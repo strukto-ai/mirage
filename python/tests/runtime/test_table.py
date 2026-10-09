@@ -24,7 +24,6 @@ from mirage.runtime.table import (
     DEFAULT_PYTHON,
     NAMED,
     RUNTIMES,
-    WorkspaceRuntime,
     bind_commands,
     build_runtime,
     known_runtimes,
@@ -33,6 +32,7 @@ from mirage.runtime.table import (
     whole_line_runtime,
 )
 from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.workspace import WorkspaceRuntime
 
 
 class FakeRuntime(Runtime):

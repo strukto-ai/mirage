@@ -13,23 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import { WASI, errnoFor } from './errors.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 export async function readdir(
   ctx: QuickJSAsyncContext,
-  vfs: RuntimeVFS | null,
+  files: RuntimeFiles | null,
   path: string,
 ): Promise<QuickJSHandle> {
   const names: string[] = []
   let errno = 0
-  if (vfs === null) {
+  if (files === null) {
     errno = WASI.ENOENT
   } else {
     try {
       const prefix = path.endsWith('/') ? path : path + '/'
-      for (const entry of await vfs.readdir(prefix, false)) {
+      for (const entry of await files.readdir(prefix, false)) {
         const rel = entry.path.replace(/\/$/, '').slice(prefix.length)
         if (rel.length > 0 && !rel.includes('/')) names.push(rel)
       }

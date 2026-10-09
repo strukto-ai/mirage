@@ -9,13 +9,7 @@
       "entry": ["*.ts"]
     },
     "packages/node": {
-      "ignoreDependencies": [
-        "@napi-rs/lzma",
-        "fs-monkey",
-        "seek-bzip",
-        "tree-sitter-bash",
-        "web-tree-sitter"
-      ],
+      "ignoreDependencies": ["@napi-rs/lzma", "seek-bzip", "tree-sitter-bash", "web-tree-sitter"],
       "entry": ["scripts/*.mjs"]
     },
     "packages/browser": {

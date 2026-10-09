@@ -37,6 +37,13 @@ export const LISTING_ENTRY_CONCURRENCY = 16
 export const ABSENT_PATH: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOENT', 'ENOTDIR'])
 
 /**
+ * What a hard link is refused with, wherever one can be spelled (node's
+ * patched `fs.link`): a hard link is a second name for one inode, and
+ * nothing above a mount holds that.
+ */
+export const HARD_LINK_REFUSAL: FsCondition = 'EPERM'
+
+/**
  * How long one policy script (a profile's `policy:`, a `routePolicy` or a
  * runtime's `script:`) may run before the line it judges is refused or
  * the route it decides fails. One bound for every stage; a holder object

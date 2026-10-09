@@ -59,7 +59,7 @@ quickjs_live = pytest.mark.skipif(
 # mounts and namespace links behind the session guard, fan-out and the
 # ls fact session-filtered) landed, which is why the structure and
 # enumeration groups run unmarked. R2 (one guarded door for every op;
-# RuntimeVFS captures the launch session and re-binds it across the
+# RuntimeFiles captures the launch session and re-binds it across the
 # thread hop) landed too, so the guest confinement group runs unmarked.
 
 

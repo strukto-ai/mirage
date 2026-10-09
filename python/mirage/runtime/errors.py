@@ -41,7 +41,7 @@ class CrossMountError(Exception):
     destination against that same backend, so applying one would drop
     the source and write the target into the wrong store.
 
-    The condition is decided once, in `RuntimeVFS.rename`, and names
+    The condition is decided once, in `RuntimeFiles.rename`, and names
     EXDEV, what rename(2) answers across two file systems; each encoder
     renders it in its own number for that condition.
 

@@ -19,7 +19,7 @@ import type { VFSEntry, VFSStat } from './types.ts'
 
 /**
  * What an open asks of the filesystem it lands on. The file door
- * (`RuntimeVFS`) answers it for the mounts.
+ * (`RuntimeFiles`) answers it for the mounts.
  */
 export interface OpenSurface {
   statOrNull(path: string, nofollow?: boolean): Promise<VFSStat | null>

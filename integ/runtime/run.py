@@ -20,7 +20,9 @@ _INTEG_DIR = str(Path(__file__).parent.parent)
 sys.path[:] = [p for p in sys.path if p not in (_RUNTIME_DIR, _INTEG_DIR, "")]
 
 import asyncio  # noqa: E402
+import builtins  # noqa: E402
 import copy  # noqa: E402
+import io  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
@@ -28,6 +30,7 @@ import re  # noqa: E402
 import shlex  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
+import traceback  # noqa: E402
 import uuid  # noqa: E402
 from typing import Any  # noqa: E402
 
@@ -58,6 +61,10 @@ from mirage.runtime.types import RunResult  # noqa: E402
 from mirage.types import FileStat, Limit, PathSpec  # noqa: E402
 from mirage.vfs.base import BaseVFS  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
+from mirage.workspace.workspace.lifecycle import (  # noqa: E402
+    patch_process,
+    unpatch_process,
+)
 
 HOST = "python"
 SUITE_DIR = Path(__file__).parent
@@ -81,6 +88,7 @@ RUNTIME_LANGUAGE: dict[str, str | None] = {
     "quickjs": "js",
     "local": "python",
     "sandlock": "python",
+    "host": "python",
     "docker": None,
     "ssh": None,
     "e2b": None,
@@ -88,6 +96,13 @@ RUNTIME_LANGUAGE: dict[str, str | None] = {
     "apple_container": None,
 }
 PROGRAM_HEAD: dict[str, str] = {"python": "python3 -c", "js": "node -e"}
+# Every language a program or an `expect` may be keyed by. `node` is the
+# typescript host door's: node's own `fs`, where `js` is QuickJS's std/os.
+LANGUAGES = frozenset({"python", "js", "node"})
+# The runtime that is no runtime: the SDK's in-process door (`with ws:`
+# here, `patchNodeFs` on the typescript host), which runs a program in the
+# runner's own process with `open` and `os` pointed at the workspace.
+HOST_DOOR = "host"
 # The expect keys that read the workspace's op ledger.
 LEDGER_CHECKS = frozenset({"ops_contain", "ops_absent", "ops_count"})
 # What a `runtimes` entry needs on this host before it can run. A runtime
@@ -99,6 +114,7 @@ RUNTIME_REQUIRES: dict[str, list[str]] = {
     "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
     "local": [],
     "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+    "host": [],
     "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"],
     "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
     "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"],
@@ -848,6 +864,12 @@ async def _run_step(
     if "add_runtime" in step:
         ws.add_runtime(step["add_runtime"])
         return []
+    if "profile" in step:
+        # The default session's profile from here on: a world's own
+        # profile applies before its files are seeded, so a case that
+        # hides a seeded file sets it as a step.
+        await ws.set_session_profile(ws.default_session_id, step["profile"])
+        return []
     if "rename" in step:
         spec = step["rename"]
         try:
@@ -946,7 +968,7 @@ def _overlay(step: dict[str, Any], keys: list[str]) -> dict[str, Any]:
 
 
 def _step_for(
-    step: dict[str, Any], language: str | None
+    step: dict[str, Any], language: str | None, door: bool = False
 ) -> tuple[dict[str, Any] | None, bool]:
     """One step as a runtime of ``language`` runs it, and whether it
     holds a guest program; None when nothing in it runs there.
@@ -955,15 +977,20 @@ def _step_for(
     guest language to what that language runs, under ``python3 -c`` or
     ``node -e``, and a ``command`` map gives the whole line per
     language. An ``expect`` keyed by language, as ``program`` is, gives
-    each language its own answer. A parallel step keeps the branches
-    that run there.
+    each language its own answer, and must hold one for the language.
+    A parallel step keeps the branches that run there. The host door
+    runs a program in the runner itself (``host_program``), so it has
+    no line for a ``command`` map to give.
 
     Args:
         step (dict[str, Any]): the step as the suite spells it.
         language (str | None): the runtime's guest language; None for a
             sandbox, which runs the plain lines.
+        door (bool): the runtime is the host door.
     """
     if "parallel" in step:
+        if door:
+            raise ValueError("the host door runs no parallel step")
         mapped = [_step_for(branch, language) for branch in step["parallel"]]
         branches = [branch for branch, _ in mapped if branch is not None]
         if not branches:
@@ -982,18 +1009,29 @@ def _step_for(
     by_language = step[key]
     if language is None or language not in by_language:
         return None, False
-    head = PROGRAM_HEAD[language]
     source = by_language[language]
-    step = {k: v for k, v in step.items() if k != "program"}
-    if key == "program":
-        step["command"] = f"{head} {shlex.quote(source)}"
+    step = {k: v for k, v in step.items() if k not in ("program", "script")}
+    if door:
+        if key == "command":
+            raise ValueError("the host door has no line for a command map")
+        if key == "script":
+            source = (
+                SUITE_DIR.parent / "fixtures" / "runtime" / source
+            ).read_text()
+        step["host_program"] = source
+    elif key == "program":
+        step["command"] = f"{PROGRAM_HEAD[language]} {shlex.quote(source)}"
     elif key == "script":
-        step.update(command=head, script=source)
+        step.update(command=PROGRAM_HEAD[language], script=source)
     else:
         step["command"] = source
     expect = step.get("expect", {})
-    if expect.keys() & PROGRAM_HEAD.keys():
-        step["expect"] = expect.get(language, {})
+    if expect.keys() & LANGUAGES:
+        if language not in expect:
+            raise ValueError(
+                f"an expect keyed by language holds no {language}"
+            )
+        step["expect"] = expect[language]
     return step, True
 
 
@@ -1014,10 +1052,14 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
         runtime (str): one name from the case's ``runtimes``.
     """
     language = RUNTIME_LANGUAGE[runtime]
+    door = runtime == HOST_DOOR
     steps: list[dict[str, Any]] = []
     programs = 0
     for listed in case["steps"]:
-        step, guest = _step_for(listed, language)
+        try:
+            step, guest = _step_for(listed, language, door)
+        except ValueError as exc:
+            raise ValueError(f"{case['id']}@{runtime}: {exc}") from exc
         if step is None:
             continue
         programs += guest
@@ -1025,7 +1067,11 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
     if programs == 0 and language is not None:
         return None
     world = copy.deepcopy(case.get("world", {}))
-    world["runtimes"] = [_entry(runtime, case.get("entry", {})), "workspace"]
+    if not door:
+        world["runtimes"] = [
+            _entry(runtime, case.get("entry", {})),
+            "workspace",
+        ]
     variant = {
         **case,
         "id": f"{case['id']}@{runtime}",
@@ -1137,7 +1183,144 @@ async def _remove_roots(ws: Workspace) -> None:
             await sftp.rmtree(vfs.config.root)
 
 
+def _exit_status(exc: SystemExit) -> int:
+    """The status CPython exits with for an uncaught ``SystemExit``.
+
+    Args:
+        exc (SystemExit): what the program raised.
+    """
+    if exc.code is None:
+        return 0
+    if isinstance(exc.code, int):
+        return exc.code & 0xFF
+    print(exc.code, file=sys.stderr)
+    return 1
+
+
+def _run_host_program(
+    ws: Workspace,
+    loop: asyncio.AbstractEventLoop,
+    case_id: str,
+    label: str,
+    step: dict[str, Any],
+) -> list[str]:
+    """Run one program the way ``python3 -c`` would, inside ``with ws:``.
+
+    The door is ``patch_process``, what ``with ws:`` installs, over the
+    case's own loop, which sits idle while the program runs on this
+    thread and is driven a call at a time, as a ``with ws:`` block's is.
+    The streams, argv and exit status are the interpreter's: an uncaught
+    exception prints its traceback and exits 1, ``SystemExit`` exits
+    with its code.
+
+    Args:
+        ws (Workspace): the case's workspace.
+        loop (asyncio.AbstractEventLoop): the loop the workspace was
+            built on, not running.
+        case_id (str): the case, for failure lines.
+        label (str): the step, for failure lines.
+        step (dict[str, Any]): the step; ``host_program`` is the source,
+            ``stdin`` what the program reads.
+    """
+    expect = step.get("expect", {})
+    ledger_before = len(ws.vfs.records)
+    stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    stderr = io.TextIOWrapper(
+        io.BytesIO(), encoding="utf-8", errors="backslashreplace"
+    )
+    stdin = io.TextIOWrapper(
+        io.BytesIO(step.get("stdin", "").encode()), encoding="utf-8"
+    )
+    saved = sys.stdin, sys.stdout, sys.stderr, sys.argv
+    patched = patch_process(ws.vfs, loop)
+    try:
+        sys.stdin, sys.stdout, sys.stderr, sys.argv = (
+            stdin,
+            stdout,
+            stderr,
+            ["-c"],
+        )
+        code = compile(step["host_program"], "<string>", "exec")
+        try:
+            exec(code, {"__name__": "__main__", "__builtins__": builtins})
+            exit_code = 0
+        except SystemExit as exc:
+            exit_code = _exit_status(exc)
+        except BaseException as exc:
+            # The program's own frames, as the interpreter prints them:
+            # the first frame is this runner's exec.
+            traceback.print_exception(
+                type(exc),
+                exc,
+                exc.__traceback__.tb_next if exc.__traceback__ else None,
+            )
+            exit_code = 1
+        stdout.flush()
+        stderr.flush()
+    finally:
+        unpatch_process(patched)
+        sys.stdin, sys.stdout, sys.stderr, sys.argv = saved
+    out = stdout.buffer.getvalue().decode(errors="replace")
+    err = stderr.buffer.getvalue().decode(errors="replace")
+    problems = _check(case_id, label, expect, exit_code, out, err)
+    seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
+    problems.extend(
+        f"{case_id} {label}: {p}" for p in _check_ops(expect, seen)
+    )
+    return problems
+
+
+def _run_door_case(suite: str, case: dict[str, Any]) -> list[str]:
+    """One host door variant, on a loop of its own on this thread.
+
+    A ``with ws:`` block drives its workspace's loop from the block's
+    own thread, so the case builds its workspace on a fresh loop here,
+    runs each program step between that loop's turns, and runs every
+    other step on it. The door patches the whole process, which is safe
+    because the runner runs one case at a time.
+
+    Args:
+        suite (str): the suite, for failure lines.
+        case (dict[str, Any]): the variant.
+    """
+    case_id = f"{suite}/{case['id']}"
+    loop = asyncio.new_event_loop()
+    try:
+        ws = loop.run_until_complete(
+            _build_workspace(case.get("world", {}), uuid.uuid4().hex[:8])
+        )
+        problems: list[str] = []
+        try:
+            backend = case.get("backend")
+            keys = (
+                [] if backend is None else [backend, f"{HOST_DOOR}@{backend}"]
+            )
+            for index, step in enumerate(case["steps"]):
+                step = _overlay(step, keys)
+                label = f"step[{index}]"
+                if "host_program" in step:
+                    problems.extend(
+                        _run_host_program(ws, loop, case_id, label, step)
+                    )
+                else:
+                    problems.extend(
+                        loop.run_until_complete(
+                            _run_step(ws, case_id, label, step)
+                        )
+                    )
+        finally:
+            try:
+                loop.run_until_complete(_remove_roots(ws))
+            finally:
+                loop.run_until_complete(ws.close())
+        return problems
+    finally:
+        loop.close()
+
+
 async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
+    if case.get("runtime") == HOST_DOOR:
+        return await asyncio.to_thread(_run_door_case, suite, case)
     case_id = f"{suite}/{case['id']}"
     world = case.get("world", {})
     run_id = uuid.uuid4().hex[:8]

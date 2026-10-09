@@ -244,12 +244,14 @@ def install_mounts(
         # `fresh` would stamp on it exactly the combination the verdict
         # exists to refuse. It is snapshotted like any other mount, so
         # that stray policy came back as a refusal on restore.
-        registry.mount(
-            "/",
-            RAMVFS(),
-            default_mode,
-            ReadSpec(),
-            write=WritePolicy.UNCONDITIONAL,
+        registry.anchor_root(
+            registry.mount(
+                "/",
+                RAMVFS(),
+                default_mode,
+                ReadSpec(),
+                write=WritePolicy.UNCONDITIONAL,
+            )
         )
     return implicit_root
 

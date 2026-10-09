@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { preloadInto } from './preload.ts'
-import { RuntimeVFS } from '../../../vfs.ts'
+import { RuntimeFiles } from '../../../files.ts'
 import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../../../../types.ts'
 import { CHAR_MODE } from '../../../../utils/stat_view.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
@@ -87,7 +87,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch), '/ram/')
     expect(fs._dirs.has('/ram')).toBe(true)
     expect(new TextDecoder().decode(fs._files.get('/ram/a.txt'))).toBe('hello')
     const bbin = fs._files.get('/ram/b.bin')
@@ -110,7 +110,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, new RuntimeVFS(dispatch), '/dev/')
+    await preloadInto(seed, new RuntimeFiles(dispatch), '/dev/')
     expect(seed.devices.get('/dev/zero')).toEqual({ mode: CHAR_MODE, rdev: 0x105 })
     expect(dispatch.mock.calls.every(([op]) => op !== 'read')).toBe(true)
   })
@@ -134,7 +134,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(seed, new RuntimeFiles(dispatch), '/ram/')
     expect(seed.modes.get('/ram/a.txt')).toBe(0o100600)
     expect(seed.stamps.get('/ram/a.txt')).toEqual({
       atimeMs: 1784073600000,
@@ -151,7 +151,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(seed, new RuntimeFiles(dispatch), '/ram/')
     expect(seed.dirs).toContain('/ram/sub/')
     expect(seed.modes.size).toBe(0)
     expect(seed.stamps.size).toBe(0)
@@ -167,7 +167,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch), '/ram/')
     expect(fs._dirs.has('/ram/sub')).toBe(true)
     const ctxt = fs._files.get('/ram/sub/c.txt')
     if (ctxt === undefined) throw new Error('unreachable')
@@ -182,10 +182,10 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    const vfs = new RuntimeVFS(dispatch)
-    await preloadInto(fs, vfs, '/ram/')
+    const files = new RuntimeFiles(dispatch)
+    await preloadInto(fs, files, '/ram/')
     fs.writeFile('/ram/x', new Uint8Array([99]))
-    await preloadInto(fs, vfs, '/ram/')
+    await preloadInto(fs, files, '/ram/')
     const x = fs._files.get('/ram/x')
     if (x === undefined) throw new Error('unreachable')
     expect(Array.from(x)).toEqual([42])
@@ -196,7 +196,7 @@ describe('preloadInto', () => {
       Promise.resolve(op === 'readdir' ? [] : new Uint8Array()),
     )
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch), '/ram/')
     expect(fs._dirs.has('/ram')).toBe(true)
     expect(fs._files.size).toBe(0)
   })
@@ -207,7 +207,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram')
+    await preloadInto(fs, new RuntimeFiles(dispatch), '/ram')
     expect(fs._dirs.has('/ram')).toBe(true)
     expect(dispatch).toHaveBeenCalledWith('readdir', '/ram/')
   })
@@ -225,7 +225,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch), '/ram/')
     const ok = fs._files.get('/ram/ok.txt')
     if (ok === undefined) throw new Error('unreachable')
     expect(Array.from(ok)).toEqual([1, 2])
@@ -250,7 +250,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(seed, new RuntimeFiles(dispatch), '/ram/')
     expect([...seed.unclassified]).toEqual(['/ram/bad.json'])
     expect(seed.files.has('/ram/bad.json')).toBe(false)
     expect(
@@ -268,7 +268,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(seed, new RuntimeFiles(dispatch), '/ram/')
     expect(seed.unclassified.size).toBe(0)
     expect(seed.unreadable.size).toBe(0)
     expect(seed.files.size).toBe(0)
@@ -299,7 +299,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const seed = new PyodideFsSeed()
-    await preloadInto(seed, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(seed, new RuntimeFiles(dispatch), '/ram/')
     expect(seed.files.size).toBe(400)
     expect(peak).toBe(LISTING_ENTRY_CONCURRENCY)
   })
@@ -317,7 +317,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch), '/ram/')
     const ok = fs._files.get('/ram/ok.txt')
     if (ok === undefined) throw new Error('unreachable')
     expect(Array.from(ok)).toEqual([7])
@@ -329,7 +329,7 @@ describe('preloadInto', () => {
   it('lets the top-level readdir error propagate', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.reject(new Error('top-level boom')))
     const fs = makeFakeFS()
-    await expect(preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')).rejects.toThrow(
+    await expect(preloadInto(fs, new RuntimeFiles(dispatch), '/ram/')).rejects.toThrow(
       /top-level boom/,
     )
   })
@@ -351,8 +351,8 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    const vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => ['/ram/', '/ram/inner/']))
-    await expect(preloadInto(fs, vfs, '/ram/')).rejects.toThrow(/inner boom/)
+    const files = new RuntimeFiles(dispatch, new PrefixResolver(() => ['/ram/', '/ram/inner/']))
+    await expect(preloadInto(fs, files, '/ram/')).rejects.toThrow(/inner boom/)
   })
 
   // A link is copied as a link, never followed: stat reports the target,
@@ -368,7 +368,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch, linksOn(['loop'])), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch, linksOn(['loop'])), '/ram/')
     expect(fs._links.get('/ram/loop')).toBe('/ram')
     expect(fs._dirs.has('/ram/loop')).toBe(false)
   })
@@ -382,7 +382,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, new RuntimeVFS(dispatch, linksOn(['l'])), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch, linksOn(['l'])), '/ram/')
     expect(fs._links.size).toBe(0)
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
@@ -397,7 +397,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS(false)
-    await preloadInto(fs, new RuntimeVFS(dispatch, linksOn(['l'])), '/ram/')
+    await preloadInto(fs, new RuntimeFiles(dispatch, linksOn(['l'])), '/ram/')
     expect(fs._links.size).toBe(0)
     expect(dispatch).not.toHaveBeenCalledWith('readlink', '/ram/l')
   })

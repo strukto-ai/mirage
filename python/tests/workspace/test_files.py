@@ -758,3 +758,13 @@ async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
         assert peak < 1024 * 1024
     finally:
         await ws.close()
+
+
+def test_is_mounted_skips_the_anchor_and_claims_for_a_root_mount():
+    # The open()/os door asks this: the scratch root nobody mounted
+    # leaves the host its paths, a mount made at / takes every one.
+    anchored = Workspace({"/data/": RAMVFS()})
+    assert anchored.vfs.is_mounted("/data/x.txt")
+    assert not anchored.vfs.is_mounted("/tmp/x.txt")
+    rooted = Workspace({"/": RAMVFS()})
+    assert rooted.vfs.is_mounted("/tmp/x.txt")

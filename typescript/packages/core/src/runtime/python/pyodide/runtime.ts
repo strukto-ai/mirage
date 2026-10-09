@@ -39,7 +39,7 @@ import {
   type PyodideInterrupter,
 } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { applyMutation, createJournal, type MutationJournal } from './fs/journal.ts'
 import { preloadInto } from './fs/preload.ts'
 import { PyodideFs } from './fs/fs.ts'
@@ -263,7 +263,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly packages: readonly string[]
   private readonly packageBaseUrl: string | null
   private readonly lockFileURL: string | null
-  private vfs: RuntimeVFS | null = null
+  private files: RuntimeFiles | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
   private readonly mountedFilesystems = new Map<string, PyodideFs>()
@@ -445,7 +445,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string },
     context?: RuntimeContext,
   ): Promise<EvalResult> {
-    this.vfs = context !== undefined ? RuntimeVFS.of(context) : null
+    this.files = context !== undefined ? RuntimeFiles.of(context) : null
     const worker = await this.ensureWorker(context)
     if (worker !== null && context !== undefined) {
       return (await worker.execute(
@@ -546,7 +546,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       const worker = this.worker
       this.worker = null
       this.initPromise = null
-      this.vfs = null
+      this.files = null
       this.mounted.clear()
       this.mountedFilesystems.clear()
       try {
@@ -630,10 +630,10 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * Emscripten mountpoint while retaining workspace routing boundaries.
    */
   private async syncMounts(pyodide: PyodideInterface): Promise<void> {
-    const vfs = this.vfs
-    if (vfs === null) return
+    const files = this.files
+    if (files === null) return
     const sync = this.sync
-    const all = vfs.prefixes()
+    const all = files.prefixes()
     for (const prefix of all) {
       if (servable(prefix) || this.refused.has(prefix)) continue
       this.refused.add(prefix)
@@ -660,7 +660,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       // leaves the previous snapshot serving rather than an empty mount,
       // and the prefix retries on the next run.
       const seed = new PyodideFsSeed()
-      if (this.sync === undefined) await preloadInto(seed, vfs, prefix)
+      if (this.sync === undefined) await preloadInto(seed, files, prefix)
       const mountpoint = mountpointOf(prefix)
       if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
       const fs = new PyodideFs(
@@ -668,7 +668,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         pyodide.ERRNO_CODES,
         this.journal,
         mountpoint,
-        (p) => vfs.mountOf(p),
+        (p) => files.mountOf(p),
         sync === undefined
           ? undefined
           : {
@@ -767,7 +767,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     nofollow: boolean,
   ): string {
     const sync = this.sync
-    if (sync === undefined || this.vfs?.mountOf(path) == null) {
+    if (sync === undefined || this.files?.mountOf(path) == null) {
       return JSON.stringify({ code: 'ENOTSUP' })
     }
     try {
@@ -796,8 +796,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    */
   private async drainMutations(): Promise<string[]> {
     this.journal.reopen()
-    const vfs = this.vfs
-    if (vfs === null) return []
+    const files = this.files
+    if (files === null) return []
     const failures = this.syncFailures.splice(0)
     const pending = this.journal.takeMutations()
     const skipped = this.syncSkipped + pending.length
@@ -811,7 +811,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       const mutation = pending[i]
       if (mutation === undefined) continue
       try {
-        await applyMutation(vfs, mutation)
+        await applyMutation(files, mutation)
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)
@@ -843,7 +843,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    this.vfs = context !== undefined ? RuntimeVFS.of(context) : null
+    this.files = context !== undefined ? RuntimeFiles.of(context) : null
     const worker = await this.ensureWorker(context)
     if (worker !== null && context !== undefined) {
       const { cwd, signal, ...rest } = args
@@ -952,7 +952,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   private guestCwd(path?: PathSpec): string {
     const cwd = path?.virtual ?? ''
-    const mount = cwd === '' ? null : (this.vfs?.mountOf(cwd) ?? null)
+    const mount = cwd === '' ? null : (this.files?.mountOf(cwd) ?? null)
     // A root mount cannot replace the interpreter's own filesystem.
     return cwd !== '/' && mount !== null && !servable(mount) ? '' : cwd
   }

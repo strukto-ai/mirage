@@ -26,7 +26,7 @@ from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec, Operand
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import IOResult
-from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.files import RuntimeFiles
 from mirage.types import (
     CapacityState,
     ContentType,
@@ -495,7 +495,7 @@ async def test_custom_driver_serves_cli_namespace_and_runtime():
                 0,
                 b"agents speak bash\n",
             )
-        runtime = RuntimeVFS(ws.dispatch, asyncio.get_running_loop())
+        runtime = RuntimeFiles(ws.dispatch, asyncio.get_running_loop())
         assert (
             await asyncio.to_thread(runtime.read, "/page")
             == b"agents speak bash\n"

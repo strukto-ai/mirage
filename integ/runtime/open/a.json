@@ -6,7 +6,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -54,7 +55,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -107,6 +109,11 @@
               "ops_contain": [
                 "write /data/log.txt"
               ]
+            },
+            "host@s3": {
+              "ops_contain": [
+                "append /data/log.txt"
+              ]
             }
           }
         },
@@ -125,7 +132,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",

@@ -27,7 +27,7 @@ from mirage.utils.key_prefix import under_path
 # a create (`Operation` has no member for it) and truncate's command
 # returns an empty IOResult, so no created or truncated path is ever
 # listed in `IOResult.cache`. A script runtime can still issue either
-# through `RuntimeVFS`, and those ops bubble into the enclosing line's
+# through `RuntimeFiles`, and those ops bubble into the enclosing line's
 # records, which is exactly why admitting them here could only pair one
 # op's token with another op's bytes.
 # "append" is absent because no object store implements it and the

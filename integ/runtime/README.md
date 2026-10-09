@@ -2,7 +2,8 @@
 
 These suites run what mirage hands to a runtime against mirage mounts: a
 guest program (Python on monty, wasi, pyodide and local, JavaScript on
-quickjs) or a whole line (the sandboxes). Every case runs through `run.py`
+quickjs), a whole line (the sandboxes), or a program the runner runs in its
+own process through the SDK's door (`host`). Every case runs through `run.py`
 (the python host), `run.ts` (the typescript host) and `cli.sh` (both CLIs
 and their daemons).
 
@@ -39,6 +40,7 @@ differs.
 | [`quickjs/`](quickjs/)                 | runtime | QuickJS invocation, printing, argv and policy scripts                                             |
 | [`local/`](local/)                     | runtime | the host's own interpreter                                                                        |
 | [`workspace/`](workspace/)             | runtime | the in-mirage runtime: captures, lockdown, listings                                               |
+| [`host/`](host/)                       | runtime | the SDK's in-process door: `with ws:` and `patchNodeFs`                                           |
 | [`sandlock/`](sandlock/)               | runtime | Landlock limits on a host process                                                                 |
 | [`apple_container/`](apple_container/) | runtime | Apple's container: stderr, sessions, an unserved cwd                                              |
 | [`e2b/`](e2b/)                         | scripts | manual checks against a live E2B sandbox, not run by the runners                                  |
@@ -52,6 +54,7 @@ differs.
 | pyodide                              | not on this host                              | Pyodide, Emscripten FS with a journal          |
 | quickjs                              | `qjs` from quickjs-ng built for WASI          | quickjs-emscripten with a `std`/`os` shim      |
 | local                                | the host's `python3`                          | the host's `python3`                           |
+| host                                 | the runner itself, inside `with ws:`          | the runner itself, under `patchNodeFs`         |
 | sandlock                             | host `python3` and `node` under Landlock      | the same                                       |
 | docker, ssh, smolvm, apple_container | whole lines in a box the user runs            | the same                                       |
 | e2b                                  | whole lines in an E2B sandbox                 | not run here (below)                           |
@@ -62,6 +65,10 @@ streaming and answers `unavailable ... ended before the stream completed`;
 only the JS SDK's traffic trips it, with or without mirage in between, so
 the typescript runners leave e2b out of their runtime tables.
 
+`host` patches the runner's own process for a program's run, which is safe
+because the runners run one case at a time. No CLI reaches a process's own
+`open`, so cli.sh has no `host` row.
+
 ## How a case reads
 
 - `runtimes` lists the runtimes a shared case runs on; each becomes the
@@ -70,15 +77,21 @@ the typescript runners leave e2b out of their runtime tables.
   `python3 -c` or `node -e`), `script` (a file under
   `integ/fixtures/runtime/`, in the folder of the same topic) or `command`
   (a whole line). A step without the runtime's language is left out of that
-  variant. A sandbox runs the plain lines.
+  variant. A sandbox runs the plain lines. The host door's language is
+  `python` on the python host and `node` on the typescript host: node's own
+  `fs`, where `js` is QuickJS's `std` and `os`.
 - `entry` narrows a runtime's captures or adds to its config for one case;
   the runners hold each runtime's base entry (a sandbox's container, host or
   sandbox id comes from the job's environment).
 - `expect` is the shared answer, CPython's on Linux. A step whose program
   differs by language may key `expect` by language too, as `program` is:
-  `{"python": {...}, "js": {...}}`. `expect_on` overrides it by `runtime`,
+  `{"python": {...}, "js": {...}}`, and then must hold every language the
+  step runs in. `expect_on` overrides it by `runtime`,
   `runtime@host`, `backend` or `runtime@backend`. Every override is a
   recorded difference, named in the folder's README.
+- `profile` gives the default session a profile from that step on. A
+  world's `profiles` apply before its files are seeded, so a case that
+  hides a seeded file sets it as a step.
 - `parallel` holds steps that run at once, each on a session of its own;
   each is checked against its own `expect` once all have ended. A branch
   cannot check the op ledger, which holds every branch's ops.

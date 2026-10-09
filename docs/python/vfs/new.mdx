@@ -161,7 +161,7 @@ The driver never sees the mount it runs under. The index store and the `vfs:` re
 | Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
 | Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
 | CLIs | The host registers a `CLISpec` with `register_cli`. File-oriented handlers use `inv.doors.dispatch` and `inv.doors.ns`; mounting a driver does not install an account CLI. |
-| Runtimes | Runtimes wired to `RuntimeVFS` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
+| Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
 Use `path.vfs_path` to address your backend and `path.virtual` for workspace

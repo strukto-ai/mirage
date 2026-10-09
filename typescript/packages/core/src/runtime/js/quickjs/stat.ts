@@ -13,22 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
-import type { RuntimeVFS } from '../../vfs.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import type { VFSStat } from '../../types.ts'
 import { WASI, errnoFor } from './errors.ts'
 
 export async function stat(
   ctx: QuickJSAsyncContext,
-  vfs: RuntimeVFS | null,
+  files: RuntimeFiles | null,
   path: string,
 ): Promise<QuickJSHandle> {
   let st: VFSStat | null = null
   let errno = 0
-  if (vfs === null) {
+  if (files === null) {
     errno = WASI.ENOENT
   } else {
     try {
-      st = await vfs.viewStat(path)
+      st = await files.viewStat(path)
       if (st === null) errno = WASI.ENOENT
     } catch (err) {
       errno = errnoFor(err)
@@ -53,9 +53,9 @@ export async function stat(
     setNum('rdev', st.rdev ?? 0)
     setNum('size', st.size)
     setNum('blocks', Math.ceil(st.size / 512))
-    setNum('atime', st.mtimeMs)
-    setNum('mtime', st.mtimeMs)
-    setNum('ctime', st.mtimeMs)
+    setNum('atime', st.mtimeMs ?? 0)
+    setNum('mtime', st.mtimeMs ?? 0)
+    setNum('ctime', st.mtimeMs ?? 0)
     ctx.setProp(tuple, 0, obj)
     obj.dispose()
   }

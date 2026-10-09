@@ -6,7 +6,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -59,7 +60,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -112,7 +114,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -164,7 +167,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -198,6 +202,11 @@
               "exit": 1,
               "stdout": "",
               "stderr_contains": "'_io.TextIOWrapper' object has no attribute 'fileno'"
+            },
+            "host": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "UnsupportedOperation: fileno"
             }
           }
         }

@@ -16,7 +16,7 @@ import { PythonRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
 import type { RuntimeContext } from '../../binding.ts'
-import { RuntimeVFS } from '../../vfs.ts'
+import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
 import { MontyExecution } from './execution.ts'
 
@@ -120,7 +120,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     return this.execution.close()
   }
 
-  private perRunVfs(context?: RuntimeContext): RuntimeVFS | null {
-    return context === undefined ? null : RuntimeVFS.of(context)
+  private perRunVfs(context?: RuntimeContext): RuntimeFiles | null {
+    return context === undefined ? null : RuntimeFiles.of(context)
   }
 }

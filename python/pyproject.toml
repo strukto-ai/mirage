@@ -454,7 +454,7 @@ module = [
     "mirage.vfs.ssh.ssh",
     "mirage.vfs.trello.trello",
     "mirage.runtime.python.monty.fs",
-    "mirage.runtime.vfs",
+    "mirage.runtime.files",
     "mirage.runtime.wasm.fs",
     "mirage.server.app",
     "mirage.server.routers.jobs",

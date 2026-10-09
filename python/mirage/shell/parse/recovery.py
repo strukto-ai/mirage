@@ -114,6 +114,9 @@ _WORD_START = b" \t\n;&|(){}"
 _DIGITS = re.compile(rb"\d+")
 
 
+_ESCAPED_BLANK = re.compile(rb"\\[ \t]")
+
+
 _LAST_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
 
 # Tokens the grammar lexes apart from a word in an argument list, where
@@ -204,7 +207,10 @@ def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     words to bash; spelled as ``_`` filler they parse as the words they
     are, and ``SourceNode`` gives back their text. So is the ``[`` of a
     test bash reads as a ``[`` command (``_bracket_is_a_command``, or one
-    an error region opens), which then runs as the builtin. An operator
+    an error region opens), which then runs as the builtin, and so is a
+    backslash-blank pair the grammar skips as whitespace
+    (``_skipped_escapes``), spelled ``..`` so it opens its word without
+    joining a ``$name`` before it or making an assignment. An operator
     inside an error region gets its own token only once the operators
     before it are respelled, so the pass repeats on its own parse until
     nothing changes.
@@ -220,8 +226,44 @@ def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     return data
 
 
+def _skipped_escapes(data: bytes, root: TSNodeLike) -> list[int]:
+    """Offsets of each backslash-blank pair the grammar read as a blank.
+
+    Outside quotes, bash reads a backslash before a space or a tab as that
+    blank escaped into the word it opens (``\\ x`` is the word `` x``).
+    The grammar skips the pair as whitespace, so the word loses its blank,
+    and a line one opens reads as more words of the line before. Only the
+    bytes no token covers are searched; a quoted or unlexed span counts as
+    one token.
+
+    Args:
+        data (bytes): shell source.
+        root (TSNodeLike): the parse of ``data``.
+    """
+    if _ESCAPED_BLANK.search(data) is None:
+        return []
+    spans: list[tuple[int, int]] = [(len(data), len(data))]
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.children and node.type not in _UNLEXED | {"string"}:
+            stack.extend(node.children)
+        else:
+            spans.append((node.start_byte, node.end_byte))
+    offsets: list[int] = []
+    at = 0
+    for lo, hi in sorted(spans):
+        offsets.extend(
+            m.start() for m in _ESCAPED_BLANK.finditer(data, at, lo)
+        )
+        at = max(at, hi)
+    return offsets
+
+
 def _respelled(data: bytes, root: TSNodeLike) -> bytes:
     out = bytearray(data)
+    for at in _skipped_escapes(data, root):
+        out[at : at + 2] = b".."
     stack = [root]
     while stack:
         node = stack.pop()
@@ -488,12 +530,15 @@ def statement_boundaries(data: bytes) -> bytes:
     """Make newlines swallowed between command words explicit separators.
 
     tree-sitter-bash can absorb a statement newline into a nested pipeline
-    when the following statement has a file redirect. A newline between
-    children of a simple command cannot be whitespace in bash: quoted
-    newlines belong to a child, and continuations have already been joined.
-    Insert a semicolon without removing bytes so source maps remain valid,
-    before a comment that ends the statement, since one after it would be
-    read as part of the comment.
+    when the following statement has a file redirect, and folds it into
+    the next word when a backslash opens that word (``\\ls``, the alias
+    bypass), so the next line reads as more arguments. A newline between
+    children of a simple command, a redirect or a declaration cannot be
+    whitespace in bash: quoted newlines belong to a child, continuations
+    have already been joined, and an escaped blank beside it is a word the
+    grammar skipped (``_skipped_escapes``). Insert a semicolon without
+    removing bytes so source maps remain valid, before a comment that ends
+    the statement, since one after it would be read as part of the comment.
 
     Args:
         data (bytes): source after heredoc lowering and continuation removal.
@@ -508,13 +553,16 @@ def statement_boundaries(data: bytes) -> bytes:
         stack.extend(node.children)
         if node.type not in (
             "command",
+            "declaration_command",
             "file_redirect",
             "redirected_statement",
+            "unset_command",
         ):
             continue
         for left, right in zip(node.children, node.children[1:]):
-            gap = data[left.end_byte : right.start_byte]
-            if b"\n" in gap and not gap.strip():
+            folded = data[right.start_byte : right.start_byte + 1] == b"\n"
+            gap = data[left.end_byte : right.start_byte + folded]
+            if b"\n" in gap and not _ESCAPED_BLANK.sub(b"", gap).strip():
                 offsets.add(
                     left.start_byte
                     if left.type == "comment"

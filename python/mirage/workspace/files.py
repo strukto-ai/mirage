@@ -19,7 +19,7 @@ from typing import Any
 
 from mirage.context import get_current_session, session_visibility
 from mirage.errors.types import NoMountError
-from mirage.io import OpReport
+from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
@@ -277,6 +277,21 @@ class Files:
             ),
             0,
         )
+
+    async def dispatch(
+        self, name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        """``Workspace.dispatch`` as this facade runs it: as its session,
+        and recorded on ``records``. The door ``RuntimeFiles`` drives for a
+        ``with ws:`` block, which is a facade caller like FUSE. The
+        IOResult is empty: a facade op's account is its record.
+
+        Args:
+            name (str): the function's name (read, write, stat, ...).
+            path (PathSpec): the virtual path.
+            **kwargs: the function's arguments, by its own names.
+        """
+        return await self._call(name, path.virtual, **kwargs), IOResult()
 
     async def _call(
         self, op: str, path: str, session_id: str | None = None, **kwargs
@@ -918,25 +933,31 @@ class Files:
         return sum(r.bytes for r in self.records if r.is_cache)
 
     def is_mounted(self, path: str) -> bool:
-        """Check if a path is under an explicit mount.
+        """Check if a path is under a mount someone made.
 
         Used by the open()/os interception to decide whether a path is a
         workspace path (route through ops) or a real OS path (pass through).
-        The catch-all virtual root at ``/`` is skipped on purpose: it matches
-        every absolute path, so counting it would hijack real filesystem
-        paths (a FUSE mountpoint, ``/tmp``) into ops. Routing to the root for
-        ops themselves still happens at the door; this gate is only about
-        what the interception should leave alone.
+        The scratch root the workspace adds when no mount claims ``/`` is
+        skipped on purpose: nobody mounted it, and it matches every
+        absolute path, so counting it would hijack real filesystem paths
+        (a FUSE mountpoint, ``/tmp``) into ops. A mount made at ``/`` is the
+        workspace's root and claims every path, as it does for a guest. A
+        relative path names the process's working directory, which the
+        interception leaves alone whatever is mounted. Routing to the anchor
+        for ops themselves still happens at the door; this gate is only
+        about what the interception should leave alone.
 
         Args:
             path (str): Virtual path.
 
         Returns:
-            bool: True if path is under a mount other than the virtual root.
+            bool: True if path is under a mount other than the anchor.
         """
+        if not path.startswith("/"):
+            return False
         return (
             owner_prefix(
-                (m.prefix for m in self._mounts if m.prefix != "/"), path
+                (m.prefix for m in self._mounts if not m.anchor), path
             )
             is not None
         )

@@ -16,6 +16,7 @@ import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
 import { isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
+  atimeMs,
   contentSize,
   DIR_MODE,
   deviceRdev,
@@ -61,19 +62,21 @@ export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
  * The projection lives at the door rather than in each surface so both
  * languages build one struct in one tier: preview1 reads the type bits
  * out of `mode` and drops the rest, monty fills a `StatResult`,
- * Emscripten fills an `FSAttr`. Mirrors python's `RuntimeVFS._row`.
+ * Emscripten fills an `FSAttr`. Mirrors python's `stat_row`.
  */
 function statRow(st: FileStat): VFSStat {
-  const ms = mtimeMs(st)
+  const mtime = mtimeMs(st)
+  const atime = atimeMs(st)
   return {
     size: contentSize(st),
     isDir: isDir(st),
-    // A guest wire has no validity channel for a timestamp, so an
-    // unknown mtime and epoch zero both encode as 0 from here on.
-    mtimeMs: ms ?? 0,
     mode: posixMode(st),
+    ...(mtime !== null ? { mtimeMs: mtime } : {}),
     ...(isLink(st) ? { isLink: true } : {}),
     ...(isCharDevice(st) ? { rdev: deviceRdev(st) } : {}),
+    ...(atime !== null ? { atimeMs: atime } : {}),
+    ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
+    ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
   }
 }
 
@@ -112,7 +115,7 @@ function baseName(entry: string): string {
  *   resolver: the workspace mount routing table; the default answers
  *     no mounts, so routing questions answer null.
  */
-export class RuntimeVFS {
+export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
@@ -134,8 +137,8 @@ export class RuntimeVFS {
   }
 
   /** The file door every engine builds from its execution context. */
-  static of(context: RuntimeContext): RuntimeVFS {
-    return new RuntimeVFS(context.dispatch, context.resolver)
+  static of(context: RuntimeContext): RuntimeFiles {
+    return new RuntimeFiles(context.dispatch, context.resolver)
   }
 
   /**
@@ -182,7 +185,7 @@ export class RuntimeVFS {
   /**
    * A file's bytes, or the range of them a handle asked for. `raw` reads
    * the stored bytes rather than a rendering, which is what an edit that is
-   * written back must start from. Mirrors Python's `RuntimeVFS.read`.
+   * written back must start from. Mirrors Python's `RuntimeFiles.read`.
    */
   async read(
     path: string,
@@ -190,7 +193,7 @@ export class RuntimeVFS {
   ): Promise<Uint8Array> {
     const out = await this.dispatch('read', path, undefined, undefined, options)
     if (!(out instanceof Uint8Array)) {
-      throw new TypeError(`runtime vfs: read ${path} expected Uint8Array, got ${typeof out}`)
+      throw new TypeError(`runtime files: read ${path} expected Uint8Array, got ${typeof out}`)
     }
     return out
   }
@@ -198,7 +201,7 @@ export class RuntimeVFS {
   async write(path: string, bytes: Uint8Array): Promise<void> {
     const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
-      throw new TypeError(`runtime vfs: write ${path} expected void, got ${typeof out}`)
+      throw new TypeError(`runtime files: write ${path} expected void, got ${typeof out}`)
     }
   }
 
@@ -229,7 +232,7 @@ export class RuntimeVFS {
       nofollow ? { nofollow: true } : undefined,
     )
     if (out === null || typeof out !== 'object' || typeof (out as FileStat).name !== 'string') {
-      throw new TypeError(`runtime vfs: stat ${path} bad shape`)
+      throw new TypeError(`runtime files: stat ${path} bad shape`)
     }
     return statRow(out as FileStat)
   }
@@ -268,7 +271,7 @@ export class RuntimeVFS {
       return null
     }
     if ((await this.listingOrNull(path)) === null) return null
-    return { size: 0, isDir: true, mode: DIR_MODE, mtimeMs: 0 }
+    return { size: 0, isDir: true, mode: DIR_MODE }
   }
 
   /**
@@ -330,7 +333,7 @@ export class RuntimeVFS {
   async readdir(path: string, classify = true): Promise<VFSEntry[]> {
     const out = await this.dispatch('readdir', path)
     if (!Array.isArray(out)) {
-      throw new TypeError(`runtime vfs: readdir ${path} expected array`)
+      throw new TypeError(`runtime files: readdir ${path} expected array`)
     }
     // After the listing, not before: a directory that will not list
     // (ENOENT, or a link cycle the namespace refuses to resolve) must
@@ -338,7 +341,7 @@ export class RuntimeVFS {
     const links = this.resolver.linkChildren(path)
     const rows = out.map((raw): VFSEntry => {
       if (typeof raw !== 'string') {
-        throw new TypeError(`runtime vfs: readdir ${path} bad entry shape`)
+        throw new TypeError(`runtime files: readdir ${path} bad entry shape`)
       }
       // Backends that mark directories with a trailing slash skip the
       // stat; unmarked entries (e.g. RAM) need one to learn dir-ness.
@@ -361,10 +364,20 @@ export class RuntimeVFS {
   private async classified(directory: string, row: VFSEntry): Promise<VFSEntry> {
     const mark = row.isLink === true ? { isLink: true } : {}
     try {
-      return { path: row.path, ...(await this.stat(row.path, row.isLink === true)), ...mark }
+      const st = await this.stat(row.path, row.isLink === true)
+      return {
+        path: row.path,
+        size: st.size,
+        isDir: st.isDir,
+        mode: st.mode,
+        mtimeMs: st.mtimeMs ?? 0,
+        ...(st.isLink === true ? { isLink: true } : {}),
+        ...(st.rdev !== undefined ? { rdev: st.rdev } : {}),
+        ...mark,
+      }
     } catch (err) {
       if (!isMissingPath(err)) {
-        console.warn(`runtime vfs: readdir ${directory}: stat ${row.path}: ${String(err)}`)
+        console.warn(`runtime files: readdir ${directory}: stat ${row.path}: ${String(err)}`)
       }
       return row
     }
@@ -448,7 +461,7 @@ export class RuntimeVFS {
   async readlink(path: string): Promise<string> {
     const out = await this.dispatch('readlink', path)
     if (typeof out !== 'string') {
-      throw new TypeError(`runtime vfs: readlink ${path} expected string, got ${typeof out}`)
+      throw new TypeError(`runtime files: readlink ${path} expected string, got ${typeof out}`)
     }
     return out
   }
