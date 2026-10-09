@@ -137,12 +137,11 @@ function execFailure(line: Uint8Array | null, out: Uint8Array | null = null): Re
  * `exec 1>&2`, fd 1 is the terminal's stderr whatever fd 2 is later
  * pointed at, and `exec 2>&1` after that puts stderr back on the
  * terminal's stderr, as bash does. Stdin is always the read end, so a
- * stream bound to it (`exec 1>&0`) has nowhere to write.
+ * stream bound to it (`exec 1>&0`) has nowhere to write, and fd 0 names its
+ * own read end unless an `exec` rebound it (`exec 0<&1`), which a later dup
+ * from fd 0 copies.
  */
 function identity(session: SessionState, fd: number): [string, boolean] {
-  // fd 0 is its own read end unless an `exec` rebound it: closed, or a
-  // writing stream's identity (`exec 0<&1`), which a later dup from fd 0
-  // copies as bash's does.
   if (fd > FD_STDERR) {
     const descriptor = session.descriptors.get(fd)
     return descriptor === undefined ? [CLOSED, false] : [descriptor.identity, descriptor.append]
@@ -291,7 +290,9 @@ function scopeOf(target: unknown): PathSpec {
  * > file` diverts later stdout, `2> file` stderr, `< file` stdin, `>>`
  * appends; `2>&1`/`>&2` copy one target onto the other; `>&-` closes.
  * The output file is opened now, as bash opens it at exec time. Numbered
- * descriptors use the same bindings and share open descriptions when duplicated.
+ * descriptors use the same bindings and share open descriptions when duplicated,
+ * and a copy of a terminal stream stays that stream when the shell later
+ * rebinds its own (`exec 3>&1; exec >f`).
  */
 export async function installExecRedirects(
   dispatch: DispatchFn,
@@ -354,9 +355,6 @@ async function installDescriptor(
     const [id, append] =
       target === FD_CLOSE ? ([CLOSED, false] as const) : identity(session, target)
     if (id === CLOSED && target !== FD_CLOSE) return badDescriptorLine(target)
-    // Copies share the open description, including its offset, and one of
-    // the terminal's streams stays that stream when the shell later rebinds
-    // its own (`exec 3>&1; exec >f`).
     const original = session.descriptors.get(target)
     let stream = original?.stream ?? null
     if (
@@ -388,9 +386,6 @@ async function installDescriptor(
         bind(session, fd, OPEN_FOR_READ_WRITE + scope.virtual, false, file.source)
       } else bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(bytes))
     } else {
-      // Opened now, as bash opens it at `exec` time: truncating creates the
-      // file empty, appending only when it is not there, so `exec >> new;
-      // test -e new` succeeds with nothing written.
       await createFile(dispatch, session, scope, new Uint8Array(), redirect.append)
       const file = new FileDescription(scope, redirect.append)
       file.opened = true
@@ -426,7 +421,9 @@ function stdoutToStderr(node: TSNodeLike): boolean {
  * closed one is dropped, and one bound to stdin fails with bash's `write
  * error: Bad file descriptor`, which is reported on stderr through
  * stderr's own binding and makes the statement's status 1, which `$?`
- * shows. `command` is the statement's recorded line; its first word names
+ * shows. An unwritable stderr fails only a statement that sent its own
+ * stdout there (`>&2`); a lost diagnostic leaves the status the command
+ * earned. `command` is the statement's recorded line; its first word names
  * the writer in a write error. `written` is the statement's output in
  * order; what went to the terminal through a copy keeps its place. Returns
  * what is left for the terminal, in the order it was written. Mirrors
@@ -460,11 +457,6 @@ export async function divertStatement(
     const line = encodeText(`${name}: write error: Bad file descriptor\n`)
     await routed(dispatch, session, Channel.STDERR, line, rest)
   } else if (unwritable && io.exitCode === 0 && stdoutToStderr(statement)) {
-    // The statement's own output was what could not be written, so the write
-    // error is its failure (bash's `echo hi >&2` under `exec 2>&0` reports
-    // 1). A diagnostic that could not be delivered leaves the status alone:
-    // GNU find still exits 0 after `-exec nosuch`, ls keeps its 2 and cat its
-    // 1, since the failed write is of a message, not of the work.
     io.exitCode = 1
   }
   if (io.exitCode !== earned) recordStatus(session, io.exitCode)
@@ -524,8 +516,8 @@ async function appendTo(
 
 /**
  * The `exec` arm. The redirect-only form is intercepted where redirects
- * are applied; a bare `exec` here has none, and `exec cmd` is the
- * process-replacement form this refuses.
+ * are applied; a bare `exec` here has none, and `exec cmd` runs the
+ * command and ends the shell.
  */
 export function execBuiltin(call: BuiltinCall): Promise<Result> {
   return handleExecCommand(
