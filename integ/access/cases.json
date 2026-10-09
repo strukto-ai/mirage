@@ -92,7 +92,8 @@
     {"id": "sees_every_mount", "input": {"command": "cat /vault/key.txt"}, "expect": {"text": "key\n", "is_error": false}},
     {"id": "streams_both_output_channels", "accesses": ["inapp", "http", "cli"], "input": {"command": "echo out; echo err >&2", "output_stream": true}, "expect": {"text": "out\n\nerr\n", "is_error": false}},
     {"id": "streams_unicode_and_nul", "accesses": ["inapp", "http", "cli"], "input": {"command": "printf 'hé\\000世界\\n'", "output_stream": true}, "expect": {"text": "hé\u0000世界\n", "is_error": false}},
-    {"id": "stream_preserves_terminal_exit_status", "accesses": ["inapp", "http", "cli"], "input": {"command": "echo prefix; exit 7", "output_stream": true}, "expect": {"text": "prefix\n", "is_error": true}}
+    {"id": "stream_preserves_terminal_exit_status", "accesses": ["inapp", "http", "cli"], "input": {"command": "echo prefix; exit 7", "output_stream": true}, "expect": {"text": "prefix\n", "is_error": true}},
+    {"id": "streams_before_the_line_ends", "accesses": ["http", "cli", "ssh", "ssh_proxy"], "input": {"command": "echo ready; while [ ! -e /stream-ready ]; do sleep 0.01; done; echo err >&2; echo done", "output_stream": true, "output_gate": "/stream-ready"}, "expect": {"text": "ready\ndone\n\nerr\n", "is_error": false}}
    ]
   },
   {

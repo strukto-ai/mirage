@@ -60,6 +60,7 @@ CLI_GROUPS = (
     "tools",
 )
 WAITED = "the line waited for all of its input"
+HELD = "the access held the output until the line ended"
 STREAM_WAIT = 10.0
 
 
@@ -84,7 +85,9 @@ def io_answer(reply: dict[str, Any]) -> Answer:
     )
 
 
-async def streamed_answer(reply: httpx.Response) -> Answer:
+async def streamed_answer(
+    reply: httpx.Response, gate: "Gate | None" = None
+) -> Answer:
     streams: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
     completed: dict[str, Any] | None = None
     reply.raise_for_status()
@@ -97,6 +100,8 @@ async def streamed_answer(reply: httpx.Response) -> Answer:
             data = base64.b64decode(record["data"], validate=True)
             assert len(data) <= 16 * 1024
             streams[record["stream"]].append(data)
+            if gate is not None:
+                await gate.open()
         else:
             completed = record
     assert completed is not None, "stream ended without completion"
@@ -416,6 +421,95 @@ class Server:
                     break
                 await asyncio.sleep(0.05)
         return found
+
+
+class Gate:
+    """A line held at a VFS path until its first output reaches the access.
+
+    The case's line loops until ``path`` exists. Opening the gate on the
+    first output byte proves the access delivered that byte while the
+    line was still running; after ``STREAM_WAIT`` it opens anyway so the
+    line can end, and ``held`` says the access kept its output back.
+
+    Args:
+        server (Server): the HTTP server the gate file is written through.
+        wid (str): the case's workspace.
+        path (str): the file the line waits for.
+    """
+
+    def __init__(self, server: Server, wid: str, path: str) -> None:
+        self.server = server
+        self.wid = wid
+        self.path = path
+        self.held = False
+        self._opened = False
+        self._timer: asyncio.Task[None] | None = None
+
+    async def __aenter__(self) -> "Gate":
+        self._timer = asyncio.create_task(self._late())
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        assert self._timer is not None
+        self._timer.cancel()
+        await asyncio.gather(self._timer, return_exceptions=True)
+
+    async def _late(self) -> None:
+        await asyncio.sleep(STREAM_WAIT)
+        if not self._opened:
+            self.held = True
+            await self.open()
+
+    async def open(self) -> None:
+        if self._opened:
+            return
+        self._opened = True
+        async with self.server.client() as http:
+            reply = await http.post(
+                f"/v1/workspaces/{self.wid}/vfs/write",
+                json={"path": self.path, "data_base64": "cmVhZHk="},
+            )
+            reply.raise_for_status()
+
+    async def run(
+        self, argv: list[str], env: dict[str, str] | None, tty: bool = False
+    ) -> tuple[int, str, str]:
+        """Run a client to its end, opening the gate on its first byte.
+
+        Args:
+            argv (list[str]): the client.
+            env (dict[str, str] | None): its environment.
+            tty (bool): give it a terminal for stdin.
+
+        Returns:
+            tuple[int, str, str]: exit status, stdout, stderr.
+        """
+        master = slave = -1
+        if tty:
+            master, slave = os.openpty()
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=ROOT,
+            env=env,
+            stdin=slave if tty else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        if tty:
+            os.close(slave)
+        try:
+            assert process.stdout is not None
+            first = await process.stdout.read(1)
+            await self.open()
+            out, err = await asyncio.wait_for(process.communicate(), 60)
+        finally:
+            if tty:
+                os.close(master)
+        return (
+            process.returncode or 0,
+            (first + out).decode(errors="replace"),
+            err.decode(errors="replace"),
+        )
 
 
 class HttpSteps:
@@ -1494,6 +1588,20 @@ class Http:
         if step.get("output_stream"):
             params["stream"] = "true"
         if op in ("shell", "session"):
+            if gated := step.get("output_gate"):
+                async with (
+                    Gate(self.server, wid, gated) as gate,
+                    http.stream(
+                        "POST",
+                        f"{base}/shell",
+                        json={"command": step["command"]},
+                        params=params,
+                    ) as reply,
+                ):
+                    answer = await streamed_answer(reply, gate)
+                return (
+                    {"text": HELD, "is_error": True} if gate.held else answer
+                )
             if step.get("output_stream"):
                 async with http.stream(
                     "POST",
@@ -1666,6 +1774,12 @@ class Cli:
                 step["command"],
                 *([] if step.get("output_stream") else ["--json"]),
             )
+            if gated := step.get("output_gate"):
+                async with Gate(self.server, wid, gated) as gate:
+                    code, out, err = await gate.run(argv, env, tty=True)
+                if gate.held:
+                    return {"text": HELD, "is_error": True}
+                return shell_answer(out, err, code)
             code, out, err = await run(argv, env, tty=True)
             if step.get("output_stream"):
                 return shell_answer(out, err, code)
@@ -2183,9 +2297,14 @@ class Ssh:
     ) -> Answer:
         login = f"{wid}@127.0.0.1"
         if op in ("shell", "session"):
-            code, out, err = await self.run(
-                [*self.argv("ssh", key), "-T", login, step["command"]]
-            )
+            argv = [*self.argv("ssh", key), "-T", login, step["command"]]
+            if gated := step.get("output_gate"):
+                async with Gate(self.server, wid, gated) as gate:
+                    code, out, err = await gate.run(argv, self.env())
+                if gate.held:
+                    return {"text": HELD, "is_error": True}
+            else:
+                code, out, err = await self.run(argv)
             return shell_answer(out, err, code)
         if op == "stdin" and "stream" not in step:
             code, out, err = await self.run(

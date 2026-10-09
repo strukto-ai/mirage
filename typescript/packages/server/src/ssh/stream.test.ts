@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PassThrough } from 'node:stream'
+import { Channel } from '@struktoai/mirage-core/shell/console/types'
+import { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { REFUSAL_WINDOW } from './constants.ts'
 import type { ServerChannel } from 'ssh2'
@@ -183,6 +186,16 @@ describe('ChannelInput', () => {
   })
 })
 
+function produced(
+  result: ExecuteResult,
+  ...events: [(typeof Channel)['STDOUT' | 'STDERR'], string][]
+): ShellExecution {
+  return new ShellExecution(async (output) => {
+    for (const [channel, data] of events) await output.emit(channel, enc.encode(data))
+    return result
+  }, new ExecutionScope())
+}
+
 describe('ChannelOutput', () => {
   it('folds stderr into stdout on a terminal and writes CRLF there', async () => {
     const plain = new FakeChannel()
@@ -194,11 +207,46 @@ describe('ChannelOutput', () => {
     expect([tty.written, tty.errors]).toEqual([['e\r\n'], []])
   })
 
-  it('delivers stdout, then stderr', async () => {
-    const chan = new FakeChannel()
-    const output = new ChannelOutput(chan.asChannel(), true)
-    await deliver(new ExecuteResult(enc.encode('out\n'), enc.encode('err\n'), 0), output)
-    expect(chan.written).toEqual(['out\r\n', 'err\r\n'])
+  it('delivers output in the order it was produced', async () => {
+    const sent: [string, boolean][] = []
+    const execution = produced(
+      new ExecuteResult(new Uint8Array(0), new Uint8Array(0), 3),
+      [Channel.STDOUT, 'one'],
+      [Channel.STDOUT, ''],
+      [Channel.STDERR, 'warn'],
+      [Channel.STDOUT, 'two'],
+    )
+    const result = await deliver(execution, (data, stderr) => {
+      sent.push([new TextDecoder().decode(data), stderr])
+      return Promise.resolve()
+    })
+    expect(sent).toEqual([
+      ['one', false],
+      ['warn', true],
+      ['two', false],
+    ])
+    expect(result.exitCode).toBe(3)
+  })
+
+  it('delivers output before the line ends', async () => {
+    let release!: () => void
+    const released = new Promise<void>((resolve) => (release = resolve))
+    let first!: () => void
+    const reached = new Promise<void>((resolve) => (first = resolve))
+    const execution = new ShellExecution(async (output) => {
+      await output.emit(Channel.STDOUT, enc.encode('ready'))
+      await released
+      return new ExecuteResult(new Uint8Array(0), new Uint8Array(0), 0)
+    }, new ExecutionScope())
+    let done = false
+    const delivering = deliver(execution, () => {
+      first()
+      return Promise.resolve()
+    }).finally(() => (done = true))
+    await reached
+    expect(done).toBe(false)
+    release()
+    await delivering
   })
 
   const W = REFUSAL_WINDOW
@@ -218,18 +266,20 @@ describe('ChannelOutput', () => {
   ] as const)(
     'appends the refusal unless the output says why: %s',
     async (_case, stdout, stderr, reason, saysWhy) => {
-      const chan = new FakeChannel()
-      const output = new ChannelOutput(chan.asChannel(), false)
-      const refused = new ExecuteResult(enc.encode(stdout), enc.encode(stderr), 1, {
+      const errors: string[] = []
+      const refused = new ExecuteResult(new Uint8Array(0), new Uint8Array(0), 1, {
         kind: 'deny',
         reason,
         policy: '',
         scope: 'operand',
         askId: null,
       })
-      await deliver(refused, output)
-      await new Promise((r) => setImmediate(r))
-      expect(chan.errors.at(-1) === `policy denied: ${reason}\n`).toBe(!saysWhy)
+      const execution = produced(refused, [Channel.STDOUT, stdout], [Channel.STDERR, stderr])
+      await deliver(execution, (data, stderr) => {
+        if (stderr) errors.push(new TextDecoder().decode(data))
+        return Promise.resolve()
+      })
+      expect(errors.at(-1) === `policy denied: ${reason}\n`).toBe(!saysWhy)
     },
   )
 })
