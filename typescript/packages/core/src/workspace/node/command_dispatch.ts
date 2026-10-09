@@ -44,7 +44,7 @@ import {
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ArithError, ExitSignal } from '../../shell/errors.ts'
+import { ArithError, DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, ProcessSubDirection } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
@@ -246,26 +246,27 @@ export async function executeCommand(
   }
 
   const prefixAssignments: [string, string][] = []
+  const view = sessionView(session, registry.policies, context.frame.diagnostics)
+  // A readonly name before a command is refused before its value expands,
+  // on the shell's own stderr, and the command runs without it; with no
+  // command it is a plain assignment, refused once its value expands
+  // (below), and the line is discarded.
+  let refused = ''
   for (const p of assignmentNodes) {
     const atext = getText(p)
     const eq = atext.indexOf('=')
     if (eq < 0) continue
     const key = atext.slice(0, eq)
+    if (name !== '' && view.isReadonly(key, false)) {
+      refused += `bash: ${key}: readonly variable\n`
+      continue
+    }
     const rawVal = atext.slice(eq + 1)
     const valNodes = p.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
     const firstVal = valNodes[0]
     const v =
       firstVal !== undefined
-        ? await ownWords(
-            node,
-            expandNode(
-              firstVal,
-              context,
-              executeFn,
-              callStack,
-              sessionView(session, registry.policies, context.frame.diagnostics),
-            ),
-          )
+        ? await ownWords(node, expandNode(firstVal, context, executeFn, callStack, view))
         : rawVal
     prefixAssignments.push([key, v])
   }
@@ -302,12 +303,7 @@ export async function executeCommand(
       ]
     }
     if (session.readonlyVars.has(k)) {
-      const err = encodeText(`bash: ${k}: readonly variable\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: name !== '' ? name : k, exitCode: 1, stderr: err }),
-      ]
+      throw new DiscardSignal(encodeText(`bash: ${k}: readonly variable\n`))
     }
   }
 
@@ -343,8 +339,12 @@ export async function executeCommand(
     if (session.functions[command] !== undefined) session.localFrames.push(savedEnvOverrides)
   }
 
+  if (refused !== '' && sink !== undefined) {
+    await sink.emit(Channel.STDERR, encodeText(refused))
+    refused = ''
+  }
   try {
-    return await runCommandBody(
+    const [stdout, io, execNode] = await runCommandBody(
       recurse,
       dispatch,
       registry,
@@ -366,6 +366,8 @@ export async function executeCommand(
       sink,
       parser,
     )
+    if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
+    return [stdout, io, execNode]
   } finally {
     const frames = session.localFrames
     if (frames[frames.length - 1] === savedEnvOverrides) frames.pop()

@@ -41,7 +41,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
 from mirage.shell.helpers import (
     get_command_name,
     get_parts,
@@ -254,25 +254,28 @@ async def execute_command(
                 scope.release()
 
     prefix_assignments: list[tuple[str, str]] = []
+    view = session_view(
+        session, registry.policies, diagnostics=context.frame.diagnostics
+    )
+    # A readonly name before a command is refused before its value
+    # expands, on the shell's own stderr, and the command runs without
+    # it; with no command it is a plain assignment, refused once its
+    # value expands (below), and the line is discarded.
+    refused = b""
     for p in assignment_nodes:
         atext = get_text(p)
         if "=" not in atext:
             continue
         key, _, raw_val = atext.partition("=")
+        if name and view.is_readonly(key, False):
+            refused += encode_text(f"bash: {key}: readonly variable\n")
+            continue
         val_nodes = [c for c in p.named_children if c.type != NT.VARIABLE_NAME]
         if val_nodes:
             v = await _own_words(
                 node,
                 expand_node(
-                    val_nodes[0],
-                    context,
-                    execute_fn,
-                    call_stack,
-                    view=session_view(
-                        session,
-                        registry.policies,
-                        diagnostics=context.frame.diagnostics,
-                    ),
+                    val_nodes[0], context, execute_fn, call_stack, view=view
                 ),
             )
         else:
@@ -313,12 +316,7 @@ async def execute_command(
                 ExecutionNode(command=name or k, exit_code=1, stderr=err),
             )
         if k in session.readonly_vars:
-            err = encode_text(f"bash: {k}: readonly variable\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=name or k, exit_code=1, stderr=err),
-            )
+            raise DiscardSignal(encode_text(f"bash: {k}: readonly variable\n"))
 
     if prefix_assignments and not name:
         for k, v in prefix_assignments:
@@ -357,8 +355,11 @@ async def execute_command(
             # reveals the caller's value and `export` keeps the name.
             session._local_frames.append(saved_env_overrides)
 
+    if refused and sink is not None:
+        await sink.emit(Channel.STDERR, refused)
+        refused = b""
     try:
-        return await _dispatch_command_body(
+        stdout, io, exec_node = await _dispatch_command_body(
             recurse,
             dispatch,
             registry,
@@ -378,6 +379,9 @@ async def execute_command(
             handed,
             sink,
         )
+        if refused:
+            io.stderr = refused + (await materialize(io.stderr) or b"")
+        return stdout, io, exec_node
     finally:
         frames = session._local_frames
         if frames and frames[-1] is saved_env_overrides:

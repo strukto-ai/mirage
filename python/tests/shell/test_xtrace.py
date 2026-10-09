@@ -32,16 +32,16 @@ def test_trace_command_safe_specials_unquoted():
 
 
 def test_trace_assignment_plain():
-    assert trace_assignment("x", "5", False) == b"+ x=5\n"
+    assert trace_assignment("x", "5", False) == "+ x=5"
 
 
 def test_trace_assignment_append():
-    assert trace_assignment("x", "y", True) == b"+ x+=y\n"
+    assert trace_assignment("x", "y", True) == "+ x+=y"
 
 
 def test_trace_assignment_empty_value():
-    assert trace_assignment("x", "", False) == b"+ x=\n"
+    assert trace_assignment("x", "", False) == "+ x="
 
 
 def test_trace_assignment_quotes_value():
-    assert trace_assignment("x", "a b", False) == b"+ x='a b'\n"
+    assert trace_assignment("x", "a b", False) == "+ x='a b'"

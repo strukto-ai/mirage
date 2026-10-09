@@ -14,28 +14,66 @@
 
 import { encodeText } from './bytes.ts'
 
-// Characters that force quoting, mirroring Python's shlex.quote.
-const UNSAFE = /[^\w@%+=:,./-]/
+const META = /[ \t\n!"$&'()*;<>?[\\\]^`{|}]|^[#~]|[=:]~/
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\x00-\x1f\x7f]/g
+const CONTROL_ESCAPES: Record<string, string> = {
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\v': '\\v',
+  '\f': '\\f',
+  '\r': '\\r',
+  '\x1b': '\\E',
+}
 
-function traceQuote(word: string): string {
-  if (word === '') return "''"
-  if (!UNSAFE.test(word)) return word
+function quoted(word: string): string {
   return "'" + word.replaceAll("'", "'\\''") + "'"
+}
+
+function controlEscape(char: string): string {
+  return CONTROL_ESCAPES[char] ?? `\\${char.charCodeAt(0).toString(8).padStart(3, '0')}`
+}
+
+/**
+ * One word as bash's trace writes it (pinned on 5.2.37 in a UTF-8 locale):
+ * single-quoted, each `'` spelled `'\''`, when it is empty, holds a blank or
+ * a shell metacharacter, starts with `#` or `~`, or has a `~` after `=` or
+ * `:`; else `$'...'` when it holds a control character; else bare, non-ASCII
+ * letters included.
+ */
+function traceQuote(word: string): string {
+  if (word === '' || META.test(word)) return quoted(word)
+  const escaped = word.replace(CONTROL, controlEscape)
+  return escaped === word ? word : `$'${escaped}'`
 }
 
 /**
  * Render one `set -x` trace line for an expanded simple command.
- *
- * Words are shown post-expansion with bash's `+ ` prefix; words that
- * need it are single-quoted like bash's trace output.
  */
 export function traceCommand(words: readonly string[]): Uint8Array {
   return encodeText('+ ' + words.map(traceQuote).join(' ') + '\n')
 }
 
-/** Render one `set -x` trace line for a scalar assignment. */
-export function traceAssignment(key: string, val: string, append: boolean): Uint8Array {
+/**
+ * The `set -x` trace line for a scalar assignment, without its newline: an
+ * assignment traces it into the shell's diagnostics, and `export` /
+ * `readonly` among their own refusals.
+ */
+export function traceAssignment(key: string, val: string, append: boolean): string {
   const op = append ? '+=' : '='
-  const rendered = val === '' ? '' : traceQuote(val)
-  return encodeText(`+ ${key}${op}${rendered}\n`)
+  return `+ ${key}${op}${val === '' ? '' : traceQuote(val)}`
+}
+
+/**
+ * Render the trace line a declaration writes for an array operand: every
+ * element single-quoted, a keyed one as `['k']='v'`.
+ */
+export function traceArray(key: string, items: readonly string[], append: boolean): Uint8Array {
+  const shown = items.map((item) => {
+    const eq = item.indexOf(']=')
+    return item.startsWith('[') && eq > 0
+      ? `[${quoted(item.slice(1, eq))}]=${quoted(item.slice(eq + 2))}`
+      : quoted(item)
+  })
+  return encodeText(`+ ${key}${append ? '+=' : '='}(${shown.join(' ')})\n`)
 }
