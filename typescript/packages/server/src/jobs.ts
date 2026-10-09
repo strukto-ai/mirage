@@ -210,22 +210,21 @@ export class JobTable {
     return record
   }
 
+  /** Stop locally owned work, then record the intent, so a stalled store cannot keep it running. */
   async cancel(id: string): Promise<boolean> {
     const control = this.live.get(id)
-    try {
-      const [, accepted] = await this.change(id, (r) =>
-        r.cancelRequested
-          ? null
-          : {
-              ...r,
-              cancelRequested: true,
-              status: JobStatus.STOPPING,
-            },
-      )
-      return accepted
-    } finally {
-      control?.controller.abort()
-    }
+    const stopped = control !== undefined && !control.controller.signal.aborted
+    control?.controller.abort()
+    const [record, accepted] = await this.change(id, (r) =>
+      r.cancelRequested
+        ? null
+        : {
+            ...r,
+            cancelRequested: true,
+            status: JobStatus.STOPPING,
+          },
+    )
+    return accepted || (stopped && record.status === JobStatus.CANCELED)
   }
 
   /** Join locally owned cleanup independently of record-store health. */

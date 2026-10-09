@@ -322,3 +322,39 @@ async def test_store_outage_cannot_prevent_local_cancellation_or_cleanup():
     assert (await store.get(job.id)).finished_at is None
     await table.close()
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_store_cannot_keep_cancelled_work_running():
+    entered, cleanup, resume = (asyncio.Event() for _ in range(3))
+
+    class StalledStore(RAMExecutionStore):
+        stalled = False
+
+        async def get(self, execution_id):
+            if self.stalled:
+                await resume.wait()
+            return await super().get(execution_id)
+
+    async def work():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup.set()
+
+    store = StalledStore()
+    table = JobTable(store)
+    job = await submit(table, work)
+    await entered.wait()
+    store.stalled = True
+    cancelling = asyncio.create_task(table.cancel(job.id))
+    try:
+        await asyncio.wait_for(cleanup.wait(), 1)
+        assert not cancelling.done()
+    finally:
+        resume.set()
+    assert await asyncio.wait_for(cancelling, 1)
+    assert (await table.wait(job.id)).status == JobStatus.CANCELED
+    await table.close()
+    await store.close()

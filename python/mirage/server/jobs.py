@@ -219,22 +219,32 @@ class JobTable:
         return entry
 
     async def cancel(self, job_id: str) -> bool:
+        """Stop locally owned work, then record the intent.
+
+        The local stop comes first so a stalled record store cannot keep
+        the work running.
+
+        Args:
+            job_id (str): execution to cancel.
+
+        Returns:
+            bool: whether this call cancelled the execution.
+        """
         control = self._live.get(job_id)
-        try:
-            _, accepted = await self._change(
-                job_id,
-                lambda r: (
-                    None
-                    if r.cancel_requested
-                    else replace(
-                        r, cancel_requested=True, status=JobStatus.STOPPING
-                    )
-                ),
-            )
-            return accepted
-        finally:
-            if control is not None:
-                control.abort()
+        stopped = control is not None and not control.aborted
+        if control is not None:
+            control.abort()
+        record, accepted = await self._change(
+            job_id,
+            lambda r: (
+                None
+                if r.cancel_requested
+                else replace(
+                    r, cancel_requested=True, status=JobStatus.STOPPING
+                )
+            ),
+        )
+        return accepted or (stopped and record.status == JobStatus.CANCELED)
 
     async def drain(self, job_id: str) -> None:
         """Join locally owned cleanup independently of record-store health.

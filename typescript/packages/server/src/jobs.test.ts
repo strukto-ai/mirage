@@ -183,6 +183,54 @@ describe('async execution ownership', () => {
     expect(invoked).toBe(false)
   })
 
+  it('a stalled store cannot keep cancelled work running', async () => {
+    const entered = gate(),
+      cleanup = gate(),
+      resume = gate()
+    class StalledStore extends RAMExecutionStore {
+      stalled = false
+      override async get(id: string): Promise<ExecutionRecord | null> {
+        if (this.stalled) await resume.wait
+        return super.get(id)
+      }
+    }
+    const store = new StalledStore()
+    const table = new JobTable(store)
+    const job = await submit(table, async (signal) => {
+      entered.release()
+      try {
+        await new Promise<void>((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      } finally {
+        cleanup.release()
+      }
+      return null
+    })
+    await entered.wait
+    store.stalled = true
+    let cancelled = false
+    const cancelling = table.cancel(job.id).then((accepted) => {
+      cancelled = true
+      return accepted
+    })
+    try {
+      await cleanup.wait
+      expect(cancelled).toBe(false)
+    } finally {
+      resume.release()
+    }
+    expect(await cancelling).toBe(true)
+    expect((await table.wait(job.id)).status).toBe(JobStatus.CANCELED)
+    await table.close()
+    await store.close()
+  })
   it('cancellation survives a delayed completion CAS', async () => {
     const completing = gate(),
       release = gate()
