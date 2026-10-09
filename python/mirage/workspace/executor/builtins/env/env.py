@@ -16,11 +16,11 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.context import reset_program_invocation, set_program_invocation
-from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.env.constants import ENV_HELP_HINT
+from mirage.workspace.executor.builtins.shared import fail, ok
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
@@ -28,13 +28,8 @@ from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 
-def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
-    err = encode_text(message + "\n" + ENV_HELP_HINT)
-    return (
-        None,
-        IOResult(exit_code=125, stderr=err),
-        ExecutionNode(command="env", exit_code=125, stderr=err),
-    )
+def _env_error(message: str) -> Result:
+    return fail("env", f"{message}\n{ENV_HELP_HINT}", 125)
 
 
 async def handle_env(
@@ -42,7 +37,7 @@ async def handle_env(
     args: list[str],
     session: SessionState,
     stdin: ByteSource | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run the ``env`` builtin (print environment or run a command).
 
     Usage: ``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``.
@@ -134,7 +129,7 @@ async def handle_env(
     if not command:
         sep = "\0" if null else "\n"
         out = encode_text("".join(f"{k}={v}{sep}" for k, v in base.items()))
-        return out, IOResult(), ExecutionNode(command="env", exit_code=0)
+        return ok("env", out)
 
     # `env NAME=v cmd` runs the command with a replaced environment.
     # Only the scalars are replaced: arrays were never part of the env

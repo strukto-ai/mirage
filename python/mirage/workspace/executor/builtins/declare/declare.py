@@ -14,11 +14,8 @@
 
 import functools
 
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
-    array_get,
     array_set,
     build_assoc_literal,
     build_indexed_literal,
@@ -38,7 +35,11 @@ from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,
+    EXPORT_FLAGS,
+    EXPORT_USAGE,
     LISTED_ATTRIBUTES,
+    READONLY_FLAGS,
+    READONLY_USAGE,
     SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
 )
@@ -47,11 +48,15 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
+    fail,
     is_valid_name,
+    ok,
     readonly_line,
     refusal,
     require_view,
+    result,
 )
+from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     appended,
@@ -63,7 +68,6 @@ from mirage.workspace.session.state import (
     shadow_local,
     subscript_index,
 )
-from mirage.workspace.types import ExecutionNode
 
 
 async def premark(
@@ -170,21 +174,6 @@ def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
     if kind is VarKind.INDEXED and isinstance(held, dict):
         return "cannot convert associative to indexed array"
     return None
-
-
-def held_slot(held: ShellValue | None) -> str:
-    """What a declaration's ``NAME+=value`` extends: a scalar's text,
-    element 0 of an array, key ``"0"`` of a map (``S=x; declare -a
-    S+=y`` gives ``([0]="xy")``), "" when unset.
-
-    Args:
-        held (ShellValue | None): the value the declaration lands on.
-    """
-    if isinstance(held, dict):
-        return held.get("0", "")
-    if isinstance(held, list):
-        return array_get(held, 0)
-    return held or ""
 
 
 def scalar_value(
@@ -384,7 +373,7 @@ async def store_staged_arrays(
     shaping: AttrMarks = (),
     global_scope: bool = False,
     inherit: bool = False,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
+) -> Result | None:
     """Store a declaration's array literals through the session view,
     the first of bash's two passes over a declaration.
 
@@ -584,7 +573,7 @@ def split_decl_flags(
         if tok == "--":
             i += 1
             break
-        if tok.startswith("-") and len(tok) > 1 and tok != "-":
+        if tok.startswith("-") and len(tok) > 1:
             body = tok[1:]
             illegal = next((c for c in body if c not in allowed), None)
             if illegal is not None:
@@ -641,7 +630,7 @@ def identifier_refusal(cmd: str, word: str) -> str | None:
 
 def declaration_result(
     cmd: str, errors: list[str], warnings: list[str] | None = None
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """A declaration's answer once every operand ran.
 
     Each warning, then each refusal, one line apiece, and exit 1 when an
@@ -657,18 +646,10 @@ def declaration_result(
         warnings (list[str] | None): lines that print without failing.
     """
     lines = [*(warnings or []), *(line for line in errors if line)]
-    code = 1 if errors else 0
-    if not lines:
-        return (
-            None,
-            IOResult(exit_code=code),
-            ExecutionNode(command=cmd, exit_code=code),
-        )
-    err = encode_text("\n".join(lines) + "\n")
-    return (
-        None,
-        IOResult(exit_code=code, stderr=err),
-        ExecutionNode(command=cmd, exit_code=code, stderr=err),
+    return result(
+        cmd,
+        exit_code=1 if errors else 0,
+        stderr="".join(f"{line}\n" for line in lines),
     )
 
 
@@ -772,7 +753,7 @@ async def handle_declare_print(
     names: list[str],
     session: SessionState,
     flags: set[str] | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run ``declare -p``: render declarations for names, or for all.
 
     With names, they print in the order given and a name that does not
@@ -799,15 +780,11 @@ async def handle_declare_print(
             errors.append(f"bash: declare: {name}: not found")
         else:
             lines.append(line)
-    out = encode_text(("\n".join(lines) + "\n") if lines else "")
-    code = 1 if errors else 0
-    if not errors:
-        return out, IOResult(), ExecutionNode(command="declare", exit_code=0)
-    err = encode_text("\n".join(errors) + "\n")
-    return (
-        out,
-        IOResult(exit_code=code, stderr=err),
-        ExecutionNode(command="declare", exit_code=code, stderr=err),
+    return result(
+        "declare",
+        encode_text("".join(f"{line}\n" for line in lines)),
+        1 if errors else 0,
+        "".join(f"{error}\n" for error in errors),
     )
 
 
@@ -858,7 +835,7 @@ def handle_declare_functions(
     flags: set[str],
     names: list[str],
     plus: frozenset[str],
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run the function half of ``declare``: ``-f`` / ``-F``.
 
     ``-p`` only prints, whatever attributes come with it: ``-F NAME``
@@ -885,7 +862,6 @@ def handle_declare_functions(
     wanted = flags & {"r", "x"}
     present = [name for name in names if name in session.functions]
     missing = [name for name in names if name not in session.functions]
-    code = 1 if missing else 0
     if names and not printing and (wanted or plus & {"r", "x"}):
         frozen = [
             name
@@ -901,16 +877,12 @@ def handle_declare_functions(
                 session.exported_functions.discard(name)
             elif "x" in flags:
                 session.exported_functions.add(name)
-        code = 1 if missing or frozen else 0
-        err = encode_text(
-            "".join(
+        return result(
+            cmd,
+            exit_code=1 if missing or frozen else 0,
+            stderr="".join(
                 f"bash: {cmd}: {name}: readonly function\n" for name in frozen
-            )
-        )
-        return (
-            None,
-            IOResult(exit_code=code, stderr=err or None),
-            ExecutionNode(command=cmd, exit_code=code, stderr=err),
+            ),
         )
     if not names:
         present = [
@@ -921,18 +893,69 @@ def handle_declare_functions(
     lines = function_lines(
         session, present, "F" not in flags, printing or not names
     )
-    out = encode_text(("\n".join(lines) + "\n") if lines else "")
-    err = (
-        encode_text(
-            "".join(f"bash: {cmd}: {name}: not found\n" for name in missing)
-        )
+    return result(
+        cmd,
+        encode_text("".join(f"{line}\n" for line in lines)),
+        1 if missing else 0,
+        "".join(f"bash: {cmd}: {name}: not found\n" for name in missing)
         if printing
-        else b""
+        else "",
     )
-    return (
-        out,
-        IOResult(exit_code=code, stderr=err or None),
-        ExecutionNode(command=cmd, exit_code=code, stderr=err),
+
+
+async def mark_names(
+    assignments: list[DeclarationOperand],
+    session: SessionState,
+    state: SessionView | None,
+    attr: VarAttr,
+) -> Result:
+    """Run ``export`` or ``readonly``: mark names, or print them.
+
+    An invalid option letter fails with status 2 and the GNU usage line.
+    ``-f`` marks functions instead (``mark_functions``). With no names,
+    every name carrying the keyword's mark prints as ``declare -p``
+    prints it, the whole cluster (``declare -rx R="1"``), a reference as
+    itself rather than its target; ``-a`` / ``-A`` narrow the listing to
+    that array kind (``kind_listed``). Otherwise each operand is assigned
+    and marked through the gated view (``mark_variables``); ``-a`` /
+    ``-A`` shape only an assigned value, and ``export -n`` takes the mark
+    off.
+
+    Args:
+        assignments (list[DeclarationOperand]): the option words, then
+            the operands in order.
+        session (SessionState): shell session state.
+        state (SessionView | None): the gated session view.
+        attr (VarAttr): EXPORT or READONLY.
+    """
+    exporting = attr is VarAttr.EXPORT
+    cmd = "export" if exporting else "readonly"
+    flags, names, bad = split_decl_flags(
+        assignments, EXPORT_FLAGS if exporting else READONLY_FLAGS
+    )
+    if bad is not None:
+        usage = EXPORT_USAGE if exporting else READONLY_USAGE
+        return fail(cmd, f"bash: {cmd}: -{bad}: invalid option\n{usage}", 2)
+    on = "n" not in flags
+    kind = declared_kind(flags)
+    if "f" in flags:
+        marked = (
+            session.exported_functions
+            if exporting
+            else session.readonly_functions
+        )
+        return await mark_functions(
+            cmd, session, marked, names, on, state, kind
+        )
+    if not names:
+        lines = (
+            declare_line(session, name)
+            for name, var in sorted(session.vars.items())
+            if attr in var.attrs and kind_listed(session, name, flags)
+        )
+        return ok(cmd, encode_text("".join(f"{x}\n" for x in lines if x)))
+    return await mark_variables(
+        cmd, session, require_view(state), names, attr, on, kind
     )
 
 
@@ -944,7 +967,7 @@ async def mark_functions(
     on: bool,
     state: SessionView | None = None,
     kind: VarKind | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
 
     A name that is not a function is ``not a function``, exit 1, and the
@@ -986,8 +1009,7 @@ async def mark_functions(
     if not names:
         listed = sorted(name for name in marked if name in session.functions)
         lines = function_lines(session, listed, True, True)
-        out = encode_text(("\n".join(lines) + "\n") if lines else "")
-        return out, IOResult(), ExecutionNode(command=cmd, exit_code=0)
+        return ok(cmd, encode_text("".join(f"{line}\n" for line in lines)))
     for name in names:
         if name not in session.functions:
             errors.append(f"bash: {cmd}: {name}: not a function")
@@ -1006,7 +1028,7 @@ async def mark_variables(
     attr: VarAttr,
     on: bool,
     kind: VarKind | None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run ``export`` or ``readonly`` over its operands: assign each
     value and put the keyword's mark on, or with ``on`` False take it
     off (``export -n``).
@@ -1115,9 +1137,7 @@ async def _mark_operand(
         checked = deref(session, key)
         target = session.vars.get(checked)
         integer = target is not None and VarAttr.INTEGER in target.attrs
-        val, added = (
-            appended(held_slot(held), val, integer) if append else (val, None)
-        )
+        val, added = appended(held, val, integer) if append else (val, None)
         value, assigned = scalar_value(held, val, kind)
         if kind is not None:
             await drop_reference(session, view, key)

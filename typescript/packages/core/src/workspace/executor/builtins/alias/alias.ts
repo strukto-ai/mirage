@@ -14,15 +14,17 @@
 
 import { getText } from '../../../../shell/helpers.ts'
 import type { TSNodeLike } from '../../../../shell/types.ts'
-import { IOResult } from '../../../../io/types.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
-import type { SessionState } from '../../../session/session.ts'
-import { ownRecord, sessionEntry, setSessionEntry } from '../../../session/session.ts'
+import {
+  ownRecord,
+  type SessionState,
+  sessionEntry,
+  setSessionEntry,
+} from '../../../session/session.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import { scanOptions } from '../getopt.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { ExecutionNode } from '../../../types.ts'
-import { fail } from '../shared.ts'
+import { fail, finish, ok, result } from '../shared.ts'
 import { ALIAS_USAGE, BAD_NAME_CHARS, FIRST_WORD, UNALIAS_USAGE } from './constants.ts'
 import type { AliasMark } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
@@ -75,18 +77,11 @@ export function handleAlias(args: string[], session: SessionState, mark: AliasMa
     if (val !== undefined) lines.push(`alias ${word}=${singleQuote(val)}`)
     else errors.push(`bash: alias: ${word}: not found`)
   }
-  const out = lines.length > 0 ? encodeText(lines.join('\n') + '\n') : null
-  const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
-  const code = errors.length > 0 ? 1 : 0
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({
-      command: 'alias',
-      exitCode: code,
-      ...(err !== null ? { stderr: err } : {}),
-    }),
-  ]
+  return result('alias', {
+    out: lines.length > 0 ? encodeText(lines.map((line) => `${line}\n`).join('')) : null,
+    exitCode: errors.length > 0 ? 1 : 0,
+    stderr: errors.map((error) => `${error}\n`).join(''),
+  })
 }
 
 /** Remove aliases: the named ones, or all under `-a`. The commands of the
@@ -99,7 +94,7 @@ export function handleUnalias(args: string[], session: SessionState, mark: Alias
   if (scan.letters.includes('a')) {
     for (const name of Object.keys(session.aliases)) changing(session, name, mark)
     session.aliases = ownRecord<string>()
-    return [null, new IOResult(), new ExecutionNode({ command: 'unalias', exitCode: 0 })]
+    return ok('unalias')
   }
   if (operands.length === 0) return fail('unalias', `${UNALIAS_USAGE}\n`, 2)
   const errors: string[] = []
@@ -108,19 +103,9 @@ export function handleUnalias(args: string[], session: SessionState, mark: Alias
       changing(session, name, mark)
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.aliases[name]
-    } else errors.push(`bash: unalias: ${name}: not found`)
+    } else errors.push(`bash: unalias: ${name}: not found\n`)
   }
-  const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
-  const code = errors.length > 0 ? 1 : 0
-  return [
-    null,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({
-      command: 'unalias',
-      exitCode: code,
-      ...(err !== null ? { stderr: err } : {}),
-    }),
-  ]
+  return finish('unalias', errors)
 }
 
 function aliasesOn(session: SessionState): boolean {

@@ -197,10 +197,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly -a ZAR=(x 'y z'); readonly -p | grep ZAR",
+      "command": "readonly -a ZAR=(x 'y z'); readonly -p | grep ZAR; ( zqnt=1; declare -nr zqnr=zqnt; readonly -p | grep ' zqnr=' )",
       "expect": {
         "exit": 0,
-        "stdout": "declare -ar ZAR=([0]=\"x\" [1]=\"y z\")\n",
+        "stdout": "declare -ar ZAR=([0]=\"x\" [1]=\"y z\")\ndeclare -nr zqnr=\"zqnt\"\n",
         "stderr": ""
       }
     },

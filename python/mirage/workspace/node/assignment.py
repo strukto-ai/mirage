@@ -17,7 +17,6 @@ from collections.abc import Awaitable
 from typing import Any, Callable
 
 from mirage.cache.index.scope import command_scope
-from mirage.io import IOResult
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
     ShellArray,
@@ -37,6 +36,8 @@ from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.shared import ok, result
+from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.executor.statement import assignment_status
 from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
@@ -50,7 +51,6 @@ from mirage.workspace.session.state import (
     session_view,
     subscript_index,
 )
-from mirage.workspace.types import ExecutionNode
 
 
 async def _fatal_index(
@@ -220,7 +220,7 @@ async def execute_assignment(
     registry: MountRegistry,
     namespace: Namespace,
     cs: CallStack | None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> Result:
     """Execute one top-level variable assignment (`a=1`, `a[i]+=v`).
 
     Every spelling -- scalar, array literal, subscript, append -- is
@@ -239,7 +239,7 @@ async def execute_assignment(
     session = context.session
     text = get_text(node)
     if "=" not in text:
-        return None, IOResult(), ExecutionNode(command=text, exit_code=0)
+        return ok(text)
     sub_seq = context.frame.cmdsub_seq
     subscript_node = next(
         (c for c in node.named_children if c.type == "subscript"), None
@@ -307,18 +307,14 @@ async def execute_assignment(
             # A plain word in a keyed literal is dropped with a warning
             # and the assignment still succeeds; unlike a declaration's,
             # this voice does not quote the word (pinned on 5.2.37).
-            err = encode_text(
-                "".join(
+            return result(
+                text,
+                exit_code=assignment_status(context.frame, sub_seq),
+                stderr="".join(
                     f"bash: {key}: {word}: must use subscript when "
                     "assigning associative array\n"
                     for word in bad_words
-                )
-            )
-            code = assignment_status(context.frame, sub_seq)
-            return (
-                None,
-                IOResult(exit_code=code, stderr=err or None),
-                ExecutionNode(command=text, exit_code=code, stderr=err),
+                ),
             )
         held = session.arrays.get(key)
         if append and held is None:
@@ -335,11 +331,8 @@ async def execute_assignment(
             functools.partial(subscript_index, session, view=view),
         )
         await _assign_var(view, key, base)
-        code = assignment_status(context.frame, sub_seq)
-        return (
-            None,
-            IOResult(exit_code=code),
-            ExecutionNode(command=text, exit_code=code),
+        return result(
+            text, exit_code=assignment_status(context.frame, sub_seq)
         )
     if val_nodes:
         val = await expand_node(
@@ -379,11 +372,8 @@ async def execute_assignment(
                 else (val, None)
             )
             await _assign_var(view, key, new_map, frozenset({sub_text}), added)
-            code = assignment_status(context.frame, sub_seq)
-            return (
-                None,
-                IOResult(exit_code=code),
-                ExecutionNode(command=text, exit_code=code),
+            return result(
+                text, exit_code=assignment_status(context.frame, sub_seq)
             )
         arr = session.arrays.get(key)
         if arr is None:
@@ -407,11 +397,8 @@ async def execute_assignment(
         )
         array_set(arr, idx, slot)
         await _assign_var(view, key, arr, frozenset({idx}), added)
-        code = assignment_status(context.frame, sub_seq)
-        return (
-            None,
-            IOResult(exit_code=code),
-            ExecutionNode(command=text, exit_code=code),
+        return result(
+            text, exit_code=assignment_status(context.frame, sub_seq)
         )
     held_map = session.assocs.get(key)
     held_arr = session.arrays.get(key)
@@ -419,13 +406,9 @@ async def execute_assignment(
     if append:
         # `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on
         # an integer name adds: `declare -i n=5; n+=3` stores 8.
-        if held_map is not None:
-            old = held_map.get("0", "")
-        elif held_arr is not None:
-            old = array_get(held_arr, 0)
-        else:
-            old = session.env.get(key, "")
-        stored, added = appended(old, val, integer)
+        stored, added = appended(
+            held_map or held_arr or session.env.get(key), val, integer
+        )
     if held_map is not None:
         # `m=x` on an associative array writes the literal key "0"
         # and keeps every other key, as bash does.
@@ -443,9 +426,4 @@ async def execute_assignment(
     # getopts scan, matching bash's internal char pointer.
     if key == "OPTIND":
         session._getopts_optind = None
-    code = assignment_status(context.frame, sub_seq)
-    return (
-        None,
-        IOResult(exit_code=code),
-        ExecutionNode(command=text, exit_code=code),
-    )
+    return result(text, exit_code=assignment_status(context.frame, sub_seq))
