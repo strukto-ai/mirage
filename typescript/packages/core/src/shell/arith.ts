@@ -463,7 +463,9 @@ class Reader {
         this.advance()
         return value
       }
-      if (this.skip > 0) return 0n
+      // A name before `=` here is a target the assignment level refuses
+      // (`1+x=2`), and bash reads nothing of it.
+      if (this.skip > 0 || this.at('=')) return 0n
       return this.lookup(target, at)[1]
     }
     throw this.fail('syntax error: operand expected')

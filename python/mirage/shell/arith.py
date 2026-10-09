@@ -547,7 +547,9 @@ class _Reader:
                 )
                 self.advance()
                 return value
-            if self.skip:
+            if self.skip or self.at("="):
+                # A name before `=` here is a target the assignment
+                # level refuses (`1+x=2`), and bash reads nothing of it.
                 return 0
             return self.lookup(target, at)[1]
         raise self.fail("syntax error: operand expected")

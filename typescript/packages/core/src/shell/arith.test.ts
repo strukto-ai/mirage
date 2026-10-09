@@ -475,6 +475,16 @@ describe('a value is what bash reads', () => {
 
   it('reads no name it assigns', () => {
     expect(evaluateArith('x=5', { x: '1+' }).value).toBe(5n)
+    // Nor one a refused assignment names, as bash's reader leaves it.
+    let caught: unknown
+    try {
+      evaluateArith('1+x=2', { x: 'y=5' })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ArithError)
+    expect((caught as ArithError).message).toContain('non-variable')
+    expect((caught as ArithError).writes).toEqual([])
   })
 
   it('marks an error in a subscript', () => {

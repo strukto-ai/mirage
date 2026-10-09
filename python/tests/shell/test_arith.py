@@ -260,6 +260,10 @@ def test_the_writes_before_an_error_are_kept():
 def test_a_name_assigned_is_not_read():
     result = evaluate_arith("x=5", {"x": "1+"})
     assert result.value == 5
+    # Nor one a refused assignment names, as bash's reader leaves it.
+    with pytest.raises(ArithError, match="non-variable") as caught:
+        evaluate_arith("1+x=2", {"x": "y=5"})
+    assert _writes_of(caught.value) == []
 
 
 def test_an_error_in_a_subscript_is_marked():
