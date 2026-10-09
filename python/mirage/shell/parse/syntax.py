@@ -98,7 +98,9 @@ def pattern_source(data: bytes) -> bytes:
         data (bytes): encoded shell source.
     """
     command = data.decode("utf-8", errors="surrogateescape")
-    if not any(c + "(" in command for c in constants.EXTGLOB_OPENERS):
+    if "[" not in command and not any(
+        c + "(" in command for c in constants.EXTGLOB_OPENERS
+    ):
         return data
     reader = _LineReader(command, frozenset(), None, True)
     try:
@@ -125,7 +127,7 @@ def heredoc_plan(command: str) -> HeredocPlan | None:
         HeredocPlan | None: offsets in UTF-8 bytes; None when bash refuses
         the line, whose heredocs nothing reads.
     """
-    reader = _LineReader(command, frozenset(), None)
+    reader = _LineReader(command, frozenset(), None, True)
     try:
         if reader.refusals():
             return None
@@ -1739,6 +1741,7 @@ class _LineReader:
                 ):
                     self.fail_token(tok)
                 after_in = False
+                self.pattern_brackets(tok.start, tok.end)
                 self.take(tok)
                 tok = self.peek()
                 if tok.kind == "op" and tok.text == ")":
@@ -1972,6 +1975,22 @@ class _LineReader:
                 )
             raise
 
+    def pattern_brackets(self, start: int, end: int) -> None:
+        """Keep a bracket pattern containing quotes or expansions one word.
+
+        Args:
+            start (int): the pattern's first character.
+            end (int): the position after the pattern.
+        """
+        word = self.text[start:end]
+        if "[" not in word or not any(c in word for c in "'\"`$\\"):
+            return
+        j = start
+        while j < end:
+            if self.text[j] in "[]":
+                self.patterns.append((j, j + 1))
+            j = self.word_char(j)
+
     def pattern_word(self) -> ReaderToken:
         """The right side of ``==``, ``=`` or ``!=``, read with extglob on."""
         i = self.blank_end(self.pos)
@@ -1993,6 +2012,7 @@ class _LineReader:
             if c in constants.WORD_BREAKS:
                 break
             j = self.word_char(j)
+        self.pattern_brackets(i, j)
         if not extended:
             return tok
         return ReaderToken("word", text[i:j].replace("\\\n", ""), i, j)

@@ -17,7 +17,7 @@ import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
-import { fnmatch, QUOTED_BANG } from './fnmatch.ts'
+import { fnmatch, QUOTED_CHARS } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
@@ -174,17 +174,9 @@ export function literalSpan(literal: string): [string, string] | null {
 // The marks are Unicode noncharacters, permanently unassigned and never
 // valid interchange text -- the same impossible input `brace.ts` assumes
 // away when it delimits its inert atoms with NUL.
-const GLOB_MARKS: Readonly<Record<string, string>> = {
-  '*': '\uFDD0',
-  '?': '\uFDD1',
-  '[': '\uFDD2',
-  '@': '\uFDD3',
-  '+': '\uFDD4',
-  '!': QUOTED_BANG,
-  '(': '\uFDD6',
-  ')': '\uFDD7',
-  '|': '\uFDD8',
-}
+const GLOB_MARKS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(QUOTED_CHARS).map(([mark, ch]) => [ch, mark]),
+)
 const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(GLOB_MARKS).map(([ch, mark]) => [mark, ch]),
 )
@@ -249,13 +241,13 @@ export function markEscapedGlobs(text: string): string {
  *
  * fnmatch has no escape character, so a quoted glob character is handed
  * over as its own one-character class, exactly what `escapeGlob` builds
- * for text that is literal throughout. A quoted bang keeps its mark until
- * matching: `[!]` is not a one-character class, and unquoting it could
- * create a `!(...)` group.
+ * for text that is literal throughout. Extended operators retain their
+ * marks until matching: turning a quoted `@` into `[@]` inside `[a"@"]`
+ * would create a nested bracket expression; unquoting it could create a group.
  */
 export function globPattern(segment: string): string {
   return segment.replace(GLOB_MARK_RE, (ch) =>
-    ch === QUOTED_BANG ? ch : `[${GLOB_CHAR_OF[ch] ?? ch}]`,
+    GLOB_CHARS.includes(GLOB_CHAR_OF[ch] ?? '') ? `[${GLOB_CHAR_OF[ch] ?? ch}]` : ch,
   )
 }
 
@@ -303,7 +295,7 @@ export function literalWord(item: string | PathSpec): string | PathSpec {
  * fnmatch has no escape character, so each special is wrapped in its own
  * one-character class: `*` becomes `[*]`. A `]` needs no treatment: outside
  * a class it is already literal, and no class can open because every `[`
- * gets wrapped. A bang retains the quote mark described by `globPattern`.
+ * gets wrapped. Extended operators retain the quote marks in `globPattern`.
  */
 export function escapeGlob(text: string): string {
   return globPattern(markGlobs(text))

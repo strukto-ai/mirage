@@ -659,21 +659,12 @@ function globStrip(
   extglob = false,
 ): string {
   if (pattern === '') return value
-  const matches: number[] = []
-  if (prefix) {
-    for (let i = 0; i <= value.length; i++) {
-      if (fnmatch(value.slice(0, i), pattern, extglob)) matches.push(i)
-    }
-    if (matches.length === 0) return value
-    const i = greedy ? Math.max(...matches) : Math.min(...matches)
-    return value.slice(i)
+  const step = greedy === prefix ? -1 : 1
+  for (let i = step < 0 ? value.length : 0; i >= 0 && i <= value.length; i += step) {
+    const candidate = prefix ? value.slice(0, i) : value.slice(i)
+    if (fnmatch(candidate, pattern, extglob)) return prefix ? value.slice(i) : value.slice(0, i)
   }
-  for (let i = 0; i <= value.length; i++) {
-    if (fnmatch(value.slice(i), pattern, extglob)) matches.push(i)
-  }
-  if (matches.length === 0) return value
-  const i = greedy ? Math.min(...matches) : Math.max(...matches)
-  return value.slice(0, i)
+  return value
 }
 
 // Bash ${var/pat/rep}: pattern is a glob, longest match wins. anchor is

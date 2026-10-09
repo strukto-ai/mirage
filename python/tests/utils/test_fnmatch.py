@@ -223,3 +223,10 @@ def test_posix_classes_match_unicode_characters(name, expected):
 
 def test_empty_negative_repetition_remains_nullable():
     assert fnmatch("", "*+([!a]|!([!a]))", extglob=True)
+
+
+@pytest.mark.parametrize("pattern", ["+(*)", "*(*)", "+(a|*)", "*+(*)"])
+def test_repeated_wildcards_match_long_values(pattern):
+    value = "a" * 10000
+    assert fnmatch(value, pattern, extglob=True)
+    assert not fnmatch(value, pattern + "b", extglob=True)

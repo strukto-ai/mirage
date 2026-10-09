@@ -88,3 +88,38 @@ it('keeps source rows across a newline shielded inside an extended pattern', () 
   expect(second?.startPosition).toEqual({ row: 2, column: 0 })
   expect(second?.text).toBe('echo after')
 })
+
+it('preserves pattern source rows across a long script', () => {
+  const root = parser.parse('echo @(😀\nb|c)\n'.repeat(1000) + 'echo end')
+  const statements = root.namedChildren
+  expect(statements).toHaveLength(1001)
+  for (const index of [0, 500, 999]) {
+    expect(statements[index]?.startPosition).toEqual({ row: 2 * index, column: 0 })
+    expect(statements[index]?.endPosition).toEqual({ row: 2 * index + 1, column: 4 })
+  }
+  expect(statements.at(-1)?.startPosition).toEqual({ row: 2000, column: 0 })
+})
+
+it('does not consume later commands for heredoc tokens inside patterns', () => {
+  const root = parser.parse('echo @(a<<b|c)\ncat <<EOF\nbody\nEOF\necho after\n')
+  expect(root.namedChildren).toHaveLength(3)
+  expect(root.namedChildren[0]?.text).toBe('echo @(a<<b|c)')
+  expect(root.namedChildren.at(-1)?.text).toBe('echo after')
+})
+
+it.each(['[[ @ == [a"@"] ]]', '[[ $x == [a"$x"] ]]', 'case "$x" in [a"$x"]) echo match;; esac'])(
+  'keeps a quoted bracket pattern one operand: %s',
+  (command) => {
+    const root = parser.parse(command)
+    expect(root.hasError).toBe(false)
+    expect(root.text).toBe(command)
+    const stack: TSNodeLike[] = [root]
+    const strings: string[] = []
+    for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+      stack.push(...node.namedChildren)
+      if (node.type === 'string') strings.push(node.text)
+    }
+    expect(strings.length).toBeGreaterThan(0)
+    expect(strings.every((value) => ['"@"', '"$x"'].includes(value))).toBe(true)
+  },
+)

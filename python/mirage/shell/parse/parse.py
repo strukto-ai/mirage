@@ -44,7 +44,7 @@ from mirage.shell.parse.source import (
     join_continuations,
     source_offsets,
 )
-from mirage.shell.parse.syntax import heredoc_plan
+from mirage.shell.parse.syntax import heredoc_plan, pattern_source
 from mirage.shell.parse.timing import lower_timing, wrap_timing
 from mirage.shell.types import TSNodeLike
 
@@ -88,9 +88,10 @@ def parse(command: str) -> TSNodeLike:
             documents = read_planned(original, plan)
         else:
             # The operators are read off a tree that lexes `0<<EOF` as one.
-            hinted = TS_PARSER.parse(original).root_node
-            lexed = operator_source(original, hinted)
-            if lexed != original:
+            patterned = pattern_source(original)
+            hinted = TS_PARSER.parse(patterned).root_node
+            lexed = operator_source(patterned, hinted)
+            if lexed != patterned:
                 hinted = TS_PARSER.parse(lexed).root_node
             documents = discover_heredocs(original, heredoc_operators(hinted))
         if documents:

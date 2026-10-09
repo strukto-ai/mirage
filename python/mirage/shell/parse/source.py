@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from bisect import bisect_right
 from typing import Any, cast
 
 import tree_sitter
@@ -43,24 +44,35 @@ class SourceNode:
     its own, which it does at a line's end.
     """
 
-    def __init__(self, node: tree_sitter.Node, data: bytes) -> None:
+    def __init__(
+        self,
+        node: tree_sitter.Node,
+        data: bytes,
+        lines: tuple[int, ...] | None = None,
+    ) -> None:
         self._node = node
         self._data = data
+        self._lines = (
+            lines
+            if lines is not None
+            else (0, *(i + 1 for i, c in enumerate(data) if c == 10))
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._node, name)
 
     def _wrap(self, node: tree_sitter.Node | None) -> "SourceNode | None":
-        return None if node is None else SourceNode(node, self._data)
+        return (
+            None if node is None else SourceNode(node, self._data, self._lines)
+        )
 
     @property
     def text(self) -> bytes:
         return self._data[self._node.start_byte : self._node.end_byte]
 
     def _point(self, at: int) -> tuple[int, int]:
-        return self._data.count(b"\n", 0, at), at - self._data.rfind(
-            b"\n", 0, at
-        ) - 1
+        row = bisect_right(self._lines, at) - 1
+        return row, at - self._lines[row]
 
     @property
     def start_point(self) -> tuple[int, int]:

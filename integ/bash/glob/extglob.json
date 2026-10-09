@@ -153,6 +153,48 @@
         "stdout": "0\n0\n1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "extglob_quoted_bracket_members",
+      "seq": 960811,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'for x in @ + '\"'\"'\"'\"'\"'\"'\"'\"'!'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"'('\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"')'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"'|'\"'\"'\"'\"'\"'\"'\"'\"'; do [[ $x == [a\"$x\"] ]]; echo $?; case \"$x\" in [a\"$x\"]) echo case;; esac; done; mkdir /data/extglob-class; touch /data/extglob-class/a /data/extglob-class/@; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' /data/extglob-class/[a\"@\"]; rm -r /data/extglob-class'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\ncase\n0\ncase\n0\ncase\n0\ncase\n0\ncase\n0\ncase\n</data/extglob-class/@>\n</data/extglob-class/a>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_literal_heredoc_operator",
+      "seq": 960812,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' @(a<<b|c)\ncat <<EOF\nbody\nEOF\necho after\n'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "<@(a<<b|c)>\nbody\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_repeated_wildcard_long",
+      "seq": 960813,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf -v x '\"'\"'\"'\"'\"'\"'\"'\"'%10000s'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"'; [[ $x == +(*) ]]; echo $?; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x##+(*)}\" \"${x%%+(*)}\"'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n<>\n<>\n",
+        "stderr": ""
+      }
     }
   ]
 }

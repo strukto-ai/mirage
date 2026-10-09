@@ -21,7 +21,7 @@ import type { ShellParserConfig } from './config.ts'
 import { heredocOperators } from './heredoc/index.ts'
 import { lowerTiming, wrapTiming, type TimingMark } from './timing.ts'
 import { discoverHeredocs, readPlanned } from './heredoc/reader.ts'
-import { heredocPlan } from './syntax.ts'
+import { heredocPlan, patternSource } from './syntax.ts'
 import { dropSourceChars, lowerHeredocs, rebaseSource } from './heredoc/lower.ts'
 import { HeredocNode } from './heredoc/node.ts'
 import { continuationIndices, joinContinuations, sourceOffsets } from './source.ts'
@@ -133,12 +133,13 @@ function parseRoot(parser: NativeParser, command: string): ShellNode {
   // bash's reading of the line names its heredocs and the order of their
   // bodies; a line it refuses falls back to the grammar's.
   const plan = command.includes('<<') ? heredocPlan(command) : null
+  const patterned = command.includes('<<') && plan === null ? patternSource(command) : command
   let hinted =
-    command.includes('<<') && plan === null ? (parser.parse(command)?.rootNode ?? null) : null
+    command.includes('<<') && plan === null ? (parser.parse(patterned)?.rootNode ?? null) : null
   if (hinted !== null) {
     // The operators are read off a tree that lexes `0<<EOF` as one.
-    const lexed = operatorSource(parser, command, hinted)
-    if (lexed !== command) hinted = parser.parse(lexed)?.rootNode ?? hinted
+    const lexed = operatorSource(parser, patterned, hinted)
+    if (lexed !== patterned) hinted = parser.parse(lexed)?.rootNode ?? hinted
   }
   const documents =
     plan !== null

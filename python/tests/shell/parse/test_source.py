@@ -77,3 +77,43 @@ def test_extended_pattern_shield_preserves_original_rows():
     assert first.end_point == (1, 4)
     assert second.start_point == (2, 0)
     assert second.text == b"echo after"
+
+
+def test_pattern_source_rows_across_a_long_script():
+    root = parse("echo @(😀\nb|c)\n" * 1000 + "echo end")
+    statements = root.named_children
+    assert len(statements) == 1001
+    for index in (0, 500, 999):
+        assert statements[index].start_point == (2 * index, 0)
+        assert statements[index].end_point == (2 * index + 1, 4)
+    assert statements[-1].start_point == (2000, 0)
+
+
+def test_heredoc_tokens_in_patterns_do_not_consume_later_commands():
+    command = "echo @(a<<b|c)\ncat <<EOF\nbody\nEOF\necho after\n"
+    root = parse(command)
+    assert len(root.named_children) == 3
+    assert root.named_children[0].text == b"echo @(a<<b|c)"
+    assert root.named_children[-1].text == b"echo after"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '[[ @ == [a"@"] ]]',
+        '[[ $x == [a"$x"] ]]',
+        'case "$x" in [a"$x"]) echo match;; esac',
+    ],
+)
+def test_quoted_bracket_pattern_remains_one_operand(command):
+    root = parse(command)
+    assert not root.has_error
+    assert root.text == command.encode()
+    stack, strings = [root], []
+    while stack:
+        node = stack.pop()
+        stack.extend(node.named_children)
+        if node.type == "string":
+            strings.append(node.text)
+    assert strings
+    assert all(value in (b'"@"', b'"$x"') for value in strings)

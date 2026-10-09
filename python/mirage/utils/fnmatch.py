@@ -15,12 +15,66 @@
 import fnmatch as _stdlib_fnmatch
 import logging
 import re
+from collections.abc import Iterable, Iterator
 
 from mirage.utils.posix import translate_bracket
 
 logger = logging.getLogger(__name__)
 
-QUOTED_BANG = "\ufdd5"
+QUOTED_CHARS = {chr(0xFDD0 + i): ch for i, ch in enumerate("*?[@+!()|")}
+QUOTED_RE = re.compile("[\ufdd0-\ufdd8]")
+
+
+class _Positions:
+    """Immutable reachable positions as merged half-open intervals.
+
+    A wildcard suffix occupies one interval instead of one integer per
+    character. Memoized suffixes therefore share the same compact shape.
+
+    Args:
+        spans (Iterable[tuple[int, int]]): half-open position intervals.
+    """
+
+    def __init__(self, spans: Iterable[tuple[int, int]] = ()) -> None:
+        merged: list[tuple[int, int]] = []
+        for lo, hi in sorted(spans):
+            if lo >= hi:
+                continue
+            if merged and lo <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(hi, merged[-1][1]))
+            else:
+                merged.append((lo, hi))
+        self.spans = tuple(merged)
+
+    def __bool__(self) -> bool:
+        return bool(self.spans)
+
+    def __iter__(self) -> Iterator[int]:
+        for lo, hi in self.spans:
+            yield from range(lo, hi)
+
+    def contains(self, position: int) -> bool:
+        return any(lo <= position < hi for lo, hi in self.spans)
+
+    def union(self, other: "_Positions") -> "_Positions":
+        return _Positions((*self.spans, *other.spans))
+
+    def subtract(self, other: "_Positions") -> "_Positions":
+        out: list[tuple[int, int]] = []
+        j = 0
+        for lo, hi in self.spans:
+            while j < len(other.spans) and other.spans[j][1] <= lo:
+                j += 1
+            k, cursor = j, lo
+            while k < len(other.spans) and other.spans[k][0] < hi:
+                start, stop = other.spans[k]
+                if cursor < start:
+                    out.append((cursor, min(start, hi)))
+                cursor = max(cursor, stop)
+                k += 1
+            if cursor < hi:
+                out.append((cursor, hi))
+        return _Positions(out)
 
 
 class _Matcher:
@@ -54,7 +108,7 @@ class _Matcher:
         self.period = period and name.startswith(".")
         self.classes: dict[int, int] = {}
         self.groups: dict[int, tuple[int, tuple[tuple[int, int], ...]]] = {}
-        self.memo: dict[tuple[int, int, int], frozenset[int]] = {}
+        self.memo: dict[tuple[int, int, int], _Positions] = {}
         stack: list[tuple[int, list[int]]] = []
         literal_depth: list[int] = []
         i = 0
@@ -100,12 +154,12 @@ class _Matcher:
         if (
             not self.groups
             and "[:" not in self.pattern
-            and QUOTED_BANG not in self.pattern
+            and not QUOTED_RE.search(self.pattern)
         ):
             return fnmatch(self.name, self.pattern, period=self.period)
-        return len(self.name) in self.ends(0, len(self.pattern), 0)
+        return self.ends(0, len(self.pattern), 0).contains(len(self.name))
 
-    def ends(self, lo: int, hi: int, start: int) -> frozenset[int]:
+    def ends(self, lo: int, hi: int, start: int) -> _Positions:
         """Every end position at which a pattern slice matches.
 
         Args:
@@ -116,55 +170,52 @@ class _Matcher:
         key = (lo, hi, start)
         if key in self.memo:
             return self.memo[key]
-        positions = {start}
+        positions = _Positions(((start, start + 1),))
         i = lo
         while i < hi and positions:
             c = self.pattern[i]
             group = self.groups.get(i)
             if group is not None and group[0] <= hi:
                 end, branches = group
-                reached: set[int] = set()
+                reached = _Positions()
                 for position in positions:
-                    once = set().union(
-                        *(self.ends(a, b, position) for a, b in branches)
-                    )
+                    once = _Positions()
+                    for a, b in branches:
+                        once = once.union(self.ends(a, b, position))
                     if c == "!":
                         if self.period and position == 0:
                             continue
-                        reached.update(
-                            set(range(position, len(self.name) + 1)) - once
-                        )
-                    elif c in ("*", "+"):
-                        closure = set(once)
-                        if c == "*":
-                            closure.add(position)
-                        pending = list(once)
-                        while pending:
-                            current = pending.pop()
-                            for a, b in branches:
-                                for target in self.ends(a, b, current):
-                                    if target not in closure:
-                                        closure.add(target)
-                                        pending.append(target)
-                        reached.update(closure)
-                    else:
-                        reached.update(once)
-                        if c == "?":
-                            reached.add(position)
+                        once = _Positions(
+                            ((position, len(self.name) + 1),)
+                        ).subtract(once)
+                    reached = reached.union(once)
+                if c in ("*", "?"):
+                    reached = reached.union(positions)
+                if c in ("*", "+"):
+                    pending = list(reached)
+                    while pending:
+                        current = pending.pop()
+                        for a, b in branches:
+                            fresh = self.ends(a, b, current).subtract(reached)
+                            if fresh:
+                                reached = reached.union(fresh)
+                                pending.extend(fresh)
                 positions, i = reached, end
                 continue
             if c == "*":
                 if self.period:
-                    positions.discard(0)
+                    positions = positions.subtract(_Positions(((0, 1),)))
                 if not positions:
                     break
-                positions = set(range(min(positions), len(self.name) + 1))
+                positions = _Positions(
+                    ((positions.spans[0][0], len(self.name) + 1),)
+                )
                 i += 1
                 continue
             end = self.classes.get(i, i + 1)
             token = self.pattern[i:end]
-            positions = {
-                position + 1
+            positions = _Positions(
+                (position + 1, position + 2)
                 for position in positions
                 if position < len(self.name)
                 and not (
@@ -174,26 +225,25 @@ class _Matcher:
                     _extended_class_matches(self.name[position], token)
                     if end > i + 1
                     else c == "?"
-                    or ("!" if c == QUOTED_BANG else c) == self.name[position]
+                    or QUOTED_CHARS.get(c, c) == self.name[position]
                 )
-            }
+            )
             i = end
-        result = frozenset(positions)
-        self.memo[key] = result
-        return result
+        self.memo[key] = positions
+        return positions
 
 
 def _extended_class_matches(char: str, pattern: str) -> bool:
-    if "[:" not in pattern and QUOTED_BANG not in pattern:
+    if "[:" not in pattern and not QUOTED_RE.search(pattern):
         return fnmatch(char, pattern)
     out: list[str] = []
     source = "[^" + pattern[2:] if pattern.startswith("[!") else pattern
     try:
         translate_bracket(source, 0, out)
-        return (
-            re.fullmatch("".join(out).replace(QUOTED_BANG, "!"), char)
-            is not None
-        )
+        expression = "".join(out)
+        for mark, literal in QUOTED_CHARS.items():
+            expression = expression.replace(mark, rf"\x{ord(literal):02x}")
+        return re.fullmatch(expression, char) is not None
     except re.error:
         logger.debug("invalid glob character class %r", pattern)
         return False
@@ -262,7 +312,7 @@ def fnmatch(
         extglob (bool): interpret Bash's extended pattern groups.
         period (bool): require an explicit leading dot in pathname matches.
     """
-    if QUOTED_BANG in pattern or (
+    if QUOTED_RE.search(pattern) or (
         extglob
         and ("[:" in pattern or any(c + "(" in pattern for c in "@?*+!"))
     ):

@@ -523,3 +523,16 @@ it('a quoted bang cannot become an operator after expansion', () => {
   expect(fnmatch('d', pattern, true)).toBe(true)
   expect(fnmatch('ax', pattern, true)).toBe(false)
 })
+
+it.each(['@', '+', '!', '(', ')', '|'])(
+  'quoted extended operators remain bracket members: %s',
+  (char) => {
+    const pattern = '[a' + escapeGlob(char) + ']'
+    for (const extglob of [false, true]) {
+      expect(fnmatch(char, pattern, extglob)).toBe(true)
+      expect(fnmatch('a', pattern, extglob)).toBe(true)
+      expect(fnmatch('z', pattern, extglob)).toBe(false)
+      expect(fnmatch(char + ']', pattern, extglob)).toBe(false)
+    }
+  },
+)

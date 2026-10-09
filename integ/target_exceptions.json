@@ -24,7 +24,8 @@
     "integ/crossmount/wc/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions.",
     "integ/crossmount/sed/read_failure.json": "These cases write their own fixtures in seed/read_failure.json. Databricks, databricks-prefix and sharepoint-prefix do not support this printf redirection fixture; all 19 writable targets run both setup and assertions.",
     "integ/bash/redirect/append_mtime.json": "The case sets an mtime with touch -d first and checks a `>>` that writes nothing keeps it; the list is touch/d.json's, the backends that support setting one.",
-    "integ/session/skills.json": "SKILL.md, help and man render registered CLIs, and only the git-* and cli-* targets register one: ram, disk and opfs, the directory's list, mount none."
+    "integ/session/skills.json": "SKILL.md, help and man render registered CLIs, and only the git-* and cli-* targets register one: ram, disk and opfs, the directory's list, mount none.",
+    "integ/bash/glob/extglob.json": "These cases pin the shared shell parser, quote handling and pattern matcher, which run before backend dispatch. RAM and disk exercise both the in-memory and filesystem namespace walks; operator, case, conditional and parameter semantics do not depend on a service. Fixture cases create temporary directories and punctuation-bearing names that not every service can represent. Existing glob cases continue covering provider traversal; no existing target was removed."
   },
   "entries": {
     "integ/bash/control/scope.json :: ctl_for_long_word_list_leaves_last_value": {

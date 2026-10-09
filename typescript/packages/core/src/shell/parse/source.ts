@@ -33,6 +33,10 @@ export class SourceNode implements WrappedNode {
   constructor(
     protected readonly node: ShellNode,
     protected readonly original: string,
+    private readonly lines: readonly number[] = [
+      0,
+      ...Array.from(original.matchAll(/\n/g), (match) => match.index + 1),
+    ],
   ) {}
   get inner(): ShellNode {
     return this.node
@@ -59,8 +63,15 @@ export class SourceNode implements WrappedNode {
     return this.point(this.node.endIndex)
   }
   private point(at: number): { row: number; column: number } {
-    const before = this.original.slice(0, at)
-    return { row: before.split('\n').length - 1, column: at - before.lastIndexOf('\n') - 1 }
+    let lo = 0
+    let hi = this.lines.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if ((this.lines[mid] ?? 0) <= at) lo = mid + 1
+      else hi = mid
+    }
+    const row = lo - 1
+    return { row, column: at - (this.lines[row] ?? 0) }
   }
   get isNamed(): boolean {
     return this.node.isNamed
@@ -84,7 +95,7 @@ export class SourceNode implements WrappedNode {
     return this.node.namedChildren.map((node) => this.wrap(node)).filter((node) => node !== null)
   }
   protected wrap(node: ShellNode | null): SourceNode | null {
-    return node === null ? null : new SourceNode(node, this.original)
+    return node === null ? null : new SourceNode(node, this.original, this.lines)
   }
   get parent(): SourceNode | null {
     return this.wrap(this.node.parent)

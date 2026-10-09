@@ -274,3 +274,12 @@ it.each([
 it('empty negative repetition remains nullable', () => {
   expect(fnmatch('', '*+([!a]|!([!a]))', true)).toBe(true)
 })
+
+it.each(['+(*)', '*(*)', '+(a|*)', '*+(*)'])(
+  'repeated wildcards match long values: %s',
+  (pattern) => {
+    const value = 'a'.repeat(10000)
+    expect(fnmatch(value, pattern, true)).toBe(true)
+    expect(fnmatch(value, pattern + 'b', true)).toBe(false)
+  },
+)

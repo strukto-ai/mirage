@@ -27,7 +27,7 @@ from mirage.context import (
 )
 from mirage.errors.constants import WALK_ERRORS
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.fnmatch import QUOTED_BANG, fnmatch
+from mirage.utils.fnmatch import QUOTED_CHARS, fnmatch
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
 from mirage.view.types import ChildMounts, LinkTargetStat
@@ -198,17 +198,7 @@ def literal_span(literal: str) -> tuple[date, date] | None:
 # The marks are Unicode noncharacters, permanently unassigned and never
 # valid interchange text -- the same impossible input `brace.py` assumes
 # away when it delimits its inert atoms with NUL.
-_GLOB_MARKS = {
-    "*": "\ufdd0",
-    "?": "\ufdd1",
-    "[": "\ufdd2",
-    "@": "\ufdd3",
-    "+": "\ufdd4",
-    "!": QUOTED_BANG,
-    "(": "\ufdd6",
-    ")": "\ufdd7",
-    "|": "\ufdd8",
-}
+_GLOB_MARKS = {ch: mark for mark, ch in QUOTED_CHARS.items()}
 _GLOB_CHAR_OF = {mark: ch for ch, mark in _GLOB_MARKS.items()}
 # Translation tables, not per-character loops: every expanded word is
 # marked and unmarked, so a Python-level rebuild made the cost quadratic
@@ -217,7 +207,7 @@ _MARK_TABLE = str.maketrans(_GLOB_MARKS)
 _UNMARK_TABLE = str.maketrans(_GLOB_CHAR_OF)
 _PATTERN_TABLE = str.maketrans(
     {
-        mark: QUOTED_BANG if ch == "!" else f"[{ch}]"
+        mark: f"[{ch}]" if ch in GLOB_CHARS else mark
         for mark, ch in _GLOB_CHAR_OF.items()
     }
 )
@@ -291,8 +281,9 @@ def glob_pattern(segment: str) -> str:
     fnmatch has no escape character, so a quoted glob character is
     handed over as its own one-character class, exactly what
     :func:`escape_glob` builds for text that is literal throughout.
-    A quoted bang keeps its mark until matching: ``[!]`` is not a
-    one-character class, and unquoting it could create a ``!(...)`` group.
+    Extended operators retain their marks until matching. Turning a
+    quoted ``@`` into ``[@]`` inside ``[a"@"]`` would create a nested
+    bracket expression; unquoting it could instead create a group.
 
     Args:
         segment (str): one path component, marks intact.
@@ -357,8 +348,8 @@ def escape_glob(text: str) -> str:
     fnmatch has no escape character, so each special is wrapped in its
     own one-character class: ``*`` becomes ``[*]``. A ``]`` needs no
     treatment: outside a class it is already literal, and no class can
-    open because every ``[`` gets wrapped. A bang retains the quote mark
-    described by :func:`glob_pattern`.
+    open because every ``[`` gets wrapped. Extended operators retain the
+    quote marks described by :func:`glob_pattern`.
 
     Args:
         text (str): literal text destined for a glob pattern.

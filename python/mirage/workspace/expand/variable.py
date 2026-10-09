@@ -877,25 +877,16 @@ def _glob_strip(
 ) -> str:
     if not pattern:
         return value
-    if prefix:
-        candidates = [
-            i
-            for i in range(len(value) + 1)
-            if fnmatch(value[:i], pattern, extglob=extglob)
-        ]
-        if not candidates:
-            return value
-        i = max(candidates) if greedy else min(candidates)
-        return value[i:]
-    candidates = [
-        i
-        for i in range(len(value) + 1)
-        if fnmatch(value[i:], pattern, extglob=extglob)
-    ]
-    if not candidates:
-        return value
-    i = min(candidates) if greedy else max(candidates)
-    return value[:i]
+    indices = (
+        range(len(value), -1, -1)
+        if greedy == prefix
+        else range(len(value) + 1)
+    )
+    for i in indices:
+        candidate = value[:i] if prefix else value[i:]
+        if fnmatch(candidate, pattern, extglob=extglob):
+            return value[i:] if prefix else value[:i]
+    return value
 
 
 def _glob_replace(

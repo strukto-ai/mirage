@@ -80,7 +80,7 @@ export function checkSyntax(
  * carries out first), and each substitution that closes with bodies still to
  * read. `null` when bash refuses the line, whose heredocs nothing reads. */
 export function heredocPlan(command: string): HeredocPlan | null {
-  const reader = new LineReader(command, new Set(), null)
+  const reader = new LineReader(command, new Set(), null, true)
   try {
     if (reader.refusals().length > 0) return null
   } catch (err) {
@@ -229,7 +229,8 @@ function isTestClose(tok: ReaderToken): boolean {
 
 /** Shield pattern operators while preserving expansions and source spans. */
 export function patternSource(text: string): string {
-  if (![...constants.EXTGLOB_OPENERS].some((c) => text.includes(c + '('))) return text
+  if (!text.includes('[') && ![...constants.EXTGLOB_OPENERS].some((c) => text.includes(c + '(')))
+    return text
   const reader = new LineReader(text, new Set(), null, true)
   try {
     reader.refusals()
@@ -1418,6 +1419,7 @@ class LineReader {
         )
           this.failToken(next)
         afterIn = false
+        this.patternBrackets(next.start, next.end)
         this.take(next)
         next = this.peek()
         if (next.kind === 'op' && next.text === ')') {
@@ -1634,6 +1636,17 @@ class LineReader {
     }
   }
 
+  /** Keep a bracket pattern containing quotes or expansions one word. */
+  patternBrackets(start: number, end: number): void {
+    const word = this.text.slice(start, end)
+    if (!word.includes('[') || !/["'`$\\]/.test(word)) return
+    let j = start
+    while (j < end) {
+      if ('[]'.includes(this.text.charAt(j))) this.patterns.push([j, j + 1])
+      j = this.wordChar(j)
+    }
+  }
+
   /** The right side of `==`, `=` or `!=`, read with extglob on. */
   patternWord(): ReaderToken {
     const i = this.blankEnd(this.pos)
@@ -1656,6 +1669,7 @@ class LineReader {
       if (constants.WORD_BREAKS.has(c)) break
       j = this.wordChar(j)
     }
+    this.patternBrackets(i, j)
     if (!extended) return tok
     return token('word', text.slice(i, j).replaceAll('\\\n', ''), i, j)
   }
