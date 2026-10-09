@@ -27,7 +27,7 @@ import type { WriteCondition } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { childSpec } from '../../utils/key_prefix.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
-import { record, startOp, type OpTimer } from '../../observe/context.ts'
+import { liftLost, lostCount, record, startOp, type OpTimer } from '../../observe/context.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import { BoxApiError } from './client.ts'
 import { CONFLICT_STATUS } from './constants.ts'
@@ -79,17 +79,17 @@ export async function retaken(
 
 /**
  * Copy `item` to `dst`, merging a folder into a folder. `changed` receives each
- * path this copy changed (a destination cleared, a file landed, a folder copy
- * sent), with its step's timer and whether it is a folder; `sent` receives each
- * file path a request may have gone out for, landed or not. Mirrors Python's
- * `_copy_into`.
+ * path this copy changed (a destination cleared, a file or a whole folder
+ * landed), with its step's timer and whether it is a folder; `sent` receives
+ * each path a request may have gone out for, landed or not, and whether it is
+ * a folder. Mirrors Python's `_copy_into`.
  */
 async function copyInto(
   accessor: BoxAccessor,
   item: BoxItem,
   dst: PathSpec,
   changed: [PathSpec, OpTimer, boolean][],
-  sent: PathSpec[],
+  sent: [PathSpec, boolean][],
 ): Promise<void> {
   const tm = accessor.tokenManager
   const timer = startOp()
@@ -115,7 +115,7 @@ async function copyInto(
     // only a file gives way to a file.
     if (existing.type === 'folder') throw eisdir(dst.virtual)
     if (item.type === 'folder') throw enotdir(dst.virtual)
-    sent.push(dst)
+    sent.push([dst, false])
     cond = await replaceFile(accessor, dst, existing)
     changed.push([dst, timer, false])
     cleared = true
@@ -124,10 +124,11 @@ async function copyInto(
   }
   try {
     if (item.type === 'folder') {
-      changed.push([dst, timer, true])
+      sent.push([dst, true])
       await copyFolder(tm, item.id, dstParent, newName)
+      changed.push([dst, timer, true])
     } else {
-      sent.push(dst)
+      sent.push([dst, false])
       await copyFile(tm, item.id, dstParent, newName)
       if (!cleared) changed.push([dst, timer, false])
     }
@@ -139,19 +140,23 @@ async function copyInto(
 /**
  * Copy a file or folder server-side, recording each path it changed. The
  * eviction runs also when the copy fails. A conditional mount evicts only what
- * changed, and a request that raised keeps its held version.
+ * changed, and a request that raised keeps its held version. A folder copied
+ * whole also lifts the line's lost marks beneath it; one whose request raised
+ * evicts its subtree and records nothing.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
   const folder = item.type === 'folder'
   const changed: [PathSpec, OpTimer, boolean][] = []
-  const sent: PathSpec[] = []
+  const sent: [PathSpec, boolean][] = []
+  const upto = lostCount()
   await evictAfter(
     () => copyInto(accessor, item, dst, changed, sent),
     async () => {
       for (const [spec, timer, whole] of changed) {
         record(whole ? 'copy_prefix' : 'copy', spec.virtual, 'box', 0, timer)
+        if (whole) liftLost(spec, upto, true)
       }
       if (!writesConditioned(dst)) {
         await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
@@ -162,7 +167,11 @@ export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec):
         else await invalidateAfterWrite(spec)
       }
       const landed = new Set(changed.map(([spec]) => spec.virtual))
-      for (const spec of sent) if (!landed.has(spec.virtual)) await evictKeepingVersion(spec)
+      for (const [spec, whole] of sent) {
+        if (landed.has(spec.virtual)) continue
+        if (whole) await invalidateSubtree(spec)
+        else await evictKeepingVersion(spec)
+      }
     },
   )
 }

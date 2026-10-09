@@ -415,6 +415,51 @@ async def test_a_box_folder_merge_keeps_the_versions_of_files_it_left(
 
 @pytest.mark.asyncio
 @BOX
+async def test_a_box_folder_copied_whole_lifts_the_lost_marks_beneath_it(
+    drive, workspace
+):
+    drive.put("s/a", b"new\n")
+
+    def theirs() -> None:
+        drive.put("d/a", b"theirs\n")
+        drive.box.hooks["upload"] = lambda: drive.drop("d")
+
+    drive.box.hooks["upload"] = theirs
+    ws = workspace()
+    line = (
+        "cat /box/d/a > /dev/null; echo x > /box/d/a; echo y > /box/y; "
+        "cp -r /box/s /box/d && echo mine > /box/d/a"
+    )
+    assert await _run(ws, line) == (0, "", f"/box/d/a: {STALE}\n")
+    assert drive.fake.read("d/a") == b"mine\n"
+
+
+@pytest.mark.asyncio
+@BOX
+async def test_a_box_folder_copy_that_failed_keeps_the_versions_beneath_it(
+    drive, workspace
+):
+    drive.put("s/a", b"new\n")
+    drive.box.hooks["upload"] = lambda: drive.drop("d")
+
+    def theirs_then_fail() -> None:
+        drive.put("d/a", b"theirs\n")
+        _fail()
+
+    drive.box.hooks["copy"] = theirs_then_fail
+    ws = workspace()
+    line = (
+        "cat /box/d/a > /dev/null; echo z > /box/z; "
+        "cp -r /box/s /box/d; ls /box/d; echo mine > /box/d/a"
+    )
+    code, out, err = await _run(ws, line)
+    assert (code, out) == (1, "a\n")
+    assert err.endswith(f"/box/d/a: {STALE}\n")
+    assert drive.fake.read("d/a") == b"theirs\n"
+
+
+@pytest.mark.asyncio
+@BOX
 @pytest.mark.parametrize("gone", [True, False], ids=["link gone", "link kept"])
 async def test_box_rm_r_deletes_a_web_link_plainly(drive, workspace, gone):
     drive.box.create_link("d/bookmark")

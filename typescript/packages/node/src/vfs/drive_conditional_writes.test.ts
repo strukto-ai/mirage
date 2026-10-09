@@ -392,6 +392,41 @@ describe('conditional writes only Box has', () => {
     expect(drive.text('d/b')).toBe('theirs\n')
   })
 
+  it('a folder copied whole lifts the lost marks beneath it', async () => {
+    drive.put('s/a', 'new\n')
+    drive.hook('upload', () => {
+      drive.put('d/a', 'theirs\n')
+      drive.hook('upload', () => {
+        drive.drop('d')
+      })
+    })
+    const ws = await workspace()
+    const line =
+      'cat /box/d/a > /dev/null; echo x > /box/d/a; echo y > /box/y; ' +
+      'cp -r /box/s /box/d && echo mine > /box/d/a'
+    expect(await run(ws, line)).toEqual([0, '', `/box/d/a: ${STALE}\n`])
+    expect(drive.text('d/a')).toBe('mine\n')
+  })
+
+  it('a folder copy that failed keeps the versions beneath it', async () => {
+    drive.put('s/a', 'new\n')
+    drive.hook('upload', () => {
+      drive.drop('d')
+    })
+    drive.hook('copy', () => {
+      drive.put('d/a', 'theirs\n')
+      fail()
+    })
+    const ws = await workspace()
+    const line =
+      'cat /box/d/a > /dev/null; echo z > /box/z; ' +
+      'cp -r /box/s /box/d; ls /box/d; echo mine > /box/d/a'
+    const [code, out, err] = await run(ws, line)
+    expect([code, out]).toEqual([1, 'a\n'])
+    expect(err.endsWith(`/box/d/a: ${STALE}\n`)).toBe(true)
+    expect(drive.text('d/a')).toBe('theirs\n')
+  })
+
   it.each([
     ['link gone', true],
     ['link kept', false],
