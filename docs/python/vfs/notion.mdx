@@ -197,9 +197,8 @@ one.
 
 ## Cache
 
-Uses `IndexCacheStore` for page metadata. No separate content
-cache - file content caching is handled by the workspace `IOResult`
-mechanism.
+Uses `IndexCacheStore` for page metadata. File bytes go through the workspace
+[file cache](/home/cache).
 
 ## Example
 

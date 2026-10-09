@@ -223,8 +223,9 @@ change streams aren't defined on views.
 
 ## Cache
 
-The MongoDB VFS uses `IndexCacheStore` (same as RAM/S3/disk/GitHub)
-for listings: database names, collection names, and document counts.
+The MongoDB VFS lists database names, collection names, and document counts.
+These listings are not cached by default (`index_ttl = 0`); a workspace or
+mount `index:` caches them for its `ttl`. See [index TTL](/home/cache#index-ttl).
 
 Document content is **not** cached. The VFS leaves `caches_reads`
 at its default of `False`, so `cat`, `grep`, `head`, and `tail` always

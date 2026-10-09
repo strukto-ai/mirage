@@ -178,7 +178,7 @@ mounted tree stays read-oriented.
     The browser cannot call `https://slack.com/api/*` directly, Slack does not set permissive CORS headers. You must run the proxy server shown above (or your own equivalent) and point `proxyUrl` at it.
   </Accordion>
   <Accordion title="`rate_limited` from Slack">
-    `SlackVFS` uses an `IndexCacheStore` (default TTL 600s) to deduplicate channel / user / date listings, but high-volume reads of `.jsonl` files can still hit Slack's per-method rate limits. Cache hits avoid the API entirely; tune `indexTtl` if your workspace changes slowly. Per [Slack docs](https://api.slack.com/docs/rate-limits), Tier 3 methods like `conversations.history` allow ~50 requests / minute / workspace.
+    `SlackVFS` uses an `IndexCacheStore` (default TTL 600s) to deduplicate channel / user / date listings, but high-volume reads of `.jsonl` files can still hit Slack's per-method rate limits. Cache hits avoid the API entirely; raise the index `ttl` (`index: { ttl }`) together with the mount's `ttl` if your workspace changes slowly. Per [Slack docs](https://api.slack.com/docs/rate-limits), Tier 3 methods like `conversations.history` allow ~50 requests / minute / workspace.
   </Accordion>
 </AccordionGroup>
 

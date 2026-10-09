@@ -146,8 +146,8 @@ the creator.
 ## Cache
 
 The Linear VFS uses `IndexCacheStore` (same as Discord and other
-mounts). There is no separate content cache -- file content caching
-is handled by the workspace `IOResult` mechanism.
+mounts). File bytes go through the workspace
+[file cache](/home/cache).
 
 ## Example
 
