@@ -99,3 +99,25 @@ def test_assignment_later_unbraced_var_stays_one_assignment():
 def test_literal_dollar_words_stay_untouched(command, words):
     cmd = parse(command).named_children[0]
     assert [get_text(p) for p in get_parts(cmd)] == words
+
+
+@pytest.mark.parametrize(
+    ("command", "commands"),
+    [
+        ("echo a\n\\echo b", [["echo", "a"], ["\\echo", "b"]]),
+        ("echo a # c\n\\echo b", [["echo", "a"], ["\\echo", "b"]]),
+        ("export a\n\\echo b", [["\\echo", "b"]]),
+        ("echo a \\ b \\\tc", [["echo", "a", "\\ b", "\\\tc"]]),
+        ("echo a\n\\ b", [["echo", "a"], ["\\ b"]]),
+    ],
+)
+def test_a_backslash_opening_a_word_stays_in_it(command, commands):
+    # Pinned against bash 5.2.37: the backslash escapes the word's first
+    # character, so the newline before it still ends the command and an
+    # escaped blank is the word's own.
+    root = parse(command)
+    assert [
+        [get_text(p) for p in get_parts(node)]
+        for node in root.named_children
+        if node.type == NT.COMMAND
+    ] == commands

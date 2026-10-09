@@ -93,6 +93,8 @@ const WORD_START = ' \t\n;&|(){}'
 
 const DIGITS = /\d+/y
 
+const ESCAPED_BLANK = /\\[ \t]/g
+
 const LAST_ARM = /^\s*esac(?![^\s;&|()<>])/
 
 // Tokens the grammar lexes apart from a word in an argument list, where
@@ -162,9 +164,11 @@ function bracketIsACommand(text: string, node: ShellNode): boolean {
  * are words to bash; spelled as `_` filler they parse as the words they are,
  * and `SourceNode` gives back their text. So is the `[` of a test bash reads
  * as a `[` command (`bracketIsACommand`, or one an error region opens), which
- * then runs as the builtin. An operator inside an error region gets its own
- * token only once the operators before it are respelled, so the pass repeats
- * on its own parse until nothing changes. Mirrors Python's operator_source.
+ * then runs as the builtin, and so is a backslash-blank pair the grammar
+ * skips as whitespace (`skippedEscapes`), which then opens its word. An
+ * operator inside an error region gets its own token only once the operators
+ * before it are respelled, so the pass repeats on its own parse until nothing
+ * changes. Mirrors Python's operator_source.
  */
 export function operatorSource(parser: NativeParser, text: string, root: ShellNode): string {
   let current = text
@@ -178,8 +182,39 @@ export function operatorSource(parser: NativeParser, text: string, root: ShellNo
   return current
 }
 
+/**
+ * Offsets of each backslash-blank pair the grammar read as a blank.
+ *
+ * Outside quotes, bash reads a backslash before a space or a tab as that
+ * blank escaped into the word it opens (`\ x` is the word ` x`). The grammar
+ * skips the pair as whitespace, so the word loses its blank, and a line one
+ * opens reads as more words of the line before. Only the text no token covers
+ * is searched; a quoted or unlexed span counts as one token.
+ */
+function skippedEscapes(text: string, root: ShellNode): number[] {
+  const spans: [number, number][] = [[text.length, text.length]]
+  const stack: ShellNode[] = [root]
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    if (node.childCount > 0 && !UNLEXED.has(node.type) && node.type !== 'string')
+      stack.push(...node.children)
+    else spans.push([node.startIndex, node.endIndex])
+  }
+  spans.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const offsets: number[] = []
+  let at = 0
+  for (const [lo, hi] of spans) {
+    for (const match of text.slice(at, lo).matchAll(ESCAPED_BLANK)) offsets.push(at + match.index)
+    at = Math.max(at, hi)
+  }
+  return offsets
+}
+
 function respelled(text: string, root: ShellNode): string {
   const out = text.split('')
+  for (const at of skippedEscapes(text, root)) {
+    out[at] = '_'
+    out[at + 1] = '_'
+  }
   const stack: ShellNode[] = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     if (node.type === 'test_command' && bracketIsACommand(text, node)) out[node.startIndex] = '_'
@@ -436,6 +471,8 @@ function errors(root: ShellNode): Set<string> {
 
 /**
  * Make statement newlines swallowed between simple-command words explicit.
+ * The grammar also folds one into the next word when a backslash opens that
+ * word (`\ls`, the alias bypass), so the next line reads as more arguments.
  * Quoted newlines are inside a child and continuations were already removed.
  * Insertion preserves the source maps used by lowered heredocs. The separator
  * goes before a comment that ends the statement, since one after it would be
@@ -451,13 +488,23 @@ export function statementBoundaries(parser: NativeParser, text: string): string 
     const node = stack.pop()
     if (node === undefined) break
     stack.push(...node.children)
-    if (!['command', 'file_redirect', 'redirected_statement'].includes(node.type)) continue
+    if (
+      ![
+        'command',
+        'declaration_command',
+        'file_redirect',
+        'redirected_statement',
+        'unset_command',
+      ].includes(node.type)
+    )
+      continue
     const children = node.children
     for (let i = 1; i < children.length; i += 1) {
       const left = children[i - 1]
       const right = children[i]
       if (left === undefined || right === undefined) continue
-      const gap = text.slice(left.endIndex, right.startIndex)
+      const folded = text[right.startIndex] === '\n' ? 1 : 0
+      const gap = text.slice(left.endIndex, right.startIndex + folded)
       if (gap.includes('\n') && gap.trim() === '')
         offsets.add(left.type === 'comment' ? left.startIndex : left.endIndex + gap.indexOf('\n'))
     }

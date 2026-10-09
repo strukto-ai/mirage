@@ -203,6 +203,74 @@
         "stdout": "",
         "stderr": "mirage: unexpected EOF while looking for matching ``'\n"
       }
+    },
+    {
+      "id": "line_start_backslash_opens_a_command",
+      "seq": 930136,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(echo a\n\\echo b\nlsx=1\n\\echo c $lsx\necho d # e\n\\echo f\nexport lsx\n\\echo g | cat\nunset lsx\n\\echo h $lsx\necho i >/dev/null\n\\echo j\n{ echo k\n\\echo l; }\necho m\n\\\necho n)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc 1\nd\nf\ng\nh\nj\nk\nl\nm\nn\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "escaped_blank_opens_a_word",
+      "seq": 930137,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '[%s]' a \\ b \\  c \\\td; echo\n(echo e\n\\ lsz)",
+      "expect": {
+        "exit": 127,
+        "stdout": "[a][ b][ ][c][\td]\ne\n",
+        "stderr": " lsz: command not found\n"
+      }
     }
   ]
 }

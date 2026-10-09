@@ -95,3 +95,34 @@ describe('$ reparse: later unbraced var cut off from its name', () => {
     expect(getParts(node).map((p) => getText(p))).toEqual(words)
   })
 })
+
+describe('a backslash opening a word', () => {
+  it.each([
+    [
+      'echo a\n\\echo b',
+      [
+        ['echo', 'a'],
+        ['\\echo', 'b'],
+      ],
+    ],
+    [
+      'echo a # c\n\\echo b',
+      [
+        ['echo', 'a'],
+        ['\\echo', 'b'],
+      ],
+    ],
+    ['export a\n\\echo b', [['\\echo', 'b']]],
+    ['echo a \\ b \\\tc', [['echo', 'a', '\\ b', '\\\tc']]],
+    ['echo a\n\\ b', [['echo', 'a'], ['\\ b']]],
+  ])('keeps it in the word in %j', (command, commands) => {
+    // Pinned against bash 5.2.37: the backslash escapes the word's first
+    // character, so the newline before it still ends the command and an
+    // escaped blank is the word's own.
+    const root = parser.parse(command)
+    const got = root.namedChildren
+      .filter((node) => node.type === 'command')
+      .map((node) => getParts(node as TSNodeLike).map((p) => getText(p)))
+    expect(got).toEqual(commands)
+  })
+})
