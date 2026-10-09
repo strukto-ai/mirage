@@ -769,7 +769,9 @@ jobs:
   # the CLI's own daemon, a token server and a JWT server. The dev leg adds
   # the CLI's lifecycle and config and the CLI command gate.
   access:
-    needs: [changes, typescript-build]
+    # In run 37896684397 the bootstrap queued for 4m08s, built for 1m44s,
+    # then these jobs queued again. Build locally on these longest legs.
+    needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     name: Access (${{ matrix.deployment }})
     runs-on: ubuntu-latest
@@ -783,9 +785,11 @@ jobs:
 
       - name: CLI battery toolchain
         uses: ./.github/actions/cli-battery-setup
+        with:
+          build-typescript: "true"
 
       - name: Run every access on both hosts
-        run: ./python/.venv/bin/python integ/access/run.py --deployment ${{ matrix.deployment }}
+        run: ./python/.venv/bin/python integ/access/run.py --deployment ${{ matrix.deployment }} --host-jobs 2
 
   cross-snapshot:
     needs: [changes, typescript-build]

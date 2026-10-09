@@ -29,7 +29,9 @@ implementations cannot drift apart.
   the in-app answer, and every other access must give it. `run.py` also
   checks auth per deployment, the CLI's daemon lifecycle and config, and
   gates that every HTTP route and CLI command was exercised. `inapp.ts` is
-  the in-app access on TypeScript.
+  the in-app access on TypeScript. CI uses `--host-jobs 2` to overlap both
+  hosts on one runner; each host keeps its own home, ports and snapshot
+  prefix, and the route and command gates still cover both hosts.
 - `policy/`: the policy corpus. Each case binds sessions to profiles and
   registers coded policies, then drives lines, VFS calls, tools, asks and
   explain, pinning what each refuses, asks or lets through: the allow list,
@@ -160,7 +162,7 @@ flowchart LR
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]
     fuse --> J7["integ-fuse · integ-fuse-windows<br/>integ-fskit-macos"]
-    runtime --> J8["integ-runtime · integ-e2b"]
+    runtime --> J8["integ-runtime (3 legs) · integ-e2b"]
 ```
 
 The same wiring from the side of a change. Every file under `python/` sets

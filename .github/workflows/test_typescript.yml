@@ -56,27 +56,19 @@ jobs:
     name: TypeScript ${{ matrix.leg }} (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
-      # Load-bearing now, where it was decorative on a single-value matrix:
-      # it is the only thing stopping one failing leg from cancelling the
-      # other two, and the gate's *cancelled* arm would red the run while
-      # destroying both survivors' output.
+      # Keep every shard's result even when a sibling fails.
       fail-fast: false
       matrix:
         node-version: ["24"]
-        # Three legs balanced against measured per-package vitest time. The
-        # one hard constraint is pnpm's topological sort, which applies to
-        # whatever subset --filter selects, so a leg costs its longest
-        # dependency chain rather than its sum: cli depends on agents, core,
-        # node and server and therefore shares a leg with none of them, while
-        # node -> server -> opencode is free because its tail is cheap.
-        # The selections themselves live in typescript/package.json as
-        # `test:leg:*`, so one command reproduces a leg locally; this list and
-        # those scripts are held in step by scripts/ci_test_legs/check.py.
-        leg: [core, cli, rest]
+        # Core took 602-777s in runs 37891950969 and 37890825370. Vitest
+        # partitions its full file collection across two runners, retaining
+        # file isolation and every test. The leg gate checks package coverage
+        # and requires a complete, non-overlapping set of shards.
+        leg: [core-1, core-2, cli, rest]
         include:
           - leg: cli
             typecheck: true
-          - leg: rest
+            # This leg's tests take ~7s; rest already spends ~330s testing.
             examples: true
     services:
       redis:
@@ -206,7 +198,7 @@ jobs:
       # other, but gated on the build -- without node_modules knip fails
       # on unresolved entries, which points at the wrong step.
       - name: Dead code (knip)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.typecheck && steps.build.outcome == 'success' }}
         working-directory: typescript
         run: pnpm exec knip
 
