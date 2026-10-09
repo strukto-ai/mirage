@@ -210,7 +210,7 @@
               "home/setup/clis",
               {
                 "group": "CLIs",
-                "icon": "terminal",
+                "icon": "wrench",
                 "pages": [
                   "home/setup/cli/himalaya",
                   "home/setup/cli/gws",
@@ -413,7 +413,7 @@
               "python/cli/custom",
               {
                 "group": "CLIs",
-                "icon": "terminal",
+                "icon": "wrench",
                 "pages": [
                   "python/cli/himalaya",
                   "python/cli/gws",
@@ -623,7 +623,7 @@
               "typescript/cli/custom",
               {
                 "group": "CLIs",
-                "icon": "terminal",
+                "icon": "wrench",
                 "pages": [
                   "typescript/cli/himalaya",
                   "typescript/cli/gws",

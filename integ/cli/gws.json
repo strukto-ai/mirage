@@ -1508,6 +1508,19 @@
         "stdout": "1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_gmail_missing_to",
+      "seq": 563112,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail send --subject Hi --body yo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gws gmail send: option '--to' is required\nTry 'gws gmail send --help' for more information.\n"
+      }
     }
   ]
 }

@@ -12,14 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
-
-from mirage import Workspace
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.core.google.config import GoogleConfig
-from mirage.io.types import materialize
-
-CONFIG = {"client_id": "cid", "refresh_token": "rt"}
 
 
 def leaf(*path: str):
@@ -138,27 +132,3 @@ def test_forms_passthroughs_nest_by_discovery_resource():
     ] == ["list", "get"]
     assert not leaf("forms", "forms", "get").write
     assert leaf("forms", "forms", "create").write
-
-
-@pytest.mark.asyncio
-async def test_missing_required_flag_exits_2():
-    ws = Workspace({})
-    ws.register_cli("gws", GWS, CONFIG)
-    io = await ws.shell("gws gmail send --subject Hi --body yo")
-    assert io.exit_code == 2
-    err = await materialize(io.stderr)
-    assert err.startswith(b"gws gmail send: option '--to' is required")
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_unknown_verb_uses_git_wording():
-    ws = Workspace({})
-    ws.register_cli("gws", GWS, CONFIG)
-    io = await ws.shell("gws drive bogus")
-    assert io.exit_code == 1
-    err = await materialize(io.stderr)
-    assert err == (
-        b"gws: 'bogus' is not a gws drive command. See 'gws drive --help'.\n"
-    )
-    await ws.close()

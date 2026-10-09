@@ -726,8 +726,7 @@ GH = CLISpec(
                 ),
                 CLISpec(
                     name="token",
-                    description="Print the authentication token gh uses "
-                    "for a hostname and account",
+                    description="Token display is unavailable in Mirage",
                     fn=auth_token,
                     options=(
                         Option(
@@ -740,7 +739,8 @@ GH = CLISpec(
                             short="-u",
                             long="--user",
                             type="str",
-                            description="The account to output the token for",
+                            description="The account selector; tokens are "
+                            "never printed",
                         ),
                     ),
                 ),
