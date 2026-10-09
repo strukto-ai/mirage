@@ -161,6 +161,16 @@ export function renderHelp(
     }
   }
 
+  const operands = spec.arguments.filter(
+    (argument) => !argument.names[0]?.startsWith('-') && argument.help,
+  )
+  if (operands.length > 0) {
+    lines.push('', 'Arguments:')
+    const width = Math.max(...operands.map((operand) => slot(operand).length))
+    for (const operand of operands)
+      lines.push(`  ${slot(operand).padEnd(width)}  ${operand.help ?? ''}`)
+  }
+
   if (spec.epilog !== null && spec.epilog !== '') {
     lines.push('')
     lines.push(trimTrailingNewlines(spec.epilog))
@@ -222,7 +232,7 @@ export function argparseHelp(
     const label = positionalName(operand) || (operand.type === 'path' ? 'PATH' : 'ARG')
     const slot = label + (operand === cs.rest ? ' ...' : '')
     usage.push(positionalRequired(operand) ? slot : `[${slot}]`)
-    operands.push([label, operand.type === 'path' ? 'Virtual path' : ''])
+    operands.push([label, operand.help ?? (operand.type === 'path' ? 'Virtual path' : '')])
   }
   if (subcommands.length > 0) usage.push(`{${subcommands.map(([sub]) => sub).join(',')}} ...`)
   const lines = [`usage: ${usage.join(' ')}`]

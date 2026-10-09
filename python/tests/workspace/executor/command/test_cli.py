@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
 from mirage.commands.config import command
 from mirage.commands.errors import PartialOutputError
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.errors.types import CommandTimeoutError
@@ -149,22 +150,43 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
                 arguments=(
                     Argument("prefix", nargs="?"),
                     Argument("FILE", type="path"),
+                    Argument(
+                        "--output",
+                        type="path",
+                        nargs=1,
+                        env="OUTPUT",
+                        default="./default",
+                    ),
                 ),
             ),
             handlers={"": CLIHandler(send)},
         ),
     )
     for words in (["report.txt"], ["prefix", "report.txt"]):
-        _, result, _ = await handle_cli(
+        path_session = SessionState("paths", cwd="/work")
+        expected_output = "default"
+        if len(words) > 1:
+            seed_var(path_session, "OUTPUT", "./environment")
+            set_attr(path_session, "OUTPUT", VarAttr.EXPORT)
+            expected_output = "environment"
+        stdout, result, _ = await handle_cli(
             paths_install,
             ["paths", *words],
-            SessionState("paths", cwd="/work"),
+            path_session,
         )
+        await materialize(stdout)
         assert result.exit_code == 0
         received = CALLS.pop()
         assert received.texts == tuple(words[:-1])
         assert [path.virtual for path in received.paths] == [
             "/work/report.txt"
+        ]
+        assert isinstance(received.flags["output"], PathSpec)
+        output = FlagView(received.flags, spec=received.spec).as_paths(
+            "output"
+        )
+        assert [(path.virtual, path.raw_path) for path in output] == [
+            (f"/work/{expected_output}", f"./{expected_output}")
         ]
 
 

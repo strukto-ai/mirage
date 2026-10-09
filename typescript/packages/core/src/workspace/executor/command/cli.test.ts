@@ -20,8 +20,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { CLI, type CLIInvocation, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { PartialOutputError } from '../../../commands/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
+import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { Limit } from '../../../types.ts'
+import { Limit, PathSpec } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -97,21 +98,35 @@ describe('handleCli', () => {
           arguments: [
             new Argument('prefix', { nargs: '?' }),
             new Argument('FILE', { type: 'path' }),
+            new Argument('--output', {
+              type: 'path',
+              nargs: 1,
+              env: 'OUTPUT',
+              default: './default',
+            }),
           ],
         }),
         handlers: { '': new CLIHandler({ fn: send }) },
       }),
     }
     for (const words of [['report.txt'], ['prefix', 'report.txt']]) {
-      const [, result] = await handleCli(
-        pathsInstall,
-        ['paths', ...words],
-        new SessionState({ sessionId: 'paths', cwd: '/work' }),
-      )
+      const expectedOutput = words.length > 1 ? 'environment' : 'default'
+      const pathSession = new SessionState({
+        sessionId: 'paths',
+        cwd: '/work',
+        vars: varsFromEnv(words.length > 1 ? { OUTPUT: './environment' } : {}),
+      })
+      const [stdout, result] = await handleCli(pathsInstall, ['paths', ...words], pathSession)
+      await materialize(stdout)
       expect(result.exitCode).toBe(0)
       const received = calls.pop()
       expect(received?.texts).toEqual(words.slice(0, -1))
       expect(received?.paths.map((path) => path.virtual)).toEqual(['/work/report.txt'])
+      expect(received?.flags.output).toBeInstanceOf(PathSpec)
+      const output = new FlagView(received?.flags ?? {}, received?.spec).asPaths('output')
+      expect(output.map((path) => [path.virtual, path.rawPath])).toEqual([
+        [`/work/${expectedOutput}`, `./${expectedOutput}`],
+      ])
     }
   })
 

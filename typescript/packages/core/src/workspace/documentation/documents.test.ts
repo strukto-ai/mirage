@@ -37,7 +37,14 @@ async function workspace(): Promise<Workspace> {
 describe('generated documents', () => {
   it.each([
     { script: null, arguments: [], ownsArgv: false },
-    { script: null, arguments: [new Argument('--output'), new Argument('PATH')], ownsArgv: false },
+    {
+      script: null,
+      arguments: [
+        new Argument('--output'),
+        new Argument('PATH', { type: 'path', help: 'Destination document' }),
+      ],
+      ownsArgv: false,
+    },
     { script: new ScriptSource('1'), arguments: [new Argument('--output')], ownsArgv: false },
     { script: new ScriptSource('1'), arguments: [], ownsArgv: true },
   ])(
@@ -68,6 +75,13 @@ describe('generated documents', () => {
       expect(skill).toContain('## `tool`')
       expect(skill.includes('This program parses its own arguments')).toBe(ownsArgv)
       expect(skill.includes('--output OUTPUT')).toBe(args.length > 0)
+      const authoredHelp = args.some((argument) => Boolean(argument.help))
+      expect(skill.includes('Destination document')).toBe(authoredHelp)
+      const manual = await ws.shell('man tool')
+      expect(manual.exitCode).toBe(0)
+      expect(new TextDecoder().decode(manual.stdout).includes('Destination document')).toBe(
+        authoredHelp,
+      )
       expect(ws.listSessions()).toHaveLength(3)
       await ws.close()
     },

@@ -14,6 +14,8 @@
 
 from dataclasses import replace
 
+import pytest
+
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
@@ -288,17 +290,51 @@ def test_an_empty_attached_path_value_names_nothing():
     assert synthesize_path_spec("/data/a", "a").walk_error is None
 
 
-def test_synthesized_path_flags_keep_dots_from_attached_and_env_values():
+@pytest.mark.parametrize(
+    ("action", "nargs"),
+    [
+        ("store", None),
+        ("store", 1),
+        ("store", 2),
+        ("store", 3),
+        ("append", None),
+        ("extend", 1),
+        ("extend", 2),
+    ],
+)
+def test_synthesized_path_flags_keep_dots_from_attached_and_env_values(
+    action, nargs
+):
     spec = CommandSpec(
-        arguments=(Argument("--file", type="path", env="INPUT"),)
+        arguments=(
+            Argument(
+                "-f",
+                "--file",
+                type="path",
+                action=action,
+                nargs=nargs,
+                env="INPUT",
+                default="hidden/../public",
+            ),
+        )
+    )
+    typed = (
+        ["--file=hidden/../public"]
+        if nargs in (None, 1)
+        else ["--file", *(["hidden/../public"] * nargs)]
     )
     for argv, env in [
-        (["--file=hidden/../public"], {}),
+        (typed, {"INPUT": "ignored"}),
         ([], {"INPUT": "hidden/../public"}),
+        ([], {}),
     ]:
         parsed = parse_flags(argv, spec, "reader", "/repo", env=env)
-        path = FlagView(parsed.flag_kwargs).as_path("file")
-        assert path is not None
-        assert path.virtual == "/repo/public"
-        assert path.raw_path == "hidden/../public"
-        assert path.dotted == "/repo/hidden/../public"
+        paths = FlagView(parsed.flag_kwargs, spec=spec).as_paths("file")
+        assert len(paths) == (nargs if argv and nargs else 1)
+        assert isinstance(parsed.flag_kwargs["file"], list) == (
+            action in ("append", "extend") or bool(argv and nargs)
+        )
+        for path in paths:
+            assert path.virtual == "/repo/public"
+            assert path.raw_path == "hidden/../public"
+            assert path.dotted == "/repo/hidden/../public"

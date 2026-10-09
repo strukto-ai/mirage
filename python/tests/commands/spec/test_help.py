@@ -42,6 +42,10 @@ def test_renders_name_description_usage_and_flags():
                 action="store_true",
                 help="Show help",
             ),
+            Argument("RECIPIENT", help="Who receives the message"),
+            Argument("FILE", type="path", nargs="?", help="Message to send"),
+            Argument("BACKUP", type="path", nargs="?"),
+            Argument("WORDS", nargs="*", help="Additional words"),
         ),
     )
     out = render_help("gws thing send", spec)
@@ -51,6 +55,16 @@ def test_renders_name_description_usage_and_flags():
     assert "Recipient" in out
     assert "-h, --help, --usage" in out
     argparse = argparse_help("gws thing send", spec)
+    assert "  RECIPIENT  Who receives the message\n" in argparse
+    assert "  FILE       Message to send\n" in argparse
+    assert "  BACKUP     Virtual path\n" in argparse
+    assert "  WORDS      Additional words\n" in argparse
+    for style in UsageStyle:
+        help_text = render_help("gws thing send", spec, style=style)
+        assert "Arguments:\n" in help_text
+        assert "  <RECIPIENT>  Who receives the message\n" in help_text
+        assert "  <FILE>       Message to send\n" in help_text
+        assert "  <WORDS>      Additional words\n" in help_text
     for flag, generic, named in (
         ("--files", "<path> <path>", "FILES FILES"),
         ("--inputs", "<FILE> <FILE>", "FILE FILE"),

@@ -878,7 +878,15 @@ def walk(
                     if arity == 1 and eq:
                         _record_values(flags, cs, spelling, [attached])
                     elif arity is not None:
-                        if eq or i + arity >= len(argv):
+                        if eq:
+                            return _usage_error(
+                                name,
+                                node,
+                                f"unknown option: {token}",
+                                style,
+                                token=token,
+                            )
+                        if i + arity >= len(argv):
                             return _usage_error(
                                 name,
                                 node,

@@ -121,7 +121,7 @@ export const PAGER = new CLI({
         name: 'ack',
         description: 'Acknowledge an incident',
         arguments: [
-          new Argument('INCIDENT_ID'),
+          new Argument('INCIDENT_ID', { help: 'Incident to acknowledge' }),
           new Argument('--by', { required: true, help: 'Person acknowledging the incident' }),
         ],
       }),
@@ -158,6 +158,7 @@ async function main(): Promise<void> {
   try {
     await show(ws, 'type -t pager-eng')
     await show(ws, 'pager-eng --help')
+    await show(ws, 'pager-eng ack --help')
     await show(ws, 'pager-eng list')
     await show(ws, 'pager-support list')
     await show(ws, 'pager-eng list INC-101 INC-404 --state open')

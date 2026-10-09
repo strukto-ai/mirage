@@ -310,18 +310,48 @@ describe('an empty attached path value', () => {
   })
 })
 
-it('keeps dots on synthesized attached and environment PATH flags', () => {
-  const spec = new CommandSpec({
-    arguments: [new Argument('--file', { type: 'path', env: 'INPUT' })],
-  })
-  for (const [argv, env] of [
-    [['--file=hidden/../public'], {}],
-    [[], { INPUT: 'hidden/../public' }],
-  ] as const) {
-    const parsed = parseFlags([...argv], spec, 'reader', '/repo', env)
-    const path = new FlagView(parsed.flagKwargs).asPath('file')
-    expect(path?.virtual).toBe('/repo/public')
-    expect(path?.rawPath).toBe('hidden/../public')
-    expect(path?.dotted).toBe('/repo/hidden/../public')
-  }
-})
+it.each([
+  ['store', null],
+  ['store', 1],
+  ['store', 2],
+  ['store', 3],
+  ['append', null],
+  ['extend', 1],
+  ['extend', 2],
+] as const)(
+  'keeps dots on synthesized PATH flags from argv, env and default (%s, nargs=%s)',
+  (action, nargs) => {
+    const spec = new CommandSpec({
+      arguments: [
+        new Argument(['-f', '--file'], {
+          type: 'path',
+          action,
+          nargs,
+          env: 'INPUT',
+          default: 'hidden/../public',
+        }),
+      ],
+    })
+    const typed =
+      nargs === null || nargs === 1
+        ? ['--file=hidden/../public']
+        : ['--file', ...Array.from({ length: nargs }, () => 'hidden/../public')]
+    for (const [argv, env] of [
+      [typed, { INPUT: 'ignored' }],
+      [[], { INPUT: 'hidden/../public' }],
+      [[], {}],
+    ] as const) {
+      const parsed = parseFlags([...argv], spec, 'reader', '/repo', env)
+      const paths = new FlagView(parsed.flagKwargs, spec).asPaths('file')
+      expect(paths).toHaveLength(argv.length > 0 && nargs !== null ? nargs : 1)
+      expect(Array.isArray(parsed.flagKwargs.file)).toBe(
+        action === 'append' || action === 'extend' || (argv.length > 0 && nargs !== null),
+      )
+      for (const path of paths) {
+        expect(path.virtual).toBe('/repo/public')
+        expect(path.rawPath).toBe('hidden/../public')
+        expect(path.dotted).toBe('/repo/hidden/../public')
+      }
+    }
+  },
+)

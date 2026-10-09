@@ -215,6 +215,17 @@ def render_help(
             else:
                 lines.append(f"  {flag.ljust(width)}  {desc}")
 
+    operands = [
+        argument
+        for argument in spec.arguments
+        if not argument.names[0].startswith("-") and argument.help
+    ]
+    if operands:
+        lines.extend(["", "Arguments:"])
+        width = max(len(_slot(operand)) for operand in operands)
+        for operand in operands:
+            lines.append(f"  {_slot(operand).ljust(width)}  {operand.help}")
+
     if spec.epilog:
         lines.append("")
         lines.append(spec.epilog.rstrip("\n"))
@@ -311,7 +322,12 @@ def argparse_help(
             slot if positional_required(operand) else "[" + slot + "]"
         )
         operands.append(
-            (label, "Virtual path" if operand.type == "path" else "")
+            (
+                label,
+                operand.help
+                if operand.help is not None
+                else ("Virtual path" if operand.type == "path" else ""),
+            )
         )
     if subcommands:
         usage.append("{" + ",".join(sub for sub, _ in subcommands) + "} ...")

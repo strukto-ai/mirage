@@ -764,6 +764,7 @@ it('stores or extends fixed-width group values and resolves mixed path values', 
   ]) {
     const attached = walk('tool', ARITY_TREE, [word ?? '', 'run'], '/work')
     expect(attached.leaf?.name).toBe('run')
+    expect(attached.exitCode).toBe(0)
     expect(attached.groupFlags['--output']).toMatchObject([{ virtual: path }])
     expect(attached.argv).toEqual([])
   }
@@ -793,10 +794,22 @@ it('retains attached-only group values and refuses incomplete fixed widths', () 
     expect(result.leaf?.name).toBe('run')
     expect(result.groupFlags).toEqual({ '-v': 1, '--gnu': value })
   }
-  for (const argv of [['--pair', 'a'], ['-pa'], ['--pair=a', 'b', 'run']]) {
+  for (const [argv, message] of [
+    [['--output'], "error: option '--output' requires a value"],
+    [['--pair'], "error: option '--pair' requires a value"],
+    [['--pair', 'a'], "error: option '--pair' requires a value"],
+    [['-p'], "error: option '-p' requires a value"],
+    [['-pa'], "error: option '-p' requires a value"],
+    [['--pair=a'], 'unknown option: --pair=a'],
+    [['--pair=a', 'b', 'run'], 'unknown option: --pair=a'],
+    [['--pai=a', 'b', 'run'], 'unknown option: --pai=a'],
+    [['--pair=', 'a', 'b', 'run'], 'unknown option: --pair='],
+  ] as const) {
     const result = walk('tool', ARITY_TREE, argv)
     expect(result.leaf).toBeNull()
-    expect(result.exitCode).not.toBe(0)
+    expect(result.exitCode).toBe(129)
+    expect(result.stream).toBe('stderr')
+    expect(text(result.output).split('\n')[0]).toBe(message)
   }
 })
 

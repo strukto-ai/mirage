@@ -120,7 +120,7 @@ PAGER = CLI(
                 name="ack",
                 description="Acknowledge an incident",
                 arguments=(
-                    Argument("INCIDENT_ID"),
+                    Argument("INCIDENT_ID", help="Incident to acknowledge"),
                     Argument(
                         "--by",
                         required=True,
@@ -162,6 +162,7 @@ async def main() -> None:
     try:
         await show(ws, "type -t pager-eng")
         await show(ws, "pager-eng --help")
+        await show(ws, "pager-eng ack --help")
         await show(ws, "pager-eng list")
         await show(ws, "pager-support list")
         await show(ws, "pager-eng list INC-101 INC-404 --state open")

@@ -728,9 +728,22 @@ def test_group_fixed_nargs_store_replaces_and_extend_accumulates():
     assert values[::2] == ["a", "c"]
     assert all(isinstance(value, PathSpec) for value in values[1::2])
     assert [value.virtual for value in values[1::2]] == ["/work/b", "/work/d"]
-    refused = walk("tool", ARITY_TREE, ["--point", "1"])
-    assert refused.exit_code != 0
-    assert b"requires a value" in refused.output
+    for words, message in (
+        (["--output"], "error: option '--output' requires a value"),
+        (["--point"], "error: option '--point' requires a value"),
+        (["--point", "1"], "error: option '--point' requires a value"),
+        (["-p"], "error: option '-p' requires a value"),
+        (["-p1"], "error: option '-p' requires a value"),
+        (["--point=1"], "unknown option: --point=1"),
+        (["--point=1", "2", "run"], "unknown option: --point=1"),
+        (["--poi=1", "2", "run"], "unknown option: --poi=1"),
+        (["--point=", "1", "2", "run"], "unknown option: --point="),
+    ):
+        refused = walk("tool", ARITY_TREE, words)
+        assert refused.leaf is None
+        assert refused.exit_code == 129
+        assert refused.stream == "stderr"
+        assert refused.output.decode().splitlines()[0] == message
     for word, path in (
         ("--output=x", "/work/x"),
         ("--out=x", "/work/x"),
@@ -738,11 +751,11 @@ def test_group_fixed_nargs_store_replaces_and_extend_accumulates():
     ):
         attached = walk("tool", ARITY_TREE, [word, "run"], cwd="/work")
         assert attached.path == ("run",)
+        assert attached.exit_code == 0
         assert [
             value.virtual for value in attached.group_flags["--output"]
         ] == [path]
         assert attached.argv == ()
-    assert walk("tool", ARITY_TREE, ["--point=1", "2", "run"]).exit_code != 0
 
 
 @pytest.mark.parametrize(

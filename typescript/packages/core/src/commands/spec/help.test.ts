@@ -28,6 +28,10 @@ describe('renderHelp', () => {
         new Argument(['-h', '--help', '--usage'], { action: 'store_true', help: 'Show help' }),
         new Argument('--color', { nargs: '?' }),
         new Argument('--backup', { nargs: '?', attachedOnly: true }),
+        new Argument('RECIPIENT', { help: 'Who receives the message' }),
+        new Argument('FILE', { type: 'path', nargs: '?', help: 'Message to send' }),
+        new Argument('BACKUP', { type: 'path', nargs: '?' }),
+        new Argument('WORDS', { nargs: '*', help: 'Additional words' }),
       ],
     })
     const out = renderHelp('gws thing send', spec)
@@ -40,6 +44,17 @@ describe('renderHelp', () => {
     expect(help).toContain('--to TO TO TO')
     expect(help).toContain('--color [COLOR]')
     expect(help).toContain('--backup[=BACKUP]')
+    expect(help).toContain('  RECIPIENT  Who receives the message\n')
+    expect(help).toContain('  FILE       Message to send\n')
+    expect(help).toContain('  BACKUP     Virtual path\n')
+    expect(help).toContain('  WORDS      Additional words\n')
+    for (const style of Object.values(UsageStyle)) {
+      const helpText = renderHelp('gws thing send', spec, [], style)
+      expect(helpText).toContain('Arguments:\n')
+      expect(helpText).toContain('  <RECIPIENT>  Who receives the message\n')
+      expect(helpText).toContain('  <FILE>       Message to send\n')
+      expect(helpText).toContain('  <WORDS>      Additional words\n')
+    }
     for (const [flag, generic, named] of [
       ['--files', '<path> <path>', 'FILES FILES'],
       ['--inputs', '<FILE> <FILE>', 'FILE FILE'],

@@ -38,7 +38,14 @@ def workspace():
     ("script", "arguments", "owns_argv"),
     [
         (None, (), False),
-        (None, (Argument("--output"), Argument("PATH")), False),
+        (
+            None,
+            (
+                Argument("--output"),
+                Argument("PATH", type="path", help="Destination document"),
+            ),
+            False,
+        ),
         (ScriptSource("1"), (Argument("--output"),), False),
         (ScriptSource("1"), (), True),
     ],
@@ -69,6 +76,11 @@ async def test_a_preview_opens_no_session_and_each_reader_renders_its_own(
     assert "## `tool`" in skill
     assert ("This program parses its own arguments" in skill) == owns_argv
     assert ("--output OUTPUT" in skill) == bool(arguments)
+    authored_help = any(argument.help for argument in arguments)
+    assert ("Destination document" in skill) == authored_help
+    manual = await ws.shell("man tool")
+    assert manual.exit_code == 0
+    assert (b"Destination document" in manual.stdout) == authored_help
     assert len(ws.list_sessions()) == 3
     await ws.close()
 

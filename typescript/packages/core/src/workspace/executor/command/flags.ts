@@ -142,34 +142,26 @@ export function parseFlags(
     // `dir` to -C and `.` to the operand. A permuted line spelling one
     // path twice, once as an option's value typed after the operand, swaps
     // the two spellings and nothing else. Mirrors Python's parse_flags.
-    const pathKeys = new Map<string, 'single' | 'multiple' | 'pair'>()
-    for (const opt of compileSpec(spec).options) {
-      if (opt.type !== 'path') continue
-      const shape = opt.valueTypes.includes('path')
-        ? 'pair'
-        : opt.action === 'append' || opt.action === 'extend' || typeof opt.nargs === 'number'
-          ? 'multiple'
-          : 'single'
-      for (const name of opt.names) {
-        pathKeys.set(flagKwargName(name), shape)
-      }
-    }
+    const pathOptions = new Map(
+      compileSpec(spec)
+        .options.filter((opt) => opt.type === 'path')
+        .flatMap((opt) => opt.names.map((name) => [flagKwargName(name), opt] as const)),
+    )
     for (const [key, value] of Object.entries(flagKwargs)) {
-      const shape = pathKeys.get(key)
+      const option = pathOptions.get(key)
+      if (option === undefined) continue
       const raw = parsed.rawPathFlags[key]
       const rawParts = Array.isArray(raw) ? raw : []
-      const parts: readonly (string | PathSpec)[] = Array.isArray(value) ? value : []
-      if (shape === 'pair' && Array.isArray(value)) {
-        flagKwargs[key] = parts.map((part, index) =>
-          index % 2 === 1 && typeof part === 'string'
+      if (Array.isArray(value)) {
+        const kinds = option.valueTypes
+        flagKwargs[key] = value.map((part, index) =>
+          typeof part === 'string' && (kinds.length === 0 || kinds[index % kinds.length] === 'path')
             ? takeSpelling(spellings, scopeMap, part, rawParts[index], cwd)
             : part,
         )
-      } else if (shape === 'multiple' && Array.isArray(value)) {
-        flagKwargs[key] = parts
-          .filter((part): part is string => typeof part === 'string')
-          .map((part, index) => takeSpelling(spellings, scopeMap, part, rawParts[index], cwd))
-      } else if (shape === 'single' && typeof value === 'string') {
+      } else if (typeof value === 'string') {
+        // A store default or environment fallback stays scalar,
+        // even when typed values use fixed nargs lists.
         flagKwargs[key] = takeSpelling(
           spellings,
           scopeMap,
