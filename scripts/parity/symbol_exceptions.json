@@ -536,6 +536,21 @@
     "atimeMs": "Nanoseconds in python and milliseconds in TypeScript, as mtime_ns and mtimeMs: epoch nanoseconds are past 2**53, so a JS number cannot hold them exactly, while a python int can and preview1 asks in them."
    }
   },
+  "runtime/python/local/config": {
+   "typescript_only": {
+    "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
+   }
+  },
+  "runtime/python/local/runtime": {
+   "typescript_only": {
+    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup."
+   }
+  },
+  "commands/builtin/general/interpreter": {
+   "typescript_only": {
+    "runtimeUnavailable": "A TypeScript engine (Pyodide, Monty, QuickJS) can find it cannot run only when a run starts, and says so with its own error, which the interpreter and a script CLI both answer with 127; a Python entry that cannot run fails to build and is left out of the world, so no run raises it."
+   }
+  },
   "core/email/client": {
    "python_only": {
     "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."

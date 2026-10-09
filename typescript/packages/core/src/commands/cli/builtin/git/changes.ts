@@ -18,7 +18,8 @@ import git from 'isomorphic-git'
 import { visibleEntries } from './pathspec.ts'
 
 import type { LinkView, StatPath } from '../../../../view/types.ts'
-import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
+import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
+import { UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
 import { GITLINK_MODE, SYMLINK } from './constants.ts'
 import { readIndex } from './index_file.ts'
@@ -345,6 +346,9 @@ async function differs(
     data = await entryBytes(dispatch, worktree.join(path), info)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
+    // git counts a file it cannot read as changed; a command that needs its
+    // bytes then refuses it (UnhashableFileError).
+    if (isEacces(err)) return true
     throw err
   }
   const oid = await git.hashBlob({ object: data })
@@ -421,7 +425,13 @@ export async function workEntries(
       entries.delete(path)
       continue
     }
-    const data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
+    let data: Uint8Array
+    try {
+      data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
+    } catch (err) {
+      if (!isEacces(err)) throw err
+      throw new UnhashableFileError(path, fsStrerror(err) ?? 'Permission denied')
+    }
     const { oid } = await git.hashBlob({ object: data })
     repo.held.set(oid, data)
     entries.set(path, { oid, mode: entryMode(info).toString(8).padStart(6, '0') })

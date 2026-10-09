@@ -19,10 +19,11 @@ import sys
 from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
-from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
+from mirage.runtime.python.local.config import LocalConfig
 from mirage.runtime.types import RunArgs, RunResult, RuntimeReach, ScriptSource
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
@@ -32,8 +33,10 @@ class LocalRuntime(PythonRuntime):
     """Run Python code on a host interpreter as a subprocess.
 
     Each run spawns `<interpreter> -c <code>`; the code sees the host
-    filesystem and environment, not the workspace mounts. Cancelling the
-    run kills the subprocess, so a limit timeout reclaims it.
+    filesystem, not the workspace mounts. Its environment is the
+    session's and the config `env`, nothing of mirage's own, as a
+    sandlock child gets. Cancelling the run kills the subprocess, so a
+    limit timeout reclaims it.
 
     The interpreter defaults to the one running mirage; point the
     config `home` (the yaml entry's ``config`` block ends up here) or
@@ -48,13 +51,13 @@ class LocalRuntime(PythonRuntime):
     # at the one builtin runtime that voids a world's sandbox claim.
     reach: RuntimeReach = "process"
 
-    config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
-    config: HomeConfig
+    config_cls: ClassVar[type[RuntimeConfig]] = LocalConfig
+    config: LocalConfig
 
     def __init__(
         self,
         captures: Sequence[str] | None = None,
-        config: HomeConfig | dict[str, Any] | None = None,
+        config: LocalConfig | dict[str, Any] | None = None,
         script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
         super().__init__(captures, config, script)
@@ -67,7 +70,9 @@ class LocalRuntime(PythonRuntime):
                     "(from the runtime entry's config `home` or "
                     f"{LOCAL_HOME_ENV})"
                 )
-            self._python = resolved
+            # Absolute: the program's env has no host PATH to resolve a
+            # name found through an empty or `.` entry against.
+            self._python = os.path.abspath(resolved)
         else:
             self._python = sys.executable
 
@@ -94,7 +99,7 @@ class LocalRuntime(PythonRuntime):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, **env},
+            env={**self.config.env, **env},
         )
         try:
             stdout, stderr = await proc.communicate(input=stdin)

@@ -62,7 +62,7 @@ const runArgs = (code: string, args: string[] = []): RunArgs => ({
 
 describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it.each(['first', 'bad', 'later'])(
-    'counts all writes discarded after %s fails',
+    'fails the open whose truncate the mount refuses (%s)',
     async (rejected) => {
       const names = ['first', 'bad', 'later', 'after', 'last']
       const files = new Map<string, Uint8Array>(
@@ -98,14 +98,16 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           ),
         )
         const failedAt = names.indexOf(rejected)
+        // The refused truncate fails the open that asked for it, so the
+        // program stops there: what it wrote before landed at each close,
+        // and nothing after it was attempted.
         expect(result.exitCode).toBe(1)
-        // Each file is a truncate and a pwrite: the failed truncate's own
-        // pwrite is skipped too.
-        expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe(
-          `python3: failed to truncate /data/${rejected} on mount: denied\n` +
-            `python3: skipped ${String(2 * (4 - failedAt) + 1)} later mutation(s) after that failure\n`,
-        )
+        const stderr = DEC.decode(result.stderr ?? new Uint8Array())
+        expect(stderr).toContain(`OSError: [Errno 29] I/O error: '/data/${rejected}'`)
+        expect(stderr).not.toContain('python3: failed to')
         expect(writes).toEqual(names.slice(0, failedAt + 1).map((name) => `/data/${name}`))
+        for (const name of names.slice(0, failedAt))
+          expect(DEC.decode(files.get(`/data/${name}`))).toBe('new')
         for (const name of names.slice(failedAt))
           expect(DEC.decode(files.get(`/data/${name}`))).toBe('old')
         const next = await rt.run(runArgs("with open('/data/last', 'w') as f: f.write('fresh')"))
@@ -117,6 +119,143 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       }
     },
   )
+
+  it('sends nothing more for a file whose write the mount refused until the file hears of it', async () => {
+    const files = new Map<string, Uint8Array>(
+      ['bad', 'good'].map((name) => [`/data/${name}`, ENC.encode('old')]),
+    )
+    const ops: string[] = []
+    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+      await Promise.resolve()
+      ops.push(`${op} ${path}`)
+      const data = files.get(path)
+      if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
+      if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: data.length })
+      if (op === 'read') return data
+      if (op === 'pwrite') {
+        if (path === '/data/bad') throw new Error('denied')
+        files.set(path, bytes ?? new Uint8Array())
+        return
+      }
+      throw new Error(`unexpected op: ${op}`)
+    }
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    try {
+      const result = await rt.run(
+        runArgs(
+          [
+            'import os',
+            "bad = open('/data/bad', 'r+')",
+            "good = open('/data/good', 'r+')",
+            "bad.write('new'); bad.flush()",
+            "good.write('new'); good.close()",
+            'try:',
+            "    os.rename('/data/bad', '/data/moved')",
+            'except OSError as e:',
+            "    print('rename', e.errno)",
+            "print(os.path.exists('/data/bad'), os.path.exists('/data/moved'))",
+            'bad.close()',
+          ].join('\n'),
+        ),
+      )
+      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(result.exitCode).toBe(0)
+      // The rename hears of the refused write and fails, so neither the
+      // mount nor the guest moves the file.
+      expect(DEC.decode(result.stdout)).toBe('rename 29\nTrue False\n')
+      expect(ops.filter((op) => op.startsWith('rename'))).toEqual([])
+      expect(DEC.decode(files.get('/data/bad'))).toBe('old')
+      expect(DEC.decode(files.get('/data/good'))).toBe('new')
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it('refuses a console that started before its runtime was bound, and starts others', async () => {
+    const rt = new PyodideRuntime()
+    try {
+      expect((await rt.eval('x = 1', { session: 'early' })).exitCode).toBe(0)
+      rt.bind(
+        new WorkspaceBinding(
+          (_op, path) => Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' })),
+          new PrefixResolver(() => ['/data/']),
+        ),
+      )
+      await expect(rt.eval('print(x)', { session: 'early' })).rejects.toThrow(
+        'pyodide console "early" started before this runtime was bound to a workspace, so it cannot reach the mounts; start a new console',
+      )
+      const late = await rt.eval("import os; print(os.path.isdir('/data'))", { session: 'late' })
+      expect(DEC.decode(late.stdout)).toBe('True\n')
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it('drops the name of a mount a named console no longer sees', async () => {
+    let prefixes = ['/data/', '/secret/']
+    const dispatch: BridgeDispatchFn = (_op, path) =>
+      Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => prefixes)))
+    const names = "import os; print(sorted(n for n in os.listdir('/') if n in ('data', 'secret')))"
+    try {
+      expect(DEC.decode((await rt.eval(names, { session: 'one' })).stdout)).toBe(
+        "['data', 'secret']\n",
+      )
+      prefixes = ['/data/']
+      expect(DEC.decode((await rt.eval(names, { session: 'one' })).stdout)).toBe("['data']\n")
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it("fails only the close of the file whose write the mount refuses, not another file's", async () => {
+    const files = new Map<string, Uint8Array>(
+      ['bad', 'good', 'later'].map((name) => [`/data/${name}`, ENC.encode('old')]),
+    )
+    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+      await Promise.resolve()
+      const data = files.get(path)
+      if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
+      if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: data.length })
+      if (op === 'read') return data
+      if (op === 'pwrite') {
+        if (path === '/data/bad') throw new Error('denied')
+        files.set(path, bytes ?? new Uint8Array())
+        return
+      }
+      throw new Error(`unexpected op: ${op}`)
+    }
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    try {
+      const result = await rt.run(
+        runArgs(
+          [
+            "bad = open('/data/bad', 'r+')",
+            "good = open('/data/good', 'r+')",
+            "bad.write('new'); bad.flush()",
+            "good.write('new'); good.flush()",
+            'good.close()',
+            'try:',
+            '    bad.close()',
+            'except OSError as e:',
+            "    print('bad', e.errno)",
+            "with open('/data/later', 'r+') as f: f.write('new')",
+          ].join('\n'),
+        ),
+      )
+      expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('bad 29\n')
+      expect(DEC.decode(files.get('/data/bad'))).toBe('old')
+      expect(DEC.decode(files.get('/data/good'))).toBe('new')
+      expect(DEC.decode(files.get('/data/later'))).toBe('new')
+    } finally {
+      await rt.close()
+    }
+  })
 
   it.each([false, true])(
     'stops a timed-out script CLI and recovers (warm worker: %s)',

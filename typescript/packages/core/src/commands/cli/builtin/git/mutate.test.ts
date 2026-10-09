@@ -35,6 +35,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { parseSessionProfile } from '../../../../policy/profile.ts'
 import { GIT } from './index.ts'
 import { blockingRef } from './refs.ts'
 import {
@@ -348,6 +349,56 @@ describe('git add', () => {
     const [code, , err] = await h.run('add nosuch.txt')
     expect(code).toBe(128)
     expect(err).toBe("fatal: pathspec 'nosuch.txt' did not match any files\n")
+  })
+})
+
+/** Deny every op on one path for the harness's session, as a profile path rule does. */
+async function seal(h: Harness, path: string): Promise<void> {
+  await h.ws.setSessionProfile(
+    h.ws.defaultSessionId,
+    parseSessionProfile({ commands: { deny: [{ reason: 'sealed', paths: [path] }] } }, 'seal'),
+  )
+}
+
+describe('an unreadable file', () => {
+  it.each([
+    ['letters.txt', 'updating'],
+    ['fresh.txt', 'adding'],
+  ])('refuses add %s in git words', async (name, verb) => {
+    const h = await harness()
+    await write(h, name, 'new\n')
+    await seal(h, `/repo/${name}`)
+    expect(await h.run(`add ${name}`)).toEqual([
+      128,
+      '',
+      `error: open("${name}"): Permission denied\n` +
+        `error: unable to index file '${name}'\n` +
+        `fatal: ${verb} files failed\n`,
+    ])
+  })
+
+  it('refuses commit -a in git words', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'new\n')
+    await seal(h, '/repo/letters.txt')
+    expect(await h.run('commit -a -m x')).toEqual([
+      128,
+      '',
+      'error: open("letters.txt"): Permission denied\n' +
+        "error: unable to index file 'letters.txt'\n" +
+        'fatal: updating files failed\n',
+    ])
+  })
+
+  it('refuses diff in git words', async () => {
+    const h = await harness()
+    await write(h, 'letters.txt', 'new\n')
+    await seal(h, '/repo/letters.txt')
+    const [code, , err] = await h.run('diff')
+    expect(code).toBe(128)
+    expect(err).toBe(
+      'error: open("letters.txt"): Permission denied\nfatal: cannot hash letters.txt\n',
+    )
   })
 })
 

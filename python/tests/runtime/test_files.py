@@ -498,11 +498,13 @@ class NoAppendVFS(RuntimeFiles):
         )
         self.files = dict(files)
         self.writes = []
+        self.reads = []
 
     def call(self, op, path, **kwargs):
         if op == "append":
             raise OperationNotSupportedError("append")
         if op == "read":
+            self.reads.append(kwargs)
             if path not in self.files:
                 raise FileNotFoundError(path)
             return self.files[path]
@@ -519,6 +521,12 @@ def test_append_without_a_whole_file_reads_its_own_base(files, written):
     vfs = NoAppendVFS(files)
     vfs.append("/s3/a", b"tail")
     assert vfs.writes == [("/s3/a", written)]
+
+
+def test_the_append_fallback_reads_past_the_file_cache():
+    vfs = NoAppendVFS({"/s3/a": b"base-"})
+    vfs.append("/s3/a", b"tail")
+    assert vfs.reads == [{"filetype": None, "direct": True}]
 
 
 def test_an_append_keeps_a_write_made_since_the_last_one():

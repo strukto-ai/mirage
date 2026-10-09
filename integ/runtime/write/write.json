@@ -139,13 +139,6 @@
               "exit": 0,
               "stdout": "true 69\n"
             }
-          },
-          "expect_on": {
-            "pyodide": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "failed to create /ro/x.txt on mount: mount /ro/ is read-only"
-            }
           }
         },
         {
@@ -155,13 +148,6 @@
           "expect": {
             "exit": 0,
             "stdout": "OSError\n"
-          },
-          "expect_on": {
-            "pyodide": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "failed to create /ro/y.txt on mount: mount /ro/ is read-only"
-            }
           }
         },
         {

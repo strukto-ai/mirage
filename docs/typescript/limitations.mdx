@@ -164,8 +164,8 @@ Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls f
 
 Pyodide's worker fetches workspace files on access and caches them for that
 execution. An external edit to a cached file is not visible until the next
-run. Without workers or `SharedArrayBuffer`, the fallback collects whole
-mounts before execution, which can be expensive for large mounts.
+run. Without workers or `SharedArrayBuffer`, `python3` in a workspace exits
+127 rather than copy every mount in before each run.
 
 See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
 for browser requirements and limitations.

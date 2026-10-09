@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PyodideUnavailableError } from '../errors.ts'
+import { noWorker, PyodideUnavailableError } from '../errors.ts'
 import { EvalError } from '../../../errors.ts'
+import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import type { BridgeDispatchFn, EvalResult, RunResult } from '../../../types.ts'
 import type { RuntimeContext } from '../../../binding.ts'
@@ -130,19 +131,20 @@ export class PyodideWorkerClient {
     })
   }
 
-  static async create(): Promise<PyodideWorkerClient | null> {
+  /** A started worker, or the refusal that says why none could start. */
+  static async create(): Promise<PyodideWorkerClient | PyodideUnavailableError> {
     let client: PyodideWorkerClient | null = null
     try {
       const port = await createPort()
-      if (port === null) return null
+      if (port === null) return noWorker()
       client = new PyodideWorkerClient(port)
       // A constructed worker may still fail to load (for example under
       // CSP). Commit to it only after its message handler is listening.
       await client.ready
       return client
-    } catch {
+    } catch (error) {
       client?.close()
-      return null
+      return noWorker(error)
     }
   }
 
@@ -262,9 +264,11 @@ export class PyodideWorkerClient {
           try {
             await applyMutation(files, mutation)
           } catch (error) {
+            const code = classify(error)
             return {
               message: `python3: failed to ${mutation.kind} ${mutation.path} on mount: ${error instanceof Error ? error.message : String(error)}`,
               skipped: mutations.length - index - 1,
+              ...(code === null ? {} : { code }),
             } satisfies FlushFailure
           }
         }

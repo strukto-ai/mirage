@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -72,7 +72,7 @@ describe('LocalRuntime', () => {
   )
 
   it.each([MountMode.READ, MountMode.WRITE, MountMode.EXEC])(
-    'uses only the host environment for the version process in %s mode',
+    'gives the version process none of the session environment in %s mode',
     async (mode) => {
       const dir = await mkdtemp(join(tmpdir(), 'mirage-local-version-env-'))
       vi.stubEnv('MIRAGE_TEST_VERSION_ENV', 'host')
@@ -96,7 +96,7 @@ describe('LocalRuntime', () => {
       const rt = new LocalRuntime({ config: { home: probe } })
       const baseline = await rt.version({})
       const expected: unknown = JSON.parse(DEC.decode(baseline.stdout))
-      expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: 'host' })
+      expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: null })
       const ws = new Workspace({ '/': new RAMVFS() }, { mode, runtimes: [rt, 'workspace'] })
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
@@ -112,6 +112,31 @@ describe('LocalRuntime', () => {
       }
     },
   )
+
+  // An empty PATH entry is the current directory; the name resolves to an
+  // absolute path, since the program's environment has no PATH to find it.
+  it('runs a bare home found through an empty PATH entry', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-path-'))
+    const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
+      encoding: 'utf8',
+    }).trim()
+    const probe = join(dir, 'mirage-probe')
+    await writeFile(probe, `#!${python}\nprint('probe')\n`)
+    await chmod(probe, 0o755)
+    vi.stubEnv('PATH', delimiter)
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(dir)
+    try {
+      const rt = new LocalRuntime({ config: { home: 'mirage-probe' } })
+      cwd.mockRestore()
+      const result = await rt.version({})
+      expect(DEC.decode(result.stdout)).toBe('probe\n')
+      await rt.close()
+    } finally {
+      cwd.mockRestore()
+      vi.unstubAllEnvs()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 
   it('reports versions in READ mode without running Python startup code', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-version-'))
@@ -161,6 +186,27 @@ describe('LocalRuntime', () => {
     })
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe("['alpha', 'beta'] piped V\n")
+  })
+
+  it('gives the program none of the host environment', async () => {
+    vi.stubEnv('MIRAGE_TEST_HOST_ONLY', 'host')
+    const rt = new LocalRuntime({ config: { env: { MIRAGE_TEST_CONFIG: 'config' } } })
+    try {
+      const result = await rt.run({
+        code:
+          "import os; print(os.environ.get('MIRAGE_TEST_HOST_ONLY'), " +
+          "os.environ['MIRAGE_TEST_CONFIG'], os.environ['MY_VAR'])",
+        args: [],
+        stdin: null,
+        env: { MY_VAR: 'session' },
+        flags: {},
+      })
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('None config session\n')
+    } finally {
+      vi.unstubAllEnvs()
+      await rt.close()
+    }
   })
 
   it('hands the init switches to the host interpreter', async () => {

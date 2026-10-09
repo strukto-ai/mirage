@@ -22,6 +22,7 @@ import type { DispatchFn, RunResult } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { ExecutionNode } from '../../../workspace/types.ts'
+import { isMissingPath } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 
 /**
@@ -40,6 +41,21 @@ export function runOutput(result: RunResult): [Uint8Array | null, IOResult] {
   ]
 }
 
+/**
+ * Whether a thrown error means the runtime itself is missing (exit 127),
+ * not that the program it ran failed.
+ *
+ * Args:
+ *   err: the error the runtime threw.
+ */
+export function runtimeUnavailable(err: unknown): err is Error {
+  return (
+    err instanceof QuickJsUnavailableError ||
+    err instanceof MontyUnavailableError ||
+    err instanceof PyodideUnavailableError
+  )
+}
+
 export async function runtimeVersion(
   label: string,
   runtime: LanguageRuntime,
@@ -51,15 +67,11 @@ export async function runtimeVersion(
     return runOutput(await runtime.version(env, signal, timeoutSeconds))
   } catch (err) {
     if (err instanceof CommandTimeoutError) throw err
-    const unavailable =
-      err instanceof QuickJsUnavailableError ||
-      err instanceof MontyUnavailableError ||
-      err instanceof PyodideUnavailableError
     const message = err instanceof Error ? err.message : String(err)
     return [
       null,
       new IOResult({
-        exitCode: unavailable ? 127 : 1,
+        exitCode: runtimeUnavailable(err) ? 127 : 1,
         stderr: new TextEncoder().encode(`${label}: ${message}\n`),
       }),
     ]
@@ -233,14 +245,16 @@ export function makeInterpreterHandler(spec: InterpreterSpec): InterpreterHandle
 
     if (code === null) {
       if (pathScope === null) return errorResult(cmdStr, `${label}: no input\n`, 1)
+      let data: unknown
       try {
-        const [data] = await dispatch('read', toPathSpec(pathScope))
-        const bytes = await readAllBytes(data)
-        code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-        if (opts.transformSource !== undefined) code = opts.transformSource(code)
-      } catch {
+        data = (await dispatch('read', toPathSpec(pathScope)))[0]
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
         return errorResult(cmdStr, `${label}: ${pathScope.virtual}: No such file\n`, 1)
       }
+      const bytes = await readAllBytes(data)
+      code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+      if (opts.transformSource !== undefined) code = opts.transformSource(code)
     }
 
     let stdinBytes: Uint8Array | null = null

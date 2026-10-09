@@ -14,7 +14,7 @@
 
 import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
-import { fsStrerror, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
+import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
 import { PathSpec } from '../../../../types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
@@ -108,7 +108,7 @@ async function content(dispatch: Dispatch, base: PathSpec, name: string): Promis
     return await readFile(dispatch, PathSpec.fromStrPath(name, undefined, base))
   } catch (err) {
     if (isEisdir(err)) throw new GitError(`Unable to hash ${name}`)
-    if (isMissingPath(err) || isEnotdir(err)) {
+    if (isMissingPath(err) || isEnotdir(err) || isEacces(err)) {
       const reason = fsStrerror(err) ?? 'No such file or directory'
       throw new GitError(`could not open '${name}' for reading: ${reason}`)
     }

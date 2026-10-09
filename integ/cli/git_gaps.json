@@ -1261,6 +1261,213 @@
         "stdout": "ce013625030ba8dba906f756967f9e9ca394464a\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\nbfa655111293037a5564088d1a9bbca4cbcf446b\n814f4a422927b82f5f8a43f8fab6d3839e3983f2\ne69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n8ef25423772bbfe671c8e285ae1d63991d59db19\n213a314abdd4e23f24dccd80a763c4b533bdb01d\ninteg\n1\nfatal: refusing to create malformed object\naa8f6d33b71dd1c53dad83401248342aa8bb8851\n128\n128\n128\n",
         "stderr": "fatal: invalid object type \"foo\"\nfatal: could not open 'nope' for reading: No such file or directory\nfatal: Unable to hash docs\n"
       }
+    },
+    {
+      "id": "git_hash_object_unreadable",
+      "seq": 568089,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo hash-object numbers.txt; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "fatal: could not open 'numbers.txt' for reading: Permission denied\n"
+      },
+      "session": "sealed-numbers",
+      "session_profiles": {
+        "sealed-numbers": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/numbers.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_unreadable_clone_setup",
+      "seq": 568090,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git clone -q /repo /repo/sealed && printf 'new\\n' > /repo/sealed/numbers.txt && printf 'new\\n' > /repo/sealed/fresh.txt && echo ready",
+      "expect": {
+        "exit": 0,
+        "stdout": "ready\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_unreadable_tracked",
+      "seq": 568091,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed add numbers.txt; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"numbers.txt\"): Permission denied\nerror: unable to index file 'numbers.txt'\nfatal: updating files failed\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_add_unreadable_untracked",
+      "seq": 568092,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed add fresh.txt; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"fresh.txt\"): Permission denied\nerror: unable to index file 'fresh.txt'\nfatal: adding files failed\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_commit_all_unreadable",
+      "seq": 568093,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed commit -a -m x; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"numbers.txt\"): Permission denied\nerror: unable to index file 'numbers.txt'\nfatal: updating files failed\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_diff_unreadable",
+      "seq": 568094,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed diff; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n",
+        "stderr": "error: open(\"numbers.txt\"): Permission denied\nfatal: cannot hash numbers.txt\n"
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_status_unreadable",
+      "seq": 568095,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/sealed status --short; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": " M numbers.txt\n?? fresh.txt\n0\n",
+        "stderr": ""
+      },
+      "session": "sealed-clone",
+      "session_profiles": {
+        "sealed-clone": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/repo/sealed/numbers.txt",
+                  "/repo/sealed/fresh.txt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "git_unreadable_clone_cleanup",
+      "seq": 568096,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm -rf /repo/sealed && echo gone",
+      "expect": {
+        "exit": 0,
+        "stdout": "gone\n",
+        "stderr": ""
+      }
     }
   ]
 }

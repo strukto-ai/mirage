@@ -468,6 +468,8 @@ describe('RuntimeFiles append', () => {
     const write = dispatch.mock.calls.find((c) => c[0] === 'write')
     if (write?.[2] === undefined) throw new Error('unreachable')
     expect(new TextDecoder().decode(write[2])).toBe('headtail')
+    const read = dispatch.mock.calls.find((c) => c[0] === 'read')
+    expect(read?.[4]).toEqual({ raw: true, direct: true })
   })
 
   // The fallback reads the base fresh each time: an append lands after

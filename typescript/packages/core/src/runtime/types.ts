@@ -97,6 +97,8 @@ export type BridgeOpAttrs = SetAttrFields & {
   length?: number
   /** A read of the stored bytes rather than a rendering. */
   raw?: boolean
+  /** A read of what the backend holds now, past the file cache. */
+  direct?: boolean
 }
 
 /**

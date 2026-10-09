@@ -119,6 +119,42 @@
       ]
     },
     {
+      "id": "hook_pre_vfs_refuses_a_script_read",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "run.sealed.py": "print(1)\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": ".sealed.py"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/run.sealed.py",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "python3: /ram/run.sealed.py: Permission denied\n"
+          }
+        },
+        {
+          "command": "python3 /ram/missing.py",
+          "expect": {
+            "exit": 1,
+            "stderr": "python3: /ram/missing.py: No such file\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "hook_post_vfs_redact",
       "world": {
         "mounts": {
