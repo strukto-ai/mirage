@@ -68,6 +68,7 @@ def file_patch(
     fully: bool = True,
     context: int = HUNK_CONTEXT,
     function_context: bool = False,
+    force_text: bool = False,
 ) -> bytes:
     """One path's patch, headers and hunks, as git's builtin_diff writes it.
 
@@ -90,6 +91,7 @@ def file_patch(
         fully (bool): ``core.quotePath``.
         context (int): the requested number of context lines.
         function_context (bool): ``-W``, widen hunks to whole functions.
+        force_text (bool): render binary blobs as text under ``--text``.
     """
     if old and new and old[0] & 0o170000 != new[0] & 0o170000:
         return file_patch(
@@ -103,6 +105,7 @@ def file_patch(
             fully,
             context,
             function_context,
+            force_text,
         ) + file_patch(
             repo,
             name,
@@ -114,6 +117,7 @@ def file_patch(
             fully,
             context,
             function_context,
+            force_text,
         )
     source = quote_path(f"a/{origin}", False, fully)
     target = quote_path(f"b/{name}", False, fully)
@@ -139,7 +143,9 @@ def file_patch(
     before, after = blob_data(repo, old), blob_data(repo, new)
     source = source if old else DEV_NULL
     target = target if new else DEV_NULL
-    if any(b"\0" in data[:BINARY_SNIFF] for data in (before, after)):
+    if not force_text and any(
+        b"\0" in data[:BINARY_SNIFF] for data in (before, after)
+    ):
         head.append(f"Binary files {source} and {target} differ")
         return encode_text("".join(line + "\n" for line in head))
     body = hunks(

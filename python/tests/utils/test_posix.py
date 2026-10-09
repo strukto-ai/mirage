@@ -5,6 +5,7 @@ import pytest
 from mirage.utils.posix import (
     class_characters,
     compile_posix_regex,
+    posix_line_matcher,
     skip_raw_bytes,
     translate_bracket,
 )
@@ -86,6 +87,11 @@ def test_mixed_brackets():
         ("([A-Z]+)-\\1", "Ab-aB", True),
         ("(É)-\\1", "É-é", False),
         ("(É)-\\1", "É-É", True),
+        ("^|needle", "NEEDLE", True),
+        ("x?|needle", "NEEDLE", True),
+        (r"(x?|(foo) \2)", "FOO foo", True),
+        ("x?", "   ", False),
+        ("x?", "", True),
     ],
 )
 def test_ascii_case_folding(source, text, expected):
@@ -93,6 +99,11 @@ def test_ascii_case_folding(source, text, expected):
         bool(compile_posix_regex(source, re.IGNORECASE).fullmatch(text))
         == expected
     )
+    matcher = posix_line_matcher(
+        compile_posix_regex(source, re.IGNORECASE), True
+    )
+    assert matcher(text) == (expected and bool(text))
+    assert matcher(text) == (expected and bool(text))
 
 
 def test_ascii_captures_preserve_spelling():
@@ -126,11 +137,20 @@ def test_skip_raw_bytes_guards_dots_and_negated_brackets_only():
         ("^a[^x]b$", "a\udcffb", False),
         ("^a\udcffb$", "a\udcffb", True),
         ("^..$", "规定", True),
+        ("^|😀", "😀", True),
+        ("^|😀", "!😀", True),
+        (r"^|(?<!\w)😀", "x😀", False),
+        ("^|a", "😀a", True),
+        (r"(?<!\w)(?:)(?!\w)", "a😀", False),
+        (r"(?<!\w)(?:a*|😀)(?!\w)", "a😀", True),
+        ("^a", "😀a", False),
+        (r"(?<![\s\S])a", "😀a", False),
+        ("a$", "😀a", True),
     ],
 )
 def test_utf8_subject_matches_characters_not_raw_bytes(source, text, expected):
     pattern = compile_posix_regex(source, 0, True)
-    assert bool(pattern.search(text)) == expected
+    assert posix_line_matcher(pattern, True)(text) == expected
 
 
 def test_utf8_keeps_dotall_and_ascii_classes():

@@ -197,11 +197,11 @@ def test_cluster_bool_then_count_flag_value():
 
 
 def test_cluster_with_unknown_char_reports_offending_char():
-    parsed = parse_command(SPECS["grep"], ["-nx", "pat", "/a.txt"], "/")
+    parsed = parse_command(SPECS["grep"], ["-nQ", "pat", "/a.txt"], "/")
     assert "-n" not in parsed.flags
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert parsed.invalid_options == ["x"]
+    assert parsed.invalid_options == ["Q"]
 
 
 def test_unknown_long_flag_reported_bare():

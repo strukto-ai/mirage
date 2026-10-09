@@ -217,6 +217,7 @@ class BreTranslator {
   private readonly refuseInvertedRange: boolean
   private readonly syntax: PosixSyntax
   private readonly extended: boolean
+  private readonly dotMatchesNul: boolean
   readonly warnings: string[] = []
   // glibc's `completed_bkref_map`: the groups a back-reference may name. A
   // branch of an alternation starts again from what was complete when the
@@ -237,10 +238,16 @@ class BreTranslator {
   // dfa's reading of a repetition applied to it.
   private anchorAt: number | null = null
 
-  constructor(pattern: string, refuseInvertedRange: boolean, syntax = PosixSyntax.BASIC) {
+  constructor(
+    pattern: string,
+    refuseInvertedRange: boolean,
+    syntax = PosixSyntax.BASIC,
+    dotMatchesNul = true,
+  ) {
     this.src = pattern
     this.refuseInvertedRange = refuseInvertedRange
     this.syntax = syntax
+    this.dotMatchesNul = dotMatchesNul
     this.extended = syntax !== PosixSyntax.BASIC
   }
 
@@ -275,7 +282,7 @@ class BreTranslator {
         this.alternate()
       } else if (ch === '.') {
         this.pos += 1
-        this.atom('.')
+        this.atom(this.dotMatchesNul ? '.' : '(?:(?!\\x00).)')
       } else if (ch === '^') {
         this.pos += 1
         if (this.extended || this.caretAnchors) this.anchor(ANCHOR_START)
@@ -672,12 +679,14 @@ export function translateBre(pattern: string, refuseInvertedRange = false): [str
  * inverted range is refused, as `RE_NO_EMPTY_RANGES` does in both extended
  * syntaxes. Answers the host source, its group count, and GNU grep's warnings
  * (without the `grep: warning: ` prefix), which only `EGREP` produces.
+ * `dotMatchesNul` controls whether a dot may consume a NUL byte.
  */
 export function translateEre(
   pattern: string,
   syntax = PosixSyntax.EGREP,
+  dotMatchesNul = true,
 ): [string, number, readonly string[]] {
-  const translator = new BreTranslator(pattern, true, syntax)
+  const translator = new BreTranslator(pattern, true, syntax, dotMatchesNul)
   const [source, groups] = translator.translate()
   return [source, groups, [...translator.warnings]]
 }

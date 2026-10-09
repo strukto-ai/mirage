@@ -25,6 +25,9 @@ import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 
 import { narrowScope, runSearch } from './search.ts'
+import { grepNeedsEveryFile } from '../grep_pushdown.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { makeSearchOp } from '../../../core/hierarchy/search.ts'
 
 const SCOPES: readonly Scope[] = [
@@ -178,16 +181,22 @@ describe('adapter search', () => {
     expect(result.exitCode).toBe(0)
   })
 
-  it('defers a shaping flag to the generic scan', async () => {
-    const search = searchCommand({ room: roomSearcher }, makeIO(), {})
-    const [out, result] = unwrap(
-      await search(new FakeAccessor(), [spec('/rooms/red/a.json')], ['ada'], opts({ v: true })),
-    )
-    const drained = await drain(out)
-    expect(result.exitCode).toBe(0)
-    expect(drained).toContain('y')
-    expect(drained).not.toContain('x ada')
-  })
+  it.each([
+    [{ v: true }, 'ada', 'y\n', 0],
+    [{ line_regexp: true }, 'ada', '', 1],
+    [{ line_regexp: true }, 'y', 'y\n', 0],
+  ] as const)(
+    'defers a shaping flag to the generic scan: %o %s',
+    async (flags, pattern, expected, code) => {
+      const provider = vi.fn(() => Promise.resolve(['provider substring hit']))
+      const search = searchCommand({ note: provider }, makeIO(), {})
+      const [out, result] = unwrap(
+        await search(new FakeAccessor(), [spec('/rooms/red/a.json')], [pattern], opts(flags)),
+      )
+      expect([await drain(out), result.exitCode]).toEqual([expected, code])
+      expect(provider).not.toHaveBeenCalled()
+    },
+  )
 
   it('falls back to the whole read when the stream refuses before yielding', async () => {
     // A native stream that refuses a kind before yielding (mongodb's
@@ -302,15 +311,21 @@ describe('narrowScope', () => {
     expect(narrowPaths).toHaveBeenCalledOnce()
   })
 
-  it.each([{ recursive: false }, { exactFileSet: true }, { wholeWord: false }])(
-    'scans every file when a gate fails: %o',
-    async (gates) => {
-      const { io, narrowPaths } = narrowing()
-      const r = await run(io, gates)
-      expect([r.resolved.map((p) => p.virtual), r.usedSearch]).toEqual([['/data'], false])
-      expect(narrowPaths).not.toHaveBeenCalled()
+  it.each([
+    { recursive: false },
+    { exactFileSet: true },
+    { wholeWord: false },
+    {
+      exactFileSet: grepNeedsEveryFile(
+        new FlagView({ w: true, line_regexp: true }, specOf('grep')),
+      ),
     },
-  )
+  ])('scans every file when a gate fails: %o', async (gates) => {
+    const { io, narrowPaths } = narrowing()
+    const r = await run(io, gates)
+    expect([r.resolved.map((p) => p.virtual), r.usedSearch]).toEqual([['/data'], false])
+    expect(narrowPaths).not.toHaveBeenCalled()
+  })
 
   it('scans every file on a mount that did not opt in', async () => {
     const { io, narrowPaths } = narrowing(undefined, undefined, false)

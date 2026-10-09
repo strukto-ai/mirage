@@ -117,6 +117,21 @@ async function logRoots(
   return found
 }
 
+/** Walk validated object links from refs, index entries and reflogs. */
+function reachable(
+  roots: ReadonlySet<string>,
+  edges: ReadonlyMap<string, readonly string[]>,
+): Set<string> {
+  const seen = new Set<string>()
+  const stack = [...roots]
+  for (let oid = stack.pop(); oid !== undefined; oid = stack.pop()) {
+    if (seen.has(oid)) continue
+    seen.add(oid)
+    for (const link of edges.get(oid) ?? []) stack.push(link)
+  }
+  return seen
+}
+
 /** Hash and decode every object, including unreachable objects and packed objects. */
 export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
@@ -130,11 +145,16 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
     const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))
     const index = await readIndex(repo, repo.dispatch)
     for (const entry of index.entries.values()) if (entry.mode !== 0o160000) roots.add(entry.oid)
+    for (const conflict of index.conflicts.values()) {
+      for (const entry of [conflict.ancestor, conflict.this, conflict.other])
+        if (entry !== null && entry.mode !== 0o160000) roots.add(entry.oid)
+    }
     for (const directory of new Set([repo.location.gitdir, repo.location.commondir])) {
       for (const oid of await logRoots(repo.dispatch, statPath, directory.join('logs')))
         roots.add(oid)
     }
     const referenced = new Set(roots)
+    const edges = new Map<string, string[]>()
     const objects = new Map<string, string>()
     const errors: string[] = []
     const ids = await objectIds(repo)
@@ -150,18 +170,20 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
         wrapped.set(header)
         wrapped.set(body, header.length)
         if ((await sha1Hex(wrapped)) !== oid) throw new Error('hash mismatch')
+        const links: string[] = []
         if (result.type === 'commit') {
           const { commit } = await git.readCommit({ ...args, oid })
-          referenced.add(commit.tree)
-          for (const parent of commit.parent) referenced.add(parent)
+          links.push(commit.tree, ...commit.parent)
         } else if (result.type === 'tree') {
           const { tree } = await git.readTree({ ...args, oid })
-          for (const entry of tree) if (entry.mode !== '160000') referenced.add(entry.oid)
+          for (const entry of tree) if (entry.mode !== '160000') links.push(entry.oid)
         } else if (result.type === 'tag') {
           const { tag } = await git.readTag({ ...args, oid })
-          referenced.add(tag.object)
+          links.push(tag.object)
         } else if (result.type !== 'blob') throw new Error(`invalid object type: ${result.type}`)
         objects.set(oid, result.type)
+        edges.set(oid, links)
+        for (const link of links) referenced.add(link)
       } catch (err) {
         errors.push(`error: object ${oid}: ${err instanceof Error ? err.message : String(err)}\n`)
       }
@@ -179,13 +201,17 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
         `notice: HEAD points to an unborn branch (${branch})\nnotice: No default references\n` +
         stderr
     }
-    const stdout = fl.asBool('no_dangling')
-      ? ''
-      : [...objects]
-          .filter(([oid]) => !referenced.has(oid))
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([oid, type]) => `dangling ${type} ${oid}\n`)
-          .join('')
+    const unreachable = fl.asBool('unreachable')
+    const excluded = unreachable ? reachable(roots, edges) : referenced
+    const label = unreachable ? 'unreachable' : 'dangling'
+    const stdout =
+      unreachable || !fl.asBool('no_dangling')
+        ? [...objects]
+            .filter(([oid]) => !excluded.has(oid))
+            .sort(([a], [b]) => compareCodePoints(a, b))
+            .map(([oid, type]) => `${label} ${type} ${oid}\n`)
+            .join('')
+        : ''
     return [
       new TextEncoder().encode(stdout),
       new IOResult({ exitCode: errors.length ? 1 : 0, stderr: new TextEncoder().encode(stderr) }),

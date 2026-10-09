@@ -144,6 +144,7 @@ async def run_search(
                 grep.fixed_string,
                 grep.whole_word,
                 grep.syntax,
+                line_regexp=grep.line_regexp,
             )
     if rg is not None and not rg.list_files:
         pattern = pattern_arg(texts, view, "regexp")
