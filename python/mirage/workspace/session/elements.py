@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
@@ -23,6 +23,7 @@ from mirage.shell.array import (
     array_has,
     array_with,
 )
+from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.shell.types import ArithWrite
 from mirage.shell.variable import ShellValue
 from mirage.view.types import SessionView
@@ -34,6 +35,7 @@ from mirage.workspace.session.state import (
     ensure_var_visible,
     env_get,
     seed_var,
+    session_arith,
     strip_key_quotes,
     subscript_index,
     visible_arrays,
@@ -215,3 +217,39 @@ async def land_arith(
             )
     finally:
         reader.settle()
+
+
+async def landed_arith(
+    session: SessionState,
+    view: SessionView | None,
+    text: str,
+    land: Callable[..., Awaitable[None]] = land_arith,
+    nounset: bool = False,
+) -> int:
+    """Evaluate ``text`` as an arithmetic command or expansion does and
+    land what it assigned through ``land``, which settles its ``RANDOM``
+    draws. Reads resolve against the visible env, so a hidden name counts
+    as unset, and bash bound the assignments made before an error, which
+    land before the error is raised.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView | None): the gated session view.
+        text (str): the expanded expression.
+        land (Callable[..., Awaitable[None]]): lands the writes,
+            ``land_arith`` for a command, the expansion's writer otherwise.
+        nounset (bool): ``set -u`` for the names it reads.
+
+    Raises:
+        ArithError: the text does not evaluate.
+        ReadonlyError: it assigned to a readonly name.
+        PolicyDenied: ``land`` refused a write, which wins over either.
+    """
+    reader = RandomReader(session)
+    try:
+        result = session_arith(session, text, reader, nounset=nounset)
+    except (ArithError, ReadonlyError) as exc:
+        await land(session, view, exc.writes, reader)
+        raise
+    await land(session, view, result.writes, reader)
+    return result.value

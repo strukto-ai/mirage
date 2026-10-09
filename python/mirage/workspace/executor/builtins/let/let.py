@@ -12,33 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
-from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
+    fail,
     readonly_refusal,
     refusal,
     require_view,
+    result,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.elements import land_arith
-from mirage.workspace.session.state import (
-    random_reader,
-    session_arith,
-    session_view,
-)
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.session.elements import landed_arith
+from mirage.workspace.session.state import session_view
 
 
 async def handle_let(
     args: list[str],
     session: SessionState,
     state: SessionView | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Evaluate each operand as an arithmetic expression.
 
     ``let`` is ``(( ))`` spelled as a builtin: every word is one
@@ -58,48 +52,21 @@ async def handle_let(
         state (SessionView | None): the gated session view.
     """
     if not args:
-        err = b"bash: let: expression expected\n"
-        return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command="let", exit_code=1, stderr=err),
-        )
+        return fail("let", "bash: let: expression expected\n")
     view = require_view(state)
     value = 0
     for expr in args:
-        reader = random_reader(session)
-        error: ArithError | ReadonlyError | None = None
-        value = 0
         try:
-            arith = session_arith(session, expr, reader)
-            writes, value = arith.writes, arith.value
-        except (ArithError, ReadonlyError) as exc:
-            # bash bound the assignments made before the error; they
-            # land before the error is reported.
-            error, writes = exc, exc.writes
-        try:
-            await land_arith(session, view, writes, reader)
+            value = await landed_arith(session, view, expr)
         except PolicyDenied as exc:
             return refusal("let", exc)
-        if isinstance(error, ReadonlyError):
-            if error.in_subscript:
-                raise error.signal()
-            return readonly_refusal("let", error.name)
-        if error is not None:
-            if error.in_subscript:
-                raise error.signal()
-            err = encode_text(f"bash: let: {error}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command="let", exit_code=1, stderr=err),
-            )
-    code = 0 if value != 0 else 1
-    return (
-        None,
-        IOResult(exit_code=code),
-        ExecutionNode(command="let", exit_code=code),
-    )
+        except (ArithError, ReadonlyError) as exc:
+            if exc.in_subscript:
+                raise exc.signal() from exc
+            if isinstance(exc, ReadonlyError):
+                return readonly_refusal("let", exc.name)
+            return fail("let", f"bash: let: {exc}\n")
+    return result("let", exit_code=0 if value != 0 else 1)
 
 
 async def let_builtin(call: BuiltinCall) -> Result:

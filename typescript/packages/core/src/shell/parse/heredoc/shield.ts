@@ -25,6 +25,7 @@ import {
 } from './constants.ts'
 import { cleanDelimiter } from './delimiter.ts'
 import type { HeredocOperator } from './types.ts'
+import { walkTree } from '../names.ts'
 
 /**
  * Every heredoc operator under `root`, in source order.
@@ -35,11 +36,7 @@ import type { HeredocOperator } from './types.ts'
  */
 export function heredocOperators(root: TSNodeLike): HeredocOperator[] {
   const found: HeredocOperator[] = []
-  const stack: TSNodeLike[] = [root]
-  for (;;) {
-    const node = stack.pop()
-    if (node === undefined) break
-    stack.push(...node.children)
+  for (const node of walkTree(root)) {
     if (node.type !== HEREDOC_START) continue
     if (node.startIndex === undefined || node.endIndex === undefined) continue
     const delimiter = cleanDelimiter(node.text)

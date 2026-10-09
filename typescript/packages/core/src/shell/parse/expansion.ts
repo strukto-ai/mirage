@@ -1,6 +1,7 @@
 import type { Node } from 'web-tree-sitter'
 import { badSubstitution } from '../parameter.ts'
 import { constructEnd } from './heredoc/line.ts'
+import { walkTree } from './names.ts'
 
 /**
  * Spell parameter expansions the way the grammar can read them.
@@ -19,11 +20,7 @@ import { constructEnd } from './heredoc/line.ts'
 export function expansionSource(text: string, root: Node): string {
   if (!text.includes('${')) return text
   const opens: [Node, Node[]][] = []
-  const stack = [root]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    if (node === undefined) break
-    stack.push(...node.children)
+  for (const node of walkTree(root)) {
     for (const [index, child] of node.children.entries()) {
       if (child.type === '${') opens.push([child, node.children.slice(index + 1)])
     }

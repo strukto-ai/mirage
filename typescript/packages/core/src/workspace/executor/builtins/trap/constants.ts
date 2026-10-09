@@ -22,9 +22,15 @@ export const EXIT_EVENT = 'EXIT'
 // mirage runs none.
 export const PSEUDO_SIGNALS: ReadonlySet<string> = new Set(['DEBUG'])
 
-// The events mirage runs, in the order `trap -p` lists them: bash's
-// signal numbers put EXIT (0) first and its pseudo-signals last.
-export const RUN_EVENTS: readonly TrapEvent[] = [TrapEvent.Exit, TrapEvent.Err, TrapEvent.Return]
+// The events mirage runs, in the order `trap -p` lists them (bash's
+// signal numbers put EXIT (0) first and its pseudo-signals last), each
+// with its session fields: the action, and the flag a registration in
+// this scope clears.
+export const RUN_EVENTS = {
+  [TrapEvent.Exit]: ['exitTrap', 'exitTrapInherited'],
+  [TrapEvent.Err]: ['errTrap', 'errTrapHidden'],
+  [TrapEvent.Return]: ['returnTrap', 'returnTrapHidden'],
+} as const
 
 // The highest signal number bash lists.
 export const SIGNAL_MAX = 64

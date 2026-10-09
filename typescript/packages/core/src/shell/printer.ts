@@ -26,6 +26,7 @@ import { BASH_KEYWORDS } from './parse/constants.ts'
 import { delimiterEnd } from './parse/heredoc/reader.ts'
 import type { Heredoc } from './parse/heredoc/types.ts'
 import { NodeType as NT, type TSNodeLike } from './types.ts'
+import { singleQuote } from '../utils/quote.ts'
 
 const INDENT = '    '
 const CONTINUATION = /\\\n[ \t]*/g
@@ -75,10 +76,6 @@ function definitionOf(body: readonly TSNodeLike[]): TSNodeLike {
   let parent = node.parent ?? null
   while (parent !== null && parent.type !== NT.FUNCTION_DEFINITION) parent = parent.parent ?? null
   return parent ?? node
-}
-
-function requote(text: string): string {
-  return `'${text.replaceAll("'", "'\\''")}'`
 }
 
 function start(node: TSNodeLike): number {
@@ -420,7 +417,7 @@ class Printer {
     }
     this.deferred.push(`${body}${delimiter}\n`)
     const shown = fd !== null && /[1-9]/.test(fd) ? fd : ''
-    return shown + operator + (quoted ? requote(delimiter) : word)
+    return shown + operator + (quoted ? singleQuote(delimiter) : word)
   }
 
   /**
@@ -431,7 +428,7 @@ class Printer {
   word(node: TSNodeLike): string {
     const kind = node.type
     const text = getText(node)
-    if (kind === NT.ANSI_C_STRING) return requote(decodeAnsiC(text.slice(2, -1)))
+    if (kind === NT.ANSI_C_STRING) return singleQuote(decodeAnsiC(text.slice(2, -1)))
     if (kind === 'translated_string') return text.slice(1)
     if (kind === NT.COMMAND_SUBSTITUTION && text.startsWith('$(')) {
       const inner = node.children.filter((c) => c.type !== '$(' && c.type !== ')')

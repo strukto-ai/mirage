@@ -69,12 +69,12 @@ import {
 import { expandRedirect } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
-import type { ArithWrite } from '../../shell/types.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { landArith } from '../session/elements.ts'
-import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
+import { landedArith } from '../session/elements.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import {
+  type BodyRun,
   type CforEval,
   executeBody,
   handleCase,
@@ -82,13 +82,12 @@ import {
   handleFor,
   handleIf,
   handleSelect,
-  handleUntil,
   handleWhile,
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
 import { aliasMark, aliasView } from '../executor/builtins/alias/index.ts'
-import { isValidName } from '../executor/builtins/shared.ts'
+import { fail, isValidName, result } from '../executor/builtins/shared.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -106,7 +105,7 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { definedAt } from './occurrence.ts'
 import type { SessionView } from '../../view/types.ts'
-import { randomReader, sessionArith, sessionView } from '../session/state.ts'
+import { sessionView } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { drained } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
@@ -226,35 +225,14 @@ async function evalCforExpr(
   callStack: CallStack | null,
   view?: SessionView,
 ): Promise<number> {
-  const session = context.session
   if (exprs.length === 0) return dflt
   const text = await slotText(exprs, context, executeFn, callStack, view)
-  const reader = randomReader(session)
-  let error: ArithError | ReadonlyError | null = null
-  let writes: readonly ArithWrite[] = []
-  let value = 0n
   try {
-    const result: ArithResult = sessionArith(session, text, reader)
-    writes = result.writes
-    value = result.value
+    return Number(await landedArith(context.session, view ?? null, text))
   } catch (err) {
-    if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
-    // bash bound the assignments made before the error; they land
-    // before the error is reported.
-    error = err
-    writes = err.writes
+    if (err instanceof ReadonlyError && err.inSubscript) throw err.signal()
+    throw err
   }
-  // Through the session view, so a preSession rule governs an arithmetic assignment
-  // exactly as it governs `X=1` and a hidden name refuses at its own
-  // write; in evaluation order, so a bare name and its element 0 land as
-  // the expression wrote them.
-  await landArith(session, view ?? null, writes, reader)
-  if (error instanceof ReadonlyError) {
-    if (error.inSubscript) throw error.signal()
-    throw error
-  }
-  if (error !== null) throw error
-  return Number(value)
 }
 
 /**
@@ -640,10 +618,6 @@ async function runRedirected(
       forks(command, context),
       namespace,
     )
-  // `exec > file` with no command installs the redirects on the shell
-  // for every later statement, rather than applying them to one
-  // command. `exec cmd > file` still has a command and falls through
-  // to the ordinary path, which refuses the command form.
   if (isBareExec(command)) {
     return await installExecRedirects(dispatch, session, redirects, stdin, expand)
   }
@@ -855,10 +829,9 @@ export interface ExecuteNodeDeps {
 }
 
 /**
- * Whether a redirected statement's command is a bare `exec`: a command
- * name and no arguments, so its redirects are the shell's own rather
- * than one command's. `exec cmd` is not bare and falls through to the
- * command path, which refuses it.
+ * Whether a redirected statement's command is a bare `exec`, which installs
+ * its redirects on the shell for every later statement; `exec cmd` is a
+ * command.
  */
 function isBareExec(command: TSNodeLike | null): boolean {
   if (command?.type !== NT.COMMAND) return false
@@ -1014,6 +987,15 @@ function diagnosticStderr(node: TSNodeLike, context: EvaluationContext): Uint8Ar
   return result
 }
 
+/**
+ * Walk one node. The scope and signal it runs under are bound into
+ * `executeFn`, so a `$(...)` in a background job never dies of the caller's
+ * abort. `set -n` stops every node at any depth, as GNU answers `if true;
+ * then set -n; echo BAD; fi` with nothing; the program loop's own stop is
+ * what silences `set -v` for the lines it never reads. `ownDiagnostics`:
+ * whether a node drained into the sink flushes its own diagnostics; a
+ * redirect's simple command leaves them for the redirect to put outside it.
+ */
 async function executeNodeBody(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
@@ -1021,17 +1003,9 @@ async function executeNodeBody(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   executionScope: ExecutionScope,
-  // Whether a node drained into the sink flushes its own diagnostics; a
-  // redirect's simple command leaves them for the redirect to put outside it.
   ownDiagnostics = true,
 ): Promise<Result> {
   const session = context.session
-  // The scope and signal this subtree runs under are the ones its nested
-  // evaluations run under, bound into `executeFn` here, at the one entry point
-  // every node goes through, as Python binds them into `execute_fn`: a
-  // background job runs without the caller's signal, and so must the lines
-  // it evaluates, or a `$(...)` inside the job would die of an abort that
-  // was never the job's.
   const inner = deps.executeFn
   const signal = deps.signal
   deps = {
@@ -1089,6 +1063,7 @@ async function executeNodeBody(
   // ambient frame cannot identify this node's nested evaluations.
   const executeFn: ExecuteFn = (cmd, opts) => deps.executeFn(cmd, { context, ...opts })
   const kind = nodeKind(node)
+  const view = sessionView(session, registry.policies, context.frame.diagnostics)
   // A root run on a caller's frames is the caller's own line (eval,
   // source, an alias, `$( )`); one given none is a shell of its own.
   const inline = callStack !== null
@@ -1099,16 +1074,6 @@ async function executeNodeBody(
   // a group, a loop, a list, a subshell or a nested shell alike.
   if (STREAMING_KINDS.has(kind)) stdin = share(stdin)
 
-  // `set -n` reads without executing, and it stops *everything* after
-  // it, at every depth: GNU answers `if true; then set -n; echo BAD; fi`
-  // and `f(){ set -n; echo BAD; }; f` with nothing at all. Stated here,
-  // at the one entry point every node goes through, rather than in each
-  // statement runner — the program loop, the subshell body, a group, a
-  // function body and every loop body are five places for one rule to
-  // drift, and it did: the check lived in the program loop alone, so
-  // `set -n` worked flat and did nothing one construct deep. The program
-  // loop keeps its own `break` as the reader-level stop, which is also
-  // what silences `set -v` for the lines it never reads.
   if (session.shellOptions.noexec === true) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
@@ -1224,7 +1189,7 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.COMMAND) {
-    const result = await runInCommandScope(() =>
+    const ran = await runInCommandScope(() =>
       executeCommand(
         recurse,
         dispatch,
@@ -1245,7 +1210,7 @@ async function executeNodeBody(
         sink,
       ),
     )
-    return sink === undefined ? result : drained(sink, ...result)
+    return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   if (kind === NodeKind.PIPELINE) {
@@ -1253,7 +1218,7 @@ async function executeNodeBody(
     // followed by `|` closes over everything to its left, so the stages
     // are read the way bash reads them rather than as the parse nested
     // them (see getPipelineStages).
-    const result = await runPipeline(
+    const ran = await runPipeline(
       recurse,
       dispatch,
       executeFn,
@@ -1267,7 +1232,7 @@ async function executeNodeBody(
       jobTable.processes,
       sink,
     )
-    return sink === undefined ? result : drained(sink, ...result)
+    return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   if (kind === NodeKind.LIST) {
@@ -1295,7 +1260,7 @@ async function executeNodeBody(
       jobTable.processes,
       sink,
     )
-    const result =
+    const ran =
       continuation.length === 0
         ? await runLeft(context, stdin, callStack)
         : await runContinuation(
@@ -1308,7 +1273,7 @@ async function executeNodeBody(
             callStack,
             executeFn,
           )
-    return sink === undefined ? result : drained(sink, ...result)
+    return sink === undefined ? ran : drained(sink, ...ran)
   }
 
   if (kind === NodeKind.SUBSHELL) {
@@ -1393,79 +1358,25 @@ async function executeNodeBody(
     return result
   }
 
-  if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
+  if (kind === NodeKind.ARITH) {
     const text = getText(node)
-    const expr = await expandArith(
-      node,
-      context,
-      executeFn,
-      callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-    )
-    const reader = randomReader(session)
-    let error: ArithError | ReadonlyError | null = null
-    let writes: readonly ArithWrite[] = []
-    let value = 0n
+    const expr = await expandArith(node, context, executeFn, callStack, view)
+    let value: bigint
     try {
-      // Reads resolve against the visible env so a hidden name counts
-      // as unset; a hidden write refuses at its own write below, in this
-      // command's own voice like the readonly one.
-      const result: ArithResult = sessionArith(session, expr, reader)
-      writes = result.writes
-      value = result.value
+      value = await landedArith(session, view, expr)
     } catch (err) {
+      if (err instanceof PolicyDenied) return fail(text, `bash: ${err.message}\n`)
       if (!(err instanceof ArithError || err instanceof ReadonlyError)) throw err
-      // bash bound the assignments made before the error; they land
-      // before the error is reported.
-      error = err
-      writes = err.writes
+      if (err.inSubscript) throw err.signal()
+      return fail(text, `bash: ${err instanceof ArithError ? '((: ' : ''}${err.message}\n`)
     }
-    try {
-      await landArith(
-        session,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-        writes,
-        reader,
-      )
-    } catch (err) {
-      if (!(err instanceof PolicyDenied)) throw err
-      const errBytes = encodeText(`bash: ${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-      ]
-    }
-    if (error instanceof ReadonlyError) {
-      if (error.inSubscript) throw error.signal()
-      const errBytes = encodeText(`bash: ${error.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-      ]
-    }
-    if (error !== null) {
-      if (error.inSubscript) throw error.signal()
-      const errBytes = encodeText(`bash: ((: ${error.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-      ]
-    }
-    const code = value !== 0n ? 0 : 1
-    return [
-      null,
-      new IOResult({ exitCode: code }),
-      new ExecutionNode({ command: text, exitCode: code }),
-    ]
+    return result(text, { exitCode: value !== 0n ? 0 : 1 })
   }
 
-  if (kind === NodeKind.COMPOUND) {
-    return executeBody(
+  const run: BodyRun = (nodes, bound) =>
+    executeBody(
       stream,
-      node.namedChildren,
+      nodes,
       context,
       stdin,
       callStack,
@@ -1475,67 +1386,25 @@ async function executeNodeBody(
       registry.decisions,
       executeFn,
       sink ?? null,
+      bound,
     )
-  }
+
+  if (kind === NodeKind.COMPOUND) return run(node.namedChildren)
 
   if (kind === NodeKind.IF) {
     const [branches, elseBody] = getIfBranches(node)
-    return handleIf(
-      stream,
-      branches,
-      elseBody,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      agentId,
-      deps.handed ?? null,
-      registry.decisions,
-      executeFn,
-      sink ?? null,
-    )
+    return handleIf(run, branches, elseBody, session)
   }
 
   if (kind === NodeKind.CFOR) {
     const [exprs, body] = getCforParts(node)
-    const evalExpr: CforEval = (e, d) =>
-      evalCforExpr(
-        e,
-        d,
-        context,
-        executeFn,
-        callStack,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-      )
-    return callStack.loop(() =>
-      handleCfor(
-        stream,
-        exprs,
-        body,
-        evalExpr,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        agentId,
-        deps.handed ?? null,
-        registry.decisions,
-        executeFn,
-        sink ?? null,
-      ),
-    )
+    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, context, executeFn, callStack, view)
+    return callStack.loop(() => handleCfor(run, exprs, body, evalExpr, session))
   }
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
     const [variable, values, body] = getForParts(node)
-    if (!isValidName(variable)) {
-      const err = encodeText(`bash: \`${variable}': not a valid identifier\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: kind, exitCode: 1, stderr: err }),
-      ]
-    }
+    if (!isValidName(variable)) return fail(kind, `bash: \`${variable}': not a valid identifier\n`)
     const resolved = await runInCommandScope(async () => {
       const classified = await expandAndClassify(
         values,
@@ -1544,7 +1413,7 @@ async function executeNodeBody(
         registry,
         session.cwd,
         callStack,
-        sessionView(session, registry.policies, context.frame.diagnostics),
+        view,
       )
       // The loop word list is consumed by the shell (WordPolicy.SHELL):
       // globs resolve to matches before iteration starts.
@@ -1557,123 +1426,42 @@ async function executeNodeBody(
       )
     })
     if (kind === NodeKind.SELECT) {
+      const signal = mergeSignals(deps.signal, context.frame.abortSignal)
       return callStack.loop(() =>
         handleSelect(
-          stream,
+          run,
           variable,
           resolved,
           body,
           context,
           stdin,
-          callStack,
           registry.policies,
-          jobTable,
-          agentId,
-          deps.handed ?? null,
-          registry.decisions,
-          mergeSignals(deps.signal, context.frame.abortSignal),
+          signal,
           sink,
-          executeFn,
         ),
       )
     }
     return callStack.loop(() =>
-      handleFor(
-        stream,
-        variable,
-        resolved,
-        body,
-        context,
-        stdin,
-        callStack,
-        registry.policies,
-        jobTable,
-        agentId,
-        deps.handed ?? null,
-        registry.decisions,
-        executeFn,
-        sink ?? null,
-      ),
+      handleFor(run, variable, resolved, body, context, registry.policies),
     )
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
     const [test, body] = getWhileParts(node)
-    if (kind === NodeKind.UNTIL) {
-      return callStack.loop(() =>
-        handleUntil(
-          stream,
-          test,
-          body,
-          context,
-          stdin,
-          callStack,
-          jobTable,
-          agentId,
-          deps.handed ?? null,
-          registry.decisions,
-          executeFn,
-          sink ?? null,
-        ),
-      )
-    }
-    return callStack.loop(() =>
-      handleWhile(
-        stream,
-        test,
-        body,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        agentId,
-        deps.handed ?? null,
-        registry.decisions,
-        executeFn,
-        sink ?? null,
-      ),
-    )
+    return callStack.loop(() => handleWhile(run, test, body, session, kind === NodeKind.UNTIL))
   }
 
   if (kind === NodeKind.CASE) {
-    const wordNode = getCaseWord(node)
-    const word = await expandNode(
-      wordNode,
-      context,
-      executeFn,
-      callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-    )
+    const word = await expandNode(getCaseWord(node), context, executeFn, callStack, view)
     const items: [string[], TSNodeLike[], string][] = []
     for (const [patternNodes, body, terminator] of getCaseItems(node)) {
       const patterns: string[] = []
       for (const patternNode of patternNodes) {
-        patterns.push(
-          await expandPattern(
-            patternNode,
-            context,
-            executeFn,
-            callStack,
-            sessionView(session, registry.policies, context.frame.diagnostics),
-          ),
-        )
+        patterns.push(await expandPattern(patternNode, context, executeFn, callStack, view))
       }
       items.push([patterns, body, terminator])
     }
-    return handleCase(
-      stream,
-      word,
-      items,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      agentId,
-      deps.handed ?? null,
-      registry.decisions,
-      executeFn,
-      sink ?? null,
-    )
+    return handleCase(run, word, items, session)
   }
 
   if (kind === NodeKind.FUNCTION_DEF) {
@@ -1682,26 +1470,17 @@ async function executeNodeBody(
       // `readonly -f f` froze the body: either definition syntax refuses
       // with `f: readonly function`, exit 1, and the old body stays,
       // pinned on 5.2.37.
-      const err = encodeText(`bash: ${name}: readonly function\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: `function ${name}`, exitCode: 1, stderr: err }),
-      ]
+      return fail(`function ${name}`, `bash: ${name}: readonly function\n`)
     }
     const source = getFunctionSource(node)
     session.functions[name] = source
-    const mark: [number, number] = [
-      session.parseCurrent,
-      session.parseRow + (node.startPosition?.row ?? 0),
-    ]
     session.functionSites.set(name, {
       source,
-      mark,
+      mark: aliasMark(session, node.startPosition?.row ?? 0),
       origin: definedAt(node, deps.handed ?? null),
       aliases: aliasView(session, node, aliasMark(session, readRow(node))),
     })
-    return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
+    return result(`function ${name}`)
   }
 
   if (kind === NodeKind.DECLARATION) {
@@ -1719,47 +1498,17 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(
-      getUnsetArgs(node),
-      session,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-    )
+    return handleUnset(getUnsetArgs(node), session, view)
   }
 
   if (kind === NodeKind.TEST) {
     const opener = node.children[0]?.type ?? '['
     if (opener === '[[') {
-      const tree = await expandDoubleBracket(
-        node,
-        context,
-        executeFn,
-        callStack,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-      )
-      return handleTest(
-        dispatch,
-        deps.namespace,
-        tree,
-        session,
-        '[[',
-        sessionView(session, registry.policies, context.frame.diagnostics),
-      )
+      const tree = await expandDoubleBracket(node, context, executeFn, callStack, view)
+      return handleTest(dispatch, deps.namespace, tree, session, '[[', view)
     }
-    const expanded = await expandTestExpr(
-      node,
-      context,
-      executeFn,
-      callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-    )
-    return handleTest(
-      dispatch,
-      deps.namespace,
-      expanded,
-      session,
-      '[',
-      sessionView(session, registry.policies, context.frame.diagnostics),
-    )
+    const expanded = await expandTestExpr(node, context, executeFn, callStack, view)
+    return handleTest(dispatch, deps.namespace, expanded, session, '[', view)
   }
 
   if (kind === NodeKind.NEGATED) {
@@ -1774,7 +1523,6 @@ async function executeNodeBody(
     return await executeAssignment(node, context, executeFn, registry, deps.namespace, callStack)
   }
 
-  // Assignment-only statement (a=1 b=2).
   if (kind === NodeKind.VAR_ASSIGNS) {
     const subSeq = context.frame.cmdsubSeq
     let mergedIo = new IOResult()
@@ -1790,13 +1538,7 @@ async function executeNodeBody(
     return [null, mergedIo, new ExecutionNode({ command: getText(node), exitCode: code })]
   }
 
-  // Constructs the parser accepts but the executor cannot honor (e.g.
-  // C-style `for ((;;))`). Mirrors the unsupported-builtin diagnostic
-  // so agents see a capability gap, not a crash.
-  const unsupportedErr = encodeText(`mirage: unsupported shell construct: ${node.type}\n`)
-  return [
-    null,
-    new IOResult({ exitCode: 2, stderr: unsupportedErr }),
-    new ExecutionNode({ command: node.text, exitCode: 2, stderr: unsupportedErr }),
-  ]
+  // Constructs the parser accepts but the executor cannot honor
+  // (tree-sitter ERROR nodes, future grammar additions).
+  return fail(node.text, `mirage: unsupported shell construct: ${node.type}\n`, 2)
 }

@@ -5,6 +5,7 @@ from typing import Any, cast
 import tree_sitter
 
 from mirage.shell.parse.heredoc.types import HeredocSource
+from mirage.shell.parse.names import walk_tree
 
 PREFIX = re.compile(
     rb"time(?=[ \t\r\n;|&)]|$)[ \t]*"
@@ -56,11 +57,8 @@ def lower_timing(
     marks: list[tuple[int, str, bool, int, int]] = []
     while True:
         root = parser.parse(data).root_node
-        stack = [root]
         edits: list[tuple[int, int, bytes]] = []
-        while stack:
-            node = stack.pop()
-            stack.extend(node.children)
+        for node in walk_tree(root):
             if not node.children:
                 continue
             negated = node.type == "negated_command"

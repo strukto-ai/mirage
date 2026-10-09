@@ -16,14 +16,13 @@ import type { ReaderToken } from './types.ts'
 
 /** An error bash reports while reading a line, in its own words: the lines
  * without a prefix, the status it refuses the line with, the text it names
- * (empty at the end of input), where that text sits, and whether the input
+ * (empty at the end of input), where that text ends, and whether the input
  * ended inside a construct. Mirrors Python's ReaderRefusal. */
 export class ReaderRefusal extends Error {
   constructor(
     readonly lines: string[],
     public status: number,
     readonly offending: string,
-    readonly start: number,
     readonly end: number,
     readonly eof: boolean,
   ) {

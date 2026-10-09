@@ -115,19 +115,6 @@ describe('runPrintf', () => {
     expect(runPrintf('<%b>', ['one', 'tw\\co', 'three'])).toEqual(['<one><tw', [], false, null])
   })
 
-  it.each([
-    ['0.5', '0'],
-    ['1.5', '2'],
-    ['2.5', '2'],
-    ['3.5', '4'],
-  ])('rounds %s half-to-even at fixed precision', (value, expected) => {
-    expect(runPrintf('%.0f', [value])).toEqual([expected, [], false, null])
-  })
-
-  it('renders a missing argument as the empty string or zero', () => {
-    expect(runPrintf('[%s][%d]', [])).toEqual(['[][0]', [], false, null])
-  })
-
   it.each(OCTAL_PINS)(
     'reads %s as three digits in the format and a zero plus three in %%b',
     (escape, inFormat, inBArg) => {

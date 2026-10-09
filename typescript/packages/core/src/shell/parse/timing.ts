@@ -2,6 +2,7 @@ import type { NativeParser, WrappedNode } from './engine.ts'
 import type { HeredocNode } from './heredoc/node.ts'
 import type { ShellNode } from '../types.ts'
 import type { HeredocSource } from './heredoc/types.ts'
+import { walkTree } from './names.ts'
 
 const PREFIX =
   /^time(?=[ \t\r\n;|&)]|$)[ \t]*(?:(-p)(?=[ \t\r\n;|&)]|$)[ \t]*)?(?:--(?=[ \t\r\n;|&)]|$)[ \t]*)?/
@@ -39,12 +40,8 @@ export function lowerTiming(
   for (;;) {
     const root = parser.parse(text)?.rootNode
     if (root === undefined) break
-    const stack = [root]
     const edits: [number, number, string][] = []
-    while (stack.length > 0) {
-      const node = stack.pop()
-      if (node === undefined) break
-      stack.push(...node.children)
+    for (const node of walkTree(root)) {
       const negated = node.type === 'negated_command'
       if (negated) {
         const body = node.namedChildren[0]

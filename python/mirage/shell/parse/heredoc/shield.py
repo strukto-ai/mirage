@@ -25,6 +25,7 @@ from mirage.shell.parse.heredoc.constants import (
 )
 from mirage.shell.parse.heredoc.delimiter import clean_delimiter
 from mirage.shell.parse.heredoc.types import HeredocOperator
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.types import TSNodeLike
 
 
@@ -39,10 +40,7 @@ def heredoc_operators(root: TSNodeLike) -> list[HeredocOperator]:
         root (TSNodeLike): the parsed tree.
     """
     found: list[HeredocOperator] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        stack.extend(node.children)
+    for node in walk_tree(root):
         if node.type != HEREDOC_START:
             continue
         delimiter = clean_delimiter(decode_text(node.text or b""))

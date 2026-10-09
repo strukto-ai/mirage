@@ -121,39 +121,23 @@ function constant(text: string): bigint | string {
   return value === null ? 'value too great for base' : wrapInt64(value)
 }
 
-/** One binary operator over 64-bit wrapping integers, `/` and `%` aside. */
-function binop(op: string, a: bigint, b: bigint): bigint {
-  switch (op) {
-    case '+':
-      return wrapInt64(a + b)
-    case '-':
-      return wrapInt64(a - b)
-    case '*':
-      return wrapInt64(a * b)
-    case '<<':
-      return wrapInt64(a << (b & 63n))
-    case '>>':
-      return a >> (b & 63n)
-    case '&':
-      return a & b
-    case '|':
-      return a | b
-    case '^':
-      return a ^ b
-    case '==':
-      return a === b ? 1n : 0n
-    case '!=':
-      return a !== b ? 1n : 0n
-    case '<':
-      return a < b ? 1n : 0n
-    case '<=':
-      return a <= b ? 1n : 0n
-    case '>':
-      return a > b ? 1n : 0n
-    default:
-      return a >= b ? 1n : 0n
-  }
-}
+/** The binary operators over 64-bit wrapping integers, `/`, `%` and `**` aside. */
+const BINARY = {
+  '+': (a, b) => wrapInt64(a + b),
+  '-': (a, b) => wrapInt64(a - b),
+  '*': (a, b) => wrapInt64(a * b),
+  '<<': (a, b) => wrapInt64(a << (b & 63n)),
+  '>>': (a, b) => a >> (b & 63n),
+  '&': (a, b) => a & b,
+  '|': (a, b) => a | b,
+  '^': (a, b) => a ^ b,
+  '==': (a, b) => (a === b ? 1n : 0n),
+  '!=': (a, b) => (a !== b ? 1n : 0n),
+  '<': (a, b) => (a < b ? 1n : 0n),
+  '<=': (a, b) => (a <= b ? 1n : 0n),
+  '>': (a, b) => (a > b ? 1n : 0n),
+  '>=': (a, b) => (a >= b ? 1n : 0n),
+} satisfies Record<string, (a: bigint, b: bigint) => bigint>
 
 /** `base ** exponent` modulo 2**64, by squaring. */
 function power(base: bigint, exponent: bigint): bigint {
@@ -400,7 +384,7 @@ class Reader {
       if (b < 0n) throw this.fail('exponent less than 0')
       return power(a, b)
     }
-    return binop(op, a, b)
+    return BINARY[op as keyof typeof BINARY](a, b)
   }
 
   private unary(): bigint {
@@ -630,7 +614,6 @@ class ArithRecord {
 export function evaluateArith(
   expr: string,
   env: Readonly<Record<string, string>>,
-  depth = 0,
   elements: ElementOps | null = null,
   readVar: ((name: string) => string | null) | null = null,
   wroteVar: ((name: string, value: string) => void) | null = null,
@@ -641,8 +624,8 @@ export function evaluateArith(
   const record = new ArithRecord(env, elements, readVar, wroteVar, nounset, frozen)
   let value: bigint
   try {
-    value = record.evaluate(expr, depth, false)
-    if (added !== null) value = wrapInt64(value + record.evaluate(added, depth, false))
+    value = record.evaluate(expr, 0, false)
+    if (added !== null) value = wrapInt64(value + record.evaluate(added, 0, false))
   } catch (err) {
     if (err instanceof ArithError || err instanceof ReadonlyError) err.writes = [...record.writes]
     throw err

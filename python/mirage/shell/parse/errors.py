@@ -22,8 +22,7 @@ class ReaderRefusal(Exception):
         lines (list[str]): the diagnostic lines, without a prefix.
         status (int): the status bash refuses the line with.
         offending (str): the text bash names, empty at the end of input.
-        start (int): where that text starts in the line.
-        end (int): where it ends.
+        end (int): where that text ends in the line.
         eof (bool): the input ended inside a construct.
     """
 
@@ -32,7 +31,6 @@ class ReaderRefusal(Exception):
         lines: list[str],
         status: int,
         offending: str,
-        start: int,
         end: int,
         eof: bool,
     ) -> None:
@@ -40,7 +38,6 @@ class ReaderRefusal(Exception):
         self.lines = lines
         self.status = status
         self.offending = offending
-        self.start = start
         self.end = end
         self.eof = eof
 

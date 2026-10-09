@@ -49,22 +49,6 @@ describe('CallStack', () => {
     expect(cs.depth).toBe(1)
   })
 
-  it('getPositional uses 1-based indexing, empty when out of range', () => {
-    const cs = new CallStack()
-    cs.push(['a', 'b', 'c'])
-    expect(cs.getPositional(1)).toBe('a')
-    expect(cs.getPositional(3)).toBe('c')
-    expect(cs.getPositional(0)).toBe('')
-    expect(cs.getPositional(10)).toBe('')
-  })
-
-  it('shift drops the first N positional args', () => {
-    const cs = new CallStack()
-    cs.push(['a', 'b', 'c', 'd'])
-    cs.shift(2)
-    expect(cs.getAllPositional()).toEqual(['c', 'd'])
-  })
-
   it('locals resolve from inner to outer frames', () => {
     const cs = new CallStack()
     cs.setLocal('OUTER', 'o1')

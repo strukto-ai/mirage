@@ -17,7 +17,7 @@ from email.message import Message
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.smtp import send_raw
-from mirage.core.email.client import list_folder_entries, quote_mailbox
+from mirage.core.email.client import list_folder_entries, quote_string
 from mirage.core.email.config import EmailConfig
 
 logger = logging.getLogger(__name__)
@@ -80,14 +80,11 @@ async def save_sent_copy(
         )
         imap = await accessor.get_imap()
         response = await imap.append(
-            raw, mailbox=quote_mailbox(folder), flags=SEEN_FLAG
+            raw, mailbox=quote_string(folder), flags=SEEN_FLAG
         )
         if response.result != "OK":
             detail = " ".join(
-                line.decode(errors="replace")
-                if isinstance(line, (bytes, bytearray))
-                else str(line)
-                for line in (response.lines or [])
+                line.decode(errors="replace") for line in response.lines
             )
             raise ValueError(f"{folder}: {detail or response.result}")
     finally:

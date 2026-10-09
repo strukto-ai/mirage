@@ -33,8 +33,7 @@ import {
   sameNode,
 } from '../../shell/parse/index.ts'
 import { walkNamedOutsideDefs } from '../../shell/parse/names.ts'
-import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
-import { VarAttr, withValue } from '../../shell/variable.ts'
+import { type ManagedRef, type ShellVar, VarAttr, withValue } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { varHidden } from '../../utils/hidden.ts'
@@ -42,9 +41,8 @@ import { abortable, makeAbortError } from '../../utils/abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { sessionEntry } from '../session/session.ts'
 import { parseFunction } from '../../shell/helpers.ts'
-import { setSessionEntry, type SessionState } from '../session/session.ts'
+import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { deref } from '../session/state.ts'
 
 // Appended to an alias value before parsing it for the read walk: the
