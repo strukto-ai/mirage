@@ -512,10 +512,12 @@ export class Dispatcher {
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
     // mkdir(2) looks its name up first, so on a read-only region that lookup
-    // answers for the mode, after every other policy has spoken.
+    // answers for the mode, after every other policy has spoken. A dry run
+    // never looks, so it explains the mode's refusal.
     const looksUp =
       owner !== null &&
       name === 'mkdir' &&
+      explaining() === null &&
       effectivePathMode(call.path.virtual, owner.prefix, owner.mode) === MountMode.READ
     const boundary = looksUp
       ? new Boundary(this.policies, owner.prefix, undefined, sessionId(), this.decisions)

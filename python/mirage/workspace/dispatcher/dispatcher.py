@@ -704,8 +704,10 @@ class Dispatcher:
         await self._refuse_cross_mount(call, mount)
         # mkdir(2) looks its name up first, so on a read-only region that
         # lookup answers for the mode, after every other policy has spoken.
+        # A dry run never looks, so it explains the mode's refusal.
         looks_up = (
             name == "mkdir"
+            and explaining() is None
             and effective_path_mode(
                 call.path.virtual, mount.prefix, mount.mode
             )
