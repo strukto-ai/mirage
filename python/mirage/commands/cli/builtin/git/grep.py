@@ -2,6 +2,7 @@ import asyncio
 import logging
 import posixpath
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from dulwich.objects import Blob
@@ -53,7 +54,7 @@ from mirage.shell.bytes import (
     from_byte_view,
     utf8_locale,
 )
-from mirage.utils.posix import compile_posix_regex
+from mirage.utils.posix import compile_posix_regex, posix_line_matcher
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,7 @@ class GrepFlags:
     """A compiled search and its presentation, independent of content source.
 
     Args:
-        patterns (tuple[re.Pattern[str], ...]): alternative line matchers.
-        whole_word (bool): reject empty matches as Git requires for -w.
+        patterns (tuple[Callable[[str], bool], ...]): alternative line matchers.
         invert (bool): select nonmatching lines.
         numbers (bool): include line numbers.
         count (bool): print each matching file's line count.
@@ -76,8 +76,7 @@ class GrepFlags:
         utf8 (bool): match characters under a UTF-8 locale.
     """
 
-    patterns: tuple[re.Pattern[str], ...]
-    whole_word: bool
+    patterns: tuple[Callable[[str], bool], ...]
     invert: bool
     numbers: bool
     count: bool
@@ -140,7 +139,7 @@ def parse_flags(
                         pattern.flags,
                         utf8,
                     )
-                compiled.append(pattern)
+                compiled.append(posix_line_matcher(pattern, whole_word))
             except (PatternError, BreError, re.error) as exc:
                 raise GitError(
                     f"{origin}, '{part}': {str(exc).removeprefix('grep: ')}"
@@ -160,7 +159,6 @@ def parse_flags(
         binary = "text" if name == "text" else "skip"
     return GrepFlags(
         tuple(compiled),
-        whole_word,
         fl.as_bool("invert_match"),
         fl.as_bool("line_number"),
         fl.as_bool("count"),
@@ -170,21 +168,6 @@ def parse_flags(
         fl.as_bool("null"),
         binary,
         utf8,
-    )
-
-
-def matches(pattern: re.Pattern[str], line: str, nonempty: bool) -> bool:
-    """Test a line, retaining nonempty alternatives at an empty match's offset.
-
-    Args:
-        pattern (re.Pattern[str]): compiled matcher with word boundaries.
-        line (str): one input line in the matcher's byte or character view.
-        nonempty (bool): require the match to consume input, as Git -w does.
-    """
-    if not nonempty:
-        return pattern.search(line) is not None
-    return any(
-        match.start() != match.end() for match in pattern.finditer(line)
     )
 
 
@@ -205,11 +188,7 @@ def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
     selected = [
         (number, line)
         for number, line in enumerate(lines, 1)
-        if any(
-            matches(pattern, line, flags.whole_word)
-            for pattern in flags.patterns
-        )
-        != flags.invert
+        if any(matches(line) for matches in flags.patterns) != flags.invert
     ]
     matched = bool(selected)
     found = not matched if flags.listing == "files_without_match" else matched

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { classCharacters, compilePosixRegex, skipRawBytes, translateBracket } from './posix.ts'
+import {
+  classCharacters,
+  compilePosixRegex,
+  posixLineMatcher,
+  skipRawBytes,
+  translateBracket,
+} from './posix.ts'
 
 function bracket(pattern: string): string {
   const out: string[] = []
@@ -69,8 +75,16 @@ describe('C-locale case folding', () => {
     ['([A-Z]+)-\\1', 'Ab-aB', true],
     ['(É)-\\1', 'É-é', false],
     ['(É)-\\1', 'É-É', true],
+    ['^|needle', 'NEEDLE', true],
+    ['x?|needle', 'NEEDLE', true],
+    [String.raw`(x?|(foo) \2)`, 'FOO foo', true],
+    ['x?', '   ', false],
+    ['x?', '', true],
   ])('matches %s against %s', (source, text, expected) => {
     expect(compilePosixRegex(`^(?:${source})$`, 'i').test(text)).toBe(expected)
+    const matches = posixLineMatcher(compilePosixRegex(source, 'i'), true)
+    expect(matches(text)).toBe(expected && text.length > 0)
+    expect(matches(text)).toBe(expected && text.length > 0)
   })
   it('preserves captures, offsets and global state', () => {
     const regex = compilePosixRegex('(a)(b)?', 'ig')
@@ -83,6 +97,9 @@ describe('C-locale case folding', () => {
     expect([...(regex.exec('ÉAb a') ?? [])]).toEqual(['a', 'a', undefined])
     expect(regex.exec('ÉAb a')).toBeNull()
     expect(regex.lastIndex).toBe(0)
+    const matches = posixLineMatcher(regex)
+    expect(matches('ab')).toBe(true)
+    expect(matches('ab')).toBe(true)
   })
   it('preserves named captures, lookarounds and explicit indices', () => {
     const regex = compilePosixRegex('(?<=É)(?<Letter>A)(?=b)', 'di')
@@ -126,8 +143,17 @@ it.each([
   ['^.$', '😀', true],
   ['^.$', '\ud800\udc80', true],
   [String.raw`^\S$`, '😀', true],
+  ['^|😀', '😀', true],
+  ['^|😀', '!😀', true],
+  [String.raw`^|(?<!\w)😀`, 'x😀', false],
+  ['^|a', '😀a', true],
+  [String.raw`(?<!\w)(?:)(?!\w)`, 'a😀', false],
+  [String.raw`(?<!\w)(?:a*|😀)(?!\w)`, 'a😀', true],
+  ['^a', '😀a', false],
+  [String.raw`(?<![\s\S])a`, '😀a', false],
+  ['a$', '😀a', true],
 ])('matches characters, not raw bytes, in a UTF-8 subject: %s on %j', (source, text, expected) => {
-  expect(compilePosixRegex(source, '', true).test(text)).toBe(expected)
+  expect(posixLineMatcher(compilePosixRegex(source, '', true), true)(text)).toBe(expected)
 })
 
 it('keeps dotAll and ASCII classes in a UTF-8 subject', () => {

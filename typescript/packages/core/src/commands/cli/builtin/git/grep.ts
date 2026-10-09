@@ -2,7 +2,7 @@ import { concat } from '../../../../io/cachable_iterator.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { byteView, encodeText, fromByteView, utf8Locale } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { compilePosixRegex } from '../../../../utils/posix.ts'
+import { compilePosixRegex, posixLineMatcher } from '../../../../utils/posix.ts'
 import { compilePattern } from '../../../builtin/grep_pattern.ts'
 import { RegexSyntax } from '../../../builtin/types.ts'
 import { BreError, PosixSyntax, translateEre } from '../../../builtin/utils/bre.ts'
@@ -32,8 +32,7 @@ import { checkSwitches, fatal, splitMarked, startPoint, verbUsage } from './util
 
 /** A compiled search and presentation, independent of content source. */
 interface GrepFlags {
-  readonly patterns: readonly RegExp[]
-  readonly wholeWord: boolean
+  readonly patterns: readonly ((line: string) => boolean)[]
   readonly invert: boolean
   readonly numbers: boolean
   readonly count: boolean
@@ -60,7 +59,7 @@ function parseFlags(
   }
   const ignoreCase = fl.asBool('ignore_case')
   const wholeWord = fl.asBool('word_regexp')
-  const compiled: RegExp[] = []
+  const compiled: ((line: string) => boolean)[] = []
   for (const value of patterns) {
     for (const part of value.split('\n')) {
       try {
@@ -74,7 +73,7 @@ function parseFlags(
             : compilePattern(byteView(part, utf8), ignoreCase, fixed, false, syntax, utf8)
         if (wholeWord)
           pattern = compilePosixRegex(`(?<!\\w)(?:${pattern.source})(?!\\w)`, pattern.flags, utf8)
-        compiled.push(pattern)
+        compiled.push(posixLineMatcher(pattern, wholeWord))
       } catch (err) {
         if (err instanceof PatternError || err instanceof BreError || err instanceof SyntaxError)
           throw new GitError(`${origin}, '${part}': ${err.message.replace(/^grep: /, '')}`)
@@ -93,7 +92,6 @@ function parseFlags(
   for (const name of fl.typedOrder('text', 'args_I')) binary = name === 'text' ? 'text' : 'skip'
   return {
     patterns: compiled,
-    wholeWord,
     invert: fl.asBool('invert_match'),
     numbers: fl.asBool('line_number'),
     count: fl.asBool('count'),
@@ -106,24 +104,6 @@ function parseFlags(
   }
 }
 
-/** Test a line, retaining nonempty alternatives at an empty match's offset. */
-function matches(pattern: RegExp, line: string, nonempty: boolean): boolean {
-  let match = pattern.exec(line)
-  while (nonempty && match !== null && match[0] === '') {
-    const tail = line.slice(match.index)
-    const remaining = pattern.unicode ? Array.from(tail).length : tail.length
-    // Reject this endpoint without slicing the subject or adding capture groups.
-    // The engine can then backtrack into a nonempty alternative at the same offset.
-    const retry = compilePosixRegex(
-      `(?:${pattern.source})(?![\\s\\S]{${String(remaining)}}$)`,
-      pattern.flags + 'g',
-    )
-    retry.lastIndex = match.index
-    match = retry.exec(line)
-  }
-  return match !== null
-}
-
 /** Select and render one file, preserving its content bytes. */
 function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Array, boolean] {
   const binary = data.subarray(0, BINARY_SNIFF).includes(0) && flags.binary !== 'text'
@@ -132,7 +112,7 @@ function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Arra
   if (lines.at(-1) === '') lines.pop()
   const selected: [number, string][] = []
   for (const [index, line] of lines.entries()) {
-    if (flags.patterns.some((pattern) => matches(pattern, line, flags.wholeWord)) !== flags.invert)
+    if (flags.patterns.some((matches) => matches(line)) !== flags.invert)
       selected.push([index + 1, line])
   }
   const matched = selected.length > 0

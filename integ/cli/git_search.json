@@ -161,11 +161,15 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "printf '\\n!needle\\nneedle\\nNEEDLE\\nfoo foo\\n' > '/repo/search-case/docs/word\tfile.txt' && git -C /repo/search-case add 'docs/word\tfile.txt' && GIT_AUTHOR_NAME=Search GIT_AUTHOR_EMAIL=search@example.com GIT_COMMITTER_NAME=Search GIT_COMMITTER_EMAIL=search@example.com git -C /repo/search-case commit -qm words && git -C /repo/search-case grep -winE '^|needle' HEAD -- 'docs/word\tfile.txt' && git -C /repo/search-case grep -wnG '\\(^\\|\\(foo\\) \\2\\)' HEAD -- 'docs/word\tfile.txt' && git -C /repo/search-case/docs grep -n needle 'HEAD:docs/word\tfile.txt' && git -C /repo/search-case/docs grep -nz needle 'HEAD:docs/word\tfile.txt'",
+      "command": "printf '\\n!needle\\nneedle\\nNEEDLE\\nfoo foo\\n' > '/repo/search-case/docs/word\tfile.txt' && git -C /repo/search-case add 'docs/word\tfile.txt' && GIT_AUTHOR_NAME=Search GIT_AUTHOR_EMAIL=search@example.com GIT_COMMITTER_NAME=Search GIT_COMMITTER_EMAIL=search@example.com git -C /repo/search-case commit -qm words && git -C /repo/search-case grep -winE '^|needle' HEAD -- 'docs/word\tfile.txt' && git -C /repo/search-case grep -wnG '\\(^\\|\\(foo\\) \\2\\)' HEAD -- 'docs/word\tfile.txt' && git -C /repo/search-case/docs grep -n needle 'HEAD:docs/word\tfile.txt' && git -C /repo/search-case/docs grep -nz needle 'HEAD:docs/word\tfile.txt' && printf '%48000sneedle\\n' '' > /repo/search-case/docs/long.txt && git -C /repo/search-case add docs/long.txt && git -C /repo/search-case grep -wiqE 'x?|NEEDLE' -- docs/long.txt && { git -C /repo/search-case grep -wqE 'x?' -- docs/long.txt; test $? -eq 1; }",
       "expect": {
         "exit": 0,
         "stdout": "HEAD:\"docs/word\\tfile.txt\":2:!needle\nHEAD:\"docs/word\\tfile.txt\":3:needle\nHEAD:\"docs/word\\tfile.txt\":4:NEEDLE\nHEAD:\"docs/word\\tfile.txt\":5:foo foo\n\"../HEAD:docs/word\\tfile.txt\":2:!needle\n\"../HEAD:docs/word\\tfile.txt\":3:needle\n../HEAD:docs/word\tfile.txt\u00002\u0000!needle\n../HEAD:docs/word\tfile.txt\u00003\u0000needle\n",
-        "stderr": ""
+        "stderr": "",
+        "elapsed": {
+          "min": 0,
+          "max": 5
+        }
       }
     },
     {
