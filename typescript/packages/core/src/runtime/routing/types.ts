@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../base.ts'
-import type { EvalValue, ScriptSource } from '../types.ts'
+import type { EvalValue, RuntimeIdentity, ScriptSource } from '../types.ts'
 
 /** One command of the line being routed, distilled from the parse. */
 export interface ParsedCommand {
@@ -85,7 +84,7 @@ export interface RouteContext {
  */
 export function routeContextPayload(
   ctx: RouteContext,
-  runtime?: Runtime,
+  runtime?: RuntimeIdentity,
 ): Record<string, EvalValue> {
   const payload: Record<string, EvalValue> = {
     line: ctx.line,
@@ -215,18 +214,18 @@ export type RoutePolicy =
  * command". The workspace runtime is a legal value in either; a command
  * placed on it is served by the workspace executor itself.
  */
-export interface RouteDecision {
+export interface RouteDecision<R extends RuntimeIdentity> {
   /**
    * Every command some entry captures, resolved for this line: the
    * runtime it runs on, or null when its capturers all refused
    * (admission failure, exit 126, never a silent fallback to the
    * workspace).
    */
-  bindings: Record<string, Runtime | null>
+  bindings: Record<string, R | null>
   /**
    * Where commands no entry captures run: the catch-all workspace runtime,
    * or null when the workspace runtime refused the line or declares
    * captures; unbound commands then exit 126.
    */
-  fallback: Runtime | null
+  fallback: R | null
 }

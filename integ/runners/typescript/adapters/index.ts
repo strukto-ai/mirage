@@ -1318,7 +1318,26 @@ async function openQdrant(target: Target): Promise<Open> {
         payload: { label: 'all', name: `row ${String(i)}` },
       })
     }
-    await client.upsert(collection, { points })
+    await client.upsert(collection, {
+      points: [
+        ...points,
+        {
+          id: '11111111-1111-1111-1111-111111111111',
+          vector: Array<number>(QDRANT_EMBED_DIM).fill(0.1),
+          payload: { label: 'uuid', name: 'uuid point' },
+        },
+        {
+          id: QDRANT_WIDE_POINTS + 1,
+          vector: Array<number>(QDRANT_EMBED_DIM).fill(0.1),
+          payload: {
+            label: 'keys',
+            ['__proto__']: { keep: 'value' },
+            constructor: 'constructor value',
+            toString: 'toString value',
+          },
+        },
+      ],
+    })
   } else {
     await client.upsert(collection, {
       points: QDRANT_ROWS.map(([id, label, kind, name]) => ({

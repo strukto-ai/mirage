@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { ExecutionScope } from '../execution.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -283,7 +284,7 @@ export interface ExecuteOptions {
    * @internal The typed line's routing decision, forwarded to nested
    * evals so inner lines never re-route.
    */
-  routingDecision?: RouteDecision
+  routingDecision?: RouteDecision<Runtime>
   /**
    * @internal The hand-off the line runs on, made by the executor's
    * nested evals under the outer line's so an inner line spends the

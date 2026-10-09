@@ -31,8 +31,8 @@ import {
   rowsMatching,
   searchRows,
   valuePrefixTest,
-  type QdrantPoint,
 } from './query.ts'
+import type { QdrantPoint } from './types.ts'
 
 describe('qdrant query helpers', () => {
   it('matches a plain segment as the string alone', () => {
@@ -85,9 +85,10 @@ describe('qdrant query helpers', () => {
     })
   })
 
-  it('maps a point to a row keyed by the point id', () => {
-    const row = pointToRow({ id: 7, payload: { label: 'cat' } }, 'id')
-    expect(row).toEqual({ label: 'cat', id: 7 })
+  it.each(['id', '__proto__'])('maps a point to a row keyed by %s', (idField) => {
+    const row = pointToRow({ id: 7, payload: { label: 'cat' } }, idField)
+    expect(Object.hasOwn(row, idField)).toBe(true)
+    expect(row).toEqual({ label: 'cat', [idField]: 7 })
   })
 
   it('matches a rendered basename rather than the source prefix', () => {

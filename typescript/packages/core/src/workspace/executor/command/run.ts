@@ -38,7 +38,7 @@ import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
-import { makeAbortError, mergeSignals } from '../../abort.ts'
+import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import type { Flags } from './types.ts'
 import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
@@ -50,7 +50,7 @@ export interface RunOnMountCtx {
   dispatch: DispatchFn
   namespace?: Namespace
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RouteDecision
+  routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   executeFn?: ExecuteFn
 }
@@ -121,7 +121,7 @@ function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
   fallback: Runtime | null,
-  routingDecision: RouteDecision | undefined,
+  routingDecision: RouteDecision<Runtime> | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
     const restricted = fallback instanceof WorkspaceRuntime && fallback.restricted

@@ -36,7 +36,7 @@ import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../../lookup/index
 import { type Runtime } from '../../../runtime/base.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
-import { abortable, mergeSignals } from '../../abort.ts'
+import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { ExecutionNode } from '../../types.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
@@ -189,7 +189,7 @@ export async function handleCommand(
   jobTable: JobTable | null = null,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
-  routingDecision?: RouteDecision,
+  routingDecision?: RouteDecision<Runtime>,
   agentId: string | null = null,
   executeFn?: ExecuteFn,
   handed: HandOff | null = null,

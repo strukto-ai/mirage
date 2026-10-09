@@ -14,7 +14,7 @@
 
 import { stdinRedirect } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { DaytonaConfig } from './config.ts'
 import { DaytonaRuntime } from './runtime.ts'

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { abortable } from '../workspace/abort.ts'
+import { abortable } from '../utils/abort.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'

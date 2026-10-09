@@ -19,7 +19,7 @@ import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/confi
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
-import type { LanceDriver, LanceRow } from './query.ts'
+import type { LanceDriver, LanceRow } from './types.ts'
 import { renderCard } from './render.ts'
 import { readdir } from './tree.ts'
 

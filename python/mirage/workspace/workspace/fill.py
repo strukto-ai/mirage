@@ -163,7 +163,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
 
 def guest_bound(
     nodes: Sequence[TSNodeLike],
-    decision: RouteDecision | None,
+    decision: RouteDecision[Runtime] | None,
     static_bindings: Mapping[str, Runtime | None],
 ) -> bool:
     """Whether any of the line's commands runs on a guest runtime.

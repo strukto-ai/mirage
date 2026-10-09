@@ -15,7 +15,6 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from typing import Any, NoReturn, TypeVar
 
 from mirage.accessor.s3 import S3Accessor
@@ -36,26 +35,13 @@ from mirage.core.s3.client import (
     is_not_found,
 )
 from mirage.core.s3.constants import CONDITION_LOST_CODES, SCOPE_ERROR
+from mirage.core.s3.types import S3Conn
 from mirage.errors.fs import enoent
 from mirage.utils.dates import to_iso_z
-from mirage.vfs.s3.config import S3Config
 
 logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
-
-
-@dataclass(frozen=True, slots=True)
-class S3Conn:
-    """One open S3 client plus the config that shaped it.
-
-    Args:
-        client (Any): open aioboto3 S3 client.
-        config (S3Config): the accessor's config.
-    """
-
-    client: Any
-    config: S3Config
 
 
 def _key_prefix_of(accessor: S3Accessor) -> str:

@@ -21,6 +21,7 @@ from qdrant_client import AsyncQdrantClient
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.pool import LoopClientCache
+from mirage.core.qdrant.types import QdrantRow
 from mirage.vfs.qdrant.config import QdrantConfig
 from mirage.vfs.secrets import reveal_secret
 
@@ -49,18 +50,13 @@ async def _open(config: QdrantConfig) -> AsyncIterator[AsyncQdrantClient]:
 class QdrantAccessor(Accessor):
     def __init__(self, config: QdrantConfig) -> None:
         self.config = config
-        self._clients = LoopClientCache("qdrant")
-        self.search_cache: dict[
-            tuple[str, str, int], list[dict[str, Any]]
-        ] = {}
+        self._clients = LoopClientCache[AsyncQdrantClient]("qdrant")
+        self.search_cache: dict[tuple[str, str, int], list[QdrantRow]] = {}
         self.indexes_ensured: set[str] = set()
 
     async def client(self) -> AsyncQdrantClient:
         """Return this loop's client, opening one when there is none."""
-        client: AsyncQdrantClient = await self._clients.get(
-            partial(_open, self.config)
-        )
-        return client
+        return await self._clients.get(partial(_open, self.config))
 
     async def close(self) -> None:
         """Close every client this accessor opened, and drop its caches."""

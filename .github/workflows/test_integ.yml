@@ -60,6 +60,12 @@ jobs:
           filters: |
             # Git's search and listing commands stay under these whole-host
             # filters, so their disk/RAM CLI corpus runs with either twin.
+            # LanceDB's shared core/lancedb/types modules select the embedded
+            # LanceDB corpus through these same whole-host filters.
+            # Shared S3 types and VFS find options use these filters too;
+            # the extracted Pyodide config also remains in runtime's TS glob.
+            # Shared utils/abort primitives stay in both whole-host filters
+            # and runtime; workspace/abort owns only line orchestration.
             core:
               - 'integ/**'
               - 'data/**'
@@ -98,6 +104,7 @@ jobs:
               - 'python/mirage/commands/builtin/slug_tree/**'
               - 'integ/vfs/qdrant/**'
               - 'python/mirage/accessor/qdrant.py'
+              # Shared query shapes in core/qdrant/types.py are backend inputs too.
               - 'python/mirage/core/qdrant/**'
               - 'python/mirage/commands/builtin/qdrant/**'
               - 'python/mirage/vfs/qdrant/**'

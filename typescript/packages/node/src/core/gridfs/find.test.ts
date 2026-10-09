@@ -20,7 +20,7 @@ vi.mock('./client.ts', async () => {
   return { ...actual, iterLatest: vi.fn() }
 })
 
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'

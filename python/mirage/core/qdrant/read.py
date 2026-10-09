@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import IndexCacheStore
@@ -22,6 +21,7 @@ from mirage.core.qdrant.naming import point_id_from_stem, row_stem
 from mirage.core.qdrant.payload import field_value
 from mirage.core.qdrant.query import row_record
 from mirage.core.qdrant.render import render_json, render_text
+from mirage.core.qdrant.types import QdrantRow
 from mirage.core.vector.read import blob_bytes
 from mirage.core.vector.scope import table_of
 from mirage.errors.fs import enoent
@@ -30,7 +30,7 @@ from mirage.types import PathSpec
 
 async def _row_of(
     accessor: QdrantAccessor, match: ScopeMatch, virtual: str
-) -> dict[str, Any]:
+) -> QdrantRow:
     # The label is stripped before the retrieve, so every spelling that
     # ends in __<id> reaches the point; only the stem readdir publishes
     # names it, so an alias reads as absent rather than as the file.

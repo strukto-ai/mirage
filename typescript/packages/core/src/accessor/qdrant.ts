@@ -15,7 +15,7 @@
 import type { QdrantClient } from '@qdrant/js-client-rest'
 import { Accessor } from './base.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
-import type { QdrantRow } from '../core/qdrant/query.ts'
+import type { QdrantRow } from '../core/qdrant/types.ts'
 import type { QdrantConfigResolved } from '../vfs/qdrant/config.ts'
 
 type QdrantClientCtor = new (opts: {

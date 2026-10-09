@@ -17,8 +17,8 @@ import logging
 
 import pytest
 
-from mirage.workspace import abort as abort_module
-from mirage.workspace.abort import (
+from mirage.utils import abort as abort_module
+from mirage.utils.abort import (
     ABORT_JOIN_SECONDS,
     MirageAbortError,
     run_cancellable,
@@ -153,7 +153,7 @@ async def test_a_body_that_swallows_both_cancels_is_joined_and_warned(
         steps.append("returned")
 
     asyncio.get_running_loop().call_later(0.01, cancel.set)
-    with caplog.at_level(logging.WARNING, logger="mirage.workspace.abort"):
+    with caplog.at_level(logging.WARNING, logger="mirage.utils.abort"):
         with pytest.raises(MirageAbortError):
             await run_cancellable(body(), cancel)
     assert steps == ["returned"]

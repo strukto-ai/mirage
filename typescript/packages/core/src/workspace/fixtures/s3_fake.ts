@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { S3Module } from '../../core/s3/client.ts'
+import type { S3Module } from '../../core/s3/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 class NoSuchKeyError extends Error {

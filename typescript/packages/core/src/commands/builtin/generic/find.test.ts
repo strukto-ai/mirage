@@ -16,7 +16,7 @@ import { materialize } from '../../../io/types.ts'
 
 import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
-import type { FindOptions } from '../../../vfs/base.ts'
+import type { FindOptions } from '../../../vfs/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../view/types.ts'

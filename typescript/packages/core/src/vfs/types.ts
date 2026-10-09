@@ -1,6 +1,6 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { FindOptions } from './base.ts'
+import type { PredNode } from '../core/generic/find_eval.ts'
 import type {
   PathSpec,
   JsonValue,
@@ -11,7 +11,14 @@ import type {
   ReadStreamFn,
   ReaddirFn,
   StatFn,
+  SetAttrFields,
 } from '../types.ts'
+
+export type SetAttrsOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  fields: SetAttrFields,
+) => Promise<Record<string, number | string>>
 
 export type DuEntries = [entries: [string, number][], total: number]
 
@@ -208,4 +215,21 @@ export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>
   searchMany?: SearchManyOp<A>
   meta?: Readonly<Record<string, JsonValue>>
+}
+
+export interface FindOptions {
+  name?: string | null
+  type?: string | null
+  minSize?: number | null
+  maxSize?: number | null
+  maxDepth?: number | null
+  minDepth?: number | null
+  nameExclude?: string | null
+  orNames?: string[] | null
+  iname?: string | null
+  pathPattern?: string | null
+  empty?: boolean | null
+  tree?: PredNode | null
+  mtimeMin?: number | null
+  mtimeMax?: number | null
 }

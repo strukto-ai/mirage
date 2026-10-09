@@ -13,13 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Connection, Query, Table } from '@lancedb/lancedb'
-import {
-  eqClause,
-  predicate,
-  type LanceDriver,
-  type LanceRow,
-  type ValueTest,
-} from '@struktoai/mirage-core/core/lancedb/query'
+import { eqClause, predicate } from '@struktoai/mirage-core/core/lancedb/query'
+import type { LanceDriver, LanceRow, ValueTest } from '@struktoai/mirage-core/core/lancedb/types'
 import { cellText } from '@struktoai/mirage-core/core/lancedb/render'
 import type { LanceDBConfigResolved } from '@struktoai/mirage-core/vfs/lancedb/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'

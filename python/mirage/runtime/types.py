@@ -12,13 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeAlias
 
 from mirage.io import IOResult, OpReport
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+
+
+class RuntimeIdentity(Protocol):
+    """The runtime metadata shared by routing and capability checks."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def captures(self) -> Sequence[str]: ...
+
 
 # The value contract of eval: never richer than JSON plus bytes, so any
 # evaluator (in-process or remote over a serialized transport) can carry

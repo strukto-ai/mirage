@@ -24,20 +24,20 @@ import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
 import type { RouteContext } from '../../../runtime/routing/types.ts'
-import { ScriptSource } from '../../../runtime/types.ts'
+import { ScriptSource, type ProcessExecution, type RunResult } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
   type LineExecutor,
   type ProcessExecutor,
 } from '../../../runtime/mixin.ts'
-import type { ProcessExecution, RunResult, RuntimeOptions } from '../../../runtime/types.ts'
+import type { RuntimeOptions } from '../../../runtime/config.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../../../types.ts'
 import * as globs from '../../expand/globs.ts'
 import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
 import { SessionState } from '../../session/session.ts'
-import { sleep } from '../../abort.ts'
+import { sleep } from '../../../utils/abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 

@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { QdrantRow } from './types.ts'
 import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { fitIdName, parseIdName } from '../../utils/naming.ts'
 import { NAME_MAX_BYTES, byteLength, pathSafeName } from '../../utils/sanitize.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { valueText } from '../render/json.ts'
-import type { QdrantRow } from './query.ts'
+
 import { fieldValue } from './payload.ts'
 
 const UTF8 = new TextEncoder()

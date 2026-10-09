@@ -14,7 +14,7 @@
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import type { PathSpec } from '../../types.ts'
 import {
   emitStartPath,

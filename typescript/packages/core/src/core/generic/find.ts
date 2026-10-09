@@ -17,7 +17,7 @@ import { isEacces, isEnoent } from '../../errors/fs.ts'
 import { isEntryError } from '../../errors/classify.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../vfs/base.ts'
+import type { FindOptions } from '../../vfs/types.ts'
 import {
   bindTree,
   buildTree,

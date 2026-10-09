@@ -37,9 +37,9 @@ from mirage.vfs.types import (
     ContentSearchOps,
     DuOps,
     ExistsOp,
+    FindOp,
     IsMountedOp,
     MkdirOp,
-    OperationFn,
     PairOp,
     PathOp,
     PwriteOp,
@@ -51,6 +51,7 @@ from mirage.vfs.types import (
     RmdirOp,
     RmTreeOp,
     SearchOps,
+    SetAttrsOp,
     StatOp,
     TruncateOp,
     WriteOp,
@@ -128,7 +129,7 @@ class CommandIO:
     is_mounted: IsMountedOp
     read_range: ReadRangeOp | None = None
     exists: ExistsOp | None = None
-    find: OperationFn | None = None
+    find: FindOp | None = None
     du: DuOps | None = None
     write: WriteOp | None = None
     append: WriteOp | None = None
@@ -142,7 +143,7 @@ class CommandIO:
     copy: PairOp | None = None
     dir_copy: PairOp | None = None
     truncate: TruncateOp | None = None
-    set_attrs: OperationFn | None = None
+    set_attrs: SetAttrsOp | None = None
     local: bool = True
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES

@@ -27,6 +27,7 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
+from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -60,7 +61,7 @@ async def run_command_tree(
     context: EvaluationContext,
     stdin: Any,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None = None,
+    routing_decision: RouteDecision[Runtime] | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     command_substitution: bool = False,

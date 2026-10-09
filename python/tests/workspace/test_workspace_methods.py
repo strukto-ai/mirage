@@ -107,20 +107,6 @@ def test_workspace_copy_method_independence_ram():
     assert _read(cp, "/m/a.txt") == "bye\n"
 
 
-# ── copy.deepcopy(ws) → uses __deepcopy__ → uses copy() ──────────
-
-
-def test_deepcopy_via_stdlib():
-    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
-    asyncio.run(src.shell("echo hi > /m/a.txt"))
-
-    cp = asyncio.run((src).copy())
-    asyncio.run(cp.shell("echo bye > /m/a.txt"))
-
-    assert _read(src, "/m/a.txt") == "hi\n"
-    assert _read(cp, "/m/a.txt") == "bye\n"
-
-
 # ── copy.copy(ws) must raise — shallow copy makes no sense ────────
 
 

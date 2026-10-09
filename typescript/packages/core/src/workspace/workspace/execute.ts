@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
@@ -45,11 +46,12 @@ import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
   hasAborted,
-  lineStatusWriter,
   makeAbortError,
   mergeSignals,
-  runWithLineAbort,
-} from '../abort.ts'
+  abortable,
+  joinOrAbort,
+} from '../../utils/abort.ts'
+import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
@@ -80,9 +82,8 @@ import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { type SessionState } from '../session/session.ts'
-import { type StatusWriter, newStatusWriter } from '../abort.ts'
-import { ExecutionNode } from '../types.ts'
-import { abortable, joinOrAbort } from '../abort.ts'
+import { type StatusWriter, ExecutionNode } from '../types.ts'
+import { newStatusWriter } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
 import { finishShell, inheritTraps } from '../executor/traps.ts'
@@ -501,7 +502,7 @@ async function runPreparedLine(
               env.registry.decisions.handUp(effectiveSession.sessionId, handed)
             else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
           }
-          let placed: RouteDecision | Deny | null
+          let placed: RouteDecision<Runtime> | Deny | null
           try {
             placed = await abortable(
               env.router.decide(rootNode, command, options, targetSession, held),
@@ -521,7 +522,7 @@ async function runPreparedLine(
               placementRefused(placed, command),
             )
           }
-          const routingDecision: RouteDecision | null = placed
+          const routingDecision: RouteDecision<Runtime> | null = placed
 
           const dispatch: DispatchFn = env.dispatcher.dispatch
 

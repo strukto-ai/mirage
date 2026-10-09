@@ -24,7 +24,7 @@ import {
 } from '../../../../commands/spec/usage.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { sleep } from '../../../abort.ts'
+import { sleep } from '../../../../utils/abort.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { SLEEP_INTERVAL, SLEEP_SUFFIXES } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'

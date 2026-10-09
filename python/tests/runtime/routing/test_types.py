@@ -13,10 +13,29 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import subprocess
+import sys
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing.types import ParsedCommand, RouteContext
 from mirage.runtime.types import RunArgs, RunResult
+
+
+def test_routing_types_import_without_loading_the_runtime():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from mirage.runtime.routing import RouteContext; "
+            "assert 'mirage.runtime.base' not in sys.modules; "
+            "assert 'mirage.runtime.routing.decide' not in sys.modules; "
+            "from mirage.runtime.base import Runtime",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 class StubRuntime(Runtime):

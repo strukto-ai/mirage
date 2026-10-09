@@ -18,8 +18,8 @@ import {
   isNotFoundError,
   loadS3Module,
   streamToBuffer,
-  type S3SendClient,
 } from '../../core/s3/client.ts'
+import type { S3SendClient } from '../../core/s3/types.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { generationOf } from './types.ts'
 
