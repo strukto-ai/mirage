@@ -22,38 +22,7 @@ import { IOResult } from '../../io/types.ts'
 import { encodeText } from '../bytes.ts'
 import type { TSNodeLike } from '../types.ts'
 
-import {
-  ARRAY_BUILTINS,
-  BASH_KEYWORDS,
-  BINARY_TESTS,
-  CASE_TERMINATORS,
-  CLOSING_WORDS,
-  COMPOUND_OPENERS,
-  EXTGLOB_OPENERS,
-  MAX_NESTING,
-  NAME_CHARS,
-  NAME_START,
-  NEAR_TEXT_STOPS,
-  OPERATOR_CHARS,
-  OPERATORS,
-  READ_ARITH,
-  READ_ARRAYS,
-  READ_BODY,
-  READ_COMMAND,
-  READ_ELEMENT,
-  READ_FOLLOW,
-  READ_KEYS,
-  READ_PREFIX,
-  READ_START,
-  READ_SUBSCRIPTS,
-  READ_TEST,
-  REDIRECTIONS,
-  RESERVED_WORDS,
-  SEPARATOR_TOKENS,
-  STRUCTURAL_TOKENS,
-  UNARY_TESTS,
-  WORD_BREAKS,
-} from './constants.ts'
+import * as constants from './constants.ts'
 
 function token(
   kind: string,
@@ -184,9 +153,9 @@ function isStructuralError(node: TSNodeLike): boolean {
   return node.children.some(
     (child) =>
       child.isNamed === true ||
-      BASH_KEYWORDS.has(child.type) ||
-      STRUCTURAL_TOKENS.has(child.type) ||
-      SEPARATOR_TOKENS.has(child.type),
+      constants.BASH_KEYWORDS.has(child.type) ||
+      constants.STRUCTURAL_TOKENS.has(child.type) ||
+      constants.SEPARATOR_TOKENS.has(child.type),
   )
 }
 
@@ -200,8 +169,8 @@ function mirageWording(line: string): string {
 }
 
 function isName(text: string): boolean {
-  if (text.length === 0 || !NAME_START.has(text.charAt(0))) return false
-  for (const c of text) if (!NAME_CHARS.has(c)) return false
+  if (text.length === 0 || !constants.NAME_START.has(text.charAt(0))) return false
+  for (const c of text) if (!constants.NAME_CHARS.has(c)) return false
   return true
 }
 
@@ -393,7 +362,7 @@ class LineReader {
       const c = text.charAt(start - 1)
       if (' \t\n'.includes(c)) break
       start -= 1
-      if (NEAR_TEXT_STOPS.has(c)) break
+      if (constants.NEAR_TEXT_STOPS.has(c)) break
     }
     return [start, end]
   }
@@ -577,7 +546,7 @@ class LineReader {
       this.pend(known[1], true)
       return known[0]
     }
-    if (this.nesting >= MAX_NESTING)
+    if (this.nesting >= constants.MAX_NESTING)
       this.failToken(token('op', this.text.slice(opened, j).replaceAll('\\\n', ''), opened, j))
     const state = this.save()
     this.pos = j
@@ -589,7 +558,7 @@ class LineReader {
     this.linebreak()
     let tok: ReaderToken
     for (;;) {
-      tok = this.peek(READ_COMMAND)
+      tok = this.peek(constants.READ_COMMAND)
       if (tok.kind === 'op' && tok.text === ')') break
       if (tok.kind === 'eof') this.refuse([this.eofLine()], true, '', j, j)
       this.andOr()
@@ -628,15 +597,16 @@ class LineReader {
     this.pos = i + 1
     this.peeked = null
     this.frames.push('array')
-    const element = READ_ELEMENT | ((mode & READ_KEYS) !== 0 ? READ_SUBSCRIPTS : 0)
+    const element =
+      constants.READ_ELEMENT | ((mode & constants.READ_KEYS) !== 0 ? constants.READ_SUBSCRIPTS : 0)
     let tok: ReaderToken
     for (;;) {
       tok = this.peek(element)
       if (
-        (mode & READ_BODY) !== 0 &&
+        (mode & constants.READ_BODY) !== 0 &&
         tok.kind === 'word' &&
         tok.plain &&
-        RESERVED_WORDS.has(tok.text)
+        constants.RESERVED_WORDS.has(tok.text)
       )
         this.failToken(tok)
       if (tok.kind === 'newline' || tok.kind === 'word') {
@@ -679,12 +649,12 @@ class LineReader {
         continue
       }
       const c = text.charAt(j)
-      if (!OPERATOR_CHARS.has(c)) break
+      if (!constants.OPERATOR_CHARS.has(c)) break
       spelled += c
       j += 1
       ends.push(j)
     }
-    for (const op of OPERATORS) {
+    for (const op of constants.OPERATORS) {
       const end = ends[op.length - 1]
       if (spelled.startsWith(op) && end !== undefined) return [op, end]
     }
@@ -703,7 +673,7 @@ class LineReader {
   /** The token after a command. After a compound one it is read as where a
    * command starts: reserved words, arrays and arithmetic. */
   peekAfter(): ReaderToken {
-    return this.peek(this.after ? READ_FOLLOW : 0)
+    return this.peek(this.after ? constants.READ_FOLLOW : 0)
   }
 
   take(tok: ReaderToken): void {
@@ -803,12 +773,12 @@ class LineReader {
     }
     const c = text.charAt(i)
     if (c === '\n') return token('newline', '\n', i, i + 1)
-    if ((mode & READ_ARITH) !== 0 && text.startsWith('((', i))
-      return this.arithCommand(i, (mode & READ_START) !== 0)
+    if ((mode & constants.READ_ARITH) !== 0 && text.startsWith('((', i))
+      return this.arithCommand(i, (mode & constants.READ_START) !== 0)
     if ((c === '<' || c === '>') && this.charAt(i + 1) === '(') return this.word(i, 0)
     const op = this.operator(i)
     if (op !== null) return token('op', op[0], i, op[1])
-    if (c === '{' && (mode & READ_TEST) === 0) {
+    if (c === '{' && (mode & constants.READ_TEST) === 0) {
       const close = text.indexOf('}', i)
       const after = text.charAt(close + 1)
       if (
@@ -819,7 +789,7 @@ class LineReader {
       )
         return token('redirvar', text.slice(i, close + 1), i, close + 1)
     }
-    if (c >= '0' && c <= '9' && (mode & READ_TEST) === 0) {
+    if (c >= '0' && c <= '9' && (mode & constants.READ_TEST) === 0) {
       let j = i
       while (j < n && text.charAt(j) >= '0' && text.charAt(j) <= '9') j += 1
       const after = text.charAt(j)
@@ -834,9 +804,9 @@ class LineReader {
     const text = this.text
     const start = i
     let plain = true
-    let state = (mode & READ_PREFIX) !== 0 ? 'start' : 'none'
+    let state = (mode & constants.READ_PREFIX) !== 0 ? 'start' : 'none'
     let assign = false
-    if ((mode & READ_ELEMENT) !== 0 && text.charAt(i) === '[') {
+    if ((mode & constants.READ_ELEMENT) !== 0 && text.charAt(i) === '[') {
       i = this.bracket(i + 1, i)
       plain = false
     }
@@ -853,7 +823,7 @@ class LineReader {
         i += 2
         continue
       }
-      if (WORD_BREAKS.has(c)) {
+      if (constants.WORD_BREAKS.has(c)) {
         if ((c === '<' || c === '>') && this.charAt(i + 1) === '(') {
           i = this.processSubstitution(i)
           plain = false
@@ -864,9 +834,11 @@ class LineReader {
       }
       const equals = c === '=' || (c === '+' && this.charAt(i + 1) === '=')
       if (state === 'start' || state === 'name') {
-        if (NAME_START.has(c) || (state === 'name' && NAME_CHARS.has(c))) state = 'name'
+        if (constants.NAME_START.has(c) || (state === 'name' && constants.NAME_CHARS.has(c)))
+          state = 'name'
         else if (state === 'name' && c === '[') {
-          const end = (mode & READ_SUBSCRIPTS) !== 0 ? this.bracket(i + 1, i) : this.subscriptEnd(i)
+          const end =
+            (mode & constants.READ_SUBSCRIPTS) !== 0 ? this.bracket(i + 1, i) : this.subscriptEnd(i)
           if (end !== null) {
             i = end
             state = 'subscript'
@@ -882,7 +854,7 @@ class LineReader {
         state = 'none'
         i = (c === '=' ? i : joined(this.text, i + 1)) + 1
         const opener = joined(this.text, i)
-        if ((mode & READ_ARRAYS) !== 0 && text.charAt(opener) === '(') {
+        if ((mode & constants.READ_ARRAYS) !== 0 && text.charAt(opener) === '(') {
           i = this.array(opener, mode)
           plain = false
         }
@@ -901,7 +873,7 @@ class LineReader {
    * ends: only a prefix's subscript may hold blanks. */
   subscriptEnd(i: number): number | null {
     const text = this.text
-    for (let j = i + 1; j < this.n && !WORD_BREAKS.has(text.charAt(j)); j += 1)
+    for (let j = i + 1; j < this.n && !constants.WORD_BREAKS.has(text.charAt(j)); j += 1)
       if (text.charAt(j) === ']') return j + 1
     return null
   }
@@ -915,7 +887,7 @@ class LineReader {
     const end = this.matched(i + 2, i)
     if (text.charAt(end + 1) === ')') return token('arith', text.slice(i, end + 2), i, end + 2)
     if (start && (end + 1 >= this.n || text.charAt(end + 1) === '\n')) {
-      if (this.nesting >= MAX_NESTING) this.failToken(token('op', '(', i, i + 1))
+      if (this.nesting >= constants.MAX_NESTING) this.failToken(token('op', '(', i, i + 1))
       this.nesting += 1
       const state = this.save()
       const outer: [number | null, number] = [this.limit, this.floor]
@@ -940,8 +912,12 @@ class LineReader {
    * word an alias spells is a command, except inside that alias's own text
    * and inside a substitution. */
   keyword(tok: ReaderToken): string | null {
-    if (tok.kind !== 'word' || !tok.plain || !RESERVED_WORDS.has(tok.text)) return null
-    if (CLOSING_WORDS.has(tok.text) && this.aliases.has(tok.text) && !this.frames.includes('sub')) {
+    if (tok.kind !== 'word' || !tok.plain || !constants.RESERVED_WORDS.has(tok.text)) return null
+    if (
+      constants.CLOSING_WORDS.has(tok.text) &&
+      this.aliases.has(tok.text) &&
+      !this.frames.includes('sub')
+    ) {
       if (!(this.own?.(tok.text, tok.start) ?? false)) return null
     }
     return tok.text
@@ -954,7 +930,7 @@ class LineReader {
   program(): void {
     this.linebreak()
     for (;;) {
-      let tok = this.peek(READ_COMMAND)
+      let tok = this.peek(constants.READ_COMMAND)
       if (tok.kind === 'eof') return
       this.andOr()
       tok = this.peekAfter()
@@ -979,7 +955,7 @@ class LineReader {
     this.linebreak()
     let seen = false
     for (;;) {
-      let tok = this.peek(READ_COMMAND)
+      let tok = this.peek(constants.READ_COMMAND)
       if (this.stops(tok, words, ops)) {
         if (!seen && !empty) this.failToken(tok)
         return tok
@@ -1016,7 +992,7 @@ class LineReader {
   pipeline(): void {
     let prefixed = false
     for (;;) {
-      const tok = this.peek(READ_COMMAND)
+      const tok = this.peek(constants.READ_COMMAND)
       const word = this.keyword(tok)
       if (word === 'time') {
         this.take(tok)
@@ -1029,7 +1005,7 @@ class LineReader {
       prefixed = true
     }
     if (prefixed) {
-      const tok = this.peek(READ_COMMAND)
+      const tok = this.peek(constants.READ_COMMAND)
       if (tok.kind === 'newline' || tok.kind === 'eof' || (tok.kind === 'op' && tok.text === ';')) {
         this.after = false
         return
@@ -1050,11 +1026,11 @@ class LineReader {
   /** Parse one command where a command starts; `piped` after a `|`, where
    * `time` is a command. */
   command(piped: boolean): void {
-    const tok = this.peek(READ_COMMAND)
+    const tok = this.peek(constants.READ_COMMAND)
     let word = this.keyword(tok)
     if (piped && word === 'time') word = null
     if (word !== null) {
-      if (!COMPOUND_OPENERS.has(word) && word !== 'function' && word !== 'coproc')
+      if (!constants.COMPOUND_OPENERS.has(word) && word !== 'function' && word !== 'coproc')
         this.failToken(tok)
       this.compound(tok)
       this.redirects()
@@ -1069,7 +1045,7 @@ class LineReader {
       tok.kind === 'word' ||
       tok.kind === 'number' ||
       tok.kind === 'redirvar' ||
-      (tok.kind === 'op' && REDIRECTIONS.has(tok.text))
+      (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
     ) {
       this.simple()
       return
@@ -1080,7 +1056,7 @@ class LineReader {
   /** Parse a compound command, a function definition or a coproc; one nested
    * `MAX_NESTING` deep is refused at its opener. */
   compound(tok: ReaderToken): void {
-    if (this.nesting >= MAX_NESTING) this.failToken(tok)
+    if (this.nesting >= constants.MAX_NESTING) this.failToken(tok)
     this.nesting += 1
     const word = this.keyword(tok)
     if (tok.kind === 'arith') this.take(tok)
@@ -1113,7 +1089,7 @@ class LineReader {
       if (
         tok.kind === 'number' ||
         tok.kind === 'redirvar' ||
-        (tok.kind === 'op' && REDIRECTIONS.has(tok.text))
+        (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
       ) {
         this.redirect(tok)
         this.after = false
@@ -1153,7 +1129,7 @@ class LineReader {
    * and its kin read arrays too, until a redirection. */
   simple(): void {
     this.after = false
-    let mode = READ_PREFIX
+    let mode = constants.READ_PREFIX
     let assigned = false
     let prefixed = false
     let tok: ReaderToken
@@ -1162,14 +1138,14 @@ class LineReader {
       if (
         tok.kind === 'number' ||
         tok.kind === 'redirvar' ||
-        (tok.kind === 'op' && REDIRECTIONS.has(tok.text))
+        (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
       ) {
         this.redirect(tok)
-        mode = assigned ? 0 : READ_PREFIX | READ_KEYS
+        mode = assigned ? 0 : constants.READ_PREFIX | constants.READ_KEYS
         prefixed = true
       } else if (tok.kind === 'word' && tok.assign) {
         this.take(tok)
-        mode &= ~READ_KEYS
+        mode &= ~constants.READ_KEYS
         assigned = true
         prefixed = true
       } else break
@@ -1180,7 +1156,7 @@ class LineReader {
         const next = this.peek()
         if (next.kind === 'op' && next.text === '(') {
           this.take(next)
-          const close = this.peek(READ_FOLLOW)
+          const close = this.peek(constants.READ_FOLLOW)
           if (!(close.kind === 'op' && close.text === ')')) this.failToken(close)
           this.take(close)
           this.linebreak()
@@ -1188,14 +1164,14 @@ class LineReader {
           return
         }
       }
-      mode = tok.plain && ARRAY_BUILTINS.has(tok.text) ? READ_ARRAYS : 0
+      mode = tok.plain && constants.ARRAY_BUILTINS.has(tok.text) ? constants.READ_ARRAYS : 0
       for (;;) {
         tok = this.peek(mode)
         if (tok.kind === 'word') this.take(tok)
         else if (
           tok.kind === 'number' ||
           tok.kind === 'redirvar' ||
-          (tok.kind === 'op' && REDIRECTIONS.has(tok.text))
+          (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
         ) {
           this.redirect(tok)
           mode = 0
@@ -1206,10 +1182,10 @@ class LineReader {
   }
 
   functionBody(): void {
-    const tok = this.peek(READ_COMMAND | READ_BODY)
+    const tok = this.peek(constants.READ_COMMAND | constants.READ_BODY)
     const word = this.keyword(tok)
     if (
-      (word !== null && COMPOUND_OPENERS.has(word)) ||
+      (word !== null && constants.COMPOUND_OPENERS.has(word)) ||
       tok.kind === 'arith' ||
       (tok.kind === 'op' && tok.text === '(')
     ) {
@@ -1243,22 +1219,22 @@ class LineReader {
    * and `time` is a command here. */
   coproc(tok: ReaderToken): void {
     this.take(tok)
-    tok = this.peek(READ_COMMAND)
+    tok = this.peek(constants.READ_COMMAND)
     let word = this.keyword(tok)
     if (word === 'time') word = null
     if (word !== null || tok.kind === 'arith' || (tok.kind === 'op' && tok.text === '(')) {
-      if (word !== null && !COMPOUND_OPENERS.has(word)) this.failToken(tok)
+      if (word !== null && !constants.COMPOUND_OPENERS.has(word)) this.failToken(tok)
       this.compound(tok)
       return
     }
     if (tok.kind === 'word' && !tok.assign) {
       const state = this.save()
       this.take(tok)
-      const next = this.peek(READ_COMMAND)
+      const next = this.peek(constants.READ_COMMAND)
       let after = this.keyword(next)
       if (after === 'time') after = null
       if (after !== null || next.kind === 'arith' || (next.kind === 'op' && next.text === '(')) {
-        if (after !== null && !COMPOUND_OPENERS.has(after)) this.failToken(next)
+        if (after !== null && !constants.COMPOUND_OPENERS.has(after)) this.failToken(next)
         this.compound(next)
         return
       }
@@ -1267,7 +1243,7 @@ class LineReader {
     if (
       tok.kind === 'word' ||
       tok.kind === 'number' ||
-      (tok.kind === 'op' && REDIRECTIONS.has(tok.text))
+      (tok.kind === 'op' && constants.REDIRECTIONS.has(tok.text))
     ) {
       this.simple()
       return
@@ -1295,7 +1271,7 @@ class LineReader {
   /** Parse a loop's `do ... done`, or `{ ... }` when `brace`. After a `;` or
    * newline (`separated`) the body's place reads arrays and arithmetic. */
   loopBody(brace: boolean, separated: boolean): void {
-    const tok = this.peek(separated ? READ_FOLLOW : 0)
+    const tok = this.peek(separated ? constants.READ_FOLLOW : 0)
     const word = this.keyword(tok)
     if (word === 'do') {
       this.take(tok)
@@ -1404,7 +1380,7 @@ class LineReader {
         this.take(next)
         next = this.peek()
       }
-      const end = this.compoundList(new Set(['esac']), CASE_TERMINATORS, true)
+      const end = this.compoundList(new Set(['esac']), constants.CASE_TERMINATORS, true)
       this.take(end)
       if (end.kind !== 'op') return
       this.linebreak()
@@ -1441,11 +1417,11 @@ class LineReader {
 
   testPeek(): ReaderToken {
     this.linebreak()
-    return this.peek(READ_TEST)
+    return this.peek(constants.READ_TEST)
   }
 
   testWord(): ReaderToken {
-    return this.peek(READ_TEST)
+    return this.peek(constants.READ_TEST)
   }
 
   /** The token after a whole test; ending inside a quote there, bash adds
@@ -1517,7 +1493,7 @@ class LineReader {
     }
     if (tok.kind !== 'word')
       throw new TestFailure([`unexpected token \`${testText(tok)}' in conditional command`], tok)
-    if (tok.plain && UNARY_TESTS.has(tok.text)) {
+    if (tok.plain && constants.UNARY_TESTS.has(tok.text)) {
       this.take(tok)
       const arg = this.testOperand('unary', () => this.testWord())
       if (arg.kind !== 'word' || isTestClose(arg))
@@ -1531,14 +1507,14 @@ class LineReader {
     this.take(tok)
     let op: ReaderToken
     try {
-      op = this.peek(READ_TEST)
+      op = this.peek(constants.READ_TEST)
     } catch (err) {
       if (err instanceof ReaderRefusal && err.eof)
         err.lines.push('conditional binary operator expected')
       throw err
     }
     if (
-      (op.kind === 'word' && op.plain && BINARY_TESTS.has(op.text)) ||
+      (op.kind === 'word' && op.plain && constants.BINARY_TESTS.has(op.text)) ||
       (op.kind === 'op' && (op.text === '<' || op.text === '>'))
     ) {
       this.take(op)
@@ -1570,7 +1546,7 @@ class LineReader {
 
   /** Parse `( EXPR )`; every error inside adds that bash expected the `)`. */
   testGroup(tok: ReaderToken): void {
-    if (this.nesting >= MAX_NESTING) this.failToken(tok)
+    if (this.nesting >= constants.MAX_NESTING) this.failToken(tok)
     this.take(tok)
     this.depth += 1
     this.nesting += 1
@@ -1614,19 +1590,22 @@ class LineReader {
   patternWord(): ReaderToken {
     const i = this.blankEnd(this.pos)
     const text = this.text
-    const tok = this.lex(i, READ_TEST)
-    if (tok.kind !== 'word' && !(EXTGLOB_OPENERS.has(text.charAt(i)) && text.charAt(i + 1) === '('))
+    const tok = this.lex(i, constants.READ_TEST)
+    if (
+      tok.kind !== 'word' &&
+      !(constants.EXTGLOB_OPENERS.has(text.charAt(i)) && text.charAt(i + 1) === '(')
+    )
       return tok
     let j = i
     let extended = false
     while (j < this.n) {
       const c = text.charAt(j)
-      if (EXTGLOB_OPENERS.has(c) && text.charAt(j + 1) === '(') {
+      if (constants.EXTGLOB_OPENERS.has(c) && text.charAt(j + 1) === '(') {
         j = this.matched(j + 2, j + 1) + 1
         extended = true
         continue
       }
-      if (WORD_BREAKS.has(c)) break
+      if (constants.WORD_BREAKS.has(c)) break
       j = this.wordChar(j)
     }
     if (!extended) return tok

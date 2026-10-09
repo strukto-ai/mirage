@@ -19,6 +19,7 @@ import { assert, beforeAll, describe, expect, it } from 'vitest'
 import { decodeText } from '../bytes.ts'
 import { checkSyntax, createShellParser, syntaxErrorResult, type ShellParser } from './index.ts'
 import { MAX_NESTING } from './constants.ts'
+import { heredocPlan } from './syntax.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -86,6 +87,17 @@ describe('checkSyntax', () => {
     const braces = (n: number) => `${'{ '.repeat(n)}a; ${'} '.repeat(MAX_NESTING)}`
     expect(checkSyntax(braces(MAX_NESTING))).toBeNull()
     expect(checkSyntax(braces(MAX_NESTING + 1))?.offending).toBe('{')
+    const bangs = `[[ ${'! '.repeat(200_000)}x ]]`
+    expect(checkSyntax(bangs)).toEqual({
+      offending: '',
+      message: 'mirage: syntax error: nesting too deep\n',
+      status: 2,
+    })
+    expect(heredocPlan(bangs)).toBeNull()
+    const own = (): boolean => {
+      throw new RangeError('Invalid array length')
+    }
+    expect(() => checkSyntax('echo F; fi', new Set(['fi']), own)).toThrow('Invalid array length')
   })
 
   it('reads a substitution once however often its word is', () => {

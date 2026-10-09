@@ -15,23 +15,7 @@
 
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parameter import scan_parameter
-from mirage.shell.parse.constants import (
-    ARITH_OPEN_TOKEN,
-    BARE_WORDS,
-    DIGIT_RUN,
-    ESCAPED_BLANK,
-    HEADER_FOLLOWER,
-    HEADER_NAME,
-    LAST_CASE_ARM,
-    LIST_TOKENS,
-    LITERAL_DOLLAR,
-    QUOTES,
-    STATEMENT_NODES,
-    TEST_PARTS,
-    UNLEXED,
-    WORD_BREAKS,
-    WORD_START,
-)
+from mirage.shell.parse import constants
 from mirage.shell.parse.engine import TS_PARSER
 from mirage.shell.parse.expansion import expansion_source
 from mirage.shell.parse.heredoc import protected_source
@@ -69,7 +53,7 @@ def _balanced_end(data: bytes, start: int) -> int | None:
                 quote = None
             index += 1
             continue
-        if char in QUOTES:
+        if char in constants.QUOTES:
             quote = char
         elif char == b"\\":
             index += 2
@@ -113,7 +97,7 @@ def _breaks_word(data: bytes, at: int) -> bool:
         data (bytes): shell source.
         at (int): byte offset, which may fall outside ``data``.
     """
-    return at < 0 or at >= len(data) or chr(data[at]) in WORD_BREAKS
+    return at < 0 or at >= len(data) or chr(data[at]) in constants.WORD_BREAKS
 
 
 def _bracket_is_a_command(data: bytes, node: TSNodeLike) -> bool:
@@ -141,9 +125,9 @@ def _bracket_is_a_command(data: bytes, node: TSNodeLike) -> bool:
     stack = list(children[1:-1])
     while stack:
         part = stack.pop()
-        if not part.is_named and part.type in LIST_TOKENS:
+        if not part.is_named and part.type in constants.LIST_TOKENS:
             return True
-        if part.type in TEST_PARTS:
+        if part.type in constants.TEST_PARTS:
             stack.extend(part.children)
     return False
 
@@ -202,20 +186,22 @@ def _skipped_escapes(data: bytes, root: TSNodeLike) -> list[int]:
         data (bytes): shell source.
         root (TSNodeLike): the parse of ``data``.
     """
-    if ESCAPED_BLANK.search(data) is None:
+    if constants.ESCAPED_BLANK.search(data) is None:
         return []
     spans: list[tuple[int, int]] = [(len(data), len(data))]
     stack = [root]
     while stack:
         node = stack.pop()
-        if node.children and node.type not in UNLEXED | {"string"}:
+        if node.children and node.type not in constants.UNLEXED | {"string"}:
             stack.extend(node.children)
         else:
             spans.append((node.start_byte, node.end_byte))
     offsets: list[int] = []
     at = 0
     for lo, hi in sorted(spans):
-        offsets.extend(m.start() for m in ESCAPED_BLANK.finditer(data, at, lo))
+        offsets.extend(
+            m.start() for m in constants.ESCAPED_BLANK.finditer(data, at, lo)
+        )
         at = max(at, hi)
     return offsets
 
@@ -235,7 +221,7 @@ def _respelled(data: bytes, root: TSNodeLike) -> bytes:
         node = stack.pop()
         if node.type == "test_command" and _bracket_is_a_command(data, node):
             out[node.start_byte] = ord("_")
-        if node.type in UNLEXED:
+        if node.type in constants.UNLEXED:
             continue
         stack.extend(node.children)
         for child in node.children:
@@ -243,10 +229,10 @@ def _respelled(data: bytes, root: TSNodeLike) -> bytes:
             if child.is_named:
                 continue
             if (
-                child.type in BARE_WORDS
+                child.type in constants.BARE_WORDS
                 and node.type in ("command", "ERROR")
                 or child.type == "$"
-                and LITERAL_DOLLAR.match(data, lo)
+                and constants.LITERAL_DOLLAR.match(data, lo)
             ):
                 out[lo:hi] = b"_" * (hi - lo)
             elif (
@@ -261,16 +247,18 @@ def _respelled(data: bytes, root: TSNodeLike) -> bytes:
             out[start] = ord(">")
         elif node.type in ("<<<", "<<") and data[start : start + 3] == b"<<<":
             out[start + 1 : start + 3] = b"  "
-        elif node.type in (";&", ";;&") and LAST_CASE_ARM.match(
+        elif node.type in (";&", ";;&") and constants.LAST_CASE_ARM.match(
             data, node.end_byte
         ):
             out[start : node.end_byte] = b";;".ljust(node.end_byte - start)
-        digits = None if node.children else DIGIT_RUN.match(data, start)
+        digits = (
+            None if node.children else constants.DIGIT_RUN.match(data, start)
+        )
         if (
             digits is not None
             and data[start] == ord("0")
             and data[digits.end() : digits.end() + 1] in (b"<", b">")
-            and (start == 0 or data[start - 1] in WORD_START)
+            and (start == 0 or data[start - 1] in constants.WORD_START)
         ):
             out[start] = ord("1")
     return bytes(out)
@@ -319,7 +307,9 @@ def failed_arith_openers(root: TSNodeLike) -> list[int]:
         node, in_error = stack.pop()
         errored = in_error or node.type == "ERROR"
         for child in node.children:
-            if child.type == ARITH_OPEN_TOKEN and (errored or node.has_error):
+            if child.type == constants.ARITH_OPEN_TOKEN and (
+                errored or node.has_error
+            ):
                 offsets.append(child.start_byte)
             stack.append((child, errored))
     return offsets
@@ -475,9 +465,9 @@ def _header_inserts(root: TSNodeLike, data: bytes) -> list[tuple[int, bytes]]:
     for head in heads:
         start = len(data) - len(data[head:].lstrip(b" \t"))
         end = delimiter_end(data, start) or start
-        follower = HEADER_FOLLOWER.match(data, end)
+        follower = constants.HEADER_FOLLOWER.match(data, end)
         word = follower.group(1) if follower else None
-        named = HEADER_NAME.fullmatch(data, start, end) is not None
+        named = constants.HEADER_NAME.fullmatch(data, start, end) is not None
         if end == start or named and word == b"in":
             continue
         tail = b";" if word == b"do" else b""
@@ -552,12 +542,15 @@ def statement_boundaries(data: bytes) -> bytes:
     while stack:
         node = stack.pop()
         stack.extend(node.children)
-        if node.type not in STATEMENT_NODES:
+        if node.type not in constants.STATEMENT_NODES:
             continue
         for left, right in zip(node.children, node.children[1:]):
             folded = data[right.start_byte : right.start_byte + 1] == b"\n"
             gap = data[left.end_byte : right.start_byte + folded]
-            if b"\n" in gap and not ESCAPED_BLANK.sub(b"", gap).strip():
+            if (
+                b"\n" in gap
+                and not constants.ESCAPED_BLANK.sub(b"", gap).strip()
+            ):
                 offsets.add(
                     left.start_byte
                     if left.type == "comment"

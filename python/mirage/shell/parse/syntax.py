@@ -18,38 +18,7 @@ from typing import NoReturn
 
 from mirage.io import IOResult
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.parse.constants import (
-    ARRAY_BUILTINS,
-    BASH_KEYWORDS,
-    BINARY_TESTS,
-    CASE_TERMINATORS,
-    CLOSING_WORDS,
-    COMPOUND_OPENERS,
-    EXTGLOB_OPENERS,
-    MAX_NESTING,
-    NAME_CHARS,
-    NAME_START,
-    NEAR_TEXT_STOPS,
-    OPERATOR_CHARS,
-    OPERATORS,
-    READ_ARITH,
-    READ_ARRAYS,
-    READ_BODY,
-    READ_COMMAND,
-    READ_ELEMENT,
-    READ_FOLLOW,
-    READ_KEYS,
-    READ_PREFIX,
-    READ_START,
-    READ_SUBSCRIPTS,
-    READ_TEST,
-    REDIRECTIONS,
-    RESERVED_WORDS,
-    SEPARATOR_TOKENS,
-    STRUCTURAL_TOKENS,
-    UNARY_TESTS,
-    WORD_BREAKS,
-)
+from mirage.shell.parse import constants
 from mirage.shell.parse.errors import ReaderRefusal, TestFailure
 from mirage.shell.parse.heredoc.delimiter import (
     clean_delimiter,
@@ -239,9 +208,9 @@ def _is_structural_error(node: TSNodeLike) -> bool:
     """
     return any(
         child.is_named
-        or child.type in BASH_KEYWORDS
-        or child.type in STRUCTURAL_TOKENS
-        or child.type in SEPARATOR_TOKENS
+        or child.type in constants.BASH_KEYWORDS
+        or child.type in constants.STRUCTURAL_TOKENS
+        or child.type in constants.SEPARATOR_TOKENS
         for child in node.children
     )
 
@@ -264,8 +233,8 @@ def _mirage_wording(line: str) -> str:
 def _is_name(text: str) -> bool:
     return (
         bool(text)
-        and text[0] in NAME_START
-        and all(c in NAME_CHARS for c in text)
+        and text[0] in constants.NAME_START
+        and all(c in constants.NAME_CHARS for c in text)
     )
 
 
@@ -508,7 +477,7 @@ class _LineReader:
             if c in " \t\n":
                 break
             start -= 1
-            if c in NEAR_TEXT_STOPS:
+            if c in constants.NEAR_TEXT_STOPS:
                 break
         return start, end
 
@@ -753,7 +722,7 @@ class _LineReader:
         if known is not None:
             self.pend(known[1], carried=True)
             return known[0]
-        if self.nesting >= MAX_NESTING:
+        if self.nesting >= constants.MAX_NESTING:
             opener = self.text[opened:j].replace("\\\n", "")
             self.fail_token(ReaderToken("op", opener, opened, j))
         state = self.save()
@@ -763,7 +732,7 @@ class _LineReader:
         self.nesting += 1
         self.linebreak()
         while True:
-            tok = self.peek(READ_COMMAND)
+            tok = self.peek(constants.READ_COMMAND)
             if tok.kind == "op" and tok.text == ")":
                 break
             if tok.kind == "eof":
@@ -809,14 +778,16 @@ class _LineReader:
         state = self.save()
         self.pos, self.peeked = i + 1, None
         self.frames.append("array")
-        element = READ_ELEMENT | (READ_SUBSCRIPTS if mode & READ_KEYS else 0)
+        element = constants.READ_ELEMENT | (
+            constants.READ_SUBSCRIPTS if mode & constants.READ_KEYS else 0
+        )
         while True:
             tok = self.peek(element)
             if (
-                mode & READ_BODY
+                mode & constants.READ_BODY
                 and tok.kind == "word"
                 and tok.plain
-                and tok.text in RESERVED_WORDS
+                and tok.text in constants.RESERVED_WORDS
             ):
                 self.fail_token(tok)
             if tok.kind in ("newline", "word"):
@@ -860,13 +831,13 @@ class _LineReader:
             if text.startswith("\\\n", j):
                 j += 2
                 continue
-            if text[j] not in OPERATOR_CHARS:
+            if text[j] not in constants.OPERATOR_CHARS:
                 break
             chars.append(text[j])
             j += 1
             ends.append(j)
         spelled = "".join(chars)
-        for op in OPERATORS:
+        for op in constants.OPERATORS:
             if spelled.startswith(op):
                 return op, ends[len(op) - 1]
         return None
@@ -890,7 +861,7 @@ class _LineReader:
     def peek_after(self) -> ReaderToken:
         """The token after a command. After a compound one it is read as
         where a command starts: reserved words, arrays and arithmetic."""
-        return self.peek(READ_FOLLOW if self.after else 0)
+        return self.peek(constants.READ_FOLLOW if self.after else 0)
 
     def take(self, tok: ReaderToken) -> None:
         self.peeked = None
@@ -999,14 +970,14 @@ class _LineReader:
         c = text[i]
         if c == "\n":
             return ReaderToken("newline", "\n", i, i + 1)
-        if mode & READ_ARITH and text.startswith("((", i):
-            return self.arith_command(i, bool(mode & READ_START))
+        if mode & constants.READ_ARITH and text.startswith("((", i):
+            return self.arith_command(i, bool(mode & constants.READ_START))
         if c in "<>" and self.char_at(i + 1) == "(":
             return self.word(i, 0)
         op = self.operator(i)
         if op is not None:
             return ReaderToken("op", op[0], i, op[1])
-        if c == "{" and not mode & READ_TEST:
+        if c == "{" and not mode & constants.READ_TEST:
             close = text.find("}", i, n)
             if (
                 close > i
@@ -1017,7 +988,7 @@ class _LineReader:
                 return ReaderToken(
                     "redirvar", text[i : close + 1], i, close + 1
                 )
-        if c.isdigit() and not mode & READ_TEST:
+        if c.isdigit() and not mode & constants.READ_TEST:
             j = i
             while j < n and text[j].isdigit():
                 j += 1
@@ -1035,9 +1006,9 @@ class _LineReader:
         text, n = self.text, self.n
         start = i
         plain = True
-        state = "start" if mode & READ_PREFIX else "none"
+        state = "start" if mode & constants.READ_PREFIX else "none"
         assign = False
-        if mode & READ_ELEMENT and text[i] == "[":
+        if mode & constants.READ_ELEMENT and text[i] == "[":
             i = self.bracket(i + 1, i)
             plain = False
         while i < n:
@@ -1052,7 +1023,7 @@ class _LineReader:
                 state = "none"
                 i += 2
                 continue
-            if c in WORD_BREAKS:
+            if c in constants.WORD_BREAKS:
                 if c in "<>" and self.char_at(i + 1) == "(":
                     i = self.process_substitution(i)
                     plain = False
@@ -1060,12 +1031,14 @@ class _LineReader:
                     continue
                 break
             if state in ("start", "name"):
-                if c in NAME_START or (state == "name" and c in NAME_CHARS):
+                if c in constants.NAME_START or (
+                    state == "name" and c in constants.NAME_CHARS
+                ):
                     state = "name"
                 elif state == "name" and c == "[":
                     end = (
                         self.bracket(i + 1, i)
-                        if mode & READ_SUBSCRIPTS
+                        if mode & constants.READ_SUBSCRIPTS
                         else self.subscript_end(i)
                     )
                     if end is not None:
@@ -1091,7 +1064,10 @@ class _LineReader:
                 state = "none"
                 i = (i if c == "=" else joined(self.text, i + 1)) + 1
                 opener = joined(self.text, i)
-                if mode & READ_ARRAYS and text[opener : opener + 1] == "(":
+                if (
+                    mode & constants.READ_ARRAYS
+                    and text[opener : opener + 1] == "("
+                ):
                     i = self.array(opener, mode)
                     plain = False
                 continue
@@ -1117,7 +1093,7 @@ class _LineReader:
         """
         text, n = self.text, self.n
         j = i + 1
-        while j < n and text[j] not in WORD_BREAKS:
+        while j < n and text[j] not in constants.WORD_BREAKS:
             if text[j] == "]":
                 return j + 1
             j += 1
@@ -1140,7 +1116,7 @@ class _LineReader:
         if text[end + 1 : end + 2] == ")":
             return ReaderToken("arith", text[i : end + 2], i, end + 2)
         if start and (end + 1 >= self.n or text[end + 1] == "\n"):
-            if self.nesting >= MAX_NESTING:
+            if self.nesting >= constants.MAX_NESTING:
                 self.fail_token(ReaderToken("op", "(", i, i + 1))
             self.nesting += 1
             state = self.save()
@@ -1169,11 +1145,11 @@ class _LineReader:
         if (
             tok.kind != "word"
             or not tok.plain
-            or tok.text not in RESERVED_WORDS
+            or tok.text not in constants.RESERVED_WORDS
         ):
             return None
         if (
-            tok.text in CLOSING_WORDS
+            tok.text in constants.CLOSING_WORDS
             and tok.text in self.aliases
             and "sub" not in self.frames
         ):
@@ -1188,7 +1164,7 @@ class _LineReader:
     def program(self) -> None:
         self.linebreak()
         while True:
-            tok = self.peek(READ_COMMAND)
+            tok = self.peek(constants.READ_COMMAND)
             if tok.kind == "eof":
                 return
             self.and_or()
@@ -1224,7 +1200,7 @@ class _LineReader:
         self.linebreak()
         seen = False
         while True:
-            tok = self.peek(READ_COMMAND)
+            tok = self.peek(constants.READ_COMMAND)
             if self.stops(tok, words, ops):
                 if not seen and not empty:
                     self.fail_token(tok)
@@ -1259,7 +1235,7 @@ class _LineReader:
         is a command there, ``!`` an error)."""
         prefixed = False
         while True:
-            tok = self.peek(READ_COMMAND)
+            tok = self.peek(constants.READ_COMMAND)
             word = self.keyword(tok)
             if word == "time":
                 self.take(tok)
@@ -1273,7 +1249,7 @@ class _LineReader:
                 break
             prefixed = True
         if prefixed:
-            tok = self.peek(READ_COMMAND)
+            tok = self.peek(constants.READ_COMMAND)
             if tok.kind in ("newline", "eof") or (
                 tok.kind == "op" and tok.text == ";"
             ):
@@ -1294,12 +1270,12 @@ class _LineReader:
         Args:
             piped (bool): it follows a ``|``, where ``time`` is a command.
         """
-        tok = self.peek(READ_COMMAND)
+        tok = self.peek(constants.READ_COMMAND)
         word = self.keyword(tok)
         if piped and word == "time":
             word = None
         if word is not None:
-            if word not in COMPOUND_OPENERS and word not in (
+            if word not in constants.COMPOUND_OPENERS and word not in (
                 "function",
                 "coproc",
             ):
@@ -1312,7 +1288,7 @@ class _LineReader:
             self.redirects()
             return
         if tok.kind in ("word", "number", "redirvar") or (
-            tok.kind == "op" and tok.text in REDIRECTIONS
+            tok.kind == "op" and tok.text in constants.REDIRECTIONS
         ):
             self.simple()
             return
@@ -1325,7 +1301,7 @@ class _LineReader:
         Args:
             tok (ReaderToken): the token it opens with.
         """
-        if self.nesting >= MAX_NESTING:
+        if self.nesting >= constants.MAX_NESTING:
             self.fail_token(tok)
         self.nesting += 1
         word = self.keyword(tok)
@@ -1365,7 +1341,7 @@ class _LineReader:
         while True:
             tok = self.peek_after()
             if tok.kind in ("number", "redirvar") or (
-                tok.kind == "op" and tok.text in REDIRECTIONS
+                tok.kind == "op" and tok.text in constants.REDIRECTIONS
             ):
                 self.redirect(tok)
                 self.after = False
@@ -1411,20 +1387,24 @@ class _LineReader:
         redirection.
         """
         self.after = False
-        mode = READ_PREFIX
+        mode = constants.READ_PREFIX
         assigned = False
         prefixed = False
         while True:
             tok = self.peek(mode)
             if tok.kind in ("number", "redirvar") or (
-                tok.kind == "op" and tok.text in REDIRECTIONS
+                tok.kind == "op" and tok.text in constants.REDIRECTIONS
             ):
                 self.redirect(tok)
-                mode = 0 if assigned else READ_PREFIX | READ_KEYS
+                mode = (
+                    0
+                    if assigned
+                    else constants.READ_PREFIX | constants.READ_KEYS
+                )
                 prefixed = True
             elif tok.kind == "word" and tok.assign:
                 self.take(tok)
-                mode &= ~READ_KEYS
+                mode &= ~constants.READ_KEYS
                 assigned = prefixed = True
             else:
                 break
@@ -1434,7 +1414,7 @@ class _LineReader:
                 nxt = self.peek()
                 if nxt.kind == "op" and nxt.text == "(":
                     self.take(nxt)
-                    close = self.peek(READ_FOLLOW)
+                    close = self.peek(constants.READ_FOLLOW)
                     if not (close.kind == "op" and close.text == ")"):
                         self.fail_token(close)
                     self.take(close)
@@ -1442,14 +1422,16 @@ class _LineReader:
                     self.function_body()
                     return
             mode = (
-                READ_ARRAYS if tok.plain and tok.text in ARRAY_BUILTINS else 0
+                constants.READ_ARRAYS
+                if tok.plain and tok.text in constants.ARRAY_BUILTINS
+                else 0
             )
             while True:
                 tok = self.peek(mode)
                 if tok.kind == "word":
                     self.take(tok)
                 elif tok.kind in ("number", "redirvar") or (
-                    tok.kind == "op" and tok.text in REDIRECTIONS
+                    tok.kind == "op" and tok.text in constants.REDIRECTIONS
                 ):
                     self.redirect(tok)
                     mode = 0
@@ -1459,10 +1441,10 @@ class _LineReader:
             self.fail_token(tok)
 
     def function_body(self) -> None:
-        tok = self.peek(READ_COMMAND | READ_BODY)
+        tok = self.peek(constants.READ_COMMAND | constants.READ_BODY)
         word = self.keyword(tok)
         if (
-            (word is not None and word in COMPOUND_OPENERS)
+            (word is not None and word in constants.COMPOUND_OPENERS)
             or tok.kind == "arith"
             or (tok.kind == "op" and tok.text == "(")
         ):
@@ -1503,7 +1485,7 @@ class _LineReader:
             tok (ReaderToken): the ``coproc`` word.
         """
         self.take(tok)
-        tok = self.peek(READ_COMMAND)
+        tok = self.peek(constants.READ_COMMAND)
         word = self.keyword(tok)
         if word == "time":
             word = None
@@ -1512,14 +1494,14 @@ class _LineReader:
             or tok.kind == "arith"
             or (tok.kind == "op" and tok.text == "(")
         ):
-            if word is not None and word not in COMPOUND_OPENERS:
+            if word is not None and word not in constants.COMPOUND_OPENERS:
                 self.fail_token(tok)
             self.compound(tok)
             return
         if tok.kind == "word" and not tok.assign:
             state = self.save()
             self.take(tok)
-            nxt = self.peek(READ_COMMAND)
+            nxt = self.peek(constants.READ_COMMAND)
             after = self.keyword(nxt)
             if after == "time":
                 after = None
@@ -1528,13 +1510,16 @@ class _LineReader:
                 or nxt.kind == "arith"
                 or (nxt.kind == "op" and nxt.text == "(")
             ):
-                if after is not None and after not in COMPOUND_OPENERS:
+                if (
+                    after is not None
+                    and after not in constants.COMPOUND_OPENERS
+                ):
                     self.fail_token(nxt)
                 self.compound(nxt)
                 return
             self.restore(state)
         if tok.kind in ("word", "number") or (
-            tok.kind == "op" and tok.text in REDIRECTIONS
+            tok.kind == "op" and tok.text in constants.REDIRECTIONS
         ):
             self.simple()
             return
@@ -1561,7 +1546,7 @@ class _LineReader:
             separated (bool): a ``;`` or newline came first, after which
                 the body's place reads arrays and arithmetic.
         """
-        tok = self.peek(READ_FOLLOW if separated else 0)
+        tok = self.peek(constants.READ_FOLLOW if separated else 0)
         word = self.keyword(tok)
         if word == "do":
             self.take(tok)
@@ -1699,7 +1684,9 @@ class _LineReader:
                 self.take(tok)
                 tok = self.peek()
             end = self.compound_list(
-                words=frozenset({"esac"}), ops=CASE_TERMINATORS, empty=True
+                words=frozenset({"esac"}),
+                ops=constants.CASE_TERMINATORS,
+                empty=True,
             )
             self.take(end)
             if end.kind != "op":
@@ -1738,10 +1725,10 @@ class _LineReader:
 
     def test_peek(self) -> ReaderToken:
         self.linebreak()
-        return self.peek(READ_TEST)
+        return self.peek(constants.READ_TEST)
 
     def test_word(self) -> ReaderToken:
-        return self.peek(READ_TEST)
+        return self.peek(constants.READ_TEST)
 
     def test_after(self) -> ReaderToken:
         """The token after a whole test; ending inside a quote there, bash
@@ -1808,7 +1795,7 @@ class _LineReader:
                 ],
                 tok,
             )
-        if tok.plain and tok.text in UNARY_TESTS:
+        if tok.plain and tok.text in constants.UNARY_TESTS:
             self.take(tok)
             arg = self.test_operand("unary", self.test_word)
             if arg.kind != "word" or _is_test_close(arg):
@@ -1823,14 +1810,16 @@ class _LineReader:
             return
         self.take(tok)
         try:
-            op = self.peek(READ_TEST)
+            op = self.peek(constants.READ_TEST)
         except ReaderRefusal as refusal:
             if refusal.eof:
                 refusal.lines.append("conditional binary operator expected")
             raise
-        if (op.kind == "word" and op.plain and op.text in BINARY_TESTS) or (
-            op.kind == "op" and op.text in ("<", ">")
-        ):
+        if (
+            op.kind == "word"
+            and op.plain
+            and op.text in constants.BINARY_TESTS
+        ) or (op.kind == "op" and op.text in ("<", ">")):
             self.take(op)
             reader = self.test_word
             if op.text == "=~":
@@ -1870,7 +1859,7 @@ class _LineReader:
         Args:
             tok (ReaderToken): the ``(``.
         """
-        if self.nesting >= MAX_NESTING:
+        if self.nesting >= constants.MAX_NESTING:
             self.fail_token(tok)
         self.take(tok)
         self.depth += 1
@@ -1922,20 +1911,21 @@ class _LineReader:
         """The right side of ``==``, ``=`` or ``!=``, read with extglob on."""
         i = self.blank_end(self.pos)
         text, n = self.text, self.n
-        tok = self.lex(i, READ_TEST)
+        tok = self.lex(i, constants.READ_TEST)
         if tok.kind != "word" and not (
-            text[i : i + 1] in EXTGLOB_OPENERS and text[i + 1 : i + 2] == "("
+            text[i : i + 1] in constants.EXTGLOB_OPENERS
+            and text[i + 1 : i + 2] == "("
         ):
             return tok
         j = i
         extended = False
         while j < n:
             c = text[j]
-            if c in EXTGLOB_OPENERS and text[j + 1 : j + 2] == "(":
+            if c in constants.EXTGLOB_OPENERS and text[j + 1 : j + 2] == "(":
                 j = self.matched(j + 2, j + 1) + 1
                 extended = True
                 continue
-            if c in WORD_BREAKS:
+            if c in constants.WORD_BREAKS:
                 break
             j = self.word_char(j)
         if not extended:
