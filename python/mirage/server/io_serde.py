@@ -20,7 +20,8 @@ from typing import Any
 
 import jsonschema
 
-from mirage.errors.classify import classify, failure_text
+from mirage.errors.classify import classify
+from mirage.errors.posix import posix_phrase
 from mirage.io.types import IOResult
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.types import (
@@ -53,14 +54,23 @@ def refusal_to_dict(refusal: Refusal | None) -> dict[str, JsonValue] | None:
 
 
 def failure_to_dict(exc: Exception) -> dict[str, JsonValue]:
-    """A failed call as the server's entry points carry it: its text, the errno
-    it names and, for a policy's refusal, its record.
+    """A failed call's public detail, errno and policy refusal record.
+
+    Only named conditions have public text. Unknown exceptions may carry
+    credentials, backend responses or host paths, so keep their details
+    in the server's logs.
 
     Args:
         exc (Exception): what the call raised.
     """
-    body: dict[str, JsonValue] = {"detail": failure_text(exc)}
     condition = classify(exc)
+    body: dict[str, JsonValue] = {
+        "detail": (
+            "internal server error"
+            if condition is None
+            else posix_phrase(condition)
+        )
+    }
     if condition is not None:
         body["errno"] = condition.name
     if isinstance(exc, PolicyDenied):

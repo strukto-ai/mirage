@@ -122,6 +122,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
           const session = await sessionOf(ws, req.query.session_id)
           body = await answered(session, call, args, explain)
         } catch (err) {
+          req.log.debug({ err }, 'vfs/%s failed', call.name)
           return failure(reply, err)
         }
         return reply.send(body)
@@ -144,6 +145,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
         const session = await sessionOf(ws, req.query.session_id)
         paths = await session.glob(pattern)
       } catch (err) {
+        req.log.debug({ err }, 'glob failed')
         return failure(reply, err)
       }
       return reply.send({ paths })

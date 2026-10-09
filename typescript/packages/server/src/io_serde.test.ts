@@ -13,15 +13,57 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode } from '@struktoai/mirage-core/types'
+import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
-import { CallArgsError, answered, checked, ioResultToDict } from './io_serde.ts'
+import { CallArgsError, answered, checked, failureToDict, ioResultToDict } from './io_serde.ts'
 import { VFS_CALL_BY_NAME, type VfsCall } from './vfs_calls.ts'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
+
+describe('failureToDict', () => {
+  it.each([
+    new Error('backend token=secret'),
+    new TypeError('backend token=secret'),
+    Object.assign(new Error('backend token=secret'), { code: 'ECONNREFUSED' }),
+    'backend token=secret',
+  ])('hides unknown backend failures (%s)', (err) => {
+    expect(failureToDict(err)).toEqual({ detail: 'internal server error' })
+  })
+
+  it.each([
+    ['ENOENT', 'No such file or directory'],
+    ['EACCES', 'Permission denied'],
+    ['EIO', 'Input/output error'],
+  ])('exposes only public errno text for %s', (code, detail) => {
+    const err = Object.assign(new Error('backend token=secret at /private/config'), { code })
+    expect(failureToDict(err)).toEqual({ detail, errno: code })
+  })
+
+  it('keeps the policy refusal record', () => {
+    const err = new PolicyDenied('backend token=secret', '/private/config', {
+      kind: 'pending',
+      reason: 'sign-off',
+      policy: '',
+      scope: 'command',
+      askId: 'abc123',
+    })
+    expect(failureToDict(err)).toEqual({
+      detail: 'Permission denied',
+      errno: 'EACCES',
+      refusal: {
+        kind: 'pending',
+        reason: 'sign-off',
+        policy: '',
+        scope: 'command',
+        ask_id: 'abc123',
+      },
+    })
+  })
+})
 
 describe('ioResultToDict', () => {
   it('carries a null refusal on an ordinary run', () => {

@@ -15,8 +15,9 @@
 import { Readable } from 'node:stream'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MirageRpcServer } from './server.ts'
 
 function server(): MirageRpcServer {
@@ -113,6 +114,19 @@ describe('MirageRpcServer', () => {
     expect(((await call(rpc, 'nope', {})).error as { code: number }).code).toBe(-32601)
     expect(((await call(rpc, 'vfs/read', { path: 3 })).error as { code: number }).code).toBe(-32602)
     expect(await rpc.handle({ jsonrpc: '2.0', method: 'shell' })).toBeNull()
+  })
+
+  it('redacts unknown failures in both message and data', async () => {
+    const glob = vi.spyOn(Session.prototype, 'glob').mockRejectedValue(new Error('token=secret'))
+    try {
+      expect((await call(server(), 'glob', { pattern: '/*' })).error).toEqual({
+        code: -32603,
+        message: 'internal server error',
+        data: { detail: 'internal server error' },
+      })
+    } finally {
+      glob.mockRestore()
+    }
   })
 
   it('runs nothing for a message without jsonrpc 2.0', async () => {

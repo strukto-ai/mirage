@@ -15,7 +15,6 @@
 import { Buffer } from 'node:buffer'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import { failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -218,7 +217,7 @@ export class MirageRpcServer {
       }
       const data = failureToDict(err)
       const code = data.errno === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
-      return errorResponse(requestId, code, failureText(err), data)
+      return errorResponse(requestId, code, data.detail, data)
     }
   }
 
