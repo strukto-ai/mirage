@@ -95,10 +95,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "shopt -s expand_aliases\nmkdir -p ald && touch ald/foo ald/bar\nalias axc='ls ald | grep'\naxc foo",
+      "command": "shopt -s expand_aliases\nmkdir -p ald && touch ald/foo ald/bar\nalias axc='ls ald | grep'\naxc foo\naxc foo > alout\ncat alout\nalias axr='echo left; echo right > alown'\naxr > alouter\nwc -c < alown; cat alouter\nalias axempty=''\naxempty > alempty\nwc -c < alempty\nrm alout alown alouter alempty",
       "expect": {
         "exit": 0,
-        "stdout": "foo\n",
+        "stdout": "foo\nfoo\nleft\n0\nright\n0\n",
         "stderr": ""
       }
     },

@@ -16,7 +16,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { lstripSlash, rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import type { SFTPWrapper } from 'ssh2'
+import type { OpenMode, SFTPWrapper } from 'ssh2'
 import { FXF_CREAT, FXF_WRITE } from './constants.ts'
 
 const S_IFMT = 0o170000
@@ -77,7 +77,7 @@ export function isFileAttrs(attrs: { mode?: number }): boolean {
 }
 
 /**
- * Open a remote file for writing, creating it and cutting nothing.
+ * Open a remote file with consistent filesystem errors.
  *
  * OpenSSH answers an open of a directory with SFTP 3's one generic refusal
  * (SSH_FX_FAILURE), so a stat decides whether it was one; a missing parent
@@ -87,10 +87,11 @@ export async function openForWrite(
   sftp: SFTPWrapper,
   remote: string,
   p: PathSpec,
+  flags: OpenMode | number = FXF_WRITE | FXF_CREAT,
 ): Promise<Buffer> {
   try {
     return await new Promise<Buffer>((resolveFn, rejectFn) => {
-      sftp.open(remote, FXF_WRITE | FXF_CREAT, (err, opened) => {
+      sftp.open(remote, flags, (err, opened) => {
         if (err) rejectFn(err)
         else resolveFn(opened)
       })

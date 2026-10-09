@@ -14,7 +14,7 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { childLine } from './node.ts'
-import type { SessionView } from '../../view/types.ts'
+import type { NamespaceLinks, SessionView } from '../../view/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
@@ -24,71 +24,41 @@ import type { MountRegistry } from '../mount/registry.ts'
 
 import { visibleEnv } from '../session/state.ts'
 import { classifyBarePath } from './classify/index.ts'
+import { globOptions, resolveGlobs } from './globs.ts'
+import { expandWords } from './parts.ts'
 import { expandNode } from './node.ts'
 import type { ExecuteFn } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
-/**
- * Expand redirect targets: heredoc vars, target words, pipelines.
- *
- * The single expansion path for redirected statements; the executor
- * then applies the redirects. Heredoc/herestring bodies get
- * session variables substituted; file targets are expanded and
- * classified into PathSpec or plain text; the first attached pipeline
- * is detached and returned separately. `forked` says the redirects belong
- * to a program bash forks for, which expands them in the child: an error
- * there is kept for the command to fail on (`UNEXPANDED`) rather than
- * thrown into the shell, which discards the line.
- */
-export async function expandRedirects(
-  redirects: readonly Redirect[],
+/** Expand one redirect immediately before the executor applies it. */
+export async function expandRedirect(
+  redirect: Redirect,
   context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null = null,
   view?: SessionView,
   forked = false,
-): Promise<[Redirect[], TSNodeLike | null]> {
-  const expanded: Redirect[] = []
-  for (const [index, r] of redirects.entries()) {
-    try {
-      expanded.push(await expandRedirect(r, context, executeFn, registry, callStack, view))
-    } catch (err) {
-      if (!(err instanceof ExitSignal) || !forked) throw err
-      // The child performs no redirect after the first that fails; a
-      // pipeline the line attached to one of them still runs.
-      const later = redirects.slice(index).find((each) => each.pipeline != null)
-      expanded.push(
-        new Redirect({
-          fd: r.fd,
-          target: err,
-          kind: RedirectKind.UNEXPANDED,
-          pipeline: later?.pipeline ?? null,
-        }),
-      )
-      break
-    }
+  links: NamespaceLinks | null = null,
+): Promise<Redirect> {
+  try {
+    return await expandTarget(redirect, context, executeFn, registry, callStack, view, links)
+  } catch (error) {
+    if (!(error instanceof ExitSignal) || !forked) throw error
+    return new Redirect({ fd: redirect.fd, target: error, kind: RedirectKind.UNEXPANDED })
   }
-  let pipeNode: TSNodeLike | null = null
-  for (const r of expanded) {
-    if (r.pipeline !== null && r.pipeline !== undefined) {
-      pipeNode = r.pipeline as TSNodeLike
-      r.pipeline = null
-      break
-    }
-  }
-  return [expanded, pipeNode]
 }
 
 /** Expand one redirect's body or target. */
-async function expandRedirect(
+async function expandTarget(
   r: Redirect,
   context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null,
   view: SessionView | undefined,
+  links: NamespaceLinks | null,
 ): Promise<Redirect> {
   const session = context.session
   if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
@@ -151,8 +121,24 @@ async function expandRedirect(
   const targetNode = r.targetNode as TSNodeLike | null
   let targetScope: unknown = r.target
   if (targetNode !== null) {
-    const targetStr = await expandNode(targetNode, context, executeFn, callStack, view)
-    targetScope = classifyBarePath(targetStr, registry, session.cwd)
+    const words = await expandWords([targetNode], context, executeFn, callStack, view)
+    const targets = await resolveGlobs(
+      words.map((word) => classifyBarePath(word, registry, session.cwd)),
+      registry,
+      session.shellOptions.noglob ?? false,
+      links,
+      globOptions(session),
+    )
+    if (targets.length !== 1) {
+      return new Redirect({
+        fd: r.fd,
+        target: r.target,
+        targetNode: r.targetNode,
+        kind: RedirectKind.AMBIGUOUS,
+        pipeline: r.pipeline,
+      })
+    }
+    targetScope = targets[0]
   }
   return new Redirect({
     fd: r.fd,

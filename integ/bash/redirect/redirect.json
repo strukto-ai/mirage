@@ -1488,6 +1488,134 @@
         "stdout": "0\n0\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_glob_single_and_namespace",
+      "seq": 501170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/redirect-glob && cd /data/redirect-glob && printf 'one\\n' > a.txt && cat < *.txt && printf 'two\\n' >> *.txt && cat < *.txt && printf 'replace\\n' >| *.txt && cat < *.txt && { echo out; echo err >&2; } &> *.txt && cat < *.txt && printf '%s\\n' \"$(<*.txt)\" && ln -s a.txt alias.log && cat < *.log && mkdir sub && ln -s .. sub/up && cat < sub/up/*.txt && echo created > created.new > *.new && cat created.new && printf 'stale\\n' > emptied && echo substituted > emptied > \"$(cat emptied; echo substituted)\" && test ! -s emptied && cat substituted; target=before; target=after echo prefix > \"$target\"; cat before; test ! -e after && echo before-prefix; shopt -s expand_aliases; alias redirect_say='echo alias'; eval 'redirect_say > alias.out'; cat alias.out); rm -r /data/redirect-glob",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\none\ntwo\nreplace\nout\nerr\nout\nerr\nout\nerr\nout\nerr\ncreated\nsubstituted\nprefix\nbefore-prefix\nalias\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_glob_ambiguous",
+      "seq": 501171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/redirect-many && cd /data/redirect-many && printf 'a\\n' > a.txt && printf 'b\\n' > b.txt; cat < *.txt; echo input=$?; echo bad > *.txt; echo output=$?; echo bad >> *.txt; echo append=$?; { echo bad; } > *.txt; echo compound=$?; true | cat < *.txt; echo pipe=$?; ! cat < *.txt; echo negated=$?; echo bad > *.txt > \"$(touch later; echo skipped)\"; echo ordered=$?; test ! -e later && echo unexpanded; (exec > *.txt); echo exec=$?; cat a.txt b.txt; rm b.txt; echo bad > b.txt > *.txt; echo created=$?; test ! -s b.txt && echo empty; cat a.txt; rm b.txt; echo bad >> b.txt >> *.txt; echo appended=$?; test ! -s b.txt && echo empty; rm b.txt; { echo bad; } > b.txt > *.txt; echo grouped=$?; rm b.txt; true | echo bad > b.txt > *.txt; echo piped=$?; rm b.txt; (exec > b.txt > *.txt); echo installed=$?; test ! -s b.txt && echo empty; echo bad > missing/ > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; rm b.txt; echo bad 2>errors >b.txt >*.txt; echo routed=$?; cat errors; echo bad 2>>errors > missing/; echo refused=$?; tail -1 errors); rm -r /data/redirect-many",
+      "expect": {
+        "exit": 0,
+        "stdout": "input=1\noutput=1\nappend=1\ncompound=1\npipe=1\nnegated=0\nordered=1\nunexpanded\nexec=1\na\nb\ncreated=1\nempty\na\nappended=1\nempty\ngrouped=1\npiped=1\ninstalled=1\nempty\nfailed=1\nunexpanded\nrouted=1\n*.txt: ambiguous redirect\nrefused=1\nmissing/: Is a directory\n",
+        "stderr": "*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\nmissing/: Is a directory\n"
+      }
+    },
+    {
+      "id": "redirect_glob_quotes_and_options",
+      "seq": 501172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/redirect-quotes && cd /data/redirect-quotes && printf 'literal\\n' > 'a*.txt' && cat < 'a*.txt' && cat < a\\*.txt && printf 'space\\n' > 'space file' && name='space file' && cat < \"$name\" && printf 'mixed\\n' > 'a*1.txt' && cat < 'a*'?.txt && pattern='space*' && cat < $pattern && printf 'new\\n' > *.new && cat < '*.new' && set -f && printf 'noglob\\n' > *.txt && cat < '*.txt' && set +f; shopt -s nullglob; cat < *.missing; echo null=$?; shopt -u nullglob; cat < *.missing; echo missing=$?); rm -r /data/redirect-quotes",
+      "expect": {
+        "exit": 0,
+        "stdout": "literal\nliteral\nspace\nmixed\nspace\nnew\nnoglob\nnull=1\nmissing=1\n",
+        "stderr": "*.missing: ambiguous redirect\n*.missing: No such file or directory\n"
+      }
+    },
+    {
+      "id": "redirect_word_cardinality",
+      "seq": 501173,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/redirect-words && cd /data/redirect-words; empty=; cat < $empty; echo empty=$?; names='a b'; echo bad > $names; echo split=$?; echo bad > {a,b}; echo brace=$?; printf 'quoted\\n' > \"$names\" && cat < \"$names\"); rm -r /data/redirect-words",
+      "expect": {
+        "exit": 0,
+        "stdout": "empty=1\nsplit=1\nbrace=1\nquoted\n",
+        "stderr": "$empty: ambiguous redirect\n$names: ambiguous redirect\n{a,b}: ambiguous redirect\n"
+      }
     }
   ]
 }

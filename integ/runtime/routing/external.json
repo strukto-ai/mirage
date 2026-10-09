@@ -421,7 +421,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr": "/vault/secret.py: Permission denied\n"
+            "stderr": "python3: /vault/secret.py: Permission denied\n"
           }
         }
       ]

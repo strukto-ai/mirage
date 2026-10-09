@@ -14,6 +14,10 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
+import type { ByteSource, IOResult } from '../io/types.ts'
+import type { Redirect } from '../shell/types.ts'
+import type { JobConsole } from '../shell/console/index.ts'
+import type { ExecutionNode } from '../workspace/types.ts'
 import type { EvaluationContext } from '../workspace/evaluation.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
@@ -485,14 +489,26 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
   return best
 }
 
-/**
- * Opens a statement's write targets as bash does before the command runs,
- * given the admitted command's name and arguments; false when one cannot be
- * opened.
- */
-export type RedirectOpener = (name: string, args: readonly string[]) => Promise<boolean>
+/** Runs a prepared command under ordered redirects, gating each target. */
+export type RedirectResult = [ByteSource | null, IOResult, ExecutionNode]
+export type RedirectRun = (
+  stdin: ByteSource | null,
+  sink: JobConsole | undefined,
+  paths: readonly PathSpec[],
+) => Promise<RedirectResult>
+export type RedirectGuard = (
+  paths: readonly PathSpec[],
+  stdin: ByteSource | null,
+) => Promise<RedirectResult | null>
+export type RedirectRunner = (
+  run: RedirectRun,
+  guard: RedirectGuard | undefined,
+  name: string,
+  args: readonly string[],
+) => Promise<RedirectResult>
 
-const redirectStorage = createAsyncContext<[object, readonly PathSpec[], RedirectOpener | null]>()
+const redirectStorage =
+  createAsyncContext<[object, readonly PathSpec[], RedirectRunner | null, readonly Redirect[]]>()
 
 /**
  * Bind a statement's expanded redirect targets to the command node they
@@ -505,17 +521,17 @@ const redirectStorage = createAsyncContext<[object, readonly PathSpec[], Redirec
  * to the command (a `$()` operand, an `eval`) never inherits the outer
  * statement's targets.
  *
- * The opener empties the targets bash opens for writing before the command
- * runs; dispatch calls it with the command's name and arguments once the line
- * is admitted, so a command the gate refuses leaves its targets as they were.
+ * The runner applies redirects after command words expand, admitting each
+ * resolved target before opening it. Nested expansions keep their own identity.
  */
 export function runWithRedirectPaths<T>(
   node: object,
   paths: readonly PathSpec[],
   fn: () => Promise<T>,
-  opener: RedirectOpener | null = null,
+  runner: RedirectRunner | null = null,
+  syntax: readonly Redirect[] = [],
 ): Promise<T> {
-  return Promise.resolve(redirectStorage.run([node, paths, opener], fn))
+  return Promise.resolve(redirectStorage.run([node, paths, runner, syntax], fn))
 }
 
 const programStorage = createAsyncContext<SessionState | null>()
@@ -592,11 +608,21 @@ export function redirectPathsFor(node: object): readonly PathSpec[] {
   return []
 }
 
+/** Pending redirects, before a rewritten command reaches admission. */
+export function redirectSyntaxFor(node: object): readonly Redirect[] {
+  const bindings = redirectStorage.liveStores()
+  for (let at = bindings.length - 1; at >= 0; at--) {
+    const bound = bindings[at]
+    if (bound?.[0] === node) return bound[3]
+  }
+  return []
+}
+
 /**
- * The opener bound with this command node's redirect targets, null for any
+ * The runner bound with this command node's redirect targets, null for any
  * other node or when none is bound.
  */
-export function redirectOpenerFor(node: object): RedirectOpener | null {
+export function redirectRunnerFor(node: object): RedirectRunner | null {
   const bindings = redirectStorage.liveStores()
   for (let at = bindings.length - 1; at >= 0; at--) {
     const bound = bindings[at]

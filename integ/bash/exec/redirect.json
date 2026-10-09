@@ -231,11 +231,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec > exgood.txt < exmissing.txt; echo visible ); test -e exgood.txt && wc -c < exgood.txt; ( exec 2> exerr.txt < exmissing.txt; echo toerr >&2 ); cat exerr.txt; rm exgood.txt exerr.txt",
+      "command": "( exec > exgood.txt < exmissing.txt; echo visible ); test -e exgood.txt && wc -c < exgood.txt; ( exec 2> exerr.txt < exmissing.txt; echo toerr >&2 ); cat exerr.txt; rm exgood.txt exerr.txt; eval 'exec > exexpand.txt >$((1/0))'; echo restored; wc -c < exexpand.txt; rm exexpand.txt",
       "expect": {
         "exit": 0,
-        "stdout": "visible\n0\nexmissing.txt: No such file or directory\n",
-        "stderr": "exmissing.txt: No such file or directory\ntoerr\n"
+        "stdout": "visible\n0\nexmissing.txt: No such file or directory\nrestored\n0\n",
+        "stderr": "exmissing.txt: No such file or directory\ntoerr\nbash: 1/0: division by 0\n"
       }
     },
     {

@@ -17,7 +17,7 @@ import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { joinRoot, stripPrefix } from './utils.ts'
+import { joinRoot, openForWrite, stripPrefix } from './utils.ts'
 
 export async function appendBytes(
   accessor: SSHAccessor,
@@ -28,12 +28,22 @@ export async function appendBytes(
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
-  await new Promise<void>((resolveFn, rejectFn) => {
-    sftp.appendFile(remote, Buffer.from(data), (err) => {
-      if (err) rejectFn(err)
-      else resolveFn()
+  const handle = await openForWrite(sftp, remote, p, 'a')
+  try {
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.write(handle, Buffer.from(data), 0, data.byteLength, 0, (err) => {
+        if (err) rejectFn(err)
+        else resolveFn()
+      })
     })
-  })
+  } finally {
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.close(handle, (err) => {
+        if (err) rejectFn(err)
+        else resolveFn()
+      })
+    })
+  }
   record('append', p.virtual, VFSName.SSH, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

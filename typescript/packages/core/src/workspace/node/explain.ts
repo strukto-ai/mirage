@@ -55,6 +55,7 @@ import {
   isPendingRefusal,
   redirectPaths,
   statementRedirects,
+  statementStdin,
   type Refused,
   UNREADABLE_LINES,
   unreadable,
@@ -160,6 +161,7 @@ export interface Walked {
   readonly occurrence: Occurrence
   readonly intrinsic?: boolean
   readonly lost?: boolean
+  readonly stdin?: Uint8Array | null
 }
 
 /**
@@ -378,6 +380,7 @@ async function judgeWords(
   wholeLine = false,
   lost = false,
   every = false,
+  stdin: Uint8Array | null = null,
 ): Promise<Judged[]> {
   const head = words[0]
   if (head === undefined) return []
@@ -410,7 +413,7 @@ async function judgeWords(
     registry,
     namespace,
     agentId,
-    null,
+    stdin,
     redirectPaths(redirectWords, registry, session.cwd),
     intrinsic,
     unread,
@@ -556,6 +559,7 @@ function* walkNode(
       yield {
         words,
         redirects: statementRedirects(node, home),
+        stdin: statementStdin(node),
         session,
         occurrence: occurrenceIn(node, frame),
         lost,
@@ -760,6 +764,8 @@ export async function lineJudgments(
         item.intrinsic,
         false,
         item.lost,
+        false,
+        item.stdin,
       ),
     ])
   }
@@ -868,7 +874,7 @@ export async function prejudgeLine(
         registry,
         namespace,
         agentId,
-        null,
+        index === 0 ? (item.stdin ?? null) : null,
         // judgeWords lists the statement's own command first and the
         // lines it runs after it, so only the first explanation is the
         // command the redirects belong to.
@@ -916,6 +922,7 @@ async function verdictRefuses(
   // the gate.
   handed: HandOff,
   signal?: AbortSignal,
+  stdin: Uint8Array | null = null,
 ): Promise<boolean> {
   const expl = judged.judgment
   const claimant: Claimant = { line: handed, occurrence: judged.occurrence }
@@ -929,7 +936,7 @@ async function verdictRefuses(
     registry,
     namespace,
     agentId,
-    null,
+    stdin,
     redirects,
     judged.intrinsic,
     judged.unread,
@@ -1021,6 +1028,8 @@ async function commandRefused(
     false,
     false,
     item.lost,
+    false,
+    item.stdin,
   )
   const targets = redirectPaths(item.redirects, registry, walked.cwd)
   for (const [index, judged] of explained.entries()) {
@@ -1041,6 +1050,7 @@ async function commandRefused(
         agentId,
         handed,
         signal,
+        index === 0 ? (item.stdin ?? null) : null,
       )
     ) {
       return true
@@ -1440,6 +1450,7 @@ async function judgeLine(
         wholeLine,
         item.lost,
         every,
+        item.stdin,
       )),
     )
   }

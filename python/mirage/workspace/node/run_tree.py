@@ -39,7 +39,7 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.redirect import handle_redirect
-from mirage.workspace.expand.redirects import expand_redirects
+from mirage.workspace.expand.redirects import expand_redirect
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import Refused, admit
@@ -125,11 +125,12 @@ async def run_command_tree(
     if redirect is None:
         stdout, io, exec_node = await run(ast, context, stdin, call_stack)
     else:
-        redirects, _ = await expand_redirects(
-            [redirect],
+        expanded = await expand_redirect(
+            redirect,
             context,
             execute_fn,
             registry,
+            links=namespace,
             view=session_view(
                 session,
                 registry.policies,
@@ -138,7 +139,7 @@ async def run_command_tree(
         )
         # Bash's implicit file read has cat's policy identity, without
         # invoking a function/alias or expanding the filename a second time.
-        target = redirects[0].target
+        target = expanded.target
         paths = (
             [target]
             if isinstance(target, PathSpec)
@@ -179,7 +180,7 @@ async def run_command_tree(
                     run,
                     dispatch,
                     None,
-                    redirects,
+                    [expanded],
                     context,
                     stdin,
                     capture_input=True,

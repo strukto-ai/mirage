@@ -3143,10 +3143,10 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "cp /repo/.git/config /repo/.git/config.saved; printf '\\n[remote \"origin\"]\\n    url = https://example.com/org/repo.git\\n    fetch = +refs/heads/*:refs/remotes/origin/*\\n    pushurl = ssh://git@example.com/org/repo.git\\n[branch \"main\"]\\n    remote = origin\\n    merge = refs/heads/main\\n' >> /repo/.git/config; mkdir -p /repo/.git/refs/remotes/origin; git -C /repo log -1 --format=%H HEAD~1 > /repo/.git/refs/remotes/origin/main; git -C /repo remote -v; git -C /repo config --get remote.origin.url; git -C /repo branch -a -vv; rm -r /repo/.git/refs/remotes; mv /repo/.git/config.saved /repo/.git/config",
+      "command": "cp /repo/.git/config /repo/.git/config.saved; printf '\\n[remote \"origin\"]\\n    url = https://example.com/org/repo.git\\n    fetch = +refs/heads/*:refs/remotes/origin/*\\n    pushurl = ssh://git@example.com/org/repo.git\\n[branch \"main\"]\\n    remote = origin\\n    merge = refs/heads/main\\n' >> /repo/.git/config; mkdir -p /repo/.git/refs/remotes/origin; git -C /repo log -1 --format=%H HEAD~1 > /repo/.git/refs/remotes/origin/main; git -C /repo remote -v; git -C /repo config --get remote.origin.url; git -C /repo remote get-url origin; git -C /repo remote get-url --push --all origin; git -C /repo branch -a -vv; rm -r /repo/.git/refs/remotes; mv /repo/.git/config.saved /repo/.git/config",
       "expect": {
         "exit": 0,
-        "stdout": "origin\thttps://example.com/org/repo.git (fetch)\norigin\tssh://git@example.com/org/repo.git (push)\nhttps://example.com/org/repo.git\n* main                8ef2542 [origin/main: ahead 1] add two\n  topic               225f39c add docs\n  remotes/origin/main 225f39c add docs\n",
+        "stdout": "origin\thttps://example.com/org/repo.git (fetch)\norigin\tssh://git@example.com/org/repo.git (push)\nhttps://example.com/org/repo.git\nhttps://example.com/org/repo.git\nssh://git@example.com/org/repo.git\n* main                8ef2542 [origin/main: ahead 1] add two\n  topic               225f39c add docs\n  remotes/origin/main 225f39c add docs\n",
         "stderr": ""
       }
     },

@@ -356,7 +356,7 @@ function makeFakeSftp(state: FakeSftp): SFTPWrapper {
           ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
           : buffer
       const slice = src.subarray(offset, offset + length)
-      const writeAt = position
+      const writeAt = h.flags === 'a' ? file.data.byteLength : position
       const newSize = Math.max(file.data.byteLength, writeAt + slice.byteLength)
       const merged = new Uint8Array(newSize)
       merged.set(file.data, 0)

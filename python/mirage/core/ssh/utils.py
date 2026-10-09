@@ -34,9 +34,12 @@ def join_root(root: str, rel: str) -> str:
 
 
 async def open_for_write(
-    sftp: asyncssh.SFTPClient, remote: str, path: PathSpec
+    sftp: asyncssh.SFTPClient,
+    remote: str,
+    path: PathSpec,
+    flags: str | int = FXF_WRITE | FXF_CREAT,
 ) -> asyncssh.SFTPClientFile:
-    """Open a remote file for writing, creating it and cutting nothing.
+    """Open a remote file with consistent filesystem errors.
 
     OpenSSH answers an open of a directory with SFTP 3's one generic
     refusal (``SFTPFailure``), so a stat decides whether it was one;
@@ -47,9 +50,10 @@ async def open_for_write(
         sftp (asyncssh.SFTPClient): the mount's SFTP session.
         remote (str): the remote path, under the mount's root.
         path (PathSpec): the virtual path, for the error.
+        flags (str | int): SFTP open mode, preserving existing bytes by default.
     """
     try:
-        return await sftp.open(remote, FXF_WRITE | FXF_CREAT, encoding=None)
+        return await sftp.open(remote, flags, encoding=None)
     except asyncssh.SFTPNoSuchFile as exc:
         raise enoent(path) from exc
     except asyncssh.SFTPFailure as exc:

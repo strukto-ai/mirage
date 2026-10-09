@@ -221,6 +221,7 @@ GIT_LONG_OPTIONS: dict[str, tuple[str, ...]] = {
         "[no-]sparse",
     ),
     "remote": ("[no-]verbose",),
+    "remote get-url": ("[no-]push", "[no-]all"),
     "reset": (
         "[no-]quiet",
         "no-refresh",
@@ -419,6 +420,7 @@ GIT_SYNOPSES: dict[str, tuple[str, ...]] = {
     "mv": ("git mv [<options>] <source>... <destination>",),
     "reflog": ("git reflog [show] [<log-options>] [<ref>]",),
     "remote": ("git remote [-v | --verbose]",),
+    "remote get-url": ("git remote get-url [--push] [--all] <name>",),
     "reset": (
         "git reset [-q] [<commit>]",
         "git reset [-q] [<tree-ish>] [--] <pathspec>...",

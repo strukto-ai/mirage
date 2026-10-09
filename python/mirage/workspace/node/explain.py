@@ -64,6 +64,7 @@ from mirage.workspace.node.admission import (
     is_pending_refusal,
     redirect_paths,
     statement_redirects,
+    statement_stdin,
     unreadable,
 )
 from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
@@ -370,6 +371,7 @@ async def _judge_words(
     whole_line: bool = False,
     lost: bool = False,
     every: bool = False,
+    stdin: bytes | None = None,
 ) -> list[Judged]:
     """Explain one command and whatever lines it runs in turn, each
     with its occurrence.
@@ -412,6 +414,7 @@ async def _judge_words(
         lost (bool): whether a ``cd`` the walk could not follow ran
             before the command, as ``Walked`` carries it.
         every (bool): ask every policy past a Deny, for ``explain``.
+        stdin (bytes | None): empty when the statement redirects input.
     """
     head = words[0]
     if head.text is None:
@@ -450,6 +453,7 @@ async def _judge_words(
         registry,
         namespace,
         agent_id,
+        stdin=stdin,
         redirects=redirect_paths(redirect_words, registry, session.cwd),
         intrinsic=intrinsic,
         unread=unread,
@@ -608,6 +612,7 @@ class Walked:
         intrinsic (bool): the shell implements the operation directly.
         words (list[Word]): the command's words, name first.
         redirects (tuple[Word, ...]): the statement's redirect targets.
+        stdin (bytes | None): empty when the statement redirects input.
         session (SessionState): the session the command is judged in.
         occurrence (Occurrence): the command's place on the line.
         lost (bool): a ``cd`` the walk could not follow ran before the
@@ -620,6 +625,7 @@ class Walked:
     occurrence: Occurrence
     intrinsic: bool = False
     lost: bool = False
+    stdin: bytes | None = None
 
 
 # A walk yields each command and returns where its scope ends: the
@@ -727,6 +733,7 @@ def _walk_node(
                 session,
                 occurrence_in(node, frame),
                 lost=lost,
+                stdin=statement_stdin(node),
             )
             walked = _after_cd(words, session, lost)
         for child in node.children:
@@ -893,6 +900,7 @@ async def line_judgments(
                     namespace,
                     agent_id,
                     item.redirects,
+                    stdin=item.stdin,
                     intrinsic=item.intrinsic,
                     lost=item.lost,
                 ),
@@ -1042,6 +1050,7 @@ async def prejudge_line(
                 # _judge_words lists the statement's own command first
                 # and the lines it runs after it, so only the first
                 # explanation is the command the redirects belong to.
+                stdin=item.stdin if index == 0 else None,
                 redirects=targets if index == 0 else (),
                 cancel=cancel,
                 # This pass judges on the gate's behalf and runs nothing
@@ -1070,6 +1079,7 @@ async def _verdict_refuses(
     agent_id: str,
     handed: HandOff,
     cancel: asyncio.Event | None,
+    stdin: bytes | None = None,
 ) -> bool:
     """Whether a verdict's answer refuses the command, putting an
     unanswered ask's question to the host.
@@ -1097,6 +1107,7 @@ async def _verdict_refuses(
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
+        stdin (bytes | None): empty when the statement redirects input.
     """
     expl = judged.judgment
     claimant = Claimant(handed, judged.occurrence)
@@ -1110,6 +1121,7 @@ async def _verdict_refuses(
         registry,
         namespace,
         agent_id,
+        stdin=stdin,
         redirects=redirects,
         intrinsic=judged.intrinsic,
         unread=judged.unread,
@@ -1217,6 +1229,7 @@ async def _command_refused(
         namespace,
         agent_id,
         item.redirects,
+        stdin=item.stdin,
         lost=item.lost,
     )
     targets = redirect_paths(item.redirects, registry, walked.cwd)
@@ -1238,6 +1251,7 @@ async def _command_refused(
             agent_id,
             handed,
             cancel,
+            item.stdin if index == 0 else None,
         ):
             return True
     return False
@@ -1357,6 +1371,7 @@ async def _judge_line(
                 agent_id,
                 item.redirects,
                 stated,
+                stdin=item.stdin,
                 intrinsic=item.intrinsic,
                 whole_line=whole_line,
                 lost=item.lost,

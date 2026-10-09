@@ -160,7 +160,7 @@ def _data_writes(dispatch):
     return [
         c
         for c in dispatch.call_args_list
-        if c[0][0] == "write" and c[1].get("data")
+        if c[0][0] in ("write", "pwrite") and c[1].get("data")
     ]
 
 
@@ -1334,12 +1334,10 @@ def test_redirect_concat_target():
 
 
 def test_redirect_append():
-    """echo touches no file of its own, so its ``>>`` target is opened by
-    the one append of its output, through the op door without a content
-    pre-read."""
+    """Open before echo runs, then append its output without a content read."""
     _, _, _, _, _, dispatch = _exec("echo hello >> /data/out.txt")
     ops = [c[0][0] for c in dispatch.call_args_list]
-    assert ops == ["append"]
+    assert ops == ["append", "append"]
 
 
 def test_redirect_stdin():
@@ -1802,7 +1800,7 @@ def test_redirect_append_var():
         "echo x >> $LOG", env={"LOG": "/data/app.log"}
     )
     ops = [c[0][0] for c in dispatch.call_args_list]
-    assert ops == ["append"]
+    assert ops == ["append", "append"]
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "append"]
     assert write_calls[0][0][1].virtual == "/data/app.log"
 
