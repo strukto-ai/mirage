@@ -1,6 +1,6 @@
 ---
 title: Cache
-description: The two-layer workspace cache, index and file, with RAM and Redis stores.
+description: The two-layer workspace cache, index and file, with RAM and Redis stores, and how the read policy serves it.
 icon: database
 ---
 
@@ -8,63 +8,171 @@ icon: database
 
 Every `Workspace` ships with a **two-layer cache** so repeated work against remote backends (S3, GDrive, Slack, ...) hits local state instead of the network:
 
-- **Index cache.** Listings and metadata. The first directory walk hits the API; subsequent ones serve from the index until the TTL expires.
+- **Index cache.** Listings and metadata. The first directory walk hits the API; later ones are served from the index until the listing expires.
 - **File cache.** Object bytes. The first read streams from origin; later pipelines read from cache.
 
-Each mount declares how its cached bytes are served, with `read:` in its mount block. Under `read: fresh`, cached file bytes are checked against a backend freshness probe that no cached index row answers (a backend with no path lookup, such as Box, may use the mount's row only for the id it addresses its one request to). Within one shell command, the first probe of a path supplies its answer to later cache checks and compatible command stats. A write on that mount, the cache clear that follows an external program or a remote runtime line, or a re-list that finds the path gone retires the answer, including a probe still in flight. Another command obtains its own answer, so an outside change after the first probe can remain unseen for the rest of that command. `tail -f` is the exception: each poll stats and reads the backend itself, past the cached copy and the command's probe answer, under either policy. Reads outside a command do not reuse probe answers. A changed fingerprint triggers a fresh read; a deleted file is evicted. Under `read: bounded` — the default — cached bytes are trusted without a check, for as long as the mount's `ttl:` allows. Each listing write is also capped by the mount's `ttl`, under either policy. Existing Redis listings retain their stored expiry until rewritten.
+<CodeGroup>
 
-`fresh` is refused at mount time on a backend that cannot honour it: one that does not cache reads has no gate to check at, and one whose `stat` and read stamp different kinds of token could never match. A mount that asked to revalidate and quietly did not is the failure the refusal exists to prevent, so the policy is never silently downgraded. See the [YAML reference](/home/yaml) for the keys and [the VFS matrix](/home/vfs-matrix) for which backends accept `fresh` today.
+```python Python
+from mirage import Workspace
+from mirage.vfs.s3 import S3Config, S3VFS
 
-The check happens wherever cached **bytes** are served, not only for the files a command names: a recursive walk, a glob and a cross-mount fan-out each revalidate every file whose content they read. Each check compares the cached fingerprint, reusing only an eligible answer from its own command; otherwise it asks the backend. One probe can require several requests on a backend that resolves a path through parent listings. One exemption, deliberate: the size a render-dependent backend cannot report for itself is filled from the cache without a check, so a metadata walk (`ls -lR`, `du`) can report a size from a stale render. Content is verified against that probe wherever it is served; that one derived number is not.
+ws = Workspace({"/s3": S3VFS(S3Config(bucket="my-bucket"))})
 
-When the check cannot be made — the backend supplies no fingerprint, registers no `stat` at all, or the probe itself fails — the cached copy is dropped and the read fetches current bytes. Bytes that could not be verified are never served, but a transient probe failure does not fail the command either: the cold read that follows reports any real backend failure in the command's own voice, and one flaky stat during a recursive walk costs that file a refetch rather than ending the walk.
+# 1. Index miss → S3 LISTs of /s3/data/. Every folder's listing is stored.
+await ws.shell('find /s3/data/ -name "*.jsonl"')
 
-A fresh directory listing proves a child absent only when that child is not listed. If a listed child's metadata has been evicted independently, object-store stat fetches it from the backend.
+# 2. Index hit → 0 network calls.
+await ws.shell("ls /s3/data/")
 
-A read that resolves a filetype renderer is never served from the file cache, and its rendered bytes are never kept there. A filetype renderer is a `read` op scoped to an extension, whether the VFS ships it (Google Docs, Sheets and Slides do) or it is registered beside the VFS. The file cache holds what the VFS's own IO returns, whether a command read it or a cold read through the dispatcher kept it. For a renderer registered beside the VFS, those bytes need not be what the renderer returns, and the dispatcher does not tell the two kinds apart, so a shipped renderer whose bytes match the cache refetches too.
+# 3. File miss → S3 GET. Bytes stored in the file cache.
+await ws.shell("cat /s3/data/log.jsonl | wc -l")
 
-The rule covers any read through the dispatcher: `ws.vfs.read`, FUSE, a cross-mount `cp` or relay and `< file` always run the renderer. A cross-mount relay such as `cp`, `sed` or `diff` does not keep the rendered bytes it read either. Under `read: fresh` the cached entry is still checked first, so a path the backend reports gone fails as it does for any other read. The cost is that a renderer read is never warm: each one runs the renderer, and each range of a ranged read (FUSE reads in chunks) runs it again.
+# 4. File hit → 0 network calls.
+await ws.shell("grep alert /s3/data/log.jsonl")
+```
 
-It does not cover:
+```typescript TypeScript
+import { S3VFS, Workspace } from '@struktoai/mirage-node'
 
-- commands that read a file operand through the VFS's own IO (`cat`, `grep`, `head`, `wc`), a symlinked operand included, which keep their cache hits;
-- a user override of the plain `read` op (one registered with no filetype), since only filetype-scoped `read` ops are checked;
-- a user-registered command that reports rendered bytes in its result's `cache` list: the file cache stores whatever a command reports, and command reads such as `cat` then serve it.
+const ws = new Workspace({ '/s3': new S3VFS({ bucket: 'my-bucket' }) })
 
-### Listings under `fresh`
+// 1. Index miss → S3 LISTs of /s3/data/. Every folder's listing is stored.
+await ws.shell('find /s3/data/ -name "*.jsonl"')
 
-`fresh` also checks cached listings. A live cached listing (one still inside the mount's `ttl`) is served when one of these holds, checked in this order; otherwise the folder is listed again:
+// 2. Index hit → 0 network calls.
+await ws.shell('ls /s3/data/')
 
-1. The running command wrote it. A read outside any command (FUSE, `ws.vfs`, an agent's file tools) trusts a listing written in the last second instead.
-2. The mount is a GitHub mount pinned to a full 40- or 64-hex commit sha, and the listing was fetched at that sha. This costs no request: github.com refuses a branch or tag named with 40 or 64 hex characters, so such a ref always names a commit (a GitHub Enterprise host is assumed to do the same). A Hugging Face Hub mount never pins: a full-sha revision is checked every command like a branch, since a branch or tag named like the sha could take the name, and mirage does not assume which one the Hub resolves.
-3. The backend versions its listings, and the version stored with the listing still matches the backend's.
+// 3. File miss → S3 GET. Bytes stored in the file cache.
+await ws.shell('cat /s3/data/log.jsonl | wc -l')
 
-Which backends version their listings:
+// 4. File hit → 0 network calls.
+await ws.shell('grep alert /s3/data/log.jsonl')
+```
 
-- **GitHub, HF Models, HF Datasets, HF Spaces:** one version for the whole mount, the head commit the ref or revision resolves to. On the Hub a mount with a `key_prefix` stores that commit joined with its key prefix, so mounts of different subtrees of one repository that share an index never share a version. A command sends one small check for the mount (GitHub: a shallow `git/trees/{ref}`; the Hub: `revision/{rev}?expand[]=sha`, about 110 bytes) and then serves every cached listing of the mount at that commit. A moved head re-lists, which on these backends means one full tree fetch. A GitHub repo whose recursive tree comes back truncated stores no version and still re-lists each folder per command.
-- **Disk:** each folder's own version, from its device, inode, change time and modified time. A command pays one local stat per listed folder instead of a scan. A folder changed in the last 2 seconds stores no version and re-lists until it has been quiet that long. This assumes a local POSIX filesystem; set `folder_versions: false` for a network or FUSE root, where a folder's change time may not move (see [Disk](/python/vfs/disk)).
-- **Every other backend:** no version. A cached listing is re-listed once per command, then trusted for the rest of that command. Google Drive and OneDrive, for example, expose no folder value that moves when a folder's entries change.
+</CodeGroup>
 
-One check answers for a whole command: later listings of the same mount (or, on disk, the same folder) in that command reuse it, and concurrent commands share a check only when it was sent after they started. Outside a command, a matching check is trusted for the same one-second window as a listing. A moved version, a missing path or a check that fails all re-list; the stored listing is kept for the re-list to compare against, never cleared. `bounded` mounts never check.
+The network counts above assume the default `read: bounded`. Under `read: fresh`, step 2 lists the folder again, step 3 sends one metadata request before downloading, and step 4 checks the cached copy first. An `ls` caches the one folder it lists; a `find` or `ls -R` caches the whole subtree it walks.
 
-### Writes
+## The Read Policy
 
-A write of a whole file keeps the bytes it wrote in the file cache, so the next read needs no download, whoever made it: a command such as `tee`, `sed -i` or `sort -o`, a `>` redirect, `ws.vfs`, or a runtime writing a file. The cached copy carries the token the upload reply names: the ETag on an object store, the md5 (else the head revision) on Google Drive, the `sha1` on Box, the `content_hash` on Dropbox. That is the kind of token `stat` reports, so under `read: fresh` the next read checks it and downloads nothing.
+Each mount sets two things in its mount block: `read:`, how its cache is served, and `ttl:`, the longest any cached file or listing from that mount is kept (600 seconds by default).
 
-The bytes are kept as the write finishes, while it still holds the file against other writers, so a later write replaces them. A write of part of a file (`>>`, a write at an offset, `truncate`) keeps nothing and the next read downloads the file, and so do `cp` within one mount and `rm -r`.
+A file's **version** is the backend's marker for its content: an ETag, content hash or modified time, depending on the backend. A **check** is a metadata request (a few on backends that resolve a path folder by folder, such as Google Drive) that compares that version with the cached copy.
 
-Under [`write: conditional`](/home/yaml#the-write-policy), that token is also the version the next write on the path is based on. On Box and Dropbox it is a content hash, which a write compares with the file's live one before it sends the service's own version ([which backends](/home/yaml#which-backends)). On such a mount the line also keeps a path's version where it keeps no bytes (a `grep` or `head` of the file, except on Box, where a partial read keeps none; the agent's own `>>`, a file bigger than the cache, the version a refused write lost on) as an entry with no bytes, which reads treat as absent.
+| | `read: bounded` (default) | `read: fresh` |
+| --- | --- | --- |
+| A cached file | Served without a check. | Checked against the backend first: one check per cached file a command reads. |
+| A cached listing | Served with no request. | Checked or listed again once per command. |
+| An outside change | Can stay hidden for up to the mount's `ttl:`. | Seen by the next command that reads it: a changed file is downloaded again and a deleted one is gone. |
+| Your own writes through this workspace | Seen by the next command. | Seen by the next command. |
 
-Nothing bigger than the whole cache is kept, read or written: such a file would push every other entry out and then itself. A cache store that refuses a fill (Redis out of memory, or a value over its size limit) is logged as a warning and the line carries on; the read or write behind it already happened, so only the next read pays a fetch.
+<Tip>
+**Which to choose.** `bounded` when the data changes rarely or a few minutes of staleness is acceptable; after the first read it sends no checks. `fresh` when the agent must see changes made outside mirage, at the cost of a request for each cached file it reads and each cached folder it lists.
+</Tip>
 
-OneDrive and SharePoint record no token for a write: SharePoint can change an Office file after the upload, so the reply's `cTag` cannot vouch for the bytes sent, and under `fresh` the next read downloads the file. Nextcloud, Databricks volumes, SSH and Hugging Face buckets record none either.
+<CodeGroup>
+
+```python Python
+from mirage import Mount, ReadPolicy, ReadSpec, Workspace
+from mirage.vfs.s3 import S3Config, S3VFS
+
+ws = Workspace({
+    "/reports": Mount(S3VFS(S3Config(bucket="reports")),
+                      read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=60)),
+    "/feed": Mount(S3VFS(S3Config(bucket="feed")),
+                   read=ReadSpec(policy=ReadPolicy.FRESH)),
+})
+```
+
+```typescript TypeScript
+import { Mount, ReadPolicy, S3VFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({
+  '/reports': new Mount(new S3VFS({ bucket: 'reports' }),
+    { read: { policy: ReadPolicy.BOUNDED, ttl: 60 } }),
+  '/feed': new Mount(new S3VFS({ bucket: 'feed' }),
+    { read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
+})
+```
+
+```yaml YAML
+mounts:
+  /reports:
+    vfs: s3
+    config: {bucket: reports}
+    read: bounded
+    ttl: 60          # outside changes show within a minute
+  /feed:
+    vfs: s3
+    config: {bucket: feed}
+    read: fresh      # every command checks what it reads
+```
+
+</CodeGroup>
+
+In YAML a mount's `ttl:` takes `read:` beside it. [The read policy](/home/yaml#the-read-policy) has the full rules.
+
+## Performance And Consistency
+
+### Performance
+
+- **`fresh` costs grow with what a command touches.** A `grep -r` over 500 cached files sends about 500 checks, and a walk can list every cached folder it visits again. On rate-limited APIs (Google Drive, OneDrive, SharePoint, Box), prefer `bounded` with a short `ttl:` for bulk work.
+- **`bounded` serves cached files and listings without checking until they expire.** Anything not cached costs a backend request. A cached file whose folder has not been listed costs one metadata lookup per command.
+
+### Listings Under `fresh`
+
+A cached listing is reused across commands only when the backend can show the folder has not changed; otherwise it is listed again, once per command:
+
+| Backends | What a command pays per cached listing |
+| --- | --- |
+| GitHub, Hugging Face models, datasets and spaces | One small check for the whole mount; none for a GitHub mount pinned to a full commit sha. A new commit lists the mount again. |
+| Disk | One local stat per folder. |
+| Every other backend | One listing request per cached folder. |
+
+Disk detects a changed folder by its change time, which moves reliably only on a local POSIX filesystem. For an NFS, SMB, rclone, s3fs or mirage FUSE root, set `folder_versions: false` in the mount's `config:` so the mount lists folders again instead:
+
+```yaml
+mounts:
+  /share:
+    vfs: disk
+    config: {root: /mnt/nfs/share, folder_versions: false}
+    read: fresh
+```
+
+### Consistency
+
+- **`fresh` checks once per command, not continuously.** A change made while a long command runs shows up in the next command that reads it.
+- **A check that cannot be made means a fresh download.** If the backend reports no version or the check request fails, mirage does not serve bytes it could not verify: it drops the cached copy and downloads the file, as on a first read.
+- **Commands mirage cannot see into clear the cache** (a host program, a remote sandbox line, a CLI write), so later reads fetch from the backends again ([details](#when-the-cache-is-cleared)).
+
+### Compatibility
+
+A backend that cannot check what it caches refuses `fresh` when the mount loads, rather than quietly behaving as `bounded`. [The VFS matrix](/home/vfs-matrix) lists which backends accept it.
+
+## Writes
+
+### Write Caching
+
+A write of a whole file keeps what it wrote in the file cache, so the next read needs no download, even under `fresh`, whoever made it: a command such as `tee`, `sed -i` or `sort -o`, a `>` redirect, `ws.vfs`, or a runtime writing a file. A write of part of a file (`>>`, a write at an offset, `truncate`) and a `cp` within one mount keep nothing, so the next read downloads the file.
+
+On OneDrive, SharePoint and Hugging Face buckets the upload reply carries no version, so under `fresh` the next read after a write downloads the file.
+
+### Conditional Writes
+
+Under [`write: conditional`](/home/yaml#the-write-policy), mirage refuses a write when the file changed on the backend since the agent read it. It compares against the version it holds in the file cache, so:
+
+- **No version, no protection.** If the cache has dropped the file's version (eviction, a [cache clear](#when-the-cache-is-cleared), or a version on Redis that no shell line has seen for a day), the next write to that file goes out unchecked. On RAM, a larger `limit` keeps more files protected.
+- **It guards against writers outside this cache, not against sessions that share it.** Versions belong to the cache, not to the session that read the file, so one session's read lets another session's write through, even if that session never read the file. Conditional writes catch changes made by other tools or by workspaces with their own cache; they are not a lock or a transaction between sessions.
+
+[Known limits](/home/yaml#known-limits) has the full rules.
 
 ## Stores
 
 Each layer is a pluggable store with two built-ins:
 
 - **RAM** (default): in-process, zero setup, 512 MB file cache. Best for single-process apps and notebooks.
-- **Redis**: shared across workers, processes, and machines. Best for serverless, multi-replica services, or for cache state that survives restarts.
+- **Redis**: shared across workers, processes, and machines. Best for serverless and multi-replica services; see [sharing a Redis cache](#sharing-a-redis-cache).
 
 <CodeGroup>
 
@@ -93,155 +201,79 @@ const ws = new Workspace(
 )
 ```
 
+```yaml YAML
+cache: {type: redis, url: redis://localhost:6379/0, limit: 8GB}
+index: {type: redis, url: redis://localhost:6379/0, ttl: 600}
+```
+
 </CodeGroup>
 
-Both configs refuse a field they do not take, or a value of the wrong type, in code as in YAML: `CacheConfig(limti="1MB")` raises rather than building the defaults, and so does a Redis-only field such as `url` on a RAM config. Python refuses when the config is built, TypeScript when the `Workspace` is built. TypeScript also takes a field's snake_case spelling (`key_prefix` for `keyPrefix`), as its VFS configs do, but not both at once.
+| Block | Key | Default | Meaning |
+| --- | --- | --- | --- |
+| `cache` | `type` | required in YAML; `ram` in code | `ram` or `redis`. |
+| `cache` | `limit` | `512MB` | Largest file kept; on RAM, also the cap on the total kept. |
+| `cache` | `max_drain_bytes` | the `limit` | Largest streamed read kept, in bytes. |
+| `index` | `type` | required in YAML; `ram` in code | `ram` or `redis`. |
+| `index` | `ttl` | `600` | Seconds a listing is kept, capped by each mount's `ttl:`. |
+| both, Redis | `url` | `redis://localhost:6379/0` | The Redis server. |
+| both, Redis | `key_prefix` | `mirage:cache:` / `mirage:index:` | Prefix for every key the store writes. |
 
-In YAML, an `index:` block's values are checked when the file is loaded, at the workspace level and in a mount block alike: `url` and `key_prefix` are strings and `ttl` is a number of seconds, fractions included, so a quoted `ttl` (including one filled in from `${VAR}`) or a boolean is refused. In code, Python's `IndexConfig` still converts a quoted or boolean `ttl`.
+A RAM cache drops least-recently-used bytes once the total passes `limit`; a Redis cache is bounded by the server's `maxmemory` ([below](#sharing-a-redis-cache)). A streamed read larger than `max_drain_bytes` (at most the `limit`) is served but not kept. Unknown fields are refused rather than ignored. In YAML an `index:` `ttl` must be a number, so a quoted one (including one filled in from `${VAR}`) is refused. The file cache has no per-mount block. Raising `limit` keeps more bytes warm at the cost of memory.
 
 ### Index TTL
 
-How long a cached listing lives comes from the first of these that applies:
+A listing is kept for the first of these that applies:
 
-1. **A per-mount index**: the mount block's `index:` in YAML ([a mount's own index](/home/yaml#a-mounts-own-index)), `Mount(vfs, index=IndexConfig(ttl=60))` / `ws.add_mount(prefix, vfs, index=...)` in Python, or `new Mount(vfs, { index: { ttl: 60 } })` / `ws.addMount(prefix, vfs, mode, read, vfsRef, index)` in TypeScript. It replaces the workspace index whole, so a RAM mount index under a Redis workspace index keeps that mount's listings in RAM. A second mount of the same VFS instance shares the first mount's index, through every entry point, so its own `index` is not used.
-2. **The workspace index**, the `index:` block in YAML or the `index` option in code. Its `ttl` applies to every mount without its own index, and is 600 seconds when left out, including on backends whose own TTL is shorter or zero.
-3. **The backend's own `index_ttl`** (`indexTtl` in TypeScript), on a RAM index, when no index is configured at all:
+1. the mount's own `index:` `ttl`;
+2. a configured workspace `index:` `ttl` (600 seconds if the block sets no `ttl`);
+3. with no `index:` configured at all, the backend's own default ([backend listing defaults](#backend-listing-defaults)).
 
-| `index_ttl` | Backends |
+It is never kept longer than the mount's `ttl:`. A mount's own `index:` replaces the workspace block whole; set it in YAML ([per-mount index](/home/yaml#per-mount-index)) or in code with `Mount(vfs, index=...)`, `ws.add_mount(..., index=...)` or `new Mount(vfs, { index })`. A longer `ttl` means fewer listing requests and staler listings.
+
+## Advanced
+
+### When The Cache Is Cleared
+
+Some commands can change data without mirage knowing which files changed. To avoid serving stale data, mirage clears cached file contents and listings after them, so the next reads fetch from the backends again:
+
+- **Host programs and remote runtimes.** Running a host program, or a line in a remote runtime such as an E2B sandbox, clears cached data across all mounts.
+- **CLI writes.** A write through one of mirage's [account CLIs](/home/setup/clis) (`gh`, `gws`, `slack`, ...) or a script CLI you register clears cached data across all mounts too.
+- **Mount changes.** Unmounting or remounting a prefix clears that prefix's cached data.
+
+When several workspaces share a Redis cache, these clears can also drop data the other workspaces use; see [sharing a Redis cache](#sharing-a-redis-cache).
+
+### Reads Outside A Command
+
+Under `read: fresh`, each command on a line (`a; b`, every stage of a pipe) checks for itself, and reads that belong to no command (FUSE, `ws.vfs`, an agent's file tools) check a cached file on every read but reuse a listing for up to a second, so a new or deleted file can stay hidden from them that long.
+
+### Caveats
+
+Files mirage renders on read (Google Docs, Sheets and Slides, or a [renderer](/python/vfs/new#renderers-and-the-file-cache) a VFS declares) are not served from the file cache when read through FUSE, `ws.vfs`, a `< file` redirect or a cross-mount `cp`, `sed` or `diff`. Each such read renders again, which costs backend requests. `cat`, `grep`, `head` and `wc` keep their cache hits.
+
+### Backend Listing Defaults
+
+With no `index:` configured, a listing is kept for the backend's own default, still capped by the mount's `ttl:`:
+
+| Default | Backends |
 | --- | --- |
-| 86 400 s (24 h) | Google Drive, Docs, Sheets, Slides, Gmail, GitHub, Dropbox, Box, OneDrive, SharePoint, email, HF Models, HF Datasets, HF Spaces |
-| 600 s | S3 and every backend not listed here |
-| 300 s | Google Calendar |
-| 60 s | Disk, SSH |
-| 0 (listings are not cached) | RAM, Redis, Postgres, MongoDB, LanceDB |
+| 600 seconds | most backends |
+| 300 seconds | Google Calendar |
+| 60 seconds | Disk, SSH |
+| not cached | RAM, Redis, Postgres, MongoDB, LanceDB |
+| a day, applied only on a mount whose `ttl:` is raised to match | Google Drive, Docs, Sheets, Slides, Gmail, GitHub, Dropbox, Box, OneDrive, SharePoint, email, Hugging Face repos |
 
-Mounts whose Redis index names the same `url` and `key_prefix` share one key space, keyed by virtual path, whether the index is the workspace's or a mount's own. Within one workspace the mount prefixes keep them apart; give each workspace its own `key_prefix`.
+Configuring a workspace `index:` changes every mount's listing lifetime: Disk and SSH move from 60 seconds to the index's `ttl`, and with a nonzero `ttl` RAM, Redis, Postgres, MongoDB and LanceDB start caching listings. A second mount of the same VFS instance shares the first mount's index.
 
-Whichever applies, each listing write is capped by the mount's `ttl:`, which is 600 seconds unless the mount sets one. Listings already in a shared Redis index keep their stored expiry until rewritten or invalidated, so a workspace or process that starts with a lower `ttl:` can still serve them; an unmount or remount clears the mount's listings. A 24-hour backend TTL therefore takes effect only on a mount whose `ttl:` is raised to match; in YAML a mount's `ttl:` needs a `read:` beside it.
+### Sharing A Redis Cache
 
-## Eviction & Limits
+These rules matter once more than one worker, process or workspace points at the same Redis.
 
-The two layers are bounded differently:
+- **Workspaces that share a `url` and `key_prefix` share one cache**, keyed by virtual path, which is what replicas of one workspace want. Give a different `key_prefix` to workspaces that mount different backends at the same prefix. Python and TypeScript workers can share one Redis.
+- **A clear on one workspace reaches the others** ([above](#when-the-cache-is-cleared)). A host program or remote runtime line empties the whole `key_prefix`; a CLI write drops the cached bytes under this workspace's mount prefixes and expires every listing. Every affected replica then fetches again, so give workspaces that often run commands in a remote sandbox their own `key_prefix`.
+- **Set `maxmemory` with `allkeys-lru`.** mirage evicts nothing from Redis itself. Listings keep their expiry inside the entry rather than as a Redis key expiry, so a `volatile-*` policy never frees them.
+- **Keep `ttl:` the same across workspaces that share the cache.** Entries keep the expiry they were written with, so lowering `ttl:` on one worker does not shorten what others stored.
+- **Upgrade every worker together.** The Redis layout is not versioned, so flush both key prefixes before upgrading (delete every key under each `key_prefix`) and expect a cold cache afterwards.
 
-| Layer | Holds | Default | Bound | Eviction |
-| --- | --- | --- | --- | --- |
-| **File cache** | object bytes per virtual path | RAM, 512 MB | `cache: {limit}` (`CacheConfig(limit=...)`); without a `cache` config, `cache_limit` (Py) / `cacheLimit` (TS) | LRU on RAM: least-recently-used bytes drop once the total exceeds the limit. On Redis nothing is evicted client-side and the server evicts (below); the limit still keeps out any file bigger than itself, caps what each streamed read buffers to fill the cache when `max_drain_bytes` is unset, and bounds `max_drain_bytes` |
-| **Index cache** | directory listings + `FileStat` metadata | RAM, the backend's `index_ttl` | the mount's own `index: {ttl}`, else the workspace `index: {ttl}` (`IndexConfig(ttl=...)`), else the backend's `index_ttl` ([Index TTL](#index-ttl)); capped by the mount's `ttl` (seconds) | time-based: listings expire after the TTL, then re-fetch on next access |
+### Relationship To Snapshots
 
-Raising the file limit keeps more bytes warm at the cost of memory; lengthening the index TTL reduces API walks at the cost of staleness, up to the mount's `ttl`.
-
-## Miss/Hit Lifecycle
-
-<CodeGroup>
-
-```python Python
-from mirage import Workspace
-from mirage.vfs.s3 import S3Config, S3VFS
-
-ws = Workspace({"/s3": S3VFS(S3Config(bucket="my-bucket"))})
-
-# 1. Index miss → S3 LIST. Listing stored in index cache.
-await ws.shell("ls /s3/data/")
-
-# 2. Index hit → 0 network calls.
-await ws.shell('find /s3/data/ -name "*.jsonl"')
-
-# 3. File miss → S3 GET. Bytes stored in file cache.
-await ws.shell("cat /s3/data/log.jsonl | wc -l")
-
-# 4. File hit → 0 network calls.
-await ws.shell("grep alert /s3/data/log.jsonl")
-```
-
-```typescript TypeScript
-import { S3VFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace({ '/s3': new S3VFS({ bucket: 'my-bucket' }) })
-
-// 1. Index miss → S3 LIST. Listing stored in index cache.
-await ws.shell('ls /s3/data/')
-
-// 2. Index hit → 0 network calls.
-await ws.shell('find /s3/data/ -name "*.jsonl"')
-
-// 3. File miss → S3 GET. Bytes stored in file cache.
-await ws.shell('cat /s3/data/log.jsonl | wc -l')
-
-// 4. File hit → 0 network calls.
-await ws.shell('grep alert /s3/data/log.jsonl')
-```
-
-</CodeGroup>
-
-## Metadata Index Contract
-
-The RAM and Redis metadata indexes share the same lookup states: a directory
-never listed is `NOT_FOUND`, a cached empty directory is a successful empty
-listing, and a listing at or past its deadline is `EXPIRED`. Entry metadata
-remains readable after a directory expires. `invalidate()` expires listings
-without deleting their metadata; `invalidate_dir` / `invalidateDir` removes a
-listing and its direct children's entries, and prefix invalidation removes a
-whole subtree. `clear()` removes all index data.
-
-Direct backend lookups trust cached metadata only when a fresh parent listing
-includes the path. Partial or filtered listings may store individual entries
-without a complete parent; these entries require another parent refresh on
-each direct lookup. The old target is removed before refreshing so an omitted
-or renamed item cannot survive as an orphaned cache hit.
-
-Concurrent lookups sharing an index serialize each parent's refresh through
-the final entry lookup. GitHub and Hugging Face snapshot readers hold the same
-guard for the whole mount, so one reader cannot remove a snapshot another is
-still reading. These guards coordinate tasks within one process; unrelated
-parent directories and mounts can refresh concurrently.
-
-`seed()` merges snapshots by path and copies their child lists. Redis queues
-these synchronous calls and flushes them before the next index operation or
-`close()`; `clear()` discards queued snapshots. Multiple seeds accumulate, and
-failed flushes remain queued for retry. `entries()` returns all stored metadata,
-including entries whose directory listing has expired.
-
-Every Redis index key starts with the config's `key_prefix`, `mirage:index:`
-by default, so the default layout is
-`mirage:index:mirage:idx:entry:<absolute-path>`. Redis stores each entry as
-the `IndexEntry` JSON under `{key_prefix}mirage:idx:entry:` and each
-directory's children and deadline as the `IndexDirectory` JSON under
-`{key_prefix}mirage:idx:directory:`. Both are the documents pydantic writes, snake_case
-and every field, and TypeScript writes and reads the same bytes
-(`IndexEntry.toJSON` / `IndexEntry.fromJSON`), so one Redis serves both
-languages and a row that does not parse is an error rather than a miss.
-Invalidation uses permanent keys beside the payload:
-`{key_prefix}mirage:idx:generation` for the whole store and
-`{key_prefix}mirage:idx:generation:<absolute-directory>` for each directory.
-Each listing records both tokens, and one `MGET` reads the listing and its two
-current tokens. A missing or changed token makes the listing `EXPIRED`.
-New tokens are unique so eviction or a refill cannot revive an old listing.
-Competing initializers retain their attempted tokens; a worker that loses
-initialization incurs a cache refill instead of adopting a later generation.
-Global invalidation rotates the global token atomically. Directory invalidation
-removes that directory's token; subtree invalidation removes tokens under that
-path, preserving fresh listings outside a scoped invalidation.
-Like RAM, these records retain expired listings until explicit removal; they do
-not use Redis TTL deletion. Redis server eviction can still turn any cached
-record into a miss. A listing is served as stored even when one of its
-children's rows was evicted; GitHub and the Hub refill the tree once when a
-stat or read of that listed child finds no row, and a name the listing does
-not hold stays absent with no refill. Configure Redis `maxmemory` for
-server-side size limits.
-
-The layout is not versioned and earlier layouts are not read. Upgrade every
-worker that shares an index together, and flush the key prefix first
-(`clear()`, or delete the keys under it), so no worker opens a row another
-release wrote.
-
-The Redis **file cache** likewise uses server-side limits: nothing is evicted
-client-side (its `limit` keeps out any file bigger than itself, caps what
-each streamed read buffers to fill it when `max_drain_bytes` is unset, and
-bounds `max_drain_bytes`), so cap
-memory with `maxmemory` and an LRU `maxmemory-policy`. File bytes and metadata occupy separate
-keys, so server eviction can remove either independently: a freshness check
-alone does not guarantee the bytes remain cached.
-
-## Relationship To Snapshots
-
-The file cache is exactly what a [snapshot](/home/snapshot) serializes: `ws.snapshot()` writes the cached bytes for every touched path into the tar, and `Workspace.load()` restores them into the file cache so a replayed run reads from local state. The index cache is not snapshotted; it rebuilds lazily after load.
+A [snapshot](/home/snapshot) carries the RAM file cache: `ws.snapshot()` writes the cached bytes for every touched path into the tar, and `Workspace.load()` restores them so a replayed run reads from local state. A Redis file cache is not captured. Restored bytes keep their original expiry, so bytes cached longer ago than the mount's `ttl:` are downloaded again. The index cache is not snapshotted; it rebuilds lazily after load ([how snapshots compose with caching](/home/snapshot#how-it-composes-with-caching)).

@@ -57,7 +57,8 @@ to the root boundary.
 
 The Disk VFS uses `IndexCacheStore` with `index_ttl = 60` (1 minute).
 Directory listings are cached for up to 60 seconds before being refreshed
-from disk.
+from disk. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
+[index TTL](/home/cache#index-ttl).
 
 Each listing is stored with its folder's version: the folder's device,
 inode, change time and modified time. Under `read: fresh`, a later command

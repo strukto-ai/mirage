@@ -69,7 +69,8 @@ Path mapping: virtual `/s3/data/file.txt` maps to S3 key `data/file.txt`.
 
 The S3 VFS uses `IndexCacheStore` with `index_ttl = 600` (10 minutes).
 Directory listings are cached for up to 600 seconds before being refreshed
-from S3. This reduces API calls for repeated directory traversals.
+from S3. This reduces API calls for repeated directory traversals. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
+[index TTL](/home/cache#index-ttl).
 
 ## Conditional writes
 

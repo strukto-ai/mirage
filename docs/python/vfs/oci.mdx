@@ -71,7 +71,8 @@ Path mapping: virtual `/oci/data/users.csv` maps to OCI key
 
 The OCI VFS uses `IndexCacheStore` with `index_ttl = 600`
 (10 minutes). Directory listings are cached for up to 600 seconds before
-being refreshed from OCI.
+being refreshed from OCI. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
+[index TTL](/home/cache#index-ttl).
 
 ## Example
 

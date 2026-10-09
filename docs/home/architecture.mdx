@@ -21,7 +21,7 @@ The action surface. **Mirage Bash** parses commands with tree-sitter and runs th
 
 ## 3. Dispatcher & Cache
 
-The **Mirage Dispatcher** routes each operation to the mount that owns the path, joining pipelines that span systems. The **Index & File Cache** absorbs repeats: the first directory walk hits the API, the next serves from cache; the first read streams bytes, later reads are local.
+The **Mirage Dispatcher** routes each operation to the mount that owns the path, joining pipelines that span systems. The **Index & File Cache** absorbs repeats: the first directory walk hits the API, the next serves from cache; the first read streams bytes, later reads are served from cache within the mount's [read policy](/home/cache#the-read-policy).
 
 Mount mode and session grants govern every mutation at the operation dispatcher,
 including symlinks, permissions and extended attributes stored in the namespace.

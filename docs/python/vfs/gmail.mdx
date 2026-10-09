@@ -96,8 +96,8 @@ Meeting_Notes__msg123/              # attachment directory
 
 The Gmail VFS uses `IndexCacheStore` (same as Slack, Discord,
 and other mounts). Index entries store label IDs, message IDs,
-and message metadata. There is no separate content cache -- file
-content caching is handled by the workspace `IOResult` mechanism.
+and message metadata. File bytes go through the workspace
+[file cache](/home/cache).
 
 ## Example
 
