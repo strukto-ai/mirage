@@ -122,7 +122,7 @@ postgres = ["asyncpg>=0.30.0"]
 redis    = ["redis[hiredis]>=5.0"]
 
 # --- mail ---
-email    = ["aioimaplib>=2.0.1", "aiosmtplib>=5.1.0"]
+email    = ["aiosmtplib>=5.1.0"]
 
 # --- secrets sources ---
 dotenv   = ["python-dotenv>=1.2.2"]
