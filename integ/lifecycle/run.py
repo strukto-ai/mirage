@@ -28,7 +28,8 @@ from typing import Any
 
 from mirage import ShellExecution
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
@@ -132,26 +133,13 @@ register_vfs("tracked-stream", TrackedStreamVFS)
 class TrackedStreamCLI:
     """A registered CLI exercising stdin, deferred status, and producer closure."""
 
-    def __init__(
-        self, exit_code: int = 0, stderr: str = "", writer: bool = False
-    ) -> None:
+    def __init__(self, exit_code: int = 0, stderr: str = "") -> None:
         self.exit_code = exit_code
-        self.writer = writer
         self.stderr = stderr.encode()
         self.pulls = 0
         self.closed = 0
 
     async def invoke(self, inv: CLIInvocation):
-        if self.writer:
-            assert inv.stdio is not None
-            try:
-                async for chunk in inv.stdio.stdin:
-                    self.pulls += 1
-                    await inv.stdio.stdout.write(chunk)
-                await inv.stdio.stderr.write(self.stderr)
-                return IOResult(exit_code=self.exit_code)
-            finally:
-                self.closed += 1
         result = IOResult(stderr=self.stderr)
         return self.output(inv, result), result
 
@@ -293,13 +281,15 @@ async def action(
     op = step["op"]
     if op == "register_stream_cli":
         cli = TrackedStreamCLI(
-            step.get("exit_code", 0),
-            step.get("stderr", ""),
-            step.get("writer", False),
+            step.get("exit_code", 0), step.get("stderr", "")
         )
         held.setdefault("stream_clis", {})[step["name"]] = cli
         ws.register_cli(
-            step["name"], CLISpec(name=step["name"], fn=cli.invoke)
+            step["name"],
+            CLI(
+                spec=CommandSpec(name=step["name"]),
+                handlers={"": CLIHandler(fn=cli.invoke)},
+            ),
         )
         return None
     if op == "stream_cli_stats":
@@ -351,8 +341,8 @@ async def action(
     elif op == "register_cli":
         ws.register_cli(
             step["name"],
-            CLISpec(
-                name=step["name"],
+            CLI(
+                spec=CommandSpec(name=step["name"]),
                 script=ScriptSource(**step["script"]),
                 runtime=step.get("runtime"),
             ),
@@ -434,7 +424,6 @@ async def action(
             await execution.aclose()
             await asyncio.gather(completion, return_exceptions=True)
         return {
-            "has_id": bool(execution.id),
             "events": events,
             "bounded": all(len(event["data"]) <= 16384 for event in events),
             "stdout_bytes": sum(
