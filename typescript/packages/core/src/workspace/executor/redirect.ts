@@ -69,8 +69,12 @@ import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.
 import { concat } from '../../io/cachable_iterator.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
-/** Opt-in diagnostic sink, kept separate from redirected shell output. */
-export const logger: { debug?: (message: string) => void } = {}
+/** Host diagnostics stay separate from redirected shell output. */
+const logger = {
+  debug(message: string): void {
+    console.error(message)
+  },
+}
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -138,12 +142,9 @@ export class JobRoute extends JobOutput {
 
   /**
    * Send on, in order, what jobs wrote while the redirect wrote its
-   * command's output, then let them write straight through: the command
-   * wrote first, and its first write is the one that opens the file. A
-   * held write that fails is the job's, which has moved on, so it never
-   * stops the line that released it: Python logs it at debug, and core,
-   * which runs on every host, has no logger to give it to (`console`
-   * writes to a Node process's stdout).
+   * command's output, then let them write straight through. The command
+   * wrote first. A held write that fails is the job's, which has moved
+   * on, so it never stops the line that released it.
    */
   async release(): Promise<void> {
     try {
@@ -155,6 +156,7 @@ export class JobRoute extends JobOutput {
             await this.write(key, data)
           } catch (error) {
             if (!isFsError(error)) throw error
+            logger.debug(`held job write failed: ${String(error)}`)
           }
         }
         held = this.recorder
@@ -241,12 +243,12 @@ export async function handleRedirect(
   }
   const failed = async (
     result: Result,
-    target = outputs.get(2),
     failedFile: FileDescription | null = null,
   ): Promise<Result> => {
     let [stdout] = result
     const [, io, node] = result
     const data = await io.materializeStderr()
+    const target = outputs.get(2)
     if (target === TO_STDERR) return result
     io.stderr = null
     if (target === TO_STDOUT) stdout = data
@@ -261,13 +263,13 @@ export async function handleRedirect(
         }
       } catch (error) {
         if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
-        logger.debug?.(`redirect error reporting failed: ${String(error)}`)
+        logger.debug(`redirect error reporting failed: ${String(error)}`)
       }
     }
     return [stdout, io, node]
   }
   const files: FileDescription[] = []
-  let openStderr: FdDest | undefined
+  let completeOutput: FileDescription | null = null
   const expanded: Redirect[] = []
   const targets: PathSpec[] = []
   const admissionStdin =
@@ -378,18 +380,13 @@ export async function handleRedirect(
         )
       }
     } else {
-      const deferred = expanded.length === redirects.length && outputOnly(name, args)
-      if (deferred) openStderr = outputs.get(2)
       try {
-        const open = () =>
-          deferred
-            ? Promise.resolve()
-            : createFile(dispatch, session, scope, new Uint8Array(), r.append)
+        const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
         if (command !== null && guard !== undefined)
           await runWithRedirectPaths(command, targets, open)
         else await open()
       } catch (error) {
-        if (!isFsError(error)) throw error
+        if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
         return failed(redirectFailure(scope, error))
       }
       if (!r.append) {
@@ -397,7 +394,8 @@ export async function handleRedirect(
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
       const file = new FileDescription(scope, r.append)
-      file.opened = !deferred
+      file.opened = true
+      if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
       files.push(file)
       for (const fd of fds) {
         closed.delete(fd)
@@ -540,51 +538,44 @@ export async function handleRedirect(
     const routed: [Channel | Inherited, Uint8Array][] = []
     const writeFiles = async () => {
       const consumed = new Set<FileDescription>()
-      let failedFile: FileDescription | null = null
-      try {
-        if (!refused)
-          // Finish the deferred open before any earlier output is committed.
-          for (const file of [...files].sort((a, b) => Number(a.opened) - Number(b.opened))) {
-            failedFile = file
-            const unique =
-              files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
-            const data = unique
-              ? concat(chunks.filter(([key]) => dest(key) === file).map(([, data]) => data))
-              : new Uint8Array()
-            if (data.byteLength > 0 || !file.opened)
-              await writeDescription(dispatch, session, file, data)
-            if (unique) {
-              consumed.add(file)
-              if (data.byteLength > 0) {
-                io.writes[file.scope.virtual] = data
-                io.cache = io.cache.filter((p) => p !== file.scope.virtual)
-              }
-            }
-          }
-        for (const [key, data] of chunks) {
-          const target = dest(key)
-          if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
-          else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
-          else if (target instanceof Inherited) routed.push([target, data])
-          else if (target instanceof FileDescription && !consumed.has(target)) {
-            failedFile = target
-            await writeDescription(dispatch, session, target, data)
-            io.writes[target.scope.virtual] = data
-            io.cache = io.cache.filter((p) => p !== target.scope.virtual)
+      const write = async (file: FileDescription, data: Uint8Array, replace = false) => {
+        try {
+          if (replace && file.source === null && file.offset === 0) {
+            // An output-only command's complete output needs no read of
+            // its freshly opened, unshared target, even on object stores.
+            await createFile(dispatch, session, file.scope, data, file.append)
+            file.offset += data.byteLength
+          } else await writeDescription(dispatch, session, file, data)
+          io.writes[file.scope.virtual] = data
+          io.cache = io.cache.filter((p) => p !== file.scope.virtual)
+        } catch (error) {
+          if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+          const [out, refusal] = await failed(redirectFailure(file.scope, error), file)
+          if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
+          const diagnostic = await materialize(refusal.stderr)
+          if (diagnostic.byteLength > 0) routed.push([Channel.STDERR, diagnostic])
+          io.exitCode = 1
+        }
+      }
+      if (!refused)
+        for (const file of files) {
+          const unique =
+            files.filter((other) => other.scope.virtual === file.scope.virtual).length === 1
+          if (unique) {
+            consumed.add(file)
+            const data = concat(
+              chunks.filter(([key]) => dest(key) === file).map(([, data]) => data),
+            )
+            if (data.byteLength > 0) await write(file, data, file === completeOutput)
           }
         }
-      } catch (error) {
-        if (typeof (error as { code?: unknown } | null)?.code !== 'string' || failedFile === null)
-          throw error
-        const [out, refusal] = await failed(
-          redirectFailure(failedFile.scope, error),
-          failedFile.opened ? outputs.get(2) : openStderr,
-          failedFile,
-        )
-        if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
-        const diagnostic = await materialize(refusal.stderr)
-        if (diagnostic.byteLength > 0) routed.push([Channel.STDERR, diagnostic])
-        io.exitCode = 1
+      for (const [key, data] of chunks) {
+        const target = dest(key)
+        if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
+        else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
+        else if (target instanceof Inherited) routed.push([target, data])
+        else if (target instanceof FileDescription && !consumed.has(target))
+          await write(target, data)
       }
     }
     if (command === null) await writeFiles()
@@ -700,9 +691,9 @@ function describe(output: FdDest, source: Input, owner: Recorder | null): Descri
  * exist: /nodir`), which used to reach the user as the path.
  */
 function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
-  const strerror = fsStrerror(err)
+  const strerror = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
   const label = scope.rawPath
-  return encodeText(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(strerror ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
 /**

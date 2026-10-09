@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.types import PathSpec
 
 
 async def _workspace() -> Workspace:
@@ -284,6 +286,11 @@ async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
         vfs.pwrite.assert_not_awaited()
     assert await _out(ws, "cat /data/m1") == ""
     assert await _out(ws, "cat /data/m2") == "body\n"
+    io = await ws.shell(
+        'printf x > /data/m1 2> "$(printf tail > /data/m1; echo /data/m2)"'
+    )
+    assert io.exit_code == 0
+    assert await _out(ws, "cat /data/m1") == "xail"
 
 
 @pytest.mark.asyncio
@@ -452,7 +459,7 @@ async def test_write_target_unwritable_is_shell_attributed():
 
 
 @pytest.mark.asyncio
-async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch):
+async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch, caplog):
     # Regression: the write raised with no handler, so the whole line
     # died; GNU prints the error and runs `echo next`.
     ws = await _workspace()
@@ -463,33 +470,79 @@ async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch):
     await ws.close()
     vfs = RAMVFS()
     ws = Workspace({"data": vfs}, mode=MountMode.WRITE)
+    original_write = vfs.write
+    original_pwrite = vfs.pwrite
+    caplog.set_level(
+        logging.DEBUG, logger="mirage.workspace.executor.redirect"
+    )
     try:
-        for error in (
-            PermissionError("write refused"),
-            OSError(errno.ENOSPC, "No space left on device"),
+        for error, reason in (
+            (PermissionError("write refused"), "Permission denied"),
+            (
+                OSError(errno.ENOSPC, "No space left on device"),
+                "No space left on device",
+            ),
         ):
+            failing = {"/data/out", "/data/err"}
+
+            async def write(path: PathSpec, data: bytes) -> None:
+                if data and path.virtual in failing:
+                    raise error
+                await original_write(path, data)
+
+            async def pwrite(
+                path: PathSpec, data: bytes, offset: int, **kwargs
+            ) -> None:
+                if data and path.virtual in failing:
+                    raise error
+                await original_pwrite(path, data, offset, **kwargs)
+
             with monkeypatch.context() as patched:
-                write = AsyncMock(side_effect=error)
-                patched.setattr(vfs, "pwrite", write)
+                patched.setattr(vfs, "write", write)
+                patched.setattr(vfs, "pwrite", pwrite)
+                for redirects in (
+                    "> /data/out 2>&1",
+                    "> /data/out 2> /data/err",
+                ):
+                    io = await ws.shell(
+                        f"echo hi {redirects}; echo rc=$?; echo next"
+                    )
+                    assert (
+                        io.exit_code,
+                        await io.stdout_str(),
+                        await io.stderr_str(),
+                    ) == (0, "rc=1\nnext\n", "")
+                assert "redirect error reporting failed" in caplog.text
+                caplog.clear()
+                io = await ws.shell("echo hi > /data/out; echo next")
+                assert (
+                    io.exit_code,
+                    await io.stdout_str(),
+                    await io.stderr_str(),
+                ) == (0, "next\n", f"/data/out: {reason}\n")
+                failing = {"/data/err"}
+                for redirects in (
+                    "> /data/out 2> /data/err",
+                    "2> /data/err > /data/out",
+                ):
+                    io = await ws.shell(
+                        f"printf '%d\\n' abc {redirects}; echo rc=$?"
+                    )
+                    assert (
+                        io.exit_code,
+                        await io.stdout_str(),
+                        await io.stderr_str(),
+                    ) == (0, "rc=1\n", "")
+                    assert await _out(ws, "cat /data/out") == "0\n"
                 io = await ws.shell(
-                    "echo hi > /data/out 2>&1; echo rc=$?; echo next"
+                    "printf '%d\\n' abc 2> /data/err; echo rc=$?"
                 )
                 assert (
                     io.exit_code,
                     await io.stdout_str(),
                     await io.stderr_str(),
-                ) == (0, "rc=1\nnext\n", "")
-                assert write.await_count == 1
-                write.reset_mock()
-                io = await ws.shell(
-                    "echo hi > /data/out 2> /data/err; echo rc=$?; echo next"
-                )
-                assert (
-                    io.exit_code,
-                    await io.stdout_str(),
-                    await io.stderr_str(),
-                ) == (0, "rc=1\nnext\n", "")
-                assert write.await_count == 2
+                ) == (0, "0\nrc=1\n", "")
+
     finally:
         await ws.close()
 

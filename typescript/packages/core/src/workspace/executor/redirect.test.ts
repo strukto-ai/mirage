@@ -23,7 +23,7 @@ import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { handleRedirect, logger } from './redirect.ts'
+import { handleRedirect } from './redirect.ts'
 
 function encode(s: string): Uint8Array {
   return new TextEncoder().encode(s)
@@ -379,6 +379,10 @@ describe('fd-table routing end-to-end', () => {
       pwrite.mockRestore()
       expect(await run(ws, 'cat /data/m1')).toBe('')
       expect(await run(ws, 'cat /data/m2')).toBe('body\n')
+      expect(
+        await runExit(ws, 'printf x > /data/m1 2> "$(printf tail > /data/m1; echo /data/m2)"'),
+      ).toBe(0)
+      expect(await run(ws, 'cat /data/m1')).toBe('xail')
     } finally {
       await ws.close()
     }
@@ -619,32 +623,66 @@ describe('handleRedirect unwritable > target', () => {
       expect(exit).toBe(0)
       expect(out).toBe('next\n')
       expect(err).toBe('/nodir/f: No such file or directory\n')
-      const diagnostic = vi.fn()
-      logger.debug = diagnostic
-      for (const code of ['EACCES', 'ENOSPC']) {
-        const write = vi
-          .spyOn(data, 'pwrite')
-          .mockRejectedValue(Object.assign(new Error('write refused'), { code }))
-        try {
-          expect(await runResult(ws, 'echo hi > /data/out 2>&1; echo rc=$?; echo next')).toEqual([
-            0,
-            'rc=1\nnext\n',
-            '',
-          ])
-          expect(write).toHaveBeenCalledTimes(1)
-          write.mockClear()
-          expect(
-            await runResult(ws, 'echo hi > /data/out 2> /data/err; echo rc=$?; echo next'),
-          ).toEqual([0, 'rc=1\nnext\n', ''])
-          expect(write).toHaveBeenCalledTimes(2)
-          expect(diagnostic).toHaveBeenCalledTimes(1)
-          diagnostic.mockClear()
-        } finally {
-          write.mockRestore()
+      const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      const originalWrite = data.write.bind(data)
+      const originalPwrite = data.pwrite.bind(data)
+      try {
+        for (const [code, reason] of [
+          ['EACCES', 'Permission denied'],
+          ['ENOSPC', 'No space left on device'],
+        ] as const) {
+          const error = Object.assign(new Error(reason), { code })
+          let failing = new Set(['/data/out', '/data/err'])
+          const write = vi.spyOn(data, 'write').mockImplementation(async (path, bytes) => {
+            if (bytes.byteLength > 0 && failing.has(path.virtual)) throw error
+            await originalWrite(path, bytes)
+          })
+          const pwrite = vi
+            .spyOn(data, 'pwrite')
+            .mockImplementation(async (path, bytes, offset) => {
+              if (bytes.byteLength > 0 && failing.has(path.virtual)) throw error
+              await originalPwrite(path, bytes, offset)
+            })
+          try {
+            for (const redirects of ['> /data/out 2>&1', '> /data/out 2> /data/err']) {
+              expect(await runResult(ws, `echo hi ${redirects}; echo rc=$?; echo next`)).toEqual([
+                0,
+                'rc=1\nnext\n',
+                '',
+              ])
+            }
+            expect(diagnostic).toHaveBeenCalledWith(
+              expect.stringContaining('redirect error reporting failed'),
+            )
+            diagnostic.mockClear()
+            expect(await runResult(ws, 'echo hi > /data/out; echo next')).toEqual([
+              0,
+              'next\n',
+              `/data/out: ${reason}\n`,
+            ])
+            failing = new Set(['/data/err'])
+            for (const redirects of ['> /data/out 2> /data/err', '2> /data/err > /data/out']) {
+              expect(await runResult(ws, `printf '%d\\n' abc ${redirects}; echo rc=$?`)).toEqual([
+                0,
+                'rc=1\n',
+                '',
+              ])
+              expect(await run(ws, 'cat /data/out')).toBe('0\n')
+            }
+            expect(await runResult(ws, "printf '%d\\n' abc 2> /data/err; echo rc=$?")).toEqual([
+              0,
+              '0\nrc=1\n',
+              '',
+            ])
+          } finally {
+            write.mockRestore()
+            pwrite.mockRestore()
+          }
         }
+      } finally {
+        diagnostic.mockRestore()
       }
     } finally {
-      delete logger.debug
       await ws.close()
     }
   })

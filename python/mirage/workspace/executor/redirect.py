@@ -193,10 +193,9 @@ class JobRoute(JobOutput):
 
     async def release(self) -> None:
         """Send on, in order, what jobs wrote while the redirect wrote its
-        command's output, then let them write straight through: the
-        command wrote first, and its first write is the one that opens
-        the file. A held write that fails is the job's, which has moved
-        on, so it never stops the line that released it."""
+        command's output, then let them write straight through. The
+        command wrote first. A held write that fails is the job's, which
+        has moved on, so it never stops the line that released it."""
         try:
             held = self.recorder
             while isinstance(held, Recorder) and held.chunks:
@@ -365,13 +364,11 @@ async def handle_redirect(
 
     async def failed(
         result: RedirectResult,
-        target: _Fd | FileDescription | Inherited | None = None,
         failed_file: FileDescription | None = None,
     ) -> RedirectResult:
         stdout, io, node = result
         data = await io.materialize_stderr()
-        if target is None:
-            target = outputs[2]
+        target = outputs[2]
         if target is _TO_STDERR:
             return result
         io.stderr = None
@@ -398,7 +395,7 @@ async def handle_redirect(
         return stdout, io, node
 
     files: list[FileDescription] = []
-    open_stderr: _Fd | FileDescription | Inherited | None = None
+    complete_output: FileDescription | None = None
     expanded: list[Redirect] = []
     targets: tuple[PathSpec, ...] = ()
     admission_stdin = (
@@ -512,32 +509,28 @@ async def handle_redirect(
                     else SharedInput(data)
                 )
         else:
-            deferred = len(expanded) == len(redirects) and _output_only(
-                name, args
+            token = (
+                set_redirect_paths(command.id, targets)
+                if command is not None and guard is not None
+                else None
             )
-            if deferred:
-                open_stderr = outputs[2]
-            else:
-                token = (
-                    set_redirect_paths(command.id, targets)
-                    if command is not None and guard is not None
-                    else None
+            try:
+                await create_file(
+                    dispatch, session, scope, b"", append=r.append
                 )
-                try:
-                    await create_file(
-                        dispatch, session, scope, b"", append=r.append
-                    )
-                except FS_ERRORS as exc:
-                    return await failed(_redirect_failure(scope, exc))
-                finally:
-                    if token is not None:
-                        reset_redirect_paths(token)
+            except OSError as exc:
+                return await failed(_redirect_failure(scope, exc))
+            finally:
+                if token is not None:
+                    reset_redirect_paths(token)
             if not r.append:
                 emptied = SharedInput(b"")
                 for fd, path in read_paths.items():
                     if path == scope.virtual:
                         inputs[fd] = emptied
-            file = FileDescription(scope, append=r.append, opened=not deferred)
+            file = FileDescription(scope, append=r.append, opened=True)
+            if len(expanded) == len(redirects) and _output_only(name, args):
+                complete_output = file
             files.append(file)
             for fd in fds:
                 closed.discard(fd)
@@ -682,12 +675,38 @@ async def handle_redirect(
             else None
         )
         consumed: set[int] = set()
-        failed_file: FileDescription | None = None
+
+        async def write(
+            file: FileDescription, data: bytes, *, replace: bool = False
+        ) -> None:
+            try:
+                if replace and file.source is None and file.offset == 0:
+                    # An output-only command's complete output needs no read of
+                    # its freshly opened, unshared target, even on object stores.
+                    await create_file(
+                        dispatch, session, file.scope, data, append=file.append
+                    )
+                    file.offset += len(data)
+                else:
+                    await write_description(dispatch, session, file, data)
+                io.writes[file.scope.virtual] = data
+                io.cache = [p for p in io.cache if p != file.scope.virtual]
+            except OSError as exc:
+                out, error, _ = await failed(
+                    _redirect_failure(file.scope, exc), failed_file=file
+                )
+                if out:
+                    routed.append(
+                        (Channel.STDOUT, await materialize(out) or b"")
+                    )
+                diagnostic = await error.materialize_stderr()
+                if diagnostic:
+                    routed.append((Channel.STDERR, diagnostic))
+                io.exit_code = 1
+
         try:
             if not refused:
-                # Finish the deferred open before any earlier output is committed.
-                for file in sorted(files, key=lambda item: item.opened):
-                    failed_file = file
+                for file in files:
                     unique = (
                         sum(
                             other.scope.virtual == file.scope.virtual
@@ -695,22 +714,15 @@ async def handle_redirect(
                         )
                         == 1
                     )
-                    data = (
-                        b"".join(
-                            data for key, data in chunks if dest(key) is file
-                        )
-                        if unique
-                        else b""
-                    )
-                    if data or not file.opened:
-                        await write_description(dispatch, session, file, data)
                     if unique:
                         consumed.add(id(file))
+                        data = b"".join(
+                            data for key, data in chunks if dest(key) is file
+                        )
                         if data:
-                            io.writes[file.scope.virtual] = data
-                            io.cache = [
-                                p for p in io.cache if p != file.scope.virtual
-                            ]
+                            await write(
+                                file, data, replace=file is complete_output
+                            )
             for key, data in chunks:
                 target = dest(key)
                 if target is _TO_STDOUT:
@@ -723,25 +735,7 @@ async def handle_redirect(
                     isinstance(target, FileDescription)
                     and id(target) not in consumed
                 ):
-                    failed_file = target
-                    await write_description(dispatch, session, target, data)
-                    io.writes[target.scope.virtual] = data
-                    io.cache = [
-                        p for p in io.cache if p != target.scope.virtual
-                    ]
-        except OSError as exc:
-            assert failed_file is not None
-            out, error, _ = await failed(
-                _redirect_failure(failed_file.scope, exc),
-                open_stderr if not failed_file.opened else None,
-                failed_file,
-            )
-            if out:
-                routed.append((Channel.STDOUT, await materialize(out) or b""))
-            diagnostic = await error.materialize_stderr()
-            if diagnostic:
-                routed.append((Channel.STDERR, diagnostic))
-            io.exit_code = 1
+                    await write(target, data)
         finally:
             if write_token is not None:
                 reset_redirect_paths(write_token)
@@ -899,7 +893,7 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
         exc (OSError): The filesystem error raised by the read or write.
     """
     label = scope.raw_path
-    strerror = fs_strerror(exc)
+    strerror = fs_strerror(exc) or exc.strerror or str(exc)
     return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
 
 

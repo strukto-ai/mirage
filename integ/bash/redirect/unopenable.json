@@ -34,7 +34,7 @@
         "gdrive-folder",
         "ssh"
       ],
-      "command": "mkdir -p /data/r10 && cd /data/r10 && echo x > nodir/f; echo rc=$? && printf y >> nodir/g; echo rc=$? && : > nodir/h; echo rc=$? && printf -v v %s z > nodir/i; echo \"rc=$? v=$v\" && ls; cd / && rm -r /data/r10; (mkdir -p /data/redirect-open && cd /data/redirect-open; echo bad > missing/leaf > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; echo bad 2>errors > missing/leaf; echo routed=$?; cat errors; echo bad > out 2> missing/err; echo stderr=$?; test ! -s out && echo empty; echo bad > out 3> missing/err; echo fd=$?; test ! -s out && echo empty); rm -r /data/redirect-open",
+      "command": "mkdir -p /data/r10 && cd /data/r10 && echo x > nodir/f; echo rc=$? && printf y >> nodir/g; echo rc=$? && : > nodir/h; echo rc=$? && printf -v v %s z > nodir/i; echo \"rc=$? v=$v\" && ls; cd / && rm -r /data/r10; (mkdir -p /data/redirect-open && cd /data/redirect-open; echo bad > missing/leaf > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; echo bad 2>errors > missing/leaf; echo routed=$?; cat errors; printf '%d\\n' abc > out 2> missing/err; echo stderr=$?; test ! -s out && echo empty; echo bad > out 3> missing/err; echo fd=$?; test ! -s out && echo empty); rm -r /data/redirect-open",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1 v=\nfailed=1\nunexpanded\nrouted=1\nmissing/leaf: No such file or directory\nstderr=1\nempty\nfd=1\nempty\n",
