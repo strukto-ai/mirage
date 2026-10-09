@@ -19,7 +19,7 @@ from dataclasses import replace
 
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
-from mirage.shell.arith import evaluate_arith
+from mirage.shell.arith import evaluate_arith, plain_decimal
 from mirage.shell.array import (
     ShellArray,
     array_extent,
@@ -380,10 +380,9 @@ def element_index(
         wrote_var (Callable[[str, str], None] | None): told of the
             subscript's assignments, as the enclosing expression is.
     """
-    try:
-        return int(subscript.strip())
-    except ValueError:
-        pass
+    plain = plain_decimal(subscript)
+    if plain is not None:
+        return plain
     try:
         return evaluate_arith(
             subscript,
@@ -473,10 +472,9 @@ async def subscript_index(
         ArithError: the subscript does not evaluate, or an assigned name
             carries ``-i`` and the value does not evaluate.
     """
-    try:
-        return int(subscript.strip())
-    except ValueError:
-        pass
+    plain = plain_decimal(subscript)
+    if plain is not None:
+        return plain
     reader = random_reader(session)
     error: ArithError | ReadonlyError | None = None
     idx = 0
@@ -1537,9 +1535,9 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     gate. The same site asks ``ensure_var_visible`` and then
     ``pre_session``, with the value, before it seeds anything, because
     a prefix assignment is a session write like any other and the form
-    exports the name for the command. A refusal there takes the whole
-    statement, which is a deliberate divergence: GNU prints its
-    readonly refusal, runs the command anyway and exits 0.
+    exports the name for the command. A policy refusal there takes the
+    whole statement; a readonly name is refused alone, as bash does,
+    and the command runs without it.
 
     Args:
         session (SessionState): the session being seeded.

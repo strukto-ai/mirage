@@ -654,6 +654,7 @@ async function runRedirected(
   const simple =
     command !== null &&
     (command.type === NT.COMMAND ||
+      command.type === NT.DECLARATION_COMMAND ||
       command.type === NT.VARIABLE_ASSIGNMENT ||
       command.type === NT.VARIABLE_ASSIGNMENTS)
   const outer = context.frame.diagnostics
@@ -937,7 +938,15 @@ export async function executeNode(
   const executionScope = deps.executionScope ?? new ExecutionScope()
   await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   if (!ownDiagnostics) {
-    const result = await executeNodeBody(deps, node, context, stdin, callStack, executionScope)
+    const result = await executeNodeBody(
+      deps,
+      node,
+      context,
+      stdin,
+      callStack,
+      executionScope,
+      false,
+    )
     if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
       throw makeAbortError(
         deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
@@ -1012,6 +1021,9 @@ async function executeNodeBody(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   executionScope: ExecutionScope,
+  // Whether a node drained into the sink flushes its own diagnostics; a
+  // redirect's simple command leaves them for the redirect to put outside it.
+  ownDiagnostics = true,
 ): Promise<Result> {
   const session = context.session
   // The scope and signal this subtree runs under are the ones its nested
@@ -1122,7 +1134,7 @@ async function executeNodeBody(
     kind !== NodeKind.VAR_ASSIGN &&
     kind !== NodeKind.VAR_ASSIGNS
   ) {
-    return drained(sink, ...(await recurse(node, context, stdin, callStack)))
+    return drained(sink, ...(await recurse(node, context, stdin, callStack, { ownDiagnostics })))
   }
 
   if (kind === NodeKind.TIMED) {

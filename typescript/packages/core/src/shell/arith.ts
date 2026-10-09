@@ -82,6 +82,18 @@ function digitsValue(digits: string, base: number): bigint | null {
 }
 
 /**
+ * `text` as a plain decimal (ASCII digits, no leading `0`, which would read
+ * as octal), wrapped to 64 bits; null when it is anything else and has to
+ * be evaluated.
+ */
+export function plainDecimal(text: string): bigint | null {
+  const number = text.replace(/^[ \t\n]+|[ \t\n]+$/g, '')
+  if (!/^[1-9][0-9]*$/.test(number)) return null
+  const value = digitsValue(number, 10)
+  return value === null ? null : wrapInt64(value)
+}
+
+/**
  * The value of an integer constant, or what bash says of a bad one:
  * decimal, octal after a leading `0`, hexadecimal after `0x` (bare `0x` is
  * 0), or `base#digits` for a base from 2 to 64 written in decimal
@@ -519,12 +531,7 @@ class ArithRecord {
   /** A variable's value as a number: its text read as an expression. */
   private coerce(raw: string | null, depth: number, subscript: boolean): bigint {
     const text = raw ?? ''
-    const number = text.replace(/^[ \t\n]+|[ \t\n]+$/g, '')
-    if (/^[1-9][0-9]*$/.test(number)) {
-      const value = digitsValue(number, 10)
-      if (value !== null) return wrapInt64(value)
-    }
-    return this.evaluate(text, depth + 1, subscript)
+    return plainDecimal(text) ?? this.evaluate(text, depth + 1, subscript)
   }
 
   private mergedEnv(): Record<string, string> {
@@ -545,10 +552,8 @@ class ArithRecord {
       throw new ArithError('syntax error: operand expected', target, target.slice(name.length))
     }
     if (elements.isAssoc?.(name) ?? true) return elements.resolve(name, inner, this.mergedEnv())
-    const trimmed = inner.trim()
-    let index: bigint
-    if (/^-?\d+$/.test(trimmed)) index = BigInt(trimmed)
-    else {
+    let index = plainDecimal(inner)
+    if (index === null) {
       try {
         index = this.evaluate(inner, depth + 1, true)
       } catch (err) {

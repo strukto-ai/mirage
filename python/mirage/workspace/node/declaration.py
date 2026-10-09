@@ -22,6 +22,7 @@ from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import VarAttr, VarKind
+from mirage.shell.xtrace import trace_array, trace_command
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
@@ -233,6 +234,7 @@ async def execute_declaration(
     flag_chars: set[str] = set()
     plus_chars: set[str] = set()
     opts_done = False
+    traced: list[str] = []
     for child in node.named_children:
         if child.type == NT.VARIABLE_ASSIGNMENT:
             val_nodes = [
@@ -246,11 +248,13 @@ async def execute_declaration(
                 operands.append(
                     (key.removesuffix("+"), key.endswith("+"), items)
                 )
+                traced.append(key.removesuffix("+"))
                 continue
             expanded = await expand_node(
                 child, context, execute_fn, cs, view=view
             )
             operands.append(expanded)
+            traced.append(expanded)
         elif child.type in (
             NT.SIMPLE_EXPANSION,
             NT.EXPANSION,
@@ -280,6 +284,7 @@ async def execute_declaration(
                 # ``export: `': not a valid identifier``, so it has
                 # to reach the builtin rather than vanish here.
                 continue
+            traced.append(expanded)
             if (
                 not opts_done
                 and expanded.startswith("-")
@@ -306,6 +311,14 @@ async def execute_declaration(
                 operands.append(expanded)
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
     words = [operand for operand in operands if isinstance(operand, str)]
+    if session.shell_options.get("xtrace"):
+        # Traced once expanded, before the builtin runs and outside its
+        # redirects: each array operand, then the command naming them.
+        staged = [op for op in operands if not isinstance(op, str)]
+        context.frame.diagnostics.append(
+            b"".join(trace_array(n, items, add) for n, add, items in staged)
+            + trace_command([cmd_word, *traced])
+        )
     if keyword in (NT.LOCAL, "declare", "typeset"):
         refused = _declare_option_refusal(
             cmd_word, flag_chars, plus_chars, context
@@ -397,21 +410,11 @@ async def execute_declaration(
                 )
             else:
                 seed_var(session, bare, [] if scalar is None else [scalar])
-    # Array literals travel as data: the handler stores them through
-    # the session view and owns both refusal voices, so the executor
-    # only expands and stages.
-    if keyword == "readonly":
-        result = await handle_readonly(
-            [*flag_words, *operands],
-            session,
-            session_view(
-                session,
-                namespace.registry.policies,
-                diagnostics=context.frame.diagnostics,
-            ),
-            kind=kind,
-        )
-        return _merge_conversion_errors(result, conversion_errors)
+    handler_view = session_view(
+        session,
+        namespace.registry.policies,
+        diagnostics=context.frame.diagnostics,
+    )
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
     # handle_local's fallback when no function scope is active. `-r`
@@ -421,11 +424,7 @@ async def execute_declaration(
         result = await handle_local(
             operands,
             session,
-            session_view(
-                session,
-                namespace.registry.policies,
-                diagnostics=context.frame.diagnostics,
-            ),
+            handler_view,
             # `declare`/`typeset` share this handler but have to name
             # themselves in a diagnostic rather than say `local`.
             cmd=cmd_word,
@@ -438,14 +437,16 @@ async def execute_declaration(
             inherit="I" in flag_chars,
         )
         return _merge_conversion_errors(result, conversion_errors)
-    # Pass export flags through so -p / bare print and bad options work.
-    result = await handle_export(
-        [*flag_words, *operands],
-        session,
-        session_view(
-            session,
-            namespace.registry.policies,
-            diagnostics=context.frame.diagnostics,
-        ),
-    )
+    # Array literals travel as data: the handler stores them through
+    # the session view and owns both refusal voices, so the executor
+    # only expands and stages. The flags pass through so -p, the bare
+    # listing and bad options work.
+    if keyword == "readonly":
+        result = await handle_readonly(
+            [*flag_words, *operands], session, handler_view, kind=kind
+        )
+    else:
+        result = await handle_export(
+            [*flag_words, *operands], session, handler_view
+        )
     return _merge_conversion_errors(result, conversion_errors)
