@@ -11,20 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-// The package's entry point, and only that: the names a program reaches
-// for first. Everything else in core is reached by module path, the way
-// `mirage.vfs.s3` is in Python -- the `./*` subpath map means no
-// symbol needs a line here to be importable.
-//
-// So do not add a name because something inside the repo wants it; that
-// something should name the module instead, and check_barrel_surface.py
-// fails the build when it does not. The same gate holds this list to its
-// consumers in both directions -- a line nothing imports, and an import of
-// a name no line carries -- which the 1500-line version of this file never
-// did. It is a repo-root script rather than knip because knip's project
-// root is typescript/, which leaves the consumers out of view.
-
 export { Accessor } from './accessor/base.ts'
 export { IndexEntry } from './cache/index/config.ts'
 export type { RedisIndexConfig } from './cache/index/config.ts'
@@ -38,11 +24,11 @@ export { LINEAR } from './commands/cli/builtin/linear/index.ts'
 export { NTN } from './commands/cli/builtin/ntn/index.ts'
 export { SLACK } from './commands/cli/builtin/slack/index.ts'
 export { registerCliSpec } from './commands/cli/specs.ts'
-export { CLISpec } from './commands/cli/types.ts'
+export { CLI, CLIHandler } from './commands/cli/types.ts'
 export type { CLIInvocation } from './commands/cli/types.ts'
 export { command } from './commands/config.ts'
 export type { CommandFnResult } from './commands/config.ts'
-export { CommandSpec, Operand, Option, SPECS, specOf } from './commands/spec/index.ts'
+export { CommandSpec, Argument, SPECS, specOf } from './commands/spec/index.ts'
 export { MemoryOAuthClientProvider } from './core/notion/client.ts'
 export { IOResult } from './io/types.ts'
 export type {

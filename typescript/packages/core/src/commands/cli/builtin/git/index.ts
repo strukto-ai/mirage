@@ -11,14 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../spec/types.ts'
+import { CLI } from '../../types.ts'
+import { CLIHandler } from '../../types.ts'
 
 import { lsFiles, lsTree } from './ls_files.ts'
 import { forEachRef } from './for_each_ref.ts'
 import { reflog } from './reflog.ts'
 import { fetch, fetchReadOnly } from './fetch.ts'
 import { clone, cloneReadOnly } from './clone.ts'
-import { Operand, Option, UsageStyle } from '../../../spec/types.ts'
-import { CLISpec, type CLIInvocation } from '../../types.ts'
+import { Argument, UsageStyle } from '../../../spec/types.ts'
+import { type CLIInvocation } from '../../types.ts'
 import { add } from './add.ts'
 import { init } from './init.ts'
 import { fsck } from './fsck.ts'
@@ -54,226 +57,196 @@ import { checkSwitches, fatal } from './util.ts'
 // as if typed, so an absent -C resolves to the session cwd and the leaves need
 // no separate working-directory fact. The root names it its operand base, so a
 // later relative -C lands under the one before it.
-const DIRECTORY_OPTION = new Option({
-  short: '-C',
+const DIRECTORY_OPTION = new Argument('-C', {
   type: 'path',
   default: '.',
-  description: 'Run as if git was started in <path>',
+  help: 'Run as if git was started in <path>',
 })
 
-const REVISION = new Operand({ type: 'str' })
+const REVISION = new Argument('text', { metavar: '', nargs: '*' })
 
 // --pretty and --format set the same variable in git; both take git's
 // optional-value form, so a bare --pretty means medium and a detached next
 // word is a revision, never a format. A bare --format stays parseable too,
 // but only so prettyFormat can answer it with git's own fatal (pretty.c reads
 // --format in its =value form alone).
-const PRETTY_OPTION = new Option({
-  long: '--pretty',
-  type: 'str',
-  valueOptional: true,
-  description:
-    'Commit display format: oneline, short, medium, full, fuller, or a format:/tformat:/%-string',
+const PRETTY_OPTION = new Argument('--pretty', {
+  nargs: '?',
+  attachedOnly: true,
+  help: 'Commit display format: oneline, short, medium, full, fuller, or a format:/tformat:/%-string',
 })
-const FORMAT_OPTION = new Option({
-  long: '--format',
-  type: 'str',
-  valueOptional: true,
-  description: 'Alias of --pretty (requires =value)',
+const FORMAT_OPTION = new Argument('--format', {
+  nargs: '?',
+  attachedOnly: true,
+  help: 'Alias of --pretty (requires =value)',
 })
 
 // Free text, read by parseDateMode: git names a style it lacks in its own
 // fatal, and format:<strftime> is no fixed word.
-const DATE_OPTION = new Option({
-  long: '--date',
-  type: 'str',
-  description:
+const DATE_OPTION = new Argument('--date', {
+  help:
     'Date display format: default, relative, local, iso, iso-strict, rfc, short, raw, unix, ' +
     'human or format:<strftime>',
 })
 
 const DIFF_OPTIONS = [
-  new Option({ short: '-a', long: '--text', description: 'Treat binary files as text' }),
-  new Option({
-    short: '-W',
-    long: '--function-context',
-    description: 'Show whole functions as diff context',
+  new Argument(['-a', '--text'], { action: 'store_true', help: 'Treat binary files as text' }),
+  new Argument(['-W', '--function-context'], {
+    action: 'store_true',
+    help: 'Show whole functions as diff context',
   }),
-  new Option({
-    short: '-U',
-    long: '--unified',
-    type: 'int',
-    description: 'Number of context lines',
+  new Argument(['-U', '--unified'], { type: 'int', help: 'Number of context lines' }),
+  new Argument('--name-status', { action: 'store_true', help: 'Show changed paths and status' }),
+  new Argument('--name-only', {
+    action: 'store_true',
+    help: 'Show changed paths instead of the patch',
   }),
-  new Option({ long: '--name-status', description: 'Show changed paths and status' }),
-  new Option({ long: '--name-only', description: 'Show changed paths instead of the patch' }),
-  new Option({ long: '--stat', description: 'Show the diffstat table instead of the patch' }),
-  new Option({ long: '--numstat', description: 'Show added and deleted line counts per path' }),
-  new Option({ long: '--shortstat', description: 'Show only the diffstat summary line' }),
-  new Option({ long: '--summary', description: 'Summarize creations, deletions and mode changes' }),
-  new Option({ short: '-p', long: '--patch', description: 'Show the patch' }),
-  new Option({ short: '-s', long: '--no-patch', description: 'Suppress all diff output' }),
-  new Option({
-    long: '--no-ext-diff',
-    description: 'Accepted for compatibility; there are no external diff drivers to disable',
+  new Argument('--stat', {
+    action: 'store_true',
+    help: 'Show the diffstat table instead of the patch',
   }),
-  new Option({
-    short: '-M',
-    long: '--find-renames',
-    type: 'str',
-    valueOptional: true,
-    description: 'Detect renames with an optional similarity threshold',
+  new Argument('--numstat', {
+    action: 'store_true',
+    help: 'Show added and deleted line counts per path',
   }),
-  new Option({ long: '--no-renames', description: 'Turn off rename detection' }),
-  new Option({ long: '--raw', description: 'Show the raw diff format' }),
+  new Argument('--shortstat', {
+    action: 'store_true',
+    help: 'Show only the diffstat summary line',
+  }),
+  new Argument('--summary', {
+    action: 'store_true',
+    help: 'Summarize creations, deletions and mode changes',
+  }),
+  new Argument(['-p', '--patch'], { action: 'store_true', help: 'Show the patch' }),
+  new Argument(['-s', '--no-patch'], { action: 'store_true', help: 'Suppress all diff output' }),
+  new Argument('--no-ext-diff', {
+    action: 'store_true',
+    help: 'Accepted for compatibility; there are no external diff drivers to disable',
+  }),
+  new Argument(['-M', '--find-renames'], {
+    nargs: '?',
+    attachedOnly: true,
+    help: 'Detect renames with an optional similarity threshold',
+  }),
+  new Argument('--no-renames', { action: 'store_true', help: 'Turn off rename detection' }),
+  new Argument('--raw', { action: 'store_true', help: 'Show the raw diff format' }),
 ]
 
 // git's optional-value form: a bare --decorate is short, and a detached next
 // word is a revision, never a style.
 const DECORATE_OPTIONS = [
-  new Option({
-    long: '--decorate',
-    type: 'str',
-    valueOptional: true,
-    description: 'Print ref names on commits: short (the default), full, auto or no',
+  new Argument('--decorate', {
+    nargs: '?',
+    attachedOnly: true,
+    help: 'Print ref names on commits: short (the default), full, auto or no',
   }),
-  new Option({ long: '--no-decorate', description: 'Print no ref names on commits' }),
+  new Argument('--no-decorate', { action: 'store_true', help: 'Print no ref names on commits' }),
 ]
 
 const MERGE_OPTIONS = [
-  new Option({ short: '-m', description: 'Show merge diffs separately against each parent' }),
-  new Option({ short: '-c', description: 'Show combined merge diffs' }),
-  new Option({ long: '--cc', description: 'Show dense combined merge diffs' }),
-  new Option({ long: '--first-parent', description: 'Follow and compare only the first parent' }),
-  new Option({ long: '--diff-merges', type: 'str', description: 'Select merge diff mode' }),
+  new Argument('-m', {
+    action: 'store_true',
+    help: 'Show merge diffs separately against each parent',
+  }),
+  new Argument('-c', { action: 'store_true', help: 'Show combined merge diffs' }),
+  new Argument('--cc', { action: 'store_true', help: 'Show dense combined merge diffs' }),
+  new Argument('--first-parent', {
+    action: 'store_true',
+    help: 'Follow and compare only the first parent',
+  }),
+  new Argument('--diff-merges', { help: 'Select merge diff mode' }),
 ]
 
 const LOG_OPTIONS = [
-  new Option({
-    short: '-E',
-    long: '--extended-regexp',
-    description: 'Use extended regular expressions',
+  new Argument(['-E', '--extended-regexp'], {
+    action: 'store_true',
+    help: 'Use extended regular expressions',
   }),
-  new Option({ short: '-F', long: '--fixed-strings', description: 'Match patterns literally' }),
-  new Option({
-    short: '-P',
-    long: '--perl-regexp',
-    description: 'Use Perl-compatible regular expressions',
+  new Argument(['-F', '--fixed-strings'], {
+    action: 'store_true',
+    help: 'Match patterns literally',
   }),
-  new Option({ long: '--basic-regexp', description: 'Use basic regular expressions' }),
-  new Option({
-    long: '--committer',
-    type: 'str',
-    multiple: true,
-    description: 'Limit commits to matching committers',
+  new Argument(['-P', '--perl-regexp'], {
+    action: 'store_true',
+    help: 'Use Perl-compatible regular expressions',
   }),
-  new Option({
-    long: '--author',
-    type: 'str',
-    multiple: true,
-    description: 'Limit commits to matching authors',
+  new Argument('--basic-regexp', { action: 'store_true', help: 'Use basic regular expressions' }),
+  new Argument('--committer', { action: 'append', help: 'Limit commits to matching committers' }),
+  new Argument('--author', { action: 'append', help: 'Limit commits to matching authors' }),
+  new Argument('--grep', {
+    action: 'append',
+    help: 'Limit commits to ones with a message line that matches',
   }),
-  new Option({
-    long: '--grep',
-    type: 'str',
-    multiple: true,
-    description: 'Limit commits to ones with a message line that matches',
-  }),
-  new Option({
-    short: '-i',
-    long: '--regexp-ignore-case',
-    description: 'Match --grep, --author and -S without regard to case',
+  new Argument(['-i', '--regexp-ignore-case'], {
+    action: 'store_true',
+    help: 'Match --grep, --author and -S without regard to case',
   }),
   ...MERGE_OPTIONS,
-  new Option({
-    long: '--after',
-    type: 'str',
-    description: 'Commits more recent than a date, like --since',
-  }),
-  new Option({
-    long: '--before',
-    type: 'str',
-    description: 'Commits older than a date, like --until',
-  }),
-  new Option({
-    long: '--max-parents',
+  new Argument('--after', { help: 'Commits more recent than a date, like --since' }),
+  new Argument('--before', { help: 'Commits older than a date, like --until' }),
+  new Argument('--max-parents', {
     type: 'int',
-    description: 'Show only commits with at most this many parents',
+    help: 'Show only commits with at most this many parents',
   }),
-  new Option({
-    long: '--min-parents',
+  new Argument('--min-parents', {
     type: 'int',
-    description: 'Show only commits with at least this many parents',
+    help: 'Show only commits with at least this many parents',
   }),
-  new Option({ long: '--merges', description: 'Show only merge commits' }),
-  new Option({ long: '--no-merges', description: 'Leave out merge commits' }),
+  new Argument('--merges', { action: 'store_true', help: 'Show only merge commits' }),
+  new Argument('--no-merges', { action: 'store_true', help: 'Leave out merge commits' }),
 
   DATE_OPTION,
   ...DECORATE_OPTIONS,
-  new Option({
-    short: '-n',
-    long: '--max-count',
+  new Argument(['-n', '--max-count'], {
     type: 'int',
     numericShorthand: true,
-    description: 'Limit the number of commits shown',
+    help: 'Limit the number of commits shown',
   }),
-  new Option({ long: '--oneline', description: 'One abbreviated line per commit' }),
-  new Option({ long: '--reverse', description: 'Print commits oldest first' }),
-  new Option({
-    long: '--graph',
-    description: 'Draw the commit history beside the log (implies --topo-order)',
+  new Argument('--oneline', { action: 'store_true', help: 'One abbreviated line per commit' }),
+  new Argument('--reverse', { action: 'store_true', help: 'Print commits oldest first' }),
+  new Argument('--graph', {
+    action: 'store_true',
+    help: 'Draw the commit history beside the log (implies --topo-order)',
   }),
-  new Option({
-    long: '--topo-order',
-    description: 'Show no parent before all its children, one line of history at a time',
+  new Argument('--topo-order', {
+    action: 'store_true',
+    help: 'Show no parent before all its children, one line of history at a time',
   }),
-  new Option({
-    long: '--date-order',
-    description: 'Show no parent before all its children, otherwise newest first',
+  new Argument('--date-order', {
+    action: 'store_true',
+    help: 'Show no parent before all its children, otherwise newest first',
   }),
-  new Option({ long: '--all', description: 'Start from every ref as well as the revision' }),
+  new Argument('--all', {
+    action: 'store_true',
+    help: 'Start from every ref as well as the revision',
+  }),
   PRETTY_OPTION,
   FORMAT_OPTION,
   // The pickaxe, and the reason `git log -S <name> --reverse` answers "which
   // commit introduced this": it selects commits that changed how many times the
   // string occurs, not commits that mention it.
-  new Option({
-    short: '-S',
-    type: 'str',
-    description: 'Show commits that change the number of occurrences of the string',
+  new Argument('-S', { help: 'Show commits that change the number of occurrences of the string' }),
+  new Argument('-G', {
+    help: 'Show commits whose diff adds or removes a line that matches the extended regular expression',
   }),
-  new Option({
-    short: '-G',
-    type: 'str',
-    description:
-      'Show commits whose diff adds or removes a line that matches the extended regular expression',
+  new Argument('--pickaxe-regex', {
+    action: 'store_true',
+    help: 'Treat the -S string as an extended regular expression',
   }),
-  new Option({
-    long: '--pickaxe-regex',
-    description: 'Treat the -S string as an extended regular expression',
-  }),
-  new Option({
-    long: '--since',
-    type: 'str',
-    description: 'Commits more recent than a date (ISO-8601 or epoch)',
-  }),
-  new Option({
-    long: '--until',
-    type: 'str',
-    description: 'Commits older than a date (ISO-8601 or epoch)',
-  }),
+  new Argument('--since', { help: 'Commits more recent than a date (ISO-8601 or epoch)' }),
+  new Argument('--until', { help: 'Commits older than a date (ISO-8601 or epoch)' }),
 ]
 
 const MAILMAP_OPTIONS = [
-  new Option({ long: '--mailmap', description: 'Apply mailmap to identities' }),
-  new Option({ long: '--use-mailmap', description: 'Apply mailmap to identities' }),
-  new Option({ long: '--no-mailmap', description: 'Use recorded identities' }),
-  new Option({ long: '--no-use-mailmap', description: 'Use recorded identities' }),
+  new Argument('--mailmap', { action: 'store_true', help: 'Apply mailmap to identities' }),
+  new Argument('--use-mailmap', { action: 'store_true', help: 'Apply mailmap to identities' }),
+  new Argument('--no-mailmap', { action: 'store_true', help: 'Use recorded identities' }),
+  new Argument('--no-use-mailmap', { action: 'store_true', help: 'Use recorded identities' }),
 ]
 
 const SHOW_OPTIONS = [
   ...MAILMAP_OPTIONS,
-  new Option({ long: '--oneline', description: 'One abbreviated line per commit' }),
+  new Argument('--oneline', { action: 'store_true', help: 'One abbreviated line per commit' }),
   ...DIFF_OPTIONS,
   ...MERGE_OPTIONS,
   DATE_OPTION,
@@ -282,118 +255,111 @@ const SHOW_OPTIONS = [
 ]
 
 const STATUS_OPTIONS = [
-  new Option({ long: '--ignored', description: 'Show ignored files' }),
-  new Option({
-    long: '--porcelain',
-    type: 'str',
-    valueOptional: true,
-    description: 'Machine-readable output, stable across versions',
+  new Argument('--ignored', { action: 'store_true', help: 'Show ignored files' }),
+  new Argument('--porcelain', {
+    nargs: '?',
+    attachedOnly: true,
+    help: 'Machine-readable output, stable across versions',
   }),
-  new Option({ short: '-s', long: '--short', description: 'Give the output in the short format' }),
-  new Option({
-    short: '-b',
-    long: '--branch',
-    description: 'Show the branch line even in short format',
+  new Argument(['-s', '--short'], {
+    action: 'store_true',
+    help: 'Give the output in the short format',
+  }),
+  new Argument(['-b', '--branch'], {
+    action: 'store_true',
+    help: 'Show the branch line even in short format',
   }),
   // git spells the mode attached (`-uall`) or not at all, never as a separate
   // token, which is what valueOptional says: a bare -u means "all" and the next
   // word is left alone to be an operand.
-  new Option({
-    short: '-u',
-    long: '--untracked-files',
-    type: 'str',
-    valueOptional: true,
+  new Argument(['-u', '--untracked-files'], {
+    nargs: '?',
+    attachedOnly: true,
     choices: ['no', 'normal', 'all'],
-    description: 'Show untracked files: no, normal or all',
+    help: 'Show untracked files: no, normal or all',
   }),
 ]
 
-const PATHSPEC = new Operand({ type: 'str' })
+const PATHSPEC = new Argument('text', { metavar: '', nargs: '*' })
 
 const ADD_OPTIONS = [
-  new Option({ short: '-A', long: '--all', description: 'Stage every change' }),
-  new Option({
-    short: '-u',
-    long: '--update',
-    description: 'Stage changes to tracked files only',
+  new Argument(['-A', '--all'], { action: 'store_true', help: 'Stage every change' }),
+  new Argument(['-u', '--update'], {
+    action: 'store_true',
+    help: 'Stage changes to tracked files only',
   }),
-  new Option({ short: '-f', long: '--force', description: 'Stage paths an ignore rule covers' }),
-  new Option({
-    short: '-v',
-    long: '--verbose',
-    description: 'Name each path as it is added or removed',
+  new Argument(['-f', '--force'], {
+    action: 'store_true',
+    help: 'Stage paths an ignore rule covers',
+  }),
+  new Argument(['-v', '--verbose'], {
+    action: 'store_true',
+    help: 'Name each path as it is added or removed',
   }),
 ]
 
 const COMMIT_OPTIONS = [
-  new Option({ short: '-q', long: '--quiet', description: 'Suppress feedback messages' }),
-  new Option({
-    short: '-a',
-    long: '--all',
-    description: 'Stage modified and deleted tracked files first',
+  new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Suppress feedback messages' }),
+  new Argument(['-a', '--all'], {
+    action: 'store_true',
+    help: 'Stage modified and deleted tracked files first',
   }),
   // Required, not defaulted: git would open an editor without it, and a mount
   // has none to open.
-  new Option({ short: '-m', long: '--message', type: 'str', description: 'Commit message' }),
-  new Option({ long: '--author', type: 'str', description: 'Override the recorded author' }),
-  new Option({
-    long: '--allow-empty',
-    description: 'Record a commit that changes nothing from its parent',
+  new Argument(['-m', '--message'], { help: 'Commit message' }),
+  new Argument('--author', { help: 'Override the recorded author' }),
+  new Argument('--allow-empty', {
+    action: 'store_true',
+    help: 'Record a commit that changes nothing from its parent',
   }),
 ]
 
 const CHECKOUT_OPTIONS = [
-  new Option({ short: '-b', description: 'Create the branch and switch to it' }),
-  new Option({ long: '--detach', description: 'Leave HEAD on the commit itself' }),
-  new Option({ short: '-q', long: '--quiet', description: 'Suppress feedback messages' }),
+  new Argument('-b', { action: 'store_true', help: 'Create the branch and switch to it' }),
+  new Argument('--detach', { action: 'store_true', help: 'Leave HEAD on the commit itself' }),
+  new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Suppress feedback messages' }),
 ]
 
 const SWITCH_OPTIONS = [
-  new Option({ short: '-q', long: '--quiet', description: 'Suppress feedback messages' }),
-  new Option({
-    short: '-c',
-    long: '--create',
-    type: 'str',
-    description: 'Create the branch and switch to it',
+  new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Suppress feedback messages' }),
+  new Argument(['-c', '--create'], { help: 'Create the branch and switch to it' }),
+  new Argument(['-d', '--detach'], {
+    action: 'store_true',
+    help: 'Detach HEAD at the named commit',
   }),
-  new Option({ short: '-d', long: '--detach', description: 'Detach HEAD at the named commit' }),
 ]
 
 const RESTORE_OPTIONS = [
-  new Option({ short: '-S', long: '--staged', description: 'Restore the index' }),
-  new Option({
-    short: '-W',
-    long: '--worktree',
-    description: 'Restore the working tree (default)',
+  new Argument(['-S', '--staged'], { action: 'store_true', help: 'Restore the index' }),
+  new Argument(['-W', '--worktree'], {
+    action: 'store_true',
+    help: 'Restore the working tree (default)',
   }),
-  new Option({
-    short: '-s',
-    long: '--source',
-    type: 'str',
-    description: 'Which tree-ish to restore from',
-  }),
+  new Argument(['-s', '--source'], { help: 'Which tree-ish to restore from' }),
 ]
 
 const RM_OPTIONS = [
-  new Option({ short: '-r', description: 'Allow recursive removal' }),
-  new Option({ long: '--cached', description: 'Only remove from the index, keeping the file' }),
-  new Option({ short: '-f', long: '--force', description: 'Override the up-to-date check' }),
-  new Option({ short: '-q', long: '--quiet', description: 'Do not list removed files' }),
-  new Option({
-    long: '--ignore-unmatch',
-    description: 'Exit with a zero status even if nothing matched',
+  new Argument('-r', { action: 'store_true', help: 'Allow recursive removal' }),
+  new Argument('--cached', {
+    action: 'store_true',
+    help: 'Only remove from the index, keeping the file',
+  }),
+  new Argument(['-f', '--force'], { action: 'store_true', help: 'Override the up-to-date check' }),
+  new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Do not list removed files' }),
+  new Argument('--ignore-unmatch', {
+    action: 'store_true',
+    help: 'Exit with a zero status even if nothing matched',
   }),
 ]
 
 const MV_OPTIONS = [
-  new Option({
-    short: '-f',
-    long: '--force',
-    description: 'Force move/rename even if target exists',
+  new Argument(['-f', '--force'], {
+    action: 'store_true',
+    help: 'Force move/rename even if target exists',
   }),
-  new Option({ short: '-k', description: 'Skip move/rename errors' }),
-  new Option({ short: '-n', long: '--dry-run', description: 'Dry run' }),
-  new Option({ short: '-v', long: '--verbose', description: 'Be verbose' }),
+  new Argument('-k', { action: 'store_true', help: 'Skip move/rename errors' }),
+  new Argument(['-n', '--dry-run'], { action: 'store_true', help: 'Dry run' }),
+  new Argument(['-v', '--verbose'], { action: 'store_true', help: 'Be verbose' }),
 ]
 
 // git's ref-filter options, which `branch` and `tag` share. The four commit
@@ -404,130 +370,115 @@ const MV_OPTIONS = [
 // bare one is HEAD, `--merged=main` is main) and `filterWords` reattaches a
 // detached value from the verbatim argv. `--points-at` always takes a value.
 const REF_FILTER_OPTIONS = [
-  new Option({
-    long: '--contains',
-    type: 'str',
-    valueOptional: true,
-    multiple: true,
+  new Argument('--contains', {
+    action: 'append',
+    nargs: '?',
+    attachedOnly: true,
     metavar: 'commit',
-    description: 'List only refs that contain the commit (HEAD if omitted)',
+    help: 'List only refs that contain the commit (HEAD if omitted)',
   }),
-  new Option({
-    long: '--no-contains',
-    type: 'str',
-    valueOptional: true,
-    multiple: true,
+  new Argument('--no-contains', {
+    action: 'append',
+    nargs: '?',
+    attachedOnly: true,
     metavar: 'commit',
-    description: "List only refs that don't contain the commit (HEAD if omitted)",
+    help: "List only refs that don't contain the commit (HEAD if omitted)",
   }),
-  new Option({
-    long: '--merged',
-    type: 'str',
-    valueOptional: true,
-    multiple: true,
+  new Argument('--merged', {
+    action: 'append',
+    nargs: '?',
+    attachedOnly: true,
     metavar: 'commit',
-    description: 'List only refs reachable from the commit (HEAD if omitted)',
+    help: 'List only refs reachable from the commit (HEAD if omitted)',
   }),
-  new Option({
-    long: '--no-merged',
-    type: 'str',
-    valueOptional: true,
-    multiple: true,
+  new Argument('--no-merged', {
+    action: 'append',
+    nargs: '?',
+    attachedOnly: true,
     metavar: 'commit',
-    description: 'List only refs not reachable from the commit (HEAD if omitted)',
+    help: 'List only refs not reachable from the commit (HEAD if omitted)',
   }),
-  new Option({
-    long: '--points-at',
-    type: 'str',
-    multiple: true,
+  new Argument('--points-at', {
+    action: 'append',
     metavar: 'object',
-    description: 'List only refs that point at the object',
+    help: 'List only refs that point at the object',
   }),
 ]
 
 // git's ref-format options, which `for-each-ref`, `branch` and `tag` share.
 // --sort repeats, the last key given sorting first, and --no-sort drops every
 // key before it, the default refname included.
-const FORMAT_OPTION_REF = new Option({
-  long: '--format',
-  type: 'str',
+const FORMAT_OPTION_REF = new Argument('--format', {
   metavar: 'format',
-  description: 'Format each ref: %(fieldname) placeholders, as git for-each-ref',
+  help: 'Format each ref: %(fieldname) placeholders, as git for-each-ref',
 })
 const SORT_OPTIONS = [
-  new Option({
-    long: '--sort',
-    type: 'str',
-    multiple: true,
+  new Argument('--sort', {
+    action: 'append',
     metavar: 'key',
-    description: 'Sort on a field, - reversing it and version: comparing as versions',
+    help: 'Sort on a field, - reversing it and version: comparing as versions',
   }),
-  new Option({ long: '--no-sort', description: 'Drop the sort keys given so far' }),
+  new Argument('--no-sort', { action: 'store_true', help: 'Drop the sort keys given so far' }),
 ]
-const OMIT_EMPTY_OPTION = new Option({
-  long: '--omit-empty',
-  description: 'Print nothing, not even a newline, for an empty row',
+const OMIT_EMPTY_OPTION = new Argument('--omit-empty', {
+  action: 'store_true',
+  help: 'Print nothing, not even a newline, for an empty row',
 })
-const IGNORE_CASE_OPTION = new Option({
-  short: '-i',
-  long: '--ignore-case',
-  description: 'Sort and match patterns case-insensitively',
+const IGNORE_CASE_OPTION = new Argument(['-i', '--ignore-case'], {
+  action: 'store_true',
+  help: 'Sort and match patterns case-insensitively',
 })
 
 const FOR_EACH_REF_OPTIONS = [
-  new Option({ short: '-s', long: '--shell', description: 'Quote fields suitably for shells' }),
-  new Option({ short: '-p', long: '--perl', description: 'Quote fields suitably for perl' }),
-  new Option({ long: '--python', description: 'Quote fields suitably for python' }),
-  new Option({ long: '--tcl', description: 'Quote fields suitably for Tcl' }),
-  OMIT_EMPTY_OPTION,
-  new Option({
-    long: '--count',
-    type: 'int',
-    metavar: 'n',
-    description: 'Show only the first <n> refs',
+  new Argument(['-s', '--shell'], {
+    action: 'store_true',
+    help: 'Quote fields suitably for shells',
   }),
+  new Argument(['-p', '--perl'], { action: 'store_true', help: 'Quote fields suitably for perl' }),
+  new Argument('--python', { action: 'store_true', help: 'Quote fields suitably for python' }),
+  new Argument('--tcl', { action: 'store_true', help: 'Quote fields suitably for Tcl' }),
+  OMIT_EMPTY_OPTION,
+  new Argument('--count', { type: 'int', metavar: 'n', help: 'Show only the first <n> refs' }),
   FORMAT_OPTION_REF,
-  new Option({
-    long: '--exclude',
-    type: 'str',
-    multiple: true,
+  new Argument('--exclude', {
+    action: 'append',
     metavar: 'pattern',
-    description: 'Leave out refs matching the pattern',
+    help: 'Leave out refs matching the pattern',
   }),
   ...SORT_OPTIONS,
   ...REF_FILTER_OPTIONS,
-  new Option({
-    long: '--ignore-case',
-    description: 'Sort and match patterns case-insensitively',
+  new Argument('--ignore-case', {
+    action: 'store_true',
+    help: 'Sort and match patterns case-insensitively',
   }),
-  new Option({ long: '--stdin', description: 'Read ref patterns from stdin' }),
-  new Option({
-    long: '--include-root-refs',
-    description: 'Also list HEAD and the other root refs',
+  new Argument('--stdin', { action: 'store_true', help: 'Read ref patterns from stdin' }),
+  new Argument('--include-root-refs', {
+    action: 'store_true',
+    help: 'Also list HEAD and the other root refs',
   }),
 ]
 
 const TAG_OPTIONS = [
-  new Option({ short: '-l', long: '--list', description: 'List tag names' }),
+  new Argument(['-l', '--list'], { action: 'store_true', help: 'List tag names' }),
   // git spells the count attached (`-n2`) or not at all, never as a separate
   // token, which is what valueOptional says: a bare -n means one line and the
   // next word is left alone to be a pattern.
-  new Option({
-    short: '-n',
+  new Argument('-n', {
     type: 'int',
-    valueOptional: true,
-    description: 'Print <n> lines of each tag message',
+    nargs: '?',
+    attachedOnly: true,
+    help: 'Print <n> lines of each tag message',
   }),
-  new Option({ short: '-d', long: '--delete', description: 'Delete tags' }),
-  new Option({ short: '-a', long: '--annotate', description: 'Annotated tag, needs a message' }),
-  new Option({
-    short: '-m',
-    long: '--message',
-    type: 'str',
-    multiple: true,
-    description: 'Tag message (repeatable, one paragraph each)',
+  new Argument(['-d', '--delete'], { action: 'store_true', help: 'Delete tags' }),
+  new Argument(['-a', '--annotate'], {
+    action: 'store_true',
+    help: 'Annotated tag, needs a message',
   }),
-  new Option({ short: '-f', long: '--force', description: 'Replace the tag if exists' }),
+  new Argument(['-m', '--message'], {
+    action: 'append',
+    help: 'Tag message (repeatable, one paragraph each)',
+  }),
+  new Argument(['-f', '--force'], { action: 'store_true', help: 'Replace the tag if exists' }),
   ...REF_FILTER_OPTIONS,
   ...SORT_OPTIONS,
   FORMAT_OPTION_REF,
@@ -536,19 +487,17 @@ const TAG_OPTIONS = [
 ]
 
 const BRANCH_OPTIONS = [
-  new Option({ long: '--show-current', description: 'Show the current branch name' }),
-  new Option({ short: '-q', long: '--quiet', description: 'Suppress feedback messages' }),
-  new Option({
-    short: '-v',
-    long: '--verbose',
-    count: true,
-    description: 'Show commit and upstream details',
+  new Argument('--show-current', { action: 'store_true', help: 'Show the current branch name' }),
+  new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Suppress feedback messages' }),
+  new Argument(['-v', '--verbose'], { action: 'count', help: 'Show commit and upstream details' }),
+  new Argument('-a', { action: 'store_true', help: 'List local and remote-tracking branches' }),
+  new Argument('-r', { action: 'store_true', help: 'List remote-tracking branches' }),
+  new Argument(['-d', '--delete'], { action: 'store_true', help: 'Delete a fully merged branch' }),
+  new Argument('-D', { action: 'store_true', help: 'Delete a branch even if not merged' }),
+  new Argument(['-l', '--list'], {
+    action: 'store_true',
+    help: 'List branches matching the patterns',
   }),
-  new Option({ short: '-a', description: 'List local and remote-tracking branches' }),
-  new Option({ short: '-r', description: 'List remote-tracking branches' }),
-  new Option({ short: '-d', long: '--delete', description: 'Delete a fully merged branch' }),
-  new Option({ short: '-D', description: 'Delete a branch even if not merged' }),
-  new Option({ short: '-l', long: '--list', description: 'List branches matching the patterns' }),
   ...REF_FILTER_OPTIONS,
   ...SORT_OPTIONS,
   FORMAT_OPTION_REF,
@@ -572,7 +521,7 @@ function helpCmd(inv: CLIInvocation): CommandFnResult {
     if (err instanceof GitError) return fatal(err)
     throw err
   }
-  const found = findNode(GIT, inv.texts)
+  const found = findNode(GIT.spec, inv.texts)
   if (found === null)
     return [
       null,
@@ -585,544 +534,542 @@ function helpCmd(inv: CLIInvocation): CommandFnResult {
     ]
   return [
     new TextEncoder().encode(
-      nodeHelp(['git', ...found.path].join(' '), found.node, GIT.usageStyle),
+      nodeHelp(['git', ...found.path].join(' '), found.node, GIT.spec.usageStyle),
     ),
     new IOResult(),
   ]
 }
 
-export const GIT = new CLISpec({
-  name: 'git',
-  description: 'Content tracker',
-  usageStyle: UsageStyle.GIT,
-  operandBase: '-C',
-  options: [
-    DIRECTORY_OPTION,
-    new Option({
-      long: '--git-dir',
-      type: 'path',
-      env: 'GIT_DIR',
-      description: 'Use the repository at <path>',
-    }),
-    new Option({
-      long: '--work-tree',
-      type: 'path',
-      env: 'GIT_WORK_TREE',
-      description: 'Use <path> as the working tree',
-    }),
-  ],
-  subcommands: [
-    new CLISpec({
-      name: 'reflog',
-      fn: verb(reflog),
-      description: 'Show reference history',
-      options: [
-        new Option({
-          short: '-n',
-          long: '--max-count',
-          type: 'int',
-          numericShorthand: true,
-          description: 'Limit the number of entries',
-        }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'for-each-ref',
-      fn: verb(forEachRef),
-      description: 'List references with a format',
-      options: FOR_EACH_REF_OPTIONS,
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'cat-file',
-      fn: verb(catFile),
-      description: 'Provide contents or details of repository objects',
-      options: [
-        new Option({ short: '-t', description: 'Show the object type' }),
-        new Option({ short: '-s', description: 'Show the object size' }),
-        new Option({ short: '-e', description: 'Check if <object> exists' }),
-        new Option({ short: '-p', description: 'Pretty-print <object> content' }),
-        new Option({
-          long: '--batch',
-          type: 'str',
-          valueOptional: true,
-          description: 'Show full <object> or <rev> contents',
-        }),
-        new Option({
-          long: '--batch-check',
-          type: 'str',
-          valueOptional: true,
-          description: "Like --batch, but don't emit <contents>",
-        }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'hash-object',
-      fn: verb(hashObject, hashObjectReadOnly),
-      description: 'Compute object ID and optionally create an object from a file',
-      options: [
-        new Option({ short: '-t', type: 'str', description: 'Object type' }),
-        new Option({ short: '-w', description: 'Write the object into the object database' }),
-        new Option({ long: '--stdin', description: 'Read the object from stdin' }),
-        new Option({ long: '--stdin-paths', description: 'Read file names from stdin' }),
-        new Option({ long: '--no-filters', description: 'Store file as is without filters' }),
-        new Option({
-          long: '--literally',
-          description: 'Just hash any random garbage to create corrupt objects for debugging Git',
-        }),
-        new Option({
-          long: '--path',
-          type: 'str',
-          description: 'Process file as it were from this path',
-        }),
-      ],
-      rest: PATHSPEC,
-    }),
-    new CLISpec({
-      name: 'grep',
-      fn: verb(grep),
-      description: 'Search tracked files in the working tree, index or named trees',
-      options: [
-        new Option({
-          long: '--cached',
-          description: 'Search index blobs instead of working files',
-        }),
-        new Option({ short: '-n', long: '--line-number', description: 'Show line numbers' }),
-        new Option({
-          short: '-i',
-          long: '--ignore-case',
-          description: 'Match without regard to case',
-        }),
-        new Option({ short: '-F', long: '--fixed-strings', description: 'Match literal strings' }),
-        new Option({
-          short: '-E',
-          long: '--extended-regexp',
-          description: 'Use extended regular expressions',
-        }),
-        new Option({
-          short: '-G',
-          long: '--basic-regexp',
-          description: 'Use basic regular expressions',
-        }),
-        new Option({ short: '-w', long: '--word-regexp', description: 'Match at word boundaries' }),
-        new Option({
-          short: '-v',
-          long: '--invert-match',
-          description: 'Select nonmatching lines',
-        }),
-        new Option({
-          short: '-c',
-          long: '--count',
-          description: 'Count selected lines in each matching file',
-        }),
-        new Option({
-          short: '-l',
-          long: '--files-with-matches',
-          description: 'Show only matching filenames',
-        }),
-        new Option({
-          short: '-L',
-          long: '--files-without-match',
-          description: 'Show only nonmatching filenames',
-        }),
-        new Option({
-          short: '-q',
-          long: '--quiet',
-          description: 'Report matches through exit status',
-        }),
-        new Option({
-          short: '-e',
-          type: 'str',
-          multiple: true,
-          description: 'Match an additional pattern',
-        }),
-        new Option({ short: '-a', long: '--text', description: 'Treat binary files as text' }),
-        new Option({ short: '-I', description: 'Skip binary files' }),
-        new Option({
-          short: '-z',
-          long: '--null',
-          description: 'Terminate filename fields with NUL',
-        }),
-        new Option({ short: '-h', description: 'Omit filenames from matching lines' }),
-        new Option({ short: '-H', description: 'Show filenames with matching lines' }),
-      ],
-      rest: new Operand({ type: 'str', remainder: true }),
-    }),
-    new CLISpec({
-      name: 'ls-tree',
-      fn: verb(lsTree),
-      description: 'List the contents of a tree object',
-      options: [
-        new Option({ short: '-r', description: 'Recurse into subtrees' }),
-        new Option({ short: '-t', description: 'Show trees when recursing' }),
-        new Option({ short: '-d', description: 'Only show trees' }),
-        new Option({ short: '-z', description: 'Terminate entries with NUL' }),
-        new Option({ long: '--name-only', description: 'Show only filenames' }),
-        new Option({ long: '--name-status', description: 'Alias of --name-only' }),
-        new Option({
-          long: '--full-name',
-          description: 'Show paths relative to the repository root',
-        }),
-        new Option({
-          long: '--full-tree',
-          description: 'List the whole tree, ignoring the current directory',
-        }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'ls-files',
-      fn: verb(lsFiles),
-      description: 'Show files in the index',
-      options: [
-        new Option({ short: '-z', description: 'Terminate paths with NUL' }),
-        new Option({ short: '-s', long: '--stage', description: 'Show staged object metadata' }),
-        new Option({ short: '-c', long: '--cached', description: 'Show cached files' }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'fetch',
-      fn: verb(fetch, fetchReadOnly),
-      description: 'Download objects and refs from another repository',
-      options: [
-        new Option({ short: '-q', long: '--quiet', description: 'Print nothing but errors' }),
-        new Option({ short: '-v', long: '--verbose', description: 'Also list unchanged refs' }),
-        new Option({
-          short: '-p',
-          long: '--prune',
-          description: 'Remove remote-tracking refs the remote no longer has',
-        }),
-        new Option({ short: '-t', long: '--tags', description: 'Fetch every tag' }),
-        new Option({ short: '-n', long: '--no-tags', description: 'Follow no tags' }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'clone',
-      fn: verb(clone, cloneReadOnly),
-      description: 'Clone a repository into a new directory',
-      options: [
-        new Option({ short: '-q', long: '--quiet', description: 'Print nothing but errors' }),
-        new Option({
-          short: '-b',
-          long: '--branch',
-          type: 'str',
-          description: 'Check out this branch or tag',
-        }),
-        new Option({
-          short: '-o',
-          long: '--origin',
-          type: 'str',
-          description: 'Name the remote this instead of origin',
-        }),
-        new Option({
-          short: '-n',
-          long: '--no-checkout',
-          description: 'Leave the working tree empty',
-        }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'help',
-      fn: verb(helpCmd),
-      description: 'Show command help',
-      rest: new Operand({ type: 'str' }),
-    }),
-    new CLISpec({
-      name: 'init',
-      fn: verb(init),
-      description: 'Create an empty Git repository or reinitialize an existing one',
-      write: true,
-      options: [
-        new Option({ short: '-q', long: '--quiet' }),
-        new Option({ long: '--bare' }),
-        new Option({ short: '-b', long: '--initial-branch', type: 'str' }),
-      ],
-      positional: [new Operand({ type: 'str', name: 'directory' })],
-    }),
-    new CLISpec({
-      name: 'fsck',
-      fn: verb(fsck),
-      description: 'Verify object hashes and connectivity',
-      options: [
-        new Option({ long: '--full' }),
-        new Option({ long: '--no-dangling' }),
-        new Option({ long: '--unreachable' }),
-      ],
-    }),
-    new CLISpec({
-      name: 'stash',
-      description: 'Inspect saved working trees',
-      subcommands: [
-        new CLISpec({ name: 'list', fn: verb(stashList), description: 'List stashed changes' }),
-        new CLISpec({
-          name: 'show',
-          fn: verb(stashShow),
-          description: 'Show stashed changes',
-          options: DIFF_OPTIONS,
-          positional: [new Operand({ type: 'str', name: 'stash' })],
-        }),
-      ],
-    }),
-    new CLISpec({
-      name: 'version',
-      aliases: ['--version', '-v'],
-      fn: verb(version),
-      description: 'Show the Mirage Git implementation version',
-    }),
-    new CLISpec({
-      name: 'remote',
-      description: 'List remotes and inspect their URLs',
-      fn: verb(remote),
-      rest: new Operand({ type: 'str', remainder: true }),
-      options: [new Option({ short: '-v', long: '--verbose', description: 'Show remote URLs' })],
-    }),
-    new CLISpec({
-      name: 'config',
-      description: 'Read repository configuration',
-      fn: verb(config),
-      options: [
-        new Option({ long: '--global', description: 'Read global configuration' }),
-        new Option({ long: '--get', description: 'Get a configuration value' }),
-        new Option({ short: '-l', long: '--list', description: 'List every variable and value' }),
-        new Option({ long: '--show-origin', description: 'Show the file each value comes from' }),
-        new Option({
-          long: '--get-regexp',
-          description: 'Get the variables whose names match a regular expression',
-        }),
-      ],
-      positional: [new Operand({ type: 'str', name: 'name' })],
-    }),
-    new CLISpec({
-      name: 'show-ref',
-      description: 'List references',
-      fn: verb(showRef),
-      rest: REVISION,
-    }),
-    // symbolic-ref has every option git's has, so its rows carry git's own
-    // help and its usage block reads exactly as git's.
-    new CLISpec({
-      name: 'symbolic-ref',
-      description: 'Read, change or delete a symbolic ref',
-      fn: verb(symbolicRef, symbolicRefReadOnly),
-      options: [
-        new Option({
-          short: '-q',
-          long: '--quiet',
-          description: 'suppress error message for non-symbolic (detached) refs',
-        }),
-        new Option({ long: '--no-quiet', description: 'Refuse a ref that is not symbolic aloud' }),
-        new Option({ short: '-d', long: '--delete', description: 'delete symbolic ref' }),
-        new Option({ long: '--no-delete', description: 'Read or change the ref instead' }),
-        new Option({ long: '--short', description: 'shorten ref output' }),
-        new Option({ long: '--no-short', description: 'Print the full name it points at' }),
-        new Option({ long: '--recurse', description: 'recursively dereference (default)' }),
-        new Option({
-          long: '--no-recurse',
-          description: 'Print only the ref this one points at directly',
-        }),
-        new Option({
-          short: '-m',
-          type: 'str',
-          metavar: 'reason',
-          description: 'reason of the update',
-        }),
-      ],
-      rest: new Operand({ type: 'str' }),
-      write: true,
-    }),
-    // shortlog's -n is --numbered, so the count keeps only its long spelling.
-    new CLISpec({
-      name: 'shortlog',
-      fn: verb(shortlog),
-      description: 'Summarize commit history',
-      options: [
-        ...LOG_OPTIONS.filter((opt) => opt.short !== '-n'),
-        new Option({
-          long: '--max-count',
-          type: 'int',
-          description: 'Limit the number of commits',
-        }),
-        new Option({ short: '-s', long: '--summary', description: 'Show only commit counts' }),
-        new Option({ short: '-e', long: '--email', description: 'Show author email addresses' }),
-        new Option({ short: '-n', long: '--numbered', description: 'Sort by commit count' }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'rev-parse',
-      fn: verb(revParse),
-      description: 'Resolve revisions',
-      options: [
-        new Option({ long: '--show-toplevel', description: 'Show the worktree root' }),
-        new Option({
-          long: '--abbrev-ref',
-          type: 'str',
-          valueOptional: true,
-          description: 'Show abbreviated reference names, strict or loose',
-        }),
-        new Option({
-          long: '--show-prefix',
-          description: 'Show the current directory relative to the worktree root',
-        }),
-        new Option({
-          long: '--is-shallow-repository',
-          description: 'Print whether the repository is shallow',
-        }),
-        new Option({
-          long: '--is-inside-work-tree',
-          description: 'Print whether the current directory is inside the work tree',
-        }),
-        new Option({
-          long: '--verify',
-          description: 'Require exactly one revision that names an object',
-        }),
-        new Option({
-          long: '--short',
-          type: 'str',
-          valueOptional: true,
-          description: 'Abbreviate the object name; implies --verify',
-        }),
-        new Option({
-          short: '-q',
-          long: '--quiet',
-          description: 'With --verify, exit 1 without a message',
-        }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'rev-list',
-      description: 'List reachable commits',
-      fn: verb(revList),
-      options: [...LOG_OPTIONS, new Option({ long: '--count', description: 'Print commit count' })],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'diff-tree',
-      description: 'Compare a commit with its parent',
-      fn: verb(diffTree),
-      options: [
-        ...SHOW_OPTIONS,
-        new Option({ long: '--no-commit-id', description: 'Suppress commit ID' }),
-        new Option({ short: '-r', description: 'Recurse into subtrees' }),
-      ],
-      positional: [new Operand({ type: 'str', name: 'commit', required: true })],
-      rest: PATHSPEC,
-    }),
-    new CLISpec({
-      name: 'status',
-      description: 'Show the working tree status',
-      fn: verb(status),
-      options: STATUS_OPTIONS,
-    }),
-    new CLISpec({
-      name: 'log',
-      description: 'Show commit logs',
-      fn: verb(log),
-      options: [...LOG_OPTIONS, ...MAILMAP_OPTIONS, ...DIFF_OPTIONS],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'show',
-      description: 'Show a commit and its diff',
-      fn: verb(show),
-      options: [...SHOW_OPTIONS, ...DECORATE_OPTIONS],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'diff',
-      description: 'Show changes between commits',
-      fn: verb(diff),
-      options: [
-        ...DIFF_OPTIONS,
-        new Option({ long: '--cached', description: 'Compare the index with a commit' }),
-        new Option({ long: '--staged', description: 'Alias of --cached' }),
-      ],
-      rest: REVISION,
-    }),
-    new CLISpec({
-      name: 'branch',
-      description: 'List, create or delete branches',
-      fn: verb(branch, branchReadOnly),
-      options: BRANCH_OPTIONS,
-      rest: new Operand({ type: 'str' }),
-      write: true,
-    }),
-    new CLISpec({
-      name: 'add',
-      description: 'Stage working tree content',
-      fn: verb(add, indexLocked),
-      options: ADD_OPTIONS,
-      rest: PATHSPEC,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'reset',
-      description: 'Unstage, putting the index back to HEAD',
-      fn: verb(reset, indexLocked),
-      options: [new Option({ short: '-q', long: '--quiet', description: 'Only report errors' })],
-      rest: PATHSPEC,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'commit',
-      description: 'Record the index as a new commit',
-      fn: verb(commit, indexLocked),
-      options: COMMIT_OPTIONS,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'checkout',
-      description: 'Switch branches',
-      fn: verb(checkout, checkoutReadOnly),
-      options: CHECKOUT_OPTIONS,
-      rest: REVISION,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'switch',
-      description: 'Switch branches',
-      fn: verb(switchBranch, switchReadOnly),
-      options: SWITCH_OPTIONS,
-      rest: REVISION,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'restore',
-      description: 'Restore working tree files',
-      fn: verb(restore, indexLocked),
-      options: RESTORE_OPTIONS,
-      rest: PATHSPEC,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'rm',
-      description: 'Remove files from the working tree and the index',
-      fn: verb(rm, indexLocked),
-      options: RM_OPTIONS,
-      rest: PATHSPEC,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'mv',
-      description: 'Move or rename a file, a directory, or a symlink',
-      fn: verb(mv, indexLocked),
-      options: MV_OPTIONS,
-      rest: PATHSPEC,
-      write: true,
-    }),
-    new CLISpec({
-      name: 'tag',
-      description: 'Create, list or delete a tag',
-      fn: verb(tag, tagReadOnly),
-      options: TAG_OPTIONS,
-      rest: new Operand({ type: 'str' }),
-      write: true,
-    }),
-  ],
+export const GIT = new CLI({
+  spec: new CommandSpec({
+    name: 'git',
+    description: 'Content tracker',
+    usageStyle: UsageStyle.GIT,
+    operandBase: '-C',
+    arguments: [
+      DIRECTORY_OPTION,
+      new Argument('--git-dir', {
+        type: 'path',
+        env: 'GIT_DIR',
+        help: 'Use the repository at <path>',
+      }),
+      new Argument('--work-tree', {
+        type: 'path',
+        env: 'GIT_WORK_TREE',
+        help: 'Use <path> as the working tree',
+      }),
+    ],
+    subcommands: [
+      new CommandSpec({
+        name: 'reflog',
+        description: 'Show reference history',
+        arguments: [
+          new Argument(['-n', '--max-count'], {
+            type: 'int',
+            numericShorthand: true,
+            help: 'Limit the number of entries',
+          }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'for-each-ref',
+        description: 'List references with a format',
+        arguments: [...FOR_EACH_REF_OPTIONS, REVISION],
+      }),
+      new CommandSpec({
+        name: 'cat-file',
+        description: 'Provide contents or details of repository objects',
+        arguments: [
+          new Argument('-t', { action: 'store_true', help: 'Show the object type' }),
+          new Argument('-s', { action: 'store_true', help: 'Show the object size' }),
+          new Argument('-e', { action: 'store_true', help: 'Check if <object> exists' }),
+          new Argument('-p', { action: 'store_true', help: 'Pretty-print <object> content' }),
+          new Argument('--batch', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Show full <object> or <rev> contents',
+          }),
+          new Argument('--batch-check', {
+            nargs: '?',
+            attachedOnly: true,
+            help: "Like --batch, but don't emit <contents>",
+          }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'hash-object',
+        description: 'Compute object ID and optionally create an object from a file',
+        arguments: [
+          new Argument('-t', { help: 'Object type' }),
+          new Argument('-w', {
+            action: 'store_true',
+            help: 'Write the object into the object database',
+          }),
+          new Argument('--stdin', { action: 'store_true', help: 'Read the object from stdin' }),
+          new Argument('--stdin-paths', {
+            action: 'store_true',
+            help: 'Read file names from stdin',
+          }),
+          new Argument('--no-filters', {
+            action: 'store_true',
+            help: 'Store file as is without filters',
+          }),
+          new Argument('--literally', {
+            action: 'store_true',
+            help: 'Just hash any random garbage to create corrupt objects for debugging Git',
+          }),
+          new Argument('--path', { help: 'Process file as it were from this path' }),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'grep',
+        description: 'Search tracked files in the working tree, index or named trees',
+        arguments: [
+          new Argument('--cached', {
+            action: 'store_true',
+            help: 'Search index blobs instead of working files',
+          }),
+          new Argument(['-n', '--line-number'], {
+            action: 'store_true',
+            help: 'Show line numbers',
+          }),
+          new Argument(['-i', '--ignore-case'], {
+            action: 'store_true',
+            help: 'Match without regard to case',
+          }),
+          new Argument(['-F', '--fixed-strings'], {
+            action: 'store_true',
+            help: 'Match literal strings',
+          }),
+          new Argument(['-E', '--extended-regexp'], {
+            action: 'store_true',
+            help: 'Use extended regular expressions',
+          }),
+          new Argument(['-G', '--basic-regexp'], {
+            action: 'store_true',
+            help: 'Use basic regular expressions',
+          }),
+          new Argument(['-w', '--word-regexp'], {
+            action: 'store_true',
+            help: 'Match at word boundaries',
+          }),
+          new Argument(['-v', '--invert-match'], {
+            action: 'store_true',
+            help: 'Select nonmatching lines',
+          }),
+          new Argument(['-c', '--count'], {
+            action: 'store_true',
+            help: 'Count selected lines in each matching file',
+          }),
+          new Argument(['-l', '--files-with-matches'], {
+            action: 'store_true',
+            help: 'Show only matching filenames',
+          }),
+          new Argument(['-L', '--files-without-match'], {
+            action: 'store_true',
+            help: 'Show only nonmatching filenames',
+          }),
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'Report matches through exit status',
+          }),
+          new Argument('-e', { action: 'append', help: 'Match an additional pattern' }),
+          new Argument(['-a', '--text'], {
+            action: 'store_true',
+            help: 'Treat binary files as text',
+          }),
+          new Argument('-I', { action: 'store_true', help: 'Skip binary files' }),
+          new Argument(['-z', '--null'], {
+            action: 'store_true',
+            help: 'Terminate filename fields with NUL',
+          }),
+          new Argument('-h', { action: 'store_true', help: 'Omit filenames from matching lines' }),
+          new Argument('-H', { action: 'store_true', help: 'Show filenames with matching lines' }),
+          new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'ls-tree',
+        description: 'List the contents of a tree object',
+        arguments: [
+          new Argument('-r', { action: 'store_true', help: 'Recurse into subtrees' }),
+          new Argument('-t', { action: 'store_true', help: 'Show trees when recursing' }),
+          new Argument('-d', { action: 'store_true', help: 'Only show trees' }),
+          new Argument('-z', { action: 'store_true', help: 'Terminate entries with NUL' }),
+          new Argument('--name-only', { action: 'store_true', help: 'Show only filenames' }),
+          new Argument('--name-status', { action: 'store_true', help: 'Alias of --name-only' }),
+          new Argument('--full-name', {
+            action: 'store_true',
+            help: 'Show paths relative to the repository root',
+          }),
+          new Argument('--full-tree', {
+            action: 'store_true',
+            help: 'List the whole tree, ignoring the current directory',
+          }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'ls-files',
+        description: 'Show files in the index',
+        arguments: [
+          new Argument('-z', { action: 'store_true', help: 'Terminate paths with NUL' }),
+          new Argument(['-s', '--stage'], {
+            action: 'store_true',
+            help: 'Show staged object metadata',
+          }),
+          new Argument(['-c', '--cached'], { action: 'store_true', help: 'Show cached files' }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'fetch',
+        description: 'Download objects and refs from another repository',
+        arguments: [
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'Print nothing but errors',
+          }),
+          new Argument(['-v', '--verbose'], {
+            action: 'store_true',
+            help: 'Also list unchanged refs',
+          }),
+          new Argument(['-p', '--prune'], {
+            action: 'store_true',
+            help: 'Remove remote-tracking refs the remote no longer has',
+          }),
+          new Argument(['-t', '--tags'], { action: 'store_true', help: 'Fetch every tag' }),
+          new Argument(['-n', '--no-tags'], { action: 'store_true', help: 'Follow no tags' }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'clone',
+        description: 'Clone a repository into a new directory',
+        arguments: [
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'Print nothing but errors',
+          }),
+          new Argument(['-b', '--branch'], { help: 'Check out this branch or tag' }),
+          new Argument(['-o', '--origin'], { help: 'Name the remote this instead of origin' }),
+          new Argument(['-n', '--no-checkout'], {
+            action: 'store_true',
+            help: 'Leave the working tree empty',
+          }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'help',
+        description: 'Show command help',
+        arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+      }),
+      new CommandSpec({
+        name: 'init',
+        description: 'Create an empty Git repository or reinitialize an existing one',
+        arguments: [
+          new Argument(['-q', '--quiet'], { action: 'store_true' }),
+          new Argument('--bare', { action: 'store_true' }),
+          new Argument(['-b', '--initial-branch']),
+          new Argument('directory', { nargs: '?' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'fsck',
+        description: 'Verify object hashes and connectivity',
+        arguments: [
+          new Argument('--full', { action: 'store_true' }),
+          new Argument('--no-dangling', { action: 'store_true' }),
+          new Argument('--unreachable', { action: 'store_true' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'stash',
+        description: 'Inspect saved working trees',
+        subcommands: [
+          new CommandSpec({ name: 'list', description: 'List stashed changes' }),
+          new CommandSpec({
+            name: 'show',
+            description: 'Show stashed changes',
+            arguments: [...DIFF_OPTIONS, new Argument('stash', { nargs: '?' })],
+          }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'version',
+        aliases: ['--version', '-v'],
+        description: 'Show the Mirage Git implementation version',
+      }),
+      new CommandSpec({
+        name: 'remote',
+        description: 'List remotes and inspect their URLs',
+        arguments: [
+          new Argument(['-v', '--verbose'], { action: 'store_true', help: 'Show remote URLs' }),
+          new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'config',
+        description: 'Read repository configuration',
+        arguments: [
+          new Argument('--global', { action: 'store_true', help: 'Read global configuration' }),
+          new Argument('--get', { action: 'store_true', help: 'Get a configuration value' }),
+          new Argument(['-l', '--list'], {
+            action: 'store_true',
+            help: 'List every variable and value',
+          }),
+          new Argument('--show-origin', {
+            action: 'store_true',
+            help: 'Show the file each value comes from',
+          }),
+          new Argument('--get-regexp', {
+            action: 'store_true',
+            help: 'Get the variables whose names match a regular expression',
+          }),
+          new Argument('name', { nargs: '?' }),
+        ],
+      }),
+      new CommandSpec({ name: 'show-ref', description: 'List references', arguments: [REVISION] }),
+      // symbolic-ref has every option git's has, so its rows carry git's own
+      // help and its usage block reads exactly as git's.
+      new CommandSpec({
+        name: 'symbolic-ref',
+        description: 'Read, change or delete a symbolic ref',
+        arguments: [
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'suppress error message for non-symbolic (detached) refs',
+          }),
+          new Argument('--no-quiet', {
+            action: 'store_true',
+            help: 'Refuse a ref that is not symbolic aloud',
+          }),
+          new Argument(['-d', '--delete'], { action: 'store_true', help: 'delete symbolic ref' }),
+          new Argument('--no-delete', {
+            action: 'store_true',
+            help: 'Read or change the ref instead',
+          }),
+          new Argument('--short', { action: 'store_true', help: 'shorten ref output' }),
+          new Argument('--no-short', {
+            action: 'store_true',
+            help: 'Print the full name it points at',
+          }),
+          new Argument('--recurse', {
+            action: 'store_true',
+            help: 'recursively dereference (default)',
+          }),
+          new Argument('--no-recurse', {
+            action: 'store_true',
+            help: 'Print only the ref this one points at directly',
+          }),
+          new Argument('-m', { metavar: 'reason', help: 'reason of the update' }),
+          new Argument('texts', { metavar: '', nargs: '*' }),
+        ],
+      }),
+      // shortlog's -n is --numbered, so the count keeps only its long spelling.
+      new CommandSpec({
+        name: 'shortlog',
+        description: 'Summarize commit history',
+        arguments: [
+          ...LOG_OPTIONS.filter((opt) => !opt.names.includes('-n')),
+          new Argument('--max-count', { type: 'int', help: 'Limit the number of commits' }),
+          new Argument(['-s', '--summary'], {
+            action: 'store_true',
+            help: 'Show only commit counts',
+          }),
+          new Argument(['-e', '--email'], {
+            action: 'store_true',
+            help: 'Show author email addresses',
+          }),
+          new Argument(['-n', '--numbered'], {
+            action: 'store_true',
+            help: 'Sort by commit count',
+          }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'rev-parse',
+        description: 'Resolve revisions',
+        arguments: [
+          new Argument('--show-toplevel', { action: 'store_true', help: 'Show the worktree root' }),
+          new Argument('--abbrev-ref', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Show abbreviated reference names, strict or loose',
+          }),
+          new Argument('--show-prefix', {
+            action: 'store_true',
+            help: 'Show the current directory relative to the worktree root',
+          }),
+          new Argument('--is-shallow-repository', {
+            action: 'store_true',
+            help: 'Print whether the repository is shallow',
+          }),
+          new Argument('--is-inside-work-tree', {
+            action: 'store_true',
+            help: 'Print whether the current directory is inside the work tree',
+          }),
+          new Argument('--verify', {
+            action: 'store_true',
+            help: 'Require exactly one revision that names an object',
+          }),
+          new Argument('--short', {
+            nargs: '?',
+            attachedOnly: true,
+            help: 'Abbreviate the object name; implies --verify',
+          }),
+          new Argument(['-q', '--quiet'], {
+            action: 'store_true',
+            help: 'With --verify, exit 1 without a message',
+          }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'rev-list',
+        description: 'List reachable commits',
+        arguments: [
+          ...LOG_OPTIONS,
+          new Argument('--count', { action: 'store_true', help: 'Print commit count' }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'diff-tree',
+        description: 'Compare a commit with its parent',
+        arguments: [
+          ...SHOW_OPTIONS,
+          new Argument('--no-commit-id', { action: 'store_true', help: 'Suppress commit ID' }),
+          new Argument('-r', { action: 'store_true', help: 'Recurse into subtrees' }),
+          new Argument('commit'),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'status',
+        description: 'Show the working tree status',
+        arguments: [...STATUS_OPTIONS],
+      }),
+      new CommandSpec({
+        name: 'log',
+        description: 'Show commit logs',
+        arguments: [...LOG_OPTIONS, ...MAILMAP_OPTIONS, ...DIFF_OPTIONS, REVISION],
+      }),
+      new CommandSpec({
+        name: 'show',
+        description: 'Show a commit and its diff',
+        arguments: [...SHOW_OPTIONS, ...DECORATE_OPTIONS, REVISION],
+      }),
+      new CommandSpec({
+        name: 'diff',
+        description: 'Show changes between commits',
+        arguments: [
+          ...DIFF_OPTIONS,
+          new Argument('--cached', {
+            action: 'store_true',
+            help: 'Compare the index with a commit',
+          }),
+          new Argument('--staged', { action: 'store_true', help: 'Alias of --cached' }),
+          REVISION,
+        ],
+      }),
+      new CommandSpec({
+        name: 'branch',
+        description: 'List, create or delete branches',
+        arguments: [...BRANCH_OPTIONS, new Argument('texts', { metavar: '', nargs: '*' })],
+      }),
+      new CommandSpec({
+        name: 'add',
+        description: 'Stage working tree content',
+        arguments: [...ADD_OPTIONS, PATHSPEC],
+      }),
+      new CommandSpec({
+        name: 'reset',
+        description: 'Unstage, putting the index back to HEAD',
+        arguments: [
+          new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Only report errors' }),
+          PATHSPEC,
+        ],
+      }),
+      new CommandSpec({
+        name: 'commit',
+        description: 'Record the index as a new commit',
+        arguments: [...COMMIT_OPTIONS],
+      }),
+      new CommandSpec({
+        name: 'checkout',
+        description: 'Switch branches',
+        arguments: [...CHECKOUT_OPTIONS, REVISION],
+      }),
+      new CommandSpec({
+        name: 'switch',
+        description: 'Switch branches',
+        arguments: [...SWITCH_OPTIONS, REVISION],
+      }),
+      new CommandSpec({
+        name: 'restore',
+        description: 'Restore working tree files',
+        arguments: [...RESTORE_OPTIONS, PATHSPEC],
+      }),
+      new CommandSpec({
+        name: 'rm',
+        description: 'Remove files from the working tree and the index',
+        arguments: [...RM_OPTIONS, PATHSPEC],
+      }),
+      new CommandSpec({
+        name: 'mv',
+        description: 'Move or rename a file, a directory, or a symlink',
+        arguments: [...MV_OPTIONS, PATHSPEC],
+      }),
+      new CommandSpec({
+        name: 'tag',
+        description: 'Create, list or delete a tag',
+        arguments: [...TAG_OPTIONS, new Argument('texts', { metavar: '', nargs: '*' })],
+      }),
+    ],
+  }),
+  handlers: {
+    reflog: new CLIHandler({ fn: verb(reflog) }),
+    'for-each-ref': new CLIHandler({ fn: verb(forEachRef) }),
+    'cat-file': new CLIHandler({ fn: verb(catFile) }),
+    'hash-object': new CLIHandler({ fn: verb(hashObject, hashObjectReadOnly) }),
+    grep: new CLIHandler({ fn: verb(grep) }),
+    'ls-tree': new CLIHandler({ fn: verb(lsTree) }),
+    'ls-files': new CLIHandler({ fn: verb(lsFiles) }),
+    fetch: new CLIHandler({ fn: verb(fetch, fetchReadOnly) }),
+    clone: new CLIHandler({ fn: verb(clone, cloneReadOnly) }),
+    help: new CLIHandler({ fn: verb(helpCmd) }),
+    init: new CLIHandler({ fn: verb(init), write: true }),
+    fsck: new CLIHandler({ fn: verb(fsck) }),
+    'stash list': new CLIHandler({ fn: verb(stashList) }),
+    'stash show': new CLIHandler({ fn: verb(stashShow) }),
+    version: new CLIHandler({ fn: verb(version) }),
+    remote: new CLIHandler({ fn: verb(remote) }),
+    config: new CLIHandler({ fn: verb(config) }),
+    'show-ref': new CLIHandler({ fn: verb(showRef) }),
+    'symbolic-ref': new CLIHandler({ fn: verb(symbolicRef, symbolicRefReadOnly), write: true }),
+    shortlog: new CLIHandler({ fn: verb(shortlog) }),
+    'rev-parse': new CLIHandler({ fn: verb(revParse) }),
+    'rev-list': new CLIHandler({ fn: verb(revList) }),
+    'diff-tree': new CLIHandler({ fn: verb(diffTree) }),
+    status: new CLIHandler({ fn: verb(status) }),
+    log: new CLIHandler({ fn: verb(log) }),
+    show: new CLIHandler({ fn: verb(show) }),
+    diff: new CLIHandler({ fn: verb(diff) }),
+    branch: new CLIHandler({ fn: verb(branch, branchReadOnly), write: true }),
+    add: new CLIHandler({ fn: verb(add, indexLocked), write: true }),
+    reset: new CLIHandler({ fn: verb(reset, indexLocked), write: true }),
+    commit: new CLIHandler({ fn: verb(commit, indexLocked), write: true }),
+    checkout: new CLIHandler({ fn: verb(checkout, checkoutReadOnly), write: true }),
+    switch: new CLIHandler({ fn: verb(switchBranch, switchReadOnly), write: true }),
+    restore: new CLIHandler({ fn: verb(restore, indexLocked), write: true }),
+    rm: new CLIHandler({ fn: verb(rm, indexLocked), write: true }),
+    mv: new CLIHandler({ fn: verb(mv, indexLocked), write: true }),
+    tag: new CLIHandler({ fn: verb(tag, tagReadOnly), write: true }),
+  },
 })

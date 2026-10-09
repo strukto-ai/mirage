@@ -19,7 +19,13 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import (
+    CLI as CLIProgram,
+)
+from mirage.commands.cli.types import (
+    CLIHandler,
+    CLIInvocation,
+)
 from mirage.commands.config import (
     Command,
     CommandIO,
@@ -27,7 +33,7 @@ from mirage.commands.config import (
     registered_commands,
 )
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import Operand
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -165,4 +171,10 @@ async def scope_probe(inv: CLIInvocation):
     ).encode(), IOResult()
 
 
-CLI = CLISpec(name="scope-probe", rest=Operand(type="path"), fn=scope_probe)
+CLI = CLIProgram(
+    spec=CommandSpec(
+        name="scope-probe",
+        arguments=(Argument("paths", type="path", nargs="*", metavar=""),),
+    ),
+    handlers={"": CLIHandler(fn=scope_probe)},
+)

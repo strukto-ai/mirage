@@ -11,40 +11,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { flagOccurrences } from '../spec/flag_view.ts'
-import { HELP_OPTION, FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
+import { HELP_OPTION, FLOAT_VALUE, INT_VALUE, NEGATIVE_NUMBER } from '../spec/constants.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
-import { CommandSpec, UsageStyle, Option } from '../spec/types.ts'
+import { CommandSpec, type CommandSpecInit, UsageStyle, Argument } from '../spec/types.ts'
 import { PathSpec } from '../../types.ts'
 
-import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
+import { WalkResult, type CLI, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, USAGE_EXIT } from './constants.ts'
 import { gitOptionRefusal, HELP_SWITCH } from './refusal.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 /** A subcommand's row label: `name (alias, ...)` like argparse. */
-function verbDisplay(child: CLISpec): string {
+function verbDisplay(child: CommandSpec): string {
   return child.aliases.length > 0 ? `${child.name} (${child.aliases.join(', ')})` : child.name
 }
 
 /** The subcommand a word names, by canonical name or alias. */
-export function findChild(node: CLISpec, word: string): CLISpec | null {
+export function findChild(node: CommandSpec, word: string): CommandSpec | null {
   return node.subcommands.find((c) => c.name === word || c.aliases.includes(word)) ?? null
 }
 
 /**
- * Every `Option.env` variable a program tree reads.
+ * Every `Argument.env` variable a program tree reads.
  *
  * The env-plane fill step asks this per installed head word on the
  * line, so a managed name a CLI reads from the environment joins the
  * fetch set even though no `$NAME` appears in the line's text.
  */
-export function envNames(node: CLISpec): ReadonlySet<string> {
+export function envNames(node: CommandSpec): ReadonlySet<string> {
   const out = new Set<string>()
-  for (const opt of node.options) {
+  for (const opt of compileSpec(node).options) {
     if (opt.env !== null) out.add(opt.env)
   }
   for (const child of node.subcommands) {
@@ -65,12 +64,12 @@ export function envNames(node: CLISpec): ReadonlySet<string> {
  * expansion), where the whole tree is the only safe answer.
  */
 export function invokedEnvNames(
-  spec: CLISpec,
+  spec: CommandSpec,
   words: ReadonlySet<string> | null,
 ): ReadonlySet<string> {
   if (words === null) return envNames(spec)
   const out = new Set<string>()
-  for (const opt of spec.options) {
+  for (const opt of compileSpec(spec).options) {
     if (opt.env !== null) out.add(opt.env)
   }
   for (const child of spec.subcommands) {
@@ -93,16 +92,24 @@ export function invokedEnvNames(
 function suppliedOption(
   cs: CompiledSpec,
   token: string,
-  hasNext: boolean,
+  following: readonly string[],
 ): [string, number] | null {
+  const next = following[0]
   if (token.startsWith('--')) {
     const eq = token.indexOf('=')
     const spelling = eq === -1 ? token : token.slice(0, eq)
-    if (cs.longOptionalSpellings.has(spelling)) return [spelling, 1]
+    const width = cs.nargsByDest.get(cs.destOf(spelling))
+    if (width === 1 && eq !== -1) return [spelling, 1]
+    if (width !== undefined)
+      return eq === -1 && following.length >= width ? [spelling, width + 1] : null
+    if (cs.longOptionalSpellings.has(spelling)) {
+      const detached = cs.detachedOptionalSpellings.has(spelling) && optionalValue(next)
+      return [spelling, eq === -1 && detached ? 2 : 1]
+    }
     if (cs.longBoolSpellings.has(spelling)) return eq === -1 ? [spelling, 1] : null
     if (cs.longValueSpellings.has(spelling)) {
       if (eq !== -1) return [spelling, 1]
-      return hasNext ? [spelling, 2] : null
+      return next !== undefined ? [spelling, 2] : null
     }
     return null
   }
@@ -110,11 +117,24 @@ function suppliedOption(
     if (token.startsWith(vf) && token.length > vf.length) return [vf, 1]
   }
   for (const vf of cs.valueSpellings) {
-    if (token === vf) return hasNext ? [vf, 2] : null
+    if (token !== vf && !(token.startsWith(vf) && token.length > vf.length)) continue
+    const width = cs.nargsByDest.get(cs.destOf(vf))
+    if (width !== undefined) {
+      const needed = width - (token === vf ? 0 : 1)
+      return following.length >= needed ? [vf, needed + 1] : null
+    }
+    if (token === vf) return next !== undefined ? [vf, 2] : null
     if (token.startsWith(vf) && token.length > vf.length) return [vf, 1]
   }
+  if (cs.detachedOptionalSpellings.has(token)) return [token, optionalValue(next) ? 2 : 1]
   if (cs.boolSpellings.has(token)) return [token, 1]
   return null
+}
+
+function optionalValue(value: string | undefined): value is string {
+  return (
+    value !== undefined && (!value.startsWith('-') || value === '-' || NEGATIVE_NUMBER.test(value))
+  )
 }
 
 /**
@@ -141,7 +161,7 @@ function claimed(
 /**
  * Env names whose every reader on the walked path is supplied.
  *
- * The parser never reads `Option.env` for a destination the line
+ * The parser never reads `Argument.env` for a destination the line
  * already fills (typed outranks environment), so a supplied option's
  * managed variable is not a read and must not fetch: a dead source
  * would otherwise fail a line that never consults it. Tracking is by
@@ -158,7 +178,7 @@ function claimed(
  * consumption is in doubt (a cluster, an abbreviation, `--help`) --
  * so a wrong guess can only over-fetch, never skip a real read.
  */
-export function suppliedEnvNames(spec: CLISpec, args: readonly string[]): ReadonlySet<string> {
+export function suppliedEnvNames(spec: CommandSpec, args: readonly string[]): ReadonlySet<string> {
   const supplied = new Set<string>()
   let node = spec
   let cs = compileSpec(node)
@@ -176,14 +196,14 @@ export function suppliedEnvNames(spec: CLISpec, args: readonly string[]): Readon
     }
     if (token.startsWith('-') && token !== '-') {
       if (token === '--help' || token.startsWith('--help=')) return new Set()
-      const hit = suppliedOption(cs, token, i + 1 < args.length)
+      const hit = suppliedOption(cs, token, args.slice(i + 1))
       if (hit === null) return new Set()
       const [spelling, consumed] = hit
       supplied.add(`${String(carriers.length - 1)}:${cs.destOf(spelling)}`)
       i += consumed
       continue
     }
-    if (node.fn !== null || node.script !== null) {
+    if (node.subcommands.length === 0) {
       if (cs.remainder) return claimed(carriers, supplied)
       i += 1
       continue
@@ -191,7 +211,6 @@ export function suppliedEnvNames(spec: CLISpec, args: readonly string[]): Readon
     const child = findChild(node, token)
     if (child === null) return claimed(carriers, supplied)
     node = child
-    if (ownsArgv(node)) return claimed(carriers, supplied)
     cs = compileSpec(node)
     carriers.push(cs.envByDest)
     i += 1
@@ -208,9 +227,9 @@ export function suppliedEnvNames(spec: CLISpec, args: readonly string[]): Readon
  * produced, so a caller gets the node or nothing.
  */
 export function findNode(
-  spec: CLISpec,
+  spec: CommandSpec,
   verbs: readonly string[],
-): { node: CLISpec; path: string[] } | null {
+): { node: CommandSpec; path: string[] } | null {
   let node = spec
   const path: string[] = []
   for (const word of verbs) {
@@ -233,13 +252,8 @@ export function findNode(
  * operands opts back into the ordinary machinery, which then renders
  * truthful help and refuses undeclared flags.
  */
-export function ownsArgv(node: CLISpec): boolean {
-  return (
-    node.script !== null &&
-    node.options.length === 0 &&
-    node.positional.length === 0 &&
-    node.rest === null
-  )
+export function ownsArgv(cli: CLI): boolean {
+  return cli.script !== null && cli.spec.arguments.length === 0
 }
 
 /**
@@ -251,11 +265,11 @@ export function ownsArgv(node: CLISpec): boolean {
  */
 export function nodeHelp(
   name: string,
-  node: CLISpec,
+  node: CommandSpec,
   style: UsageStyle = UsageStyle.ARGPARSE,
   visible?: (verb: string) => boolean,
 ): string {
-  if (style === UsageStyle.ARGPARSE)
+  if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA)
     return argparseHelp(name, listedNode(node, style), rowsOf(node, visible))
   return renderHelp(name, listedNode(node, style), rowsOf(node, visible), style)
 }
@@ -263,7 +277,7 @@ export function nodeHelp(
 // The node's child rows, as the renderer lists them. `visible` filters on
 // a child's canonical name for the reading session: help, man and
 // generated skills all pass one.
-function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, string][] {
+function rowsOf(node: CommandSpec, visible?: (verb: string) => boolean): [string, string][] {
   return node.subcommands
     .filter((child) => visible === undefined || visible(child.name))
     .map((child) => [verbDisplay(child), child.description ?? ''])
@@ -275,16 +289,22 @@ function rowsOf(node: CLISpec, visible?: (verb: string) => boolean): [string, st
 // declares its own or answers the flag itself (ownsArgv), where advertising it
 // would promise a page mirage no longer renders. A refusal renders the same
 // node a help page would, or its usage line would disagree with `--help`'s.
-// It is the grammar alone: a rebuilt CLISpec is validated again, and the
+// It is the grammar alone: a rebuilt CommandSpec is validated again, and the
 // added `--help` would collide with a child that declares its own.
-export function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARSE): CommandSpec {
-  if (node.options.some((option) => option.long === '--help') || ownsArgv(node)) return node
-  const help =
-    style === UsageStyle.ARGPARSE && !node.options.some((o) => o.short === '-h')
-      ? new Option({ long: '--help', short: '-h', description: 'Show this help and exit' })
-      : HELP_OPTION
-  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
-  return new CommandSpec({ ...node, options: [...node.options, help] })
+export function listedNode(
+  node: CommandSpec,
+  style: UsageStyle = UsageStyle.ARGPARSE,
+): CommandSpec {
+  if (!node.addHelp || node.arguments.some((argument) => argument.names.includes('--help')))
+    return node
+  const names =
+    (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA) &&
+    !node.arguments.some((argument) => argument.names.includes('-h'))
+      ? ['-h', '--help']
+      : ['--help']
+  const help = new Argument(names, { action: 'store_true', help: HELP_OPTION.help })
+  const spec: CommandSpecInit = node
+  return new CommandSpec({ ...spec, arguments: [...node.arguments, help] })
 }
 
 /**
@@ -303,7 +323,7 @@ export function listedNode(node: CLISpec, style: UsageStyle = UsageStyle.ARGPARS
  */
 function usageError(
   name: string,
-  node: CLISpec,
+  node: CommandSpec,
   message: string,
   style: UsageStyle,
   token?: string,
@@ -384,6 +404,19 @@ function recordValue(flags: WalkFlagBag, cs: CompiledSpec, spelling: string, val
   }
 }
 
+function recordValues(
+  flags: WalkFlagBag,
+  cs: CompiledSpec,
+  spelling: string,
+  values: readonly string[],
+): void {
+  const dest = cs.destOf(spelling)
+  for (const value of values) flagOccurrences(flags).push([dest, value])
+  const previous = flags[dest]
+  flags[dest] =
+    cs.multipleDests.has(dest) && Array.isArray(previous) ? [...previous, ...values] : [...values]
+}
+
 /**
  * Match a whole short token against declared spellings. Mirrors the flat
  * parser's precedence before cluster splitting: attached values on
@@ -395,13 +428,14 @@ function recordValue(flags: WalkFlagBag, cs: CompiledSpec, spelling: string, val
  */
 function matchShort(
   name: string,
-  node: CLISpec,
+  node: CommandSpec,
   cs: CompiledSpec,
   flags: WalkFlagBag,
   token: string,
-  nextToken: string | undefined,
+  following: readonly string[],
   style: UsageStyle,
 ): [number, WalkResult | null] | null {
+  const nextToken = following[0]
   for (const vf of cs.attachSpellings) {
     if (token.startsWith(vf) && token.length > vf.length) {
       recordValue(flags, cs, vf, token.slice(vf.length))
@@ -409,17 +443,20 @@ function matchShort(
     }
   }
   for (const vf of cs.valueSpellings) {
-    if (token === vf) {
-      if (nextToken === undefined) {
-        return [0, usageError(name, node, `error: option '${vf}' requires a value`, style)]
-      }
-      recordValue(flags, cs, vf, nextToken)
-      return [2, null]
-    }
-    if (token.startsWith(vf) && token.length > vf.length) {
-      recordValue(flags, cs, vf, token.slice(vf.length))
-      return [1, null]
-    }
+    if (token !== vf && !(token.startsWith(vf) && token.length > vf.length)) continue
+    const arity = cs.nargsByDest.get(cs.destOf(vf))
+    const attached = token.slice(vf.length)
+    const remaining = (arity ?? 1) - (attached === '' ? 0 : 1)
+    if (following.length < remaining)
+      return [0, usageError(name, node, `error: option '${vf}' requires a value`, style)]
+    const values = [...(attached === '' ? [] : [attached]), ...following.slice(0, remaining)]
+    if (arity !== undefined) recordValues(flags, cs, vf, values)
+    else recordValue(flags, cs, vf, values[0] ?? '')
+    return [remaining + 1, null]
+  }
+  if (cs.detachedOptionalSpellings.has(token) && optionalValue(nextToken)) {
+    recordValue(flags, cs, token, nextToken)
+    return [2, null]
   }
   if (cs.boolSpellings.has(token)) {
     recordBool(flags, cs, token)
@@ -434,13 +471,14 @@ function matchShort(
  * node does not declare its own, because it is a registered option
  * everywhere else (argparse and getopt_long both expand `--hel` to it).
  */
-function expandGroupLong(node: CLISpec, cs: CompiledSpec, spelling: string): readonly string[] {
+function expandGroupLong(node: CommandSpec, cs: CompiledSpec, spelling: string): readonly string[] {
   const candidates = expandLong(cs, spelling)
   if (
+    node.addHelp &&
     '--help'.startsWith(spelling) &&
     spelling.length > 2 &&
     !candidates.includes('--help') &&
-    !node.options.some((option) => option.long === '--help')
+    !cs.dest.has('--help')
   ) {
     return [...candidates, '--help']
   }
@@ -486,9 +524,12 @@ function resolveGroupPaths(
   for (const [dest, kind] of cs.kindByDest) {
     if (kind !== 'path' || !(dest in flags) || dest === cs.baseDest) continue
     const value = flags[dest]
-    if (Array.isArray(value))
-      flags[dest] = value.map((part) => PathSpec.fromStrPath(part, undefined, base))
-    else if (typeof value === 'string') flags[dest] = PathSpec.fromStrPath(value, undefined, base)
+    if (Array.isArray(value)) {
+      const kinds = cs.valueTypesByDest.get(dest) ?? ['path']
+      flags[dest] = value.map((part, index) =>
+        kinds[index % kinds.length] === 'path' ? PathSpec.fromStrPath(part, undefined, base) : part,
+      )
+    } else if (typeof value === 'string') flags[dest] = PathSpec.fromStrPath(value, undefined, base)
   }
 }
 
@@ -503,7 +544,7 @@ function resolveGroupPaths(
  */
 function finishNode(
   name: string,
-  node: CLISpec,
+  node: CommandSpec,
   cs: CompiledSpec,
   flags: WalkFlagBag,
   cwd: string,
@@ -576,12 +617,12 @@ function finishNode(
  * every rendering so a renamed install prints its own name, `cwd` is the
  * working directory PATH-typed group values resolve against, so a group option
  * resolves the way a leaf option does, and `env` is the session environment,
- * so a group option declaring `Option.env` fills at its own level exactly as
+ * so a group option declaring `Argument.env` fills at its own level exactly as
  * a leaf one does in the flat parser.
  */
 export function walk(
   head: string,
-  spec: CLISpec,
+  spec: CommandSpec,
   argv: readonly string[],
   cwd = '/',
   env: Readonly<Record<string, string>> | null = null,
@@ -600,7 +641,7 @@ export function walk(
     // A script node terminates the walk exactly like an fn leaf: its
     // remaining argv rides the ordinary spec machinery for validation,
     // then passes to the program verbatim.
-    if (node.fn !== null || node.script !== null) {
+    if (node.subcommands.length === 0) {
       return new WalkResult({
         leaf: node,
         path,
@@ -629,7 +670,13 @@ export function walk(
         descended = true
         break
       }
-      if (!optionsEnded && token === '-h' && style === UsageStyle.ARGPARSE && !cs.dest.has('-h')) {
+      if (
+        !optionsEnded &&
+        node.addHelp &&
+        token === '-h' &&
+        (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA) &&
+        !cs.dest.has('-h')
+      ) {
         return new WalkResult({
           output: encodeText(nodeHelp(name, node, style, shown)),
         })
@@ -648,7 +695,7 @@ export function walk(
         // getopt_long: an exact spelling wins; otherwise a unique prefix
         // expands (git status --porcel) and an ambiguous one is refused
         // with every possibility (git wording).
-        if (!cs.dest.has(spelling) && spelling !== '--help') {
+        if (node.allowAbbrev && !cs.dest.has(spelling) && spelling !== '--help') {
           const candidates = expandGroupLong(node, cs, spelling)
           if (candidates.length === 1) {
             spelling = candidates[0] ?? spelling
@@ -668,6 +715,9 @@ export function walk(
         if (cs.longOptionalSpellings.has(spelling)) {
           if (attached !== null) {
             recordValue(flags, cs, spelling, attached)
+          } else if (cs.detachedOptionalSpellings.has(spelling) && optionalValue(argv[i + 1])) {
+            recordValue(flags, cs, spelling, argv[i + 1] ?? '')
+            i += 1
           } else {
             recordBool(flags, cs, spelling)
           }
@@ -678,7 +728,17 @@ export function walk(
           recordBool(flags, cs, spelling)
         } else if (cs.longValueSpellings.has(spelling)) {
           const next = argv[i + 1]
-          if (attached !== null) {
+          const width = cs.nargsByDest.get(cs.destOf(spelling))
+          if (width === 1 && attached !== null) {
+            recordValues(flags, cs, spelling, [attached])
+          } else if (width !== undefined) {
+            if (attached !== null)
+              return usageError(name, node, `unknown option: ${token}`, style, token)
+            if (argv.length - i - 1 < width)
+              return usageError(name, node, `error: option '${spelling}' requires a value`, style)
+            recordValues(flags, cs, spelling, argv.slice(i + 1, i + 1 + width))
+            i += width
+          } else if (attached !== null) {
             recordValue(flags, cs, spelling, attached)
           } else if (next !== undefined) {
             i += 1
@@ -686,7 +746,7 @@ export function walk(
           } else {
             return usageError(name, node, `error: option '${spelling}' requires a value`, style)
           }
-        } else if (spelling === '--help') {
+        } else if (spelling === '--help' && node.addHelp) {
           if (attached !== null) {
             return usageError(name, node, `error: option '${spelling}' takes no value`, style)
           }
@@ -709,7 +769,7 @@ export function walk(
         // Declared multi-char shorts (find-style -name) match the whole
         // token before any cluster splitting, longest first, the same
         // precedence the flat parser uses.
-        const whole = matchShort(name, node, cs, flags, token, argv[i + 1], style)
+        const whole = matchShort(name, node, cs, flags, token, argv.slice(i + 1), style)
         if (whole !== null) {
           const [consumed, refused] = whole
           if (refused !== null) return refused
@@ -721,21 +781,32 @@ export function walk(
         let j = 1
         while (j < token.length) {
           const spelling = `-${token.charAt(j)}`
-          if (cs.boolSpellings.has(spelling)) {
+          if (
+            cs.detachedOptionalSpellings.has(spelling) ||
+            (cs.attachSpellings.includes(spelling) && j + 1 < token.length) ||
+            (!cs.boolSpellings.has(spelling) && cs.dest.has(spelling))
+          ) {
+            const matched = matchShort(
+              name,
+              node,
+              cs,
+              flags,
+              `-${token.slice(j)}`,
+              argv.slice(i + 1),
+              style,
+            )
+            if (matched !== null) {
+              const [consumed, refused] = matched
+              if (refused !== null) return refused
+              i += consumed - 1
+              break
+            }
+            error = `unknown option: ${spelling}`
+            unknown = spelling
+            break
+          } else if (cs.boolSpellings.has(spelling)) {
             recordBool(flags, cs, spelling)
             j += 1
-          } else if (cs.dest.has(spelling)) {
-            const rest = token.slice(j + 1)
-            const next = argv[i + 1]
-            if (rest !== '') {
-              recordValue(flags, cs, spelling, rest)
-            } else if (next !== undefined) {
-              i += 1
-              recordValue(flags, cs, spelling, next)
-            } else {
-              error = `error: option '${spelling}' requires a value`
-            }
-            break
           } else {
             error = `unknown option: ${spelling}`
             unknown = spelling

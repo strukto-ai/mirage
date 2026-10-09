@@ -23,8 +23,8 @@ from mirage.commands.cli.builtin.slack.read_messages import read_messages
 from mirage.commands.cli.builtin.slack.search import search
 from mirage.commands.cli.builtin.slack.send_message import send_message
 from mirage.commands.cli.builtin.slack.unpin_message import unpin_message
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Option
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.slack.config import SlackConfig
 
 # The slack program, spelled with the OpenClaw Slack action vocabulary
@@ -32,138 +32,124 @@ from mirage.core.slack.config import SlackConfig
 # member-info, emoji-list). search and list-members are mirage
 # extensions carrying over the old mount commands' capabilities.
 # Install with a SlackConfig; two installs are two workspaces.
-SLACK = CLISpec(
-    name="slack",
-    description="Slack Web API client",
-    config_model=SlackConfig,
-    subcommands=(
-        CLISpec(
-            name="send-message",
-            description="Post a message to a channel or thread",
-            fn=send_message,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--text", type="str", required=True),
-                Option(
-                    long="--thread-ts",
-                    type="str",
-                    description="Reply in this thread",
+SLACK = CLI(
+    spec=CommandSpec(
+        name="slack",
+        description="Slack Web API client",
+        subcommands=(
+            CommandSpec(
+                name="send-message",
+                description="Post a message to a channel or thread",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--text", required=True),
+                    Argument("--thread-ts", help="Reply in this thread"),
                 ),
             ),
-        ),
-        CLISpec(
-            name="read-messages",
-            description="Read the most recent messages of a channel",
-            fn=read_messages,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(
-                    long="--limit",
-                    type="int",
-                    description="Max messages (default: 20)",
-                ),
-            ),
-        ),
-        CLISpec(
-            name="react",
-            description="Add an emoji reaction to a message",
-            fn=react,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--ts", type="str", required=True),
-                Option(
-                    long="--emoji",
-                    type="str",
-                    required=True,
-                    description="Emoji name without colons",
-                ),
-            ),
-        ),
-        CLISpec(
-            name="reactions",
-            description="List the reactions on a message",
-            fn=reactions,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--ts", type="str", required=True),
-            ),
-        ),
-        CLISpec(
-            name="pin-message",
-            description="Pin a message to its channel",
-            fn=pin_message,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--ts", type="str", required=True),
-            ),
-        ),
-        CLISpec(
-            name="unpin-message",
-            description="Remove a pin from a message",
-            fn=unpin_message,
-            write=True,
-            options=(
-                Option(long="--channel", type="str", required=True),
-                Option(long="--ts", type="str", required=True),
-            ),
-        ),
-        CLISpec(
-            name="list-pins",
-            description="List the pinned items of a channel",
-            fn=list_pins,
-            options=(Option(long="--channel", type="str", required=True),),
-        ),
-        CLISpec(
-            name="member-info",
-            description="Fetch one user's profile",
-            fn=member_info,
-            options=(Option(long="--user", type="str", required=True),),
-        ),
-        CLISpec(
-            name="list-members",
-            description="List workspace members, optionally filtered",
-            fn=list_members,
-            options=(
-                Option(
-                    long="--query",
-                    type="str",
-                    description="Name or email filter",
-                ),
-            ),
-        ),
-        CLISpec(
-            name="emoji-list",
-            description="List the workspace's custom emoji",
-            fn=emoji_list,
-        ),
-        CLISpec(
-            name="search",
-            description="Search messages with Slack query operators",
-            fn=search,
-            options=(
-                Option(
-                    long="--query",
-                    type="str",
-                    required=True,
-                    description=(
-                        "Slack search query (supports operators "
-                        "like 'from:@user', 'in:#channel')"
+            CommandSpec(
+                name="read-messages",
+                description="Read the most recent messages of a channel",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument(
+                        "--limit",
+                        type="int",
+                        help="Max messages (default: 20)",
                     ),
                 ),
-                Option(
-                    long="--count",
-                    type="int",
-                    description="Results per page (1-100, default 20)",
+            ),
+            CommandSpec(
+                name="react",
+                description="Add an emoji reaction to a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--ts", required=True),
+                    Argument(
+                        "--emoji",
+                        required=True,
+                        help="Emoji name without colons",
+                    ),
                 ),
-                Option(
-                    long="--page",
-                    type="int",
-                    description="1-based page number (default 1)",
+            ),
+            CommandSpec(
+                name="reactions",
+                description="List the reactions on a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--ts", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="pin-message",
+                description="Pin a message to its channel",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--ts", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="unpin-message",
+                description="Remove a pin from a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--ts", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="list-pins",
+                description="List the pinned items of a channel",
+                arguments=(Argument("--channel", required=True),),
+            ),
+            CommandSpec(
+                name="member-info",
+                description="Fetch one user's profile",
+                arguments=(Argument("--user", required=True),),
+            ),
+            CommandSpec(
+                name="list-members",
+                description="List workspace members, optionally filtered",
+                arguments=(Argument("--query", help="Name or email filter"),),
+            ),
+            CommandSpec(
+                name="emoji-list",
+                description="List the workspace's custom emoji",
+            ),
+            CommandSpec(
+                name="search",
+                description="Search messages with Slack query operators",
+                arguments=(
+                    Argument(
+                        "--query",
+                        required=True,
+                        help="Slack search query (supports operators "
+                        "like 'from:@user', 'in:#channel')",
+                    ),
+                    Argument(
+                        "--count",
+                        type="int",
+                        help="Results per page (1-100, default 20)",
+                    ),
+                    Argument(
+                        "--page",
+                        type="int",
+                        help="1-based page number (default 1)",
+                    ),
                 ),
             ),
         ),
     ),
+    handlers={
+        "send-message": CLIHandler(fn=send_message, write=True),
+        "read-messages": CLIHandler(fn=read_messages),
+        "react": CLIHandler(fn=react, write=True),
+        "reactions": CLIHandler(fn=reactions),
+        "pin-message": CLIHandler(fn=pin_message, write=True),
+        "unpin-message": CLIHandler(fn=unpin_message, write=True),
+        "list-pins": CLIHandler(fn=list_pins),
+        "member-info": CLIHandler(fn=member_info),
+        "list-members": CLIHandler(fn=list_members),
+        "emoji-list": CLIHandler(fn=emoji_list),
+        "search": CLIHandler(fn=search),
+    },
+    config_model=SlackConfig,
 )

@@ -11,10 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CLIHandler } from '../../../commands/cli/types.ts'
 
-import { CLISpec } from '../../../commands/cli/types.ts'
+import { CLI } from '../../../commands/cli/types.ts'
 import { command } from '../../../commands/config.ts'
-import { CommandSpec, Operand } from '../../../commands/spec/types.ts'
+import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -328,7 +329,12 @@ function registerBoardList(ws: Workspace): void {
   for (const registered of command({
     name: 'trello board list',
     vfs: 'ram',
-    spec: new CommandSpec({ positional: [new Operand()], rest: new Operand({ type: 'str' }) }),
+    spec: new CommandSpec({
+      arguments: [
+        new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
+        new Argument('texts', { metavar: '', nargs: '*' }),
+      ],
+    }),
     fn: () => [ENC.encode('ok\n'), new IOResult()],
   }))
     ws.registry.mountForPrefix('/').register(registered)
@@ -445,7 +451,10 @@ describe('external command routing regressions', () => {
       try {
         ws.registerCli(
           'custom-cli',
-          new CLISpec({ name: 'custom-cli', fn: () => [ENC.encode('ok\n'), new IOResult()] }),
+          new CLI({
+            spec: new CommandSpec({ name: 'custom-cli' }),
+            handlers: { '': new CLIHandler({ fn: () => [ENC.encode('ok\n'), new IOResult()] }) },
+          }),
         )
         await ws.shell('echo ok > /input')
         await ws.shell('custom-stage() { echo ok; }')

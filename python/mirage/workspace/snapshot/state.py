@@ -24,7 +24,8 @@ from pydantic import BaseModel
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
+from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
@@ -138,7 +139,7 @@ class WorkspaceLike(Protocol):
 # (spec, config) tuple carries a live spec too, which is how copy()
 # shares directly installed programs.
 CLIOverrides = dict[
-    str, dict[str, Any] | tuple[str | CLISpec, dict[str, Any] | None]
+    str, dict[str, Any] | tuple[str | CLI, dict[str, Any] | None]
 ]
 
 # What a snapshot restores into the env plane, once the gate has passed
@@ -194,21 +195,21 @@ def cli_snapshot(name: str, install) -> dict[str, Any]:
     """
     entry: dict[str, Any] = {
         CLIKey.NAME: name,
-        CLIKey.SPEC: install.spec.name,
+        CLIKey.SPEC: install.cli.spec.name,
         CLIKey.CONFIG: cli_config_dump(install.config),
     }
-    script = install.spec.script
+    script = install.cli.script
     if script is not None:
         entry[CLIKey.SCRIPT] = {
             ScriptKey.SOURCE: script.source,
             ScriptKey.LANGUAGE: script.language,
             ScriptKey.MODULE: script.module,
         }
-        entry[CLIKey.RUNTIME] = install.spec.runtime
+        entry[CLIKey.RUNTIME] = install.cli.runtime
     return entry
 
 
-def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLISpec:
+def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLI:
     """The spec a snapshot entry restores: a registry key or a program.
 
     Args:
@@ -229,8 +230,8 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLISpec:
         raise ValueError(
             f"snapshot cli {name!r}: unknown script language {language!r}"
         )
-    return CLISpec(
-        name=name,
+    return CLI(
+        spec=CommandSpec(name=name),
         script=ScriptSource(
             str(script[ScriptKey.SOURCE]),
             language=cast(Language, language),
@@ -518,7 +519,7 @@ def build_mount_args(
             ),
         )
 
-    cli_args: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] = {}
+    cli_args: dict[str, tuple[str | CLI, dict[str, Any] | None]] = {}
     for e in cli_entries:
         override = cli_overrides.get(e[CLIKey.NAME])
         if isinstance(override, tuple):
@@ -970,7 +971,7 @@ def requires_vfs_override(mount_state: dict[str, Any]) -> bool:
 def reusable_clis(ws: WorkspaceLike) -> CLIOverrides:
     """Live-install overrides a same-process copy reinstalls from.
 
-    Each override carries the live CLISpec and the revealed config, the
+    Each override carries the live CLI and the revealed config, the
     way remote mounts share their live mounts: a directly installed
     spec (never named in the global registry) and a redacted secret
     both survive without a registry lookup.
@@ -981,7 +982,7 @@ def reusable_clis(ws: WorkspaceLike) -> CLIOverrides:
     overrides: CLIOverrides = {}
     for name, install in ws.registry.clis.items().items():
         overrides[name] = (
-            install.spec,
+            install.cli,
             cli_config_dump(install.config, reveal=True),
         )
     return overrides

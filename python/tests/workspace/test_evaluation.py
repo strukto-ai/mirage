@@ -4,7 +4,8 @@ import pytest
 import pytest_asyncio
 
 from mirage import Workspace
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.shell.console import Channel
 from mirage.shell.parse import scope
@@ -59,7 +60,12 @@ def install_stall(ws):
         await gate.wait()
         return None, IOResult()
 
-    ws.register_cli("stall", CLISpec(name="stall", fn=stall))
+    ws.register_cli(
+        "stall",
+        CLI(
+            spec=CommandSpec(name="stall"), handlers={"": CLIHandler(fn=stall)}
+        ),
+    )
     return entered, gate
 
 
@@ -100,7 +106,12 @@ async def test_alias_expansions_release_when_each_ends(owned_workspace):
         live.append(sum(program.references > 0 for program in programs))
         return None, IOResult()
 
-    ws.register_cli("probe", CLISpec(name="probe", fn=probe))
+    ws.register_cli(
+        "probe",
+        CLI(
+            spec=CommandSpec(name="probe"), handlers={"": CLIHandler(fn=probe)}
+        ),
+    )
     await ws.shell("alias a='true'")
     await ws.shell(f"for i in {'x ' * 50}; do a; done; probe")
     assert live == [1]

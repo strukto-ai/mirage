@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.config import command
-from mirage.commands.spec import SPECS, CommandSpec, Operand, Option
+from mirage.commands.spec import SPECS, Argument, CommandSpec
 from mirage.commands.spec.builtins import registered_spec
 from mirage.commands.spec.standard import (
     has_injected_version,
@@ -57,7 +57,9 @@ class TestStandardRequest:
         assert standard_request("nope", None, ["--version"]) is None
 
     def test_none_when_command_declares_its_own_version(self):
-        spec = CommandSpec(options=(Option(long="--version"),))
+        spec = CommandSpec(
+            arguments=(Argument("--version", action="store_true"),)
+        )
         registered = command("custom", vfs="disk", spec=spec)(_noop_handler)
         assert (
             standard_request(
@@ -99,7 +101,9 @@ class TestStandardRequest:
     # An abbreviation that names two options is not this option, and the
     # parser reports the ambiguity with both candidates.
     def test_none_for_an_ambiguous_abbreviation(self):
-        spec = CommandSpec(options=(Option(long="--verbose"),))
+        spec = CommandSpec(
+            arguments=(Argument("--verbose", action="store_true"),)
+        )
         registered = command("custom", vfs="disk", spec=spec)(_noop_handler)
         assert (
             standard_request(
@@ -127,7 +131,11 @@ class TestStandardRequest:
             is None
         )
         borrowed = command(
-            "expr", vfs="disk", spec=CommandSpec(rest=Operand(type="str"))
+            "expr",
+            vfs="disk",
+            spec=CommandSpec(
+                arguments=(Argument("texts", nargs="*", metavar=""),)
+            ),
         )(_noop_handler)
         assert (
             standard_request(
@@ -273,7 +281,9 @@ class TestStandardRequest:
     # parser already agreed; only this scan did not, so `mytool operand
     # --version` printed mirage's version and the handler never ran.
     def test_a_remainder_operand_keeps_the_words_after_it(self):
-        spec = CommandSpec(rest=Operand(type="str", remainder=True))
+        spec = CommandSpec(
+            arguments=(Argument("texts", nargs="REMAINDER", metavar=""),)
+        )
         registered = command("mytool", vfs="disk", spec=spec)(_noop_handler)
         rest_spec = registered._registered_commands[0].spec
         assert (
@@ -309,7 +319,11 @@ class TestStandardRequest:
     def test_a_borrowed_name_does_not_borrow_the_family(self):
         for name in ("grep", "zgrep"):
             borrowed = command(
-                name, vfs="disk", spec=CommandSpec(rest=Operand(type="str"))
+                name,
+                vfs="disk",
+                spec=CommandSpec(
+                    arguments=(Argument("texts", nargs="*", metavar=""),)
+                ),
             )(_noop_handler)
             spec = borrowed._registered_commands[0].spec
             assert standard_request(name, spec, ["--version", "--bogus"])

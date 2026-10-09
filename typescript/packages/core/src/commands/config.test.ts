@@ -17,9 +17,11 @@ import { materialize } from '../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { command, Command } from './config.ts'
 import { specOf } from './spec/builtins.ts'
-import { CommandSpec, Operand, Option } from './spec/types.ts'
+import { CommandSpec, Argument } from './spec/types.ts'
 
-const STUB_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
+const STUB_SPEC = new CommandSpec({
+  arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+})
 const STUB_FN = () => Promise.resolve([null, { exitCode: 0 } as never] as [null, never])
 
 describe('Command', () => {
@@ -42,7 +44,7 @@ describe('command()', () => {
     const [rc] = command({
       name: 'custom',
       vfs: null,
-      spec: new CommandSpec({ options: [new Option({ long: '--version' })] }),
+      spec: new CommandSpec({ arguments: [new Argument('--version', { action: 'store_true' })] }),
       fn,
     })
     if (rc === undefined) throw new Error('expected a registered command')

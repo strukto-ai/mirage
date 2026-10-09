@@ -11,15 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../commands/spec/types.ts'
+import { CLIHandler } from '../../../commands/cli/types.ts'
 
 import { varsFromEnv } from '../../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
 
-import { CLISpec, type CLIInvocation, type CLIVerbFn } from '../../../commands/cli/types.ts'
+import { CLI, type CLIInvocation, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { PartialOutputError } from '../../../commands/errors.ts'
-import { Operand, Option, UsageStyle } from '../../../commands/spec/types.ts'
+import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
+import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { Limit } from '../../../types.ts'
+import { Limit, PathSpec } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -43,25 +46,29 @@ function send(inv: CLIInvocation): [Uint8Array, IOResult] {
 }
 
 function makeInstall(name = 'prog'): CLIInstall {
-  const spec = new CLISpec({
-    name: 'prog',
+  const spec = new CLI({
+    spec: new CommandSpec({
+      name: 'prog',
+      arguments: [new Argument(['-v', '--verbose'], { action: 'count' })],
+      subcommands: [
+        new CommandSpec({
+          name: 'message',
+          subcommands: [
+            new CommandSpec({
+              name: 'send',
+              arguments: [
+                new Argument(['-t', '--to'], { required: true }),
+                new Argument('texts', { metavar: '', nargs: '*' }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    }),
+    handlers: { 'message send': new CLIHandler({ fn: send }) },
     configModel: (input) => input,
-    options: [new Option({ short: '-v', long: '--verbose', count: true })],
-    subcommands: [
-      new CLISpec({
-        name: 'message',
-        subcommands: [
-          new CLISpec({
-            name: 'send',
-            fn: send,
-            options: [new Option({ short: '-t', long: '--to', type: 'str', required: true })],
-            rest: new Operand({ type: 'str' }),
-          }),
-        ],
-      }),
-    ],
   })
-  return { name, spec, config: { token: 'tok' } }
+  return { name, cli: spec, config: { token: 'tok' } }
 }
 
 describe('handleCli', () => {
@@ -82,6 +89,45 @@ describe('handleCli', () => {
     // $PWD is exported, so a CLI subprocess inherits it as bash's would.
     expect(inv?.env).toEqual({ EDITOR: 'vi', PWD: '/' })
     expect(node.command).toBe('prog -vv message send -t #eng hello world')
+    const pathsInstall: CLIInstall = {
+      name: 'paths',
+      config: { token: 'tok' },
+      cli: new CLI({
+        spec: new CommandSpec({
+          name: 'paths',
+          arguments: [
+            new Argument('prefix', { nargs: '?' }),
+            new Argument('FILE', { type: 'path' }),
+            new Argument('--output', {
+              type: 'path',
+              nargs: 1,
+              env: 'OUTPUT',
+              default: './default',
+            }),
+          ],
+        }),
+        handlers: { '': new CLIHandler({ fn: send }) },
+      }),
+    }
+    for (const words of [['report.txt'], ['prefix', 'report.txt']]) {
+      const expectedOutput = words.length > 1 ? 'environment' : 'default'
+      const pathSession = new SessionState({
+        sessionId: 'paths',
+        cwd: '/work',
+        vars: varsFromEnv(words.length > 1 ? { OUTPUT: './environment' } : {}),
+      })
+      const [stdout, result] = await handleCli(pathsInstall, ['paths', ...words], pathSession)
+      await materialize(stdout)
+      expect(result.exitCode).toBe(0)
+      const received = calls.pop()
+      expect(received?.texts).toEqual(words.slice(0, -1))
+      expect(received?.paths.map((path) => path.virtual)).toEqual(['/work/report.txt'])
+      expect(received?.flags.output).toBeInstanceOf(PathSpec)
+      const output = new FlagView(received?.flags ?? {}, received?.spec).asPaths('output')
+      expect(output.map((path) => [path.virtual, path.rawPath])).toEqual([
+        [`/work/${expectedOutput}`, `./${expectedOutput}`],
+      ])
+    }
   })
 
   it('refuses an unknown verb with git wording, exit 1', async () => {
@@ -132,12 +178,14 @@ describe('handleCli', () => {
       new TextEncoder().encode(`help=${String(inv.flags.help as boolean | undefined)}\n`),
       new IOResult(),
     ]
-    const spec = new CLISpec({
-      name: 'prog',
-      fn: ownHelp,
-      options: [new Option({ long: '--help', description: 'own help' })],
+    const spec = new CLI({
+      spec: new CommandSpec({
+        name: 'prog',
+        arguments: [new Argument('--help', { action: 'store_true', help: 'own help' })],
+      }),
+      handlers: { '': new CLIHandler({ fn: ownHelp }) },
     })
-    const install: CLIInstall = { name: 'prog', spec, config: null }
+    const install: CLIInstall = { name: 'prog', cli: spec, config: null }
     const [stdout, io] = await handleCli(
       install,
       ['prog', '--help'],
@@ -167,17 +215,11 @@ describe('handleCli', () => {
       await new Promise((resolve) => setTimeout(resolve, 500))
       return [null, new IOResult()]
     }
-    const spec = new CLISpec({
-      name: 'prog',
-      subcommands: [
-        new CLISpec({
-          name: 'run',
-          fn: slow,
-          limit: new Limit({ timeoutSeconds: 0.05 }),
-        }),
-      ],
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
+      handlers: { run: new CLIHandler({ fn: slow, limit: new Limit({ timeoutSeconds: 0.05 }) }) },
     })
-    const install: CLIInstall = { name: 'prog', spec, config: null }
+    const install: CLIInstall = { name: 'prog', cli: spec, config: null }
     await expect(
       handleCli(install, ['prog', 'run'], new SessionState({ sessionId: 't' })),
     ).rejects.toThrow(/prog run: timed out/)
@@ -197,19 +239,14 @@ describe('handleCli', () => {
       settled = true
       return [null, new IOResult()]
     }
-    const spec = new CLISpec({
-      name: 'prog',
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
+      handlers: {
+        run: new CLIHandler({ fn: slow, write: true, limit: new Limit({ timeoutSeconds: 0.05 }) }),
+      },
       configModel: (input) => input,
-      subcommands: [
-        new CLISpec({
-          name: 'run',
-          fn: slow,
-          write: true,
-          limit: new Limit({ timeoutSeconds: 0.05 }),
-        }),
-      ],
     })
-    const install: CLIInstall = { name: 'prog', spec, config: {} }
+    const install: CLIInstall = { name: 'prog', cli: spec, config: {} }
     await expect(
       handleCli(
         install,
@@ -236,19 +273,14 @@ describe('handleCli', () => {
       await new Promise((resolve) => setTimeout(resolve, 100))
       return [null, new IOResult()]
     }
-    const spec = new CLISpec({
-      name: 'prog',
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
+      handlers: {
+        run: new CLIHandler({ fn: slow, write: true, limit: new Limit({ timeoutSeconds: 0.05 }) }),
+      },
       configModel: (input) => input,
-      subcommands: [
-        new CLISpec({
-          name: 'run',
-          fn: slow,
-          write: true,
-          limit: new Limit({ timeoutSeconds: 0.05 }),
-        }),
-      ],
     })
-    const install: CLIInstall = { name: 'prog', spec, config: {} }
+    const install: CLIInstall = { name: 'prog', cli: spec, config: {} }
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const unhandled: unknown[] = []
     const onUnhandled = (reason: unknown): void => {
@@ -377,16 +409,15 @@ function scriptInstall(
     runtime?: string | null
     config?: Record<string, unknown> | null
     language?: RuntimeLanguage
-    options?: Option[]
+    options?: Argument[]
   } = {},
 ): CLIInstall {
-  const spec = new CLISpec({
-    name: 'pager',
+  const spec = new CLI({
+    spec: new CommandSpec({ name: 'pager', arguments: [...(opts.options ?? [])] }),
     script: new ScriptSource("print('hi')", opts.language ?? 'python'),
     runtime: opts.runtime ?? null,
-    options: opts.options ?? [],
   })
-  return { name: 'pager', spec, config: opts.config ?? null }
+  return { name: 'pager', cli: spec, config: opts.config ?? null }
 }
 
 describe('handleCli script arm', () => {
@@ -419,7 +450,7 @@ describe('handleCli script arm', () => {
     // native binary could also honor.
     const py = new FakePyRuntime()
     const install = scriptInstall({
-      options: [new Option({ short: '-n', long: '--lines', type: 'int' })],
+      options: [new Argument(['-n', '--lines'], { type: 'int' })],
     })
     const [, io] = await handleCli(
       install,
@@ -436,11 +467,11 @@ describe('handleCli script arm', () => {
     // A .mjs source only runs as an ES module if the engine gets
     // flags.module; without it import and top-level await fail.
     const js = new FakeJsRuntime()
-    const spec = new CLISpec({
-      name: 'pager',
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'pager' }),
       script: new ScriptSource('export const x = 1', 'js', true),
     })
-    const install: CLIInstall = { name: 'pager', spec, config: null }
+    const install: CLIInstall = { name: 'pager', cli: spec, config: null }
     const [, io] = await handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [js],
     })
@@ -486,7 +517,7 @@ describe('handleCli script arm', () => {
     // The program's own name rides argv slot 0, so its messages read
     // 'pager:' and two installs of one program are distinguishable.
     const py = new FakePyRuntime()
-    const install: CLIInstall = { name: 'renamed', spec: scriptInstall().spec, config: null }
+    const install: CLIInstall = { name: 'renamed', cli: scriptInstall().cli, config: null }
     await handleCli(
       install,
       ['renamed', 'report.txt'],
@@ -530,7 +561,7 @@ describe('handleCli script arm', () => {
     // rendered page is truthful and the program never runs.
     const py = new FakePyRuntime()
     const install = scriptInstall({
-      options: [new Option({ short: '-n', long: '--lines', type: 'int' })],
+      options: [new Argument(['-n', '--lines'], { type: 'int' })],
     })
     const [stdout, io] = await handleCli(
       install,
@@ -565,7 +596,7 @@ describe('handleCli script arm', () => {
   it('a script with a grammar refuses an undeclared flag', async () => {
     const py = new FakePyRuntime()
     const install = scriptInstall({
-      options: [new Option({ short: '-n', long: '--lines', type: 'int' })],
+      options: [new Argument(['-n', '--lines'], { type: 'int' })],
     })
     const [, io] = await handleCli(
       install,
@@ -769,12 +800,12 @@ describe('handleCli script arm', () => {
 
   it('the leaf limit bounds the run', async () => {
     const sleepy = new SleepingRuntime()
-    const spec = new CLISpec({
-      name: 'pager',
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'pager' }),
+      handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.05 }) }) },
       script: new ScriptSource("print('hi')"),
-      limit: new Limit({ timeoutSeconds: 0.05 }),
     })
-    const install: CLIInstall = { name: 'pager', spec, config: null }
+    const install: CLIInstall = { name: 'pager', cli: spec, config: null }
     await expect(
       handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
         entries: [sleepy],
@@ -787,19 +818,18 @@ describe('handleCli script arm', () => {
 
 describe('a leaf that fails after printing', () => {
   it('keeps what it printed ahead of the diagnostic', async () => {
-    const spec = new CLISpec({
-      name: 'prog',
-      configModel: (input) => input,
-      subcommands: [
-        new CLISpec({
-          name: 'go',
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'go' })] }),
+      handlers: {
+        go: new CLIHandler({
           fn: () => {
             throw new PartialOutputError('late boom', new TextEncoder().encode('first\n'))
           },
         }),
-      ],
+      },
+      configModel: (input) => input,
     })
-    const install: CLIInstall = { name: 'prog', spec, config: { token: 'tok' } }
+    const install: CLIInstall = { name: 'prog', cli: spec, config: { token: 'tok' } }
     const [stdout, io] = await handleCli(
       install,
       ['prog', 'go'],
@@ -819,20 +849,19 @@ describe('a leaf that fails after printing', () => {
 // does when a handler's result says nothing.
 describe('cache drop on a thrown leaf', () => {
   function throwingInstall(write: boolean): CLIInstall {
-    const spec = new CLISpec({
-      name: 'prog',
-      configModel: (input) => input,
-      subcommands: [
-        new CLISpec({
-          name: 'push',
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'push' })] }),
+      handlers: {
+        push: new CLIHandler({
           write,
           fn: () => {
             throw new Error('filter failed after the request')
           },
         }),
-      ],
+      },
+      configModel: (input) => input,
     })
-    return { name: 'prog', spec, config: { token: 'tok' } }
+    return { name: 'prog', cli: spec, config: { token: 'tok' } }
   }
 
   it('a write leaf that throws still drops caches', async () => {
@@ -875,23 +904,41 @@ describe('dropsMountCaches', () => {
     // A script root's config is opaque, so it never carries a config model,
     // yet its program may reach a service exactly as an account CLI does;
     // only a root with neither writes through the dispatcher.
-    expect(dropsMountCaches(makeInstall().spec)).toBe(true)
+    expect(dropsMountCaches(makeInstall().cli)).toBe(true)
     expect(
-      dropsMountCaches(new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") })),
+      dropsMountCaches(
+        new CLI({
+          spec: new CommandSpec({ name: 'pager' }),
+          script: new ScriptSource("print('hi')"),
+        }),
+      ),
     ).toBe(true)
-    expect(dropsMountCaches(new CLISpec({ name: 'tool', fn: send }))).toBe(false)
+    expect(
+      dropsMountCaches(
+        new CLI({
+          spec: new CommandSpec({ name: 'tool' }),
+          handlers: { '': new CLIHandler({ fn: send }) },
+        }),
+      ),
+    ).toBe(false)
   })
 })
 
 it('keeps a custom CLI grammar when it uses Git usage formatting', async () => {
-  const spec = new CLISpec({
-    name: 'custom',
-    usageStyle: UsageStyle.GIT,
-    subcommands: [
-      new CLISpec({ name: 'branch', fn: send, options: [new Option({ long: '--topic' })] }),
-    ],
+  const spec = new CLI({
+    spec: new CommandSpec({
+      name: 'custom',
+      usageStyle: UsageStyle.GIT,
+      subcommands: [
+        new CommandSpec({
+          name: 'branch',
+          arguments: [new Argument('--topic', { action: 'store_true' })],
+        }),
+      ],
+    }),
+    handlers: { branch: new CLIHandler({ fn: send }) },
   })
-  const install = { name: 'custom', spec, config: { token: 'tok' } }
+  const install = { name: 'custom', cli: spec, config: { token: 'tok' } }
   const [stdout, io] = await handleCli(
     install,
     ['custom', 'branch', '--top'],
@@ -907,23 +954,27 @@ it.each(['success', 'error', 'abort'] as const)(
     const abort = new AbortController()
     const evaluate = vi.fn(() => Promise.resolve(new IOResult()))
     let saved: CLIInvocation['shell']
-    const spec = new CLISpec({
-      name: 'probe',
-      fn: async (inv) => {
-        saved = inv.shell
-        if (inv.shell === undefined) throw new Error('missing invocation shell')
-        if (outcome === 'abort') {
-          abort.abort()
-          await expect(inv.shell('echo denied')).rejects.toThrow('no longer active')
-        } else {
-          await inv.shell('echo allowed')
-        }
-        if (outcome === 'error') throw new Error('handler failed')
-        return [null, new IOResult()]
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'probe' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async (inv) => {
+            saved = inv.shell
+            if (inv.shell === undefined) throw new Error('missing invocation shell')
+            if (outcome === 'abort') {
+              abort.abort()
+              await expect(inv.shell('echo denied')).rejects.toThrow('no longer active')
+            } else {
+              await inv.shell('echo allowed')
+            }
+            if (outcome === 'error') throw new Error('handler failed')
+            return [null, new IOResult()]
+          },
+        }),
       },
     })
     await handleCli(
-      { name: 'probe', spec, config: null },
+      { name: 'probe', cli: spec, config: null },
       ['probe'],
       new SessionState({ sessionId: 's' }),
       null,
@@ -935,26 +986,75 @@ it.each(['success', 'error', 'abort'] as const)(
   },
 )
 
+it.each([
+  [null, UsageStyle.ARGPARSE, 2],
+  [2, UsageStyle.ARGPARSE, 2],
+  ['+', UsageStyle.ARGPARSE, 2],
+  ['?', UsageStyle.ARGPARSE, 0],
+  ['*', UsageStyle.ARGPARSE, 0],
+  [null, UsageStyle.GIT, 7],
+  [null, UsageStyle.COBRA, 1],
+] as const)('handles missing positional arity %j in %s', async (nargs, usageStyle, expected) => {
+  const fn = vi.fn((): [null, IOResult] => {
+    if (usageStyle === UsageStyle.COBRA) throw new Error('handler requires ID')
+    return [null, new IOResult({ exitCode: usageStyle === UsageStyle.GIT ? 7 : 0 })]
+  })
+  const cli = new CLI({
+    spec: new CommandSpec({
+      name: 'tool',
+      usageStyle,
+      subcommands: [new CommandSpec({ name: 'run', arguments: [new Argument('ID', { nargs })] })],
+    }),
+    handlers: { run: new CLIHandler({ fn }) },
+  })
+  const install: CLIInstall = { name: 'renamed', cli, config: null }
+  const session = new SessionState({ sessionId: 'arity' })
+  const [stdout, io] = await handleCli(install, ['renamed', 'run'], session)
+  expect(io.exitCode).toBe(expected)
+  if (usageStyle === UsageStyle.COBRA) {
+    expect(stdout).toBeNull()
+    expect(dec.decode(await materialize(io.stderr))).toBe('renamed run: handler requires ID\n')
+    const [help, helped] = await handleCli(install, ['renamed', 'run', '-h'], session)
+    expect(helped.exitCode).toBe(0)
+    expect(dec.decode(await materialize(help))).toMatch(/^usage: renamed run \[-h\] ID\n/)
+  }
+  if (expected !== 2) expect(fn).toHaveBeenCalledOnce()
+  else {
+    expect(stdout).toBeNull()
+    const message = dec.decode(await materialize(io.stderr))
+    expect(message).toMatch(/^usage: renamed run /)
+    expect(message).toContain('\nrenamed run: error: the following arguments are required: ID\n')
+    const [help, helped] = await handleCli(install, ['renamed', 'run', '--help'], session)
+    expect(helped.exitCode).toBe(0)
+    expect(dec.decode(await materialize(help))).toMatch(/^usage: renamed run /)
+    expect(fn).not.toHaveBeenCalled()
+  }
+})
+
 it.each([null, 1])(
   'joins native producer when unstarted output closes (timeout=%s)',
   async (timeout) => {
     let closed = false
-    const spec = new CLISpec({
-      name: 'writer',
-      limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-      fn: async (inv) => {
-        if (inv.stdio === undefined) throw new Error('missing stdio')
-        try {
-          await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
-          await inv.stdio.waitCancelled()
-          return new IOResult()
-        } finally {
-          closed = true
-        }
+    const cli = new CLI({
+      spec: new CommandSpec({ name: 'writer' }),
+      handlers: {
+        '': new CLIHandler({
+          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+          fn: async (inv) => {
+            if (inv.stdio === undefined) throw new Error('missing stdio')
+            try {
+              await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
+              await inv.stdio.waitCancelled()
+              return new IOResult()
+            } finally {
+              closed = true
+            }
+          },
+        }),
       },
     })
     const [output] = await handleCli(
-      { name: 'writer', spec, config: null },
+      { name: 'writer', cli, config: null },
       ['writer'],
       new SessionState({ sessionId: 'test' }),
     )
@@ -966,17 +1066,21 @@ it.each([null, 1])(
 it.each([0.05, null])(
   'releases a native writer that ignores cancellation (timeout=%s)',
   async (timeout) => {
-    const spec = new CLISpec({
-      name: 'writer',
-      limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-      fn: async (inv) => {
-        if (inv.stdio === undefined) throw new Error('missing stdio')
-        await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
-        return new Promise<never>(() => undefined)
+    const cli = new CLI({
+      spec: new CommandSpec({ name: 'writer' }),
+      handlers: {
+        '': new CLIHandler({
+          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+          fn: async (inv) => {
+            if (inv.stdio === undefined) throw new Error('missing stdio')
+            await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
+            return new Promise<never>(() => undefined)
+          },
+        }),
       },
     })
     const [output] = await handleCli(
-      { name: 'writer', spec, config: null },
+      { name: 'writer', cli, config: null },
       ['writer'],
       new SessionState({ sessionId: 'test' }),
     )

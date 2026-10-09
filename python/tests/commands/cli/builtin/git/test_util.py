@@ -35,9 +35,9 @@ from mirage.commands.cli.builtin.git.util import (
     switches,
     without_section,
 )
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import Option
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.types import PathSpec
 
 
@@ -169,13 +169,12 @@ async def _verb(inv: CLIInvocation) -> None:
 
 
 def test_switches_reads_the_leaf_the_line_was_parsed_against():
-    leaf = CLISpec(
+    leaf = CommandSpec(
         name="mv",
-        fn=_verb,
-        options=(
-            Option(short="-f", long="--force"),
-            Option(short="-k"),
-            Option(long="--sparse"),
+        arguments=(
+            Argument("-f", "--force", action="store_true"),
+            Argument("-k", action="store_true"),
+            Argument("--sparse", action="store_true"),
         ),
     )
     assert switches(CLIInvocation(None, spec=leaf)) == {"f", "k"}
@@ -248,7 +247,9 @@ def test_every_occurrence_is_parsed():
 
 
 def test_a_later_relative_c_lands_under_the_one_before_it():
-    result = walk("git", GIT, ["-C", "/repo", "-C", "docs", "status"], "/")
+    result = walk(
+        "git", GIT.spec, ["-C", "/repo", "-C", "docs", "status"], "/"
+    )
     assert result.group_flags["-C"].virtual == "/repo/docs"
 
 

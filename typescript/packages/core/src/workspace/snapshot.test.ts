@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { BoxVFS } from '../vfs/box/box.ts'
 import { setCwd } from './session/shell_dirs.ts'
@@ -27,7 +29,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
-import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
+import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
@@ -506,11 +508,11 @@ describe('cli registry snapshot', () => {
       new IOResult(),
     ] as [Uint8Array, IOResult]
 
-  function makeCliSpec(): CLISpec {
-    return new CLISpec({
-      name: 'snapcli',
+  function makeCliSpec(): CLI {
+    return new CLI({
+      spec: new CommandSpec({ name: 'snapcli', subcommands: [new CommandSpec({ name: 'run' })] }),
+      handlers: { run: new CLIHandler({ fn: cliEcho }) },
       configModel: z.object({ token: secretStr(), channel: z.string().default('general') }),
-      subcommands: [new CLISpec({ name: 'run', fn: cliEcho })],
     })
   }
 
@@ -551,7 +553,7 @@ describe('cli registry snapshot', () => {
 
   it('copy shares live cli secrets and the live spec', async () => {
     // The spec is deliberately NOT in the global registry: copy() must
-    // carry the live CLISpec like a live VFS, not resolve by name.
+    // carry the live CLI like a live VFS, not resolve by name.
     const spec = makeCliSpec()
     const ws = buildWorkspace()
     ws.registerCli('snapcli', spec, { token: 'sek' })
@@ -569,7 +571,10 @@ describe('cli registry snapshot', () => {
     const ws = buildWorkspace()
     ws.registerCli(
       'pager',
-      new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") }),
+      new CLI({
+        spec: new CommandSpec({ name: 'pager' }),
+        script: new ScriptSource("print('hi')"),
+      }),
       { width: 80 },
     )
     const state = await toStateDict(ws)
@@ -584,8 +589,8 @@ describe('cli registry snapshot', () => {
 
     const restored = await Workspace.fromState(state, { shellParser: parser })
     const install = restored.clis().get('pager')
-    expect(install?.spec.script?.source).toBe("print('hi')")
-    expect(install?.spec.runtime).toBeNull()
+    expect(install?.cli.script?.source).toBe("print('hi')")
+    expect(install?.cli.runtime).toBeNull()
     await ws.close()
     await restored.close()
   })
@@ -594,8 +599,8 @@ describe('cli registry snapshot', () => {
     const ws = buildWorkspace()
     ws.registerCli(
       'pager',
-      new CLISpec({
-        name: 'pager',
+      new CLI({
+        spec: new CommandSpec({ name: 'pager' }),
         script: new ScriptSource('export const x = 1', 'js', true),
         runtime: 'quickjs',
       }),
@@ -606,9 +611,9 @@ describe('cli registry snapshot', () => {
     expect(state.clis?.[0]?.script?.module).toBe(true)
     const restored = await Workspace.fromState(state, { shellParser: parser })
     const install = restored.clis().get('pager')
-    expect(install?.spec.runtime).toBe('quickjs')
-    expect(install?.spec.script?.module).toBe(true)
-    expect(install?.spec.script?.language).toBe('js')
+    expect(install?.cli.runtime).toBe('quickjs')
+    expect(install?.cli.script?.module).toBe(true)
+    expect(install?.cli.script?.language).toBe('js')
     await ws.close()
     await restored.close()
   })
@@ -619,7 +624,10 @@ describe('cli registry snapshot', () => {
     const ws = buildWorkspace()
     ws.registerCli(
       'pager',
-      new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") }),
+      new CLI({
+        spec: new CommandSpec({ name: 'pager' }),
+        script: new ScriptSource("print('hi')"),
+      }),
       null,
     )
     const [manifest] = splitManifestAndBlobs(

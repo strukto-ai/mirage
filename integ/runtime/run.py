@@ -42,7 +42,8 @@ from mirage import (  # noqa: E402
     Workspace,
 )
 from mirage.cache.index import NULL_INDEX, IndexCacheStore  # noqa: E402
-from mirage.commands.cli.types import CLISpec  # noqa: E402
+from mirage.commands.cli.types import CLI  # noqa: E402
+from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.types import (  # noqa: E402
@@ -628,8 +629,8 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
             config}.
     """
     for name, entry in clis.items():
-        spec = CLISpec(
-            name=name,
+        spec = CLI(
+            spec=CommandSpec(name=name),
             script=ScriptSource(
                 entry["script"], language=entry.get("language", "python")
             ),

@@ -21,6 +21,7 @@ from mirage.commands.spec import (
     parse_command,
     parse_to_kwargs,
 )
+from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (
@@ -189,28 +190,11 @@ def parse_flags(
         # csplit -f part -> /data/part) is absent from scope_map, so build a
         # PathSpec for it just like positional paths do, otherwise it never
         # gets the mount prefix stripped.
-        repeat_path_keys = {
-            flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and opt.multiple
-            for name in (opt.short, opt.long)
-            if name
-        }
-        # A pair option's list alternates name, value; only the values
-        # are paths (jq --rawfile body /d/f.txt).
-        pair_path_keys = {
-            flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and opt.pair
-            for name in (opt.short, opt.long)
-            if name
-        }
-        single_path_keys = {
-            flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and not opt.multiple
-            for name in (opt.short, opt.long)
-            if name
+        path_options = {
+            flag_kwarg_name(name): opt
+            for opt in compile_spec(spec).options
+            if opt.type == "path"
+            for name in opt.names
         }
         # An option's value is read before the operands, which is POSIX
         # order and the order -C requires (its value moves the operands
@@ -228,26 +212,20 @@ def parse_flags(
                 if isinstance(value, list)
                 else []
             )
-            if key in pair_path_keys and isinstance(value, list):
-                # A pair is (name, value): only the odd slots are paths.
-                pairs: list[str | PathSpec] = list(texts_in)
-                for index in range(1, len(pairs), 2):
-                    pairs[index] = take_spelling(
-                        spellings,
-                        scope_map,
-                        texts_in[index],
-                        raw_parts[index],
-                        cwd,
-                    )
-                flag_kwargs[key] = pairs
-            elif key in repeat_path_keys and isinstance(value, list):
+            option = path_options.get(key)
+            if option is not None and isinstance(value, list):
+                kinds = option.value_types
                 flag_kwargs[key] = [
                     take_spelling(
                         spellings, scope_map, part, raw_parts[index], cwd
                     )
+                    if not kinds or kinds[index % len(kinds)] == "path"
+                    else part
                     for index, part in enumerate(texts_in)
                 ]
-            elif key in single_path_keys and isinstance(value, str):
+            elif option is not None and isinstance(value, str):
+                # A store default or environment fallback stays scalar,
+                # even when typed values use fixed nargs lists.
                 flag_kwargs[key] = take_spelling(
                     spellings,
                     scope_map,

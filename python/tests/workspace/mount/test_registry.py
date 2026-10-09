@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.errors.fs import ebusy
@@ -120,7 +120,12 @@ def test_installed_cli_head_wins_over_multiword_mount_command(registry):
     _register_cmd(registry.mount_for("/data"), "gws docs documents get")
     registry.clis.install(
         "gws",
-        CLISpec(name="gws", subcommands=(CLISpec(name="run", fn=_noop_cli),)),
+        CLI(
+            spec=CommandSpec(
+                name="gws", subcommands=(CommandSpec(name="run"),)
+            ),
+            handlers={"run": CLIHandler(fn=_noop_cli)},
+        ),
     )
     assert (
         registry.match_command_prefix(["gws", "docs", "documents", "get"]) == 1

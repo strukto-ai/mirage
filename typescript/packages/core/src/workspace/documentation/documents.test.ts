@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
@@ -32,22 +35,57 @@ async function workspace(): Promise<Workspace> {
 }
 
 describe('generated documents', () => {
-  it('previews a profile without a session, and renders for each reader', async () => {
-    const ws = await workspace()
-    await ws.session('a', { profile: 'reader' })
-    await ws.session('b')
-    const preview = await ws.vfsMd(undefined, { profile: 'reader' })
-    expect(preview).not.toContain('/secret')
-    expect(ws.listSessions()).toHaveLength(3)
-    await ws.vfsMd('/VFS.md')
-    const [restricted, full] = await Promise.all([
-      ws.vfs.cat('/VFS.md', 'a'),
-      ws.vfs.cat('/VFS.md', 'b'),
-    ])
-    expect(restricted).toBe(preview)
-    expect(full).toContain('/secret')
-    await ws.close()
-  })
+  it.each([
+    { script: null, arguments: [], ownsArgv: false },
+    {
+      script: null,
+      arguments: [
+        new Argument('--output'),
+        new Argument('PATH', { type: 'path', help: 'Destination document' }),
+      ],
+      ownsArgv: false,
+    },
+    { script: new ScriptSource('1'), arguments: [new Argument('--output')], ownsArgv: false },
+    { script: new ScriptSource('1'), arguments: [], ownsArgv: true },
+  ])(
+    'previews a profile without a session, and renders for each reader ($ownsArgv)',
+    async ({ script, arguments: args, ownsArgv }) => {
+      const ws = await workspace()
+      ws.registerCli(
+        'tool',
+        new CLI({
+          spec: new CommandSpec({ name: 'tool', arguments: args, addHelp: false }),
+          script,
+          handlers: script ? {} : { '': new CLIHandler({ fn: vi.fn() }) },
+        }),
+      )
+      await ws.session('a', { profile: 'reader' })
+      await ws.session('b')
+      const preview = await ws.vfsMd(undefined, { profile: 'reader' })
+      expect(preview).not.toContain('/secret')
+      expect(ws.listSessions()).toHaveLength(3)
+      await ws.vfsMd('/VFS.md')
+      const [restricted, full] = await Promise.all([
+        ws.vfs.cat('/VFS.md', 'a'),
+        ws.vfs.cat('/VFS.md', 'b'),
+      ])
+      expect(restricted).toBe(preview)
+      expect(full).toContain('/secret')
+      const skill = await ws.skillMd()
+      expect(skill).toContain('## `tool`')
+      expect(skill.includes('This program parses its own arguments')).toBe(ownsArgv)
+      expect(skill.includes('--output OUTPUT')).toBe(args.length > 0)
+      const authoredHelp = args.some((argument) => Boolean(argument.help))
+      expect(skill.includes('Destination document')).toBe(authoredHelp)
+      const manual = await ws.shell('man tool')
+      expect(manual.exitCode).toBe(0)
+      expect(new TextDecoder().decode(manual.stdout).includes('Destination document')).toBe(
+        authoredHelp,
+      )
+      expect(ws.listSessions()).toHaveLength(3)
+      await ws.close()
+    },
+  )
   it('checks exact paths, existing parents and collisions without backend writes', async () => {
     const ws = await workspace()
     await ws.vfs.mkdir('/data/guides')

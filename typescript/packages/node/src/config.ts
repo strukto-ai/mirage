@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 
 import { IOConfig } from '@struktoai/mirage-core/io/config'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
@@ -20,7 +21,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parseYaml } from './utils/yaml.ts'
 import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
-import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
@@ -767,7 +768,7 @@ interface StoreBlock {
 }
 
 /**
- * One `clis:` entry: install a named CLISpec with its own config. The
+ * One `clis:` entry: install a named CLI with its own config. The
  * section key is the installed head word. Exactly one handler source:
  * `cli` names a registered spec tree; `script` references a program
  * file whose content is embedded at load (the docker build-context
@@ -1197,36 +1198,45 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
 }
 
 /** Resolve a `cli:` value: a bare name stays a name, a ref loads a spec. */
-async function resolveCliRef(ref: string, name: string): Promise<string | CLISpec> {
+async function resolveCliRef(ref: string, name: string): Promise<string | CLI> {
   if (!ref.includes(':')) return ref
   return asCliSpec(await loadAttr(ref), name, ref)
 }
 
-/**
- * True when a value carries every field the CLI walker reads, at every
- * level of the tree.
- *
- * This is the invariant `CLISpec`'s own constructor enforces, checked
- * again here because the constructor that ran was not necessarily ours.
- * The fields are the ones dispatch and `man` actually touch
- * (`subcommands.find`, `aliases.includes`, `options.some`), so a value
- * that passes cannot fail later reading a missing one. A class name is
- * not enough on its own: any class called `CLISpec`, or an object with a
- * `constructor` property that says so, would answer to that and then
- * crash on the first line an agent types.
- */
+/** Validate the shared grammar and execution shape from another core copy. */
 function looksLikeCliSpec(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return false
-  const node = value as Record<string, unknown>
-  if (typeof node.name !== 'string' || node.name === '' || /\s/.test(node.name)) return false
-  if (!Array.isArray(node.aliases) || !Array.isArray(node.options)) return false
-  if (!Array.isArray(node.subcommands)) return false
-  const runnable =
-    typeof node.fn === 'function' ||
-    (node.script !== null && node.script !== undefined) ||
-    node.subcommands.length > 0
-  if (!runnable) return false
-  return node.subcommands.every(looksLikeCliSpec)
+  const definition = value as Record<string, unknown>
+  if (!isPlainObject(definition.handlers)) return false
+  for (const handler of Object.values(definition.handlers)) {
+    if (handler === null || typeof handler !== 'object') return false
+    const binding = handler as Record<string, unknown>
+    if (binding.fn !== null && typeof binding.fn !== 'function') return false
+    if (typeof binding.write !== 'boolean') return false
+  }
+  const pending: unknown[] = [definition.spec]
+  const seen = new Set<unknown>()
+  while (pending.length > 0) {
+    const candidate = pending.pop()
+    if (candidate === null || typeof candidate !== 'object') return false
+    if (seen.has(candidate)) continue
+    seen.add(candidate)
+    const node = candidate as Record<string, unknown>
+    if (typeof node.name !== 'string' || node.name === '' || /\s/.test(node.name)) return false
+    if (!Array.isArray(node.aliases) || !node.aliases.every((alias) => typeof alias === 'string'))
+      return false
+    if (!Array.isArray(node.arguments) || !Array.isArray(node.subcommands)) return false
+    if (typeof node.addHelp !== 'boolean' || typeof node.allowAbbrev !== 'boolean') return false
+    for (const argument of node.arguments) {
+      if (argument === null || typeof argument !== 'object') return false
+      const input = argument as Record<string, unknown>
+      if (!Array.isArray(input.names) || !input.names.every((name) => typeof name === 'string'))
+        return false
+    }
+    const subcommands: unknown[] = node.subcommands
+    pending.push(...subcommands)
+  }
+  return true
 }
 
 /**
@@ -1235,23 +1245,23 @@ function looksLikeCliSpec(value: unknown): boolean {
  * `instanceof` is the fast path, not the test. The referenced file lives
  * in someone else's project, which is the whole point of the ref form,
  * and that project may resolve its own copy of `@struktoai/mirage-core`:
- * a real CLISpec carrying every method, built off a different class
+ * a real CLI carrying every method, built off a different class
  * object. Demanding `instanceof` would refuse exactly the case this
  * exists to serve, so anything else is admitted on its shape instead,
  * and refused at create time rather than when an agent first types the
  * head word.
  */
-function asCliSpec(value: unknown, name: string, ref: string): CLISpec {
-  if (value instanceof CLISpec) return value
-  if (looksLikeCliSpec(value)) return value as CLISpec
-  throw new Error(`clis entry '${name}': ${ref} is not a CLISpec`)
+function asCliSpec(value: unknown, name: string, ref: string): CLI {
+  if (value instanceof CLI) return value
+  if (looksLikeCliSpec(value)) return new CLI(value as CLI)
+  throw new Error(`clis entry '${name}': ${ref} is not a CLI`)
 }
 
 async function buildCliEntries(
   clis: Record<string, CLIBlock>,
   sources?: Readonly<Record<string, ResolvedSource>>,
-): Promise<Record<string, [string | CLISpec, Record<string, unknown> | null]>> {
-  const out: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
+): Promise<Record<string, [string | CLI, Record<string, unknown> | null]>> {
+  const out: Record<string, [string | CLI, Record<string, unknown> | null]> = {}
   for (const [name, block] of Object.entries(clis as Record<string, unknown>)) {
     // The raw config arrives as unvalidated YAML: the CLIBlock type is
     // a claim, not a guarantee, so validate the shape here.
@@ -1287,8 +1297,8 @@ async function buildCliEntries(
     // `buildVfs` rather than here, because a mount block reaches the
     // registry and a `clis` block does not.
     const entry = hasScript
-      ? new CLISpec({
-          name,
+      ? new CLI({
+          spec: new CommandSpec({ name }),
           script: loadScriptSource(block.script as string),
           runtime: block.runtime ?? null,
         })

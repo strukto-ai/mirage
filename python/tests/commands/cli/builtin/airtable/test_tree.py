@@ -16,8 +16,8 @@ import pytest
 
 from mirage.commands.cli.builtin.airtable import AIRTABLE
 from mirage.commands.cli.specs import cli_spec_for
-from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import UsageStyle
+from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.core.airtable.config import AirtableConfig
 from tests.fixtures.airtable_api import FEATURES, OPS, ROADMAP, TOKEN
 
@@ -36,8 +36,8 @@ WRITES = {
 }
 
 
-def leaf(*path: str) -> CLISpec:
-    node = AIRTABLE
+def leaf(*path: str) -> CommandSpec:
+    node = AIRTABLE.spec
     for name in path:
         node = next(c for c in node.subcommands if c.name == name)
     return node
@@ -46,16 +46,24 @@ def leaf(*path: str) -> CLISpec:
 def test_the_tree_is_registered_under_its_name():
     assert cli_spec_for("airtable") is AIRTABLE
     assert AIRTABLE.config_model is AirtableConfig
-    assert AIRTABLE.usage_style is UsageStyle.ARGPARSE
+    assert AIRTABLE.spec.usage_style is UsageStyle.ARGPARSE
     assert {
-        g.name: [v.name for v in g.subcommands] for g in AIRTABLE.subcommands
+        g.name: [v.name for v in g.subcommands]
+        for g in AIRTABLE.spec.subcommands
     } == VERBS
 
 
 def test_only_the_writers_are_classified_as_writes():
     for noun, verbs in VERBS.items():
         for verb in verbs:
-            assert leaf(noun, verb).write is ((noun, verb) in WRITES)
+            assert AIRTABLE.handlers[
+                " ".join(
+                    (
+                        noun,
+                        verb,
+                    )
+                )
+            ].write is ((noun, verb) in WRITES)
 
 
 def test_every_verb_below_base_names_its_base_and_table():
@@ -63,9 +71,15 @@ def test_every_verb_below_base_names_its_base_and_table():
         ("comment", "list"),
         ("comment", "add"),
     ]:
-        spelled = {o.long for o in leaf(noun, verb).options if o.required}
+        spelled = {
+            o.names[-1]
+            for o in compile_spec(leaf(noun, verb)).options
+            if o.required
+        }
         assert spelled == {"--base", "--table"}
-    assert [o.long for o in leaf("table", "get").options] == ["--base"]
+    assert [
+        o.names[-1] for o in compile_spec(leaf("table", "get")).options
+    ] == ["--base"]
 
 
 @pytest.mark.asyncio

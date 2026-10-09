@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { commandsFor } from '../../commands/builtin/backends.ts'
 import { EvaluationContext } from '../evaluation.ts'
@@ -24,7 +26,7 @@ import { envSnapshot, seedVar, sessionView, setAttr } from '../../workspace/sess
 import { VarAttr } from '../../shell/variable.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -1853,23 +1855,20 @@ describe('handleMan for installed CLIs', () => {
     wireRegistry(reg)
     reg.clis.install(
       'linear',
-      new CLISpec({
-        name: 'linear',
-        description: 'Linear API client',
-        subcommands: [
-          new CLISpec({
-            name: 'issue',
-            description: 'Manage issues',
-            aliases: ['i'],
-            subcommands: [
-              new CLISpec({
-                name: 'create',
-                description: 'Create one',
-                fn: () => [null, new IOResult()],
-              }),
-            ],
-          }),
-        ],
+      new CLI({
+        spec: new CommandSpec({
+          name: 'linear',
+          description: 'Linear API client',
+          subcommands: [
+            new CommandSpec({
+              name: 'issue',
+              description: 'Manage issues',
+              aliases: ['i'],
+              subcommands: [new CommandSpec({ name: 'create', description: 'Create one' })],
+            }),
+          ],
+        }),
+        handlers: { 'issue create': new CLIHandler({ fn: () => [null, new IOResult()] }) },
       }),
     )
     return reg

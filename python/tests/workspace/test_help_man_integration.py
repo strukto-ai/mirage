@@ -16,7 +16,8 @@ import asyncio
 
 import pytest
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -176,17 +177,19 @@ def _cli_ws():
     ws = _ws()
     ws.register_cli(
         "linear",
-        CLISpec(
-            name="linear",
-            description="Linear API client",
-            subcommands=(
-                CLISpec(
-                    name="issue", description="Manage issues", fn=lambda: None
-                ),
-                CLISpec(
-                    name="team", description="Manage one", fn=lambda: None
+        CLI(
+            spec=CommandSpec(
+                name="linear",
+                description="Linear API client",
+                subcommands=(
+                    CommandSpec(name="issue", description="Manage issues"),
+                    CommandSpec(name="team", description="Manage one"),
                 ),
             ),
+            handlers={
+                "issue": CLIHandler(fn=lambda: None),
+                "team": CLIHandler(fn=lambda: None),
+            },
         ),
     )
     return ws

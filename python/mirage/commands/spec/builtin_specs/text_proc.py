@@ -12,281 +12,266 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
     "wc": CommandSpec(
-        options=(
-            Option(short="-l", long="--lines"),
-            Option(short="-w", long="--words"),
-            Option(short="-c", long="--bytes"),
-            Option(short="-m", long="--chars"),
-            Option(short="-L", long="--max-line-length"),
-            Option(long="--total", type="str"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-l", "--lines", action="store_true"),
+            Argument("-w", "--words", action="store_true"),
+            Argument("-c", "--bytes", action="store_true"),
+            Argument("-m", "--chars", action="store_true"),
+            Argument("-L", "--max-line-length", action="store_true"),
+            Argument("--total"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "sort": CommandSpec(
-        options=(
-            Option(short="-r", long="--reverse"),
-            Option(short="-n", long="--numeric-sort"),
-            Option(short="-u", long="--unique"),
-            Option(short="-b", long="--ignore-leading-blanks"),
-            Option(short="-k", long="--key", type="str", multiple=True),
-            Option(short="-t", long="--field-separator", type="str"),
-            Option(short="-h", long="--human-numeric-sort"),
-            Option(short="-V", long="--version-sort"),
-            Option(short="-s", long="--stable"),
-            Option(short="-m", long="--merge"),
-            Option(short="-f", long="--ignore-case"),
-            Option(short="-c"),
-            Option(short="-C"),
-            Option(long="--check", type="str", value_optional=True),
-            Option(short="-d", long="--dictionary-order"),
-            Option(short="-g", long="--general-numeric-sort"),
-            Option(short="-i", long="--ignore-nonprinting"),
-            Option(short="-M", long="--month-sort"),
-            Option(short="-o", long="--output", type="path", multiple=True),
-            Option(short="-z", long="--zero-terminated"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-r", "--reverse", action="store_true"),
+            Argument("-n", "--numeric-sort", action="store_true"),
+            Argument("-u", "--unique", action="store_true"),
+            Argument("-b", "--ignore-leading-blanks", action="store_true"),
+            Argument("-k", "--key", action="append"),
+            Argument("-t", "--field-separator"),
+            Argument("-h", "--human-numeric-sort", action="store_true"),
+            Argument("-V", "--version-sort", action="store_true"),
+            Argument("-s", "--stable", action="store_true"),
+            Argument("-m", "--merge", action="store_true"),
+            Argument("-f", "--ignore-case", action="store_true"),
+            Argument("-c", action="store_true"),
+            Argument("-C", action="store_true"),
+            Argument("--check", nargs="?", attached_only=True),
+            Argument("-d", "--dictionary-order", action="store_true"),
+            Argument("-g", "--general-numeric-sort", action="store_true"),
+            Argument("-i", "--ignore-nonprinting", action="store_true"),
+            Argument("-M", "--month-sort", action="store_true"),
+            Argument("-o", "--output", type="path", action="append"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "uniq": CommandSpec(
-        options=(
-            Option(short="-c", long="--count"),
-            Option(short="-d", long="--repeated"),
-            Option(short="-D"),
-            Option(long="--all-repeated", type="str", value_optional=True),
-            Option(long="--group", type="str", value_optional=True),
-            Option(short="-u", long="--unique"),
-            Option(short="-f", long="--skip-fields", type="str"),
-            Option(short="-s", long="--skip-chars", type="str"),
-            Option(short="-i", long="--ignore-case"),
-            Option(short="-w", long="--check-chars", type="str"),
-            Option(short="-z", long="--zero-terminated"),
-        ),
-        positional=(
-            Operand(type="path"),
-            Operand(type="path"),
-        ),
+        arguments=(
+            Argument("-c", "--count", action="store_true"),
+            Argument("-d", "--repeated", action="store_true"),
+            Argument("-D", action="store_true"),
+            Argument("--all-repeated", nargs="?", attached_only=True),
+            Argument("--group", nargs="?", attached_only=True),
+            Argument("-u", "--unique", action="store_true"),
+            Argument("-f", "--skip-fields"),
+            Argument("-s", "--skip-chars"),
+            Argument("-i", "--ignore-case", action="store_true"),
+            Argument("-w", "--check-chars"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("path2", type="path", nargs="?", metavar=""),
+        )
     ),
     "cut": CommandSpec(
-        options=(
-            Option(short="-f", long="--fields", type="str"),
-            Option(short="-F", type="str"),
-            Option(short="-d", long="--delimiter", type="str"),
-            Option(short="-c", long="--characters", type="str"),
-            Option(short="-b", long="--bytes", type="str"),
-            Option(short="-n", long="--no-partial"),
-            Option(long="--complement"),
-            Option(short="-s", long="--only-delimited"),
-            Option(short="-O", type="str"),
-            Option(long="--output-delimiter", type="str"),
-            Option(short="-w"),
-            Option(
-                long="--whitespace-delimited", type="str", value_optional=True
+        arguments=(
+            Argument("-f", "--fields"),
+            Argument("-F"),
+            Argument("-d", "--delimiter"),
+            Argument("-c", "--characters"),
+            Argument("-b", "--bytes"),
+            Argument("-n", "--no-partial", action="store_true"),
+            Argument("--complement", action="store_true"),
+            Argument("-s", "--only-delimited", action="store_true"),
+            Argument("-O"),
+            Argument("--output-delimiter"),
+            Argument("-w", action="store_true"),
+            Argument(
+                "--whitespace-delimited",
+                nargs="?",
+                attached_only=True,
             ),
-            Option(short="-z", long="--zero-terminated"),
-        ),
-        rest=Operand(type="path"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "echo": CommandSpec(
-        options=(Option(short="-n"), Option(short="-e")),
-        rest=Operand(type="str"),
+        arguments=(
+            Argument("-n", action="store_true"),
+            Argument("-e", action="store_true"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     ),
     "tee": CommandSpec(
-        options=(
-            Option(short="-a", long="--append"),
-            Option(short="-i", long="--ignore-interrupts"),
-            Option(short="-p"),
-            Option(
-                long="--output-error",
-                type="str",
-                value_optional=True,
+        arguments=(
+            Argument("-a", "--append", action="store_true"),
+            Argument("-i", "--ignore-interrupts", action="store_true"),
+            Argument("-p", action="store_true"),
+            Argument(
+                "--output-error",
+                nargs="?",
+                attached_only=True,
                 choices=("warn", "warn-nopipe", "exit", "exit-nopipe"),
             ),
-        ),
-        rest=Operand(type="path"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "tr": CommandSpec(
-        options=(
-            Option(short="-d", long="--delete"),
-            Option(short="-s", long="--squeeze-repeats"),
-            Option(short="-c", long="--complement"),
-            Option(short="-C"),
-            Option(short="-t", long="--truncate-set1"),
-        ),
-        positional=(
-            Operand(type="str"),
-            Operand(type="str"),
-        ),
+        arguments=(
+            Argument("-d", "--delete", action="store_true"),
+            Argument("-s", "--squeeze-repeats", action="store_true"),
+            Argument("-c", "--complement", action="store_true"),
+            Argument("-C", action="store_true"),
+            Argument("-t", "--truncate-set1", action="store_true"),
+            Argument("text", nargs="?", metavar=""),
+            Argument("text2", nargs="?", metavar=""),
+        )
     ),
     "paste": CommandSpec(
-        options=(
-            Option(short="-d", long="--delimiters", type="str"),
-            Option(short="-s", long="--serial"),
-            Option(short="-z", long="--zero-terminated"),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-d", "--delimiters"),
+            Argument("-s", "--serial", action="store_true"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "printf": CommandSpec(
-        positional=(Operand(type="str"),),
-        rest=Operand(type="str"),
+        arguments=(
+            Argument("text", nargs="?", metavar=""),
+            Argument("texts", nargs="*", metavar=""),
+        )
     ),
     "seq": CommandSpec(
         description="Print a sequence of numbers.",
-        options=(
-            Option(
-                short="-s",
-                long="--separator",
-                type="str",
-                description=(
-                    "Use the given string as separator between numbers."
-                ),
+        arguments=(
+            Argument(
+                "-s",
+                "--separator",
+                help="Use the given string as separator between numbers.",
             ),
-            Option(
-                short="-w",
-                long="--equal-width",
-                description="Pad numbers with zeros to equal width.",
+            Argument(
+                "-w",
+                "--equal-width",
+                action="store_true",
+                help="Pad numbers with zeros to equal width.",
             ),
-            Option(
-                short="-f",
-                long="--format",
-                type="str",
-                description=(
-                    "Format each number with a printf-style format string."
-                ),
+            Argument(
+                "-f",
+                "--format",
+                help="Format each number with a printf-style format string.",
             ),
+            Argument("text", nargs="?", metavar=""),
+            Argument("text2", nargs="?", metavar=""),
+            Argument("text3", nargs="?", metavar=""),
+            # seq's getopt string starts with `+`, so its first operand ends
+            # the options: `seq 1 -w 3` reads -w as LAST and refuses it as a
+            # number (coreutils 9.7). A negative number does the same, which
+            # NEGATIVE_NUMBER_OPERANDS covers.
+            Argument("texts", nargs="REMAINDER", metavar=""),
         ),
-        positional=(
-            Operand(type="str"),
-            Operand(type="str"),
-            Operand(type="str"),
-        ),
-        # seq's getopt string starts with `+`, so its first operand ends
-        # the options: `seq 1 -w 3` reads -w as LAST and refuses it as a
-        # number (coreutils 9.7). A negative number does the same, which
-        # NEGATIVE_NUMBER_OPERANDS covers.
-        rest=Operand(type="str", remainder=True),
     ),
     "split": CommandSpec(
-        options=(
+        arguments=(
             # GNU's obsolete -NUM is a line count (DIGIT_OPTIONS reads
             # its digits inside a cluster too). One divergence: GNU adds
             # its `Try` hint when a zero count came as digits (`split
             # -0`) and not for `-l 0`, and the bag cannot tell the two
             # apart, so both refuse without it.
-            Option(
-                short="-l", long="--lines", type="str", numeric_shorthand=True
-            ),
-            Option(short="-b", long="--bytes", type="str"),
-            Option(short="-n", long="--number", type="str"),
+            Argument("-l", "--lines", numeric_shorthand=True),
+            Argument("-b", "--bytes"),
+            Argument("-n", "--number"),
             # GNU: -d/-x never take an argument; only --numeric-suffixes=
             # and --hex-suffixes= carry one, so `-d10` is -d and ten lines.
-            Option(
-                short="-d",
-                long="--numeric-suffixes",
-                type="str",
-                value_optional=True,
+            Argument(
+                "-d",
+                "--numeric-suffixes",
+                nargs="?",
+                attached_only=True,
                 short_value=False,
             ),
-            Option(
-                short="-x",
-                long="--hex-suffixes",
-                type="str",
-                value_optional=True,
+            Argument(
+                "-x",
+                "--hex-suffixes",
+                nargs="?",
+                attached_only=True,
                 short_value=False,
             ),
-            Option(short="-a", long="--suffix-length", type="str"),
-            Option(long="--additional-suffix", type="str"),
-            Option(short="-t", long="--separator", type="str"),
-        ),
-        positional=(
-            Operand(type="path"),
-            Operand(type="path"),
-        ),
+            Argument("-a", "--suffix-length"),
+            Argument("--additional-suffix"),
+            Argument("-t", "--separator"),
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("path2", type="path", nargs="?", metavar=""),
+        )
     ),
     "shuf": CommandSpec(
-        options=(
-            Option(short="-n", long="--head-count", type="str", multiple=True),
-            Option(short="-e", long="--echo"),
-            Option(short="-z", long="--zero-terminated"),
-            Option(short="-r", long="--repeat"),
-            Option(
-                short="-i", long="--input-range", type="str", multiple=True
-            ),
-            Option(short="-o", long="--output", type="path", multiple=True),
-        ),
-        rest=Operand(type="path"),
+        arguments=(
+            Argument("-n", "--head-count", action="append"),
+            Argument("-e", "--echo", action="store_true"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("-r", "--repeat", action="store_true"),
+            Argument("-i", "--input-range", action="append"),
+            Argument("-o", "--output", type="path", action="append"),
+            Argument("paths", type="path", nargs="*", metavar=""),
+        )
     ),
     "comm": CommandSpec(
-        options=(
-            Option(short="-1"),
-            Option(short="-2"),
-            Option(short="-3"),
-            Option(long="--check-order"),
-            Option(long="--nocheck-order"),
-            Option(long="--output-delimiter", type="str"),
-            Option(long="--total"),
-            Option(short="-z", long="--zero-terminated"),
-        ),
-        positional=(
-            Operand(type="path"),
-            Operand(type="path"),
-        ),
+        arguments=(
+            Argument("-1", action="store_true"),
+            Argument("-2", action="store_true"),
+            Argument("-3", action="store_true"),
+            Argument("--check-order", action="store_true"),
+            Argument("--nocheck-order", action="store_true"),
+            Argument("--output-delimiter"),
+            Argument("--total", action="store_true"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("path2", type="path", nargs="?", metavar=""),
+        )
     ),
     "csplit": CommandSpec(
-        options=(
-            Option(short="-f", long="--prefix", type="path"),
-            Option(short="-n", long="--digits", type="str"),
-            Option(long="--silent"),
-            Option(short="-k", long="--keep-files"),
-            Option(short="-s", long="--quiet"),
-            Option(short="-b", long="--suffix-format", type="str"),
-            Option(long="--suppress-matched"),
-            Option(short="-z", long="--elide-empty-files"),
-        ),
-        positional=(Operand(type="path"),),
-        rest=Operand(type="str"),
+        arguments=(
+            Argument("-f", "--prefix", type="path"),
+            Argument("-n", "--digits"),
+            Argument("--silent", action="store_true"),
+            Argument("-k", "--keep-files", action="store_true"),
+            Argument("-s", "--quiet", action="store_true"),
+            Argument("-b", "--suffix-format"),
+            Argument("--suppress-matched", action="store_true"),
+            Argument("-z", "--elide-empty-files", action="store_true"),
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("texts", nargs="*", metavar=""),
+        )
     ),
-    "tsort": CommandSpec(positional=(Operand(type="path"),)),
+    "tsort": CommandSpec(
+        arguments=(Argument("path", type="path", nargs="?", metavar=""),)
+    ),
     "join": CommandSpec(
-        options=(
-            Option(short="-t", type="str"),
-            Option(short="-1", type="str"),
-            Option(short="-2", type="str"),
-            Option(short="-a", type="str"),
-            Option(short="-v", type="str"),
-            Option(short="-e", type="str"),
-            Option(short="-o", type="str"),
-            Option(short="-i", long="--ignore-case"),
-            Option(short="-j", type="str"),
-            Option(short="-z", long="--zero-terminated"),
-            Option(long="--check-order"),
-            Option(long="--nocheck-order"),
-            Option(long="--header"),
-        ),
-        positional=(
-            Operand(type="path"),
-            Operand(type="path"),
-        ),
+        arguments=(
+            Argument("-t"),
+            Argument("-1"),
+            Argument("-2"),
+            Argument("-a"),
+            Argument("-v"),
+            Argument("-e"),
+            Argument("-o"),
+            Argument("-i", "--ignore-case", action="store_true"),
+            Argument("-j"),
+            Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("--check-order", action="store_true"),
+            Argument("--nocheck-order", action="store_true"),
+            Argument("--header", action="store_true"),
+            Argument("path", type="path", nargs="?", metavar=""),
+            Argument("path2", type="path", nargs="?", metavar=""),
+        )
     ),
     "numfmt": CommandSpec(
-        options=(
+        arguments=(
             # GNU's argmatch tables, in GNU's order: `--to=auto` is not
             # an output mode, and an unknown word answers with the
             # shared ARGMATCH refusal (coreutils 9.7).
-            Option(
-                long="--to", type="str", choices=("none", "si", "iec", "iec-i")
-            ),
-            Option(
-                long="--from",
-                type="str",
+            Argument("--to", choices=("none", "si", "iec", "iec-i")),
+            Argument(
+                "--from",
                 choices=("none", "auto", "si", "iec", "iec-i"),
             ),
-            Option(long="--suffix", type="str"),
-            Option(long="--grouping"),
-        ),
-        rest=Operand(type="str"),
+            Argument("--suffix"),
+            Argument("--grouping", action="store_true"),
+            Argument("texts", nargs="*", metavar=""),
+        )
     ),
 }

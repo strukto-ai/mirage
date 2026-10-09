@@ -11,9 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { GNU_LONG_OPTIONS } from './long_options.ts'
-import { Option } from './types.ts'
+import { Argument } from './types.ts'
 
 // The two options every registered command answers, as GNU coreutils does.
 // They live here rather than beside the wrapper that injects them because
@@ -22,16 +21,14 @@ import { Option } from './types.ts'
 // SINGLETONS, so `o === HELP_OPTION` identifies one through any copy of a
 // spec, which is what tells a builtin's grammar apart from a registered
 // command that borrowed its name.
-export const HELP_OPTION = new Option({
-  long: '--help',
-  type: 'bool',
-  description: 'Show this help and exit',
+export const HELP_OPTION = new Argument('--help', {
+  action: 'store_true',
+  help: 'Show this help and exit',
 })
 
-export const VERSION_OPTION = new Option({
-  long: '--version',
-  type: 'bool',
-  description: 'Show version information and exit',
+export const VERSION_OPTION = new Argument('--version', {
+  action: 'store_true',
+  help: 'Show version information and exit',
 })
 
 // Stand-in name for a required operand whose slot declares none, so a
@@ -656,14 +653,14 @@ export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 // `--backup`, `ls --sort`, `ls --time`, `sort --check`, `cp --update`,
 // `tail --follow`, `wc --total`, `uniq`, `cut` -- call `argmatch` from the
 // command with their own candidate list, and never reach the parser's
-// `Option.choices` at all. The entries below are the whole of what does.
+// `Argument.choices` at all. The entries below are the whole of what does.
 // Measured on coreutils 9.7: `tee --output-error=exit-n` resolves to
 // `exit-nopipe` while `=w` and `=e` are ambiguous, `numfmt --to=s` resolves
 // to `si` and `--to=ie` is ambiguous between `iec` and `iec-i`, `date -Is`
 // resolves to `seconds` and `date --rfc-3339=` is ambiguous.
 //
 // Written as "<command> <canonical long spelling>" because that is how the
-// measurement reads, but it NAMES the builtin `Option` objects rather
+// measurement reads, but it NAMES the builtin `Argument` objects rather
 // than keying on the two strings: the parser resolves each entry once and
 // then asks whether the option declaring a set IS one of them. A name is not
 // identity, and a mount may register its own `tee` (commands/registry.ts)
@@ -672,7 +669,7 @@ export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 // registration, which hands the parser an enriched COPY of the spec
 // (config.ts appends --help/--version), so `spec === BUILTIN_SPECS[name]` is
 // false for every builtin by the time a line is parsed while every declared
-// Option is still the same object. A command name never contains a space, so
+// Argument is still the same object. A command name never contains a space, so
 // the joined key is unambiguous; python spells the same table as a set of
 // pairs.
 export const ARGMATCH_CHOICE_OPTIONS: ReadonlySet<string> = new Set([

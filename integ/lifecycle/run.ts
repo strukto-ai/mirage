@@ -57,7 +57,8 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
-import { CLISpec, type CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
+import { CLI, CLIHandler, type CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { sleep } from '@struktoai/mirage-core/utils/abort'
@@ -403,7 +404,13 @@ async function action(
       const cli = new TrackedStreamCLI(step.exit_code ?? 0, step.stderr ?? '', step.writer ?? false)
       held.streamClis ??= new Map()
       held.streamClis.set(step.name, cli)
-      ws.registerCli(step.name, new CLISpec({ name: step.name, fn: (inv) => cli.invoke(inv) }))
+      ws.registerCli(
+        step.name,
+        new CLI({
+          spec: new CommandSpec({ name: step.name }),
+          handlers: { '': new CLIHandler({ fn: (inv) => cli.invoke(inv) }) },
+        }),
+      )
       break
     }
     case 'stream_cli_stats': {
@@ -452,8 +459,8 @@ async function action(
     case 'register_cli':
       ws.registerCli(
         step.name,
-        new CLISpec({
-          name: step.name,
+        new CLI({
+          spec: new CommandSpec({ name: step.name }),
           script: new ScriptSource(step.script.source, step.script.language),
           ...(step.runtime !== undefined ? { runtime: step.runtime } : {}),
         }),

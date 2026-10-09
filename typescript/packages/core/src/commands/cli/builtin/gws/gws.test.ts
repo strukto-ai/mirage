@@ -54,7 +54,7 @@ function method(key: string) {
 }
 
 function leaf(...path: string[]) {
-  let node = GWS
+  let node = GWS.spec
   for (const name of path) {
     const child = node.subcommands.find((c) => c.name === name)
     if (child === undefined) throw new Error(`no subcommand ${name}`)
@@ -65,7 +65,7 @@ function leaf(...path: string[]) {
 
 describe('gws tree', () => {
   it('lists every service and registers itself', () => {
-    expect(GWS.subcommands.map((g) => g.name)).toEqual([
+    expect(GWS.spec.subcommands.map((g) => g.name)).toEqual([
       'drive',
       'sheets',
       'docs',
@@ -105,7 +105,9 @@ describe('gws tree', () => {
       'trash',
       'attachments',
     ])
-    expect(leaf('gmail', 'users', 'messages', 'attachments', 'get').fn).not.toBeNull()
+    expect(
+      GWS.handlers[['gmail', 'users', 'messages', 'attachments', 'get'].join(' ')]?.fn,
+    ).not.toBeNull()
   })
 
   it('keeps the bespoke verbs without the plus marker', () => {
@@ -119,16 +121,16 @@ describe('gws tree', () => {
         .subcommands.slice(-3)
         .map((v) => v.name),
     ).toEqual(['read', 'write', 'append'])
-    expect(leaf('docs', 'write').write).toBe(true)
-    expect(leaf('drive', 'files', 'list').write).toBe(false)
-    expect(leaf('slides', 'presentations', 'get').write).toBe(false)
-    expect(leaf('slides', 'presentations', 'create').write).toBe(true)
-    expect(leaf('slides', 'presentations', 'batchUpdate').write).toBe(true)
-    expect(leaf('drive', 'files', 'delete').write).toBe(true)
-    expect(leaf('drive', 'permissions', 'list').write).toBe(false)
-    expect(leaf('drive', 'permissions', 'create').write).toBe(true)
-    expect(leaf('drive', 'permissions', 'delete').write).toBe(true)
-    expect(leaf('gmail', 'users', 'messages', 'trash').write).toBe(true)
+    expect(GWS.handlers[['docs', 'write'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['drive', 'files', 'list'].join(' ')]?.write).toBe(false)
+    expect(GWS.handlers[['slides', 'presentations', 'get'].join(' ')]?.write).toBe(false)
+    expect(GWS.handlers[['slides', 'presentations', 'create'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['slides', 'presentations', 'batchUpdate'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['drive', 'files', 'delete'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['drive', 'permissions', 'list'].join(' ')]?.write).toBe(false)
+    expect(GWS.handlers[['drive', 'permissions', 'create'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['drive', 'permissions', 'delete'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['gmail', 'users', 'messages', 'trash'].join(' ')]?.write).toBe(true)
   })
 
   it('nests calendar passthroughs by discovery resource', () => {
@@ -145,12 +147,12 @@ describe('gws tree', () => {
       'patch',
       'delete',
     ])
-    expect(leaf('calendar', 'events', 'list').write).toBe(false)
-    expect(leaf('calendar', 'events', 'insert').write).toBe(true)
-    expect(leaf('calendar', 'events', 'delete').write).toBe(true)
+    expect(GWS.handlers[['calendar', 'events', 'list'].join(' ')]?.write).toBe(false)
+    expect(GWS.handlers[['calendar', 'events', 'insert'].join(' ')]?.write).toBe(true)
+    expect(GWS.handlers[['calendar', 'events', 'delete'].join(' ')]?.write).toBe(true)
     // freebusy.query is a POST that mutates nothing, but write follows the
     // HTTP verb everywhere else in the tree and a second rule would be worse.
-    expect(leaf('calendar', 'freebusy', 'query').write).toBe(true)
+    expect(GWS.handlers[['calendar', 'freebusy', 'query'].join(' ')]?.write).toBe(true)
   })
 
   it('nests forms passthroughs by discovery resource', () => {
@@ -165,8 +167,8 @@ describe('gws tree', () => {
       'list',
       'get',
     ])
-    expect(leaf('forms', 'forms', 'get').write).toBe(false)
-    expect(leaf('forms', 'forms', 'create').write).toBe(true)
+    expect(GWS.handlers[['forms', 'forms', 'get'].join(' ')]?.write).toBe(false)
+    expect(GWS.handlers[['forms', 'forms', 'create'].join(' ')]?.write).toBe(true)
   })
 
   it('accepts and preserves a refreshFn callback at install time', () => {

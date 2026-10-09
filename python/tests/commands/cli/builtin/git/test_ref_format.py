@@ -41,12 +41,10 @@ def _commit(when: int, subject: str) -> RefObject:
     return RefObject(
         oid=f"{when:040d}",
         type="commit",
-        raw=(
-            f"tree {'t' * 40}\n"
-            f"author A <a@x> {when} +0000\n"
-            f"committer C <c@x> {when} +0000\n\n"
-            f"{subject}\n"
-        ).encode(),
+        raw=f"tree {'t' * 40}\n"
+        f"author A <a@x> {when} +0000\n"
+        f"committer C <c@x> {when} +0000\n\n"
+        f"{subject}\n".encode(),
     )
 
 

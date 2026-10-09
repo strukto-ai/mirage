@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
@@ -18,8 +19,8 @@ import { RAMAccessor } from '../accessor/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { commandsFor } from '../commands/builtin/backends.ts'
 import { command, type Command } from '../commands/config.ts'
-import { CommandSpec, Operand } from '../commands/spec/types.ts'
-import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
+import { CommandSpec, Argument } from '../commands/spec/types.ts'
+import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
 import { RuntimeFiles } from '../runtime/files.ts'
 import { IOResult } from '../io/types.ts'
 import { ops } from '../test-utils.ts'
@@ -504,10 +505,12 @@ it('serves a custom driver through CLI, namespace and runtime entry points', asy
   )
   ws.registerCli(
     'showpage',
-    new CLISpec({
-      name: 'showpage',
-      positional: [new Operand({ name: 'path', type: 'path', required: true })],
-      fn: readCli,
+    new CLI({
+      spec: new CommandSpec({
+        name: 'showpage',
+        arguments: [new Argument('path', { type: 'path' })],
+      }),
+      handlers: { '': new CLIHandler({ fn: readCli }) },
     }),
   )
   try {

@@ -11,143 +11,134 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { CommandSpec, Operand, Option } from '../types.ts'
+import { CommandSpec, Argument } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   cat: new CommandSpec({
-    options: [
-      new Option({ short: '-b', long: '--number-nonblank' }),
-      new Option({ short: '-n', long: '--number' }),
-      new Option({ short: '-s', long: '--squeeze-blank' }),
-      new Option({ short: '-v', long: '--show-nonprinting' }),
-      new Option({ short: '-E', long: '--show-ends' }),
-      new Option({ short: '-e' }),
-      new Option({ short: '-t' }),
-      new Option({ short: '-T', long: '--show-tabs' }),
-      new Option({ short: '-A', long: '--show-all' }),
-      new Option({ short: '-u' }),
+    arguments: [
+      new Argument(['-b', '--number-nonblank'], { action: 'store_true' }),
+      new Argument(['-n', '--number'], { action: 'store_true' }),
+      new Argument(['-s', '--squeeze-blank'], { action: 'store_true' }),
+      new Argument(['-v', '--show-nonprinting'], { action: 'store_true' }),
+      new Argument(['-E', '--show-ends'], { action: 'store_true' }),
+      new Argument('-e', { action: 'store_true' }),
+      new Argument('-t', { action: 'store_true' }),
+      new Argument(['-T', '--show-tabs'], { action: 'store_true' }),
+      new Argument(['-A', '--show-all'], { action: 'store_true' }),
+      new Argument('-u', { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   column: new CommandSpec({
-    options: [
-      new Option({ short: '-t' }),
-      new Option({ short: '-s', type: 'str' }),
-      new Option({ short: '-o', type: 'str' }),
+    arguments: [
+      new Argument('-t', { action: 'store_true' }),
+      new Argument('-s'),
+      new Argument('-o'),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   expand: new CommandSpec({
-    options: [
-      new Option({ short: '-t', long: '--tabs', type: 'str', multiple: true }),
-      new Option({ short: '-i', long: '--initial' }),
+    arguments: [
+      new Argument(['-t', '--tabs'], { action: 'append' }),
+      new Argument(['-i', '--initial'], { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   fmt: new CommandSpec({
-    options: [
-      new Option({ short: '-w', long: '--width', type: 'str' }),
-      new Option({ short: '-g', long: '--goal', type: 'str' }),
-      new Option({ short: '-c', long: '--crown-margin' }),
-      new Option({ short: '-p', long: '--prefix', type: 'str' }),
-      new Option({ short: '-s', long: '--split-only' }),
-      new Option({ short: '-t', long: '--tagged-paragraph' }),
-      new Option({ short: '-u', long: '--uniform-spacing' }),
+    arguments: [
+      new Argument(['-w', '--width']),
+      new Argument(['-g', '--goal']),
+      new Argument(['-c', '--crown-margin'], { action: 'store_true' }),
+      new Argument(['-p', '--prefix']),
+      new Argument(['-s', '--split-only'], { action: 'store_true' }),
+      new Argument(['-t', '--tagged-paragraph'], { action: 'store_true' }),
+      new Argument(['-u', '--uniform-spacing'], { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   fold: new CommandSpec({
-    options: [
-      new Option({ short: '-w', long: '--width', type: 'str' }),
-      new Option({ short: '-s', long: '--spaces' }),
-      new Option({ short: '-b', long: '--bytes' }),
-      new Option({ short: '-c', long: '--characters' }),
+    arguments: [
+      new Argument(['-w', '--width']),
+      new Argument(['-s', '--spaces'], { action: 'store_true' }),
+      new Argument(['-b', '--bytes'], { action: 'store_true' }),
+      new Argument(['-c', '--characters'], { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   head: new CommandSpec({
-    options: [
-      new Option({
-        short: '-n',
-        long: '--lines',
-        type: 'str',
-        numericShorthand: true,
-      }),
-      new Option({ short: '-c', long: '--bytes', type: 'str' }),
-      new Option({ short: '-q', long: '--quiet' }),
-      new Option({ long: '--silent' }),
-      new Option({ short: '-v', long: '--verbose' }),
-      new Option({ short: '-z', long: '--zero-terminated' }),
+    arguments: [
+      new Argument(['-n', '--lines'], { numericShorthand: true }),
+      new Argument(['-c', '--bytes']),
+      new Argument(['-q', '--quiet'], { action: 'store_true' }),
+      new Argument('--silent', { action: 'store_true' }),
+      new Argument(['-v', '--verbose'], { action: 'store_true' }),
+      new Argument(['-z', '--zero-terminated'], { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   look: new CommandSpec({
-    options: [new Option({ short: '-f' })],
-    positional: [new Operand({ type: 'str' }), new Operand({ type: 'path' })],
+    arguments: [
+      new Argument('-f', { action: 'store_true' }),
+      new Argument('text', { metavar: '', nargs: '?' }),
+      new Argument('path2', { metavar: '', type: 'path', nargs: '?' }),
+    ],
   }),
   nl: new CommandSpec({
-    options: [
-      new Option({ short: '-b', long: '--body-numbering', type: 'str', multiple: true }),
-      new Option({ short: '-v', long: '--starting-line-number', type: 'str', multiple: true }),
-      new Option({ short: '-f', long: '--footer-numbering', type: 'str', multiple: true }),
-      new Option({ short: '-h', long: '--header-numbering', type: 'str', multiple: true }),
-      new Option({ short: '-l', long: '--join-blank-lines', type: 'str', multiple: true }),
-      new Option({ short: '-p', long: '--no-renumber' }),
-      new Option({ short: '-s', long: '--number-separator', type: 'str' }),
-      new Option({ short: '-d', long: '--section-delimiter', type: 'str' }),
-      new Option({ short: '-i', long: '--line-increment', type: 'str', multiple: true }),
-      new Option({ short: '-w', long: '--number-width', type: 'str', multiple: true }),
-      new Option({ short: '-n', long: '--number-format', type: 'str', multiple: true }),
+    arguments: [
+      new Argument(['-b', '--body-numbering'], { action: 'append' }),
+      new Argument(['-v', '--starting-line-number'], { action: 'append' }),
+      new Argument(['-f', '--footer-numbering'], { action: 'append' }),
+      new Argument(['-h', '--header-numbering'], { action: 'append' }),
+      new Argument(['-l', '--join-blank-lines'], { action: 'append' }),
+      new Argument(['-p', '--no-renumber'], { action: 'store_true' }),
+      new Argument(['-s', '--number-separator']),
+      new Argument(['-d', '--section-delimiter']),
+      new Argument(['-i', '--line-increment'], { action: 'append' }),
+      new Argument(['-w', '--number-width'], { action: 'append' }),
+      new Argument(['-n', '--number-format'], { action: 'append' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   od: new CommandSpec({
-    options: [
-      new Option({ short: '-A', long: '--address-radix', type: 'str' }),
-      new Option({ short: '-j', long: '--skip-bytes', type: 'str' }),
-      new Option({ short: '-N', long: '--read-bytes', type: 'str' }),
-      new Option({ short: '-t', long: '--format', type: 'str', multiple: true }),
-      new Option({ short: '-c', type: 'bool' }),
+    arguments: [
+      new Argument(['-A', '--address-radix']),
+      new Argument(['-j', '--skip-bytes']),
+      new Argument(['-N', '--read-bytes']),
+      new Argument(['-t', '--format'], { action: 'append' }),
+      new Argument('-c', { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
-  rev: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+  rev: new CommandSpec({
+    arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+  }),
   tac: new CommandSpec({
-    options: [
-      new Option({ short: '-b', long: '--before' }),
-      new Option({ short: '-r', long: '--regex' }),
-      new Option({ short: '-s', long: '--separator', type: 'str' }),
+    arguments: [
+      new Argument(['-b', '--before'], { action: 'store_true' }),
+      new Argument(['-r', '--regex'], { action: 'store_true' }),
+      new Argument(['-s', '--separator']),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   tail: new CommandSpec({
-    options: [
-      new Option({ short: '-n', type: 'str', numericShorthand: true }),
-      new Option({ short: '-c', type: 'str' }),
-      new Option({ short: '-q' }),
-      new Option({ short: '-v' }),
-      // GNU: -f never takes an argument; only --follow= carries the
-      // descriptor/name choice, so the short stays clusterable.
-      new Option({
-        short: '-f',
-        long: '--follow',
-        type: 'str',
-        valueOptional: true,
-        shortValue: false,
-      }),
-      new Option({ short: '-F' }),
-      new Option({ long: '--retry' }),
-      new Option({ short: '-s', long: '--sleep-interval', type: 'str' }),
+    arguments: [
+      new Argument('-n', { numericShorthand: true }),
+      new Argument('-c'),
+      new Argument('-q', { action: 'store_true' }),
+      new Argument('-v', { action: 'store_true' }),
+      new Argument(['-f', '--follow'], { nargs: '?', attachedOnly: true, shortValue: false }),
+      new Argument('-F', { action: 'store_true' }),
+      new Argument('--retry', { action: 'store_true' }),
+      new Argument(['-s', '--sleep-interval']),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
   unexpand: new CommandSpec({
-    options: [
-      new Option({ short: '-t', long: '--tabs', type: 'str' }),
-      new Option({ short: '-a', long: '--all' }),
-      new Option({ long: '--first-only' }),
+    arguments: [
+      new Argument(['-t', '--tabs']),
+      new Argument(['-a', '--all'], { action: 'store_true' }),
+      new Argument('--first-only', { action: 'store_true' }),
+      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
     ],
-    rest: new Operand({ type: 'path' }),
   }),
 }

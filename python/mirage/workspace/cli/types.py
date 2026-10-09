@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLI
 from mirage.types import JsonValue
 
 
@@ -32,7 +32,7 @@ class CLIInstall:
     Args:
         name (str): installed head word (the YAML ``clis:`` key or the
             first argument of ``register_cli``).
-        spec (CLISpec): the program tree the head dispatches into.
+        cli (CLI): the program tree the head dispatches into.
         config (BaseModel | dict[str, JsonValue] | None): the
             installation's validated ``config_model`` instance, handed
             to every leaf ``fn``; a script spec has no model, so its
@@ -41,5 +41,5 @@ class CLIInstall:
     """
 
     name: str
-    spec: CLISpec
+    cli: CLI
     config: "BaseModel | dict[str, JsonValue] | None" = None

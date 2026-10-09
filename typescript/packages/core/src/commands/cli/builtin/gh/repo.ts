@@ -453,7 +453,7 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
       : parseRepo(spec)
   const url = `${webOrigin(config)}/${ref.owner}/${ref.repo}.git`
   const target = names[1] ?? ref.repo
-  const leaf = findNode(GIT, ['clone'])?.node ?? GIT
+  const leaf = findNode(GIT.spec, ['clone'])?.node ?? GIT.spec
   const words = [...gitflags, url, target]
   const parsed = parseCommand(leaf, words, inv.cwd.virtual, 'git clone', inv.env, true)
   const git: CLIInvocation = {

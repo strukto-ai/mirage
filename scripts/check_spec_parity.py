@@ -34,6 +34,7 @@ EXCEPTIONS = ROOT / "scripts" / "parity" / "parity_exceptions.json"
 
 BY_VFS = "_meta.by_vfs"
 BY_VFS_KEYS = "_meta.by_vfs.keys"
+NODE_ONLY_CLIS = {"hf", "himalaya"}
 
 
 def spec_fields(py: dict[str, Any], ts: dict[str, Any]) -> list[str]:
@@ -80,6 +81,77 @@ def load_vfs_trees() -> dict[str, dict[str, Any]]:
             )
         loaded[tree] = json.loads(path.read_text())
     return loaded
+
+
+def cli_differences(py: Any, ts: Any, path: str) -> list[str]:
+    """Locate grammar and binding drift without dumping an entire tree.
+
+    Args:
+        py (Any): the Python JSON value.
+        ts (Any): the TypeScript JSON value.
+        path (str): the command, argument or binding being compared.
+    """
+    if isinstance(py, dict) and isinstance(ts, dict):
+        differences = []
+        for key in sorted(py.keys() | ts.keys()):
+            if key not in py or key not in ts:
+                differences.append(f"{path}.{key}: missing in one host")
+            else:
+                differences.extend(
+                    cli_differences(py[key], ts[key], f"{path}.{key}")
+                )
+        return differences
+    if isinstance(py, list) and isinstance(ts, list):
+        if len(py) != len(ts):
+            return [
+                f"{path}: python has {len(py)} entries, typescript has {len(ts)}"
+            ]
+        return [
+            difference
+            for index, (left, right) in enumerate(zip(py, ts))
+            for difference in cli_differences(left, right, f"{path}[{index}]")
+        ]
+    if py != ts:
+        return [f"{path}: python={py!r} typescript={ts!r}"]
+    return []
+
+
+def check_cli_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
+    """Compare every bundled CLI and shared runtime variant.
+
+    Args:
+        trees (dict[str, dict[str, Any]]): the generated host manifests.
+    """
+    missing = [
+        host for host, tree in trees.items() if not tree.get("cli_specs")
+    ]
+    if missing:
+        return [f"CLI manifests missing for {missing}; regenerate both hosts"]
+    py = trees["python"]["cli_specs"]
+    variants = {host: trees[host]["cli_specs"] for host in ("node", "browser")}
+    ts_names = set(variants["node"])
+    failures = []
+    if set(py) != ts_names:
+        failures.append(
+            f"CLI inventory: python-only={sorted(set(py) - ts_names)}, "
+            f"typescript-only={sorted(ts_names - set(py))}"
+        )
+    browser_names = set(variants["browser"])
+    expected_browser = ts_names - NODE_ONLY_CLIS
+    if browser_names != expected_browser:
+        failures.append(
+            "CLI inventory: "
+            f"browser-missing={sorted(expected_browser - browser_names)}, "
+            f"browser-only={sorted(browser_names - expected_browser)}"
+        )
+    for host, programs in variants.items():
+        for name in sorted(py.keys() & programs.keys()):
+            failures.extend(
+                cli_differences(
+                    py[name], programs[name], f"CLI {name} ({host})"
+                )
+            )
+    return failures
 
 
 def merge_variants(
@@ -525,32 +597,38 @@ def describe(
             f"    {diff}: python={py['_meta'].get(key)!r} "
             f"typescript={ts['_meta'].get(key)!r}"
         )
-    if diff == "options":
-        # An option that declares only one spelling carries only that
-        # key, since the dumps omit anything left at its default.
+    if diff == "arguments":
         py_by_name = {
-            o.get("long") or o.get("short"): o for o in py.get("options", [])
+            tuple(arg["names"]): arg for arg in py.get("arguments", [])
         }
         ts_by_name = {
-            o.get("long") or o.get("short"): o for o in ts.get("options", [])
+            tuple(arg["names"]): arg for arg in ts.get("arguments", [])
         }
         lines = [f"    {diff}:"]
-        for key in sorted(set(py_by_name) | set(ts_by_name)):
-            py_opt, ts_opt = py_by_name.get(key), ts_by_name.get(key)
+        for argument_names in sorted(set(py_by_name) | set(ts_by_name)):
+            py_opt, ts_opt = (
+                py_by_name.get(argument_names),
+                ts_by_name.get(argument_names),
+            )
             if py_opt == ts_opt:
                 continue
             if py_opt is None:
-                lines.append(f"      {key}: typescript-only")
+                lines.append(f"      {argument_names}: typescript-only")
             elif ts_opt is None:
-                lines.append(f"      {key}: python-only")
+                lines.append(f"      {argument_names}: python-only")
             else:
                 for k in sorted(set(py_opt) | set(ts_opt)):
                     if py_opt.get(k) != ts_opt.get(k):
                         lines.append(
-                            f"      {key}.{k}: "
+                            f"      {argument_names}.{k}: "
                             f"python={py_opt.get(k)!r} "
                             f"typescript={ts_opt.get(k)!r}"
                         )
+        if len(lines) == 1:
+            lines.append(
+                f"      order: python={list(py_by_name)!r} "
+                f"typescript={list(ts_by_name)!r}"
+            )
         return "\n".join(lines)
     return f"    {diff}: python={py.get(diff)!r} typescript={ts.get(diff)!r}"
 
@@ -628,6 +706,7 @@ def main() -> int:
         failures.append(f"commands only in typescript: {only_ts}")
 
     trees = load_vfs_trees()
+    failures.extend(check_cli_specs(trees))
     failures.extend(compare_variants(ts_variants))
     failures.extend(
         check_vfs_names(trees, language_only, expansions, unconstructible)
@@ -717,7 +796,10 @@ def main() -> int:
         print(f"\n{len(failures)} divergence(s) between python and typescript")
         return 1
 
-    print(f"command spec parity OK: {len(py_specs)} commands match")
+    print(
+        f"command spec parity OK: {len(py_specs)} commands and "
+        f"{len(trees['python']['cli_specs'])} CLI trees match"
+    )
     return 0
 
 

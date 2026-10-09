@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compileSpec } from '../../commands/spec/compile.ts'
 import { describe, expect, it } from 'vitest'
 import { TRELLO_COMMANDS } from '../../commands/builtin/trello/index.ts'
 import type { Command } from '../../commands/config.ts'
@@ -55,8 +56,9 @@ function unmatched(line: string, known: Map<string, Command>): string[] {
   const name = nameOf(tokens, known)
   const rc = name === null ? undefined : known.get(name)
   if (name === null || rc === undefined) return [`'${line}' names no registered command`]
-  const longs = new Set(rc.spec.options.map((o) => o.long))
-  const takesOperands = rc.spec.rest !== null || rc.spec.positional.length > 0
+  const longs = new Set(compileSpec(rc.spec).options.map((o) => o.names.at(-1)))
+  const takesOperands =
+    compileSpec(rc.spec).rest !== null || compileSpec(rc.spec).positional.length > 0
   const problems: string[] = []
   const rest = tokens.slice(name.split(' ').length)
   let i = 0

@@ -11,13 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { command } from '../config.ts'
 import { BUILTIN_SPECS, registeredSpec } from './builtins.ts'
 import { hasInjectedVersion, standardRequest } from './standard.ts'
-import { CommandSpec, Operand, Option } from './types.ts'
+import { CommandSpec, Argument } from './types.ts'
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([new Uint8Array(), new IOResult()])
@@ -57,7 +56,9 @@ describe('standardRequest', () => {
   })
 
   it('is null when the command declares its own --version', () => {
-    const own = new CommandSpec({ options: [new Option({ long: '--version' })] })
+    const own = new CommandSpec({
+      arguments: [new Argument('--version', { action: 'store_true' })],
+    })
     expect(standardRequest('custom', specFor('custom', own), ['--version'])).toBeNull()
   })
 
@@ -79,7 +80,9 @@ describe('standardRequest', () => {
   it('is null for an abbreviation carrying a value or naming two options', () => {
     expect(standardRequest('tsort', specFor('tsort'), ['--versio=x'])).toBeNull()
     expect(standardRequest('tsort', specFor('tsort'), ['--version=x'])).toBeNull()
-    const two = new CommandSpec({ options: [new Option({ long: '--verbose' })] })
+    const two = new CommandSpec({
+      arguments: [new Argument('--verbose', { action: 'store_true' })],
+    })
     expect(standardRequest('custom', specFor('custom', two), ['--ver'])).toBeNull()
   })
 
@@ -89,7 +92,10 @@ describe('standardRequest', () => {
   it('holds the sole-argument window for the builtin alone', () => {
     expect(standardRequest('expr', builtinSpec('expr'), ['--versio'])).not.toBeNull()
     expect(standardRequest('expr', builtinSpec('expr'), ['--version', 'x'])).toBeNull()
-    const borrowed = specFor('expr', new CommandSpec({ rest: new Operand({ type: 'str' }) }))
+    const borrowed = specFor(
+      'expr',
+      new CommandSpec({ arguments: [new Argument('texts', { metavar: '', nargs: '*' })] }),
+    )
     expect(standardRequest('expr', borrowed, ['--version', 'x'])).not.toBeNull()
   })
 
@@ -213,7 +219,7 @@ describe('standardRequest', () => {
   it('keeps the words after a remainder operand', () => {
     const rest = specFor(
       'mytool',
-      new CommandSpec({ rest: new Operand({ type: 'str', remainder: true }) }),
+      new CommandSpec({ arguments: [new Argument('texts', { metavar: '', nargs: 'REMAINDER' })] }),
     )
     expect(standardRequest('mytool', rest, ['operand', '--version'])).toBeNull()
     expect(standardRequest('mytool', rest, ['operand', '--vers'])).toBeNull()
@@ -242,7 +248,10 @@ describe('standardRequest', () => {
   // that command.
   it('does not let a borrowed name borrow the family', () => {
     for (const name of ['grep', 'zgrep']) {
-      const borrowed = specFor(name, new CommandSpec({ rest: new Operand({ type: 'str' }) }))
+      const borrowed = specFor(
+        name,
+        new CommandSpec({ arguments: [new Argument('texts', { metavar: '', nargs: '*' })] }),
+      )
       expect(standardRequest(name, borrowed, ['--version', '--bogus'])).not.toBeNull()
       expect(standardRequest(name, borrowed, ['--bogus', '--version'])).toBeNull()
     }

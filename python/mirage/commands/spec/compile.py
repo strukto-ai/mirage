@@ -17,7 +17,155 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
-from mirage.commands.spec.types import CommandSpec, ValueType
+from mirage.commands.spec.types import Argument, CommandSpec, ValueType
+
+
+def option_spellings(argument: Argument) -> tuple[str | None, str | None]:
+    """First short and long spelling, for dialects that display each separately."""
+    return (
+        next(
+            (name for name in argument.names if not name.startswith("--")),
+            None,
+        ),
+        next((name for name in argument.names if name.startswith("--")), None),
+    )
+
+
+def argument_dest(argument: Argument) -> str:
+    """Canonical option spelling, or the positional argument's name."""
+    return next(
+        (name for name in argument.names if name.startswith("--")),
+        argument.names[0],
+    )
+
+
+def positional_name(argument: Argument) -> str:
+    """Declared positional placeholder, including an explicit empty placeholder."""
+    return (
+        argument.metavar if argument.metavar is not None else argument.names[0]
+    )
+
+
+def positional_required(argument: Argument) -> bool:
+    return argument.nargs not in ("?", "*", "REMAINDER")
+
+
+def argument_shapes(
+    spec: CommandSpec,
+) -> tuple[tuple[Argument, ...], tuple[Argument, ...], Argument | None]:
+    """Lower the public argument declarations into scanning slots."""
+    options: list[Argument] = []
+    positional: list[Argument] = []
+    rest: Argument | None = None
+    seen_names: set[str] = set()
+    for argument in spec.arguments:
+        if not argument.names or any(
+            not name or name in ("-", "--") for name in argument.names
+        ):
+            raise ValueError("argument requires a name or option spelling")
+        option = argument.names[0].startswith("-")
+        if any(name.startswith("-") != option for name in argument.names):
+            raise ValueError(
+                "argument cannot mix positional names and option spellings"
+            )
+        if argument.type == "bool":
+            raise ValueError(
+                "argument type 'bool' is expressed with action='store_true'"
+            )
+        if argument.action not in (
+            "store",
+            "store_true",
+            "count",
+            "append",
+            "extend",
+        ):
+            raise ValueError(f"invalid argument action {argument.action!r}")
+        if argument.nargs not in (None, "?", "*", "+", "REMAINDER") and not (
+            isinstance(argument.nargs, int) and argument.nargs > 0
+        ):
+            raise ValueError(f"invalid nargs {argument.nargs!r}")
+        if argument.value_types and (
+            not isinstance(argument.nargs, int)
+            or len(argument.value_types) != argument.nargs
+        ):
+            raise ValueError(
+                "value_types must match the argument's fixed nargs"
+            )
+        if option:
+            if argument.provided_by or argument.text_when:
+                raise ValueError(
+                    "provided_by and text_when belong to positional arguments"
+                )
+            if argument.action in ("store_true", "count") and (
+                argument.nargs is not None or argument.type != "str"
+            ):
+                raise ValueError("zero-token actions cannot declare nargs")
+            if argument.nargs in ("*", "+", "REMAINDER"):
+                raise ValueError(
+                    "variadic nargs belongs to positional arguments"
+                )
+            if isinstance(argument.nargs, int) and argument.action == "append":
+                raise ValueError(
+                    "multi-value options use action='extend' or 'store'"
+                )
+            if argument.value_types and argument.value_types not in (
+                ("str", "str"),
+                ("str", "path"),
+            ):
+                raise ValueError("value_types supports named text/path pairs")
+            if argument.value_types and argument.nargs != 2:
+                raise ValueError("value_types requires nargs=2")
+            if argument.attached_only and argument.nargs != "?":
+                raise ValueError("attached_only requires nargs='?'")
+            options.append(argument)
+        else:
+            if len(argument.names) != 1:
+                raise ValueError(
+                    "a positional argument takes exactly one name"
+                )
+            name = argument.names[0]
+            if name in seen_names:
+                raise ValueError(f"duplicate positional argument {name!r}")
+            seen_names.add(name)
+            if argument.default is not None:
+                raise ValueError("positional defaults are not supported")
+            if argument.value_types:
+                raise ValueError("value_types belongs to fixed option values")
+            if argument.required:
+                raise ValueError(
+                    "positional requiredness is expressed with nargs"
+                )
+            if argument.action != "store":
+                raise ValueError("positional arguments use action='store'")
+            if (
+                argument.env
+                or argument.numeric_shorthand
+                or argument.attached_only
+                or not argument.short_value
+            ):
+                raise ValueError(
+                    "option settings cannot be used on positional arguments"
+                )
+            if argument.nargs in ("*", "+", "REMAINDER"):
+                if rest is not None:
+                    raise ValueError(
+                        "only one variadic positional argument is supported"
+                    )
+                rest = argument
+            else:
+                if rest is not None:
+                    raise ValueError(
+                        "a variadic positional argument must be last"
+                    )
+                positional.extend(
+                    [argument]
+                    * (
+                        argument.nargs
+                        if isinstance(argument.nargs, int)
+                        else 1
+                    )
+                )
+    return tuple(options), tuple(positional), rest
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,8 +200,6 @@ class CompiledSpec:
         dest (dict[str, str]): spelling -> canonical spelling.
         multiple_dests (frozenset[str]): canonical spellings that
             accumulate repeated values into a list.
-        pair_dests (frozenset[str]): canonical spellings that consume two
-            tokens per occurrence and accumulate both, flattened.
         count_dests (frozenset[str]): canonical spellings of boolean
             flags whose occurrences accumulate into an int (click count,
             ``-vvv``).
@@ -77,13 +223,16 @@ class CompiledSpec:
             ``-<digits>`` shorthand, when one option declares it.
         rest_kind (ValueType | None): kind of the rest operand.
         remainder (bool): the rest operand gathers every word from the
-            first operand on, options included (``Operand.remainder``,
+            first operand on, options included (``Argument.nargs``,
             argparse's ``nargs=REMAINDER``).
         base_dest (str | None): canonical spelling of the option that
             re-bases the path operands after it (``CommandSpec.
             operand_base``, tar's -C).
     """
 
+    options: tuple[Argument, ...] = ()
+    positional: tuple[Argument, ...] = ()
+    rest: Argument | None = None
     bool_spellings: frozenset[str] = frozenset()
     value_spellings: tuple[str, ...] = ()
     attach_spellings: tuple[str, ...] = ()
@@ -97,7 +246,6 @@ class CompiledSpec:
     kind_by_dest: dict[str, ValueType] = field(default_factory=dict)
     dest: dict[str, str] = field(default_factory=dict)
     multiple_dests: frozenset[str] = frozenset()
-    pair_dests: frozenset[str] = frozenset()
     count_dests: frozenset[str] = frozenset()
     choices_by_dest: dict[str, tuple[str, ...]] = field(default_factory=dict)
     required_dests: tuple[str, ...] = ()
@@ -106,6 +254,11 @@ class CompiledSpec:
     numeric_dest: str | None = None
     rest_kind: ValueType | None = None
     base_dest: str | None = None
+    nargs_by_dest: dict[str, int] = field(default_factory=dict)
+    value_types_by_dest: dict[str, tuple[ValueType, ...]] = field(
+        default_factory=dict
+    )
+    detached_optional_spellings: frozenset[str] = frozenset()
     remainder: bool = False
 
     def dest_of(self, spelling: str) -> str:
@@ -301,7 +454,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     kind_by_dest: dict[str, ValueType] = {}
     dest: dict[str, str] = {}
     multiple_dests: set[str] = set()
-    pair_dests: set[str] = set()
+    nargs_by_dest: dict[str, int] = {}
     count_dests: set[str] = set()
     choices_by_dest: dict[str, tuple[str, ...]] = {}
     required_dests: list[str] = []
@@ -309,39 +462,16 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     env_by_dest: dict[str, str] = {}
     numeric_dest: str | None = None
 
-    for opt in spec.options:
-        canonical = opt.long if opt.long else opt.short
-        if canonical is None:
-            raise ValueError("option requires a short or long spelling")
-        for spelling in (opt.short, opt.long):
-            if spelling is None:
-                continue
+    options, positional, rest = argument_shapes(spec)
+    for opt in options:
+        canonical = argument_dest(opt)
+        for spelling in opt.names:
             if spelling in seen_spellings:
                 raise ValueError(f"duplicate option spelling {spelling!r}")
             seen_spellings.add(spelling)
-        if opt.count and opt.type != "bool":
-            raise ValueError(
-                f"option {canonical!r}: count requires a "
-                "boolean flag (type 'bool')"
-            )
-        if opt.pair and opt.type == "bool":
-            raise ValueError(
-                f"option {canonical!r}: pair requires a value "
-                "flag (a boolean consumes no token)"
-            )
-        if opt.pair and opt.value_optional:
-            raise ValueError(
-                f"option {canonical!r}: pair and value_optional "
-                "are mutually exclusive"
-            )
-        if opt.pair and opt.short:
-            # A short spelling clusters and takes an attached value, both
-            # of which are single-token rules; jq's own two-token options
-            # are long-only for the same reason.
-            raise ValueError(
-                f"option {canonical!r}: pair requires a long spelling only"
-            )
-        if opt.type == "bool" and (opt.choices or opt.default is not None):
+        if opt.action in ("store_true", "count") and (
+            opt.choices or opt.default is not None
+        ):
             raise ValueError(
                 f"option {canonical!r}: choices and default "
                 "require a value flag"
@@ -369,17 +499,15 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
                     f"{opt.default!r} is not a number"
                 )
             float_dests.add(canonical)
-        if opt.short:
-            dest[opt.short] = canonical
-        if opt.long:
-            dest[opt.long] = canonical
-        if opt.type != "bool":
+        for spelling in opt.names:
+            dest[spelling] = canonical
+        if opt.action not in ("store_true", "count"):
             kind_by_dest[canonical] = opt.type
-        if opt.multiple or opt.pair:
+        if opt.action in ("append", "extend"):
             multiple_dests.add(canonical)
-        if opt.pair:
-            pair_dests.add(canonical)
-        if opt.count:
+        if isinstance(opt.nargs, int):
+            nargs_by_dest[canonical] = opt.nargs
+        if opt.action == "count":
             count_dests.add(canonical)
         if opt.choices:
             choices_by_dest[canonical] = opt.choices
@@ -390,34 +518,40 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         if opt.env is not None:
             env_by_dest[canonical] = opt.env
 
-        if opt.short:
-            if opt.type == "bool":
-                bool_spellings.add(opt.short)
-            elif opt.value_optional:
-                # GNU optional argument: the bare short is boolean and a
-                # value only rides attached to the same token.
-                bool_spellings.add(opt.short)
+        for spelling in opt.names:
+            if spelling.startswith("--"):
+                long_spellings.append(spelling)
+                if opt.action in ("store_true", "count"):
+                    long_bool_spellings.add(spelling)
+                elif opt.nargs == "?":
+                    long_bool_spellings.add(spelling)
+                    long_optional_spellings.add(spelling)
+                    kind_of[spelling] = opt.type
+                else:
+                    long_value_spellings.add(spelling)
+                    kind_of[spelling] = opt.type
+            elif opt.action in ("store_true", "count"):
+                bool_spellings.add(spelling)
+            elif opt.nargs == "?":
+                bool_spellings.add(spelling)
                 if opt.short_value:
-                    attach_spellings.append(opt.short)
-                kind_of[opt.short] = opt.type
+                    attach_spellings.append(spelling)
+                kind_of[spelling] = opt.type
             else:
-                value_spellings.append(opt.short)
-                kind_of[opt.short] = opt.type
+                value_spellings.append(spelling)
+                kind_of[spelling] = opt.type
                 if opt.numeric_shorthand:
                     numeric_dest = canonical
-        if opt.long:
-            long_spellings.append(opt.long)
-            if opt.type == "bool":
-                long_bool_spellings.add(opt.long)
-            elif opt.value_optional:
-                # GNU optional argument: bare form is boolean, value only
-                # attaches via `=`; a detached next token is an operand.
-                long_bool_spellings.add(opt.long)
-                long_optional_spellings.add(opt.long)
-                kind_of[opt.long] = opt.type
-            else:
-                long_value_spellings.add(opt.long)
-                kind_of[opt.long] = opt.type
+
+    for operand in (*positional, *((rest,) if rest is not None else ())):
+        argument = operand
+        name = argument.names[0]
+        if argument.type == "int":
+            int_dests.add(name)
+        elif argument.type == "float":
+            float_dests.add(name)
+        if argument.choices:
+            choices_by_dest[name] = argument.choices
 
     base_dest: str | None = None
     if spec.operand_base is not None:
@@ -426,7 +560,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             raise ValueError(
                 f"operand_base {spec.operand_base!r} is not a declared option"
             )
-        if kind_by_dest.get(base_dest) != "path" or base_dest in pair_dests:
+        if kind_by_dest.get(base_dest) != "path" or base_dest in nargs_by_dest:
             raise ValueError(
                 f"operand_base {spec.operand_base!r} must be a "
                 "single-token path option"
@@ -438,6 +572,21 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     attach_spellings.sort(key=len, reverse=True)
 
     return CompiledSpec(
+        options=options,
+        positional=positional,
+        rest=rest,
+        nargs_by_dest=nargs_by_dest,
+        value_types_by_dest={
+            argument_dest(opt): opt.value_types
+            for opt in options
+            if opt.value_types
+        },
+        detached_optional_spellings=frozenset(
+            name
+            for opt in options
+            if opt.nargs == "?" and not opt.attached_only
+            for name in opt.names
+        ),
         bool_spellings=frozenset(bool_spellings),
         value_spellings=tuple(value_spellings),
         attach_spellings=tuple(attach_spellings),
@@ -451,14 +600,13 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         kind_by_dest=kind_by_dest,
         dest=dest,
         multiple_dests=frozenset(multiple_dests),
-        pair_dests=frozenset(pair_dests),
         count_dests=frozenset(count_dests),
         choices_by_dest=choices_by_dest,
         required_dests=tuple(required_dests),
         defaults=defaults,
         env_by_dest=env_by_dest,
         numeric_dest=numeric_dest,
-        rest_kind=spec.rest.type if spec.rest is not None else None,
+        rest_kind=rest.type if rest is not None else None,
         base_dest=base_dest,
-        remainder=spec.rest is not None and spec.rest.remainder,
+        remainder=rest is not None and rest.nargs == "REMAINDER",
     )

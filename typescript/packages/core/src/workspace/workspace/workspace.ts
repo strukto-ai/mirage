@@ -37,7 +37,7 @@ import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
-import type { CLISpec } from '../../commands/cli/types.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PlacementPolicy } from '../../policy/builtin/placement.ts'
@@ -585,11 +585,7 @@ export class Workspace {
    * names are two accounts); config validates through the spec's
    * configModel, fail loud at install time.
    */
-  registerCli(
-    name: string,
-    spec: CLISpec,
-    config: Record<string, unknown> | null = null,
-  ): CLIInstall {
+  registerCli(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.registry.clis.install(name, spec, config)
   }
@@ -975,7 +971,7 @@ export class Workspace {
   private cliVerbs(): ReadonlyMap<string, ReadonlySet<string>> {
     const out = new Map<string, ReadonlySet<string>>()
     for (const [name, install] of this.registry.clis.items()) {
-      out.set(name, new Set(install.spec.subcommands.map((child) => child.name)))
+      out.set(name, new Set(install.cli.spec.subcommands.map((child) => child.name)))
     }
     return out
   }
@@ -2044,7 +2040,7 @@ export class Workspace {
     // survive without a registry lookup.
     const cliOverrides: CLIOverrides = {}
     for (const [name, install] of this.registry.clis.items()) {
-      cliOverrides[name] = [install.spec, install.config as Record<string, unknown> | null]
+      cliOverrides[name] = [install.cli, install.config as Record<string, unknown> | null]
     }
     const Ctor = this.constructor as typeof Workspace
     return (await Ctor._fromState(state, opts, overrides, cliOverrides)) as this

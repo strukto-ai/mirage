@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.linear import LINEAR
+from mirage.commands.spec.compile import compile_spec
 from mirage.core.linear.config import LinearConfig
 
 NOUNS = [
@@ -29,16 +30,16 @@ NOUNS = [
 
 
 def leaf(*path: str):
-    node = LINEAR
+    node = LINEAR.spec
     for name in path:
         node = next(c for c in node.subcommands if c.name == name)
     return node
 
 
 def test_tree_shape_keeps_the_mount_grammar():
-    assert LINEAR.name == "linear"
+    assert LINEAR.spec.name == "linear"
     assert LINEAR.config_model is LinearConfig
-    assert [g.name for g in LINEAR.subcommands] == NOUNS
+    assert [g.name for g in LINEAR.spec.subcommands] == NOUNS
     assert [v.name for v in leaf("issue").subcommands] == [
         "list",
         "get",
@@ -69,17 +70,31 @@ def test_write_classification():
         ("comment", "add"),
         ("comment", "update"),
     ):
-        assert leaf(noun, verb).write
+        assert LINEAR.handlers[
+            " ".join(
+                (
+                    noun,
+                    verb,
+                )
+            )
+        ].write
     for noun, verb in (
         ("team", "list"),
         ("issue", "list"),
         ("issue", "get"),
         ("comment", "list"),
     ):
-        assert not leaf(noun, verb).write
+        assert not LINEAR.handlers[
+            " ".join(
+                (
+                    noun,
+                    verb,
+                )
+            )
+        ].write
 
 
 def test_issue_operand_is_positional():
-    assert leaf("issue", "get").rest is not None
-    assert leaf("issue", "update").rest is not None
-    assert leaf("issue", "list").rest is None
+    assert compile_spec(leaf("issue", "get")).rest is not None
+    assert compile_spec(leaf("issue", "update")).rest is not None
+    assert compile_spec(leaf("issue", "list")).rest is None

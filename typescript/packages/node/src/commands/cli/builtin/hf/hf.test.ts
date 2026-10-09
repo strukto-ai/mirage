@@ -11,17 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { parseCommand } from '@struktoai/mirage-core/commands/spec/parser'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type * as CommitModule from '../../../../core/hf_hub/commit.ts'
-import type { CLIView, CLIInvocation, CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import type { CLIView, CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
-import type { FlagValue } from '@struktoai/mirage-core/commands/spec/types'
+import type { CommandSpec, FlagValue } from '@struktoai/mirage-core/commands/spec/types'
 import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { HfHubError } from '../../../../core/hf_hub/client.ts'
 import { Absence } from '../../../../core/hf_hub/repo.ts'
@@ -97,7 +97,7 @@ async function text(result: CommandFnResult): Promise<string> {
   return new TextDecoder().decode(await materialize(result[0]))
 }
 
-function child(spec: CLISpec, name: string): CLISpec {
+function child(spec: CommandSpec, name: string): CommandSpec {
   const found = spec.subcommands.find((s) => s.name === name)
   if (found === undefined) throw new Error(`no subcommand ${name}`)
   return found
@@ -165,14 +165,39 @@ describe('the hf program tree', () => {
     // Upstream v1 had `huggingface-cli tag --list/--delete` on one leaf;
     // `hf repo tag` is a group. Getting this wrong makes every tag line
     // mirage accepts one the real binary refuses.
-    const tag = child(child(HF, 'repo'), 'tag')
-    expect(tag.fn).toBeNull()
+    const tag = child(child(HF.spec, 'repo'), 'tag')
+    expect(HF.handlers['repo tag']).toBeUndefined()
     expect(tag.subcommands.map((s) => s.name)).toEqual(['create', 'list', 'delete'])
   })
 
+  it('declares variadic filenames while continuing to parse flags', () => {
+    const download = child(HF.spec, 'download')
+    const parsed = parseCommand(
+      download,
+      ['acme/widget', 'one.json', '--revision', 'dev', 'two.json'],
+      '/',
+    )
+    expect(parsed.args).toEqual([
+      ['acme/widget', 'str'],
+      ['one.json', 'str'],
+      ['two.json', 'str'],
+    ])
+    expect(parsed.flags['--revision']).toBe('dev')
+    expect(parsed.missingRequiredOperands).toEqual([])
+    const deletion = child(child(HF.spec, 'repo-files'), 'delete')
+    expect(parseCommand(deletion, ['acme/widget'], '/').missingRequiredOperands).toEqual([
+      'PATTERNS',
+    ])
+    expect(
+      parseCommand(deletion, ['acme/widget', '*.json', '*.txt'], '/').missingRequiredOperands,
+    ).toEqual([])
+  })
+
   it('spells space_sdk with upstream underscore', () => {
-    const create = child(child(HF, 'repo'), 'create')
-    expect(create.options.map((o) => o.long)).toContain('--space_sdk')
+    const create = child(child(HF.spec, 'repo'), 'create')
+    expect(
+      create.arguments.flatMap((o) => o.names.filter((name) => name.startsWith('--'))),
+    ).toContain('--space_sdk')
   })
 })
 
@@ -349,7 +374,7 @@ describe('a tree the Hub refuses', () => {
 })
 
 describe('required operands', () => {
-  // `Operand.required` only refuses under the clap dialect, and hf is
+  // required positional arguments only refuses under the clap dialect, and hf is
   // argparse, so each leaf owns the check. Without it the line reached the
   // Hub and came back as an authentication error instead of naming the slot.
   it('names the one empty slot', async () => {

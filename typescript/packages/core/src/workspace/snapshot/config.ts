@@ -14,12 +14,12 @@
 
 import { IndexType, type IndexConfig, type RedisIndexConfig } from '../../cache/index/config.ts'
 import { REDACTED_SECRET, hasRedactedSecret } from '../../vfs/secrets.ts'
-import type { CLISpec } from '../../commands/cli/types.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { MountMode, WritePolicy } from '../../types.ts'
 
 export interface MountArgs {
-  clis?: Record<string, [string | CLISpec, Record<string, unknown> | null]>
+  clis?: Record<string, [string | CLI, Record<string, unknown> | null]>
   mountArgs: Record<string, Mount>
   defaultSessionId: string | undefined
   defaultAgentId: string | null

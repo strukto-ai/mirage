@@ -24,7 +24,8 @@ import { MongoClient } from 'mongodb'
 import type { FileEntryWithStats, SFTPWrapper } from 'ssh2'
 import {
   buildRuntime,
-  CLISpec,
+  CLI,
+  CommandSpec,
   DiskVFS,
   Limit,
   MongoDBVFS,
@@ -649,8 +650,8 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   // entry embeds a policy script here; cli.sh writes them back out to
   // files to drive the yaml path.
   for (const [name, entry] of Object.entries(world.clis ?? {})) {
-    const spec = new CLISpec({
-      name,
+    const spec = new CLI({
+      spec: new CommandSpec({ name }),
       script: new ScriptSource(entry.script, entry.language ?? 'python'),
       ...(entry.runtime !== undefined ? { runtime: entry.runtime } : {}),
     })

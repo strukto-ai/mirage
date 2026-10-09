@@ -11,37 +11,79 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
-import { optionMetavar, renderHelp } from './help.ts'
-import { CommandSpec, Operand, Option, UsageStyle } from './types.ts'
+import { specOf } from './builtins.ts'
+import { argparseHelp, optionMetavar, renderHelp } from './help.ts'
+import { CommandSpec, Argument, UsageStyle } from './types.ts'
 
 describe('renderHelp', () => {
   it('renders name, description, usage, and flag table', () => {
     const spec = new CommandSpec({
       description: 'Send a thing.',
-      options: [
-        new Option({ long: '--to', type: 'str', description: 'Recipient' }),
-        new Option({ long: '--help', type: 'bool', description: 'Show help' }),
+      arguments: [
+        new Argument('--to', { nargs: 3, help: 'Recipient' }),
+        new Argument('--files', { type: 'path', nargs: 2, action: 'extend' }),
+        new Argument('--inputs', { type: 'path', nargs: 2, action: 'extend', metavar: 'FILE' }),
+        new Argument('--labels', { nargs: 2, action: 'extend' }),
+        new Argument(['-h', '--help', '--usage'], { action: 'store_true', help: 'Show help' }),
+        new Argument('--color', { nargs: '?' }),
+        new Argument('--backup', { nargs: '?', attachedOnly: true }),
+        new Argument('RECIPIENT', { help: 'Who receives the message' }),
+        new Argument('FILE', { type: 'path', nargs: '?', help: 'Message to send' }),
+        new Argument('BACKUP', { type: 'path', nargs: '?' }),
+        new Argument('WORDS', { nargs: '*', help: 'Additional words' }),
       ],
     })
     const out = renderHelp('gws thing send', spec)
     expect(out).toContain('gws thing send: Send a thing.')
     expect(out).toContain('Usage: gws thing send [flags]')
-    expect(out).toContain('--to <text>')
+    expect(out).toContain('--to <text> <text> <text>')
     expect(out).toContain('Recipient')
-    expect(out).toContain('--help')
+    expect(out).toContain('-h, --help, --usage')
+    const help = argparseHelp('gws thing send', spec)
+    expect(help).toContain('--to TO TO TO')
+    expect(help).toContain('--color [COLOR]')
+    expect(help).toContain('--backup[=BACKUP]')
+    expect(help).toContain('  RECIPIENT  Who receives the message\n')
+    expect(help).toContain('  FILE       Message to send\n')
+    expect(help).toContain('  BACKUP     Virtual path\n')
+    expect(help).toContain('  WORDS      Additional words\n')
+    for (const style of Object.values(UsageStyle)) {
+      const helpText = renderHelp('gws thing send', spec, [], style)
+      expect(helpText).toContain('Arguments:\n')
+      expect(helpText).toContain('  <RECIPIENT>  Who receives the message\n')
+      expect(helpText).toContain('  <FILE>       Message to send\n')
+      expect(helpText).toContain('  <WORDS>      Additional words\n')
+    }
+    for (const [flag, generic, named] of [
+      ['--files', '<path> <path>', 'FILES FILES'],
+      ['--inputs', '<FILE> <FILE>', 'FILE FILE'],
+      ['--labels', '<text> <text>', 'LABELS LABELS'],
+    ] as const) {
+      expect(out).toContain(`${flag} ${generic}`)
+      expect(help).toContain(`${flag} ${named}`)
+    }
+    const jq = specOf('jq')
+    for (const [flag, value] of [
+      ['--arg', 'text'],
+      ['--argjson', 'text'],
+      ['--rawfile', 'path'],
+      ['--slurpfile', 'path'],
+    ] as const) {
+      expect(renderHelp('jq', jq)).toContain(`${flag} <name> <${value}>`)
+      expect(argparseHelp('jq', jq)).toContain(`${flag} NAME ${flag.slice(2).toUpperCase()}`)
+    }
   })
 
   it('falls back to bare name when description is null', () => {
-    const spec = new CommandSpec({ options: [] })
+    const spec = new CommandSpec({ arguments: [] })
     const out = renderHelp('foo', spec)
     expect(out.split('\n')[0]).toBe('foo')
   })
 
   it('trails the epilog after the flag table, one blank line apart', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--help', type: 'bool', description: 'Show help' })],
+      arguments: [new Argument('--help', { action: 'store_true', help: 'Show help' })],
       epilog: 'Services:\n  drive\n',
     })
     const out = renderHelp('gws', spec)
@@ -65,14 +107,7 @@ describe('renderHelp with subcommands', () => {
   it('lists commands after the usage line', () => {
     const spec = new CommandSpec({
       description: 'Google Workspace',
-      options: [
-        new Option({
-          short: '-C',
-          long: '--cwd',
-          type: 'str',
-          description: 'run as if started there',
-        }),
-      ],
+      arguments: [new Argument(['-C', '--cwd'], { help: 'run as if started there' })],
     })
     const rows: [string, string][] = [
       ['gmail', 'Gmail messages\nlong tail ignored'],
@@ -110,7 +145,7 @@ describe('renderHelp in clap style', () => {
   it('spells options and command its own way', () => {
     const spec = new CommandSpec({
       description: 'Manage pages',
-      options: [new Option({ long: '--json', type: 'bool' })],
+      arguments: [new Argument('--json', { action: 'store_true' })],
     })
     const rows: [string, string][] = [['get', 'Retrieve a page']]
     expect(renderHelp('ntn pages', spec, rows, UsageStyle.CLAP)).toContain(
@@ -124,14 +159,14 @@ describe('renderHelp in clap style', () => {
   it('names operand slots and marks optional ones', () => {
     const spec = new CommandSpec({
       description: 'Retrieve a page',
-      positional: [new Operand({ type: 'str', name: 'PAGE_ID', required: true })],
+      arguments: [new Argument('PAGE_ID')],
     })
     expect(renderHelp('ntn pages get', spec, [], UsageStyle.CLAP)).toContain(
       'Usage: ntn pages get <PAGE_ID>',
     )
     const loose = new CommandSpec({
       description: 'Call the API',
-      rest: new Operand({ type: 'str', name: 'PATH' }),
+      arguments: [new Argument('PATH', { nargs: '*' })],
     })
     expect(renderHelp('ntn api', loose, [], UsageStyle.CLAP)).toContain('Usage: ntn api [PATH]...')
   })
@@ -161,7 +196,7 @@ describe('renderHelp in clap style', () => {
   it('heads the option list Options: not Flags:', () => {
     const spec = new CommandSpec({
       description: 'x',
-      options: [new Option({ long: '--json', type: 'bool' })],
+      arguments: [new Argument('--json', { action: 'store_true' })],
     })
     expect(renderHelp('ntn whoami', spec, [], UsageStyle.CLAP)).toContain('Options:')
     expect(renderHelp('ntn whoami', spec)).toContain('Flags:')
@@ -170,11 +205,12 @@ describe('renderHelp in clap style', () => {
 
 describe('optionMetavar', () => {
   it('derives from the long spelling', () => {
-    expect(optionMetavar(new Option({ long: '--start-cursor', type: 'str' }))).toBe('START_CURSOR')
+    const option = new Argument('--start-cursor')
+    expect(optionMetavar(option)).toBe('START_CURSOR')
   })
 
   it('prefers a declared name, which is the only reason the field exists', () => {
-    const declared = new Option({ long: '--notion-version', type: 'str', metavar: 'VERSION' })
+    const declared = new Argument('--notion-version', { metavar: 'VERSION' })
     expect(optionMetavar(declared)).toBe('VERSION')
   })
 })

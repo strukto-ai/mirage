@@ -22,7 +22,7 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.backends import commands_for
 from mirage.commands.config import ExecContext, command
 from mirage.commands.spec import CommandSpec
-from mirage.commands.spec.types import Option
+from mirage.commands.spec.types import Argument
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import IOResult, materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
@@ -96,10 +96,13 @@ async def test_only_wrapper_responses_bypass_the_write_guard(
     vfs = RAMVFS()
     mount = MountEntry("/ram/", vfs, mode)
     calls: list[str] = []
-    options = (Option(long="--version", type="bool"),) if declared else ()
+    options = (Argument("--version", action="store_true"),) if declared else ()
 
     @command(
-        "mutate", vfs="ram", spec=CommandSpec(options=options), write=True
+        "mutate",
+        vfs="ram",
+        spec=CommandSpec(arguments=(*options,)),
+        write=True,
     )
     async def mutate(accessor: RAMAccessor, paths, texts, opts):
         calls.append("handler")

@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLISpec } from '../../commands/cli/types.ts'
+import { CLI } from '../../commands/cli/types.ts'
 import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -44,11 +45,15 @@ it('links a pipeline CLI and operation history to the admitted execution', async
   const seen: (ExecutionIdentity | null)[] = []
   ws.registerCli(
     'probe',
-    new CLISpec({
-      name: 'probe',
-      fn: () => {
-        seen.push(currentExecution())
-        return [ENC.encode('tracked\n'), new IOResult()]
+    new CLI({
+      spec: new CommandSpec({ name: 'probe' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: () => {
+            seen.push(currentExecution())
+            return [ENC.encode('tracked\n'), new IOResult()]
+          },
+        }),
       },
     }),
   )
@@ -399,11 +404,15 @@ describe('same-session lines run one at a time', () => {
     const ws = await makeWs()
     ws.registerCli(
       'again',
-      new CLISpec({
-        name: 'again',
-        fn: async () => {
-          const inner = await ws.shell('echo inner')
-          return [inner.stdout, new IOResult({ exitCode: inner.exitCode })]
+      new CLI({
+        spec: new CommandSpec({ name: 'again' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              const inner = await ws.shell('echo inner')
+              return [inner.stdout, new IOResult({ exitCode: inner.exitCode })]
+            },
+          }),
         },
       }),
     )
@@ -419,11 +428,15 @@ describe('same-session lines run one at a time', () => {
     })
     ws.registerCli(
       'stall',
-      new CLISpec({
-        name: 'stall',
-        fn: async () => {
-          await gate
-          return null
+      new CLI({
+        spec: new CommandSpec({ name: 'stall' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              await gate
+              return null
+            },
+          }),
         },
       }),
     )

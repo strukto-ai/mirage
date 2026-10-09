@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLISpec } from './types.ts'
+import type { CLI } from './types.ts'
 import { AIRTABLE } from './builtin/airtable/index.ts'
 import { DISCORD } from './builtin/discord/index.ts'
 import { GH } from './builtin/gh/index.ts'
@@ -23,26 +23,26 @@ import { NTN } from './builtin/ntn/index.ts'
 import { SLACK } from './builtin/slack/index.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
-// Named CLISpec trees the YAML `clis:` section resolves against
+// Named CLI trees the YAML `clis:` section resolves against
 // (`cli: slack` looks up "slack" here). The bundled programs are seeded
 // here rather than self-registering from their own modules: a side
 // effect only fires if something imported that module, so which CLIs
 // existed depended on what the caller happened to pull in. Runtime
 // packages add theirs through registerCliSpec from their entry point,
 // and user programs do the same before the workspace loads.
-const CLI_SPECS = new Map<string, CLISpec>(
-  [AIRTABLE, DISCORD, GH, GIT, GWS, LINEAR, NTN, SLACK].map((spec) => [spec.name, spec]),
+const CLI_SPECS = new Map<string, CLI>(
+  [AIRTABLE, DISCORD, GH, GIT, GWS, LINEAR, NTN, SLACK].map((spec) => [spec.spec.name, spec]),
 )
 
-/** Make a CLISpec resolvable by name from YAML; its root name is the key. */
-export function registerCliSpec(spec: CLISpec): void {
-  if (CLI_SPECS.has(spec.name)) {
-    throw new Error(`CLI spec '${spec.name}' is already registered`)
+/** Make a CLI resolvable by name from YAML; its root name is the key. */
+export function registerCliSpec(spec: CLI): void {
+  if (CLI_SPECS.has(spec.spec.name)) {
+    throw new Error(`CLI spec '${spec.spec.name}' is already registered`)
   }
-  CLI_SPECS.set(spec.name, spec)
+  CLI_SPECS.set(spec.spec.name, spec)
 }
 
-/** Remove a named CLISpec from the YAML lookup. */
+/** Remove a named CLI from the YAML lookup. */
 export function unregisterCliSpec(name: string): void {
   if (!CLI_SPECS.has(name)) {
     throw new Error(`CLI spec '${name}' is not registered`)
@@ -51,7 +51,7 @@ export function unregisterCliSpec(name: string): void {
 }
 
 /** Resolve a YAML `cli:` key to its registered tree, fail loud. */
-export function cliSpecFor(name: string): CLISpec {
+export function cliSpecFor(name: string): CLI {
   const spec = CLI_SPECS.get(name)
   if (spec === undefined) {
     const known = [...CLI_SPECS.keys()].sort(compareCodePoints).join(', ') || 'none registered'

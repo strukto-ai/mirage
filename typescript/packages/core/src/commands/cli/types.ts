@@ -25,324 +25,182 @@ import type { NamespaceView, SessionView, StatPath } from '../../view/types.ts'
 import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { compileSpec } from '../spec/compile.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
-import { CommandSpec, type CommandSpecInit, type FlagValue, UsageStyle } from '../spec/types.ts'
+import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
-/**
- * One entry point per state plane, for the CLI verb that needs one.
- *
- * Account CLIs reach services through their own config. File arguments
- * such as attachments, query filters and upload paths use this view,
- * just as `git` uses it for repositories. The executor supplies it on
- * `CLIInvocation.view`; callers exercising a handler directly may omit
- * it when the handler needs no workspace operations.
- *
- * The field names and types are `CommandOpts`' (commands/config.ts),
- * deliberately: a fact reached from a CLI leaf and the same fact reached
- * from a command handler must be spelled the same way, or the two tiers
- * grow separate vocabularies for one plane.
- */
+/** Workspace capabilities, matching CommandOpts; services use installation config. */
 export interface CLIView {
-  /**
-   * The workspace op dispatcher. A CLI routes by name rather than by operand,
-   * so nothing hands it an accessor; a verb that works over a mount (git over a
-   * checkout) reaches one through this instead.
-   */
+  /** Policy-gated filesystem operations. */
   dispatch?: DispatchFn
-  /**
-   * Dispatcher-backed stat of one path, asking both channels a backend can
-   * answer on. On a prefix store a directory is the set of keys under it rather
-   * than an object of its own, so a point lookup misses a `.git` that readdir
-   * reports; discovery needs the same two-channel answer `find` asks about its
-   * own start point.
-   */
+  /** Stat including prefix-store directories. */
   statPath?: StatPath
-  /**
-   * The namespace view, holding the facts no backend can see: symlinks,
-   * mount boundaries, the attr overlay, the child names the namespace owes a
-   * directory. A verb that walks a tree itself needs this or it silently
-   * cannot see a link, the way `git status` could not. `ns.mounts.rootOf` is
-   * where a mount prefix comes from: a mount boundary is a filesystem
-   * boundary, which is where git stops looking for a repository
-   * (GIT_DISCOVERY_ACROSS_FILESYSTEM).
-   */
+  /** Symlinks, mount boundaries and attributes. */
   ns?: NamespaceView
-  /**
-   * The session view, live and gated for both reads and writes.
-   * `inv.env` stays the frozen process view, which is what a script or native
-   * handler maps onto a real process environment; a verb that wants liveness,
-   * or wants to write, reads this instead. Env is not a mount, so an account
-   * CLI may read it without breaking the tier rule.
-   */
+  /** Live, gated session access; CLIInvocation.env is a frozen snapshot. */
   sessionView?: SessionView
   processes?: ProcessView
 }
 
-/**
- * Everything one CLI line hands its handler, built once per line by the
- * executor. The record carries both views of the invocation: the process
- * view (`argv`, `stdin`, `env`, `cwd`) and the parsed view (`config`, `paths`,
- * `texts`, `flags`), so every handler tier renders whichever its
- * substrate can express. A CLI is installed by name with its own config,
- * so the invocation carries no backend accessor, mount prefix or filetype
- * cascade. File operations use `view`.
- */
+/** Original argv and parsed arguments for one handler; file operations use view. */
 export interface CLIInvocation<ConfigT = unknown> {
-  /** The installation's validated config, null without a configModel. */
+  /** Validated installation config, null without a configModel. */
   config: ConfigT
-  /** Verbatim tokens after the head word, subcommand words included. */
+  /** Original words after the installed head, including subcommands. */
   argv: readonly string[]
-  /** Path-typed operands of the leaf, cwd-resolved. */
+  /** Cwd-resolved path operands. */
   paths: readonly PathSpec[]
-  /** Text-typed operands of the leaf. */
   texts: readonly string[]
-  /** The session's working directory, the one the paths were resolved against. */
   cwd: PathSpec
-  /** Merged group and leaf flags keyed by kwarg name, read via FlagView. */
+  /** Merged group and leaf flags keyed by kwarg name; read through FlagView. */
   flags: Record<string, FlagValue>
-  /** Piped input, null when the line has none. */
   stdin: ByteSource | null
   stdio?: Stdio
-  /**
-   * The session's environment variables, as one frozen process-view
-   * snapshot. A leaf that wants the live, gated handle reads
-   * `view.sessionView`.
-   */
+  /** Frozen process environment; live access uses view.sessionView. */
   env: Readonly<Record<string, string>>
-  /**
-   * Workspace entry points, including for account CLIs that read attachments
-   * or other file arguments. Absent when the caller provides no workspace view.
-   */
+  /** Workspace capabilities, absent for direct calls. */
   view?: CLIView
+  /** Resolved leaf grammar, absent for direct calls. */
+  spec?: CommandSpec
   /**
-   * The leaf the line resolved to, the grammar its argv was parsed
-   * against. A verb reads it to answer in its original's terms (git names
-   * the first switch letter parse-options would not know), so a refusal
-   * never restates the options declared one level up. Absent where no
-   * executor built the record.
-   */
-  spec?: CLISpec
-  /**
-   * Evaluate a nested line in this invocation's exact session. Host callbacks
-   * use this instead of Workspace.shell for portable re-entry, including after
-   * awaits and inside forks. Valid only until the handler settles or aborts;
-   * await each call before returning. Absent outside a workspace.
+   * Evaluate in this invocation's session, including after awaits or in forks.
+   * Await calls before returning; the handle expires when the handler settles.
    */
   shell?: (command: string) => Promise<IOResult>
 }
 
-/**
- * Leaf handler of a CLISpec node, called as `fn(inv)` with the line's
- * one CLIInvocation; `inv.config` is the installation's validated
- * config (null when the CLI declares no config model). What the handler
- * does with the config: wrap it in an accessor, build its own client, or
- * ignore it, is the author's business.
- */
+/** A leaf callback receiving the parsed invocation and validated account config. */
 export type CLIVerbFn<Result = CommandOutput | null> = (
   inv: CLIInvocation,
 ) => Promise<Result> | Result
 
-export interface CLISpecInit extends CommandSpecInit {
-  name: string
-  aliases?: readonly string[]
+export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
+
+export interface CLIHandlerInit {
   fn?: CLIVerbFn<HandlerResult> | null
-  subcommands?: readonly CLISpec[]
   write?: boolean
   limit?: Limit | null
+}
+
+/** Execution and policy for one canonical command path. */
+export class CLIHandler {
+  readonly fn: CLIVerbFn<HandlerResult> | null
+  readonly write: boolean
+  readonly limit: Limit | null
+
+  constructor(init: CLIHandlerInit = {}) {
+    this.fn = init.fn ?? null
+    this.write = init.write ?? false
+    this.limit = init.limit ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface CLIInit {
+  spec: CommandSpec
+  handlers?: Readonly<Record<string, CLIHandler>>
   configModel?: CLIConfigModel | null
   script?: ScriptSource | null
   runtime?: string | null
-  usageStyle?: UsageStyle
 }
 
-/**
- * The root config contract: a zod object schema (which doubles as the
- * snapshot redaction schema, mirroring pydantic SecretStr fields) or a
- * plain normalizer function (opaque: snapshots store its output as-is).
- */
-export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
+/** Bind the shared command grammar to handlers and account configuration. */
+export class CLI {
+  readonly spec: CommandSpec
+  readonly handlers: Readonly<Record<string, CLIHandler>>
 
-/**
- * One node of a program tree: argparse's parser/subparser as data.
- *
- * A CLISpec IS a CommandSpec (click's Group-is-a-Command): it inherits the
- * grammar fields (options, positional, rest, description, epilog) and adds
- * identity, behavior, and nesting. A leaf carries `fn`; a group carries
- * `subcommands`; the root of an installable program may carry
- * `configModel` (the zod-backed `normalize*Config` shape mounts already
- * use, doubling as the redaction schema). A script's config is opaque, so a
- * script cannot declare `configModel`. Every level of the tree parses with
- * the ordinary spec machinery because every level is a CommandSpec.
- *
- * The constructor validates the node at module-import time: the name must
- * be a single word, a node takes exactly one of `fn`, `subcommands`, or
- * `script` (a script root stands alone: the program re-parses argv
- * natively), every node's inherited CommandSpec grammar compiles, a group
- * declares no positional/rest (its operand is the subcommand word), child
- * names must be unique, and only a tree's root may declare `configModel` or
- * `script`.
- */
-export class CLISpec extends CommandSpec {
-  readonly name: string
-  readonly aliases: readonly string[]
-  readonly fn: CLIVerbFn<HandlerResult> | null
-  readonly subcommands: readonly CLISpec[]
-  readonly write: boolean
-  readonly limit: Limit | null
   readonly configModel: CLIConfigModel | null
-  /**
-   * Root only, and the root stands alone (no fn, no subcommands). The
-   * program that serves the whole install, embedded from a YAML
-   * `script:` path at load; config is the only entry point for script source,
-   * in code a leaf carries `fn`.
-   */
   readonly script: ScriptSource | null
-  /**
-   * Name of the world runtime entry that runs `script` (YAML
-   * `runtime:`); null picks the first entry speaking the script's
-   * language. Takes `script`.
-   */
   readonly runtime: string | null
-  /**
-   * Root only. How a leaf refuses an option it does not declare. Defaults to
-   * argparse, which is right for a CLI mirage invented; a CLI that mimics an
-   * existing program sets the style that program uses, so an agent reading the
-   * message and the exit code sees what it would from the real one.
-   */
-  readonly usageStyle: UsageStyle
 
-  constructor(init: CLISpecInit) {
-    super(init)
-    this.name = init.name
-    this.aliases = Object.freeze([...(init.aliases ?? [])])
-    this.fn = init.fn ?? null
-    this.subcommands = Object.freeze([...(init.subcommands ?? [])])
-    this.write = init.write ?? false
-    this.limit = init.limit ?? null
-    this.configModel = init.configModel ?? null
+  constructor(init: CLIInit) {
+    this.spec = init.spec
     this.script = init.script ?? null
     this.runtime = init.runtime ?? null
-    this.usageStyle = init.usageStyle ?? UsageStyle.ARGPARSE
+    this.configModel = init.configModel ?? null
+    const handlers = { ...init.handlers }
+    if (this.script !== null) {
+      handlers[''] ??= new CLIHandler()
+      if (this.spec.arguments.length === 0) {
+        const spec: CommandSpecInit = this.spec
+        this.spec = new CommandSpec({ ...spec, addHelp: false })
+      }
+    }
+    this.handlers = Object.freeze(handlers)
     validateCli(this)
     Object.freeze(this)
   }
 }
 
-/**
- * Validate one CLISpec node at construction time.
- *
- * Called from the CLISpec constructor, so an invalid node throws at import
- * time, never at dispatch. Children were validated by their own
- * construction (a nested literal builds bottom up), so each call checks one
- * level: the name is a single word with no whitespace, a node takes exactly
- * one of fn, subcommands, or script (a script root stands alone and takes
- * opaque config: the program re-parses argv natively), runtime only rides a
- * script, every node's inherited CommandSpec grammar compiles, a group
- * declares no positional/rest (its operand is the subcommand word), child
- * names are unique, and only a tree's root may declare configModel or
- * script.
- *
- * Args:
- *   node: the freshly constructed node.
- */
-function validateCli(node: CLISpec): void {
-  if (node.name === '' || /\s/.test(node.name)) {
-    throw new Error(`cli name '${node.name}' must be a single non-empty word`)
-  }
-  for (const alias of node.aliases) {
-    if (alias === '' || /\s/.test(alias)) {
-      throw new Error(`cli '${node.name}': alias '${alias}' must be a single non-empty word`)
+function validateCli(cli: CLI): void {
+  const name = cli.spec.name
+  if (cli.script !== null) {
+    if (cli.spec.subcommands.length > 0) {
+      throw new Error(`cli '${name}': a script serves the whole program`)
     }
+    if (cli.configModel !== null) {
+      throw new Error(`cli '${name}': script config is opaque; it cannot declare configModel`)
+    }
+    if (Object.values(cli.handlers).some((handler) => handler.fn !== null)) {
+      throw new Error(`cli '${name}': a node takes fn or script, not both`)
+    }
+  } else if (cli.runtime !== null) {
+    throw new Error(`cli '${name}': runtime names the entry that runs script; it takes script`)
   }
-  if (node.script !== null && node.fn !== null) {
-    throw new Error(`cli '${node.name}': a node takes fn or script, not both`)
-  }
-  if (node.script !== null && node.subcommands.length > 0) {
+  const leaves = validateTree(cli.spec, [], new Set())
+  const missing = [...leaves].filter((path) => !Object.hasOwn(cli.handlers, path))
+  const extra = Object.keys(cli.handlers).filter((path) => !leaves.has(path))
+  if (missing.length > 0)
     throw new Error(
-      `cli '${node.name}': a script serves the whole program; subcommands belong to fn trees`,
+      `cli '${name}': missing handlers for ${JSON.stringify(missing.sort(compareCodePoints))}`,
     )
-  }
-  if (node.script !== null && node.configModel !== null) {
-    throw new Error(`cli '${node.name}': script config is opaque; it cannot declare configModel`)
-  }
-  if (node.runtime !== null && node.script === null) {
-    throw new Error(`cli '${node.name}': runtime names the entry that runs script; it takes script`)
-  }
-  if (node.fn !== null && node.subcommands.length > 0) {
-    throw new Error(`cli '${node.name}': a node takes fn or subcommands, not both`)
-  }
-  if (node.fn === null && node.subcommands.length === 0 && node.script === null) {
-    throw new Error(`cli '${node.name}': a node needs fn, subcommands, or script`)
-  }
-  if (node.subcommands.length > 0 && (node.positional.length > 0 || node.rest !== null)) {
+  if (extra.length > 0)
     throw new Error(
-      `cli '${node.name}': a group's operand is its subcommand word; ` +
-        'positional/rest belong on leaves',
+      `cli '${name}': handlers do not name leaves: ${JSON.stringify(extra.sort(compareCodePoints))}`,
     )
-  }
-  const compiled = compileSpec(node)
-  // Names and aliases share one sibling namespace (argparse refuses a
-  // conflicting subparser alias the same way).
-  const seen = new Set<string>()
-  for (const child of node.subcommands) {
-    for (const word of [child.name, ...child.aliases]) {
-      if (seen.has(word)) {
-        throw new Error(`cli '${node.name}': duplicate subcommand '${word}'`)
-      }
-      seen.add(word)
-    }
-    if (child.configModel !== null) {
-      throw new Error(
-        `cli '${node.name}': subcommand '${child.name}' declares configModel; ` +
-          'only the root of a tree may',
-      )
-    }
-    if (child.script !== null) {
-      throw new Error(
-        `cli '${node.name}': subcommand '${child.name}' declares script; ` +
-          'only the root of a tree may',
-      )
-    }
-  }
-  if (node.options.length > 0 && node.subcommands.length > 0) {
-    const own = new Set(compiled.dest.values())
-    for (const child of node.subcommands) {
-      checkCollisions(node.name, own, child, [child.name])
-    }
+  if (cli.script === null && Object.values(cli.handlers).some((handler) => handler.fn === null)) {
+    throw new Error(`cli '${name}': each leaf needs a handler fn`)
   }
 }
 
-/**
- * Refuse an option spelled the same on a node and any descendant. The walk
- * consumes group options level by level into one flag bag, so an
- * ancestor/descendant collision would be ambiguous there; siblings may
- * freely share spellings. Children validated themselves already, so this
- * only compares each descendant against the ancestor set.
- */
-function checkCollisions(
-  rootName: string,
-  ancestorDests: ReadonlySet<string>,
-  node: CLISpec,
+function validateTree(
+  node: CommandSpec,
   path: readonly string[],
-): void {
-  if (node.options.length > 0) {
-    for (const dest of compileSpec(node).dest.values()) {
-      if (ancestorDests.has(dest)) {
-        throw new Error(
-          `cli '${rootName}': option '${dest}' collides with subcommand '${path.join(' ')}'`,
-        )
-      }
-    }
+  ancestors: ReadonlySet<string>,
+): Set<string> {
+  if (!node.name || /\s/.test(node.name))
+    throw new Error(`cli name '${node.name}' must be a single non-empty word`)
+  for (const alias of node.aliases) {
+    if (!alias || /\s/.test(alias))
+      throw new Error(`cli '${node.name}': alias '${alias}' must be a single non-empty word`)
   }
+  const compiled = compileSpec(node)
+  const own = new Set(compiled.dest.values())
+  for (const dest of own) {
+    if (ancestors.has(dest))
+      throw new Error(`option '${dest}' collides with subcommand '${path.join(' ')}'`)
+  }
+  if (node.subcommands.length === 0) return new Set([path.join(' ')])
+  if (compiled.positional.length > 0 || compiled.rest !== null) {
+    throw new Error(`cli '${node.name}': positional arguments belong on leaves`)
+  }
+  const seen = new Set<string>()
+  const leaves = new Set<string>()
   for (const child of node.subcommands) {
-    checkCollisions(rootName, ancestorDests, child, [...path, child.name])
+    for (const word of [child.name, ...child.aliases]) {
+      if (seen.has(word)) throw new Error(`cli '${node.name}': duplicate subcommand '${word}'`)
+      seen.add(word)
+    }
+    for (const leaf of validateTree(child, [...path, child.name], new Set([...ancestors, ...own])))
+      leaves.add(leaf)
   }
+  return leaves
 }
 
 export type WalkFlagBag = Record<string, FlagValue>
 
 export interface WalkResultInit {
-  leaf?: CLISpec | null
+  leaf?: CommandSpec | null
   path?: readonly string[]
   operandBases?: readonly PathSpec[]
   groupFlags?: WalkFlagBag
@@ -361,7 +219,7 @@ export interface WalkResultInit {
  * help, bare-group usage, unknown verbs, and group-level option errors).
  */
 export class WalkResult {
-  readonly leaf: CLISpec | null
+  readonly leaf: CommandSpec | null
   readonly path: readonly string[]
   readonly operandBases: readonly PathSpec[]
   readonly groupFlags: WalkFlagBag

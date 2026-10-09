@@ -28,7 +28,8 @@ from typing import Any
 
 from mirage import ShellExecution
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
@@ -299,7 +300,11 @@ async def action(
         )
         held.setdefault("stream_clis", {})[step["name"]] = cli
         ws.register_cli(
-            step["name"], CLISpec(name=step["name"], fn=cli.invoke)
+            step["name"],
+            CLI(
+                spec=CommandSpec(name=step["name"]),
+                handlers={"": CLIHandler(fn=cli.invoke)},
+            ),
         )
         return None
     if op == "stream_cli_stats":
@@ -351,8 +356,8 @@ async def action(
     elif op == "register_cli":
         ws.register_cli(
             step["name"],
-            CLISpec(
-                name=step["name"],
+            CLI(
+                spec=CommandSpec(name=step["name"]),
                 script=ScriptSource(**step["script"]),
                 runtime=step.get("runtime"),
             ),

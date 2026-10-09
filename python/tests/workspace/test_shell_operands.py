@@ -3,8 +3,8 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from mirage.commands.cli.types import CLIInvocation, CLISpec
-from mirage.commands.spec.types import Operand
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult, materialize
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -139,7 +139,13 @@ async def test_dash_cli_stdin(ws: Workspace) -> None:
 
     ws.register_cli(
         "consume",
-        CLISpec(name="consume", rest=Operand(type="str"), fn=consume),
+        CLI(
+            spec=CommandSpec(
+                name="consume",
+                arguments=(Argument("texts", nargs="*", metavar=""),),
+            ),
+            handlers={"": CLIHandler(fn=consume)},
+        ),
     )
     result = await ws.shell("printf body | consume - 2>&1")
     assert result.exit_code == 0

@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.commands.builtin.backends import commands_for
 from mirage.commands.config import command
-from mirage.commands.spec import CommandSpec, Operand
+from mirage.commands.spec import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -30,7 +30,13 @@ def _register(ws, fn):
 
 
 def test_workspace_accepts_commands_param():
-    @command("myecho", vfs="ram", spec=CommandSpec(rest=Operand(type="str")))
+    @command(
+        "myecho",
+        vfs="ram",
+        spec=CommandSpec(
+            arguments=(Argument("texts", nargs="*", metavar=""),)
+        ),
+    )
     async def my_echo(store, paths, texts, opts):
         return " ".join(texts).encode(), IOResult()
 
@@ -53,7 +59,13 @@ def test_workspace_register_method():
         mode=MountMode.WRITE,
     )
 
-    @command("myecho", vfs="ram", spec=CommandSpec(rest=Operand(type="str")))
+    @command(
+        "myecho",
+        vfs="ram",
+        spec=CommandSpec(
+            arguments=(Argument("texts", nargs="*", metavar=""),)
+        ),
+    )
     async def my_echo(store, paths, texts, opts):
         return " ".join(texts).encode(), IOResult()
 

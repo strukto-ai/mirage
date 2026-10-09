@@ -21,9 +21,9 @@ from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.backends import commands_for
-from mirage.commands.cli import CLISpec
+from mirage.commands.cli import CLI, CLIHandler
 from mirage.commands.config import command
-from mirage.commands.spec import CommandSpec, Operand
+from mirage.commands.spec import Argument, CommandSpec
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import IOResult
 from mirage.runtime.files import RuntimeFiles
@@ -480,10 +480,11 @@ async def test_custom_driver_serves_cli_namespace_and_runtime():
     ws = Workspace({"/wiki": make_vfs()}, mode=MountMode.WRITE)
     ws.register_cli(
         "showpage",
-        CLISpec(
-            name="showpage",
-            positional=(Operand(name="path", type="path", required=True),),
-            fn=_read_cli,
+        CLI(
+            spec=CommandSpec(
+                name="showpage", arguments=(Argument("path", type="path"),)
+            ),
+            handlers={"": CLIHandler(fn=_read_cli)},
         ),
     )
     try:

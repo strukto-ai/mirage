@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.compile import compile_spec
 
 # GNU prints the refusal and the usage line together, both under the
 # builtin's own name as typed (`source` or `.`), and exits 2 without
@@ -45,9 +46,10 @@ BASH_UNSUPPORTED_LONG_OPTIONS = frozenset(
 # spec so the parser and help cannot drift; Bash accepts one or two dashes.
 BASH_LONG_OPTIONS: dict[str, bool] = {
     **{
-        option.long[2:]: option.type == "str"
-        for option in SPECS["bash"].options
-        if option.long
+        name[2:]: option.action == "store"
+        for option in compile_spec(SPECS["bash"]).options
+        for name in option.names
+        if name.startswith("--")
     },
     **dict.fromkeys(
         (*BASH_UNSUPPORTED_LONG_OPTIONS, "help", "version"), False

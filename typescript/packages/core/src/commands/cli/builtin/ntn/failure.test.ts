@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { NotionAPIError } from '../../../../core/notion/client.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CLISpec } from '../../types.ts'
+import type { CLI, CLIHandler } from '../../types.ts'
 import { NTN } from './index.ts'
 import { GUARDED, HintedAPIError, apiFailure, guarded, sourceHint } from './failure.ts'
 
@@ -84,10 +84,11 @@ const PROBED: [number, string, string, string][] = [
 
 // An absent handler is null here, not undefined, so the walk tests for a
 // callable: `!== undefined` matched the root and made the whole check vacuous.
-function leaves(node: CLISpec, path: string[]): [string, CLISpec][] {
-  const here = [...path, node.name]
-  if (typeof node.fn === 'function') return [[here.join(' '), node]]
-  return node.subcommands.flatMap((child) => leaves(child, here))
+function leaves(cli: CLI, path: string[]): [string, CLIHandler][] {
+  return Object.entries(cli.handlers).map(([name, handler]) => [
+    [...path, cli.spec.name, name].filter(Boolean).join(' '),
+    handler,
+  ])
 }
 
 describe('ntn api failures speak upstream', () => {

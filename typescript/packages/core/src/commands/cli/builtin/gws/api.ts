@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../../../spec/types.ts'
+import { CLIHandler } from '../../types.ts'
 
 import { invalidateAfterWrite } from '../../../../cache/context.ts'
 import { TokenManager } from '../../../../core/google/client.ts'
@@ -26,10 +28,10 @@ import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import { CLISpec } from '../../types.ts'
+
 import type { CLIInvocation } from '../../types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { Option } from '../../../spec/types.ts'
+import { Argument } from '../../../spec/types.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
 import { GWS_METHODS, SERVICE_BASES, gwsMethodDescription } from './methods.ts'
 
@@ -41,11 +43,11 @@ const PAGE_ALL_HELP =
   'Follow nextPageToken to the end (the default); pages print as one JSON response per line'
 const PAGE_LIMIT_HELP = 'Stop after this many pages instead of reading them all'
 
-const API_OPTIONS: readonly Option[] = [
-  new Option({ long: '--params', type: 'str', description: PARAMS_HELP }),
-  new Option({ long: '--json', type: 'str', description: JSON_HELP }),
-  new Option({ long: '--page-all', description: PAGE_ALL_HELP }),
-  new Option({ long: '--page-limit', type: 'str', description: PAGE_LIMIT_HELP }),
+const API_OPTIONS: readonly Argument[] = [
+  new Argument('--params', { help: PARAMS_HELP }),
+  new Argument('--json', { help: JSON_HELP }),
+  new Argument('--page-all', { action: 'store_true', help: PAGE_ALL_HELP }),
+  new Argument('--page-limit', { help: PAGE_LIMIT_HELP }),
 ]
 
 // Flush a mounted listing after a gws mutation, when one is cached: gws
@@ -305,13 +307,11 @@ async function paginate(
   return ENC.encode(pages.length > 1 ? out + '\n' : out)
 }
 
-function methodLeaf(method: GwsMethod): CLISpec {
-  return new CLISpec({
+function methodLeaf(method: GwsMethod): CommandSpec {
+  return new CommandSpec({
     name: method.method,
     description: gwsMethodDescription(method),
-    fn: (inv: CLIInvocation) => runGwsMethod(method, inv as CLIInvocation<GoogleConfig>),
-    write: method.http !== 'GET',
-    options: [...API_OPTIONS],
+    arguments: [...API_OPTIONS],
   })
 }
 
@@ -320,10 +320,10 @@ interface GroupNode {
   children: Map<string, GroupNode>
 }
 
-function buildGroup(name: string, node: GroupNode): CLISpec {
+function buildGroup(name: string, node: GroupNode): CommandSpec {
   const leaves = node.methods.map((m) => methodLeaf(m))
   const groups = [...node.children.entries()].map(([child, sub]) => buildGroup(child, sub))
-  return new CLISpec({
+  return new CommandSpec({
     name,
     description: `Google API ${name} methods`,
     subcommands: [...leaves, ...groups],
@@ -337,7 +337,7 @@ function buildGroup(name: string, node: GroupNode): CLISpec {
  * nested groups, so `gws gmail users messages get` walks like any other
  * tree path.
  */
-export function apiGroups(service: GwsService): CLISpec[] {
+export function apiGroups(service: GwsService): CommandSpec[] {
   const root = new Map<string, GroupNode>()
   for (const m of GWS_METHODS) {
     if (m.service !== service) continue
@@ -354,4 +354,16 @@ export function apiGroups(service: GwsService): CLISpec[] {
     if (node !== undefined) node.methods.push(m)
   }
   return [...root.entries()].map(([name, node]) => buildGroup(name, node))
+}
+
+export function apiHandlers(): Record<string, CLIHandler> {
+  return Object.fromEntries(
+    GWS_METHODS.map((method) => [
+      `${method.service} ${method.resource} ${method.method}`,
+      new CLIHandler({
+        fn: (inv) => runGwsMethod(method, inv as CLIInvocation<GoogleConfig>),
+        write: method.http !== 'GET',
+      }),
+    ]),
+  )
 }

@@ -21,7 +21,8 @@ import pytest
 from pydantic import BaseModel, SecretStr
 
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode, ReadPolicy, ReadSpec
@@ -539,10 +540,10 @@ async def _cli_echo(inv: CLIInvocation):
     )
 
 
-_CLI_SPEC = CLISpec(
-    name="snapcli",
+_CLI_SPEC = CLI(
+    spec=CommandSpec(name="snapcli", subcommands=(CommandSpec(name="run"),)),
+    handlers={"run": CLIHandler(fn=_cli_echo)},
     config_model=_CliCfg,
-    subcommands=(CLISpec(name="run", fn=_cli_echo),),
 )
 
 
@@ -623,10 +624,10 @@ async def _nested_echo(inv: CLIInvocation):
     )
 
 
-_NESTED_SPEC = CLISpec(
-    name="nestcli",
+_NESTED_SPEC = CLI(
+    spec=CommandSpec(name="nestcli", subcommands=(CommandSpec(name="run"),)),
+    handlers={"run": CLIHandler(fn=_nested_echo)},
     config_model=_NestedCfg,
-    subcommands=(CLISpec(name="run", fn=_nested_echo),),
 )
 
 
@@ -659,8 +660,8 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
     # program rides in the snapshot and load rebuilds the spec from it.
     # The install also proves the manifest carries the clis key at all.
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    spec = CLISpec(
-        name="pager",
+    spec = CLI(
+        spec=CommandSpec(name="pager"),
         script=ScriptSource(
             "import os\nprint(argv[1], os.environ['MIRAGE_CLI_CONFIG'])"
         ),
@@ -689,7 +690,9 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     # keys are secret: the mapping is captured as-is rather than
     # crashing on model_dump or being guessed at.
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    spec = CLISpec(name="pager", script=ScriptSource("print('hi')"))
+    spec = CLI(
+        spec=CommandSpec(name="pager"), script=ScriptSource("print('hi')")
+    )
     ws.register_cli("pager", spec, config={"width": 80})
     state = await to_state_dict(ws)
     assert state[StateKey.CLIS][0][CLIKey.CONFIG] == {"width": 80}
@@ -705,8 +708,8 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
 @pytest.mark.asyncio
 async def test_script_cli_runtime_pin_and_module_bit_round_trip():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    spec = CLISpec(
-        name="pager",
+    spec = CLI(
+        spec=CommandSpec(name="pager"),
         script=ScriptSource("x", language="js", module=True),
         runtime="quickjs",
     )
@@ -717,9 +720,9 @@ async def test_script_cli_runtime_pin_and_module_bit_round_trip():
     assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is True
     restored = await Workspace.from_state(state)
     install = restored.clis()["pager"]
-    assert install.spec.runtime == "quickjs"
-    assert install.spec.script.module is True
-    assert install.spec.script.language == "js"
+    assert install.cli.runtime == "quickjs"
+    assert install.cli.script.module is True
+    assert install.cli.script.language == "js"
     await ws.close()
     await restored.close()
 

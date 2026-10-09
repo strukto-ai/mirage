@@ -11,312 +11,158 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/types.ts'
-import { CommandSpec, Operand, Option } from '../spec/types.ts'
+import { Argument, CommandSpec } from '../spec/types.ts'
 import type { CommandOpts } from '../config.ts'
-import type { CLIView } from './types.ts'
-import { CLISpec, type CLIVerbFn } from './types.ts'
+import { CLI, CLIHandler, type CLIView, type CLIVerbFn } from './types.ts'
 
 const verb: CLIVerbFn = () => null
-
 const configModel = (input: Record<string, unknown>) => input
 
-function tree(): CLISpec {
-  return new CLISpec({
-    name: 'gws',
-    description: 'Google Workspace',
-    configModel,
-    subcommands: [
-      new CLISpec({
-        name: 'gmail',
-        description: 'Gmail messages',
-        subcommands: [
-          new CLISpec({
-            name: 'send',
-            fn: verb,
-            write: true,
-            options: [
-              new Option({
-                short: '-t',
-                long: '--to',
-                type: 'str',
-                multiple: true,
-                required: true,
-              }),
-            ],
-            rest: new Operand({ type: 'str' }),
-          }),
-          new CLISpec({ name: 'list', fn: verb }),
-        ],
-      }),
-      new CLISpec({
-        name: 'docs',
-        description: 'Google Docs',
-        subcommands: [new CLISpec({ name: 'cat', fn: verb })],
-      }),
-    ],
-  })
-}
-
-describe('CLISpec', () => {
-  it('builds a tree and is a CommandSpec', () => {
-    const gws = tree()
-    expect(gws).toBeInstanceOf(CommandSpec)
-    expect(gws.subcommands.map((child) => child.name)).toEqual(['gmail', 'docs'])
-    const gmail = gws.subcommands[0]
-    const send = gmail?.subcommands[0]
-    expect(send?.write).toBe(true)
-    expect(send?.fn).toBe(verb)
-    expect(send?.options[0]?.long).toBe('--to')
-    expect(gws.configModel).toBe(configModel)
-    expect(gmail?.configModel).toBeNull()
+describe('CLI registration', () => {
+  it('freezes registrations and copies their handler mappings', () => {
+    const handlers: Record<string, CLIHandler> = { '': new CLIHandler({ fn: verb }) }
+    const cli = new CLI({ spec: new CommandSpec({ name: 'tool' }), handlers })
+    delete handlers['']
+    expect(cli.handlers['']?.fn).toBe(verb)
+    expect(Object.isFrozen(cli.handlers)).toBe(true)
+    expect(Object.isFrozen(cli.handlers[''])).toBe(true)
   })
 
-  it('allows a single-verb leaf root', () => {
-    const single = new CLISpec({ name: 'hello', fn: verb })
-    expect(single.subcommands).toEqual([])
-    expect(single.write).toBe(false)
-    expect(single.limit).toBeNull()
+  it('rejects missing handlers and handlers attached to groups or unknown paths', () => {
+    expect(() => new CLI({ spec: new CommandSpec({ name: 'hello' }) })).toThrow(/missing handlers/)
+    const spec = new CommandSpec({ name: 'hello', subcommands: [new CommandSpec({ name: 'run' })] })
+    expect(
+      () =>
+        new CLI({
+          spec,
+          handlers: { run: new CLIHandler({ fn: verb }), '': new CLIHandler({ fn: verb }) },
+        }),
+    ).toThrow(/do not name leaves/)
+    expect(
+      () =>
+        new CLI({ spec: new CommandSpec({ name: 'hello' }), handlers: { '': new CLIHandler() } }),
+    ).toThrow(/needs a handler fn/)
   })
 
-  it('allows group-level options', () => {
-    const git = new CLISpec({
-      name: 'git',
-      options: [new Option({ short: '-C', type: 'path' })],
-      subcommands: [new CLISpec({ name: 'status', fn: verb })],
+  it.each(['', 'gmail send', 'gmail\tsend', 'gmail\n'])('rejects invalid root name %j', (name) => {
+    expect(
+      () =>
+        new CLI({
+          spec: new CommandSpec({ name }),
+          handlers: { '': new CLIHandler({ fn: verb }) },
+        }),
+    ).toThrow(/single non-empty word/)
+  })
+
+  it('rejects duplicate names and aliases, including a repeated alias', () => {
+    for (const aliases of [['send'], ['co', 'co']]) {
+      const spec = new CommandSpec({
+        name: 'tool',
+        subcommands: [new CommandSpec({ name: 'send', aliases })],
+      })
+      expect(() => new CLI({ spec, handlers: { send: new CLIHandler({ fn: verb }) } })).toThrow(
+        /duplicate subcommand/,
+      )
+    }
+    const spec = new CommandSpec({
+      name: 'tool',
+      subcommands: [
+        new CommandSpec({ name: 'send', aliases: ['co'] }),
+        new CommandSpec({ name: 'co' }),
+      ],
     })
-    expect(git.options[0]?.short).toBe('-C')
+    expect(
+      () =>
+        new CLI({
+          spec,
+          handlers: { send: new CLIHandler({ fn: verb }), co: new CLIHandler({ fn: verb }) },
+        }),
+    ).toThrow(/duplicate subcommand/)
   })
 
-  it('stays frozen like every spec', () => {
-    const gws = tree()
-    expect(Object.isFrozen(gws)).toBe(true)
-    expect(Object.isFrozen(gws.subcommands)).toBe(true)
-    expect(Object.isFrozen(new CommandSpec({}))).toBe(true)
+  it('rejects positional arguments on groups', () => {
+    for (const nargs of ['?', '*'] as const) {
+      const spec = new CommandSpec({
+        name: 'tool',
+        arguments: [new Argument('value', { nargs })],
+        subcommands: [new CommandSpec({ name: 'run' })],
+      })
+      expect(() => new CLI({ spec, handlers: { run: new CLIHandler({ fn: verb }) } })).toThrow(
+        /positional arguments belong on leaves/,
+      )
+    }
+  })
+
+  it('compiles every node and rejects conflicting ancestor option destinations', () => {
+    const spec = new CommandSpec({
+      name: 'tool',
+      arguments: [new Argument('--token')],
+      subcommands: [new CommandSpec({ name: 'run', arguments: [new Argument('--token')] })],
+    })
+    expect(() => new CLI({ spec, handlers: { run: new CLIHandler({ fn: verb }) } })).toThrow(
+      /collides with subcommand/,
+    )
+    expect(
+      () =>
+        new CLI({
+          spec: new CommandSpec({ name: 'tool', arguments: [new Argument([])] }),
+          handlers: { '': new CLIHandler({ fn: verb }) },
+        }),
+    ).toThrow(/requires a name or option spelling/)
+  })
+
+  it('allows sibling options to share a destination', () => {
+    const spec = new CommandSpec({
+      name: 'tool',
+      subcommands: ['send', 'share'].map(
+        (name) => new CommandSpec({ name, arguments: [new Argument('--token')] }),
+      ),
+    })
+    expect(
+      new CLI({
+        spec,
+        handlers: { send: new CLIHandler({ fn: verb }), share: new CLIHandler({ fn: verb }) },
+      }).spec,
+    ).toBe(spec)
+  })
+
+  it('keeps script execution outside grammar and suppresses injected help for opaque argv', () => {
+    const cli = new CLI({
+      spec: new CommandSpec({ name: 'pager' }),
+      script: new ScriptSource('1'),
+      runtime: 'monty',
+    })
+    expect(cli.spec.addHelp).toBe(false)
+    expect(cli.runtime).toBe('monty')
+    expect(cli.handlers['']?.fn).toBeNull()
+  })
+
+  it('rejects incompatible script execution settings', () => {
+    const spec = new CommandSpec({ name: 'pager' })
+    const script = new ScriptSource('1')
+    expect(() => new CLI({ spec, script, configModel })).toThrow(/configModel/)
+    expect(() => new CLI({ spec, script, handlers: { '': new CLIHandler({ fn: verb }) } })).toThrow(
+      /fn or script, not both/,
+    )
+    expect(
+      () => new CLI({ spec, runtime: 'monty', handlers: { '': new CLIHandler({ fn: verb }) } }),
+    ).toThrow(/it takes script/)
+    expect(
+      () =>
+        new CLI({
+          spec: new CommandSpec({ name: 'pager', subcommands: [new CommandSpec({ name: 'run' })] }),
+          script,
+        }),
+    ).toThrow(/serves the whole program/)
   })
 })
 
 describe('view parity with the command tier', () => {
   it('spells every view field the way CommandOpts spells it', () => {
-    // A CLI leaf and a command handler reach the same planes. Spelling one
-    // fact two ways is how the two tiers end up with two vocabularies for one
-    // plane, and then with two behaviors. Checked at compile time because a
-    // TS interface has no fields to enumerate at runtime: a field CommandOpts
-    // does not declare fails to index, and a field whose type drifted fails to
-    // assign. The Python twin is tests/commands/cli/test_view_parity.py.
     type Shared = { [K in keyof CLIView]: CommandOpts[K] }
     const parity: Shared = {} as CLIView
     expect(parity).toBeDefined()
-  })
-})
-
-describe('validateCli', () => {
-  it('rejects an empty, multi-word, or whitespace-bearing name', () => {
-    expect(() => new CLISpec({ name: '', fn: verb })).toThrow(/single non-empty word/)
-    expect(() => new CLISpec({ name: 'gmail send', fn: verb })).toThrow(/single non-empty word/)
-    expect(() => new CLISpec({ name: 'gmail\tsend', fn: verb })).toThrow(/single non-empty word/)
-    expect(() => new CLISpec({ name: 'gmail\n', fn: verb })).toThrow(/single non-empty word/)
-  })
-
-  it('rejects fn together with subcommands', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          fn: verb,
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
-    ).toThrow(/not both/)
-  })
-
-  it('rejects a node with neither fn nor subcommands', () => {
-    expect(() => new CLISpec({ name: 'gws' })).toThrow(/needs fn, subcommands, or script/)
-  })
-
-  it('a script root stands alone', () => {
-    const spec = new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") })
-    expect(spec.fn).toBeNull()
-    expect(spec.subcommands).toEqual([])
-  })
-
-  it('script excludes fn and subcommands', () => {
-    expect(() => new CLISpec({ name: 'pager', fn: verb, script: new ScriptSource('1') })).toThrow(
-      /fn or script, not both/,
-    )
-    expect(
-      () =>
-        new CLISpec({
-          name: 'pager',
-          script: new ScriptSource('1'),
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
-    ).toThrow(/subcommands belong to fn trees/)
-  })
-
-  it('script excludes configModel', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'pager',
-          script: new ScriptSource('1'),
-          configModel,
-        }),
-    ).toThrow(/configModel/)
-  })
-
-  it('runtime takes script', () => {
-    expect(() => new CLISpec({ name: 'pager', fn: verb, runtime: 'monty' })).toThrow(
-      /it takes script/,
-    )
-    const spec = new CLISpec({ name: 'pager', script: new ScriptSource('1'), runtime: 'monty' })
-    expect(spec.runtime).toBe('monty')
-  })
-
-  it('script is root only', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          subcommands: [new CLISpec({ name: 'pager', script: new ScriptSource('1') })],
-        }),
-    ).toThrow(/only the root of a tree may/)
-  })
-
-  it('rejects positional or rest on a group', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          positional: [new Operand({ type: 'str' })],
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
-    ).toThrow(/belong on leaves/)
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          rest: new Operand({ type: 'str' }),
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
-    ).toThrow(/belong on leaves/)
-  })
-
-  it('rejects duplicate subcommand names', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          subcommands: [
-            new CLISpec({ name: 'send', fn: verb }),
-            new CLISpec({ name: 'send', fn: verb }),
-          ],
-        }),
-    ).toThrow(/duplicate subcommand 'send'/)
-  })
-
-  it('rejects configModel below the root', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          subcommands: [new CLISpec({ name: 'gmail', fn: verb, configModel })],
-        }),
-    ).toThrow(/only the root of a tree may/)
-  })
-
-  it('validates leaf option grammar at construction', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'mine',
-          fn: verb,
-          options: [new Option({ long: '--mode', choices: ['a', 'b'] })],
-        }),
-    ).toThrow(/choices and default require a value flag/)
-  })
-
-  it('rejects a spelling-less leaf option at construction', () => {
-    expect(() => new CLISpec({ name: 'mine', fn: verb, options: [new Option()] })).toThrow(
-      /requires a short or long spelling/,
-    )
-  })
-
-  it('rejects a duplicate leaf option spelling at construction', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'mine',
-          fn: verb,
-          options: [new Option({ long: '--mode' }), new Option({ long: '--mode', type: 'str' })],
-        }),
-    ).toThrow(/duplicate option spelling/)
-  })
-
-  it('rejects an option colliding between a node and a descendant', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'gws',
-          options: [new Option({ short: '-C', long: '--cwd', type: 'str' })],
-          subcommands: [
-            new CLISpec({
-              name: 'gmail',
-              subcommands: [
-                new CLISpec({
-                  name: 'send',
-                  fn: verb,
-                  options: [new Option({ long: '--cwd', type: 'str' })],
-                }),
-              ],
-            }),
-          ],
-        }),
-    ).toThrow(/option '--cwd' collides with subcommand 'gmail send'/)
-  })
-
-  it('allows sibling leaves to share option spellings', () => {
-    const spec = new CLISpec({
-      name: 'gws',
-      subcommands: [
-        new CLISpec({
-          name: 'send',
-          fn: verb,
-          options: [new Option({ long: '--to', type: 'str' })],
-        }),
-        new CLISpec({
-          name: 'share',
-          fn: verb,
-          options: [new Option({ long: '--to', type: 'str' })],
-        }),
-      ],
-    })
-    expect(spec.subcommands).toHaveLength(2)
-  })
-})
-
-describe('CLISpec aliases', () => {
-  it('shares one sibling namespace between names and aliases', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'tool',
-          subcommands: [
-            new CLISpec({ name: 'checkout', aliases: ['co'], fn: verb }),
-            new CLISpec({ name: 'co', fn: verb }),
-          ],
-        }),
-    ).toThrow(/duplicate subcommand 'co'/)
-  })
-
-  it('refuses a multi-word alias', () => {
-    expect(
-      () =>
-        new CLISpec({
-          name: 'tool',
-          subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })],
-        }),
-    ).toThrow(/alias 'c o'/)
   })
 })

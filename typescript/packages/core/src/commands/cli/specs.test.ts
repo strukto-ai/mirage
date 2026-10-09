@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../spec/types.ts'
+import { CLIHandler } from './types.ts'
 
 import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
 import { cliSpecFor, registerCliSpec, unregisterCliSpec } from './specs.ts'
-import { CLISpec } from './types.ts'
+import { CLI } from './types.ts'
 
 // Mirrors python/tests/commands/cli/test_specs.py.
 
@@ -26,8 +28,11 @@ function noop(): [null, IOResult] {
 
 const BUNDLED = ['airtable', 'discord', 'gh', 'git', 'gws', 'linear', 'ntn', 'slack']
 
-function tree(name: string): CLISpec {
-  return new CLISpec({ name, subcommands: [new CLISpec({ name: 'run', fn: noop })] })
+function tree(name: string): CLI {
+  return new CLI({
+    spec: new CommandSpec({ name, subcommands: [new CommandSpec({ name: 'run' })] }),
+    handlers: { run: new CLIHandler({ fn: noop }) },
+  })
 }
 
 describe('cli spec registry', () => {
@@ -69,7 +74,7 @@ describe('cli spec registry', () => {
   // already imported -- which the old barrel hid by importing them all.
   it('resolves the bundled CLIs without importing their modules', () => {
     for (const name of BUNDLED) {
-      expect(cliSpecFor(name).name).toBe(name)
+      expect(cliSpecFor(name).spec.name).toBe(name)
     }
   })
 })

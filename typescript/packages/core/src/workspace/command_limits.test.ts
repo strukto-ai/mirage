@@ -11,11 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { CommandSpec } from '../commands/spec/types.ts'
+import { CLIHandler } from '../commands/cli/types.ts'
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { CLISpec } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
@@ -305,12 +307,16 @@ it('applies workspace and profile deadlines to registered CLIs', async () => {
       profiles: { short: { commandLimits: { prog: new Limit({ timeoutSeconds: 0.01 }) } } },
     },
   )
-  const spec = new CLISpec({
-    name: 'prog',
-    limit: new Limit({ timeoutSeconds: 0.01 }),
-    fn: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      return [null, new IOResult()]
+  const spec = new CLI({
+    spec: new CommandSpec({ name: 'prog' }),
+    handlers: {
+      '': new CLIHandler({
+        fn: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          return [null, new IOResult()]
+        },
+        limit: new Limit({ timeoutSeconds: 0.01 }),
+      }),
     },
   })
   try {

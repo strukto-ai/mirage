@@ -11,11 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { EvaluationContext } from '../../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { command } from '../../../commands/config.ts'
-import { CommandSpec, type FlagValue, Operand, Option } from '../../../commands/spec/types.ts'
+import { CommandSpec, type FlagValue, Argument } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { JobTable } from '../../../shell/job_table/index.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
@@ -68,7 +67,9 @@ describe('handleCommand — command not found', () => {
 })
 
 describe('handleCommand — dispatches to mount that has the command', () => {
-  const BASIC_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
+  const BASIC_SPEC = new CommandSpec({
+    arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+  })
 
   it('routes to a mount whose VFS registered the command', async () => {
     const ram = new StubVFS('ram')
@@ -100,8 +101,10 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     const reg = new MountRegistry({ '/ram': ram }, MountMode.WRITE)
     const mount = reg.mountFor('/ram')
     const spec = new CommandSpec({
-      options: [new Option({ short: '-n', type: 'str' })],
-      rest: new Operand({ type: 'path' }),
+      arguments: [
+        new Argument('-n'),
+        new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      ],
     })
     let seenFlags: Record<string, FlagValue> = {}
     const [cmd] = command({
@@ -137,7 +140,9 @@ describe('handleCommand — cross-mount', () => {
     const [cmd] = command({
       name: 'mycmd',
       vfs: 'ram',
-      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+      spec: new CommandSpec({
+        arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+      }),
       fn: () => [null, new IOResult()],
     })
     if (cmd === undefined) throw new Error('cmd missing')

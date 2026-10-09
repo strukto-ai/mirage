@@ -111,7 +111,12 @@ These replace the equivalent Python workspace smoke tests; the refusal cases
 assert exit code, stdout and stderr directly. Stateful account and mount
 tests remain separate because their setup and assertions are different.
 
-The CLI reference tables are generated from the registered `CLISpec` trees:
+`integ/truth/custom_cli.json` runs the paired pager examples against one golden,
+including account isolation, mixed positional/options, choices and mutation.
+The spec parity gate compares every bundled CLI's grammar, canonical handler
+paths, write classification and limits across hosts.
+
+The CLI reference tables are generated from the registered `CLI` programs and their `CommandSpec` trees:
 run `python/.venv/bin/python scripts/gen_cli_docs.py` after changing a tree.
 CI runs the same command with `--check` to detect stale or missing references,
 then `typescript/scripts/check-cli-docs.ts` checks the inventory and command

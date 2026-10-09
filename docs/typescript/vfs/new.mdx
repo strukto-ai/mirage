@@ -157,7 +157,7 @@ that deletes or moves defines those functions.
 | --- | --- |
 | Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
 | Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
-| CLIs | The host registers a `CLISpec` with `registerCli`. File-oriented handlers use `inv.view.dispatch` and `inv.view.ns`; mounting a driver does not install an account CLI. |
+| CLIs | The host registers a `CLI` using `registerCli`. File-oriented handlers use `inv.view.dispatch` and `inv.view.ns`; mounting a driver does not install an account CLI. |
 | Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
