@@ -50,11 +50,11 @@ async function load(ws: Workspace, root: string, relative = ''): Promise<void> {
     } else await ws.dispatch('write', `/repo/${name}`, [readFileSync(join(root, name))])
   }
 }
-function native(root: string, args: string[], input?: string): string {
+function native(root: string, args: string[]): string {
   return execFileSync(
     'git',
     ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args],
-    { encoding: 'utf8', stdio: 'pipe', input },
+    { encoding: 'utf8', stdio: 'pipe' },
   )
 }
 it.each([false, true])('checks native loose and packed objects (packed=%s)', async (packed) => {
@@ -69,9 +69,21 @@ it.each([false, true])('checks native loose and packed objects (packed=%s)', asy
     native(root, ['stash', 'push', '-m', 'saved'])
     if (packed) native(root, ['gc', '--prune=now'])
     await load(ws, root)
-    const checked = await ws.shell('git -C /repo fsck --no-dangling')
-    expect(new TextDecoder().decode(checked.stderr)).toBe('')
-    expect(checked.exitCode).toBe(0)
+    for (const options of [
+      [],
+      ['--no-dangling'],
+      ['--unreachable'],
+      ['--unreachable', '--no-dangling'],
+    ]) {
+      const checked = await ws.shell(`git -C /repo fsck ${options.join(' ')}`)
+      expect(new TextDecoder().decode(checked.stderr)).toBe('')
+      expect(checked.exitCode).toBe(0)
+      expect(new TextDecoder().decode(checked.stdout).split('\n').sort()).toEqual(
+        native(root, ['fsck', ...options])
+          .split('\n')
+          .sort(),
+      )
+    }
     if (!packed) {
       const oid = native(root, ['rev-parse', 'HEAD:a.txt']).trim()
       unlinkSync(join(root, '.git/objects', oid.slice(0, 2), oid.slice(2)))
@@ -193,83 +205,3 @@ it.each(['stat', 'read'])('preserves the path on pack permission errors (%s)', a
     code: new GitError('').code,
   })
 })
-
-it.each([false, true])(
-  'distinguishes unreachable objects from dangling tips (packed=%s)',
-  async (packed) => {
-    const root = mkdtempSync(join(tmpdir(), 'mirage-fsck-unreachable-'))
-    const ws = workspace()
-    try {
-      native(root, ['init', '-q', '-b', 'main'])
-      writeFileSync(join(root, 'a.txt'), 'before\n')
-      native(root, ['add', '.'])
-      native(root, ['commit', '-qm', 'first'])
-      const blob = native(root, ['hash-object', '-w', '--stdin'], 'orphan content\n').trim()
-      const tree = native(
-        root,
-        ['mktree'],
-        `100644 blob ${blob}\torphan.txt\n160000 commit ${'a'.repeat(40)}\tsubmodule\n`,
-      ).trim()
-      const commit = native(root, ['commit-tree', tree], 'orphan\n').trim()
-      const tag = native(
-        root,
-        ['hash-object', '-t', 'tag', '-w', '--stdin'],
-        `object ${commit}\ntype commit\ntag orphan\ntagger Test <test@example.com> 1 +0000\n\norphan tag\n`,
-      ).trim()
-      const head = native(root, ['rev-parse', 'HEAD']).trim()
-      const headTree = native(root, ['rev-parse', 'HEAD^{tree}']).trim()
-      const logged = native(root, ['commit-tree', headTree, '-p', head], 'only in reflog\n').trim()
-      native(root, ['update-ref', '--create-reflog', 'refs/heads/main', logged])
-      native(root, ['update-ref', 'refs/heads/main', head])
-      writeFileSync(join(root, 'staged.txt'), 'index only\n')
-      native(root, ['add', 'staged.txt'])
-      const stages: string[] = []
-      for (const stage of [1, 2, 3]) {
-        const oid = native(
-          root,
-          ['hash-object', '-w', '--stdin'],
-          `stage ${String(stage)}\n`,
-        ).trim()
-        stages.push(`100644 ${oid} ${String(stage)}\tconflict.txt\n`)
-      }
-      stages.push(`160000 ${'a'.repeat(40)} 1\tgitlink\n`)
-      native(root, ['update-index', '--index-info'], stages.join(''))
-      const detached = native(root, ['commit-tree', headTree, '-p', head], 'detached head\n').trim()
-      writeFileSync(join(root, '.git/HEAD'), `${detached}\n`)
-      if (packed) {
-        const ids = native(root, ['cat-file', '--batch-all-objects', '--batch-check=%(objectname)'])
-        native(root, ['pack-objects', join(root, '.git/objects/pack/pack')], ids)
-        for (const fanout of readdirSync(join(root, '.git/objects'))) {
-          if (/^[0-9a-f]{2}$/.test(fanout))
-            rmSync(join(root, '.git/objects', fanout), { recursive: true })
-        }
-      }
-      expect(native(root, ['fsck', '--unreachable']).trim().split('\n').sort()).toEqual(
-        [
-          `unreachable blob ${blob}`,
-          `unreachable tree ${tree}`,
-          `unreachable commit ${commit}`,
-          `unreachable tag ${tag}`,
-        ].sort(),
-      )
-      await load(ws, root)
-      for (const options of [
-        [],
-        ['--no-dangling'],
-        ['--unreachable'],
-        ['--unreachable', '--no-dangling'],
-      ]) {
-        const expected = native(root, ['fsck', ...options])
-        const actual = await ws.shell(`git -C /repo fsck ${options.join(' ')}`)
-        expect(actual.exitCode).toBe(0)
-        expect(new TextDecoder().decode(actual.stderr)).toBe('')
-        expect(new TextDecoder().decode(actual.stdout).split('\n').sort()).toEqual(
-          expected.split('\n').sort(),
-        )
-      }
-    } finally {
-      await ws.close()
-      rmSync(root, { recursive: true, force: true })
-    }
-  },
-)

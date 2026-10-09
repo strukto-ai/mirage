@@ -4,7 +4,7 @@ import posixpath
 import re
 from dataclasses import dataclass
 
-from dulwich.objects import Blob, ObjectID
+from dulwich.objects import Blob
 from dulwich.repo import BaseRepo
 
 from mirage.commands.builtin.grep_pattern import compile_pattern
@@ -23,6 +23,7 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import exists, read_optional
+from mirage.commands.cli.builtin.git.patch import blob_data
 from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_patterns,
     pathspec_selects,
@@ -33,7 +34,8 @@ from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.tree import flat_tree, resolve_tree
+from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
+from mirage.commands.cli.builtin.git.tree import Tree, flat_tree, resolve_tree
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
@@ -45,7 +47,12 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.errors import UsageError as PatternError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.shell.bytes import byte_view, encode_text, utf8_locale
+from mirage.shell.bytes import (
+    byte_view,
+    encode_text,
+    from_byte_view,
+    utf8_locale,
+)
 from mirage.utils.posix import compile_posix_regex
 
 logger = logging.getLogger(__name__)
@@ -101,6 +108,8 @@ def parse_flags(
             else RegexSyntax.BASIC
         )
         fixed = name == "fixed_strings"
+    ignore_case = fl.as_bool("ignore_case")
+    whole_word = fl.as_bool("word_regexp")
     compiled = []
     for value in patterns:
         for part in value.split("\n"):
@@ -111,19 +120,19 @@ def parse_flags(
                     )[0]
                     pattern = compile_posix_regex(
                         source,
-                        re.IGNORECASE if fl.as_bool("ignore_case") else 0,
+                        re.IGNORECASE if ignore_case else 0,
                         utf8,
                     )
                 else:
                     pattern = compile_pattern(
                         byte_view(part, utf8),
-                        fl.as_bool("ignore_case"),
+                        ignore_case,
                         fixed,
                         False,
                         syntax,
                         utf8,
                     )
-                if fl.as_bool("word_regexp"):
+                if whole_word:
                     pattern = compile_posix_regex(
                         r"(?<!\w)(?:" + pattern.pattern + r")(?!\w)",
                         pattern.flags,
@@ -169,19 +178,16 @@ def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
         label (str): quoted output name, including revision when present.
         flags (GrepFlags): compiled matching and presentation options.
     """
-    binary = b"\0" in data[:8000] and flags.binary != "text"
+    binary = b"\0" in data[:BINARY_SNIFF] and flags.binary != "text"
     if binary and flags.binary == "skip":
         return b"", False
-    lines = data.split(b"\n")
-    if lines[-1] == b"":
+    lines = byte_view(data, flags.utf8).split("\n")
+    if lines[-1] == "":
         lines.pop()
     selected = [
         (number, line)
         for number, line in enumerate(lines, 1)
-        if any(
-            pattern.search(byte_view(line, flags.utf8)) is not None
-            for pattern in flags.patterns
-        )
+        if any(pattern.search(line) is not None for pattern in flags.patterns)
         != flags.invert
     ]
     matched = bool(selected)
@@ -200,27 +206,13 @@ def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
     return b"".join(
         prefix
         + (str(number).encode() + sep if flags.numbers else b"")
-        + line
+        + from_byte_view(line, flags.utf8)
         + b"\n"
         for number, line in selected
     ), True
 
 
-def blob_data(repo: BaseRepo, oid: bytes) -> bytes:
-    """Read one regular file's object on the repository worker.
-
-    Args:
-        repo (BaseRepo): opened object database.
-        oid (bytes): blob id.
-    """
-    obj = repo.object_store[ObjectID(oid)]
-    assert isinstance(obj, Blob)
-    return obj.data
-
-
-def search_entries(
-    repo: BaseRepo, name: str
-) -> dict[bytes, tuple[int, bytes]]:
+def search_entries(repo: BaseRepo, name: str) -> Tree:
     """The searchable leaves of a tree-ish, or a directly named blob.
 
     Args:
@@ -230,7 +222,7 @@ def search_entries(
     obj = unwrapped(repo, resolve_object(repo, name), name)
     if isinstance(obj, Blob):
         return {b"": (0o100644, obj.id)}
-    return flat_tree(repo, resolve_tree(repo, name))
+    return flat_tree(repo, resolve_tree(repo, name, obj))
 
 
 async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
@@ -263,14 +255,15 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         assert doors.dispatch is not None
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
-        trees: list[tuple[str, dict[bytes, tuple[int, bytes]]]] = []
+        cached = fl.as_bool("cached")
+        sources: list[tuple[str, Tree]] = []
         for index, word in enumerate(words):
             if word.startswith("-") and "--" not in inv.argv:
                 raise GitError(
                     f"option '{word}' must come before non-option arguments"
                 )
             try:
-                trees.append(
+                sources.append(
                     (word, await asyncio.to_thread(search_entries, repo, word))
                 )
             except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
@@ -288,9 +281,9 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 logger.debug("Git grep operand is a pathspec: %s", word)
                 paths = words[index:] + paths
                 break
-        if trees and fl.as_bool("cached"):
+        if sources and cached:
             raise GitError("both --cached and trees are given")
-        if not trees and not fl.as_bool("cached"):
+        if not sources and not cached:
             assert doors.stat_path is not None
             await require_work_tree(
                 doors.dispatch,
@@ -302,14 +295,13 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         fully = await config_bool(
             doors.dispatch, location, b"core", b"quotepath", True
         )
-        sources = list(trees)
-        if not trees:
+        if not sources:
             state = await read_index(doors.dispatch, location.gitdir)
-            entries: dict[bytes, tuple[int, bytes]] = {
+            entries: Tree = {
                 path: (entry.mode, entry.sha)
                 for path, entry in state.entries.items()
             }
-            if not fl.as_bool("cached"):
+            if not cached:
                 for path, conflict in state.conflicts.items():
                     for entry in (
                         conflict.this,
@@ -337,8 +329,10 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 ):
                     continue
                 data: bytes | None
-                if revision or fl.as_bool("cached"):
-                    data = await asyncio.to_thread(blob_data, repo, oid)
+                if revision or cached:
+                    data = await asyncio.to_thread(
+                        blob_data, repo, (mode, oid)
+                    )
                 else:
                     target = location.worktree.join(relative)
                     if (

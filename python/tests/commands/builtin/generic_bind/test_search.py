@@ -146,20 +146,29 @@ def test_unmatched_kind_takes_the_generic_scan():
     assert result.exit_code == 0
 
 
-def test_shaping_flag_defers_to_the_generic_scan():
-    search = _search_command({"room": _room_searcher}, IO)
+@pytest.mark.parametrize(
+    "flags,pattern,expected,code",
+    [
+        ({"v": True}, "ada", b"y\n", 0),
+        ({"line_regexp": True}, "ada", b"", 1),
+        ({"line_regexp": True}, "y", b"y\n", 0),
+    ],
+)
+def test_shaping_flag_defers_to_the_generic_scan(
+    flags, pattern, expected, code
+):
+    provider = AsyncMock(return_value=["provider substring hit"])
+    search = _search_command({"note": provider}, IO)
     out, result = asyncio.run(
         search(
             FakeAccessor(),
             [spec("/rooms/red/a.json")],
-            ["ada"],
-            CommandOpts(flags={"v": True}),
+            [pattern],
+            CommandOpts(flags=flags),
         )
     )
-    drained = asyncio.run(_drain(out))
-    assert result.exit_code == 0
-    assert b"y" in drained
-    assert b"x ada" not in drained
+    assert (asyncio.run(_drain(out)), result.exit_code) == (expected, code)
+    provider.assert_not_awaited()
 
 
 def test_guard_probes_existence_before_searching():
@@ -387,7 +396,16 @@ def test_a_recursive_whole_word_literal_narrows_to_candidates():
 
 @pytest.mark.parametrize(
     "gates",
-    [{"recursive": False}, {"exact_file_set": True}, {"whole_word": False}],
+    [
+        {"recursive": False},
+        {"exact_file_set": True},
+        {"whole_word": False},
+        {
+            "exact_file_set": grep_needs_every_file(
+                FlagView({"w": True, "line_regexp": True}, spec=SPECS["grep"])
+            )
+        },
+    ],
 )
 def test_a_failed_gate_scans_every_file(gates):
     io, narrow = _narrowing()
@@ -426,34 +444,3 @@ def test_binary_candidates_are_dropped_and_may_leave_none():
     assert (used, [p.virtual for p in resolved]) == (True, ["/data/a.txt"])
     io, _ = _narrowing(answer=[_hit("/data/a.parquet")])
     assert _narrow(io) == ([], True)
-
-
-@pytest.mark.parametrize(
-    "pattern,expected,code", [("ada", b"", 1), ("y", b"y\n", 0)]
-)
-def test_whole_line_search_scans_instead_of_printing_native_substring_hits(
-    pattern, expected, code
-):
-    provider = AsyncMock(return_value=["provider substring hit"])
-    search = _search_command({"note": provider}, IO)
-    out, result = asyncio.run(
-        search(
-            FakeAccessor(),
-            [spec("/rooms/red/a.json")],
-            [pattern],
-            CommandOpts(flags={"line_regexp": True}),
-        )
-    )
-    assert asyncio.run(_drain(out)) == expected
-    assert result.exit_code == code
-    provider.assert_not_awaited()
-
-
-def test_whole_line_overrides_word_index_narrowing():
-    io, narrow = _narrowing()
-    flags = FlagView({"w": True, "line_regexp": True}, spec=SPECS["grep"])
-    assert _narrow(io, exact_file_set=grep_needs_every_file(flags)) == (
-        [_scope()],
-        False,
-    )
-    narrow.assert_not_awaited()

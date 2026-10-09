@@ -33,7 +33,8 @@ export async function lsTree(inv: CLIInvocation): Promise<CommandFnResult> {
         throw new GitError(`Not a valid object name ${name}`)
       throw err
     }
-    const start = fl.asBool('full_tree') ? repo.location.worktree.virtual : startPoint(fl).virtual
+    const fullTree = fl.asBool('full_tree')
+    const start = fullTree ? repo.location.worktree.virtual : startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
     let patterns = paths.map((path) => {
       if (path === '') throw new EmptyPathspecError()
@@ -53,14 +54,15 @@ export async function lsTree(inv: CLIInvocation): Promise<CommandFnResult> {
     const fully = await configBool(repo, 'core.quotepath', true)
     const nul = fl.asBool('z')
     const names = fl.asBool('name_only') || fl.asBool('name_status')
+    const fullName = fullTree || fl.asBool('full_name')
+    const terminator = nul ? '\0' : '\n'
     const out: string[] = []
     for (const [path, mode, oid] of rows) {
       if (!visiblePath(repo.location, path)) continue
-      const relative =
-        fl.asBool('full_name') || fl.asBool('full_tree') ? path : relativePath(path, prefix)
+      const relative = fullName ? path : relativePath(path, prefix)
       const label = nul ? relative : quotePath(relative, false, fully)
       const kind = mode === '040000' ? 'tree' : mode === '160000' ? 'commit' : 'blob'
-      out.push((names ? '' : `${mode} ${kind} ${oid}\t`) + label + (nul ? '\0' : '\n'))
+      out.push((names ? '' : `${mode} ${kind} ${oid}\t`) + label + terminator)
     }
     return [encodeText(out.join('')), new IOResult()]
   } catch (err) {

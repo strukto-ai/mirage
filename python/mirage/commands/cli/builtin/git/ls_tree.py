@@ -49,10 +49,9 @@ async def ls_tree(
             tree = await asyncio.to_thread(resolve_tree, repo, name)
         except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
             raise GitError(f"Not a valid object name {name}") from exc
+        full_tree = fl.as_bool("full_tree")
         start = (
-            location.worktree.virtual
-            if fl.as_bool("full_tree")
-            else start_point(fl).virtual
+            location.worktree.virtual if full_tree else start_point(fl).virtual
         )
         prefix = repo_relative(location, start, ".")
         selected: list[str] = []
@@ -82,14 +81,14 @@ async def ls_tree(
         )
         nul = fl.as_bool("z")
         names = fl.as_bool("name_only") or fl.as_bool("name_status")
+        full_name = full_tree or fl.as_bool("full_name")
+        terminator = "\0" if nul else "\n"
         out: list[str] = []
         for path, mode, oid in rows:
             if not visible_path(location, path):
                 continue
             relative = (
-                path
-                if fl.as_bool("full_name") or fl.as_bool("full_tree")
-                else posixpath.relpath(path, prefix or ".")
+                path if full_name else posixpath.relpath(path, prefix or ".")
             )
             label = relative if nul else quote_path(relative, False, fully)
             kind = (
@@ -102,7 +101,7 @@ async def ls_tree(
             out.append(
                 ("" if names else f"{mode} {kind} {oid}\t")
                 + label
-                + ("\0" if nul else "\n")
+                + terminator
             )
         return encode_text("".join(out)), IOResult()
     except GitError as exc:

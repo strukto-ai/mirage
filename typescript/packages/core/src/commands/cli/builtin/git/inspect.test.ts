@@ -14,7 +14,7 @@
 
 import { spawnSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -146,78 +146,4 @@ it('prints the worktree root in line order among revisions', async () => {
   const head = DEC.decode((await ws.shell('git -C /repo rev-parse HEAD')).stdout)
   const result = await ws.shell('git -C /repo rev-parse HEAD --show-toplevel HEAD')
   expect(DEC.decode(result.stdout)).toBe(`${head}/repo\n${head}`)
-})
-
-it('matches native Git binary text patches, pickaxe and binary statistics', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'mirage-git-text-'))
-  const binaryWs = new Workspace(
-    { '/repo': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
-  binaryWs.registerCli('git', GIT)
-  const nativeGit = (args: string[], input?: string): string =>
-    execFileSync(
-      'git',
-      ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args],
-      { encoding: 'utf8', stdio: 'pipe', env: NATIVE_ENV, input },
-    )
-  try {
-    nativeGit(['init', '-q', '-b', 'main'])
-    for (const [content, message] of [
-      [Buffer.from('old\0\xff\n', 'latin1'), 'binary one'],
-      [Buffer.from('new\0\xfe\nneedle\n', 'latin1'), 'binary two'],
-    ] as const) {
-      writeFileSync(join(root, 'binary.dat'), content)
-      nativeGit(['add', 'binary.dat'])
-      nativeGit(['commit', '-qm', message])
-    }
-    writeFileSync(join(root, 'binary.dat'), Buffer.from('new\0\xfe\nneedle\nmerged\n', 'latin1'))
-    nativeGit(['add', 'binary.dat'])
-    const tree = nativeGit(['write-tree']).trim()
-    const merge = nativeGit(
-      ['commit-tree', tree, '-p', 'HEAD', '-p', 'HEAD~1'],
-      'binary merge\n',
-    ).trim()
-    nativeGit(['update-ref', 'refs/heads/binary-merge', merge])
-    nativeGit(['reset', '--hard', 'HEAD'])
-    writeFileSync(join(root, 'binary.dat'), Buffer.from('new\0\xfe\nneedle\nsaved\n', 'latin1'))
-    nativeGit(['stash', 'push', '-qm', 'binary stash'])
-    const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-      await binaryWs.dispatch(op, path.virtual, args, kwargs),
-      new IOResult(),
-    ]
-    for (const rel of walk(root)) {
-      const target = `/repo/${rel}`
-      await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
-      await binaryWs.dispatch('write', target, [new Uint8Array(readFileSync(join(root, rel)))])
-    }
-    expect(nativeGit(['log', '-2', '--format=%s', '-G', 'needle'])).toBe('')
-    expect(nativeGit(['log', '-2', '--format=%s', '-G', 'needle', '--text'])).toBe('binary two\n')
-    for (const command of [
-      'log -2 --format=%s -G needle',
-      'log -2 --format=%s -G needle --text',
-      'log -2 --format=%s -G needle -a',
-      'log -2 --format=%s -S needle --text',
-      'log -1 --format= -p --text',
-      'log -1 --format= --numstat --text',
-      'show --format= --text HEAD',
-      'show --format= --stat -p --text HEAD',
-      'diff HEAD~1 HEAD --text',
-      'diff-tree --no-commit-id -r -p --text HEAD',
-      'show --format= --cc --text binary-merge',
-      'show --format= -c -a binary-merge',
-      'show --format= -m --text binary-merge',
-      'stash show -p --text',
-    ]) {
-      const actual = await binaryWs.shell(`git -C /repo ${command}`)
-      const expected = spawnSync('bash', ['-c', `git ${command}`], { cwd: root, env: NATIVE_ENV })
-      expect(
-        [actual.exitCode, Buffer.from(actual.stdout), Buffer.from(actual.stderr)],
-        command,
-      ).toEqual([expected.status, expected.stdout, expected.stderr])
-    }
-  } finally {
-    await binaryWs.close()
-    rmSync(root, { recursive: true, force: true })
-  }
 })

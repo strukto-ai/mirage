@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "zgrep_x_basic",
+      "id": "zgrep_x_decompressed_input",
       "seq": 16801050,
       "targets": [
         "ram",
@@ -23,150 +23,20 @@
         "nextcloud",
         "box"
       ],
-      "command": "printf 'ab\\nabc\\n' | gzip > /data/zx.gz; zgrep -x ab /data/zx.gz",
+      "command": "printf 'ab\\nabc\\n@\\nx@\\n@x\\n' | gzip > /data/zx.gz; zgrep -xw @ /data/zx.gz; zgrep -wx @ /data/zx.gz; zgrep --line-regexp -Fic ab /data/zx.gz; zgrep -Pxo 'a\\Kb' /data/zx.gz; printf 'ab\\nabc\\n' | gzip | zgrep -x ab",
       "expect": {
         "exit": 0,
-        "stdout": "ab\n",
+        "stdout": "@\n@\n1\nb\nab\n",
         "stderr": ""
       },
       "flags": [
-        "x"
-      ]
-    },
-    {
-      "id": "zgrep_x_long",
-      "seq": 16801051,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\n' | gzip > /data/zx.gz; zgrep --line-regexp ab /data/zx.gz",
-      "expect": {
-        "exit": 0,
-        "stdout": "ab\n",
-        "stderr": ""
-      },
-      "flags": [
-        "line-regexp"
-      ]
-    },
-    {
-      "id": "zgrep_x_fixed_count",
-      "seq": 16801052,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\n' | gzip > /data/zx.gz; zgrep -Fxc ab /data/zx.gz",
-      "expect": {
-        "exit": 0,
-        "stdout": "1\n",
-        "stderr": ""
-      },
-      "flags": [
+        "x",
+        "w",
+        "line-regexp",
         "F",
-        "x",
-        "c"
-      ]
-    },
-    {
-      "id": "zgrep_x_word_order",
-      "seq": 16801053,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "box"
-      ],
-      "command": "printf '@\\nx@\\n@x\\n' | gzip > /data/zx.gz; zgrep -xw @ /data/zx.gz; zgrep -wx @ /data/zx.gz",
-      "expect": {
-        "exit": 0,
-        "stdout": "@\n@\n",
-        "stderr": ""
-      },
-      "flags": [
-        "x",
-        "w"
-      ]
-    },
-    {
-      "id": "zgrep_x_pcre_reset",
-      "seq": 16801054,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\n' | gzip > /data/zx.gz; zgrep -Pxo 'a\\Kb' /data/zx.gz",
-      "expect": {
-        "exit": 0,
-        "stdout": "b\n",
-        "stderr": ""
-      },
-      "flags": [
+        "i",
+        "c",
         "P",
-        "x",
         "o"
       ]
     }

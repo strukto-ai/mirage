@@ -321,13 +321,3 @@ it('under a UTF-8 locale leaves out a line no character owns', async () => {
   expect(DEC.decode(await materialize(out as AsyncIterable<Uint8Array>))).toBe('a1\na2\n')
   expect(DEC.decode(await io.materializeStderr())).toBe('grep: /u.gz: binary file matches\n')
 })
-
-it('whole-line zgrep overrides word matching on decompressed input', async () => {
-  const vfs = new RAMVFS()
-  vfs.store.files.set('/x.gz', await gzip(ENC.encode('@\nx@\n@x\n')))
-  const result = await runZgrep(vfs, [PathSpec.fromStrPath('/x.gz')], ['@'], {
-    line_regexp: true,
-    w: true,
-  })
-  expect(result).toEqual({ out: '@\n', exitCode: 0 })
-})

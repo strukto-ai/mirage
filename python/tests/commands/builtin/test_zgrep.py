@@ -375,13 +375,3 @@ def test_zgrep_utf8_leaves_out_a_line_no_character_owns():
     )
     stdout, io = _run_raw(ws, "zgrep a /data/u.gz")
     assert (_bytes(stdout), _bytes(io.stderr)) == (b"a1\na\xff\na2\n", b"")
-
-
-@pytest.mark.parametrize("spelling", ["-x", "--line-regexp", "-xw", "-wx"])
-def test_zgrep_whole_line_matching(spelling):
-    ws, _ = _ws()
-    _run_raw(ws, "tee /data/x.gz", stdin=gzip.compress(b"@\nx@\n@x\n"))
-    stdout, io = _run_raw(ws, f"zgrep {spelling} @ /data/x.gz")
-    assert _bytes(stdout) == b"@\n"
-    assert io.exit_code == 0
-    assert not io.stderr

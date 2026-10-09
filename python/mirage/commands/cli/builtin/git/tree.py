@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dulwich.object_store import BaseObjectStore, iter_tree_contents
-from dulwich.objects import Blob, Commit, ObjectID
+from dulwich.objects import Blob, Commit, ObjectID, ShaFile
 from dulwich.objects import Tree as GitTree
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
@@ -52,10 +52,7 @@ def flat_tree(repo: BaseRepo, tree_id: ObjectID) -> Tree:
         repo (BaseRepo): the opened repository.
         tree_id (ObjectID): the tree to read.
     """
-    return {
-        entry.path: (entry.mode, entry.sha)
-        for entry in iter_tree_contents(repo.object_store, tree_id)
-    }
+    return tree_entries(repo.object_store, tree_id)
 
 
 def tree_of(repo: BaseRepo, commit_id: ObjectID) -> Tree:
@@ -82,14 +79,19 @@ def contents(repo: BaseRepo, shas: list[bytes]) -> dict[bytes, bytes]:
     return out
 
 
-def resolve_tree(repo: BaseRepo, name: str) -> ObjectID:
+def resolve_tree(
+    repo: BaseRepo, name: str, obj: ShaFile | None = None
+) -> ObjectID:
     """Resolve a tree-ish through tags and commits.
 
     Args:
         repo (BaseRepo): opened object database.
         name (str): revision as typed.
+        obj (ShaFile | None): already resolved object, when the caller has it.
     """
-    obj = unwrapped(repo, resolve_object(repo, name), name)
+    obj = unwrapped(
+        repo, resolve_object(repo, name) if obj is None else obj, name
+    )
     if isinstance(obj, Commit):
         return ObjectID(obj.tree)
     if isinstance(obj, GitTree):
@@ -132,23 +134,17 @@ def listed_tree(
             or path.startswith(pattern.rstrip("/") + "/")
             for pattern in patterns
         )
-        directory = entry.mode == 0o40000
-        descend = directory and (
-            (recursive and selected)
-            or any(pattern.startswith(path + "/") for pattern in patterns)
+        row = (path, f"{entry.mode:06o}", entry.sha.decode())
+        if entry.mode != 0o40000:
+            if selected and not directories:
+                out.append(row)
+            continue
+        descend = (recursive and selected) or any(
+            pattern.startswith(path + "/") for pattern in patterns
         )
-        if (
-            selected
-            or directory
-            and descend
-            and (trees or directories and recursive)
-        ) and (
-            directory
-            and (not descend or trees or directories)
-            or not directory
-            and not directories
-        ):
-            out.append((path, f"{entry.mode:06o}", entry.sha.decode()))
+        show_tree = trees or directories and (selected or recursive)
+        if (selected and not descend) or (descend and show_tree):
+            out.append(row)
         if descend:
             out.extend(
                 listed_tree(

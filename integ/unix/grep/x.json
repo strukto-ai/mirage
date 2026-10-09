@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "grep_x_basic",
+      "id": "grep_x_flags_and_patterns",
       "seq": 16801000,
       "targets": [
         "ram",
@@ -27,18 +27,26 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\nabc\\n' > /data/gx.txt; grep -x ab /data/gx.txt",
+      "command": "grep -x world /data/a.txt; grep --line-regexp -q or /data/a.txt; echo rc=$?; grep -Fxc world /data/a.txt; grep -vxc world /data/a.txt; grep -x -f /data/patterns.txt /data/a.txt; printf 'a.b\\nc+\\nA.B\\nxa.b\\nc++\\n' | grep -Fxi -e a.b -e c+",
       "expect": {
         "exit": 0,
-        "stdout": "ab\n",
+        "stdout": "world\nrc=1\n1\n4\nworld\nbar\na.b\nc+\nA.B\n",
         "stderr": ""
       },
       "flags": [
-        "x"
+        "x",
+        "line-regexp",
+        "q",
+        "F",
+        "c",
+        "v",
+        "f",
+        "i",
+        "e"
       ]
     },
     {
-      "id": "grep_x_long",
+      "id": "grep_x_dialects_and_word_precedence",
       "seq": 16801001,
       "targets": [
         "ram",
@@ -64,18 +72,22 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\nabc\\n' > /data/gx.txt; grep --line-regexp ab /data/gx.txt",
+      "command": "printf 'ab\\nabc\\na\\n' | grep -Ex 'a|ab'; printf 'abab\\nababx\\n' | grep -x '\\(ab\\)\\1'; printf 'ab\\nabc\\n' | grep -Pxo 'a\\Kb'; printf '@\\nx@\\n@x\\n' | grep -xw @; printf '@\\nx@\\n@x\\n' | grep -wx @",
       "expect": {
         "exit": 0,
-        "stdout": "ab\n",
+        "stdout": "ab\na\nabab\nb\n@\n@\n",
         "stderr": ""
       },
       "flags": [
-        "line-regexp"
+        "x",
+        "E",
+        "P",
+        "o",
+        "w"
       ]
     },
     {
-      "id": "grep_x_fixed_count",
+      "id": "grep_x_line_boundaries_and_empty_patterns",
       "seq": 16801002,
       "targets": [
         "ram",
@@ -101,517 +113,21 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\nabc\\n' > /data/gx.txt; grep -Fxc ab /data/gx.txt",
+      "command": "printf 'ab\\r\\nab\\n\\nabc\\nab' | grep -nbx -e ab -e ''; printf 'ab\\r\\nab\\nabc\\nab' | grep -nbx -B1 -m1 ab; printf '\\nab\\n' | grep -Fx -f /data/empty.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
-        "stderr": ""
-      },
-      "flags": [
-        "F",
-        "x",
-        "c"
-      ]
-    },
-    {
-      "id": "grep_x_alternation",
-      "seq": 16801003,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\na\\n' | grep -Ex 'a|ab'",
-      "expect": {
-        "exit": 0,
-        "stdout": "ab\na\n",
-        "stderr": ""
-      },
-      "flags": [
-        "E",
-        "x"
-      ]
-    },
-    {
-      "id": "grep_x_basic_backreference",
-      "seq": 16801004,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'abab\\nababx\\n' | grep -x '\\(ab\\)\\1'",
-      "expect": {
-        "exit": 0,
-        "stdout": "abab\n",
-        "stderr": ""
-      },
-      "flags": [
-        "x"
-      ]
-    },
-    {
-      "id": "grep_x_word_order",
-      "seq": 16801005,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf '@\\nx@\\n@x\\n' > /data/gx.txt; grep -xw @ /data/gx.txt; grep -wx @ /data/gx.txt",
-      "expect": {
-        "exit": 0,
-        "stdout": "@\n@\n",
+        "stdout": "2:4:ab\n3:7:\n5:12:ab\n1-0-ab\r\n2:4:ab\nrc=1\n",
         "stderr": ""
       },
       "flags": [
         "x",
-        "w"
-      ]
-    },
-    {
-      "id": "grep_x_blank_line",
-      "seq": 16801006,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\n\\nabc\\n' | grep -nx ''",
-      "expect": {
-        "exit": 0,
-        "stdout": "2:\n",
-        "stderr": ""
-      },
-      "flags": [
-        "n",
-        "x"
-      ]
-    },
-    {
-      "id": "grep_x_crlf",
-      "seq": 16801007,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\r\\nab\\n' | grep -nx ab",
-      "expect": {
-        "exit": 0,
-        "stdout": "2:ab\n",
-        "stderr": ""
-      },
-      "flags": [
-        "n",
-        "x"
-      ]
-    },
-    {
-      "id": "grep_x_unterminated",
-      "seq": 16801008,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\nab' | grep -nx ab",
-      "expect": {
-        "exit": 0,
-        "stdout": "1:ab\n3:ab\n",
-        "stderr": ""
-      },
-      "flags": [
-        "n",
-        "x"
-      ]
-    },
-    {
-      "id": "grep_x_only_matching_pcre_reset",
-      "seq": 16801009,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\n' | grep -Pxo 'a\\Kb'",
-      "expect": {
-        "exit": 0,
-        "stdout": "b\n",
-        "stderr": ""
-      },
-      "flags": [
-        "P",
-        "x",
-        "o"
-      ]
-    },
-    {
-      "id": "grep_x_pattern_list",
-      "seq": 16801010,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'a.b\\nc+\\nA.B\\nxa.b\\nc++\\n' | grep -Fxi -e a.b -e c+",
-      "expect": {
-        "exit": 0,
-        "stdout": "a.b\nc+\nA.B\n",
-        "stderr": ""
-      },
-      "flags": [
-        "F",
-        "x",
-        "i",
-        "e"
-      ]
-    },
-    {
-      "id": "grep_x_pattern_file",
-      "seq": 16801011,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\ncd\\n' > /data/gx_patterns; printf 'ab\\nabc\\ncd\\nxcd\\n' | grep -x -f /data/gx_patterns",
-      "expect": {
-        "exit": 0,
-        "stdout": "ab\ncd\n",
-        "stderr": ""
-      },
-      "flags": [
-        "x",
-        "f"
-      ]
-    },
-    {
-      "id": "grep_x_empty_pattern_file",
-      "seq": 16801012,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf '' > /data/gx_patterns; printf '\\nab\\n' | grep -Fx -f /data/gx_patterns",
-      "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": ""
-      },
-      "flags": [
-        "F",
-        "x",
-        "f"
-      ]
-    },
-    {
-      "id": "grep_x_inverted_count",
-      "seq": 16801013,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\nabc\\nab\\n' | grep -vxc ab",
-      "expect": {
-        "exit": 0,
-        "stdout": "1\n",
-        "stderr": ""
-      },
-      "flags": [
-        "v",
-        "x",
-        "c"
-      ]
-    },
-    {
-      "id": "grep_x_quiet_no_match",
-      "seq": 16801014,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'abc\\n' | grep -qx ab",
-      "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": ""
-      },
-      "flags": [
-        "q",
-        "x"
-      ]
-    },
-    {
-      "id": "grep_x_offset_context",
-      "seq": 16801015,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "printf 'ab\\r\\nab\\nabc\\nab' | grep -nbx -B1 -m1 ab",
-      "expect": {
-        "exit": 0,
-        "stdout": "1-0-ab\r\n2:4:ab\n",
-        "stderr": ""
-      },
-      "flags": [
         "n",
         "b",
-        "x",
+        "e",
         "B",
-        "m"
+        "m",
+        "F",
+        "f"
       ]
     }
   ]

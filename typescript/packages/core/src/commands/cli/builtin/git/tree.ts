@@ -18,6 +18,7 @@ import { decodeText } from '../../../../shell/bytes.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
 import { repoArgs, type Repo } from './repo.ts'
+import type { GitObject } from './types.ts'
 
 const SPACE = 0x20
 const NUL = 0x00
@@ -89,16 +90,8 @@ export async function treeEntries(
   treeOid: string,
   prefix = '',
 ): Promise<Map<string, TreeEntry>> {
-  const out = new Map<string, TreeEntry>()
-  for (const entry of await treeItems(repo, treeOid)) {
-    const path = prefix === '' ? entry.path : `${prefix}/${entry.path}`
-    if (entry.mode === TREE_MODE) {
-      for (const [key, value] of await treeEntries(repo, entry.oid, path)) out.set(key, value)
-    } else {
-      out.set(path, { oid: entry.oid, mode: entry.mode })
-    }
-  }
-  return out
+  const rows = await listedTree(repo, treeOid, [], true, false, false, prefix)
+  return new Map(rows.map(([path, mode, oid]) => [path, { mode, oid }]))
 }
 
 /**
@@ -117,8 +110,8 @@ export async function commitEntries(
 }
 
 /** Resolve a tree-ish through tags and commits. */
-export async function resolveTree(repo: Repo, name: string): Promise<string> {
-  const obj = await unwrapped(repo, await resolveObject(repo, name), name)
+export async function resolveTree(repo: Repo, name: string, resolved?: GitObject): Promise<string> {
+  const obj = await unwrapped(repo, resolved ?? (await resolveObject(repo, name)), name)
   if (obj.type === 'commit')
     return (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
   if (obj.type === 'tree') return obj.oid
@@ -144,19 +137,27 @@ export async function listedTree(
         (pattern) =>
           pattern === '' || path === pattern || path.startsWith(pattern.replace(/\/$/, '') + '/'),
       )
-    const directory = entry.mode === TREE_MODE
+    const row: [string, string, string] = [path, entry.mode, entry.oid]
+    if (entry.mode !== TREE_MODE) {
+      if (selected && !directories) out.push(row)
+      continue
+    }
     const descend =
-      directory &&
-      ((recursive && selected) || patterns.some((pattern) => pattern.startsWith(path + '/')))
-    if (
-      (selected || (directory && descend && (trees || (directories && recursive)))) &&
-      ((directory && (!descend || trees || directories)) || (!directory && !directories))
-    )
-      out.push([path, entry.mode, entry.oid])
-    if (descend)
-      out.push(
-        ...(await listedTree(repo, entry.oid, patterns, recursive, trees, directories, path)),
+      (recursive && selected) || patterns.some((pattern) => pattern.startsWith(path + '/'))
+    const showTree = trees || (directories && (selected || recursive))
+    if ((selected && !descend) || (descend && showTree)) out.push(row)
+    if (descend) {
+      const children = await listedTree(
+        repo,
+        entry.oid,
+        patterns,
+        recursive,
+        trees,
+        directories,
+        path,
       )
+      for (const child of children) out.push(child)
+    }
   }
   return out
 }
