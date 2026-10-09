@@ -14,18 +14,15 @@
 
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic.head import head_multi
-from mirage.commands.builtin.generic.rg import rg_generic
-from mirage.commands.builtin.generic.tail import tail_multi
-from mirage.commands.builtin.generic.wc import format_multi
 from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
-from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 _PAYLOAD = b"alpha\nbeta\n"
 
@@ -71,95 +68,45 @@ async def _drain(source) -> bytes:
     return b"".join([c async for c in source])
 
 
-# Every read-content command funnels its file read through one of these shared
-# consumers, which wrap the injected reader with cache_aware_* at the choke
-# point. A backend can therefore pass a RAW reader and warm reads still serve
-# from cache. These tests pin that guarantee: with a warm manager active, the
-# consumer must NOT call the backend reader. If a consumer loses its wrap, the
-# call count goes non-zero and the matching test fails.
-
-
 @pytest.mark.asyncio
-async def test_head_multi_serves_cache_without_backend():
-    # head_multi is built in-scope but drained AFTER the manager scope is
-    # popped (mirroring the mount lifecycle), so this also pins eager capture:
-    # a lazily-captured manager would be gone by drain and the read would miss.
-    reader = _CountingReader(_PAYLOAD)
-    manager = await _warm_manager()
-    prev = push_cache_manager(manager)
-    source = head_multi([_spec()], read=reader, n=1)
-    push_cache_manager(prev)
-    out = await _drain(source)
-    assert out == b"alpha\n"
-    assert reader.calls == 0
-
-
-@pytest.mark.asyncio
-async def test_tail_multi_serves_cache_without_backend():
-    reader = _CountingReader(_PAYLOAD)
-    manager = await _warm_manager()
-    prev = push_cache_manager(manager)
-    source = tail_multi([_spec()], read=reader, n=1)
-    push_cache_manager(prev)
-    out = await _drain(source)
-    assert out == b"beta\n"
-    assert reader.calls == 0
-
-
-@pytest.mark.asyncio
-async def test_wc_format_multi_serves_cache_without_backend():
-    reader = _CountingReader(_PAYLOAD)
-    manager = await _warm_manager()
-    prev = push_cache_manager(manager)
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat /c/a.txt",
+        "head -n 1 /c/a.txt",
+        "tail -n 1 /c/a.txt",
+        "wc -l /c/a.txt",
+        "grep alpha /c/a.txt",
+        "rg alpha /c/a.txt",
+    ],
+)
+async def test_a_warm_read_command_reads_nothing_from_the_backend(line):
+    # Every read command reads at the door, which serves the warm entry
+    # whatever reader the command binds.
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ws = Workspace({"/c": ram}, mode=MountMode.WRITE)
     try:
-        out, err, _ = await format_multi([_spec()], read=reader, lines=True)
+        await ws.shell("printf 'alpha\\nbeta\\n' > /c/a.txt")
+        await (await ws.shell("cat /c/a.txt")).stdout_str()
+        reads: list[str] = []
+        read, read_stream = ram.read, ram.read_stream
+
+        async def counted_read(path, *args, **kwargs):
+            reads.append(path.virtual)
+            return await read(path, *args, **kwargs)
+
+        def counted_stream(path, *args, **kwargs):
+            reads.append(path.virtual)
+            return read_stream(path, *args, **kwargs)
+
+        ram.read, ram.read_stream = counted_read, counted_stream
+        out = await ws.shell(line)
+        assert await out.stdout_str()
+        assert out.exit_code == 0
+        assert reads == []
     finally:
-        push_cache_manager(prev)
-    assert b"2" in out
-    assert err == b""
-    assert reader.calls == 0
-
-
-@pytest.mark.asyncio
-async def test_generic_grep_serves_cache_without_backend():
-    reader = _CountingReader(_PAYLOAD)
-    manager = await _warm_manager()
-    prev = push_cache_manager(manager)
-    try:
-        out, io = await grep_generic(
-            [_spec()],
-            ("alpha",),
-            CommandOpts(),
-            readdir=_readdir,
-            stat=_stat,
-            read_bytes=reader,
-            read_stream=None,
-        )
-    finally:
-        push_cache_manager(prev)
-    assert b"alpha" in await materialize(out)
-    assert reader.calls == 0
-
-
-@pytest.mark.asyncio
-async def test_generic_rg_serves_cache_without_backend():
-    reader = _CountingReader(_PAYLOAD)
-    manager = await _warm_manager()
-    prev = push_cache_manager(manager)
-    try:
-        out, io = await rg_generic(
-            [_spec()],
-            ("alpha",),
-            CommandOpts(),
-            readdir=_readdir,
-            stat=_stat,
-            read_bytes=reader,
-            read_stream=None,
-        )
-    finally:
-        push_cache_manager(prev)
-    assert b"alpha" in await materialize(out)
-    assert reader.calls == 0
+        await ws.close()
 
 
 @pytest.mark.asyncio

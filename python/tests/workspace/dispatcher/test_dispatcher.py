@@ -1225,17 +1225,42 @@ async def test_ranges_of_an_unranged_read_come_from_one_kept_read():
 
 
 @pytest.mark.asyncio
-async def test_raw_and_natively_ranged_reads_keep_nothing():
-    # A raw read is not the rendering the cache holds under the same key,
-    # and a store that serves a range itself moved only that range.
+async def test_a_raw_read_keeps_what_a_command_reads():
+    # The stored bytes are what the cache holds under the path, so the
+    # cat after a raw read is served warm.
     ws, fetched = _counted_workspace(filetype=".count")
     await ws.vfs.write("/data/f.count", b"STORED")
-    await ws.vfs.write("/data/f.txt", b"0123456789")
     assert await ws.vfs.read("/data/f.count", raw=True) == b"STORED"
-    assert await ws.vfs.read("/data/f.txt", 2, 3) == b"234"
-    assert not await ws.cache.exists("/data/f.count")
-    assert not await ws.cache.exists("/data/f.txt")
+    assert await ws.cache.get("/data/f.count") == b"STORED"
+    out = await ws.shell("cat /data/f.count")
+    assert await out.stdout_str() == "STORED"
     assert fetched == []
+
+
+@pytest.mark.asyncio
+async def test_a_direct_read_neither_serves_nor_keeps_the_cache():
+    # A follow's poll asks for what the backend holds now: the warm copy
+    # is not served, and the read leaves the cache as it found it.
+    ws, fetched = _counted_workspace()
+    path = PathSpec.from_str_path("/data/f.count")
+    await ws.cache.set("/data/f.count", b"WARM")
+    whole, _ = await ws.dispatch("read", path, direct=True)
+    window, _ = await ws.dispatch("read", path, offset=1, size=2, direct=True)
+    assert (whole, window) == (b"BODY", b"OD")
+    assert fetched == ["/data/f.count", "/data/f.count"]
+    assert await ws.cache.get("/data/f.count") == b"WARM"
+    await ws.cache.remove("/data/f.count")
+    await ws.dispatch("read", path, direct=True)
+    assert not await ws.cache.exists("/data/f.count")
+
+
+@pytest.mark.asyncio
+async def test_a_natively_ranged_read_keeps_nothing():
+    # A store that serves a range itself moved only that range.
+    ws, _ = _counted_workspace(filetype=".count")
+    await ws.vfs.write("/data/f.txt", b"0123456789")
+    assert await ws.vfs.read("/data/f.txt", 2, 3) == b"234"
+    assert not await ws.cache.exists("/data/f.txt")
 
 
 @pytest.mark.asyncio
@@ -1686,11 +1711,12 @@ async def test_each_pull_gets_the_whole_timeout():
             got.append(chunk)
             await asyncio.sleep(0.1)
         assert len(got) == 5
+        tape.files["b.txt"] = tape.files["a.txt"]
         tape.delay = 0.5
         with pytest.raises(CommandTimeoutError):
             await ws.dispatch(
                 "read",
-                PathSpec.from_str_path("/tape/a.txt"),
+                PathSpec.from_str_path("/tape/b.txt"),
                 stream=True,
                 filetype=None,
             )
@@ -1754,3 +1780,39 @@ async def test_a_stream_past_the_drain_budget_keeps_nothing():
         assert len(b"".join([chunk async for chunk in stream])) == 50
         await ws.dispatch("read", TAPE)
         assert tape.reads == 1
+
+
+class SeenReads(Policy):
+    def __init__(self) -> None:
+        self.seen: list[tuple[str, str]] = []
+
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        self.seen.append((ctx.op, ctx.path.virtual))
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat /d/a.txt",
+        "head -n 1 /d/a.txt",
+        "tail -n 1 /d/a.txt",
+        "wc -l /d/a.txt",
+        "grep a /d/a.txt",
+        "rg a /d/a.txt",
+        "sort /d/a.txt",
+        "md5sum /d/a.txt",
+    ],
+)
+async def test_a_command_reads_at_the_door(line):
+    seen = SeenReads()
+    with Workspace(
+        {"/d/": RAMVFS()}, mode=MountMode.WRITE, policies=[seen]
+    ) as ws:
+        await ws.vfs.write("/d/a.txt", b"a\nb\n")
+        seen.seen.clear()
+        out = await ws.shell(line)
+        await out.stdout_str()
+        assert out.exit_code == 0
+        assert ("read", "/d/a.txt") in seen.seen

@@ -28,7 +28,6 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.postgres import client
-from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.readdir import entity_exists
 from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, CountedRun, IOResult
@@ -90,5 +89,5 @@ async def wc(
         resolved,
         list(texts),
         opts,
-        bound_op(postgres_read, accessor, opts.index),
+        bound_op(mount_io(opts).read_bytes, accessor, opts.index),
     )

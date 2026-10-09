@@ -23,8 +23,8 @@ import {
   genericCommands,
   scanIo,
   withProbeAnswers,
-  withReadCache,
   withSlashGuard,
+  withStatCache,
 } from './factory.ts'
 import { runWithCacheManager } from '../../../cache/context.ts'
 import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
@@ -217,8 +217,6 @@ describe('withSlashGuard on the write tier', () => {
 })
 
 describe('scanIo', () => {
-  const path = new PathSpec({ vfsPath: 'a.txt', virtual: '/s3/a.txt', directory: '/s3/' })
-
   it('guards only a judged mount', () => {
     // A bespoke search scans the raw adapter when nothing on its mount is
     // hidden or refused, and the guarded one when anything is, since the
@@ -232,27 +230,6 @@ describe('scanIo', () => {
     expect(scan).not.toBe(io)
     expect(scoped).toBe(true)
   })
-
-  // The generics' own cache steps aside for a judged path, so the guarded
-  // scan reads the cache itself once its guards admit the path.
-  it('serves warm bytes below its guards', async () => {
-    let calls = 0
-    const io = makeOps({
-      local: false,
-      readBytes: () => {
-        calls += 1
-        return Promise.resolve(new TextEncoder().encode('cold'))
-      },
-    })
-    const store = new RAMFileCacheStore()
-    await store.set('/s3/a.txt', new TextEncoder().encode('payload'))
-    const manager = new CacheManager(store, null, '/s3/', true)
-    const out = await runWithCacheManager(manager, () => {
-      const [scan] = scanIo(io, { scoped: () => true }, '/s3/')
-      return scan.readBytes(new FakeAccessor(), path)
-    })
-    expect([new TextDecoder().decode(out), calls]).toEqual(['payload', 0])
-  })
 })
 
 describe('a command stat after the freshness probe', () => {
@@ -262,7 +239,7 @@ describe('a command stat after the freshness probe', () => {
 
   function counting(answer: FileStat): { calls: number; ops: CommandIO } {
     const counter = { calls: 0, ops: makeOps() }
-    counter.ops = withReadCache(
+    counter.ops = withStatCache(
       withProbeAnswers(
         makeOps({
           local: false,

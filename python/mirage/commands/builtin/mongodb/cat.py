@@ -21,7 +21,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
-from mirage.core.mongodb.read import stream_any
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,6 +40,6 @@ async def cat(
         list(texts),
         opts,
         bound_op(mount_io(opts).stat, accessor, opts.index),
-        bound_op(stream_any, accessor, opts.index),
+        bound_op(mount_io(opts).read_stream, accessor, opts.index),
         local=mount_io(opts).local,
     )

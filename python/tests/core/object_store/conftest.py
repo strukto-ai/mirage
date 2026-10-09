@@ -16,7 +16,6 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from typing import Any
 
 import pytest
 
@@ -236,9 +235,6 @@ class FakeManager:
 
     async def invalidate_subtree(self, path: PathSpec) -> None:
         self.subtrees.append(path.mount_path)
-
-    async def cached_bytes(self, path: PathSpec) -> Any:
-        return None
 
     async def cached_size(self, path: PathSpec) -> int | None:
         return None

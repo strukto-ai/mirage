@@ -29,7 +29,6 @@ import pytest
 from bson import ObjectId
 from moto.server import ThreadedMotoServer
 
-import mirage.cache.file.io as cache_io
 import mirage.core.box.read as box_read
 import mirage.core.dropbox.read as dropbox_read
 import mirage.core.gdocs.read as gdocs_read
@@ -54,9 +53,7 @@ from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO
 from mirage.core.hf_hub.client import etag_value
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.types import IOResult
-from mirage.observe.context import OpTimer, RecordingScope, active_recorder
+from mirage.observe.context import OpTimer, active_recorder
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
@@ -138,7 +135,7 @@ GRAPH = {
 }
 
 ALL_SHAPES = ("root", "nested", "prefixed")
-ALL_ROWS = ("bytes", "stream", "drain")
+ALL_ROWS = ("bytes", "stream", "partial")
 
 # The mounts that render a Drive file through its editor API: the mime type
 # they list, the module whose `record` a read stamps through, and the file
@@ -163,7 +160,7 @@ GAPPS = {
 
 # What each family can run, fixed at collection. github and gdrive have no
 # key_prefix, and their stream is their read handed over whole, one chunk,
-# so a drain row would pass without draining anything. The GAPPS mounts
+# so a partial row would read the whole file. The GAPPS mounts
 # also have one flat listing, so only one shape.
 FAMILY_SHAPES = {
     "github": ("root", "nested"),
@@ -205,16 +202,16 @@ KEYS = {
 SEED = b"name,age\nalice,30\n"
 CHANGED = b"name,age\nalice,31\n"
 DECOY = b"decoy at the unprefixed key\n"
-# Several download chunks, so the background drain has bytes left to pull
-# after the first chunk is consumed.
+# Several download chunks, so a read stopped after the first chunk has bytes
+# left it never pulls.
 BIG = (b"x" * 1023 + b"\n") * 300
 
 COMMANDS = {
     "bytes": "cp {v} /r/a.txt",
     "stream": "cat {v}",
-    "drain": "cat {v}",
+    "partial": "cat {v} | head -c 1",
 }
-SLOTS = {"bytes": "bytes", "stream": "stream", "drain": "stream"}
+SLOTS = {"bytes": "bytes", "stream": "stream", "partial": "stream"}
 
 
 @dataclass(frozen=True)
@@ -740,7 +737,7 @@ def _cases(rows: tuple[str, ...]) -> list:
     return cases
 
 
-A_CASES = _cases(("bytes", "stream", "drain")) + [
+A_CASES = _cases(("bytes", "stream")) + [
     pytest.param(name, "listed", "stream", id=f"{name}-listed-stream")
     for name in ("s3", *GRAPH)
 ]
@@ -768,29 +765,6 @@ async def _line(ws: Workspace, line: str) -> bytes:
     err = await result.stderr_str()
     assert (result.exit_code, err) == (0, ""), line
     return out
-
-
-async def _partial_read(ws: Workspace, fake: Fake, virtual: str) -> bytes:
-    # Exercise the cache handoff directly, independent of pipe cancellation.
-    spec = PathSpec(
-        virtual=virtual,
-        directory=virtual.rsplit("/", 1)[0] + "/",
-        vfs_path=fake.key,
-    )
-    scope = RecordingScope()
-    try:
-        source = CachableAsyncIterator(
-            fake.io.read_stream(fake.vfs.accessor, spec, *fake.args())
-        )
-        first = await anext(source)
-        assert not source.exhausted
-        await ws.apply_io(
-            IOResult(reads={virtual: source}, cache=[virtual]),
-            records=scope.records,
-        )
-        return first[:1]
-    finally:
-        scope.close()
 
 
 async def _reconcile_stat(ws: Workspace, virtual: str) -> FileStat:
@@ -826,28 +800,6 @@ def _spy_slots(
     return slots
 
 
-def _spy_drain(monkeypatch: pytest.MonkeyPatch) -> list[asyncio.Event]:
-    drains: list[asyncio.Event] = []
-    original = cache_io._background_drain
-
-    # Sync, so the call is counted when apply_io creates the task; the
-    # coroutine still runs inside that task, which the drain checks.
-    def spy(*args, **kwargs):
-        done = asyncio.Event()
-        drains.append(done)
-
-        async def drain():
-            try:
-                await original(*args, **kwargs)
-            finally:
-                done.set()
-
-        return drain()
-
-    monkeypatch.setattr(cache_io, "_background_drain", spy)
-    return drains
-
-
 def _declared() -> set[str]:
     declared = set()
     for name in known_vfs_names():
@@ -861,8 +813,8 @@ def _declared() -> set[str]:
 
 def test_each_family_runs_exactly_its_rows():
     # The per-family table is filtered at collection, so a filter bug drops
-    # a row silently or hands a whole-read stream a drain row that passes
-    # without draining. Pin the ids outright rather than the count.
+    # a row silently or hands a whole-read stream a partial row that reads
+    # the whole file. Pin the ids outright rather than the count.
     aliases = [n for n in S3_FAMILY if n != "s3"] + [
         "hf_datasets",
         "hf_spaces",
@@ -870,7 +822,7 @@ def test_each_family_runs_exactly_its_rows():
     # Literals, not ALL_SHAPES / ALL_ROWS: the expectation must not move
     # with the tables it checks.
     shapes = ("root", "nested", "prefixed")
-    rows = ("bytes", "stream", "drain")
+    rows = ("bytes", "stream")
     expected_a = (
         {
             f"{family}-{shape}-{row}"
@@ -901,11 +853,7 @@ def test_each_family_runs_exactly_its_rows():
             for row in ("bytes", "stream")
         }
     )
-    expected_b = {
-        i
-        for i in expected_a
-        if not i.endswith("-drain") and not i.endswith("-listed-stream")
-    }
+    expected_b = {i for i in expected_a if not i.endswith("-listed-stream")}
     assert {c.id for c in A_CASES} == expected_a
     assert {c.id for c in B_CASES} == expected_b
     assert {c.id for c in WRITE_CASES} == {
@@ -926,7 +874,7 @@ def test_each_family_runs_exactly_its_rows():
         c.id.startswith(
             ("github-", "gdrive-", "gdocs-", "gsheets-", "gslides-")
         )
-        for c in _cases(("drain",))
+        for c in _cases(("partial",))
     )
 
 
@@ -950,10 +898,9 @@ def test_every_declaring_backend_has_a_harness():
 def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     name, shape, row, monkeypatch
 ):
-    data = BIG if row == "drain" else SEED
+    data = SEED
     with _fake(name, shape, data, monkeypatch) as fake:
         slots = _spy_slots(fake, monkeypatch)
-        drains = _spy_drain(monkeypatch)
         virtual = "/m/" + fake.key
         line = COMMANDS[row].format(v=virtual)
 
@@ -964,14 +911,7 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
                     await _line(ws, "ls /m")
                 cached_before = await ws.cache.exists(virtual)
                 before = fake.fetches()
-                first = await (
-                    _partial_read(ws, fake, virtual)
-                    if row == "drain"
-                    else _line(ws, line)
-                )
-                drained = len(drains)
-                for done in drains:
-                    await done.wait()
+                first = await _line(ws, line)
                 fetched = fake.fetches() - before
                 taken = list(slots)
                 if row == "bytes":
@@ -982,15 +922,12 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
                     and await ws.cache.is_fresh(virtual, stat.fingerprint)
                 )
                 middle = fake.fetches()
-                # The drain row's second run reads the whole entry back, so
-                # a drain that cached a truncated buffer cannot pass.
                 second = await _line(ws, line)
                 if row == "bytes":
                     second = await _line(ws, "cat /r/a.txt")
                 return (
                     cached_before,
                     first,
-                    drained,
                     fetched,
                     taken,
                     stat,
@@ -1004,7 +941,6 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
         (
             cached_before,
             first,
-            drained,
             fetched,
             taken,
             stat,
@@ -1015,9 +951,8 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
 
     assert cached_before is False
     assert taken == [(fake.slot(row), virtual)]
-    assert drained == (1 if row == "drain" else 0)
     assert fetched == 1
-    assert first == (data[:1] if row == "drain" else data)
+    assert first == data
     assert stat.fingerprint is not None
     # A cp of a rendered Google file reads through the dispatcher, where a
     # filetype read op always renders and keeps nothing, so its second cp
@@ -1030,26 +965,25 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     assert fake.reach == []
 
 
-@pytest.mark.parametrize(("name", "shape", "row"), _cases(("drain",)))
-def test_early_pipe_exit_never_caches_a_prefix(name, shape, row, monkeypatch):
+@pytest.mark.parametrize(("name", "shape", "row"), _cases(("partial",)))
+def test_early_pipe_exit_keeps_nothing(name, shape, row, monkeypatch):
     with _fake(name, shape, BIG, monkeypatch) as fake:
         slots = _spy_slots(fake, monkeypatch)
-        drains = _spy_drain(monkeypatch)
         virtual = "/m/" + fake.key
 
         async def run():
             ws = _fresh_workspace(fake.vfs)
             try:
                 before = fake.fetches()
-                assert await _line(ws, f"cat {virtual} | head -c 1") == BIG[:1]
-                for done in drains:
-                    await done.wait()
+                assert (
+                    await _line(ws, COMMANDS[row].format(v=virtual))
+                    == (BIG[:1])
+                )
                 assert slots == [(fake.slot(row), virtual)]
                 assert fake.fetches() - before == 1
-                cached = await ws.cache.get(virtual)
-                assert cached is None or cached == BIG
+                assert await ws.cache.get(virtual) is None
                 assert await _line(ws, f"cat {virtual}") == BIG
-                assert fake.fetches() - before == (2 if cached is None else 1)
+                assert fake.fetches() - before == 2
             finally:
                 await ws.close()
 

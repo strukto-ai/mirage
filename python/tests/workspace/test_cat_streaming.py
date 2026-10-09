@@ -21,8 +21,8 @@ from mirage.workspace import Workspace
 
 
 def _spying_stream(real_stream, pulled: list[str]):
-    def factory(accessor, p: PathSpec, index=None) -> AsyncIterator[bytes]:
-        return _spy_iter(real_stream(accessor, p, index), p.virtual, pulled)
+    def factory(p: PathSpec, *args, **kwargs) -> AsyncIterator[bytes]:
+        return _spy_iter(real_stream(p, *args, **kwargs), p.virtual, pulled)
 
     return factory
 
@@ -50,13 +50,9 @@ def _seeded_ws() -> Workspace:
 
 
 def _spy_cat_reads(ws, command, pulled):
-    ops = ws.mount("/data/").io
-    real = ops.read_stream
-    object.__setattr__(ops, "read_stream", _spying_stream(real, pulled))
-    try:
-        return asyncio.run(_run_and_collect(ws, command))
-    finally:
-        object.__setattr__(ops, "read_stream", real)
+    vfs = ws.mount("/data/").vfs
+    vfs.read_stream = _spying_stream(vfs.read_stream, pulled)
+    return asyncio.run(_run_and_collect(ws, command))
 
 
 async def _run_and_collect(ws, command):

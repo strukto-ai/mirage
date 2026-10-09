@@ -831,8 +831,10 @@ describe('conditional writes on an S3 mount', () => {
       expect((await run(ws, line))[0], line).toBe(0)
     }
     expect(mutations().every(([, params]) => Object.keys(params).length === 0)).toBe(true)
-    // Nor does it keep a version without bytes.
-    expect((await run(ws, 'grep x /s3/g'))[0]).toBe(1)
+    // Nor does it keep a version without bytes: a read that keeps none
+    // leaves no token behind.
+    expect((await run(ws, 'head -c 1 /s3/g'))[0]).toBe(0)
+    expect(await ws.cache.exists('/s3/g')).toBe(false)
     expect(await ws.cache.fingerprint('/s3/g')).toBeNull()
   })
 

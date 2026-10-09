@@ -18,7 +18,6 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
-from mirage.context import reset_admission, set_admission
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
@@ -393,9 +392,9 @@ def _remote_registry_with_cache():
 
 @pytest.mark.asyncio
 async def test_resolve_mount_keeps_cached_read_on_real_mount():
-    # Warm reads are served in place by with_read_cache, so a cached
-    # read-only command stays on its real mount (keeping its limits and
-    # custom handlers) instead of being redirected to the cache mount.
+    # A cached read-only command stays on its real mount (keeping its
+    # limits and custom handlers) instead of being redirected to the cache
+    # mount; its reads are served warm at the door.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
     scope = PathSpec(
@@ -531,12 +530,6 @@ class _StubReconciler:
     async def reconcile_read(self, mount, path) -> None:
         return None
 
-    async def may_serve_cached(self, mount, path: str) -> bool:
-        self.asked.append(path)
-        if self.raises is not None:
-            raise self.raises
-        return bool(self.answer)
-
     async def may_serve_listing(
         self, mount, folder: str, version: str | None
     ) -> bool:
@@ -553,105 +546,6 @@ def _gated_registry(reconciler=None):
     if reconciler is not None:
         registry.set_reconciler(reconciler)
     return registry, mount
-
-
-class _RefusingGate:
-    """An EntryGate that refuses one path."""
-
-    scoped = True
-    granted = ()
-
-    def __init__(self, refused: str) -> None:
-        self.refused = refused
-
-    def check(self, virtual: str) -> None:
-        if virtual == self.refused:
-            raise PermissionError(virtual)
-
-    def refuses(self, virtual: str) -> bool:
-        return virtual == self.refused
-
-
-@pytest.mark.asyncio
-async def test_manager_gate_declines_what_the_running_command_refuses():
-    """A warm entry the running command may not read is not served.
-
-    The read then falls through to the guarded backend read, which
-    refuses it exactly as a cold read. The answer comes before the
-    reconciler is asked, so a refused path costs no freshness probe;
-    with no command bound the cache is trusted as before.
-    """
-    reconciler = _StubReconciler(answer=True)
-    registry, mount = _gated_registry(reconciler)
-    serve = mount.cache_manager._may_serve_cached
-    token = set_admission(_RefusingGate("/data/sealed.txt"))
-    try:
-        assert await serve("/data/sealed.txt") is False
-        assert await serve("/data/open.txt") is True
-    finally:
-        reset_admission(token)
-    assert await serve("/data/sealed.txt") is True
-    assert reconciler.asked == ["/data/open.txt", "/data/sealed.txt"]
-
-
-@pytest.mark.asyncio
-async def test_gate_trusts_the_cache_with_no_reconciler():
-    """A manager built before the reconciler is wired answers True.
-
-    Workspace attaches the file cache before it sets the reconciler, so
-    the closure has to read it at call time and fall back to trusting the
-    cache rather than refusing every read.
-    """
-    registry, mount = _gated_registry()
-    assert await registry._may_serve_cached(mount, "/data/f.txt") is True
-
-
-@pytest.mark.asyncio
-async def test_gate_consults_the_reconciler():
-    rec = _StubReconciler(answer=True)
-    registry, mount = _gated_registry(rec)
-    assert await registry._may_serve_cached(mount, "/data/f.txt") is True
-    assert rec.asked == ["/data/f.txt"]
-
-
-@pytest.mark.asyncio
-async def test_gate_refuses_a_retiring_mount_without_probing():
-    """Teardown answers False rather than probing into EBUSY."""
-    rec = _StubReconciler(answer=True)
-    registry, mount = _gated_registry(rec)
-    mount.retiring = True
-    assert await registry._may_serve_cached(mount, "/data/f.txt") is False
-    assert rec.asked == []
-
-
-@pytest.mark.asyncio
-async def test_gate_absorbs_ebusy_from_the_probe():
-    """The flag can flip mid-probe, so the error is caught as well."""
-    rec = _StubReconciler(raises=ebusy("/data/"))
-    registry, mount = _gated_registry(rec)
-    assert await registry._may_serve_cached(mount, "/data/f.txt") is False
-
-
-@pytest.mark.asyncio
-async def test_gate_propagates_any_other_oserror():
-    """The safety valve: a real stat failure must not read as 'serve cold'.
-
-    Widening the EBUSY catch would turn every backend outage into a
-    silent cache bypass, which is the failure this whole change removes.
-    """
-    rec = _StubReconciler(raises=OSError("backend down"))
-    registry, mount = _gated_registry(rec)
-    with pytest.raises(OSError, match="backend down"):
-        await registry._may_serve_cached(mount, "/data/f.txt")
-
-
-@pytest.mark.asyncio
-async def test_gate_propagates_a_missing_path():
-    """GONE is an OSError subclass with no errno; it must still escape."""
-    rec = _StubReconciler(raises=FileNotFoundError("/data/f.txt"))
-    registry, mount = _gated_registry(rec)
-    with pytest.raises(FileNotFoundError):
-        await registry._may_serve_cached(mount, "/data/f.txt")
 
 
 @pytest.mark.asyncio

@@ -47,18 +47,6 @@ def _now() -> float:
     return time.monotonic()
 
 
-async def _always_serve(_key: str) -> bool:
-    """Default read gate: trust the cache.
-
-    What a manager built outside a workspace answers, having no
-    reconciler to ask.
-
-    Args:
-        _key (str): Mount-absolute cache key, ignored.
-    """
-    return True
-
-
 class CacheManager:
     """Post-mutation cache coherence for one mount.
 
@@ -79,7 +67,6 @@ class CacheManager:
         prefix: str,
         caches_reads: bool,
         owns_path: Callable[[str], bool] = lambda _: True,
-        may_serve_cached: Callable[[str], Awaitable[bool]] = _always_serve,
         read_ttl: int = DEFAULT_READ_TTL,
         on_gone: Callable[[list[Evicted]], Awaitable[None]] | None = None,
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
@@ -97,16 +84,12 @@ class CacheManager:
             file cache only holds paths for read-caching backends.
         owns_path (Callable[[str], bool]): whether this mount still
             owns a virtual cache key.
-        may_serve_cached (Callable[[str], Awaitable[bool]]): the read
-            gate, injected because this class holds no mount and no
-            dispatcher and ``mirage.cache.context`` documents that
-            dependency as one-way. Answers whether a warm entry may
-            still be served; the default trusts the cache.
         read_ttl (int): lifetime of complete backend renders, and the
             cap on every listing this mount's view writes.
         on_gone (Callable[[list[Evicted]], Awaitable[None]] | None):
-            cleanup for children a re-list found gone. This keeps the
-            dependency one-way, like the read gate; None cleans nothing.
+            cleanup for children a re-list found gone, injected because
+            this class holds no mount and no dispatcher; None cleans
+            nothing.
         may_serve_listing (Callable[[str, str | None], Awaitable[bool]]
             | None): the listing gate every view of this mount asks,
             with the folder and its stored version, before serving a
@@ -119,7 +102,6 @@ class CacheManager:
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
         self._owns_path = owns_path
-        self._may_serve_cached = may_serve_cached
         self._read_ttl = read_ttl
         self._on_gone = on_gone
         self._excluded_prefixes = excluded_prefixes
@@ -518,43 +500,6 @@ class CacheManager:
             return None
         return self._file_cache
 
-    async def cached_bytes(self, path: PathSpec) -> bytes | None:
-        """Return cached bytes for ``path`` if present and still valid.
-
-        Never fetches content from the backend. The single read-cache
-        check, called by the shared read-through wrappers
-        (``mirage.cache.read_through``) that every read command reads
-        through, so warm reads are served from the file cache without the
-        command knowing about it.
-
-        This is the second of the two doors that serve cached bytes, and
-        it is the one every shell read uses. It runs the same verdict
-        function as the dispatcher's door, so the two cannot answer
-        differently. ``exists`` comes first so a cold path costs no
-        backend stat; ``get`` comes after the gate so this door never
-        holds bytes a STALE verdict has just evicted (the dispatcher's
-        door reads its copy before asking, and slices whatever it got).
-
-        A spelling with a trailing slash is never served: the key has
-        already dropped it, and only the backend read answers ENOTDIR for
-        a plain file named as a directory.
-
-        Args:
-            path (PathSpec): the path to look up.
-        """
-        if (path.dotted or "").endswith("/"):
-            return None
-        key = self._cache_key(path)
-        cache = self._readable_cache(key)
-        if cache is None:
-            return None
-        if not await cache.exists(key):
-            return None
-        if not await self._may_serve_cached(key):
-            return None
-        cached = await cache.get(key)
-        return cached if self._owns_path(key) else None
-
     async def keep_version(self, path: PathSpec, version: str) -> None:
         """Keep ``version`` for ``path`` without bytes, if this mount caches.
 
@@ -616,20 +561,6 @@ class CacheManager:
                 out[i] = token
         return out
 
-    async def read_through(
-        self, path: PathSpec, fetch: Callable[[], Awaitable[bytes]]
-    ) -> bytes:
-        """Cache a complete backend read before a consumer transforms it.
-
-        Args:
-            path (PathSpec): file being read.
-            fetch (Callable): cold whole-file reader.
-        """
-        cached = await self.cached_bytes(path)
-        if cached is not None:
-            return cached
-        return await self.fill(path, fetch)
-
     async def fill(
         self,
         path: PathSpec,
@@ -638,10 +569,10 @@ class CacheManager:
     ) -> T:
         """Run a cold whole-file read and keep its bytes for the next one.
 
-        The fill half of ``read_through``, for a door that probed the
-        cache itself (the dispatcher's). A write that lands while the
-        fetch runs retires the generation, so the bytes it read are not
-        kept; an answer that is not bytes is returned and kept nowhere.
+        For the dispatcher, which probed the cache itself. A write that
+        lands while the fetch runs retires the generation, so the bytes it
+        read are not kept; an answer that is not bytes is returned and
+        kept nowhere.
         ``keep``, when given, is asked after the fetch with the cache's
         mutation lock held and has the last say over whether the bytes
         are kept; the dispatcher passes "no renderer resolves for the

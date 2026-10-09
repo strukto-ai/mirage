@@ -14,7 +14,6 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
-import { streamAny } from '../../../core/mongodb/read.ts'
 import { stat as mongoStat } from '../../../core/mongodb/stat.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -36,7 +35,7 @@ async function cat(
     texts,
     opts,
     (p) => mongoStat(accessor, p, opts.index ?? undefined),
-    (p) => streamAny(accessor, p, opts.index ?? undefined),
+    (p) => mountIo(opts).readStream(accessor, p, opts.index ?? undefined),
   )
 }
 

@@ -24,25 +24,6 @@ function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text)
 }
 
-interface SourceState {
-  closed: boolean
-  reads: number
-}
-
-async function* trackedChunks(state: SourceState): AsyncIterable<Uint8Array> {
-  try {
-    await Promise.resolve()
-    state.reads += 1
-    yield new Uint8Array(100)
-    state.reads += 1
-    yield new Uint8Array(100)
-    state.reads += 1
-    yield new Uint8Array(100)
-  } finally {
-    state.closed = true
-  }
-}
-
 describe('CachableAsyncIterator', () => {
   it('passes chunks through when iterated', async () => {
     const ci = new CachableAsyncIterator(fromChunks([encode('a'), encode('b')]))
@@ -65,38 +46,6 @@ describe('CachableAsyncIterator', () => {
     expect(first.done).toBe(false)
     const drained = await ci.drain()
     expect(new TextDecoder().decode(drained)).toBe('abc')
-  })
-
-  it('drainBounded stops when the budget is exceeded', async () => {
-    const ci = new CachableAsyncIterator(fromChunks([encode('aa'), encode('bb'), encode('cc')]))
-    const bytes = await ci.drainBounded(3)
-    expect(bytes).toBeNull()
-    expect(ci.bufferedChunks).toHaveLength(0)
-  })
-
-  it('drainBounded returns the bytes when under budget', async () => {
-    const ci = new CachableAsyncIterator(fromChunks([encode('ab')]))
-    const bytes = await ci.drainBounded(100)
-    expect(bytes).toEqual(encode('ab'))
-  })
-
-  it('drainBounded closes the source when the budget is exceeded', async () => {
-    const state: SourceState = { closed: false, reads: 0 }
-    const ci = new CachableAsyncIterator(trackedChunks(state))
-    expect(await ci.drainBounded(150)).toBeNull()
-    expect(state.closed).toBe(true)
-    expect(ci.bufferedChunks).toHaveLength(0)
-  })
-
-  it('drainBounded checks the existing buffer before another read', async () => {
-    const state: SourceState = { closed: false, reads: 0 }
-    const ci = new CachableAsyncIterator(trackedChunks(state))
-    expect((await ci.next()).done).toBe(false)
-    expect(state.reads).toBe(1)
-    expect(await ci.drainBounded(50)).toBeNull()
-    expect(state.reads).toBe(1)
-    expect(state.closed).toBe(true)
-    expect(ci.bufferedChunks).toHaveLength(0)
   })
 })
 

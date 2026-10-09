@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { applyIo } from '@struktoai/mirage-core/cache/file/io'
-import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterator'
-import { IOResult } from '@struktoai/mirage-core/io/types'
-import { OpRecord } from '@struktoai/mirage-core/observe/record'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RedisClientType } from 'redis'
 import { DEL_BATCH, KEY_BATCH, RedisFileCacheStore, VERSION_TTL } from './redis.ts'
@@ -70,10 +66,10 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.get('/data/sub/nested2')).toBeNull()
   })
 
-  it.each(['set', 'add', 'keepFingerprints'] as const)(
+  it.each(['set', 'keepFingerprints'] as const)(
     '%s discards a fill invalidated while it awaited the client',
     async (method) => {
-      // This store's window is its own: `set` and `add` both
+      // This store's window is its own: `set` and `keepFingerprints` both
       // `await this.cacheClient()` between `invalidation.enter` and the
       // `stale` check. core's ram.test.ts covers the lock path, a
       // different suspension point, so neither stands in for the other.
@@ -127,58 +123,31 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     },
   )
 
-  it.each(['set', 'add'] as const)(
-    '%s of an unrelated key survives a prefix eviction while it awaited the client',
-    async (method) => {
-      // The scoped twin of the case above: the writer is held inside the
-      // gated client while evictPrefix runs to completion, so a store-wide
-      // retirement would discard it even though nothing under its key went.
-      const real = cache.cacheClient.bind(cache)
-      let release!: () => void
-      const gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
-      let held = false
-      cache.cacheClient = async (): Promise<RedisClientType> => {
-        if (!held) {
-          held = true
-          await gate
-        }
-        return real()
+  it('a set of an unrelated key survives a prefix eviction while it awaited the client', async () => {
+    // The scoped twin of the case above: the writer is held inside the
+    // gated client while evictPrefix runs to completion, so a store-wide
+    // retirement would discard it even though nothing under its key went.
+    const real = cache.cacheClient.bind(cache)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let held = false
+    cache.cacheClient = async (): Promise<RedisClientType> => {
+      if (!held) {
+        held = true
+        await gate
       }
-      const data = new Uint8Array([1, 2, 3])
-      const fill = cache[method]('other', data)
-      await cache.evictPrefix('pend')
-      release()
-      cache.cacheClient = real
-      await fill
-      expect(await cache.get('other')).toEqual(data)
-      await cache.remove('other')
-    },
-  )
-
-  it('a tokenless add still bounds its data key', async () => {
-    // add.lua nests the meta EXPIRE inside the data EXPIRE, so a mistake
-    // in that nesting takes the data key's bound with it. This is the
-    // combination the background drain now reaches: it calls `add` with
-    // whatever latestFingerprint returned -- which may be null -- and the
-    // mount's bound. An immortal tokenless entry is the one thing
-    // `bounded` can never expire.
-    expect(await cache.add('a', new Uint8Array([1]), { ttl: 100 })).toBe(true)
-    const c = await cache.cacheClient()
-    expect(await c.ttl(`${prefix}data:a`)).toBeGreaterThan(0)
-    expect(await c.exists(`${prefix}meta:a`)).toBe(0)
-  })
-
-  it('a losing tokenless add leaves the incumbent token alone', async () => {
-    // The early return has to happen before the meta delete. A drain that
-    // finishes late correctly declines to overwrite a newer fill; if it
-    // still dropped that fill's token on the way out, the survivor would
-    // be unverifiable and a `fresh` mount would refetch it on every read.
-    await cache.set('a', new Uint8Array([2]), { fingerprint: 'etag-new' })
-    expect(await cache.add('a', new Uint8Array([3]))).toBe(false)
-    expect(await cache.get('a')).toEqual(new Uint8Array([2]))
-    expect(await cache.isFresh('a', 'etag-new')).toBe(true)
+      return real()
+    }
+    const data = new Uint8Array([1, 2, 3])
+    const fill = cache.set('other', data)
+    await cache.evictPrefix('pend')
+    release()
+    cache.cacheClient = real
+    await fill
+    expect(await cache.get('other')).toEqual(data)
+    await cache.remove('other')
   })
 
   it('a token-bearing set bounds its meta key too', async () => {
@@ -214,19 +183,6 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     // Asserted on the key itself: "deleted" and "overwritten with
     // something that happens not to match" are the same isFresh answer,
     // and only the first is what this branch claims to do.
-    expect(await c.exists(`${prefix}meta:a`)).toBe(0)
-    expect(await cache.isFresh('a', 'etag-old')).toBe(false)
-  })
-
-  it('a tokenless add deletes a meta key that outlived its data', async () => {
-    // add.lua only checks the data key, so a meta key that survived its
-    // data key is invisible to the insert-only guard and must be dropped.
-    await cache.set('a', new Uint8Array([1]), { fingerprint: 'etag-old' })
-    const c = await cache.cacheClient()
-    await c.del(`${prefix}data:a`)
-    expect(await c.exists(`${prefix}meta:a`)).toBe(1)
-    expect(await cache.add('a', new Uint8Array([2]))).toBe(true)
-    expect(await cache.get('a')).toEqual(new Uint8Array([2]))
     expect(await c.exists(`${prefix}meta:a`)).toBe(0)
     expect(await cache.isFresh('a', 'etag-old')).toBe(false)
   })
@@ -275,39 +231,6 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(remaining).toBeLessThanOrEqual(30)
   })
 
-  it('add returns false if key exists, true otherwise', async () => {
-    const data = new Uint8Array([1, 2, 3])
-    expect(await cache.add('k', data)).toBe(true)
-    expect(await cache.add('k', data)).toBe(false)
-  })
-
-  it('gives concurrent add calls exactly one winner', async () => {
-    const contenders = Array.from({ length: 32 }, (_, i) => ({
-      data: new TextEncoder().encode(`value-${String(i)}`),
-      fingerprint: `fingerprint-${String(i)}`,
-    }))
-    const inserted = await Promise.all(
-      contenders.map(({ data, fingerprint }) => cache.add('shared', data, { fingerprint })),
-    )
-
-    expect(inserted.filter(Boolean)).toHaveLength(1)
-    const winner = contenders.find((_value, index) => inserted[index])
-    if (winner === undefined) throw new Error('expected one add call to win')
-    expect(await cache.get('shared')).toEqual(winner.data)
-    expect(await cache.isFresh('shared', winner.fingerprint)).toBe(true)
-  })
-
-  it('preserves binary data and applies ttl to data and metadata on add', async () => {
-    const data = new Uint8Array([0x00, 0xff, 0x80, 0x42])
-    expect(await cache.add('binary', data, { fingerprint: 'binary-fp', ttl: 1 })).toBe(true)
-    expect(await cache.get('binary')).toEqual(data)
-    expect(await cache.isFresh('binary', 'binary-fp')).toBe(true)
-
-    await new Promise((resolve) => setTimeout(resolve, 1100))
-    expect(await cache.get('binary')).toBeNull()
-    expect(await cache.isFresh('binary', 'binary-fp')).toBe(false)
-  })
-
   it('remove deletes data and meta', async () => {
     await cache.set('k', new Uint8Array([9]))
     expect(await cache.exists('k')).toBe(true)
@@ -349,63 +272,14 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.exists('b')).toBe(false)
   })
 
-  it('background-drains an unexhausted stream, carrying the record fingerprint', async () => {
-    async function* gen(): AsyncGenerator<Uint8Array> {
-      await Promise.resolve()
-      yield new TextEncoder().encode('drained')
-    }
-    const stream = new CachableAsyncIterator(gen())
-    const io = new IOResult({ reads: { '/file.txt': stream }, cache: ['/file.txt'] })
-    const records = [
-      new OpRecord({
-        op: 'read',
-        path: '/file.txt',
-        source: 's3',
-        bytes: 0,
-        timestamp: 0,
-        durationMs: 0,
-        fingerprint: 'etag-9',
-      }),
-    ]
-    await applyIo(cache, io, undefined, records)
-    expect(cache.drainTasks.has('/file.txt')).toBe(true)
-    await Promise.all([...cache.drainTasks.values()])
-    expect(new TextDecoder().decode((await cache.get('/file.txt')) ?? undefined)).toBe('drained')
-    expect(await cache.isFresh('/file.txt', 'etag-9')).toBe(true)
-  })
-
-  it('remove aborts a pending drain fill', async () => {
-    let started!: () => void
-    const gate = new Promise<void>((r) => {
-      started = r
-    })
-    async function* gen(): AsyncGenerator<Uint8Array> {
-      started()
-      await new Promise((r) => setTimeout(r, 200))
-      yield new TextEncoder().encode('slow')
-    }
-    const stream = new CachableAsyncIterator(gen())
-    const io = new IOResult({ reads: { '/slow.txt': stream }, cache: ['/slow.txt'] })
-    await applyIo(cache, io)
-    const task = cache.drainTasks.get('/slow.txt')
-    expect(task).toBeDefined()
-    await gate
-    await cache.remove('/slow.txt')
-    expect(cache.drainTasks.has('/slow.txt')).toBe(false)
-    await task
-    expect(await cache.get('/slow.txt')).toBeNull()
-  })
-
   it('never reads a version kept without bytes', async () => {
     await cache.keepFingerprints({ '/a': 'v1' })
     expect(await cache.exists('/a')).toBe(false)
     expect(await cache.get('/a')).toBeNull()
     expect(await cache.isFresh('/a', 'v1')).toBe(false)
     expect(await cache.fingerprint('/a')).toBe('v1')
-    expect(await cache.add('/a', new TextEncoder().encode('drained'), { fingerprint: 'v1' })).toBe(
-      true,
-    )
-    expect(new TextDecoder().decode((await cache.get('/a')) ?? new Uint8Array())).toBe('drained')
+    await cache.set('/a', new TextEncoder().encode('read'), { fingerprint: 'v1' })
+    expect(new TextDecoder().decode((await cache.get('/a')) ?? new Uint8Array())).toBe('read')
   })
 
   const KEPT = [60, VERSION_TTL] as const
@@ -421,14 +295,12 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
       [VERSION_TTL, 2 * VERSION_TTL],
     ],
     ['alone', null, undefined, KEPT, [-3, -2]],
-    ['late drain', 'add', 60, KEPT, [0, 60]],
   ] as const)('only ever raises a version bound: %s', async (_name, fill, ttl, meta, data) => {
     // Raise-only: outlives its bytes, never shortens them (-1: no expiry).
     const x = new TextEncoder().encode('x')
     if (fill === 'set')
       await cache.set('/a', x, { fingerprint: 'v1', ...(ttl !== undefined ? { ttl } : {}) })
     await cache.keepFingerprints({ '/a': 'v1' })
-    if (fill === 'add') expect(await cache.add('/a', x, { fingerprint: 'v1', ttl })).toBe(true)
     const c = await ttlClient(cache)
     const metaTtl = await c.ttl(`${prefix}meta:/a`)
     const dataTtl = await c.ttl(`${prefix}data:/a`)

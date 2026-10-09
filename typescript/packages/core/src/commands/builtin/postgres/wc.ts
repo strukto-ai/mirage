@@ -15,7 +15,6 @@
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { countRows } from '../../../core/postgres/client.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
-import { readStream } from '../../../core/postgres/read.ts'
 import { entityExists } from '../../../core/postgres/readdir.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
@@ -86,7 +85,9 @@ async function wc(
     const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
     return [out, new IOResult({ countedRuns: rows })]
   }
-  return wcGeneric(resolved, texts, opts, (p) => readStream(accessor, p, opts.index ?? undefined))
+  return wcGeneric(resolved, texts, opts, (p) =>
+    mountIo(opts).readStream(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const POSTGRES_WC = command({

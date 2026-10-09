@@ -143,7 +143,6 @@ class CommandIO:
     dir_copy: PairOp | None = None
     truncate: TruncateOp | None = None
     set_attrs: OperationFn | None = None
-    streams_bytes: bool = False
     local: bool = True
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES

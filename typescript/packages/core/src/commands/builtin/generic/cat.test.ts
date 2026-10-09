@@ -54,7 +54,7 @@ function statFn(p: PathSpec): Promise<FileStat> {
 }
 
 describe('catGeneric multi-file streaming', () => {
-  it('records one reads entry per file, not the joined stream', async () => {
+  it('prints each file in order and leaves the cache to the door', async () => {
     const pulled: string[] = []
     const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
       fileStream(p.virtual, pulled),
@@ -62,8 +62,7 @@ describe('catGeneric multi-file streaming', () => {
     expect(result).not.toBeNull()
     const [stdout, io] = result ?? [null, new IOResult()]
     expect(DEC.decode(await materialize(stdout))).toBe('a1\na2\na3\nb1\nb2\n')
-    expect(DEC.decode(await materialize(io.reads['/a.txt']))).toBe('a1\na2\na3\n')
-    expect(DEC.decode(await materialize(io.reads['/b.txt']))).toBe('b1\nb2\n')
+    expect(io.reads).toEqual({})
   })
 
   it('does not pull the second file when the consumer stops early', async () => {

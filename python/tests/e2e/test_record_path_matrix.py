@@ -98,8 +98,9 @@ _NATIVE_APPEND = [
     ("append", C),
 ]
 
-# s3 has no native append (read + write), serves cat and the cp source from
-# cache, and records its own copy, rename, unlink, rmdir and rm_r.
+# s3 has no native append (read + write), serves cat, the cp source and
+# gzip's read from cache, and records its own copy, rename, unlink, rmdir
+# and rm_r.
 _S3 = [
     ("write", K),
     ("read", K),
@@ -115,14 +116,14 @@ _S3 = [
     ("rmdir", "/m/m/e"),
     ("write", DF),
     ("rm_r", "/m/m/d"),
-    *_GENERIC_OUT,
+    *_GENERIC_OUT[1:],
     ("create", C),
     ("read", C),
     ("write", C),
 ]
 
-# ssh records nothing for cat (cached), cp, mv, rm, rmdir, rm -r or
-# split's streamed read.
+# ssh records nothing for cat and gzip (cached), cp, mv, rm, rmdir, rm -r
+# or split's streamed read.
 _SSH = [
     ("write", K),
     ("append", K),
@@ -130,7 +131,7 @@ _SSH = [
     ("write", NEW),
     ("truncate", NEW),
     ("write", DF),
-    *_GENERIC_OUT[:4],
+    *_GENERIC_OUT[1:4],
     *_GENERIC_OUT[5:],
     ("create", C),
     ("append", C),

@@ -199,17 +199,16 @@ describe('onedrive under read: fresh', () => {
     }
   })
 
-  it('a streamed read stamps its cTag', async () => {
+  it.each([false, true])('a door read stamps its cTag (streamed: %s)', async (streamed) => {
     const graph = await graphOf(OLD)
     const w = ws(await vfsOf(graph))
     try {
-      // Recorded, as a command's read is: the cTag reaches the cache through
-      // the recording.
-      const [got] = await runWithRecording(async () => {
-        let text = ''
-        for await (const chunk of await w.vfs.readStream('/m/a.txt')) text += DEC.decode(chunk)
-        return text
-      })
+      let got = ''
+      if (streamed) {
+        for await (const chunk of await w.vfs.readStream('/m/a.txt')) got += DEC.decode(chunk)
+      } else {
+        got = DEC.decode(await w.vfs.read('/m/a.txt'))
+      }
       expect(got).toBe(DEC.decode(OLD))
       const before = graph.fetches()
       expect(await out(w, CAT)).toBe(DEC.decode(OLD))

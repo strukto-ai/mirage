@@ -13,22 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
-import { read as discordRead } from '../../../core/discord/read.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
-
-async function* discordStream(
-  accessor: DiscordAccessor,
-  p: PathSpec,
-  index: IndexCacheStore | undefined,
-): AsyncIterable<Uint8Array> {
-  yield await discordRead(accessor, p, index)
-}
 
 async function head(
   accessor: DiscordAccessor,
@@ -45,7 +35,7 @@ async function head(
     texts,
     opts,
     (p) => discordStat(accessor, p, opts.index ?? undefined),
-    (p) => discordStream(accessor, p, opts.index ?? undefined),
+    (p) => mountIo(opts).readStream(accessor, p, opts.index ?? undefined),
   )
 }
 

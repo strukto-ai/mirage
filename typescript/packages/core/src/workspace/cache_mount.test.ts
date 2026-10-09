@@ -284,14 +284,10 @@ describe('namespace orphan GC on remote delete', () => {
   })
 })
 
-describe('a guarded cp reads past the cache without refilling it', () => {
-  it('leaves the entry it read past under bounded', async () => {
-    // Every condition here is load-bearing and fails silently if changed.
-    // The hide forces `cp` onto the primitive walk, whose per-file read
-    // carries no backend token; the native strategy fills no cache at all.
-    // The mount is the root because `cp` keys its reads on `src.virtual`
-    // while the runner re-prefixes, so at `/r` the fill lands on
-    // `/r/r/dir/a.txt` and this asserts nothing (#441, #629).
+describe('a guarded cp reads at the door', () => {
+  it('copies what cat serves under bounded', async () => {
+    // The hide forces `cp` onto the primitive walk, which reads at the door
+    // like every command, so a trusted entry is what both copy and print.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
@@ -314,7 +310,7 @@ describe('a guarded cp reads past the cache without refilling it', () => {
       expect(copied.exitCode).toBe(0)
 
       const made = await ws.shell('cat /copy/a.txt', { sessionId: 'agent' })
-      expect(DEC.decode(made.stdout)).toBe('v2\n')
+      expect(DEC.decode(made.stdout)).toBe('v1\n')
       const served = await ws.shell('cat /dir/a.txt', { sessionId: 'agent' })
       expect(DEC.decode(served.stdout)).toBe('v1\n')
     } finally {

@@ -12,10 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from collections.abc import Iterable
 from importlib.resources import files
-from typing import Any
 
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import glob_escape, parse_limit
@@ -24,8 +22,6 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import under_path
 from mirage.vfs.redis.redis import RedisVFS
 
-# Shipped next to this module; byte-identical to the TypeScript add.lua.
-ADD_LUA = (files("mirage.cache.file") / "add.lua").read_text(encoding="utf-8")
 VERSION_LUA = (files("mirage.cache.file") / "version.lua").read_text(
     encoding="utf-8"
 )
@@ -88,8 +84,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         # cross-language contract and a guard against a future await
         # rather than a window that can currently open.
         self._invalidation = Invalidation()
-        self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
-        self._add = self._cache_client.register_script(ADD_LUA)
         self._version = self._cache_client.register_script(VERSION_LUA)
 
     def _data_key(self, key: str) -> str:
@@ -132,39 +126,8 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         finally:
             self._invalidation.leave(key)
 
-    async def add(
-        self,
-        key: str,
-        data: bytes,
-        fingerprint: str | None = None,
-        ttl: int | None = None,
-    ) -> bool:
-        stamp = self._invalidation.enter(key)
-        try:
-            if self._invalidation.stale(key, stamp):
-                return False
-            # The background drain deliberately uses insert-only
-            # semantics: an older drain finishing late must not overwrite
-            # a newer cache fill. add.lua keeps the existence check, bytes,
-            # fingerprint and TTL in one Redis execution so shared-cache
-            # writers cannot interleave.
-            inserted = await self._add(
-                keys=[self._data_key(key), self._meta_key(key)],
-                args=[
-                    data,
-                    fingerprint or "",
-                    "" if ttl is None else str(ttl),
-                ],
-            )
-            return bool(inserted)
-        finally:
-            self._invalidation.leave(key)
-
     async def remove(self, key: str) -> None:
         self._invalidation.invalidate(key)
-        task = self._drain_tasks.pop(key, None)
-        if task:
-            task.cancel()
         pipe = self._cache_client.pipeline()
         pipe.delete(self._data_key(key))
         pipe.delete(self._meta_key(key))
@@ -239,23 +202,12 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()
-        for task in self._drain_tasks.values():
-            task.cancel()
-        self._drain_tasks.clear()
         await self._drop_matching("")
 
     async def evict_prefix(
         self, prefix: str, *, excluded: tuple[str, ...] = ()
     ) -> None:
         self._invalidation.invalidate_prefix(prefix, excluded)
-        for key in [
-            k
-            for k in self._drain_tasks
-            if k.startswith(prefix)
-            and not any(under_path(k, p) for p in excluded)
-        ]:
-            task = self._drain_tasks.pop(key)
-            task.cancel()
         await self._drop_matching(prefix, excluded)
 
     async def _drop_matching(

@@ -12,21 +12,60 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+from collections.abc import AsyncIterator
 from dataclasses import replace
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.config import CommandIO
-from mirage.core.dev.stream import read_stream
+from mirage.core.dev.constants import ZERO_CHUNK_SIZE
+from mirage.types import PathSpec
+from mirage.vfs.types import ReadRangeOp
+
+
+async def _ranged(
+    read_range: ReadRangeOp,
+    accessor: Accessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes]:
+    """Stream ``path`` as successive ranged reads at the door.
+
+    ``/dev/zero`` answers every range in full, so the stream ends only
+    when the reader stops; ``/dev/null`` and a regular file end at the
+    first short range. Each range is a door read, so hides, path rules
+    and policies judge it.
+
+    Args:
+        read_range (ReadRangeOp): the table's ranged read.
+        accessor (Accessor): backend handle.
+        path (PathSpec): the file.
+        index (IndexCacheStore): the mount's index.
+    """
+    offset = 0
+    while True:
+        chunk = await read_range(
+            accessor, path, index, offset, ZERO_CHUNK_SIZE
+        )
+        if chunk:
+            yield chunk
+        if len(chunk) < ZERO_CHUNK_SIZE:
+            return
+        offset += len(chunk)
 
 
 def _endless(io: CommandIO) -> CommandIO:
-    return replace(io, read_stream=read_stream)
+    if io.read_range is None:
+        return io
+    return replace(io, read_stream=functools.partial(_ranged, io.read_range))
 
 
 # /dev is a RAM mount whose read and stat know the two synthetic
 # character devices. Commands that consume a whole input read a finite
-# stream, while the two bounded streaming commands opt into the endless
-# source.
+# stream, while the two bounded streaming commands read in ranges, which
+# /dev/zero answers without end.
 COMMANDS = [
     *generic_commands(
         "ram",

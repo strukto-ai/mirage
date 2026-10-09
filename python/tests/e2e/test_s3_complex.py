@@ -24,7 +24,6 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.s3 import COMMANDS as _S3_COMMANDS
 from mirage.commands.config import CommandOpts
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
@@ -320,13 +319,9 @@ def _resolved(original: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_cat_multifile_caches_materialized_bytes_per_file():
-    """Regression: multi-file cat on a streaming backend must register fully
-    materialized bytes per path in io.reads (not un-exhausted cachables). A
-    per-file cachable cannot preserve stdout identity, so the cache-fill
-    background drain raced the consumer on the same network stream and
-    poisoned each file's cache slot. Materialized bytes cache deterministically
-    with no drain and no race."""
+async def test_cat_multifile_prints_each_file_in_order():
+    """Multi-file cat on a streaming backend prints each file whole, in
+    operand order, and leaves the cache to the door."""
     objects = _s3_objects()
     backend = _s3_backend()
     with _patch_async_session(objects):
@@ -339,20 +334,15 @@ async def test_cat_multifile_caches_materialized_bytes_per_file():
             CommandOpts(io=command_io(backend), index=NULL_INDEX),
         )
 
-        assert (
-            io.reads["/reports/summary.txt"] == b"alpha report\nbeta report\n"
-        )
-        assert io.reads["/archive/2026/q1/deep.txt"] == b"deep archive\n"
-        assert all(isinstance(v, bytes) for v in io.reads.values())
-
+        assert io.reads == {}
         combined = b"".join([chunk async for chunk in source])
         assert combined == b"alpha report\nbeta report\ndeep archive\n"
 
 
 @pytest.mark.asyncio
-async def test_cat_single_file_keeps_streaming_cachable():
-    """The single-file path must stay a streaming cachable returned AS stdout
-    (identity preserved) so large files still stream, not materialize."""
+async def test_cat_single_file_streams():
+    """The single-file path stays a stream so large files never
+    materialize."""
     objects = _s3_objects()
     backend = _s3_backend()
     with _patch_async_session(objects):
@@ -363,5 +353,5 @@ async def test_cat_single_file_keeps_streaming_cachable():
             [],
             CommandOpts(io=command_io(backend), index=NULL_INDEX),
         )
-        assert isinstance(source, CachableAsyncIterator)
-        assert io.reads["/reports/summary.txt"] is source
+        assert not isinstance(source, bytes)
+        assert io.reads == {}

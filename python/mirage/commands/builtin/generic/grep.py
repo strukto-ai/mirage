@@ -10,10 +10,6 @@ from contextlib import aclosing
 from dataclasses import replace
 from functools import partial
 
-from mirage.cache.read_through import (
-    cache_aware_bound_bytes,
-    cache_aware_bound_stream,
-)
 from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.grep_binary import GrepFlags, grep_input
 from mirage.commands.builtin.grep_pattern import (
@@ -220,9 +216,6 @@ async def grep_generic(
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    read_bytes = cache_aware_bound_bytes(read_bytes)
-    if read_stream is not None:
-        read_stream = cache_aware_bound_stream(read_stream)
     operand_stream = stdin_stream(
         read_stream if read_stream is not None else read_bytes, stdin
     )

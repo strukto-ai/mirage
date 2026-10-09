@@ -85,28 +85,6 @@ async def test_locks_cleaned_after_eviction():
 
 
 @pytest.mark.asyncio
-async def test_drain_task_cancelled_on_remove():
-    cache = RAMFileCacheStore(cache_limit="1MB")
-
-    cancelled = False
-
-    async def slow():
-        nonlocal cancelled
-        try:
-            await asyncio.sleep(10)
-        except asyncio.CancelledError:
-            cancelled = True
-
-    task = asyncio.create_task(slow())
-    cache._drain_tasks["/a"] = task
-    await cache.set("/a", b"data")
-    await asyncio.sleep(0)
-    await cache.remove("/a")
-    await asyncio.sleep(0)
-    assert cancelled
-
-
-@pytest.mark.asyncio
 async def test_evict_prefix_drops_only_matching_keys():
     cache = RAMFileCacheStore()
     await cache.set("/data/a.txt", b"a")
@@ -166,7 +144,7 @@ def _fill(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add", "keep_fingerprints"])
+@pytest.mark.parametrize("operation", ["set", "keep_fingerprints"])
 async def test_clear_while_a_writer_is_parked_discards_its_write(operation):
     cache = RAMFileCacheStore()
     lock = cache._lock_for("/large")
@@ -188,14 +166,11 @@ async def test_clear_while_a_writer_is_parked_discards_its_write(operation):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
-async def test_evict_prefix_while_a_writer_is_parked_discards_its_write(
-    operation,
-):
+async def test_evict_prefix_while_a_writer_is_parked_discards_its_write():
     cache = RAMFileCacheStore()
     lock = cache._lock_for("/large")
     await lock.acquire()
-    pending = asyncio.create_task(getattr(cache, operation)("/large", b"x"))
+    pending = asyncio.create_task(cache.set("/large", b"x"))
     evicting: asyncio.Task[None] | None = None
     try:
         await asyncio.sleep(0.01)
@@ -208,10 +183,7 @@ async def test_evict_prefix_while_a_writer_is_parked_discards_its_write(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
-async def test_a_writer_queued_behind_a_removal_of_its_key_is_discarded(
-    operation,
-):
+async def test_a_writer_queued_behind_a_removal_of_its_key_is_discarded():
     # The per-key counter as `remove` advances it, under the key's lock:
     # the clear case above bumps the store-wide epoch instead. The second writer holds
     # bytes read before the removal, so it must not repopulate the key that
@@ -224,11 +196,11 @@ async def test_a_writer_queued_behind_a_removal_of_its_key_is_discarded(
     cache = RAMFileCacheStore()
     lock = cache._lock_for("/large")
     await lock.acquire()
-    first = asyncio.create_task(getattr(cache, operation)("/large", b"x"))
+    first = asyncio.create_task(cache.set("/large", b"x"))
     await asyncio.sleep(0.01)
     removal = asyncio.create_task(cache.remove("/large"))
     await asyncio.sleep(0.01)
-    second = asyncio.create_task(getattr(cache, operation)("/large", b"y"))
+    second = asyncio.create_task(cache.set("/large", b"y"))
     await asyncio.sleep(0.01)
     lock.release()
     await asyncio.gather(first, removal, second)
@@ -236,8 +208,7 @@ async def test_a_writer_queued_behind_a_removal_of_its_key_is_discarded(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
-async def test_a_parked_fill_survives_the_removal_of_another_key(operation):
+async def test_a_parked_fill_survives_the_removal_of_another_key():
     # Per-key scoping: a removal of an unrelated key must not throw away a
     # fill that is waiting its turn. `remove` takes a different lock, so it
     # runs to completion while this writer is still parked.
@@ -245,7 +216,7 @@ async def test_a_parked_fill_survives_the_removal_of_another_key(operation):
     data = b"x" * 1000
     lock = cache._lock_for("/large")
     await lock.acquire()
-    fill = asyncio.create_task(getattr(cache, operation)("/large", data))
+    fill = asyncio.create_task(cache.set("/large", data))
     try:
         await asyncio.sleep(0.01)
         await cache.remove("/other")
@@ -256,14 +227,13 @@ async def test_a_parked_fill_survives_the_removal_of_another_key(operation):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
-async def test_a_parked_fill_survives_a_prefix_eviction_elsewhere(operation):
+async def test_a_parked_fill_survives_a_prefix_eviction_elsewhere():
     # Prefix scoping: `rm -r /a` or `mv /a ...` must not throw away a fill
     # of an unrelated key that is waiting its turn.
     cache = RAMFileCacheStore()
     lock = cache._lock_for("/b")
     await lock.acquire()
-    fill = asyncio.create_task(getattr(cache, operation)("/b", b"x"))
+    fill = asyncio.create_task(cache.set("/b", b"x"))
     try:
         await asyncio.sleep(0.01)
         await cache.evict_prefix("/a/")
@@ -274,24 +244,22 @@ async def test_a_parked_fill_survives_a_prefix_eviction_elsewhere(operation):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
-async def test_a_fill_with_no_token_stores_none(operation):
+async def test_a_fill_with_no_token_stores_none():
     """The entry records what the backend said, and says nothing when the
     backend said nothing. Inventing md5(content) made the entry claim a
     token it did not have, which `is_fresh` then rejected on every backend
     whose own token is not an md5 of the content."""
     cache = RAMFileCacheStore()
-    await getattr(cache, operation)("/a", b"data")
+    await cache.set("/a", b"data")
     assert cache._entries["/a"].fingerprint is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["set", "add"])
-async def test_an_empty_token_is_stored_as_none(operation):
+async def test_an_empty_token_is_stored_as_none():
     """`""` and None mean the same thing at both write doors, so the redis
     store's `''`-means-none wire convention cannot disagree with this one."""
     cache = RAMFileCacheStore()
-    await getattr(cache, operation)("/a", b"data", fingerprint="")
+    await cache.set("/a", b"data", fingerprint="")
     assert cache._entries["/a"].fingerprint is None
 
 
@@ -426,8 +394,8 @@ async def test_a_version_kept_without_bytes_is_never_read():
     assert not await cache.is_fresh("/a", "v1")
     assert not await cache.is_unbounded("/a")
     assert await cache.fingerprint("/a") == "v1"
-    assert await cache.add("/a", b"drained", fingerprint="v1")
-    assert await cache.get("/a") == b"drained"
+    await cache.set("/a", b"read", fingerprint="v1")
+    assert await cache.get("/a") == b"read"
 
 
 @pytest.mark.asyncio
@@ -486,19 +454,3 @@ async def test_an_expired_entry_still_answers_its_version(kept):
     assert await cache.get("/a") is None
     assert await cache.fingerprint("/a") == ("v1" if kept else None)
     assert "/a" not in cache._store.files
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "token, kept", [("v1", "v1"), ("v2", None)], ids=["same", "other"]
-)
-async def test_a_fill_over_a_kept_version_keeps_it_when_it_matches(
-    token, kept
-):
-    # A drain landing after the line keeps the version the line kept.
-    cache = RAMFileCacheStore()
-    await cache.keep_fingerprints({"/a": "v1"})
-    await cache.add("/a", b"x", fingerprint=token, ttl=1)
-    cache._entries["/a"].cached_at -= 10
-    assert await cache.get("/a") is None
-    assert await cache.fingerprint("/a") == kept

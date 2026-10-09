@@ -9,7 +9,6 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -20,8 +19,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import async_chain, chain_cachables, ensure_stream
+from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -62,6 +60,31 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CatFlags:
     )
 
 
+async def _reported(
+    source: AsyncIterator[bytes], io: IOResult, path: PathSpec
+) -> AsyncIterator[bytes]:
+    """One operand of a multi-operand cat, reported if its read fails.
+
+    A read that fails once the stat passed is reported like a missing
+    operand, and the next operand still prints. Mirrors TypeScript's
+    ``reported``.
+
+    Args:
+        source (AsyncIterator[bytes]): the operand's bytes.
+        io (IOResult): the result its failure is reported on.
+        path (PathSpec): the operand.
+    """
+    try:
+        async for chunk in source:
+            yield chunk
+    except FS_ERRORS as exc:
+        existing = io.stderr if isinstance(io.stderr, bytes) else b""
+        io.stderr = existing + encode_text(fs_error_line("cat", path, exc))
+        io.exit_code = 1
+    finally:
+        await close_quietly(source)
+
+
 def _wants_display(parsed: CatFlags) -> bool:
     return any(
         (
@@ -87,13 +110,11 @@ async def cat_generic(
 
     The wiring resolves globs and binds the backend ops; everything else
     lives here so factory builders and bespoke backend commands agree:
-    flag parsing, the per-operand report-and-continue split, caching
-    shape, and the stdin fallback. A single operand (and every operand on
-    a local backend) is teed through a CachableAsyncIterator returned AS
-    stdout so the cache fills as the consumer reads; multiple operands on
-    a non-local backend are materialized instead, because a joined stdout
-    is a different object from the per-file cachables and the cache-fill
-    drain would race the consumer on the same network stream.
+    flag parsing, the per-operand report-and-continue split, and the stdin
+    fallback. A single operand (and every operand on a local backend)
+    streams as the consumer reads; multiple operands on a non-local
+    backend are read one by one. Either way a read that fails after its
+    stat is reported and the next operand still prints.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -130,27 +151,12 @@ async def cat_generic(
             return source
 
         if len(readable) == 1:
-            p = readable[0]
-            cachable = CachableAsyncIterator(await source_for(p))
-            if not is_stdin(p):
-                io.reads[p.mount_path] = cachable
-                io.cache.append(p.mount_path)
-            source: ByteSource = cachable
+            source: ByteSource = await source_for(readable[0])
         elif local:
-            cachables = [
-                CachableAsyncIterator(await source_for(p)) for p in readable
-            ]
-            io.reads.update(
-                {
-                    p.mount_path: c
-                    for p, c in zip(readable, cachables)
-                    if not is_stdin(p)
-                }
+            source = async_chain(
+                [_reported(await source_for(p), io, p) for p in readable]
             )
-            io.cache.extend(p.mount_path for p in readable if not is_stdin(p))
-            source = chain_cachables(*cachables)
         else:
-            reads: dict[str, ByteSource] = {}
             parts: list[bytes] = []
             for p in readable:
                 try:
@@ -161,11 +167,7 @@ async def cat_generic(
                     # operand, and the next operand still prints.
                     err += encode_text(fs_error_line("cat", p, exc))
                     continue
-                if not is_stdin(p):
-                    reads[p.mount_path] = data
                 parts.append(data)
-            io.reads.update(reads)
-            io.cache.extend(reads)
             source = async_chain(parts)
         if err:
             io.stderr = err
@@ -221,40 +223,48 @@ async def display_lines(
 ) -> AsyncIterator[bytes]:
     """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
 
+    Closes ``source`` when it stops, at the end or when its reader stops.
+
     Args:
         source (ByteSource): the bytes to render.
         parsed (CatFlags): the display flags.
     """
-    number_lines = parsed.number_lines and not parsed.number_nonblank
-    transform = parsed.show_tabs or parsed.show_nonprinting
-    line_no = 0
-    buf = b""
-    prev_blank = False
-    async for chunk in ensure_stream(source):
-        buf += chunk
-        while b"\n" in buf:
-            line, buf = buf.split(b"\n", 1)
-            if parsed.squeeze_blank and not line and prev_blank:
-                prev_blank = True
-                continue
-            should_number = number_lines or (
-                parsed.number_nonblank and bool(line)
-            )
+    stream = ensure_stream(source)
+    try:
+        number_lines = parsed.number_lines and not parsed.number_nonblank
+        transform = parsed.show_tabs or parsed.show_nonprinting
+        line_no = 0
+        buf = b""
+        prev_blank = False
+        async for chunk in stream:
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if parsed.squeeze_blank and not line and prev_blank:
+                    prev_blank = True
+                    continue
+                should_number = number_lines or (
+                    parsed.number_nonblank and bool(line)
+                )
+                if should_number:
+                    line_no += 1
+                prefix = (
+                    encode_text(f"{line_no:6d}\t") if should_number else b""
+                )
+                suffix = b"$\n" if parsed.show_ends else b"\n"
+                if transform:
+                    line = _visible(
+                        line, parsed.show_tabs, parsed.show_nonprinting
+                    )
+                yield prefix + line + suffix
+                prev_blank = not line
+        if buf:
+            should_number = parsed.number_lines or parsed.number_nonblank
             if should_number:
                 line_no += 1
             prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
-            suffix = b"$\n" if parsed.show_ends else b"\n"
             if transform:
-                line = _visible(
-                    line, parsed.show_tabs, parsed.show_nonprinting
-                )
-            yield prefix + line + suffix
-            prev_blank = not line
-    if buf:
-        should_number = parsed.number_lines or parsed.number_nonblank
-        if should_number:
-            line_no += 1
-        prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
-        if transform:
-            buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
-        yield prefix + buf
+                buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
+            yield prefix + buf
+    finally:
+        await close_quietly(stream)

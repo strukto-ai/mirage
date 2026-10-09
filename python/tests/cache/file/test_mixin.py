@@ -49,23 +49,6 @@ class TestGetSet:
         assert entry.fingerprint == "etag-123"
 
 
-class TestAdd:
-    @pytest.mark.asyncio
-    async def test_add_new_key(self):
-        cache = RAMFileCacheStore(cache_limit="1MB")
-        result = await cache.add("/a", b"data")
-        assert result is True
-        assert await cache.get("/a") == b"data"
-
-    @pytest.mark.asyncio
-    async def test_add_existing_key(self):
-        cache = RAMFileCacheStore(cache_limit="1MB")
-        await cache.set("/a", b"first")
-        result = await cache.add("/a", b"second")
-        assert result is False
-        assert await cache.get("/a") == b"first"
-
-
 class TestMulti:
     @pytest.mark.asyncio
     async def test_multi_get(self):
@@ -97,28 +80,6 @@ class TestExistsRemoveClear:
     async def test_remove_missing(self):
         cache = RAMFileCacheStore(cache_limit="1MB")
         await cache.remove("/missing")
-
-    @pytest.mark.asyncio
-    async def test_remove_cancels_drain_task(self):
-        cache = RAMFileCacheStore(cache_limit="1MB")
-
-        cancelled = False
-
-        async def slow_drain():
-            nonlocal cancelled
-            try:
-                await asyncio.sleep(10)
-            except asyncio.CancelledError:
-                cancelled = True
-
-        task = asyncio.create_task(slow_drain())
-        cache._drain_tasks["/a"] = task
-        await cache.set("/a", b"data")
-        await asyncio.sleep(0)
-        await cache.remove("/a")
-        await asyncio.sleep(0)
-        assert cancelled
-        assert "/a" not in cache._drain_tasks
 
     @pytest.mark.asyncio
     async def test_clear(self):

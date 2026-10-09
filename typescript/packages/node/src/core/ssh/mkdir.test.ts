@@ -57,10 +57,6 @@ class RecordingInvalidator implements CacheInvalidator {
     return fetch()
   }
 
-  cachedBytes(): Promise<Uint8Array | null> {
-    return Promise.resolve(null)
-  }
-
   cachedSize(): Promise<number | null> {
     return Promise.resolve(null)
   }

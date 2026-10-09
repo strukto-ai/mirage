@@ -4,7 +4,6 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.operands import operands_io
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import (
@@ -396,14 +395,13 @@ async def format_multi(
         max_line_length=max_line_length,
         total=total,
     )
-    cached = cache_aware_read(read)
     rows: list[tuple[WCCounts, str | None]] = []
     sizes: list[int | None] = []
     totals = WCCounts()
     err = b""
     for path in paths:
         try:
-            source = read(path) if is_stdin(path) else cached(path)
+            source = read(path)
             if inspect.isawaitable(source):
                 source = await source
             counts = await wc(source, flags=flags)
