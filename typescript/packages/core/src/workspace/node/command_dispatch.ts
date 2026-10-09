@@ -958,7 +958,7 @@ async function routeArgv(
   }
 
   // Default: mount-dispatched command
-  const [stdout, io, execNode] = await handleCommand(
+  const [source, io, execNode] = await handleCommand(
     recurse,
     dispatch,
     registry,
@@ -977,6 +977,8 @@ async function routeArgv(
     sink,
     parser,
   )
+
+  const stdout = linkErrors.length > 0 ? await materialize(source) : source
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {
     if (name === 'rm') {

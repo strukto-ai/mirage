@@ -27,7 +27,7 @@ from mirage.policy import (
 )
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.types import ShellExecution
+from mirage.runtime.types import ShellRequest
 from mirage.types import Limit, PathSpec, Producer
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.session import SessionState, env_snapshot
@@ -77,7 +77,7 @@ async def run_whole_line(
     try:
         result = await run_with_timeout(
             runtime.execute(
-                ShellExecution(
+                ShellRequest(
                     line=command,
                     stdin=data,
                     env=env_snapshot(session),

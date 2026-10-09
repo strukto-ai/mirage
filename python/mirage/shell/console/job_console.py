@@ -46,6 +46,20 @@ class JobConsole:
     ) -> None:
         self._store = store if store is not None else RAMConsoleStore()
         self._finished = finished
+        self._execution_id: str | None = None
+
+    @property
+    def execution_id(self) -> str | None:
+        return self._execution_id
+
+    def bind_execution(self, execution_id: str) -> None:
+        """Associate this job's output with its one managed execution."""
+        if (
+            self._execution_id is not None
+            and self._execution_id != execution_id
+        ):
+            raise ValueError("console already belongs to another execution")
+        self._execution_id = execution_id
 
     @property
     def store(self) -> ConsoleStore:

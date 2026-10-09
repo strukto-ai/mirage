@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.generic.crossmount.constants import (
@@ -24,10 +25,12 @@ from mirage.commands.builtin.generic.crossmount.types import (
 )
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code_from_line
+from mirage.concurrency.limiter import settle
 from mirage.errors.render import revoice_fs_error_line
 from mirage.io import IOResult
-from mirage.io.stream import async_chain, materialize
-from mirage.io.types import ByteSource
+from mirage.io.stdio import OutputStream
+from mirage.io.stream import async_chain, close_quietly, drain, materialize
+from mirage.io.types import ByteSource, OutputState
 from mirage.types import PathSpec
 
 
@@ -92,62 +95,105 @@ async def run_stream(
         flag_kwargs (dict): Flags parsed against the shared command spec.
         run_single (RunSingle): Executor-injected single-mount runner.
     """
-    merged_io = IOResult()
+    result = IOResult()
+    state = OutputState()
+    result.output = state
+    fetches: list[tuple[PathSpec, ByteSource | None, IOResult]] = []
     sources: list[ByteSource] = []
-    failed = False
-    # The real command's code for the worst failed fetch. The fetch runs
-    # as Cmd.CAT, so its own code is cat's 1 whatever went wrong; the
-    # stderr is already respelled into the real command's voice and the
-    # code has to follow it, or `sort a /other/missing` answers 1 while
-    # `sort missing` answers 2.
-    fail_code = 0
-    for scope in scopes:
-        out, io = await run_single(Cmd.CAT, [scope], [], {})
-        if io.exit_code != 0:
-            failed = True
-            if io.stderr is not None:
+
+    async def finish(final: IOResult | None = None) -> None:
+        merged = IOResult()
+        fail_code = 0
+        for scope, _, io in fetches:
+            if io.exit_code != 0:
                 rendered = await materialize(io.stderr)
                 if cmd_name != Cmd.CAT:
                     rendered = _respell_fetch_stderr(rendered, cmd_name, scope)
-                    io.stderr = rendered
+                io.stderr = rendered
                 fail_code = max(
                     fail_code,
                     read_fail_exit_code_from_line(cmd_name, rendered),
+                    1,
                 )
-            # The fetch ran as cat, so its exit code is cat's whatever
-            # went wrong. fail_code already carries the real command's,
-            # and merging cat's over it would win the `or` below.
-            io.exit_code = 0
-            merged_io = await merged_io.merge(io)
-            continue
-        merged_io = await merged_io.merge(io)
-        if out is not None:
-            sources.append(out)
-    # sort aborts on any failed operand like GNU (it needs every input
-    # before emitting anything), matching the single-mount builder.
-    if failed and cmd_name == Cmd.SORT:
-        merged_io.exit_code = merged_io.exit_code or fail_code or 1
-        return None, merged_io
+                io.exit_code = 0
+            merged = await merged.merge(io)
+        if final is not None:
+            merged = await merged.merge(final)
+        result.reads = merged.reads
+        result.writes = merged.writes
+        result.cache = merged.cache
+        result.matched_runs = merged.matched_runs
+        result.sized_runs = merged.sized_runs
+        result.counted_runs = merged.counted_runs
+        result.refusal = result.refusal or merged.refusal
+        result.stderr = (
+            await materialize(merged.stderr) + await materialize(result.stderr)
+        ) or None
+        result.exit_code = result.exit_code or merged.exit_code or fail_code
+        state.finish()
 
-    if cmd_name in LINE_STREAM_COMMANDS and sources:
-        ended: list[ByteSource] = [_line_ended(s) for s in sources[:-1]]
-        sources = ended + sources[-1:]
-    body: ByteSource = async_chain(sources)
+    async def close_fetches() -> None:
+        await asyncio.gather(*(close_quietly(out) for _, out, _ in fetches))
 
-    if cmd_name == Cmd.CAT and not _has_active_flags(flag_kwargs):
-        if failed:
-            merged_io.exit_code = merged_io.exit_code or fail_code or 1
-        return body, merged_io
+    try:
+        for scope in scopes:
+            out, io = await run_single(Cmd.CAT, [scope], [], {})
+            fetches.append((scope, out, io))
+            result.producer = io.producer
+            result.refusal = io.refusal or result.refusal
+            if io.exit_code != 0:
+                await drain(out)
+            elif out is not None:
+                sources.append(out)
+        if cmd_name == Cmd.SORT and any(
+            io.exit_code != 0 for _, _, io in fetches
+        ):
+            await close_fetches()
+            await finish()
+            return None, result
 
-    out, io = await run_single(
-        cmd_name,
-        [],
-        list(text_args),
-        flag_kwargs,
-        stdin=body,
-        resolve_hint=scopes[0],
-    )
-    merged_io = await merged_io.merge(io)
-    if failed:
-        merged_io.exit_code = merged_io.exit_code or fail_code or 1
-    return out, merged_io
+        if cmd_name in LINE_STREAM_COMMANDS and sources:
+            ended: list[ByteSource] = [_line_ended(s) for s in sources[:-1]]
+            sources = ended + sources[-1:]
+        body: ByteSource = async_chain(sources)
+        final: IOResult | None = None
+        if cmd_name == Cmd.CAT and not _has_active_flags(flag_kwargs):
+            out = body
+        else:
+            out, final = await run_single(
+                cmd_name,
+                [],
+                list(text_args),
+                flag_kwargs,
+                stdin=body,
+                resolve_hint=scopes[0],
+            )
+            result.producer = final.producer
+            result.refusal = final.refusal or result.refusal
+    except BaseException:
+        await close_fetches()
+        raise
+
+    closing: asyncio.Task[None] | None = None
+
+    async def finalize() -> None:
+        await asyncio.gather(close_quietly(out), close_fetches())
+        await finish(final)
+
+    async def close() -> None:
+        nonlocal closing
+        if closing is None:
+            closing = asyncio.create_task(finalize())
+        await settle(closing)
+
+    async def output() -> AsyncIterator[bytes]:
+        try:
+            async for data in async_chain([out] if out is not None else []):
+                if cmd_name != Cmd.SORT or not any(
+                    io.exit_code != 0 for _, _, io in fetches
+                ):
+                    yield data
+        finally:
+            await close()
+
+    return OutputStream(output(), close), result

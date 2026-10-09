@@ -13,12 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncGenerator
 from functools import partial
 from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import SessionArg, api_request, status_error
+from mirage.core.api.client import (
+    SessionArg,
+    api_request,
+    api_stream,
+    status_error,
+)
 from mirage.core.slack.config import SlackConfig
 from mirage.utils.ranges import window_for
 from mirage.vfs.secrets import reveal_secret
@@ -152,3 +158,23 @@ async def download_file(
         session=session,
     )
     return data
+
+
+def download_file_stream(
+    config: SlackConfig,
+    url: str,
+    session: SessionArg = None,
+) -> AsyncGenerator[bytes, None]:
+    """Stream an attachment with bounded reads and response cleanup.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        url (str): attachment download URL.
+        session (SessionArg): pool or live session to borrow.
+    """
+    return api_stream(
+        url,
+        error_of=status_error,
+        headers={"Authorization": f"Bearer {reveal_secret(config.token)}"},
+        session=session,
+    )

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -42,7 +43,7 @@ async function runCurl(
   const vfs = new RAMVFS()
   const cmd = GENERAL_CURL[0]
   if (cmd === undefined) throw new Error('curl not registered')
-  const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags }))
+  const result = await invoke(() => cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags })))
   if (result === null) throw new Error('null result')
   const [out, io] = result
   return { out: await materialize(out), io }
@@ -61,10 +62,9 @@ async function runWget(
     writes.push(args?.[0] as Uint8Array)
     return Promise.resolve([null, new IOResult()])
   }
-  const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], {
-    ...opts({ flags }),
-    dispatch,
-  })
+  const result = await invoke(() =>
+    cmd.fn(vfs.accessor, [] as PathSpec[], [url], { ...opts({ flags }), dispatch }),
+  )
   if (result === null) throw new Error('null result')
   const [out, io] = result
   return { out: await materialize(out), io, writes }

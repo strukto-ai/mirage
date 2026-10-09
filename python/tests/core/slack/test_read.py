@@ -20,7 +20,7 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.read import read, read_range
+from mirage.core.slack.read import read, read_range, read_stream
 from mirage.types import PathSpec
 
 pytestmark = pytest.mark.asyncio
@@ -200,3 +200,24 @@ async def test_read_jsonl_window_is_sliced_locally(accessor, index):
             accessor, spec(CHAT), index, offset=1, size=6
         )
     assert result == b'"text"'
+
+
+async def test_attachment_stream_closes_before_fetching_tail(accessor, index):
+    await _populate_index(index)
+    path = spec(BLOB)
+    closed = []
+
+    async def source():
+        try:
+            yield b"first\n"
+            raise AssertionError("fetched tail")
+        finally:
+            closed.append(True)
+
+    with patch(
+        "mirage.core.slack.read.download_file_stream", return_value=source()
+    ):
+        stream = read_stream(accessor, path, index)
+        assert await anext(stream) == b"first\n"
+        await stream.aclose()
+    assert closed == [True]

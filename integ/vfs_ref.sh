@@ -64,7 +64,7 @@ YML
 
 run_line() {
   local cli="$1" id="$2" line="$3"
-  $cli shell -w "$id" -c "$line" </dev/null | sout | tr -d '\n'
+  $cli shell --json -w "$id" -c "$line" </dev/null | sout | tr -d '\n'
 }
 
 # The owned half: create from the ref, write a page, snapshot, change the

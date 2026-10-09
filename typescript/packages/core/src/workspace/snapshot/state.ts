@@ -187,6 +187,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
         created_at: j.createdAt,
         agent: j.agent,
         session_id: j.sessionId,
+        execution_id: j.executionId,
       })),
   )
   const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) => {
@@ -222,6 +223,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   for (const [path, meta] of ws.namespace.nodes) nodes[path] = metaToFields(meta)
   return {
     version: FORMAT_VERSION,
+    io: { buffer_bytes: ws.registry.io.bufferBytes },
     mirage_version: VERSION,
     write: ws.writeDefault,
     default_session_id: ws.sessionManager.defaultId,
@@ -760,7 +762,9 @@ function restoredConsole(j: JobSnapshot): JobConsole {
     channel: Channel.CONTROL,
     data: new TextEncoder().encode(outcome),
   })
-  return new JobConsole(new RAMConsoleStore(null, chunks), true)
+  const console = new JobConsole(new RAMConsoleStore(null, chunks), true)
+  if (j.execution_id !== null && j.execution_id !== undefined) console.bindExecution(j.execution_id)
+  return console
 }
 
 function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): void {

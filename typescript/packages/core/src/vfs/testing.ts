@@ -4,13 +4,15 @@ import { getExtension } from '../utils/filetype.ts'
 import { isEnoent } from '../errors/fs.ts'
 import { type PathSpec, FileType } from '../types.ts'
 import type { BaseVFS } from './base.ts'
+import { concat } from '../io/cachable_iterator.ts'
 
-/** A small known file, its parent directory, and an absent sibling. */
+/** A known file, its parent and absent sibling, and an optional chunk bound. */
 export interface ReadFixture {
   file: PathSpec
   directory: PathSpec
   missing: PathSpec
   content: Uint8Array
+  maxChunkSize?: number
 }
 
 function check(condition: boolean, message: string): asserts condition {
@@ -84,9 +86,15 @@ export async function checkReadContract(
   const stored =
     render !== undefined && vfs.supports('read') ? await vfs.read(fixture.file, store) : data
   if (vfs.supports('readStream')) {
-    const chunks: number[] = []
-    for await (const chunk of vfs.readStream(fixture.file, store)) chunks.push(...chunk)
-    check(sameBytes(Uint8Array.from(chunks), stored), 'readStream differs from read')
+    const chunks: Uint8Array[] = []
+    for await (const chunk of vfs.readStream(fixture.file, store)) {
+      check(
+        fixture.maxChunkSize === undefined || chunk.byteLength <= fixture.maxChunkSize,
+        'readStream exceeded maxChunkSize',
+      )
+      chunks.push(chunk)
+    }
+    check(sameBytes(concat(chunks), stored), 'readStream differs from read')
   }
   if (render !== undefined) await checkWindows(render, fixture.file, store, data)
   if (vfs.readsRanges && vfs.supports('read')) {

@@ -32,7 +32,7 @@ from functools import partial
 from pathlib import Path
 from shlex import join as shell_join
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal, overload
 
 from pydantic import BaseModel
 
@@ -58,6 +58,7 @@ from mirage.context import (
 )
 from mirage.errors.fs import enoent
 from mirage.io import IOResult
+from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
@@ -162,6 +163,7 @@ from mirage.workspace.session.resolve import (
 from mirage.workspace.session.session import vars_from_entries, vars_from_env
 from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.session.validate import check_cli_verbs
+from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import (
     DriftQueue,
     apply_state_dict,
@@ -190,6 +192,7 @@ from mirage.workspace.workspace.cache import build_file_cache
 from mirage.workspace.workspace.execute import (
     ExecuteEnv,
     LineFrame,
+    drain_to_sink,
     execute_line,
 )
 from mirage.workspace.workspace.explainer import Explainer
@@ -265,8 +268,11 @@ class Workspace:
         | None = None,
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
+        io: IOConfig | Mapping[str, Any] | None = None,
     ) -> None:
-        self._registry = MountRegistry()
+        self._registry = MountRegistry(
+            IOConfig.model_validate({} if io is None else io)
+        )
         self._registry.process_view = self._process_view
         self._registry.command_limits = dict(command_limits or {})
         # The permission profiles: one per name, and the one a session
@@ -319,6 +325,7 @@ class Workspace:
         self.processes = ProcessSupervisor()
         self.job_table = JobTable(console_factory, self.processes)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
+        self._shell_executions: set[ShellExecution] = set()
         self._admitting = asyncio.Event()
         self._admitting.set()
         self._capture_lock = asyncio.Lock()
@@ -1137,8 +1144,8 @@ class Workspace:
         # wherever the parent's own output goes.
         child.terminal_output = True
         input_stream, output = (
-            ProcessInput(),
-            ProcessOutput(request.merge_stderr),
+            ProcessInput(self.io.buffer_bytes),
+            ProcessOutput(request.merge_stderr, self.io.buffer_bytes),
         )
         env = dict(request.env) if request.env is not None else None
         owner = self._session_mgr.get(session.session_id)
@@ -1306,6 +1313,11 @@ class Workspace:
             loop.close()
 
     @property
+    def io(self) -> IOConfig:
+        """Limits shared by this workspace's streaming queues."""
+        return self._registry.io
+
+    @property
     def registry(self) -> MountRegistry:
         """Mount table; consumed by the watch runtime."""
         return self._registry
@@ -1413,6 +1425,10 @@ class Workspace:
         # close lists. Keep _closed separate so runtime journals can still
         # dispatch.
         self._closing = True
+        executions = list(self._shell_executions)
+        for execution in executions:
+            execution.cancel()
+        await asyncio.gather(*(execution.aclose() for execution in executions))
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
@@ -1675,6 +1691,7 @@ class Workspace:
         # workspace adds again.
         ws = cls(
             args.mount_args,
+            io=IOConfig.model_validate(state.get("io", {})),
             mode=args.anchor_mode or MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
@@ -2297,6 +2314,7 @@ class Workspace:
                 raise RuntimeError("Workspace is closed")
             return await run()
 
+    @overload
     async def shell(
         self,
         command: str,
@@ -2314,10 +2332,80 @@ class Workspace:
         call_stack: CallStack | None = None,
         execution_scope: ExecutionScope | None = None,
         job_table: JobTable | None = None,
-    ) -> IOResult:
-        """Execute a shell command in the workspace.
+        *,
+        stream: Literal[True],
+    ) -> ShellExecution: ...
+
+    @overload
+    async def shell(
+        self,
+        command: str,
+        session_id: str | None = None,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
+        handed: HandOff | None = None,
+        sink: JobConsole | None = None,
+        call_stack: CallStack | None = None,
+        execution_scope: ExecutionScope | None = None,
+        job_table: JobTable | None = None,
+        *,
+        stream: Literal[False] = False,
+    ) -> IOResult: ...
+
+    @overload
+    async def shell(
+        self,
+        command: str,
+        session_id: str | None = None,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
+        handed: HandOff | None = None,
+        sink: JobConsole | None = None,
+        call_stack: CallStack | None = None,
+        execution_scope: ExecutionScope | None = None,
+        job_table: JobTable | None = None,
+        *,
+        stream: bool,
+    ) -> IOResult | ShellExecution: ...
+
+    async def shell(
+        self,
+        command: str,
+        session_id: str | None = None,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
+        handed: HandOff | None = None,
+        sink: JobConsole | None = None,
+        call_stack: CallStack | None = None,
+        execution_scope: ExecutionScope | None = None,
+        job_table: JobTable | None = None,
+        *,
+        stream: bool = False,
+    ) -> IOResult | ShellExecution:
+        """Execute a shell command, or return its running execution when streamed.
 
         Args:
+            stream (bool): return a ShellExecution with bounded ordered events.
+                Consume events before awaiting final status, and use async with
+                when abandoning output early. False collects the same events.
             command: The shell command string to execute.
             session_id: Session whose persistent state hosts the command.
             stdin: Optional stdin payload (bytes or async byte iterator).
@@ -2375,6 +2463,95 @@ class Workspace:
                 caller's ``jobs`` and ``wait`` never see them; None for
                 the session's.
         """
+        if stream and sink is not None:
+            raise ValueError("stream and sink are mutually exclusive")
+        if not stream and (
+            sink is not None
+            or handed is not None
+            or execution_scope is not None
+            or call_stack is not None
+            or job_table is not None
+            or get_current_session_for(self._session_mgr) is not None
+        ):
+            return await self._shell(
+                command,
+                session_id,
+                stdin,
+                agent_id,
+                cwd,
+                env,
+                cancel,
+                record,
+                runtime,
+                routing_decision,
+                handed,
+                sink,
+                call_stack,
+                execution_scope,
+                job_table,
+            )
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+
+        async def run(
+            output: JobConsole, stop: asyncio.Event, scope: ExecutionScope
+        ) -> IOResult:
+            return await self._shell(
+                command,
+                session_id,
+                stdin,
+                agent_id,
+                cwd,
+                env,
+                stop,
+                record,
+                runtime,
+                routing_decision,
+                handed,
+                output,
+                call_stack,
+                scope,
+                job_table,
+            )
+
+        execution = ShellExecution(
+            run,
+            execution_scope or ExecutionScope(),
+            cancel,
+            buffer_bytes=self.io.buffer_bytes,
+        )
+        if stream:
+            self._shell_executions.add(execution)
+            execution.on_settled(
+                lambda: self._shell_executions.discard(execution)
+            )
+            try:
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                await execution.aclose()
+                raise
+            return execution
+        return await execution.collect()
+
+    async def _shell(
+        self,
+        command: str,
+        session_id: str | None = None,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        routing_decision: RouteDecision[Runtime] | None = None,
+        handed: HandOff | None = None,
+        sink: JobConsole | None = None,
+        call_stack: CallStack | None = None,
+        execution_scope: ExecutionScope | None = None,
+        job_table: JobTable | None = None,
+    ) -> IOResult:
+        """Run the internal shell invocation with its existing cancellation scope."""
         # The one cancellation seam: the whole line is one task, so a
         # cancel set while a store is still loading, a secret is still
         # fetching, the tree is still running or the flush is still
@@ -2421,6 +2598,10 @@ class Workspace:
                 cancel,
                 stop,
             )
+            if sink is not None and isinstance(result, IOResult):
+                await run_cancellable(
+                    drain_to_sink(sink, result), cancel, stop
+                )
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the
             # shell's, whether it arrived on the event or as a cancel
@@ -2438,14 +2619,6 @@ class Workspace:
                 self._admitted.discard(stop)
                 ended.set()
                 LINE_STOP.reset(token)
-        if sink is not None and isinstance(result, IOResult):
-            for channel, data in (
-                (Channel.STDOUT, await result.materialize_stdout()),
-                (Channel.STDERR, await result.materialize_stderr()),
-            ):
-                if data:
-                    await sink.emit(channel, data)
-            result.stdout = result.stderr = None
         return result
 
 
@@ -2517,6 +2690,7 @@ class Session:
         """The read history the session's agent tools share."""
         return await self._ws._session_reads(self._id)
 
+    @overload
     async def shell(
         self,
         command: str,
@@ -2527,7 +2701,53 @@ class Session:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-    ) -> IOResult:
+        *,
+        stream: Literal[True],
+    ) -> ShellExecution: ...
+
+    @overload
+    async def shell(
+        self,
+        command: str,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        *,
+        stream: Literal[False] = False,
+    ) -> IOResult: ...
+
+    @overload
+    async def shell(
+        self,
+        command: str,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        *,
+        stream: bool,
+    ) -> IOResult | ShellExecution: ...
+
+    async def shell(
+        self,
+        command: str,
+        stdin: ByteSource | None = None,
+        agent_id: str | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        cancel: asyncio.Event | None = None,
+        record: bool = True,
+        runtime: str | None = None,
+        *,
+        stream: bool = False,
+    ) -> IOResult | ShellExecution:
         """Run a shell line as this session; ``Workspace.shell`` with
         the session fixed.
 
@@ -2542,6 +2762,7 @@ class Session:
             cancel (asyncio.Event | None): abort signal.
             record (bool): whether the line enters history.
             runtime (str | None): the runtime to route the line to.
+            stream (bool): return bounded live events and a final status handle.
         """
         return await self._ws.shell(
             command,
@@ -2553,6 +2774,7 @@ class Session:
             cancel=cancel,
             record=record,
             runtime=runtime,
+            stream=stream,
         )
 
     async def glob(self, pattern: str) -> list[str]:

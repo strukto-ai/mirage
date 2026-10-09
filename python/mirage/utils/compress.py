@@ -14,7 +14,10 @@
 
 import zlib
 from collections.abc import AsyncIterator, Generator, Iterator
+from contextlib import aclosing
 from enum import Enum
+
+from mirage.io.cooperative import chunks
 
 
 class GzipDataError(ValueError):
@@ -135,13 +138,12 @@ async def gzip_compress_stream(
         bytes: gzip member bytes, trailer included.
     """
     compressor = zlib.compressobj(level, zlib.DEFLATED, zlib.MAX_WBITS | 16)
-    async for chunk in source:
-        compressed = compressor.compress(chunk)
-        if compressed:
-            yield compressed
-    tail = compressor.flush()
-    if tail:
-        yield tail
+    async with aclosing(chunks(source)) as bounded:
+        async for chunk in bounded:
+            async for compressed in chunks(compressor.compress(chunk)):
+                yield compressed
+        async for tail in chunks(compressor.flush()):
+            yield tail
 
 
 class MemberPart(Enum):

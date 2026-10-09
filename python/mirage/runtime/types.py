@@ -303,7 +303,7 @@ class CodeExecution(RunArgs):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ShellExecution:
+class ShellRequest:
     """A whole shell line, interpreted entirely by the selected runtime."""
 
     line: str
@@ -324,7 +324,7 @@ class ProcessExecution:
     kind: Literal["process"] = field(default="process", init=False)
 
 
-ExecutionRequest: TypeAlias = CodeExecution | ShellExecution | ProcessExecution
+ExecutionRequest: TypeAlias = CodeExecution | ShellRequest | ProcessExecution
 
 # Guest APIs that can operate on workspace files. Policy and backend support
 # still decide whether an individual operation is allowed.

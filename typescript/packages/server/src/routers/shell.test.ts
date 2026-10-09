@@ -533,3 +533,161 @@ describe('a foreground shell request', () => {
     }
   })
 })
+
+it('inherits io config from HTTP workspace creation', async () => {
+  const app = buildApp()
+  try {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: {
+        id: 'configured-stream',
+        config: { mounts: { '/': { vfs: 'ram', mode: 'write' } }, io: { buffer_bytes: 131072 } },
+      },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(app.registry.get('configured-stream').runner.ws.io.bufferBytes).toBe(131072)
+    const data = Uint8Array.from({ length: 256 * 1025 }, (_, i) => i % 256)
+    const form = new FormData()
+    form.set('request', JSON.stringify({ command: 'cat; printf err >&2' }))
+    form.set('stdin', new Blob([data]), 'stdin.bin')
+    const upload = new Request('http://localhost', { method: 'POST', body: form })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/configured-stream/shell?stream=true',
+      headers: { 'content-type': upload.headers.get('content-type') ?? '' },
+      payload: Buffer.from(await upload.arrayBuffer()),
+    })
+    expect(response.statusCode).toBe(200)
+    const events = response.body
+      .trimEnd()
+      .split('\n')
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            stream?: string
+            data?: string
+            status?: string
+            result?: { exit_code: number }
+          },
+      )
+    const output = (stream: string): Buffer =>
+      Buffer.concat(
+        events
+          .filter((event) => event.stream === stream)
+          .map((event) => Buffer.from(event.data ?? '', 'base64')),
+      )
+    expect(output('stdout')).toEqual(Buffer.from(data))
+    expect(output('stderr')).toEqual(Buffer.from('err'))
+    expect(events.at(-1)).toMatchObject({ status: 'done', result: { exit_code: 0 } })
+  } finally {
+    await app.close()
+  }
+})
+
+it.each(['', 'x'.repeat(128 * 1024 + 1)])(
+  'streams exact bytes on separate channels before final metadata',
+  async (padding) => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'byte-stream')
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/byte-stream/shell?stream=true',
+        payload: { command: `printf '\\377\\000x${padding}'; printf err >&2; false` },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toBe('application/x-ndjson')
+      const events = response.body
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as unknown) as {
+        stream?: string
+        data?: string
+        status?: string
+        result?: { exit_code: number; stdout: string; stderr: string }
+      }[]
+      const output = (stream: string): Buffer =>
+        Buffer.concat(
+          events.filter((e) => e.stream === stream).map((e) => Buffer.from(e.data ?? '', 'base64')),
+        )
+      expect(output('stdout')).toEqual(
+        Buffer.concat([Buffer.from([255, 0, 120]), Buffer.from(padding)]),
+      )
+      expect(output('stderr')).toEqual(Buffer.from('err'))
+      expect(
+        events
+          .filter((event) => event.stream !== undefined)
+          .every((event) => Buffer.from(event.data ?? '', 'base64').byteLength <= 8 * 1024),
+      ).toBe(true)
+      expect(events.at(-1)).toMatchObject({
+        status: 'done',
+        result: { exit_code: 1, stdout: '', stderr: '' },
+      })
+      const job = await app.inject({
+        method: 'GET',
+        url: `/v1/jobs/${String(response.headers['x-mirage-job-id'])}`,
+      })
+      expect(job.json<{ status: string }>().status).toBe('done')
+    } finally {
+      await app.close()
+    }
+  },
+)
+
+it.each(['background', 'explain'])(
+  'refuses streaming with %s before submitting work',
+  async (other) => {
+    const app = buildApp()
+    try {
+      await createWs(app, 'bad-stream')
+      const result = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/bad-stream/shell?stream=true&${other}=true`,
+        payload: { command: 'echo no' },
+      })
+      expect(result.statusCode).toBe(400)
+      const jobs = await app.inject({ method: 'GET', url: '/v1/jobs' })
+      expect(jobs.json()).toEqual([])
+    } finally {
+      await app.close()
+    }
+  },
+)
+
+it('streams a prefix before completion and joins cancellation after disconnect', async () => {
+  const app = buildApp()
+  try {
+    await createWs(app, 'early-stream')
+    const base = await app.listen({ host: '127.0.0.1', port: 0 })
+    const stop = new AbortController()
+    const response = await fetch(`${base}/v1/workspaces/early-stream/shell?stream=true`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: 'echo ready; sleep 30' }),
+      signal: stop.signal,
+    })
+    const jobId = response.headers.get('X-Mirage-Job-Id') ?? ''
+    if (response.body === null) throw new Error('missing response body')
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader()
+    const first = await reader.read()
+    expect(new TextDecoder().decode(first.value)).toContain(
+      Buffer.from('ready\n').toString('base64'),
+    )
+    expect(
+      (await (await fetch(`${base}/v1/jobs/${jobId}`)).json()) as { status: string },
+    ).toMatchObject({ status: 'running' })
+    stop.abort()
+    await reader.cancel().catch(() => undefined)
+    const waited = await fetch(`${base}/v1/jobs/${jobId}/wait`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ timeout_s: 3 }),
+    })
+    const final = (await waited.json()) as { status: string; finished_at: number | null }
+    expect(final.status).toBe('canceled')
+    expect(typeof final.finished_at).toBe('number')
+  } finally {
+    await app.close()
+  }
+})

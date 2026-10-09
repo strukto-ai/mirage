@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IOResult } from '../io/types.ts'
+import { currentExecutionId } from '../execution/context.ts'
 import { utcDateFolder } from '../utils/dates.ts'
 import {
   EVENT_CLEAR,
@@ -112,6 +113,8 @@ export class Observer {
       stdout: text,
     }
     if (cwd !== undefined) init.cwd = cwd
+    const executionId = currentExecutionId()
+    if (executionId !== null) init.executionId = executionId
     await this.log(new LogEntry(init))
   }
 

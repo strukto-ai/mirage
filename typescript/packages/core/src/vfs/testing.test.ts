@@ -219,3 +219,20 @@ describe('the read contract', () => {
     await expect(checkReadContract(vfs, FIXTURE)).rejects.toMatchObject({ code: 'EACCES' })
   })
 })
+
+it('rejects oversized chunks and closes the stream on contract failure', async () => {
+  const vfs = new RAMVFS()
+  await ramWrite(vfs.accessor, FILE, CONTENT)
+  let closed = false
+  vfs.readStream = async function* () {
+    try {
+      yield await Promise.resolve(CONTENT)
+    } finally {
+      closed = true
+    }
+  }
+  await expect(checkReadContract(vfs, { ...FIXTURE, maxChunkSize: 1 })).rejects.toThrow(
+    'maxChunkSize',
+  )
+  expect(closed).toBe(true)
+})

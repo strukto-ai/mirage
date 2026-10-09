@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { concat } from '../../io/cachable_iterator.ts'
 import { Recorder } from '../descriptors.ts'
 import { Channel, JobConsole, Tee, Terminal } from './index.ts'
 
@@ -108,6 +110,27 @@ describe('Terminal', () => {
       'one\ntwo\nmeanwhile\n',
     )
     expect(tty.reader).toBe(reader)
+  })
+
+  it('bounds the streamed stdout prefix and resets it per line', async () => {
+    const tty = new Terminal()
+    await tty.jobs.emit(Channel.STDOUT, enc('queued '))
+    const reader = new JobConsole()
+    await tty.attach(reader)
+    const payload = enc('€'.repeat(CHUNK_SIZE))
+    await tty.emit(Channel.STDOUT, payload.subarray(0, 2))
+    await tty.emit(Channel.STDERR, enc('warning'))
+    await tty.emit(Channel.STDOUT, payload.subarray(2))
+    const shown = concat([enc('queued '), payload])
+    expect(tty.stdoutPrefix).toEqual(shown.subarray(0, CHUNK_SIZE))
+    expect(await reader.snapshot(Channel.STDOUT)).toEqual(shown)
+    expect(dec(tty.take())).toEqual(['', ''])
+    expect(tty.stdoutPrefix.byteLength).toBe(0)
+    await tty.attach(new JobConsole())
+    await tty.emit(Channel.STDOUT, enc('next'))
+    expect(tty.stdoutPrefix).toEqual(enc('next'))
+    tty.dropLine()
+    expect(tty.stdoutPrefix.byteLength).toBe(0)
   })
 
   it('a noisy job does not hold a reader from attaching', async () => {

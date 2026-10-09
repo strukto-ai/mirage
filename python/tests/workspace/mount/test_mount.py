@@ -231,7 +231,8 @@ async def test_write_mode_allows_write_cmd():
     assert io.exit_code == 0
 
 
-def test_a_write_with_no_dispatcher_is_refused():
+@pytest.mark.asyncio
+async def test_a_write_with_no_dispatcher_is_refused():
     # The dispatcher is where a write is judged and settled, so a host
     # running a command straight on its mount, with none, cannot write.
     ram = RAMVFS()
@@ -239,11 +240,12 @@ def test_a_write_with_no_dispatcher_is_refused():
     reg.mount("/rw/", ram, MountMode.WRITE)
     mount = reg.mount_for("/rw/f")
     scope = PathSpec.from_str_path("/rw/f")
-    _, io = _run(
-        mount.run_command("tee", [scope], [], {}, ExecContext(stdin=b"x"))
+    stdout, io = await mount.run_command(
+        "tee", [scope], [], {}, ExecContext(stdin=b"x")
     )
+    await materialize(stdout)
     assert io.exit_code == 1
-    assert b"Operation not supported" in _run(io.materialize_stderr())
+    assert b"Operation not supported" in await io.materialize_stderr()
     assert "/f" not in ram._store.files
 
 
@@ -302,7 +304,8 @@ def test_execute_cmd_with_flag_kwargs(registry):
     assert io.exit_code == 0
 
 
-def test_execute_cmd_with_texts(registry):
+@pytest.mark.asyncio
+async def test_execute_cmd_with_texts(registry):
     mount = registry.mount_for("/data/hello.txt")
     scope = PathSpec(
         vfs_path="data/hello.txt",
@@ -310,8 +313,8 @@ def test_execute_cmd_with_texts(registry):
         directory="/data/",
         resolved=True,
     )
-    stdout, io = _run(mount.run_command("grep", [scope], ["hello"], {}))
-    assert b"hello" in _run(materialize(stdout))
+    stdout, io = await mount.run_command("grep", [scope], ["hello"], {})
+    assert b"hello" in await materialize(stdout)
     assert io.exit_code == 0
 
 
@@ -396,3 +399,27 @@ async def test_closing_command_output_finalizes_its_source():
     await output.aclose()
     assert result.exit_code == 0
     assert result.stderr == b"finished\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [False, True])
+async def test_native_output_close_joins_producer_and_releases_mount(started):
+    closed = asyncio.Event()
+
+    @command("writer", vfs="ram", spec=CommandSpec())
+    async def writer(accessor, paths, texts, opts):
+        try:
+            await opts.stdio.stdout.write(b"prefix")
+            await opts.stdio.wait_cancelled()
+            return IOResult()
+        finally:
+            closed.set()
+
+    mount = MountEntry("/", RAMVFS(), MountMode.WRITE)
+    mount.register_commands([writer])
+    output, _ = await mount.run_command("writer", [], [], {})
+    if started:
+        assert await anext(output) == b"prefix"
+    await asyncio.wait_for(output.aclose(), 1)
+    assert closed.is_set()
+    await asyncio.wait_for(mount.activity.wait(), 1)

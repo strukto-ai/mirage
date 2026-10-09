@@ -14,7 +14,7 @@
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import asyncssh
@@ -34,7 +34,11 @@ from mirage.server.ssh.stream import (
     loop_sender,
 )
 from mirage.server.stdin import LoopStdin
+from mirage.shell.console import JobConsole
+from mirage.shell.console.types import Channel
 from mirage.types import Refusal
+from mirage.workspace.execution import ExecutionScope
+from mirage.workspace.shell_execution import ShellExecution
 
 Step = str | BaseException
 
@@ -277,21 +281,58 @@ async def test_output_folds_stderr_into_stdout_on_a_terminal():
     assert (tty.stdout.data, tty.stderr.data) == (["err"], [])
 
 
-async def _two_chunks() -> AsyncIterator[bytes]:
-    yield b"one"
-    yield b""
-    yield b"two"
+def _execution(io: IOResult, *events: tuple[Channel, bytes]) -> ShellExecution:
+    async def run(
+        output: JobConsole, cancel: asyncio.Event, scope: ExecutionScope
+    ) -> IOResult:
+        for channel, data in events:
+            await output.emit(channel, data)
+        return io
+
+    return ShellExecution(run, ExecutionScope())
 
 
 @pytest.mark.asyncio
-async def test_deliver_streams_stdout_then_stderr():
+async def test_deliver_sends_output_in_the_order_it_was_produced():
     sent: list[tuple[bytes, bool]] = []
 
     async def send(data: bytes, is_stderr: bool) -> None:
         sent.append((data, is_stderr))
 
-    await deliver(IOResult(stdout=_two_chunks(), stderr=b"warn"), send)
-    assert sent == [(b"one", False), (b"two", False), (b"warn", True)]
+    execution = _execution(
+        IOResult(exit_code=3),
+        (Channel.STDOUT, b"one"),
+        (Channel.STDOUT, b""),
+        (Channel.STDERR, b"warn"),
+        (Channel.STDOUT, b"two"),
+    )
+    async with execution:
+        result = await deliver(execution, send)
+    assert sent == [(b"one", False), (b"warn", True), (b"two", False)]
+    assert result.exit_code == 3
+
+
+@pytest.mark.asyncio
+async def test_deliver_sends_output_before_the_line_ends():
+    release = asyncio.Event()
+    first = asyncio.Event()
+
+    async def run(
+        output: JobConsole, cancel: asyncio.Event, scope: ExecutionScope
+    ) -> IOResult:
+        await output.emit(Channel.STDOUT, b"ready")
+        await release.wait()
+        return IOResult()
+
+    async def send(data: bytes, is_stderr: bool) -> None:
+        first.set()
+
+    async with ShellExecution(run, ExecutionScope()) as execution:
+        delivering = asyncio.create_task(deliver(execution, send))
+        await asyncio.wait_for(first.wait(), 5)
+        assert not delivering.done()
+        release.set()
+        await asyncio.wait_for(delivering, 5)
 
 
 _W = REFUSAL_WINDOW
@@ -330,8 +371,13 @@ async def test_deliver_appends_the_refusal_unless_the_output_says_why(
         sent.append((data, is_stderr))
 
     refusal = Refusal(kind="deny", reason=reason, scope="operand")
-    io = IOResult(stdout=stdout, stderr=stderr, exit_code=1, refusal=refusal)
-    await deliver(io, send)
+    execution = _execution(
+        IOResult(exit_code=1, refusal=refusal),
+        (Channel.STDOUT, stdout),
+        (Channel.STDERR, stderr),
+    )
+    async with execution:
+        await deliver(execution, send)
     line = (f"policy denied: {reason}\n".encode(), True)
     assert (sent[-1] == line) is not said
 

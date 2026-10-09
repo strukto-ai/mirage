@@ -983,6 +983,9 @@ async def _route_argv(
         sink=sink,
     )
 
+    if link_errors:
+        stdout = await materialize(stdout)
+
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":
             # A removed path takes its node meta (overlay attrs) with it;

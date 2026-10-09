@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
-import { read } from './read.ts'
+import { read, readStream } from './read.ts'
 
 interface Call {
   endpoint: string
@@ -212,4 +212,73 @@ describe('read unknown', () => {
       read(new SlackAccessor(t), spec('/mnt/slack', '/mnt/slack')),
     ).rejects.toMatchObject({ code: 'EISDIR' })
   })
+})
+
+it('closes an attachment stream before fetching its tail', async () => {
+  let closed = false
+  async function* source() {
+    try {
+      yield await Promise.resolve(new TextEncoder().encode('first\n'))
+      throw new Error('fetched tail')
+    } finally {
+      closed = true
+    }
+  }
+  const index = new RAMIndexCacheStore()
+  const path = spec('/channels/general__C1/2026-04-24/files/report__F1.txt')
+  await index.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
+    [
+      'report__F1.txt',
+      new IndexEntry({
+        id: 'F1',
+        name: 'report.txt',
+        vfsName: 'report__F1.txt',
+        resourceType: 'slack/file',
+        extra: { url_private_download: 'https://cdn.test/report' },
+      }),
+    ],
+  ])
+  try {
+    const stream = readStream(
+      new SlackAccessor({ call: () => Promise.resolve({ ok: true }), downloadFileStream: source }),
+      path,
+      index,
+    )
+    const first = await stream.next()
+    if (first.done) throw new Error('attachment stream ended before its first chunk')
+    expect(new TextDecoder().decode(first.value)).toBe('first\n')
+    await stream.return()
+    expect(closed).toBe(true)
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+it('uses bounded buffered downloads when a custom transport has no stream method', async () => {
+  const index = new RAMIndexCacheStore()
+  const path = spec('/channels/general__C1/2026-04-24/files/report__F1.txt')
+  const bytes = new Uint8Array(40_000).fill(65)
+  const downloadFile = vi.fn().mockResolvedValue(bytes)
+  await index.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
+    [
+      'report__F1.txt',
+      new IndexEntry({
+        id: 'F1',
+        name: 'report.txt',
+        vfsName: 'report__F1.txt',
+        resourceType: 'slack/file',
+        extra: { url_private_download: 'https://cdn.test/report' },
+      }),
+    ],
+  ])
+  const received: Uint8Array[] = []
+  for await (const chunk of readStream(
+    new SlackAccessor({ call: () => Promise.resolve({ ok: true }), downloadFile }),
+    path,
+    index,
+  ))
+    received.push(chunk)
+  expect(received.map((chunk) => chunk.byteLength)).toEqual([16384, 16384, 7232])
+  expect(received.reduce((total, chunk) => total + chunk.byteLength, 0)).toBe(bytes.byteLength)
+  expect(downloadFile).toHaveBeenCalledWith('https://cdn.test/report', 0, null)
 })

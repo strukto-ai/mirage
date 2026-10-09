@@ -40,6 +40,70 @@ async function submit(table: JobTable, work: (signal: AbortSignal) => Promise<Js
 }
 
 describe('async execution ownership', () => {
+  it('store outages cannot prevent local cancellation or interrupt cleanup', async () => {
+    const entered = gate(),
+      cleanup = gate(),
+      release = gate()
+    class BrokenStore extends RAMExecutionStore {
+      offline = false
+      override async get(id: string): Promise<ExecutionRecord | null> {
+        if (this.offline) throw new Error('storage unavailable')
+        return super.get(id)
+      }
+    }
+    const store = new BrokenStore()
+    const table = new JobTable(store)
+    const job = await submit(table, async (signal) => {
+      entered.release()
+      try {
+        await new Promise<void>((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      } finally {
+        cleanup.release()
+        await release.wait
+      }
+      return null
+    })
+    await entered.wait
+    store.offline = true
+    await expect(table.cancel(job.id)).rejects.toThrow('storage unavailable')
+    await cleanup.wait
+    let drained = false
+    const draining = table.drain(job.id).then(() => {
+      drained = true
+    })
+    await expect(table.cancel(job.id)).rejects.toThrow('storage unavailable')
+    await Promise.resolve()
+    expect(drained).toBe(false)
+    release.release()
+    await draining
+    store.offline = false
+    expect((await store.get(job.id))?.finishedAt).toBeNull()
+    await table.close()
+    await store.close()
+  })
+  it('passes the persisted execution identity into admission scope', async () => {
+    const table = new JobTable()
+    const job = await table.submit(
+      'ws',
+      'probe',
+      async (_signal, scope) => {
+        await scope.start()
+        return scope.id
+      },
+      'session',
+    )
+    expect((await table.wait(job.id)).result).toBe(job.id)
+    await table.close()
+  })
+
   it('retains stopping until cleanup, and a wait timeout does not cancel work', async () => {
     const entered = gate(),
       cleanup = gate(),
@@ -119,6 +183,54 @@ describe('async execution ownership', () => {
     expect(invoked).toBe(false)
   })
 
+  it('a stalled store cannot keep cancelled work running', async () => {
+    const entered = gate(),
+      cleanup = gate(),
+      resume = gate()
+    class StalledStore extends RAMExecutionStore {
+      stalled = false
+      override async get(id: string): Promise<ExecutionRecord | null> {
+        if (this.stalled) await resume.wait
+        return super.get(id)
+      }
+    }
+    const store = new StalledStore()
+    const table = new JobTable(store)
+    const job = await submit(table, async (signal) => {
+      entered.release()
+      try {
+        await new Promise<void>((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      } finally {
+        cleanup.release()
+      }
+      return null
+    })
+    await entered.wait
+    store.stalled = true
+    let cancelled = false
+    const cancelling = table.cancel(job.id).then((accepted) => {
+      cancelled = true
+      return accepted
+    })
+    try {
+      await cleanup.wait
+      expect(cancelled).toBe(false)
+    } finally {
+      resume.release()
+    }
+    expect(await cancelling).toBe(true)
+    expect((await table.wait(job.id)).status).toBe(JobStatus.CANCELED)
+    await table.close()
+    await store.close()
+  })
   it('cancellation survives a delayed completion CAS', async () => {
     const completing = gate(),
       release = gate()

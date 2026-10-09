@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
@@ -34,13 +35,15 @@ async function runWc(
   if (cmd === undefined) throw new Error('wc not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
   const vfs = makeFakeVfs(transport)
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-    ...(options.index !== undefined ? { index: options.index } : {}),
-  })
+  const result = await invoke(() =>
+    cmd.fn(vfs.accessor, paths, [], {
+      stdin: null,
+      flags,
+      io: commandIo(vfs),
+      cwd: '/',
+      ...(options.index !== undefined ? { index: options.index } : {}),
+    }),
+  )
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''

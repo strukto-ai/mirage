@@ -54,6 +54,14 @@ class Job:
     process: ProcessHandle | None = None
 
     @property
+    def execution_id(self) -> str | None:
+        return (
+            self.process.info.execution_id
+            if self.process is not None
+            else self.console.execution_id
+        )
+
+    @property
     def pid(self) -> int:
         """The managed PID `$!`, `jobs -p` and `wait -p` report.
 

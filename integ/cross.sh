@@ -54,7 +54,7 @@ seed() {
 check_limit() {
   local cli="$1" name="$2"
   local lines
-  lines="$($cli shell -w cross_w -c "cat /guard/big.txt" | stdout_of | grep -c .)"
+  lines="$($cli shell --json -w cross_w -c "cat /guard/big.txt" | stdout_of | grep -c .)"
   if [ "$lines" == "2" ]; then
     echo "  OK   limit caps cat to 2 lines ($name)"
   else
@@ -94,7 +94,7 @@ run_direction() {
   local expected=()
   local i
   for i in "${!FINGERPRINTS[@]}"; do
-    expected[$i]="$($writer_cli shell -w cross_w -c "${FINGERPRINTS[$i]}" | stdout_of)"
+    expected[$i]="$($writer_cli shell --json -w cross_w -c "${FINGERPRINTS[$i]}" | stdout_of)"
   done
   $writer_cli workspace snapshot cross_w "$tar" >/dev/null
   $writer_cli workspace delete cross_w >/dev/null 2>&1 || true
@@ -104,7 +104,7 @@ run_direction() {
   $reader_cli workspace load "$tar" "$YAML" --id cross_r >/dev/null
   for i in "${!FINGERPRINTS[@]}"; do
     local got
-    got="$($reader_cli shell -w cross_r -c "${FINGERPRINTS[$i]}" | stdout_of)"
+    got="$($reader_cli shell --json -w cross_r -c "${FINGERPRINTS[$i]}" | stdout_of)"
     if [ "$got" == "${expected[$i]}" ]; then
       echo "  OK   ${FINGERPRINTS[$i]} => $(printf '%q' "$got")"
     else
@@ -142,7 +142,7 @@ run_cache_direction() {
   local expected=()
   local i
   for i in "${!CACHE_FINGERPRINTS[@]}"; do
-    expected[$i]="$($writer_cli shell -w cross_cw -c "${CACHE_FINGERPRINTS[$i]}" | stdout_of)"
+    expected[$i]="$($writer_cli shell --json -w cross_cw -c "${CACHE_FINGERPRINTS[$i]}" | stdout_of)"
   done
   if $writer_cli workspace snapshot cross_cw "$tar" >/dev/null; then
     echo "  OK   snapshot written under a redis cache ($writer_name)"
@@ -156,7 +156,7 @@ run_cache_direction() {
   $reader_cli workspace load "$tar" "$CACHE_YAML" --id cross_cr >/dev/null
   for i in "${!CACHE_FINGERPRINTS[@]}"; do
     local got
-    got="$($reader_cli shell -w cross_cr -c "${CACHE_FINGERPRINTS[$i]}" | stdout_of)"
+    got="$($reader_cli shell --json -w cross_cr -c "${CACHE_FINGERPRINTS[$i]}" | stdout_of)"
     if [ "$got" == "${expected[$i]}" ]; then
       echo "  OK   ${CACHE_FINGERPRINTS[$i]} => $(printf '%q' "$got")"
     else

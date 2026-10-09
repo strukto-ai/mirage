@@ -360,8 +360,9 @@ async def stat_check(ws, check: dict) -> str:
     returned: no shell command asks for one, because commands read whole
     files, so the ranged read op is only reachable through the dispatcher
     FUSE and ``ws.vfs`` use. ``read`` with ``stream`` reads the stored
-    bytes as the dispatcher streams them (no command does yet) and fails when
-    they come back whole.
+    bytes as the dispatcher streams them and fails when they come back whole.
+    ``max_chunk_size`` bounds each chunk; ``take_bytes`` closes a read
+    after its prefix to exercise partial consumption.
 
     Args:
         ws: the workspace the case runs against.
@@ -376,7 +377,20 @@ async def stat_check(ws, check: dict) -> str:
         )
         if not hasattr(stream, "__aiter__"):
             raise TypeError(f"{check['read']}: the read was not streamed")
-        data = b"".join([chunk async for chunk in stream])
+        parts = []
+        remaining = check.get("take_bytes")
+        try:
+            async for chunk in stream:
+                if len(chunk) > check.get("max_chunk_size", float("inf")):
+                    raise AssertionError("stream exceeded max_chunk_size")
+                parts.append(chunk if remaining is None else chunk[:remaining])
+                if remaining is not None:
+                    remaining -= len(parts[-1])
+                    if remaining == 0:
+                        break
+        finally:
+            await stream.aclose()
+        data = b"".join(parts)
         return data.decode("utf-8", "replace")
     if "read" in check:
         data, _ = await ws.dispatch(

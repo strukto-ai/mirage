@@ -613,6 +613,65 @@ class SeeProducer implements Policy {
 }
 
 describe('Limit end to end', () => {
+  it.each([
+    {
+      name: 'truncate',
+      policy: CapLines,
+      command: "printf '1\\n2\\n3\\n'; echo fourth",
+      stdout: '1\n2\n',
+      stderr: 'output truncated',
+      exitCode: 0,
+      failed: false,
+    },
+    {
+      name: 'hard limit',
+      policy: CapBytesHard,
+      command: 'echo secret; echo more',
+      stdout: '',
+      stderr: 'output truncated',
+      exitCode: 1,
+      failed: false,
+    },
+    {
+      name: 'failed policy',
+      policy: Boom,
+      command: 'echo secret; echo forbidden >&2',
+      stdout: '',
+      stderr: 'forbidden\necho: Permission denied\n',
+      exitCode: 126,
+      failed: true,
+    },
+  ])('stream exposes only approved output: $name', async (test) => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new test.policy())
+      const execution = await ws.shell(test.command, { stream: true })
+      const output = { stdout: '', stderr: '' }
+      try {
+        for await (const event of execution.events)
+          output[event.stream] += new TextDecoder().decode(event.data)
+        const result = await execution.wait()
+        expect(output.stdout).toBe(test.stdout)
+        expect(output.stderr).toContain(test.stderr)
+        expect(result.exitCode).toBe(test.exitCode)
+        expect(result.stdout.byteLength).toBe(0)
+        expect(result.stderr.byteLength).toBe(0)
+        if (test.failed) {
+          expect(output.stderr).toBe(test.stderr)
+          expect(result.refusal).toMatchObject({
+            kind: 'failed',
+            reason: 'Boom failed',
+            policy: 'Boom',
+          })
+        } else expect(result.refusal).toBeNull()
+      } finally {
+        await execution.close()
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('two limit policies merge to the tightest', async () => {
     const ws = executableWorkspace()
     try {

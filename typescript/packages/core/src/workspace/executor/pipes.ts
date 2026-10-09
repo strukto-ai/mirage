@@ -65,6 +65,7 @@ import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { CAPACITY } from '../../io/pipe.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -80,13 +81,17 @@ export async function handlePipe(
   // Each stage is a child shell, which runs its own EXIT action through
   // this when it ends.
   executeFn: ExecuteFn | null = null,
+  bufferBytes = CAPACITY,
+  // Where the statement's output goes as it arrives; the last stage
+  // streams into it instead of being collected first.
+  sink?: JobConsole,
 ): Promise<Result> {
   const session = context.session
   // Reassociated pipelines can enter here without executeNode resetting
   // the parent. An exemption belongs to the preceding statement only;
   // the caller applies this pipeline's own negation after it finishes.
   session.errexitImmune = false
-  const pipes = commands.map((_, i) => new PipeConsole(stderrFlags[i] === true))
+  const pipes = commands.map((_, i) => new PipeConsole(stderrFlags[i] === true, bufferBytes))
   const ios: IOResult[] = commands.map(() => new IOResult())
   // A stage the top shell forks for a simple command is that command's
   // shell; one a child shell forks is a child of a child.
@@ -215,11 +220,11 @@ export async function handlePipe(
     const completed = Promise.all(tasks)
     // Attach the rejection handler before reading the last segment: an
     // upstream failure must settle the pipeline even if nobody reads it.
+    const last = pipes[pipes.length - 1]?.stream() ?? null
+    const reading =
+      sink === undefined ? materialize(last) : pump(sink, Channel.STDOUT, last).then(() => null)
     const result = await runWithTimeout(
-      abortable(
-        Promise.all([materialize(pipes[pipes.length - 1]?.stream() ?? null), completed]),
-        parentSignal,
-      ),
+      abortable(Promise.all([reading, completed]), parentSignal),
       session.pipelineTimeoutSeconds,
       'pipeline',
     )

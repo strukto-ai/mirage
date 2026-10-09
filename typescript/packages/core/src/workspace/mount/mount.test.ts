@@ -249,7 +249,7 @@ describe('Mount.runCommand', () => {
     const tee = commandsFor(vfs).find((cmd) => cmd.name === 'tee')
     if (tee === undefined) throw new Error('missing tee')
     m.register(tee)
-    const [, io] = await m.runCommand(
+    const [stdout, io] = await m.runCommand(
       'tee',
       [PathSpec.fromStrPath('/rw/f')],
       [],
@@ -258,8 +258,9 @@ describe('Mount.runCommand', () => {
         stdin: new TextEncoder().encode('x'),
       },
     )
+    await materialize(stdout)
     expect(io.exitCode).toBe(1)
-    expect(new TextDecoder().decode(await materialize(io.stderr))).toContain(
+    expect(new TextDecoder().decode(await io.materializeStderr())).toContain(
       'Operation not supported',
     )
     expect(vfs.store.files.has('/f')).toBe(false)
@@ -284,7 +285,7 @@ describe('Mount.runCommand', () => {
     m.register(cmd)
     const [stdout, io] = await m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {})
     expect(io.exitCode).toBe(0)
-    expect(stdout).toBeInstanceOf(Uint8Array)
+    expect(await materialize(stdout)).toEqual(new TextEncoder().encode('ok'))
   })
 
   it('rejects write commands on a READ mount', async () => {
@@ -532,3 +533,60 @@ it('a path-guarded command is still held at its write', async () => {
     await ws.close()
   }
 })
+
+it.each([false, true])(
+  'closes native output and releases mount admission (started=%s)',
+  async (started) => {
+    let closed = false
+    const [cmd] = command({
+      name: 'writer',
+      vfs: 'ram',
+      spec: new CommandSpec(),
+      fn: async (_accessor, _paths, _texts, opts) => {
+        if (opts.stdio === undefined) throw new Error('missing stdio')
+        try {
+          await opts.stdio.stdout.write(new TextEncoder().encode('prefix'))
+          await opts.stdio.waitCancelled()
+          return new IOResult()
+        } finally {
+          closed = true
+        }
+      },
+    })
+    if (cmd === undefined) throw new Error('missing command')
+    const mount = makeMount()
+    mount.register(cmd)
+    const [output] = await mount.runCommand('writer', [], [], {})
+    const iterator = output as AsyncIterableIterator<Uint8Array>
+    if (started) expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
+    await iterator.return?.()
+    expect(closed).toBe(true)
+    await mount.activity.wait()
+  },
+)
+
+it.each([0.05, null])(
+  'releases a native writer that ignores cancellation (timeout=%s)',
+  async (timeout) => {
+    const [cmd] = command({
+      name: 'writer',
+      vfs: 'ram',
+      spec: new CommandSpec(),
+      limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+      fn: async (_accessor, _paths, _texts, opts) => {
+        if (opts.stdio === undefined) throw new Error('missing stdio')
+        await opts.stdio.stdout.write(new TextEncoder().encode('prefix'))
+        return new Promise<never>(() => undefined)
+      },
+    })
+    if (cmd === undefined) throw new Error('missing command')
+    const mount = makeMount()
+    mount.register(cmd)
+    const [output] = await mount.runCommand('writer', [], [], {})
+    const iterator = output as AsyncIterableIterator<Uint8Array>
+    expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
+    if (timeout === null) await iterator.return?.()
+    else await expect(iterator.next()).rejects.toThrow(/writer: timed out after 0.05s/)
+  },
+  2000,
+)

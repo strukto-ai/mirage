@@ -78,3 +78,40 @@ async def test_retention_and_workspace_filter_keep_active_records(monkeypatch):
     await store.close()
     with pytest.raises(RuntimeError, match="closed"):
         await waiting
+
+
+@pytest.mark.asyncio
+async def test_terminal_creates_share_retention_by_completion_time(
+    monkeypatch,
+):
+    store = RAMExecutionStore(max_completed=2, retention_seconds=10)
+    now = time.time()
+    active = ExecutionRecord("active", "workspace", "session", "sleep", now)
+    await store.create(active)
+    for name, finished_at in (
+        ("newest", now + 2),
+        ("oldest", now),
+        ("middle", now + 1),
+    ):
+        await store.create(
+            replace(
+                active,
+                id=name,
+                status=ExecutionStatus.DONE,
+                finished_at=finished_at,
+            )
+        )
+    assert await store.get("oldest") is None
+    assert {record.id for record in await store.list()} == {
+        "active",
+        "middle",
+        "newest",
+    }
+    monkeypatch.setattr("mirage.execution.ram.time.time", lambda: now + 11.5)
+    assert {record.id for record in await store.list()} == {"active", "newest"}
+    await store.create(
+        replace(
+            active, id="expired", status=ExecutionStatus.DONE, finished_at=now
+        )
+    )
+    assert await store.get("expired") is None

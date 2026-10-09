@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 import { Limit, OnExceed } from '../../../types.ts'
-import { applyLimit } from './limit.ts'
+import { applyLimit, maybeWithTimeout } from './limit.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -97,3 +98,34 @@ it.each([1, 2, 20])('intersects limits and detects exact fits with chunks of %i'
     expect((await io.stderrStr()).includes('truncated')).toBe(truncated)
   }
 })
+
+it.each([false, true])(
+  'timeout wrapper retains owned producer close (pending=%s)',
+  async (pendingPull) => {
+    let closed = false
+    const result = await invoke(async (stdio) => {
+      try {
+        await stdio.stdout.write(ENC.encode('prefix'))
+        await stdio.waitCancelled()
+        return null
+      } finally {
+        closed = true
+      }
+    })
+    if (result === null) throw new Error('handler declined')
+    const wrapped = maybeWithTimeout(
+      result[0],
+      new Limit({ timeoutSeconds: 30 }),
+      'writer',
+    ) as AsyncIterableIterator<Uint8Array>
+    let pending: Promise<IteratorResult<Uint8Array> | undefined> | undefined
+    if (pendingPull) {
+      expect((await wrapped.next()).value).toEqual(ENC.encode('prefix'))
+      pending = wrapped.next().catch(() => undefined)
+      await Promise.resolve()
+    }
+    await wrapped.return?.()
+    await pending
+    expect(closed).toBe(true)
+  },
+)

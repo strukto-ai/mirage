@@ -57,8 +57,30 @@ import type { DispatchFn } from '../../runtime/types.ts'
 
 import { ExecutionNode } from '../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import type { SessionState } from '../session/session.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
+
+/** Forward ordinary output while retaining chunks needing descriptor routing. */
+class StatementRecorder extends Recorder {
+  constructor(
+    private readonly session: SessionState,
+    private readonly sink: JobConsole | null,
+  ) {
+    super()
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    if (
+      this.sink !== null &&
+      this.chunks.length === 0 &&
+      this.session.execStdout === null &&
+      this.session.execStderr === null
+    )
+      await this.sink.emit(channel, data)
+    else await super.emit(channel, data)
+  }
+}
 
 export async function executeProgram(
   recurse: ExecuteNodeFn,
@@ -254,11 +276,9 @@ async function runProgram(
     const at = i
     i += 1
     const armed = errTrapArmed(session)
-    // Each statement writes to a recorder rather than straight to the
-    // program's output, so what it wrote to the terminal through a copy
-    // (`exec 3>&1`) keeps its place, past an `exec` diversion, and what it
-    // wrote to an enclosing level's stream goes on there.
-    const recorder = new Recorder()
+    // Ordinary output progresses while the statement runs. Descriptor
+    // copies and exec diversions retain their order for routing below.
+    const recorder = new StatementRecorder(session, sink)
     let io: IOResult
     try {
       // `exec < file` feeds the shell's stdin: a later `read` or `while

@@ -21,6 +21,7 @@ import { JobStatus, type JobEntry, type JobTable } from '../jobs.ts'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
 import { UploadStdin } from '../stdin.ts'
+import { ShellOutput, shellResponse } from '../stream.ts'
 import { RouteError, failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
@@ -84,7 +85,11 @@ async function readPart(
  * goes to the line as it arrives. A background one is read whole, since
  * the job id answers only after the body is done.
  */
-async function readShellBody(req: FastifyRequest, background: boolean): Promise<ShellUpload> {
+async function readShellBody(
+  req: FastifyRequest,
+  background: boolean,
+  capacity: number,
+): Promise<ShellUpload> {
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/')) {
     return {
@@ -123,7 +128,7 @@ async function readShellBody(req: FastifyRequest, background: boolean): Promise<
           finish: () => Promise.resolve(),
         }
       }
-      const stdin = new UploadStdin()
+      const stdin = new UploadStdin(capacity)
       const failed = readPart(
         events,
         (data) => stdin.feed(data),
@@ -214,6 +219,7 @@ interface ShellQuery {
   background?: string
   session_id?: string
   explain?: string
+  stream?: string
 }
 
 /**
@@ -255,45 +261,65 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
   app.post<{ Params: ShellParams; Body: ShellBody; Querystring: ShellQuery }>(
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
+      let streaming: boolean
       try {
+        streaming = queryFlag(req.query.stream, 'stream')
+        if (
+          streaming &&
+          (queryFlag(req.query.background, 'background') || queryFlag(req.query.explain, 'explain'))
+        ) {
+          throw new RouteError(400, 'stream cannot be combined with background or explain')
+        }
         if (queryFlag(req.query.explain, 'explain')) return await explained(req, reply, deps)
       } catch (err) {
         return failure(reply, err)
       }
       const { wsId } = req.params
-      if (deps.registry.visible(wsId, req.account) === null) {
+      const entry = deps.registry.visible(wsId, req.account)
+      if (entry === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       const background = req.query.background === 'true'
       let upload: ShellUpload
       try {
-        upload = await readShellBody(req, background)
+        upload = await readShellBody(req, background, entry.runner.ws.io.bufferBytes)
       } catch (error) {
         return refuse(req, reply, error)
       }
       const { body, stdin } = upload
-      const entry = deps.registry.get(wsId)
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
+      const output = streaming ? new ShellOutput(entry.runner.ws.io.bufferBytes) : undefined
       let job = await deps.jobs.submit(
         wsId,
         body.command,
-        async (signal, executionScope) =>
-          ioResultToDict(
-            await entry.runner.ws.shell(body.command, {
-              sessionId,
-              executionScope,
-              ...(body.agent_id !== undefined ? { agentId: body.agent_id } : {}),
-              ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
-              ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
-              ...(body.record !== undefined ? { record: body.record } : {}),
-              ...(stdin !== undefined ? { stdin } : {}),
-              signal,
-            }),
-          ),
+        async (signal, executionScope) => {
+          output?.bindExecution(executionScope.id)
+          const options = {
+            sessionId,
+            executionScope,
+            ...(body.agent_id !== undefined ? { agentId: body.agent_id } : {}),
+            ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
+            ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
+            ...(body.record !== undefined ? { record: body.record } : {}),
+            ...(stdin !== undefined ? { stdin } : {}),
+            signal,
+          }
+          if (output === undefined)
+            return ioResultToDict(await entry.runner.ws.shell(body.command, options))
+          const execution = await entry.runner.ws.shell(body.command, { ...options, stream: true })
+          try {
+            for await (const chunk of execution.events) await output.emit(chunk.stream, chunk.data)
+            return ioResultToDict(await execution.wait())
+          } finally {
+            await execution.close()
+          }
+        },
         sessionId,
       )
       reply.header('X-Mirage-Job-Id', job.id)
+      if (output !== undefined)
+        return shellResponse(output, deps.jobs, job, reply, upload.failed, stdin)
       if (background) {
         await upload.finish()
         return reply.status(202).send({

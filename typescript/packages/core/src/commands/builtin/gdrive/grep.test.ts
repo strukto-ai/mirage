@@ -1,3 +1,4 @@
+import { invoke } from '../../../io/stdio.ts'
 import type * as ClientModule from '../../../core/google/client.ts'
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('../../../core/google/client.ts', async (importOriginal) => ({
@@ -33,13 +34,15 @@ async function run(kind: string, flags: Record<string, boolean> = {}) {
   const cmd = GDRIVE_COMMANDS.find((c) => c.name === 'grep')
   if (cmd === undefined) throw new Error('grep not registered')
   const accessor = new GDriveAccessor({ tokenManager: TM })
-  const result = await cmd.fn(accessor, [p], ['needle'], {
-    stdin: null,
-    flags,
-    io: ioFor(GDriveVFS, accessor),
-    cwd: '/',
-    index,
-  })
+  const result = await invoke(() =>
+    cmd.fn(accessor, [p], ['needle'], {
+      stdin: null,
+      flags,
+      io: ioFor(GDriveVFS, accessor),
+      cwd: '/',
+      index,
+    }),
+  )
   if (result === null) throw new Error('no grep result')
   return { out: await materialize(result[0]), io: result[1] }
 }

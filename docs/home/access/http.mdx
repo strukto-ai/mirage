@@ -123,6 +123,11 @@ curl -s http://127.0.0.1:8765/v1/workspaces \
   -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}}'
 ```
 
+Set the queue capacity in the creation payload's `config.io` block. For
+example, `{"config":{"io":{"buffer_bytes":262144},"mounts":{"/":{"vfs":"ram"}}}}`
+sets 256 KiB per queue. Shell upload/output streams and MCP on this workspace
+inherit it; there is no buffer-size query parameter. See [I/O buffers](/home/yaml#io-buffers).
+
 ### List workspaces
 
 <Badge color="blue">GET</Badge> `/v1/workspaces`
@@ -248,10 +253,15 @@ Each call acts as the session `?session_id=` names, the default one when absent.
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 <ParamField query="background" type="boolean" default="false">Answer `202` with `{job_id, workspace_id, submitted_at}` at once.</ParamField>
 <ParamField query="explain" type="boolean" default="false">Answer the line's explanation; run nothing.</ParamField>
+<ParamField query="stream" type="boolean" default="false">Stream stdout, stderr and final status as NDJSON. Cannot be combined with background or explain.</ParamField>
 
 Answers `{kind, exit_code, stdout, stderr, refusal}` when the line finishes, with the job id in `X-Mirage-Job-Id`. A dropped request cancels its job. With `explain`, only the line is read: stdin, `cwd`, `runtime` and `background` are refused.
 
-To send stdin, post `multipart/form-data` with a `request` part holding the JSON body, then a `stdin` part. The line starts when the `stdin` part begins and reads it as it arrives. A body that stops before its closing boundary cancels the line and answers `400`. With `?background=true`, the whole upload is read before the `202`.
+To send stdin, post `multipart/form-data` with a `request` part holding the JSON body, then a `stdin` part. The line starts when the `stdin` part begins and reads it as it arrives. A body that stops before its closing boundary cancels the line and answers `400` in collected mode. With `?background=true`, the whole upload is read before the `202`.
+
+With `?stream=true`, the response uses `application/x-ndjson` and retains the same `X-Mirage-Job-Id`. Each output record is `{"stream":"stdout","data":"..."}` or `{"stream":"stderr","data":"..."}`, with base64 bytes in `data`. Decoded chunks are at most 8 KiB; the transport applies backpressure when its configured byte queue fills (64 KiB by default). A final `{"status":"done","result":{...},"error":null}` record follows execution cleanup. The result contains the exit code and refusal metadata with empty stdout and stderr, since those bytes have already streamed. Failures and cancellation use `failed` and `canceled`, respectively. A closed stream without a final record is incomplete.
+
+Streaming input and output can overlap. A command that finishes before stdin ends closes the HTTP connection, allowing the client to stop uploading. A disconnected client cancels its job and the server joins cleanup; streaming output is not retained for replay by this endpoint.
 
 ```bash
 curl -s "http://127.0.0.1:8765/v1/workspaces/demo/shell?session_id=agent" \

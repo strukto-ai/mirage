@@ -123,6 +123,7 @@ class OpRecord:
     mount_id: str | None = field(default=None, repr=False, compare=False)
     claimed: ByteSource | None = field(default=None, repr=False, compare=False)
     sealed: bool = field(default=False, repr=False, compare=False)
+    execution_id: str | None = None
 
     @property
     def is_cache(self) -> bool:
@@ -140,6 +141,11 @@ class OpRecord:
             "duration_ms": self.duration_ms,
             "fingerprint": self.fingerprint,
             "revision": self.revision,
+            **(
+                {"execution_id": self.execution_id}
+                if self.execution_id is not None
+                else {}
+            ),
         }
 
 

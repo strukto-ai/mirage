@@ -14,6 +14,7 @@
 from collections.abc import Awaitable
 from typing import TypeVar
 
+from mirage.io.errors import PipeClosed  # noqa: F401
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.types import ArithWrite
@@ -281,7 +282,3 @@ class ReturnSignal(Exception):
         self.stderr = stderr
         self.stdout = stdout
         self.unrouted = False
-
-
-class PipeClosed(Exception):
-    pass
