@@ -77,7 +77,7 @@ import {
 import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { mergeSignals } from '../../utils/abort.ts'
+import { joinOrAbort, mergeSignals } from '../../utils/abort.ts'
 import { lineSignal } from '../abort.ts'
 import {
   captureRecordingContext,
@@ -1155,7 +1155,7 @@ export class MountEntry {
               } catch (error) {
                 if (error instanceof CommandTimeoutError) {
                   stdio.cancel()
-                  if (stdio.writing) await running.catch(() => undefined)
+                  if (stdio.writing) await joinOrAbort(running, stdio.signal).catch(() => undefined)
                 }
                 throw error
               }

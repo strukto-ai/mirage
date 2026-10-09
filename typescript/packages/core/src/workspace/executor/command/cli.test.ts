@@ -962,3 +962,28 @@ it.each([null, 1])(
     expect(closed).toBe(true)
   },
 )
+
+it.each([0.05, null])(
+  'releases a native writer that ignores cancellation (timeout=%s)',
+  async (timeout) => {
+    const spec = new CLISpec({
+      name: 'writer',
+      limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+      fn: async (inv) => {
+        if (inv.stdio === undefined) throw new Error('missing stdio')
+        await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
+        return new Promise<never>(() => undefined)
+      },
+    })
+    const [output] = await handleCli(
+      { name: 'writer', spec, config: null },
+      ['writer'],
+      new SessionState({ sessionId: 'test' }),
+    )
+    const iterator = output as AsyncIterableIterator<Uint8Array>
+    expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
+    if (timeout === null) await iterator.return?.()
+    else await expect(iterator.next()).rejects.toThrow(/writer: timed out after 0.05s/)
+  },
+  2000,
+)

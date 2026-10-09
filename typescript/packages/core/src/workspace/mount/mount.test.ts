@@ -532,3 +532,29 @@ it.each([false, true])(
     await mount.activity.wait()
   },
 )
+
+it.each([0.05, null])(
+  'releases a native writer that ignores cancellation (timeout=%s)',
+  async (timeout) => {
+    const [cmd] = command({
+      name: 'writer',
+      vfs: 'ram',
+      spec: new CommandSpec(),
+      limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+      fn: async (_accessor, _paths, _texts, opts) => {
+        if (opts.stdio === undefined) throw new Error('missing stdio')
+        await opts.stdio.stdout.write(new TextEncoder().encode('prefix'))
+        return new Promise<never>(() => undefined)
+      },
+    })
+    if (cmd === undefined) throw new Error('missing command')
+    const mount = makeMount()
+    mount.register(cmd)
+    const [output] = await mount.runCommand('writer', [], [], {})
+    const iterator = output as AsyncIterableIterator<Uint8Array>
+    expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
+    if (timeout === null) await iterator.return?.()
+    else await expect(iterator.next()).rejects.toThrow(/writer: timed out after 0.05s/)
+  },
+  2000,
+)

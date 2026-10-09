@@ -40,6 +40,7 @@ import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
+import { joinOrAbort } from '../../../utils/abort.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
@@ -473,7 +474,7 @@ export async function handleCli(
           } catch (error) {
             if (error instanceof CommandTimeoutError) {
               stdio.cancel()
-              if (stdio.writing) await running.catch(() => undefined)
+              if (stdio.writing) await joinOrAbort(running, stdio.signal).catch(() => undefined)
               if (leaf.write && dropCaches !== null) {
                 const settle = (): Promise<void> => dropCaches()
                 void running.then(settle, settle).catch((dropError: unknown) => {

@@ -1,6 +1,6 @@
 import { closeQuietly, wrapCachableStreams } from './stream.ts'
 import { concat } from './cachable_iterator.ts'
-import { abortable } from '../utils/abort.ts'
+import { abortable, joinOrAbort } from '../utils/abort.ts'
 import { chunks } from './cooperative.ts'
 import { OutputPipe } from './output.ts'
 import { CAPACITY } from './pipe.ts'
@@ -211,7 +211,9 @@ export async function invoke(
   const settled = task.catch(() => undefined)
   async function close(): Promise<void> {
     cancel()
-    await settled
+    await joinOrAbort(settled, stdio.signal).catch((error: unknown) => {
+      console.debug('handler outlived its cancellation grace', error)
+    })
     await closeQuietly(stdio.stdin)
     signal?.removeEventListener('abort', cancel)
   }
