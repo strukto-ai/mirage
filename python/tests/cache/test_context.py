@@ -27,6 +27,7 @@ from mirage.cache.context import (
     invalidate_ancestors,
     invalidate_subtree,
     listing_refreshed,
+    native_condition,
     own_write_version,
     publish_read,
     push_cache_manager,
@@ -37,7 +38,8 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.cache.types import WriteContext
+from mirage.cache.types import LiveVersion, WriteCondition, WriteContext
+from mirage.errors.types import OperationNotSupportedError
 from mirage.types import PathSpec
 
 
@@ -303,3 +305,29 @@ async def test_an_own_version_conditions_only_its_own_path(own_path, want):
     finally:
         push_write_context(prev)
     assert cond is not None and cond.if_match == want
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["put", "copy", "delete"])
+async def test_native_condition_names_the_op_it_cannot_condition(kind):
+    path = PathSpec(virtual="/box/f", directory="/box/", vfs_path="/f")
+    context = WriteContext(
+        vfs="box",
+        conditions=frozenset({"put", "copy", "delete"}),
+        read_version=_held,
+        read_versions=_held_all,
+        drop=_noop,
+        keep=_noop,
+    )
+    prev = push_write_context(context)
+    try:
+        with pytest.raises(OperationNotSupportedError) as info:
+            await native_condition(
+                path,
+                WriteCondition(if_match="s1"),
+                LiveVersion(content="s1", native=None),
+                kind,
+            )
+    finally:
+        push_write_context(prev)
+    assert f"conditional {kind}" in str(info.value)

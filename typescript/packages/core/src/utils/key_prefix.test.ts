@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { normalize } from './key_prefix.ts'
+import { PathSpec } from '../types.ts'
+import { childSpec, normalize } from './key_prefix.ts'
 
 // The one key-prefix rule, mirrored by python/tests/utils/test_key_prefix.py.
 // A root-spelled prefix is no prefix: '/' used to normalize to '/', and every
@@ -31,5 +32,16 @@ const NORMALIZE: readonly [string | undefined, string][] = [
 describe('normalize', () => {
   it.each(NORMALIZE)('%j -> %j', (raw, expected) => {
     expect(normalize(raw)).toBe(expected)
+  })
+})
+
+describe('childSpec', () => {
+  it('appends to the VFS key', () => {
+    const parent = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
+    const child = childSpec(parent, 'x')
+    expect(child.virtual).toBe('/m/d/x')
+    expect(child.vfsPath).toBe('d/x')
+    const root = new PathSpec({ virtual: '/m', directory: '/', vfsPath: '' })
+    expect(childSpec(root, 'x').vfsPath).toBe('x')
   })
 })

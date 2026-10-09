@@ -34,8 +34,16 @@ export function boxError(status: number, code: string, message: string): Reply {
 }
 
 export const notFound = (what: string): Reply => boxError(404, 'not_found', `${what} not found`)
-export const nameInUse = (name: string): Reply =>
-  boxError(409, 'item_name_in_use', `${name} already exists`)
+// A 409 names the item holding the name in context_info.conflicts, as Box does
+// (measured 2026-10-08), so a client can tell a folder there from a file.
+export function nameInUse(taken: { type: string; id: string; name: string }): Reply {
+  const reply = boxError(409, 'item_name_in_use', `${taken.name} already exists`)
+  const conflicts = [{ type: taken.type, id: taken.id, name: taken.name }]
+  return {
+    ...reply,
+    body: { ...(reply.body as Record<string, JsonValue>), context_info: { conflicts } },
+  }
+}
 export const unauthorized = (): Reply => boxError(401, 'unauthorized', 'missing bearer token')
 
 export function render(item: Item): JsonValue {

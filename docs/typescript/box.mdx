@@ -168,12 +168,29 @@ A write records the `sha1` its upload reply names, so a `fresh` read
 right after a `tee` or `sed -i` downloads nothing. See
 [Writes](/home/cache#writes).
 
+## Conditional writes
+
+A Box mount accepts [`write: conditional`](/home/yaml#the-write-policy). A
+write or a file delete compares the `sha1` mirage holds with the one the
+folder listing it walks anyway shows, and refuses a file changed since it
+was read before sending anything; the request then carries the file's
+`etag` as `If-Match`, so Box refuses (412) a change that lands in between.
+A conditional write costs no request more than a plain one. `rm -r` walks
+the folder file by file, and a `mv` within the mount is Box's own move,
+which is not refused when its source changed (a `mv` to another mount is a
+copy and a conditioned delete, so there a changed source stays and `mv`
+reports the failed removal); see
+[which backends](/home/yaml#which-backends).
+
 ## Reads under `fresh`
 
 A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
 folder listing and `GET /files/{id}` both carry; a download names no version,
 so a whole read stamps the listed `sha1` only when the downloaded bytes hash
-to it, and a ranged read stamps nothing. `modified_at` is never the token:
+to it, and a ranged read stamps nothing. On a
+[`write: conditional`](/home/yaml#the-write-policy) mount a whole read stamps
+the `sha1` of the bytes it downloaded, so a listing another client has since
+outdated cannot leave the next write without the version the agent read. `modified_at` is never the token:
 two same-size edits in one second share it.
 
 Checking a cached file costs one request, `GET /files/{id}` by the id the

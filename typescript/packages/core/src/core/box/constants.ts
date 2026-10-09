@@ -37,6 +37,13 @@ export const PLACE_EVENTS: ReadonlySet<string> = new Set([
 ])
 export const TRASH_EVENTS: ReadonlySet<string> = new Set(['ITEM_TRASH'])
 
+// Box's answer to a request whose If-Match no longer holds, and to one on a
+// file that is gone (measured 2026-10-05 for uploads, 2026-10-08 for deletes).
+export const LOST_STATUS = 412
+export const GONE_STATUS = 404
+// A name taken, or a non-recursive delete of a folder that is not empty.
+export const CONFLICT_STATUS = 409
+
 export const SHA1 = 'sha1'
 export const ACTIVE = 'active'
 export const ALL_FILES_FOLDER_ID = '0'

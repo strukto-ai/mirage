@@ -128,7 +128,8 @@ async def truncate_by_rewrite(
     """Resize by reading the file and writing it back padded or cut.
 
     For a store with no partial write. It cannot hold ``no_create``
-    atomically, so it refuses that before writing anything.
+    atomically, so it refuses that before writing anything. Emptying reads
+    nothing, so its write carries the version the agent read.
 
     Args:
         read (ReadFn): whole-file reader.
@@ -139,11 +140,16 @@ async def truncate_by_rewrite(
     """
     if no_create:
         raise enotsup("emulated", "truncate --no-create", path)
+    if length == 0:
+        await write(path, b"")
+        return
+    own: str | OwnRead | None
     try:
-        data = await read(path)
+        data, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
-        data = b""
-    await write(path, data[:length].ljust(length, b"\0"))
+        data, own = b"", OwnRead.ABSENT
+    with own_write_version(path, own):
+        await write(path, data[:length].ljust(length, b"\0"))
 
 
 def expect_offset(offset: int, path: PathSpec) -> int:

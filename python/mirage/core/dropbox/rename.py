@@ -14,16 +14,10 @@
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_after_move, invalidate_ancestors
-from mirage.core.dropbox.api import (
-    delete_path,
-    get_metadata,
-    list_folder,
-    move_path,
-)
-from mirage.core.dropbox.client import DropboxApiError
+from mirage.core.dropbox.api import move_path
+from mirage.core.dropbox.copy import replace_onto
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.errors.fs import enoent
-from mirage.observe.context import record, start_op
+from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 
 
@@ -34,8 +28,9 @@ async def rename(
     one: a file outright, and a directory when it is empty. So a
     conflict deletes the target and retries, except for a folder that
     still lists a child, where the original error propagates and the
-    generic mv reports GNU's "Directory not empty" (mirrors msgraph's
-    rename_replace).
+    generic mv reports "Directory not empty" (mirrors msgraph's
+    rename_replace). The source moves whole, so only a destination it
+    replaces is held to its version (``replace_onto``).
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -44,33 +39,31 @@ async def rename(
     """
     from_path = dropbox_path_of(accessor, src)
     to_path = dropbox_path_of(accessor, dst)
+    tm = accessor.token_manager
     timer = start_op()
-    replaced_non_file = False
-    try:
-        moved = await move_path(accessor.token_manager, from_path, to_path)
-    except DropboxApiError as exc:
-        if exc.summary.startswith("from_lookup/not_found"):
-            raise enoent(src.virtual) from exc
-        if not exc.summary.startswith("to/conflict"):
-            raise
-        existing = await get_metadata(accessor.token_manager, to_path)
-        if existing.get(".tag") == "folder":
-            children = await list_folder(
-                accessor.token_manager, to_path, limit=1
-            )
-            if children:
-                raise
-        await delete_path(accessor.token_manager, to_path)
-        replaced_non_file = existing.get(".tag") != "file"
-        moved = await move_path(accessor.token_manager, from_path, to_path)
-    record("rename", src.virtual, "dropbox", 0, timer)
+    upto = lost_count()
+
+    moved, replaced = await replace_onto(
+        tm,
+        src,
+        dst,
+        to_path,
+        lambda: move_path(tm, from_path, to_path),
+        empty_folder=True,
+    )
+    replaced_non_file = replaced is not None and replaced.get(".tag") != "file"
     # A folder carries a subtree under both names. dst also loses one when
     # the move replaced anything there but a file (an empty folder, or an
     # entry of no known kind), whose name may still have cached children.
     # Only a file tag narrows; a reply that names no type keeps the
     # subtree.
     folder = moved.get(".tag") != "file"
+    op = "rename_prefix" if folder else "rename"
+    record(op, src.virtual, "dropbox", 0, timer)
+    record(op, dst.virtual, "dropbox", 0, timer)
     await invalidate_after_move(src, folder)
     await invalidate_ancestors(src)
     await invalidate_after_move(dst, folder or replaced_non_file)
     await invalidate_ancestors(dst)
+    lift_lost(src, upto, subtree=folder)
+    lift_lost(dst, upto, subtree=folder)

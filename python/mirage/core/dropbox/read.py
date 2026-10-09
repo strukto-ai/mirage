@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator, Mapping
 from functools import partial
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.cache.context import publish_read, writes_conditioned
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.warm import entry_or_warm
 from mirage.core.dropbox.client import (
@@ -111,14 +112,12 @@ async def read(
         if index is NULL_INDEX and exc.status == 409:
             raise enoent(path.virtual) from exc
         raise
+    token = result_token(result)
     record(
-        "read",
-        path.virtual,
-        "dropbox",
-        len(data),
-        timer,
-        fingerprint=result_token(result),
+        "read", path.virtual, "dropbox", len(data), timer, fingerprint=token
     )
+    if window is None and writes_conditioned():
+        publish_read(path.virtual, data, token)
     return data
 
 

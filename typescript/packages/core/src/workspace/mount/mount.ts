@@ -760,8 +760,9 @@ export class MountEntry {
    * The VFS's streamed read of a scope keyed below the mount, framed for later
    * pulls. The backend runs on each pull, after this frame is gone, so every
    * pull gets what a call gets around it: the caller's context (session,
-   * recorder, cache scope), the mount's recording context, its revision pins,
-   * and the read's timeout, which bounds each pull rather than the whole
+   * recorder, cache scope), the mount's recording context, its write context
+   * (a read hands its token on only where a write will send it), its revision
+   * pins, and the read's timeout, which bounds each pull rather than the whole
    * stream. The mount is held until the stream ends or is closed. Mirrors
    * Python's `read_stream`.
    */
@@ -775,6 +776,7 @@ export class MountEntry {
       ...captureRecordingContext(),
       captureCacheContext(),
       captureCommandScope(),
+      (fn) => runWithWriteContext(this.prefix, this.writeContext(), async () => await fn()),
       (fn) => runWithRevisions(revisions, async () => await fn()),
     ])
     const stream = withMountContext(

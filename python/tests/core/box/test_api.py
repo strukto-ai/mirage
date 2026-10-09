@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.cache.context import push_write_context
+from mirage.cache.types import WriteCondition
 from mirage.core.box.api import (
     SEARCH_FIELDS,
     absent_on_404,
@@ -24,12 +28,26 @@ from mirage.core.box.api import (
     events_since,
     list_folder_items,
     realtime_server,
+    refused,
     search_content,
     upload_file_version,
     upload_new_file,
 )
 from mirage.core.box.client import BoxApiError, BoxTokenManager
+from mirage.errors.types import StaleWriteError
+from mirage.types import PathSpec
 from mirage.vfs.box.config import BoxConfig
+from tests.fixtures.write_context import KeptVersions
+
+_LOST = json.loads(
+    (
+        Path(__file__).parents[4]
+        / "integ"
+        / "fixtures"
+        / "write"
+        / "drive_lost_codes.json"
+    ).read_text()
+)
 
 
 @pytest.fixture
@@ -309,3 +327,30 @@ async def test_uploads_follow_an_endpoint_override():
         "http://127.0.0.1:5096/2.0/files/content",
         "http://127.0.0.1:5096/2.0/files/7/content",
     ]
+
+
+async def _refuse(
+    exc: BoxApiError, sent: str | None
+) -> tuple[KeptVersions, StaleWriteError | None]:
+    store = KeptVersions("box")
+    prev = push_write_context(store.context())
+    try:
+        path = PathSpec(virtual="/box/f", directory="/box/", vfs_path="/f")
+        got = await refused(path, exc, WriteCondition("s1"), sent)
+    finally:
+        push_write_context(prev)
+    return store, got
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sent", ["e1", None], ids=["sent", "plain"])
+@pytest.mark.parametrize(
+    "case", _LOST["box"], ids=[c["name"] for c in _LOST["box"]]
+)
+async def test_refused_reads_box_answers_like_the_shared_table(case, sent):
+    store, got = await _refuse(BoxApiError("x", case["status"]), sent)
+    outcome = {"lost": ["s1"], "gone": []}.get(case["outcome"])
+    if sent is None or outcome is None:
+        assert got is None and store.kept == []
+    else:
+        assert isinstance(got, StaleWriteError) and store.kept == outcome

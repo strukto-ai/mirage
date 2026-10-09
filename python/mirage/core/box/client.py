@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from functools import partial
 from typing import Any
@@ -32,6 +33,8 @@ from mirage.utils.ranges import ByteWindow
 from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.secrets import reveal_secret
 
+logger = logging.getLogger(__name__)
+
 
 def token_url_of(config: BoxConfig) -> str:
     if config.endpoint:
@@ -50,16 +53,42 @@ def upload_base_of(config: BoxConfig) -> str:
 
 
 class BoxApiError(RuntimeError):
-    def __init__(self, message: str, status: int) -> None:
+    def __init__(
+        self, message: str, status: int, conflict: str | None = None
+    ) -> None:
         self.status = status
+        self.conflict = conflict
         super().__init__(message)
+
+
+def conflict_of(text: str) -> str | None:
+    """The type of the item a 409 names in ``context_info.conflicts``.
+
+    Args:
+        text (str): the error body.
+    """
+    if not text.lstrip().startswith("{"):
+        return None
+    try:
+        body = json.loads(text)
+    except (ValueError, RecursionError) as exc:
+        logger.debug("Box error body is not JSON: %s", exc)
+        return None
+    info = body.get("context_info") if isinstance(body, dict) else None
+    conflicts = info.get("conflicts") if isinstance(info, dict) else None
+    if isinstance(conflicts, list):
+        conflicts = conflicts[0] if conflicts else None
+    kind = conflicts.get("type") if isinstance(conflicts, dict) else None
+    return kind if isinstance(kind, str) else None
 
 
 def _error_of(
     resp: aiohttp.ClientResponse, text: str, *, label: str, url: str
 ) -> Exception:
     return BoxApiError(
-        f"Box {label} {url} -> {resp.status} {text}", resp.status
+        f"Box {label} {url} -> {resp.status} {text}",
+        resp.status,
+        conflict_of(text),
     )
 
 
@@ -332,12 +361,13 @@ async def box_delete(
     tm: BoxTokenManager,
     url: str,
     params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> None:
     await api_request(
         "DELETE",
         url,
         error_of=partial(_error_of, label="DELETE", url=url),
-        headers=await box_auth_headers(tm),
+        headers={**await box_auth_headers(tm), **(headers or {})},
         params=_str_params(params),
         read="none",
         session=tm.pool,
@@ -350,6 +380,7 @@ async def box_upload_multipart(
     attributes: dict[str, Any],
     filename: str,
     data: bytes,
+    headers: dict[str, str] | None = None,
 ) -> JsonValue:
     form = aiohttp.FormData()
     form.add_field("attributes", json.dumps(attributes))
@@ -363,7 +394,7 @@ async def box_upload_multipart(
         "POST",
         url,
         error_of=partial(_error_of, label="upload", url=url),
-        headers=await box_auth_headers(tm),
+        headers={**await box_auth_headers(tm), **(headers or {})},
         data=form,
         session=tm.pool,
     )

@@ -1357,10 +1357,10 @@ class MountEntry:
 
         The backend runs on each pull, after this frame is gone, so every
         pull gets what ``call`` sets up around one call: the caller's
-        context (session, recorder), the mount's recording context, its
-        revision pins, the host-I/O bypass, and the read's timeout, which
-        bounds each pull rather than the whole stream. The mount is held
-        until the stream ends or is closed.
+        context (session, recorder), the mount's recording and write
+        contexts, its revision pins, the host-I/O bypass, and the read's
+        timeout, which bounds each pull rather than the whole stream. The
+        mount is held until the stream ends or is closed.
 
         Args:
             path (str): virtual path.
@@ -1386,7 +1386,12 @@ class MountEntry:
             self.revisions or None,
             with_mount_context(stream, self.mount_id),
         )
+        prev_write = push_write_context(self.write_context())
+        try:
+            pulls = ContextScope()
+        finally:
+            push_write_context(prev_write)
         return cast(
             AsyncIterator[bytes],
-            self.activity.hold(ContextScope().stream(with_host_io(stream))),
+            self.activity.hold(pulls.stream(with_host_io(stream))),
         )

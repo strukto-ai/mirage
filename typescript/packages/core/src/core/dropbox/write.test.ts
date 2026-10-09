@@ -124,6 +124,7 @@ describe('dropbox write', () => {
       STUB_TM,
       '/Team/data/note.txt',
       new Uint8Array([104]),
+      null,
     )
   })
 })
@@ -162,7 +163,7 @@ describe('dropbox unlink', () => {
   it('deletes a file', async () => {
     vi.mocked(api.getMetadata).mockResolvedValue(fileEntry('/a.txt'))
     await unlink(makeAccessor(), spec('/a.txt'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/a.txt')
+    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/a.txt', null)
   })
 
   it('refuses a folder with EISDIR', async () => {
@@ -214,7 +215,7 @@ describe('dropbox rename', () => {
       .mockResolvedValueOnce({})
     vi.mocked(api.getMetadata).mockResolvedValue(fileEntry('/b.txt'))
     await rename(makeAccessor(), spec('/a.txt'), spec('/b.txt'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/b.txt')
+    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/b.txt', null)
     expect(api.movePath).toHaveBeenCalledTimes(2)
   })
 
@@ -225,7 +226,7 @@ describe('dropbox rename', () => {
     vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/dst'))
     vi.mocked(api.listFolder).mockResolvedValue([])
     await rename(makeAccessor(), spec('/src'), spec('/dst'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/dst')
+    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/dst', null)
     expect(api.movePath).toHaveBeenCalledTimes(2)
   })
 

@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType, PathSpec } from '../types.ts'
+import { FileStat, FileType, type PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
+import { childSpec } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 
 export type Allowed = (virtual: string) => boolean
@@ -83,17 +84,6 @@ export function visibleBelow(base: string, names: Iterable<string>, allowed: All
     if (allowed(`${root}/${entryName(name)}`)) return true
   }
   return false
-}
-
-/** The child PathSpec one cascade step descends to. */
-export function childSpec(spec: PathSpec, name: string): PathSpec {
-  const base = rstripSlash(spec.virtual)
-  const key = rstripSlash(spec.vfsPath)
-  return new PathSpec({
-    virtual: `${base}/${name}`,
-    directory: spec.virtual,
-    vfsPath: key === '' ? name : `${key}/${name}`,
-  })
 }
 
 /**

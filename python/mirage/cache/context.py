@@ -20,6 +20,7 @@ from typing import Literal, Protocol, TypeVar
 
 from mirage.cache.types import (
     KnownVersions,
+    LiveVersion,
     OwnRead,
     WriteCondition,
     WriteContext,
@@ -433,6 +434,47 @@ def _require(context: WriteContext, path: PathSpec, kind: WriteKind) -> None:
         raise enotsup(context.vfs, f"conditional {kind}", path)
 
 
+async def native_condition(
+    path: PathSpec,
+    cond: WriteCondition | None,
+    live: LiveVersion | None,
+    kind: WriteKind,
+) -> str | None:
+    """The native token a write sends in place of the held content token.
+
+    None when the write goes plain; the backend refuses whatever lands
+    between the lookup and the write.
+
+    Args:
+        path (PathSpec): the path written.
+        cond (WriteCondition | None): the condition the write carries.
+        live (LiveVersion | None): the file's current tokens, None when
+            the backend has no file there.
+        kind (WriteKind): the op the token conditions, for the refusal.
+
+    Raises:
+        StaleWriteError: the file changed or went since it was read.
+        OperationNotSupportedError: the backend gave no token to send.
+    """
+    held = cond.if_match if cond is not None else None
+    if not held:
+        return None
+    if live is None:
+        raise await stale(path, gone=True)
+    if live.content != held:
+        raise await stale(path, version=held)
+    if not live.native:
+        context = _write.get()
+        assert context is not None
+        raise enotsup(context.vfs, f"conditional {kind}", path)
+    return live.native
+
+
+def writes_conditioned() -> bool:
+    """Whether the mount running this op is a ``write: conditional`` one."""
+    return _write.get() is not None
+
+
 def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
     """Whether a ``kind`` on ``path`` goes out conditioned.
 
@@ -473,6 +515,25 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
             await context.keep(path, keep)
 
 
+async def evict_keeping_version(path: PathSpec) -> None:
+    """Evict ``path``'s cached bytes and listing, keeping the version held.
+
+    For a request that raised and may have landed: the next write stays
+    conditioned on what the agent read.
+
+    Args:
+        path (PathSpec): the path the request may have changed.
+    """
+    context = _write.get()
+    if context is None:
+        await invalidate_after_write(path)
+        return
+    version = await context.read_version(path)
+    await context.drop(path)
+    if version:
+        await context.keep(path, version)
+
+
 async def stale(
     path: PathSpec,
     landed: bool = False,
@@ -500,6 +561,34 @@ async def stale(
         keep = version or await context.read_version(path)
     await drop_cached(path, keep)
     return stale_write(path, landed=landed)
+
+
+async def keep_refused(
+    lost: list[tuple[PathSpec, str | None]],
+) -> StaleWriteError | None:
+    """Keep the version of every file a walk left behind; refuse the first.
+
+    Args:
+        lost (list[tuple[PathSpec, str | None]]): each file left behind,
+            with the version it lost on.
+
+    Returns:
+        StaleWriteError | None: the refusal naming the first, or None.
+    """
+    refusals = [await stale(spec, version=version) for spec, version in lost]
+    return refusals[0] if refusals else None
+
+
+async def held_versions(paths: list[PathSpec]) -> list[str | None]:
+    """The version the mount holds for each path, in one store round trip.
+
+    Args:
+        paths (list[PathSpec]): the paths, in order.
+    """
+    context = _write.get()
+    if context is None or not paths:
+        return [None] * len(paths)
+    return await context.read_versions(paths)
 
 
 def known_versions(root: PathSpec, key_prefix: str) -> KnownVersions:

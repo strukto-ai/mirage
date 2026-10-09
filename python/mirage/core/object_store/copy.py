@@ -78,9 +78,7 @@ def make_copy(
                 return
             # The destination, not the source: a copy replaces dst's
             # bytes and leaves src untouched, so only dst's token stops
-            # describing its object. (dropbox records a copy against src;
-            # that is inert there only because dropbox emits no read
-            # record at all, so no dropbox path is ever pinned.)
+            # describing its object.
             record("copy", dst_spec.virtual, driver.vfs, 0, timer)
             # The eviction rides with the record, as in unlink.
             await invalidate_after_write(dst_spec)

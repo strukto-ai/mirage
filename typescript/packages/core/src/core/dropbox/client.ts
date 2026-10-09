@@ -23,12 +23,13 @@ import { type ApiResponse, apiRequest, loweredHeaders } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
+import type { JsonValue } from '../../types.ts'
 
 // The Dropbox-API-Arg header carries JSON, and a header is a ByteString:
 // a path with a character past U+00FF makes fetch refuse the request.
 // Dropbox reads JSON escapes there, so every non-ASCII character goes as
 // \uXXXX, which is what python's json.dumps sends by default.
-function headerJson(arg: Record<string, string | boolean>): string {
+function headerJson(arg: Record<string, JsonValue>): string {
   return JSON.stringify(arg).replace(
     /[\u007f-\uffff]/g,
     (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`,
@@ -147,7 +148,9 @@ export async function dropboxRpc(
 }
 
 /**
- * Upload one file, overwriting, and return the reply as decoded.
+ * Upload one file, overwriting, and return the reply as decoded. Given a
+ * `rev`, the upload goes in `update` mode: Dropbox stores it only while the
+ * file is still that revision, and answers a 409 `path/conflict` otherwise.
  *
  * The reply is the stored FileMetadata; it is not checked here, since the
  * upload has landed once the call returns and the writer's `uploadToken`
@@ -157,8 +160,13 @@ export async function dropboxUpload(
   tm: DropboxTokenManager,
   path: string,
   data: Uint8Array,
+  rev: string | null = null,
 ): Promise<unknown> {
   const headers = await dropboxAuthHeaders(tm)
+  const arg: Record<string, JsonValue> =
+    rev === null
+      ? { path, mode: 'overwrite', mute: true }
+      : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
   const resp = (await apiRequest('POST', `${tm.contentBase}/files/upload`, {
     errorOf: (r, text) =>
       new DropboxApiError(
@@ -168,7 +176,7 @@ export async function dropboxUpload(
       ),
     headers: {
       ...headers,
-      'Dropbox-API-Arg': headerJson({ path, mode: 'overwrite', mute: true }),
+      'Dropbox-API-Arg': headerJson(arg),
       'Content-Type': 'application/octet-stream',
     },
     body: data as unknown as BodyInit,

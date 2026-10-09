@@ -19,7 +19,6 @@ import pytest
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.remnants import (
     VisibleRemnant,
-    child_spec,
     entry_name,
     remove_remnants,
     visible_below,
@@ -149,12 +148,3 @@ def test_entry_name_takes_the_last_component():
     assert entry_name("sub/") == "sub"
     assert entry_name("/a/b/c") == "c"
     assert entry_name("plain") == "plain"
-
-
-def test_child_spec_appends_to_the_vfs_key():
-    parent = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
-    child = child_spec(parent, "x")
-    assert child.virtual == "/m/d/x"
-    assert child.vfs_path == "d/x"
-    root = PathSpec(virtual="/m", directory="/", vfs_path="")
-    assert child_spec(root, "x").vfs_path == "x"

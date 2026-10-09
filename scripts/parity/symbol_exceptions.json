@@ -1,5 +1,5 @@
 {
- "baseline": 3960,
+ "baseline": 3959,
  "modules": {
   "workspace/executor/redirect": {
    "typescript_only": {
@@ -450,7 +450,8 @@
     "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "agree": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
-    "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree."
+    "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
+    "ownersOf": "TypeScript's fallback async-context storage can hold live frames of several overlapping lines at once, so a path is answered by the frames of the longest prefix covering it; Python's ContextVar is always task-isolated, so its one frame is the owner."
    }
   },
   "observe/context": {
