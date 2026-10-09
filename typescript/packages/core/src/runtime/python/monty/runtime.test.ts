@@ -95,7 +95,7 @@ function makeBridge(
       mutations.push(`rename ${path} ${dst ?? ''}`)
       return Promise.resolve(undefined)
     }
-    // The door builds each row from a name plus one stat, so the double
+    // The file adapter builds each row from a name plus one stat, so the double
     // answers both.
     if (op === 'stat') {
       if (dirs.has(path))
@@ -321,7 +321,7 @@ describe('MontyRuntime', () => {
   }, 30_000)
 
   it('a rename leaving the mount view raises EXDEV without dispatching', async () => {
-    // The door refuses a pair on different mounts before dispatching,
+    // The file adapter refuses a pair on different mounts before dispatching,
     // and a destination outside the view is the same boundary.
     const { dispatch, mutations } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch, () => ['/s3/'])

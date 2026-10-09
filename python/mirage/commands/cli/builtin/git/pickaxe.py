@@ -22,6 +22,7 @@ from dulwich.objects import Blob, Commit, ObjectID
 
 from mirage.commands.cli.builtin.git.patch import byte_lines
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
+from mirage.shell.bytes import decode_text
 
 EMPTY_TREE = None
 
@@ -92,7 +93,7 @@ def _occurrences(
     data = _blob(store, sha)
     if not isinstance(needle, re.Pattern):
         return (data.lower() if ignore_case else data).count(needle)
-    return contains(data.decode("utf-8", "replace"), needle)
+    return contains(decode_text(data), needle)
 
 
 def _changes(
@@ -117,7 +118,10 @@ def _changes(
 
 
 def greps(
-    store: BaseObjectStore, commit: Commit, pattern: re.Pattern[str]
+    store: BaseObjectStore,
+    commit: Commit,
+    pattern: re.Pattern[str],
+    force_text: bool = False,
 ) -> bool:
     """Whether a commit's diff adds or removes a line the pattern matches,
     git's ``-G``; a binary side is skipped, as git does without ``--text``.
@@ -126,10 +130,13 @@ def greps(
         store (BaseObjectStore): object database holding the trees.
         commit (Commit): the commit to test.
         pattern (re.Pattern[str]): the compiled ``-G`` expression.
+        force_text (bool): include binary changed lines under ``--text``.
     """
     for old_sha, new_sha in _changes(store, commit):
         old, new = _blob(store, old_sha), _blob(store, new_sha)
-        if b"\0" in old[:BINARY_SNIFF] or b"\0" in new[:BINARY_SNIFF]:
+        if not force_text and (
+            b"\0" in old[:BINARY_SNIFF] or b"\0" in new[:BINARY_SNIFF]
+        ):
             continue
         before, after = byte_lines(old), byte_lines(new)
         matcher = SequenceMatcher(a=before, b=after, autojunk=False)
@@ -137,7 +144,7 @@ def greps(
             if tag == "equal":
                 continue
             for line in (*before[i1:i2], *after[j1:j2]):
-                text = line.decode("utf-8", "replace").removesuffix("\n")
+                text = decode_text(line).removesuffix("\n")
                 if pattern.search(text):
                     return True
     return False

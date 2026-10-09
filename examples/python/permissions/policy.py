@@ -25,8 +25,8 @@ from mirage import (
 from mirage.runtime.types import ScriptSource
 from mirage.vfs.ram import RAMVFS
 
-# A release workspace under two policies, one through each door code
-# has, and the point of the example is what each door is for:
+# A release workspace under two policies, one through each entry point code
+# has, and the point of the example is what each entry point is for:
 #
 #   a coded Policy     a class passed as ``policies=[...]``. It runs in
 #                      this process, needs no engine, may define any of
@@ -99,13 +99,13 @@ LINES = [
     (
         "reviewer",
         "echo x > /scratch/cold/f",
-        "and refuses a write at the op door",
+        "and refuses a write at the dispatcher",
     ),
     ("reviewer", "rm /scratch/cold/k", "whichever command asked for it"),
     (
         "reviewer",
         "export AWS_SECRET=x",
-        "the coded policy, at the session door",
+        "the coded policy, at the session view",
     ),
     (
         "reviewer",
@@ -167,8 +167,8 @@ async def main() -> None:
             print(f"{'':9} {'':30} {note}")
 
         # A dry run names who would speak, through the session's own
-        # doors: a line, as the tree of its commands, and one VFS call of
-        # a door that sees no command (a file tool, FUSE).
+        # entry points: a line, as the tree of its commands, and one VFS call
+        # of an entry point that sees no command (a file tool, FUSE).
         explain = (await ws.session("reviewer")).explain
         shell_res = await explain.shell("cat /repo/flagged.txt")
         for cmd in shell_res.node.children:

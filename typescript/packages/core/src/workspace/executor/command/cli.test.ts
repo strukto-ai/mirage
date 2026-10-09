@@ -401,7 +401,7 @@ describe('handleCli script arm', () => {
   })
 
   it('declared options still pass verbatim', async () => {
-    // The spec is a typed front door: a declared option validates,
+    // The spec is a typed entry point: a declared option validates,
     // then the program still receives the raw tokens, the contract a
     // native binary could also honor.
     const py = new FakePyRuntime()
@@ -513,7 +513,7 @@ describe('handleCli script arm', () => {
   })
 
   it('--help renders when the spec declares a grammar', async () => {
-    // Declaring options opts back into the front door, where the
+    // Declaring options opts back into the entry point, where the
     // rendered page is truthful and the program never runs.
     const py = new FakePyRuntime()
     const install = scriptInstall({

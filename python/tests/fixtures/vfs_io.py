@@ -73,8 +73,8 @@ def call_over(cls: type[BaseVFS], name: str) -> Callable[..., Awaitable[Any]]:
     return call
 
 
-# Every op name the door dispatches to a mount.
-DOOR_OPS = (
+# Every op name the dispatcher sends to a mount.
+DISPATCH_OPS = (
     "read",
     "readdir",
     "stat",
@@ -93,13 +93,13 @@ DOOR_OPS = (
 
 
 def served(vfs: BaseVFS) -> set[str]:
-    """The op names the door serves on a mount of ``vfs``.
+    """The op names the dispatcher serves on a mount of ``vfs``.
 
     Args:
         vfs (BaseVFS): the VFS under test.
     """
     mount = MountEntry("/", vfs)
-    return {op for op in DOOR_OPS if mount.answers(op)}
+    return {op for op in DISPATCH_OPS if mount.answers(op)}
 
 
 def override(vfs: BaseVFS, name: str, fn: Callable[..., Any]) -> BaseVFS:

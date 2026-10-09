@@ -182,7 +182,7 @@ describe('hf read', () => {
   })
 
   it('answers a zero-length window empty but still checks the file', async () => {
-    // The table's range door reaches here with no factory short-circuit, and a
+    // The table's range read reaches here with no factory short-circuit, and a
     // zero-length Range header is not one the client can build; the read still
     // has to say whether the file is there, as opendal's open did.
     const { accessor, hub } = await mounted({ 'a.txt': 'abc' })

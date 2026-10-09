@@ -86,7 +86,7 @@ export interface CpFlags {
 /**
  * Namespace symlink facts and dispatcher primitives for cp and mv.
  * Links live above every backend, so no copy strategy lists one and a tree
- * copy has to recreate each by name. `relay` and `relayStat` are the door's
+ * copy has to recreate each by name. `relay` and `relayStat` are the dispatcher's
  * own transfer primitives, which copy what a followed link leads to on
  * whatever mount it lives. Mirrors Python's TransferLinks.
  */
@@ -266,7 +266,7 @@ export function parseFlags(fl: FlagView): CpFlags {
   })
 }
 
-// What stands at a path, asked through the door; null where nothing does,
+// What stands at a path, asked through the dispatcher; null where nothing does,
 // which is where a new link goes. Mirrors Python's _entry_at.
 async function entryAt(dispatch: DispatchFn, spec: PathSpec): Promise<FileStat | null> {
   try {
@@ -1085,7 +1085,7 @@ export async function cpGeneric(
   // null where none stands (the router has followed the operand by the time
   // cp runs); undefined outside a workspace. Mirrors Python's link_at.
   linkAt?: (path: PathSpec) => FileStat | null,
-  // The namespace's links and the door that makes them, so a link is copied
+  // The namespace's links and the dispatcher that makes them, so a link is copied
   // as a link where the policy says to; undefined outside a workspace, where
   // no link can stand.
   copies?: TransferLinks,

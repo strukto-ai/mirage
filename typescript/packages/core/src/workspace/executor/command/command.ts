@@ -304,7 +304,7 @@ export async function handleCommand(
     )
   }
 
-  // Every op the command issues from here carries its gate to the door.
+  // Every op the command issues from here carries its gate to the dispatcher.
   dispatch = withDispatchRuleGuard(dispatch)
 
   if (cmdName in CWD_DEFAULT_RAW) {

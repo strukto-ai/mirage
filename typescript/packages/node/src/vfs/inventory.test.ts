@@ -27,11 +27,11 @@ import { PostgresVFS } from './postgres/postgres.ts'
 import { SlackVFS } from './slack/slack.ts'
 import { SSHVFS } from './ssh/ssh.ts'
 
-// Every backend's op surface as the door sees it, pinned when the op tables
+// Every backend's op surface as the dispatcher sees it, pinned when the op tables
 // became VFS methods. A diff here is a lost or gained op unless the change is
 // deliberate. A class is probed with the base facts, so a renderer an
 // instance declares is not counted here.
-const DOOR_OPS = [
+const DISPATCH_OPS = [
   'read',
   'readdir',
   'stat',
@@ -51,7 +51,7 @@ const DOOR_OPS = [
 function served(cls: { prototype: BaseVFS }): string[] {
   const probe = Object.assign(Object.create(cls.prototype) as BaseVFS, new BaseVFS())
   const mount = new MountEntry({ prefix: '/', vfs: probe })
-  return DOOR_OPS.filter((op) => mount.answers(op)).sort()
+  return DISPATCH_OPS.filter((op) => mount.answers(op)).sort()
 }
 
 const SERVED: [string, { prototype: BaseVFS }, string[]][] = [
@@ -127,7 +127,7 @@ const SERVED: [string, { prototype: BaseVFS }, string[]][] = [
   ],
 ]
 
-describe('the door serves each backend its functions', () => {
+describe('the dispatcher serves each backend its functions', () => {
   it.each(SERVED)('%s', (_name, cls, expected) => {
     expect(served(cls)).toEqual([...expected].sort())
   })

@@ -18,7 +18,7 @@ import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIDoors, CLIInvocation } from '../../types.ts'
+import type { CLIView, CLIInvocation } from '../../types.ts'
 import {
   branchUpstream,
   headCommit,
@@ -596,7 +596,7 @@ async function namesPath(
  * git 2.50.1.
  *
  * @param repo the opened repository
- * @param doors the invocation's doors
+ * @param view the invocation's view
  * @param fl the line's flags
  * @param treeish the tree-ish named ahead of the paths, null for the index
  * @param paths the pathspecs as typed
@@ -604,7 +604,7 @@ async function namesPath(
  */
 async function checkoutPaths(
   repo: Repo,
-  doors: CLIDoors,
+  view: CLIView,
   fl: FlagView,
   treeish: string | null,
   paths: readonly string[],
@@ -622,7 +622,7 @@ async function checkoutPaths(
   }
   const [notes, updated] = await restorePaths(
     repo,
-    doors,
+    view,
     paths,
     lineStart(fl).virtual,
     source,
@@ -648,15 +648,15 @@ async function checkoutPaths(
  * `checkoutPaths`.
  */
 export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let carried: string
   let note: string
   let warnings = ''
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
@@ -667,7 +667,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (target === undefined) throw new UnknownPathspecError('')
     const extra = texts[1]
     if (detach && extra !== undefined) throw new DetachPathError(extra)
-    const repo = await opened(fl, doors, true)
+    const repo = await opened(fl, view, true)
     const mode = await trackMode(repo)
     const head = await readHead(dispatch, repo.location.gitdir)
     let creating = fl.asBool('b')
@@ -678,12 +678,12 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       const [leading, marked] = splitMarked(texts, inv.argv)
       if (marked.length > 0) {
         const paths = [...leading.slice(1), ...marked]
-        return await checkoutPaths(repo, doors, fl, leading[0] ?? null, paths, false)
+        return await checkoutPaths(repo, view, fl, leading[0] ?? null, paths, false)
       }
       if (texts.length > 1) {
         const treeish = (await readsAsCommit(repo, known, target)) ? target : null
         const paths = treeish === null ? texts : texts.slice(1)
-        return await checkoutPaths(repo, doors, fl, treeish, paths, true)
+        return await checkoutPaths(repo, view, fl, treeish, paths, true)
       }
     }
     if (creating && known.has(ref)) throw new BranchExistsError(target)
@@ -697,7 +697,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       } catch {
         if (detach) throw new DetachPathError(target)
         if (await namesPath(repo, dispatch, lineStart(fl).virtual, target)) {
-          return await checkoutPaths(repo, doors, fl, null, texts, true)
+          return await checkoutPaths(repo, view, fl, null, texts, true)
         }
         guessed = await remoteBranch(repo, target)
         if (guessed === null) throw new UnknownPathspecError(target)
@@ -748,8 +748,8 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     const moved = await moveHead(
       dispatch,
       statPath,
-      doors.ns?.links ?? null,
-      doors.ns?.mounts ?? null,
+      view.ns?.links ?? null,
+      view.ns?.mounts ?? null,
       repo,
       known,
       head,

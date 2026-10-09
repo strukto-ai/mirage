@@ -210,13 +210,13 @@ async function startingPoints(
 
 /** Show commit logs. */
 export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
     checkOperands(inv, texts)
     const flags = parseFlags(fl, inv.env)
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const parsed = {
       ...flags,
       mailmap: await loadMailmap(repo.dispatch, repo.location),

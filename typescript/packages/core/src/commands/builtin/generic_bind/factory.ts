@@ -117,7 +117,7 @@ export function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO
  * service's search the answer, since the service sees every entry, and
  * its scan reads the operands through the guards the generic builders
  * bind; an unjudged one scans the mount's own table. Either reads its
- * content at the door, which admits the path before a warm serve.
+ * content at the dispatcher, which admits the path before a warm serve.
  * Mirrors Python's scan_io.
  */
 export function scanIo<A extends Accessor>(
@@ -202,7 +202,7 @@ export function genericCommands(vfs: string, options: GenericCommandsOptions = {
     const change = changes[b.name]
     // Path guards are applied per invocation, over the stamped adapter,
     // inside the command closure below. The mount's table stays untouched
-    // for the op door, which does its own enforcement.
+    // for the dispatcher, which does its own enforcement.
     const finish = b.write === true && b.read !== true ? writeWraps : statWraps
     // A nested mount's keys live in another VFS and no VFS
     // stores a symlink, so a glob resolved by one backend's readdir
@@ -223,7 +223,7 @@ export function genericCommands(vfs: string, options: GenericCommandsOptions = {
     // Python's `glob_children` is `| None` and takes the uniform path.
     // Command path restrictions speak first, then the coded preVfs
     // hooks, both outside the stat and slash wraps (`finish`). Content
-    // reads are the door's (withDoorReads on the mount's table), which
+    // reads are the dispatcher's (dispatchedIo on the mount's table), which
     // judges them itself before a warm serve. A probe answer is served
     // below the guards (withProbeAnswers on the raw adapter), so they
     // still judge every path before it. The

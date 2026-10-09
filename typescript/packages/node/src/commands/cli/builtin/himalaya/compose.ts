@@ -19,5 +19,5 @@ import type { EmailConfig } from '../../../../core/email/config.ts'
 import { route } from './util.ts'
 
 export async function compose(inv: CLIInvocation): Promise<CommandFnResult> {
-  return route(inv.config as EmailConfig, new FlagView(inv.flags), inv.stdin, null, inv.doors)
+  return route(inv.config as EmailConfig, new FlagView(inv.flags), inv.stdin, null, inv.view)
 }

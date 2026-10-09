@@ -19,7 +19,7 @@ import { envGet } from './state.ts'
 
 // Returns $HOME from the session env, or null when unset/empty, matching
 // GNU bash (no implicit home; `cd` errors, `~` and $HOME do not expand).
-// Read through the session door, not the raw env: this is HOME's own
+// Read through the session view, not the raw env: this is HOME's own
 // resolution channel ($HOME, tilde expansion, bare `cd`), so a hidden
 // HOME must read as unset here too.
 export function homeDir(session: SessionState): string | null {

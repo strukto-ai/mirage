@@ -103,7 +103,7 @@ In YAML, an `index:` block's values are checked when the file is loaded, at the 
 
 How long a cached listing lives comes from the first of these that applies:
 
-1. **A per-mount index**: the mount block's `index:` in YAML ([a mount's own index](/home/yaml#a-mounts-own-index)), `Mount(vfs, index=IndexConfig(ttl=60))` / `ws.add_mount(prefix, vfs, index=...)` in Python, or `new Mount(vfs, { index: { ttl: 60 } })` / `ws.addMount(prefix, vfs, mode, read, vfsRef, index)` in TypeScript. It replaces the workspace index whole, so a RAM mount index under a Redis workspace index keeps that mount's listings in RAM. A second mount of the same VFS instance shares the first mount's index, through every door, so its own `index` is not used.
+1. **A per-mount index**: the mount block's `index:` in YAML ([a mount's own index](/home/yaml#a-mounts-own-index)), `Mount(vfs, index=IndexConfig(ttl=60))` / `ws.add_mount(prefix, vfs, index=...)` in Python, or `new Mount(vfs, { index: { ttl: 60 } })` / `ws.addMount(prefix, vfs, mode, read, vfsRef, index)` in TypeScript. It replaces the workspace index whole, so a RAM mount index under a Redis workspace index keeps that mount's listings in RAM. A second mount of the same VFS instance shares the first mount's index, through every entry point, so its own `index` is not used.
 2. **The workspace index**, the `index:` block in YAML or the `index` option in code. Its `ttl` applies to every mount without its own index, and is 600 seconds when left out, including on backends whose own TTL is shorter or zero.
 3. **The backend's own `index_ttl`** (`indexTtl` in TypeScript), on a RAM index, when no index is configured at all:
 

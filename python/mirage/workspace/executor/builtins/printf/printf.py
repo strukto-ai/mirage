@@ -29,7 +29,7 @@ from mirage.workspace.executor.builtins.printf.format import run_printf
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, which both the usage error and the
@@ -102,7 +102,7 @@ async def _assign_printf_target(
     A delegation to the one element writer: a bare name assigns element
     0 when the name already holds an array (indexed or associative),
     nothing mutates unless the whole assignment succeeds, and the
-    landing write goes through the door as the whole variable, so a
+    landing write goes through the session view as the whole variable, so a
     ``pre_session`` rule refusing the name sees `printf -v 'AWS_KEY[0]'`
     as a write to AWS_KEY. The refusal is raised, not collapsed into a
     status, so the rule's own words reach the user as they do from
@@ -111,7 +111,7 @@ async def _assign_printf_target(
 
     Args:
         session (SessionState): shell session whose variables are written.
-        view (SessionView | None): the session plane's door, which the
+        view (SessionView | None): the session view, which the
             write clears; None outside a workspace.
         name (str): the target's base variable name.
         subscript (str | None): the ``[...]`` text, or None for a scalar.
@@ -246,7 +246,13 @@ async def handle_printf(
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="printf", exit_code=2),
         )
-    output, messages, failed, excess = run_printf(args[0], args[1:])
+    program = program_invocation(session)
+    output, messages, failed, excess = run_printf(
+        args[0],
+        args[1:],
+        program,
+        program and "POSIXLY_CORRECT" in env_snapshot(session),
+    )
     voice = "" if program_invocation(session) else "bash: "
     err_bytes = encode_text("".join(voice + message for message in messages))
     exit_code = 1 if failed else 0

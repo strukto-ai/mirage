@@ -108,7 +108,7 @@ interface Step {
   script?: string | Record<string, string>
   // A guest program per language, run as `python3 -c` or `node -e`.
   program?: Record<string, string>
-  // The host door's program, run in this process under patchNodeFs.
+  // The host entry point's program, run in this process under patchNodeFs.
   host_program?: string
   runtime?: string
   stdin?: string
@@ -222,7 +222,7 @@ class EchoBox extends Runtime implements LineExecutor {
 
 // Registered the way a host registers its own runtime, so a case names
 // it by string like a builtin, `buildRuntime` resolves it, and the
-// unknown-name refusal lists it. The registry suite pins that door.
+// unknown-name refusal lists it. The registry suite pins that entry point.
 registerRuntime('echobox', EchoBox)
 
 class ProcessBox extends Runtime implements ProcessExecutor {
@@ -867,7 +867,7 @@ async function runStep(
     return []
   }
   if (step.read_op !== undefined) {
-    // Reads through the op door (the surface FUSE and programmatic
+    // Reads through the dispatcher (the surface FUSE and programmatic
     // access share), where preVfs/postVfs policies fire.
     let errnoName = 'NONE'
     let content = ''
@@ -941,7 +941,7 @@ function capture(out: string[], err: string[]): Console {
 
 /**
  * Run one program the way `node -e` would, with node's `fs` pointed at the
- * workspace: the host door, `patchNodeFs`, for the program's run. The
+ * workspace: the host entry point, `patchNodeFs`, for the program's run. The
  * program gets `require` and a `console` of its own; a throw prints what
  * node prints for it and exits 1. Mirrors run.py `_run_host_program`.
  */
@@ -999,12 +999,12 @@ const RUNTIME_LANGUAGE: Record<string, string | null> = {
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
 // Every language a program or an `expect` may be keyed by. `node` is the
-// host door's: node's own `fs`, where `js` is QuickJS's std/os.
+// host entry point's: node's own `fs`, where `js` is QuickJS's std/os.
 const LANGUAGES = new Set(['python', 'js', 'node'])
-// The runtime that is no runtime: the SDK's in-process door (`patchNodeFs`
+// The runtime that is no runtime: the SDK's in-process entry point (`patchNodeFs`
 // here, `with ws:` on the python host), which runs a program in the
 // runner's own process with node's `fs` pointed at the workspace.
-const HOST_DOOR = 'host'
+const HOST_RUNTIME = 'host'
 // The expect keys that read the workspace's op ledger.
 const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // What a `runtimes` entry needs on this host before it can run. A runtime
@@ -1084,12 +1084,12 @@ function overlay(step: Step, keys: string[]): Step {
  * gives the whole line per language. An `expect` keyed by language, as
  * `program` is, gives each language its own answer, and must hold one for
  * the language. A parallel step keeps the branches that run there. The
- * host door runs a program in the runner itself (`host_program`), so it
+ * host entry point runs a program in the runner itself (`host_program`), so it
  * has no line for a `command` map to give. Mirrors run.py `_step_for`.
  */
-function stepFor(step: Step, language: string | null, door = false): [Step | null, boolean] {
+function stepFor(step: Step, language: string | null, onHost = false): [Step | null, boolean] {
   if (step.parallel !== undefined) {
-    if (door) throw new Error('the host door runs no parallel step')
+    if (onHost) throw new Error('the host entry point runs no parallel step')
     const mapped = step.parallel.map((branch) => stepFor(branch, language))
     const branches = mapped.flatMap(([branch]) => (branch === null ? [] : [branch]))
     if (branches.length === 0) return [null, false]
@@ -1104,8 +1104,8 @@ function stepFor(step: Step, language: string | null, door = false): [Step | nul
   delete rest.program
   delete rest.script
   let mapped: Step
-  if (door) {
-    if (key === 'command') throw new Error('the host door has no line for a command map')
+  if (onHost) {
+    if (key === 'command') throw new Error('the host entry point has no line for a command map')
     const program =
       key === 'script'
         ? readFileSync(join(SUITE_DIR, '../fixtures/runtime', source), 'utf8')
@@ -1138,13 +1138,13 @@ function stepFor(step: Step, language: string | null, door = false): [Step | nul
  */
 function forRuntime(testCase: Case, runtime: string): Case | null {
   const language = RUNTIME_LANGUAGE[runtime] ?? null
-  const door = runtime === HOST_DOOR
+  const onHost = runtime === HOST_RUNTIME
   const steps: Step[] = []
   let programs = 0
   for (const listed of testCase.steps ?? []) {
     let mapped: [Step | null, boolean]
     try {
-      mapped = stepFor(listed, language, door)
+      mapped = stepFor(listed, language, onHost)
     } catch (err) {
       throw new Error(`${testCase.id}@${runtime}: ${(err as Error).message}`, { cause: err })
     }
@@ -1155,7 +1155,7 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
   }
   if (programs === 0 && language !== null) return null
   const world = structuredClone(testCase.world ?? {})
-  if (!door) world.runtimes = [runtimeEntry(runtime, testCase.entry ?? {}), 'workspace']
+  if (!onHost) world.runtimes = [runtimeEntry(runtime, testCase.entry ?? {}), 'workspace']
   return {
     ...testCase,
     id: `${testCase.id}@${runtime}`,

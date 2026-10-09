@@ -21,7 +21,7 @@ const STDIN_FILENAME = '<stdin>'
  * The file CPython runs a program from, named the way it names it.
  *
  * A script and a program piped to stdin both come through CPython's file
- * door, which binds `__file__` to the file's name and compiles every frame
+ * entry point, which binds `__file__` to the file's name and compiles every frame
  * under it: the script operand made absolute against the working
  * directory as typed, never normalized (`./s.py` under /w is `/w/./s.py`),
  * or `<stdin>` for either stdin spelling. A payload, a module and a script
@@ -44,8 +44,8 @@ export function mainFilename(args: RunArgs): string | null {
  *
  * CPython hardcodes argv[0] to "-c" for a `-c` program, names every frame
  * "<string>" and binds no `__file__`, which is right for a payload and
- * wrong for the other doors, so the program is re-compiled under its own
- * name with what CPython's file door binds. It also binds the script-CLI
+ * wrong for the other entry points, so the program is re-compiled under its own
+ * name with what CPython's file adapter binds. It also binds the script-CLI
  * contract before compiling the unmodified program. Mirrors Python's
  * prepare_source.
  */

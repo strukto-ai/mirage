@@ -14,6 +14,7 @@
 
 import { getOpcodes, groupOpcodes } from '../../../builtin/diff_format.ts'
 import { DiffOpTag } from '../../../builtin/diff_types.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { FUNCNAME_START, GIT_SPACE } from './constants.ts'
 import { quotePath } from './render.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
@@ -25,19 +26,17 @@ const HUNK_HEADER_BYTES = 128
 const BINARY_SNIFF = 8000
 const OID_HEX = 40
 const DEV_NULL = '/dev/null'
-const ENC = new TextEncoder()
-const DEC = new TextDecoder()
 
 /** An entry's bytes: a blob's contents, a submodule's commit line, empty for a missing side. */
 export async function blobData(repo: Repo, entry: TreeEntry | null): Promise<Uint8Array> {
   if (!entry) return new Uint8Array()
-  if (entry.mode === '160000') return ENC.encode(`Subproject commit ${entry.oid}\n`)
+  if (entry.mode === '160000') return encodeText(`Subproject commit ${entry.oid}\n`)
   return readBlobBytes(repo, entry.oid)
 }
 
 /** A blob's lines, each keeping its newline, as xdiff splits them. */
 export function lines(data: Uint8Array): string[] {
-  const text = DEC.decode(data)
+  const text = decodeText(data)
   return text === '' ? [] : text.split(/(?<=\n)/)
 }
 
@@ -63,6 +62,7 @@ export async function filePatch(
   fully = true,
   count = HUNK_CONTEXT,
   functionContext = false,
+  forceText = false,
 ): Promise<string> {
   if (before && after && before.mode.slice(0, 3) !== after.mode.slice(0, 3))
     return (
@@ -77,6 +77,7 @@ export async function filePatch(
         fully,
         count,
         functionContext,
+        forceText,
       )) +
       (await filePatch(
         repo,
@@ -89,6 +90,7 @@ export async function filePatch(
         fully,
         count,
         functionContext,
+        forceText,
       ))
     )
   const source = quotePath(`a/${oldPath}`, false, fully),
@@ -113,7 +115,7 @@ export async function filePatch(
     fresh = await blobData(repo, after)
   const from = before ? source : DEV_NULL,
     to = after ? target : DEV_NULL
-  if ([old, fresh].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
+  if (!forceText && [old, fresh].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
     return text([...head, `Binary files ${from} and ${to} differ`])
   const body = hunks(lines(old), lines(fresh), count, functionContext)
   return (
@@ -155,15 +157,15 @@ function hunks(
     for (let k = start - 1; k > searched; k--) {
       const line = old[k] ?? ''
       if (FUNCNAME_START.test(line)) {
-        context = trimmed(ENC.encode(line).subarray(0, FUNCNAME_BYTES))
+        context = trimmed(encodeText(line).subarray(0, FUNCNAME_BYTES))
         break
       }
     }
     searched = start - 1
     let header = `@@ -${span(start, last[2])} +${span(first[3], last[4])} @@`
     if (context) {
-      const room = HUNK_HEADER_BYTES - ENC.encode(header).length - 2
-      header += ' ' + DEC.decode(ENC.encode(context).subarray(0, room))
+      const room = HUNK_HEADER_BYTES - encodeText(header).length - 2
+      header += ' ' + decodeText(encodeText(context).subarray(0, room))
     }
     out.push(header + '\n')
     for (const [tag, i1, i2, j1, j2] of group) {
@@ -181,7 +183,7 @@ function hunks(
 function trimmed(bytes: Uint8Array): string {
   let end = bytes.length
   while (end > 0 && GIT_SPACE.has(bytes[end - 1] ?? 0)) end--
-  return DEC.decode(bytes.subarray(0, end))
+  return decodeText(bytes.subarray(0, end))
 }
 
 function span(start: number, stop: number): string {

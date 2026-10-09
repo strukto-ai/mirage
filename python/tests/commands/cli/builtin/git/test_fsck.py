@@ -20,8 +20,20 @@ async def test_fsck_real_objects_and_missing_blob(repo_path, packed):
         pack_everything(repo_path)
     with mounted(repo_path) as ws:
         ws.register_cli("git", GIT)
-        result = await ws.shell("git -C /repo fsck --no-dangling")
-        assert result.exit_code == 0, await result.stderr_str()
+        for options in (
+            "",
+            "--no-dangling",
+            "--unreachable",
+            "--unreachable --no-dangling",
+        ):
+            expected = subprocess.check_output(
+                ["git", "-C", str(repo_path), "fsck", *options.split()]
+            )
+            result = await ws.shell("git -C /repo fsck " + options)
+            assert result.exit_code == 0, await result.stderr_str()
+            assert sorted((result.stdout or b"").splitlines()) == sorted(
+                expected.splitlines()
+            )
     if not packed:
         oid = subprocess.check_output(
             ["git", "-C", str(repo_path), "rev-parse", "HEAD:a.txt"], text=True

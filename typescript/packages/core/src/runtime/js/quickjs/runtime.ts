@@ -47,7 +47,7 @@ const EVAL_INTERRUPT_SECONDS = 10
 export class QuickJsRuntime extends JsRuntime implements Evaluator {
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` suspend
-  // into the workspace bridge: guest I/O has no door around the gate.
+  // into the workspace bridge: guest I/O has no way around the gate.
   override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   readonly [EVALUATOR] = true as const

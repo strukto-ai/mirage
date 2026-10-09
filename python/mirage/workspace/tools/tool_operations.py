@@ -49,12 +49,12 @@ DEFAULT_READ_LIMIT = 2000
 P = ParamSpec("P")
 R = TypeVar("R")
 
-# Every tool, in the order the doors list them.
+# Every tool, in the order the entry points list them.
 TOOL_NAMES = ("shell", "read", "write", "edit", "ls", "grep", "glob")
 
 
 class SessionLike(Protocol):
-    """What a tool table acts through: one session's doors
+    """What a tool table acts through: one session's entry points
     (``Session``)."""
 
     @property
@@ -264,10 +264,10 @@ class MirageToolOperations:
         )
 
     def names(self) -> tuple[str, ...]:
-        """The tools this session can use, in the order the doors list
+        """The tools this session can use, in the order the entry points list
         them.
 
-        Read off the session's profile, so no door offers a tool every
+        Read off the session's profile, so no entry point offers a tool every
         call of which would be refused: ``shell`` needs a command the
         allow list installs, ``ls`` and ``grep`` run those commands and
         need them, and ``write`` and ``edit`` need somewhere the session
@@ -299,7 +299,7 @@ class MirageToolOperations:
 
     async def offered(self) -> tuple[str, ...]:
         """The tools this session can use, its sessions loaded first, so a
-        stored session answers with its own profile: what an async door
+        stored session answers with its own profile: what an async entry point
         lists and calls by.
 
         Returns:
@@ -539,7 +539,7 @@ class MirageToolOperations:
     ) -> ToolResult:
         """Run one tool by name with its JSON input.
 
-        The one entry every door shares: MCP, the HTTP routes, the CLI
+        The one entry every entry point shares: MCP, the HTTP routes, the CLI
         and the agent adapters hand a tool's name and its input, as the
         tool's ``*_INPUT`` schema reads it, to this method, so each
         tool answers the same way through each of them.

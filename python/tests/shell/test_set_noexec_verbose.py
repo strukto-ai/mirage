@@ -108,7 +108,7 @@ NESTED_NOEXEC = [
 def test_noexec_stops_a_nested_statement_runner(shell, cmd):
     # The check lived in the program loop alone, so `set -n` worked flat
     # and silently did nothing one construct deep: every one of these
-    # printed BAD. It is stated in `execute_node` now, the one door
+    # printed BAD. It is stated in `execute_node` now, the one entry point
     # every node goes through.
     _, out, err = shell.mirage_result(cmd)
     assert out == ""

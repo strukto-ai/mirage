@@ -19,7 +19,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import type { StatFn } from './archive/walk.ts'
-import { linkDoor } from '../utils/links.ts'
+import { linkResolver } from '../utils/links.ts'
 import { decompressInputs } from './decompress.ts'
 
 interface GunzipFlags {
@@ -57,6 +57,6 @@ export async function gunzipGeneric(
     write,
     unlink,
     ...(stat !== undefined ? { stat } : {}),
-    door: linkDoor(opts),
+    resolver: linkResolver(opts),
   })
 }

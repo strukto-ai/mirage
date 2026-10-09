@@ -37,7 +37,7 @@ import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
 import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
-import type { SSHDoor } from './ssh/types.ts'
+import type { SSHEndpoint } from './ssh/types.ts'
 import websocket from '@fastify/websocket'
 
 export interface BuildAppOptions {
@@ -54,10 +54,10 @@ export interface BuildAppOptions {
   stateRoot?: string
   pidFile?: string
   /**
-   * The SSH settings: the TCP door opens when the app is ready and closes
+   * The SSH settings: the TCP endpoint opens when the app is ready and closes
    * with it, and the HTTPS route carries SSH either way. Undefined resolves
    * them from the `MIRAGE_SSH_*` env vars and the `ssh_*` config keys; the
-   * TCP door stays shut unless a port is set.
+   * TCP endpoint stays shut unless a port is set.
    */
   sshConfig?: SSHConfig
 }
@@ -119,7 +119,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })
   registerVfsRoutes(app, { registry })
-  const ssh: SSHDoor = {
+  const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
   }
@@ -130,9 +130,9 @@ export function buildApp(options: BuildAppOptions = {}) {
   })
   const sshConfig = ssh.config
   if (sshConfig.port !== null) {
-    // A configured door that cannot open (the port is taken, ssh2 is
+    // A configured entry point that cannot open (the port is taken, ssh2 is
     // missing) fails the start rather than leaving the daemon up without
-    // the door its config asked for. Loaded on demand so a daemon with no
+    // the entry point its config asked for. Loaded on demand so a daemon with no
     // SSH never loads ssh2 or the node barrel the SFTP side needs.
     app.addHook('onReady', async () => {
       const { startSSHServer } = await import('./ssh/server.ts')

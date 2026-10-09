@@ -87,7 +87,7 @@ def program_file_refusal(
 async def read_program_file(
     name: str, path: PathSpec, dispatch: DispatchFn
 ) -> bytes:
-    """One program file's bytes, read through the door.
+    """One program file's bytes, read through the dispatcher.
 
     A directory opens and fails at its read, which a keyed store's own
     read cannot tell from nothing being there, so a stat goes first; sed

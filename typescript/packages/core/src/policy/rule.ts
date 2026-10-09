@@ -46,7 +46,7 @@ export class RulePolicy implements Policy {
 
   preVfs(ctx: VfsContext): Action | null {
     // The op-layer twin: pure path protection (no command scope) also
-    // holds at the op door, so FUSE, programmatic ops, and the warm
+    // holds at the dispatcher, so FUSE, programmatic ops, and the warm
     // cache cannot bypass it. Command-scoped rules stay command-layer:
     // an op does not know which command issued it.
     if (matchOp(this.rule, this.scope, ctx)) return { kind: 'deny', reason: this.rule.reason }

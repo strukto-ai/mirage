@@ -44,7 +44,7 @@ function isAbsent(err: unknown): boolean {
 }
 
 /**
- * Whether a listing row is one the door did not classify.
+ * Whether a listing row is one the file adapter did not classify.
  *
  * Its size-0 non-directory shape is a placeholder, not an answer: a
  * guest that needs the entry's kind, size or stamp must ask the mount
@@ -59,7 +59,7 @@ export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
 /**
  * Translate one mirage stat row into the guest-facing struct.
  *
- * The projection lives at the door rather than in each surface so both
+ * The projection lives in the file adapter rather than in each surface so both
  * languages build one struct in one tier: preview1 reads the type bits
  * out of `mode` and drops the rest, monty fills a `StatResult`,
  * Emscripten fills an `FSAttr`. Mirrors python's `stat_row`.
@@ -121,7 +121,7 @@ export class RuntimeFiles {
   private readonly noAppend = new Set<string>()
 
   constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
-    // One cap on every request this door sends, held for that request
+    // One cap on every request the file adapter sends, held for that request
     // alone, so the stats of listings that run together (a preload
     // walking a tree) share it with the walk's own reads.
     const limiter = new ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
@@ -136,7 +136,7 @@ export class RuntimeFiles {
     this.resolver = resolver
   }
 
-  /** The file door every engine builds from its execution context. */
+  /** The file adapter every engine builds from its execution context. */
   static of(context: RuntimeContext): RuntimeFiles {
     return new RuntimeFiles(context.dispatch, context.resolver)
   }
@@ -262,7 +262,7 @@ export class RuntimeFiles {
    * shell, while a withheld surface's files (history, the program view)
    * stay unseen. A file's own row decides that, not its listing: the
    * history mount lists its one file as empty so a traversal never
-   * descends into it. 0 is the door's spelling of an unknown mtime.
+   * descends into it. 0 is the file adapter's spelling of an unknown mtime.
    */
   async viewStat(path: string): Promise<VFSStat | null> {
     const row = await this.statOrNull(path)
@@ -298,7 +298,7 @@ export class RuntimeFiles {
    * entry is classified by its own stat, which is RAM when the readdir
    * filled the index and a backend request when the mount keeps none.
    * At most `LISTING_ENTRY_CONCURRENCY` requests run at once across
-   * everything this door serves, so a large directory on an unindexed
+   * everything this adapter serves, so a large directory on an unindexed
    * mount does not put every entry's request on the wire together.
    *
    * An entry whose stat fails, for any reason, rides unclassified: a
@@ -442,7 +442,7 @@ export class RuntimeFiles {
    * A link is namespace state, so no backend stores one and the target
    * is kept verbatim as the guest typed it. The dispatcher answers this
    * op from the node table itself, which is why a runtime can serve
-   * `os.symlink` at all: the door a surface already holds reaches the
+   * `os.symlink` at all: the dispatcher a surface already holds reaches the
    * name plane, not just a mount.
    *
    * Args:
@@ -470,7 +470,7 @@ export class RuntimeFiles {
   /**
    * Write metadata fields, natively where the backend can hold them.
    *
-   * The door reads the whole set and stores in the namespace overlay
+   * The dispatcher reads the whole set and stores in the namespace overlay
    * whatever the backend cannot keep, so a mount with no setattr op
    * still answers: a utime on an s3 or dropbox mount lands in the name
    * plane and stat reports it back. Stored, not enforced; the mount

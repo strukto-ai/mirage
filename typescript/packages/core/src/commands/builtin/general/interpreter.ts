@@ -67,7 +67,7 @@ export async function runtimeVersion(
   }
 }
 
-// Which of an interpreter's four doors the source came through. The
+// Which of an interpreter's four entry points the source came through. The
 // mode is what decides argv[0], so the two travel together: CPython
 // spells it '-c' for a payload, the module's file for -m, the file as
 // typed for a script, '-' for the explicit stdin operand, and '' for
@@ -150,7 +150,7 @@ interface InterpreterOpts {
   env: Record<string, string>
   cwd?: PathSpec
   code: string | null
-  // argv[0], derived from which door the source came through; '' is
+  // argv[0], derived from which entry point the source came through; '' is
   // CPython's own answer for a program piped in with no operand, so a
   // runtime must not treat it as absent.
   prog?: string

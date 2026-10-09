@@ -184,11 +184,11 @@ function commandNames(vfs: BaseVFS): Set<string> {
   return new Set(commandsFor(vfs).map((rc) => rc.name))
 }
 
-const DOOR_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']
+const DISPATCH_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']
 
 function served(vfs: BaseVFS): Set<string> {
   const mount = new MountEntry({ prefix: '/', vfs })
-  return new Set(DOOR_OPS.filter((op) => mount.answers(op)))
+  return new Set(DISPATCH_OPS.filter((op) => mount.answers(op)))
 }
 
 /**
@@ -338,7 +338,7 @@ describe('a plug-in VFS', () => {
     expect(matches.map((m) => m.virtual)).toEqual(['/guides/quickstart.md'])
   })
 
-  it('serves its reads at the door', () => {
+  it('serves its reads at the dispatcher', () => {
     expect(served(makeVfs())).toEqual(new Set(['glob', 'read', 'readdir', 'stat']))
   })
 
@@ -486,15 +486,15 @@ describe('custom VFS capability fallbacks', () => {
 })
 
 async function readCli(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const dispatch = inv.doors?.dispatch
+  const dispatch = inv.view?.dispatch
   const path = inv.paths[0]
-  if (dispatch === undefined || path === undefined) throw new Error('missing CLI path door')
+  if (dispatch === undefined || path === undefined) throw new Error('missing CLI dispatch')
   const [data, result] = await dispatch('read', path)
   if (!(data instanceof Uint8Array)) throw new Error('expected file bytes')
   return [data, result]
 }
 
-it('serves a custom driver through CLI, namespace and runtime doors', async () => {
+it('serves a custom driver through CLI, namespace and runtime entry points', async () => {
   const ws = new Workspace(
     { '/wiki': makeVfs() },
     {

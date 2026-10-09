@@ -49,7 +49,7 @@ In code: `Workspace(mounts, profiles=...)` and
   workspace's default session follows the same rule, so `default` also
   governs bare `ws.shell(...)` and `ws.vfs`.
 - `ws.session("agent_a", profile="guarded")` returns one handle for both
-  doors, `handle.shell(line)` and `handle.vfs.read(path)`. It creates the
+  entry points, `handle.shell(line)` and `handle.vfs.read(path)`. It creates the
   session or adopts an existing one. `Session(ws, "agent_a")` only adopts.
 - **A line sets the session; a VFS call inherits it.**
   `ws.vfs.read(path, session_id=...)` applies only outside a running
@@ -99,7 +99,7 @@ walk (`grep -r`, `tar`, `cp -r`, `find -delete`), files a command opens
 (`awk print >`, `sed w`) and cached bytes. A `grep` or `rg` that a
 backend answers with its own search (Slack, Gmail, Postgres, GitHub, ...)
 walks instead when a hide or a rule covers anything it would search. Only
-rules with paths and no command reach the VFS-only doors (FUSE, `ws.vfs`,
+rules with paths and no command reach the VFS-only entry points (FUSE, `ws.vfs`,
 SFTP).
 
 Not covered yet: file access inside a CLI or interpreter (`git`,

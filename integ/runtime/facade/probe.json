@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "id": "probes_answer_through_the_dispatcher",
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/seed.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/nope.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "is_dir",
+            "path": "/data/sub"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/data/seed.txt"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "is_file",
+            "path": "/data/sub"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/data/seed.txt"
+          },
+          "expect": {
+            "value": "seed\n",
+            "ops_contain": [
+              "read /data/seed.txt"
+            ]
+          }
+        },
+        {
+          "facade": {
+            "method": "list_files",
+            "path": "/data"
+          },
+          "expect": {
+            "value": [
+              "seed.txt"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

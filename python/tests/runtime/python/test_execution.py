@@ -75,7 +75,7 @@ def test_a_script_sets_argv0_file_and_compiles_under_its_own_name():
 
 
 @pytest.mark.parametrize("prog", ["", "-"])
-def test_both_stdin_doors_compile_as_stdin(prog):
+def test_both_stdin_entry_points_compile_as_stdin(prog):
     out = prepare_source(_run(prog=prog))
     assert "'<stdin>', 'exec'" in out
     assert "__file__ = '<stdin>'" in out
@@ -88,7 +88,7 @@ def test_a_module_names_no_file():
     assert "__file__" not in out
 
 
-def test_the_preamble_binds_only_what_the_file_door_binds():
+def test_the_preamble_binds_only_what_the_file_adapter_binds():
     ns: dict[str, Any] = {}
     script = _script("/s.py", "/s.py")
     exec(

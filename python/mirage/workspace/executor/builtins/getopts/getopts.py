@@ -94,7 +94,7 @@ async def handle_getopts(
         call_stack (CallStack | None): function-call positional frames;
             inside a shell function getopts scans the function's own
             positional parameters, matching bash.
-        state (SessionView | None): the session plane's gated door.
+        state (SessionView | None): the gated session view.
     """
     if len(args) < 2:
         err = b"getopts: usage: getopts optstring name [arg ...]\n"

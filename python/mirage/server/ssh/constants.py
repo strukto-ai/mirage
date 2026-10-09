@@ -22,7 +22,7 @@ SSH_DIR = "ssh"
 HOST_KEY_NAME = "host_ed25519_key"
 AUTHORIZED_KEYS_NAME = "authorized_keys"
 
-# The module that serves the door. It imports asyncssh, which is the
+# The module that serves the entry point. It imports asyncssh, which is the
 # `ssh` extra, so the daemon loads it by path only once a port is set or
 # the HTTPS route carries a connection.
 SERVER_MODULE = "mirage.server.ssh.server:start_ssh_server"
@@ -31,7 +31,7 @@ TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
 # How many bytes the HTTPS route relays at a time.
 TUNNEL_CHUNK = 64 * 1024
 
-# How much of each stream's start and end the door keeps to tell whether
+# How much of each stream's start and end the entry point keeps to tell whether
 # a refusal already says why: the refused command's own diagnostic sits
 # near the start of a line refused early and near the end of one refused
 # late, so both ends hold it without the whole output.

@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.builtin.utils.links import link_door
+from mirage.commands.builtin.utils.links import link_resolver
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
@@ -46,7 +46,7 @@ async def zgrep(
         read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         stdin=opts.stdin,
         stat=partial(ops.stat, accessor),
-        door=link_door(opts),
+        resolver=link_resolver(opts),
         utf8=utf8_locale(opts.env),
     )
 

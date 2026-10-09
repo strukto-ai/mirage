@@ -248,19 +248,19 @@ def check_configs(
     """Per-VFS config field sets: what a mount can be told.
 
     Python dumps its pydantic wire names; TypeScript dumps the zod shape
-    behind each ``normalize*Config`` door plus the rename map the door
-    applies, and whether the door validates at all. A python wire name has
-    to land on a TypeScript field through the rename map or
+    behind each ``normalize*Config`` entry point plus the rename map the entry
+    point applies, and whether the entry point validates at all. A python wire
+    name has to land on a TypeScript field through the rename map or
     ``snakeToCamel`` with the same requiredness, every TypeScript field has
-    to be reachable from some python name, and every door has to parse.
+    to be reachable from some python name, and every entry point has to parse.
     Node against browser is deliberately not compared here: the browser
     S3 family authenticates with a presigned-URL provider where node holds
     credentials, so the two runtimes' configs differ by design and the
     node entry -- the one that mirrors python -- is the one compared.
 
     Exemptions are keyed by VFS then by field, spelled either way
-    (``refreshFn`` or ``refresh_fn``); ``validates`` exempts a door that
-    does not parse.
+    (``refreshFn`` or ``refresh_fn``); ``validates`` exempts an entry point
+    that does not parse.
 
     Args:
         loaded (dict[str, dict[str, Any]]): the three VFS trees.
@@ -290,7 +290,7 @@ def check_configs(
         if a is None and b is None:
             continue
         if a is None or b is None:
-            if exempt(name, "door"):
+            if exempt(name, "config"):
                 continue
             side = "python" if a is None else "typescript"
             failures.append(

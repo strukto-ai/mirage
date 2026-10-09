@@ -140,7 +140,7 @@ describe('decide', () => {
     const rules: AdmissionRules = { allow: null, ask: [source, dest], deny: [] }
     const decision = decide(ctx('cp', '/a/x', '/deep/b/y'), rules)
     // The deeper anchor is still the decision, which is what the agent is
-    // told; both are what the door has to collect.
+    // told; both are what the entry point has to collect.
     expect(decision.outcome).toBe(Outcome.ASK)
     expect(decision.rule).toBe(dest)
     expect(decision.asks).toEqual([source, dest])

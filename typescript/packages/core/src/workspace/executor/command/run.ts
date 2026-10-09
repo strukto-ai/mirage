@@ -56,7 +56,7 @@ export interface RunOnMountCtx {
 }
 
 /**
- * The door a command handler runs a nested line through (`opts.shell`):
+ * The entry point a command handler runs a nested line through (`opts.shell`):
  * the line runs in the calling command's own session, under its signal,
  * reading the input it is handed.
  */
@@ -114,7 +114,7 @@ export function admissionDenial(cmdName: string): IOResult {
  * is looked up in the decision: its binding, or the decision's
  * fallback when no entry captures it. A resolved WorkspaceRuntime means the
  * executor serves the command itself (the workspace runtime has no
- * interpreter door); null means no runtime accepted it: exit 126,
+ * interpreter entry point); null means no runtime accepted it: exit 126,
  * "no runtime accepted this line", like a shell refusing to exec.
  */
 function lineRuntimeFor(
@@ -290,7 +290,7 @@ export async function runOnMount(
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
   const statPath: StatPath = (path) => pathStat(dispatch, path, statOverlay)
-  // The same door for a listing: a walker whose output is one document
+  // The same entry point for a listing: a walker whose output is one document
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a VFS its own accessor cannot open.
   const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)

@@ -76,7 +76,7 @@ export function registerAsksRoutes(app: FastifyInstance, deps: AsksRoutesDeps): 
     async (req, reply) => {
       // The workspace's asks: pending by default, every decision under
       // all=true. The ledger already serves both views from one store,
-      // so the door only picks which query to run.
+      // so the entry point only picks which query to run.
       const { wsId } = req.params
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })

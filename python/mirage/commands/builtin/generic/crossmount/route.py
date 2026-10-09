@@ -90,7 +90,7 @@ async def handle_cross_mount(
             mount cannot condition the delete, before anything is copied.
         ns (NamespaceView | None): Name-plane facts for the RELAY
             generics that render them (ls).
-        session_view (SessionView | None): The session plane's door, for
+        session_view (SessionView | None): The session view, for
             the RELAY generic that renders the session's profile (ls).
         cwd (str): The session's working directory, which a typed
             operand resolves against (cp's link sources).

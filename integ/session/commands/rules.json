@@ -40,7 +40,7 @@
       }
     },
     {
-      "id": "cmd_bound_path_rule_at_the_op_door_speaks_eacces",
+      "id": "cmd_bound_path_rule_at_the_dispatcher_speaks_eacces",
       "seq": 923020,
       "targets": [
         "ram-commands"
@@ -145,14 +145,14 @@
       }
     },
     {
-      "id": "cmd_find_delete_is_gated_at_the_op_door",
+      "id": "cmd_find_delete_is_gated_at_the_dispatcher",
       "seq": 923026,
       "targets": [
         "ram-commands"
       ],
       "session": "frozen",
       "command": "find /scratch/locked -name y -delete",
-      "explain_blind": "the refusal comes from the op door during the walk, below the command plane the dry run reads",
+      "explain_blind": "the refusal comes from the dispatcher during the walk, below the command plane the dry run reads",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -192,7 +192,7 @@
         "ram-commands"
       ],
       "command": "mkdir -p /scratch/private && echo k > /scratch/private/k && ln -s /scratch/private/k /scratch/k && cat /scratch/k",
-      "explain_blind": "the refusal comes from the op door during the walk, below the command plane the dry run reads",
+      "explain_blind": "the refusal comes from the dispatcher during the walk, below the command plane the dry run reads",
       "expect": {
         "exit": 1,
         "stdout": "",

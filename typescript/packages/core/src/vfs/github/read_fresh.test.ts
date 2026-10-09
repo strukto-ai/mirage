@@ -118,8 +118,8 @@ describe('github under read: fresh', () => {
 
   // Each cell is [dir listings, whole-tree walks, blob downloads] for one line
   // on a warm fresh mount: cat pays one probe, at routing, as hf's table
-  // does; its own stat and the cache door both reuse that answer. cp skips
-  // routing's probe, so the cache door asks, and cp's stat resolves through
+  // does; its own stat and the cache stage both reuse that answer. cp skips
+  // routing's probe, so the cache stage asks, and cp's stat resolves through
   // the listing, which fresh re-checks once per command: on github that is
   // one check of the head, which replaces the tree refetch (Task 1.3).
   const WARM: [string, [number, number, number]][] = [
@@ -241,10 +241,10 @@ describe('github under read: fresh', () => {
     }
   })
 
-  it('reads a revert through both doors', async () => {
+  it('reads a revert through both reads', async () => {
     // Content-addressed shas make every stamp source agree once the index is
-    // refilled, so this guards that both the stream door (cat) and the bytes
-    // door (cp) stamp, rather than telling stamp sources apart.
+    // refilled, so this guards that both the stream read (cat) and the bytes
+    // read (cp) stamp, rather than telling stamp sources apart.
     const w = await ws(await vfsOf())
     try {
       for (const [step, data] of [OLD, NEW, OLD].entries()) {
@@ -388,7 +388,7 @@ describe('github cannot-see versus gone', () => {
     gh.fail.set('recursive', [401, 'Bad credentials'])
   }
 
-  it('never reads cannot-see as gone through the dispatcher door', async () => {
+  it('never reads cannot-see as gone through the dispatcher', async () => {
     // No cached copy, so cp's own stat is the op that reaches the backend: an
     // ENOENT there goes through onEnoent, which drops the overlay.
     const w = await ws(await vfsOf())
@@ -401,7 +401,7 @@ describe('github cannot-see versus gone', () => {
     }
   })
 
-  it('never reads cannot-see as gone through the xattr door', async () => {
+  it('never reads cannot-see as gone through the xattr call', async () => {
     const w = await ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
@@ -423,7 +423,7 @@ describe('github cannot-see versus gone', () => {
       expect(kept(w)).toBe(true)
       // The routing probe's listing of docs/ is cut short, so it defers to one
       // walk of the whole tree, which finds the file; cat's own stat and the
-      // cache door reuse its answer.
+      // cache stage reuse its answer.
       expect(gh.counts()).toEqual([1, 1, 0])
     } finally {
       await w.close()
@@ -444,7 +444,7 @@ describe('github cannot-see versus gone', () => {
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       // One listing of docs/, by the routing probe; cat's own stat and the
-      // cache door reuse its answer, so the truncated tree is never walked
+      // cache stage reuse its answer, so the truncated tree is never walked
       // folder by folder, which would reach docs/ by its sha.
       expect(gh.counts()).toEqual([1, 0, 0])
       expect(gh.count('sha_dir')).toBe(0)
@@ -580,11 +580,11 @@ it.each(['find /gh', 'du -a /gh', 'ls -R /gh'])(
   },
 )
 
-// The op door is what FUSE, ws.vfs and the agent file tools reach, and none
+// The dispatcher is what FUSE, ws.vfs and the agent file tools reach, and none
 // of them runs inside a shell command. One `ls -l` over FUSE is a readdir and
 // a stat per entry; fresh trusts a listing that recent instead of refetching
 // the whole tree for every call.
-describe('github op door under read: fresh', () => {
+describe('github dispatcher under read: fresh', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })

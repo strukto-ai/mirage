@@ -124,8 +124,8 @@ async function content(dispatch: Dispatch, base: PathSpec, name: string): Promis
  */
 export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const doors = inv.doors ?? {}
-  const dispatch = doors.dispatch
+  const view = inv.view ?? {}
+  const dispatch = view.dispatch
   const texts = [...inv.texts]
   try {
     if (dispatch === undefined) throw new NoWorkspaceError()
@@ -150,7 +150,7 @@ export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
       throw new GitError('refusing to create malformed object')
     }
     if (fl.asBool('w') && contents.length > 0) {
-      const repo = await opened(fl, doors)
+      const repo = await opened(fl, view)
       for (const data of contents) {
         // hash-object writes any of the four types, which only the general
         // writer takes.

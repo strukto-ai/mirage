@@ -80,7 +80,7 @@ async def test_read_plain_file_falls_through():
             )
         ],
     )
-    # A cold read through the door fills the cache, so it asks for the
+    # A cold read through the dispatcher fills the cache, so it asks for the
     # md5 its entry is stamped with, as a command's read does.
     with (
         patch(

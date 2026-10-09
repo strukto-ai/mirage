@@ -525,10 +525,10 @@ describe('parseCommand — clusters ending in a value flag (getopt)', () => {
   })
 
   it('unknown char in cluster reports the offending char', () => {
-    const p = parseCommand(specOf('grep'), ['-nx', 'pat', '/a.txt'], '/')
+    const p = parseCommand(specOf('grep'), ['-nQ', 'pat', '/a.txt'], '/')
     expect(p.flags['-n']).toBeUndefined()
     expect(p.texts()).toEqual(['pat'])
-    expect(p.invalidOptions).toEqual(['x'])
+    expect(p.invalidOptions).toEqual(['Q'])
   })
 
   it('find multi-char short flags still work', () => {

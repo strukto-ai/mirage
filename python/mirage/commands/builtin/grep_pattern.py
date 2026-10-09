@@ -25,6 +25,7 @@ from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
 from mirage.commands.builtin.utils.rust_regex import (
     RustRegexError,
     translate_rust,
+    whole_line,
     whole_word,
 )
 from mirage.commands.builtin.utils.types import HostRegex
@@ -364,6 +365,7 @@ def compile_pattern(
     whole_word: bool = False,
     syntax: RegexSyntax = RegexSyntax.EXTENDED,
     utf8: bool = False,
+    line_regexp: bool = False,
 ) -> re.Pattern[str]:
     """Compile a pattern list into one matcher.
 
@@ -374,19 +376,31 @@ def compile_pattern(
         whole_word (bool): True if -w flag is set.
         syntax (RegexSyntax): the dialect the patterns are written in.
         utf8 (bool): the lines are text under a UTF-8 locale.
+        line_regexp (bool): -x, which overrides -w and spans the whole line.
     """
+    # GNU grep 3.11: -x overrides -w in either order.
+    whole_word = whole_word and not line_regexp
     if syntax is RegexSyntax.RUST:
         translated = rust_source(
             pattern, fixed_string, whole_word, ignore_case
         )
+        source = (
+            whole_line(translated.source, False)
+            if line_regexp
+            else translated.source
+        )
         return re.compile(
-            translated.source, re.IGNORECASE if translated.ignore_case else 0
+            source, re.IGNORECASE if translated.ignore_case else 0
         )
     if syntax is RegexSyntax.PERL and not fixed_string:
         source, fold = perl_regex(pattern, ignore_case, whole_word)
+        if line_regexp:
+            source = whole_line(source, False)
         return compile_posix_regex(source, re.IGNORECASE if fold else 0, utf8)
     flags = re.IGNORECASE if ignore_case else 0
     source = build_pattern_str(pattern, fixed_string, whole_word, syntax)
+    if line_regexp:
+        source = whole_line(source, False)
     try:
         return compile_posix_regex(source, flags, utf8)
     except re.error as exc:

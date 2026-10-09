@@ -246,7 +246,8 @@ def _gridfs() -> GridFSVFS:
 async def test_an_added_mount_is_judged_on_its_write_policy(
     options, vfs, write, expected
 ):
-    # The wire string, not the enum: the programmatic door coerces first.
+    # The wire string, not the enum: the programmatic entry point coerces
+    # first.
     ws = Workspace({}, mode=MountMode.WRITE, **options)
     try:
         if isinstance(expected, WritePolicy):

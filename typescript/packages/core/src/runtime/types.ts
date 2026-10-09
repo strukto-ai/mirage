@@ -18,14 +18,14 @@ import type { RuntimeConfig } from './config.ts'
 import type { RouteScript } from './routing/types.ts'
 
 /**
- * The languages a runtime can interpret, one name for both doors (run
+ * The languages a runtime can interpret, one name for both entry points (run
  * and eval). A union, not string, so a typo is a type error instead of
  * a selector that silently matches nothing and reports "no runtime".
  */
 export type RuntimeLanguage = 'python' | 'js'
 
 /**
- * Which doors code executed by a runtime has to the outside world.
+ * Which entry points code executed by a runtime has to the outside world.
  *
  * The workspace dispatch is a gate: it checks mount modes, session
  * grants, and policy, records the op, and only then touches the real
@@ -34,11 +34,11 @@ export type RuntimeLanguage = 'python' | 'js'
  * write to an S3 mount still lands in real S3, but only after the
  * gate said yes.
  *
- * - 'workspace': the gate is the code's only door. The engine runs as an
+ * - 'workspace': the gate is the code's only entry point. The engine runs as an
  *   in-process guest with no syscalls, so its I/O can only travel the
  *   VFS bridge (or the workspace executor itself) and a mount-mode or
  *   policy refusal is final.
- * - 'process': the code has host doors around the gate. It is, or
+ * - 'process': the code has host entry points around the gate. It is, or
  *   spawns, a real process on this machine with the user's own
  *   filesystem and network, so it can reach the same backends (and
  *   everything else) without the gate seeing it.
@@ -54,7 +54,7 @@ export type RuntimeReach = 'workspace' | 'process' | 'remote'
  * the consumer side, because runtimes receive it through a binding while the
  * workspace provides it, and the runtime package imports no workspace
  * module — the home of Python's DispatchFn protocol (runtime/types).
- * `report`, when a caller passes one, is stamped by the door the moment
+ * `report`, when a caller passes one, is stamped by the dispatcher the moment
  * the op completes, so an observer reads what ran even when a later
  * step throws the result away; runtimes and combiners never pass it.
  */
@@ -68,7 +68,7 @@ export type DispatchFn = (
 
 /**
  * Run one shell line in the calling session and return its result, the
- * line reading the given input (null keeps the ambient one): the door a
+ * line reading the given input (null keeps the ambient one): the entry point a
  * command handler reaches the executor through, as awk's command pipes
  * and system() do. Defined beside DispatchFn for the same reason: the
  * consumer receives it, the workspace provides it.
@@ -314,7 +314,7 @@ export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown
  * value references a `.py` file whose content is embedded here at
  * load. The source sees ctx as a dict and its LAST EXPRESSION is the
  * verdict. It runs on the policy engine (monty today; a sandbox
- * runtime is a candidate door later).
+ * runtime is a candidate entry point later).
  */
 export class ScriptSource {
   /**

@@ -22,10 +22,10 @@ import { genericCommands } from '../generic_bind/index.ts'
 type ReadRange = NonNullable<CommandIO['readRange']>
 
 /**
- * Stream `path` as successive ranged reads at the door. `/dev/zero` answers
+ * Stream `path` as successive ranged reads at the dispatcher. `/dev/zero` answers
  * every range in full, so the stream ends only when the reader stops;
  * `/dev/null` and a regular file end at the first short range. Each range
- * is a door read, so hides, path rules and policies judge it. Mirrors
+ * is a dispatcher read, so hides, path rules and policies judge it. Mirrors
  * Python's `_ranged`.
  */
 async function* ranged(

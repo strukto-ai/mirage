@@ -29,7 +29,7 @@ SUMMARY = re.compile(rb"^\[main [0-9a-f]{7,}\] (.+)$", re.M)
 
 
 def env_view(env: dict[str, str]) -> SessionView:
-    """The session plane's door over a session holding ``env``.
+    """The session view over a session holding ``env``.
 
     Args:
         env (dict[str, str]): the variables the session holds.
@@ -190,7 +190,7 @@ def test_no_environment_leaves_the_stated_default():
 
 
 def test_a_hidden_variable_is_not_read_as_an_identity():
-    # The door filters hidden names, so a hidden GIT_AUTHOR_NAME reads
+    # The dispatcher filters hidden names, so a hidden GIT_AUTHOR_NAME reads
     # as unset rather than leaking into a commit the session can see.
     session = SessionState(
         session_id="s",

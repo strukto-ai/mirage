@@ -1,6 +1,6 @@
 # sandbox
 
-The whole-line door every sandbox shares: mirage hands the line, its
+The whole-line entry point every sandbox shares: mirage hands the line, its
 stdin, env and cwd to a box the user runs and reads back stdout, stderr and
 the exit code. What the line touches lives on the box, not on a mount.
 

@@ -45,8 +45,8 @@ describe('DevVFS', () => {
   })
 
   it('exposes the same op surface as RAMVFS', () => {
-    const door = ops(new DevVFS())
-    for (const name of ['read', 'write', 'readdir', 'stat']) expect(door.has(name)).toBe(true)
+    const table = ops(new DevVFS())
+    for (const name of ['read', 'write', 'readdir', 'stat']) expect(table.has(name)).toBe(true)
   })
 
   it('reads /null as empty bytes', async () => {

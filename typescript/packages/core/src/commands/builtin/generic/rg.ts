@@ -44,7 +44,7 @@ import {
   type Tally,
 } from '../rg_search.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { type LinkDoor, linkDoor } from '../utils/links.ts'
+import { type LinkResolver, linkResolver } from '../utils/links.ts'
 import { formatOptionalRecords, formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { RegexSyntax } from '../types.ts'
@@ -680,7 +680,7 @@ export async function rgGeneric(
   // A mount below the operand shadows whatever the backend holds there; the
   // fan-out that would search the mount itself is off too.
   const boundary = f.oneFileSystem ? (mounts ?? null) : null
-  let found = haystacks(paths, rd, st, opts.cwd, walk, f, warnings, boundary, linkDoor(opts))
+  let found = haystacks(paths, rd, st, opts.cwd, walk, f, warnings, boundary, linkResolver(opts))
   if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
     const listed: Haystack[] = []
     for await (const h of found) listed.push(h)
@@ -821,8 +821,8 @@ export function betweenFiles(f: RgFlags): string {
 // Every input the line searches, in order: a stdin operand, a named file as
 // itself whatever the filters say, and a directory walked. `boundary` is the
 // mounts --one-file-system keeps each walk to its operand's own, null when
-// the walk may enter any directory; `door` the namespace's links and the
-// door past them, which -L walks through.
+// the walk may enter any directory; `resolver` the namespace's links and the
+// dispatcher past them, which -L walks through.
 export async function* haystacks(
   paths: readonly PathSpec[],
   rd: (path: string) => Promise<string[]>,
@@ -832,7 +832,7 @@ export async function* haystacks(
   f: RgFlags,
   warnings: string[],
   boundary: MountView | null,
-  door: LinkDoor | null,
+  resolver: LinkResolver | null,
 ): AsyncGenerator<Haystack> {
   // ripgrep holds one path that is not a directory to one thread, as it
   // does -j1 and a sort; every other line runs its parallel walker.
@@ -845,7 +845,7 @@ export async function* haystacks(
         shown: operandName(p),
         stat: fifoStat(p.rawPath),
         spec: p,
-        door: null,
+        resolver: null,
       }
       continue
     }
@@ -872,7 +872,7 @@ export async function* haystacks(
       }
     }
     if (!isDir) {
-      yield { virtual: p.virtual, shown: p.rawPath, stat: s, spec: p, door: null }
+      yield { virtual: p.virtual, shown: p.rawPath, stat: s, spec: p, resolver: null }
       continue
     }
     let crosses: ((path: string) => boolean) | null = null
@@ -890,7 +890,7 @@ export async function* haystacks(
       f.sort === 'path' && !f.sortReverse,
       warnings,
       crosses,
-      door,
+      resolver,
       f.follow,
       parallel,
     )
@@ -954,8 +954,8 @@ async function searchAll(
     const chunks: Uint8Array[] = []
     try {
       const source =
-        h.spec === null && h.door !== null
-          ? h.door.read(h.virtual)
+        h.spec === null && h.resolver !== null
+          ? h.resolver.read(h.virtual)
           : stream(h.spec ?? makeSpec(h.virtual, template))
       const pipe = h.spec !== null && isStdin(h.spec)
       for await (const c of searchHaystack(

@@ -106,8 +106,8 @@ def test_native_range_roster_is_exactly_the_declared_set():
 def test_a_reader_that_takes_a_window_reads_ranges(name):
     """A backend that can range must say so, or nobody ever asks it to.
 
-    ``reads_ranges`` is what tells the door a VFS can fetch a window;
-    without it the door reads the whole object and slices, which is
+    ``reads_ranges`` is what tells the dispatcher a VFS can fetch a window;
+    without it the dispatcher reads the whole object and slices, which is
     correct and silent and throws away the entire point. Derived from the
     signature rather than listed, so a new backend that grows a window is
     required to declare it too.

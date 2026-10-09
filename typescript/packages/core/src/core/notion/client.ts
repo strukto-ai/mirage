@@ -323,7 +323,7 @@ export class HttpNotionTransport implements NotionTransport {
   }
 
   // The one place a request is actually made. `ntn api` is a typed path
-  // through the same door rather than a second client, so a header or an
+  // through the same entry point rather than a second client, so a header or an
   // error shape can never differ between a named verb and a raw call.
   async request(call: RestCall): Promise<Record<string, unknown>> {
     const params: Record<string, string | number | boolean> = {}

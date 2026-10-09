@@ -50,7 +50,7 @@ const worlds: Workspace[] = []
  * A world with one role and, optionally, an approval channel answering
  * every request the same way. The fixture is seeded through the unroled
  * default session, so the role's own rules do not refuse the setup at the
- * op door, and the shell is bound to a session carrying the role.
+ * dispatcher, and the shell is bound to a session carrying the role.
  */
 async function world(
   role: unknown,

@@ -267,19 +267,19 @@ export async function stageTracked(
  * already holds.
  */
 export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     const parsed = parseFlags(fl)
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
-    const repo: Repo = await opened(fl, doors, true)
+    const repo: Repo = await opened(fl, view, true)
     const state = await readIndex(repo, dispatch)
     const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
     const found = await scan(
@@ -288,7 +288,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
       repo.location,
       tracked,
       UNTRACKED_ALL,
-      doors.ns?.links ?? null,
+      view.ns?.links ?? null,
     )
     const ignores = await loadIgnores(dispatch, repo.location.commondir, repo.location.worktree)
     const present = new Set(found.files.keys())

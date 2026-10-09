@@ -285,7 +285,7 @@ export {
 } from '@struktoai/mirage-core/core/notion/config'
 export type { NotionConfig, NotionConfigRedacted } from '@struktoai/mirage-core/core/notion/config'
 // Named rather than left to the `export *` above: the three VFS classes come
-// through it, but core's front door carries no config type of theirs, so
+// through it, but core's entry point carries no config type of theirs, so
 // dropping these lines would take them out of this package's API too.
 export {
   normalizeAirtableConfig,
@@ -428,15 +428,15 @@ export {
 
 // The authoring surface: what a host reaches for to bring its own
 // VFS, CLI, policy or runtime, and the types the Workspace's own
-// signatures hand back. Core's barrel is the front door for a program
-// that mounts and runs; these are the doors behind it, re-exported by
+// signatures hand back. Core's barrel is the entry point for a program
+// that mounts and runs; these are the entry points behind it, re-exported by
 // module so a consumer of this package needs no second dependency on
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
 export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 export { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
-export type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
+export type { CLIView } from '@struktoai/mirage-core/commands/cli/types'
 export { UsageError } from '@struktoai/mirage-core/commands/errors'
 export { PolicyDenied, PolicyError } from '@struktoai/mirage-core/policy/errors'
 export {

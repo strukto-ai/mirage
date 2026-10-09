@@ -119,14 +119,14 @@ _ESCAPED_BLANK = re.compile(rb"\\[ \t]")
 
 _LAST_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
 
-# Tokens the grammar lexes apart from a word in an argument list, where
-# bash reads a word, by the node they stand under. A bare `$` in a command
-# is already kept as a word, and only an error region loses it; the `$`
-# opening `$"..."` is the translation marker, never a word.
-_BARE_WORDS = {
-    "command": frozenset({"==", "=~"}),
-    "ERROR": frozenset({"==", "=~", "$"}),
-}
+# Test operators the grammar lexes apart from a word in an argument list or
+# an error region, where bash reads a word.
+_BARE_WORDS = frozenset({"==", "=~"})
+
+
+# A `$` that no name, digit, special parameter, brace, paren, bracket or
+# quote follows, which bash reads as a literal `$`.
+_LITERAL_DOLLAR = re.compile(rb"\$(?![\w@*#?$!{(\['\"-])")
 
 
 _WORD_BREAK = b" \t\n;&|()<>"
@@ -203,11 +203,13 @@ def operator_source(data: bytes, root: TSNodeLike) -> bytes:
     as ``;;`` does, there being no arm after it, so it is spelled so. An
     argument of ``==`` or ``=~``, which the grammar reads as a test
     operator wanting an operand (so ``echo ==`` is an error and
-    ``echo == x`` drops it), and a bare ``$`` before a terminator are
-    words to bash; spelled as ``_`` filler they parse as the words they
-    are, and ``SourceNode`` gives back their text. So is the ``[`` of a
-    test bash reads as a ``[`` command (``_bracket_is_a_command``, or one
-    an error region opens), which then runs as the builtin, and so is a
+    ``echo == x`` drops it), and a ``$`` that opens no expansion
+    (``$\\a``, ``$,``, ``$`` before a blank) are words to bash, where the
+    grammar errs or reads an expansion missing its name; spelled as ``_``
+    filler they parse as the words they are, and ``SourceNode`` gives
+    back their text. So is the ``[`` of a test bash reads as a ``[``
+    command (``_bracket_is_a_command``, or one an error region opens),
+    which then runs as the builtin, and so is a
     backslash-blank pair the grammar skips as whitespace
     (``_skipped_escapes``), spelled ``..`` so it opens its word without
     joining a ``$name`` before it or making an assignment. An operator
@@ -276,8 +278,11 @@ def _respelled(data: bytes, root: TSNodeLike) -> bytes:
             lo, hi = child.start_byte, child.end_byte
             if child.is_named:
                 continue
-            if child.type in _BARE_WORDS.get(node.type, ()) and not (
-                child.type == "$" and data[hi : hi + 1] == b'"'
+            if (
+                child.type in _BARE_WORDS
+                and node.type in ("command", "ERROR")
+                or child.type == "$"
+                and _LITERAL_DOLLAR.match(data, lo)
             ):
                 out[lo:hi] = b"_" * (hi - lo)
             elif (

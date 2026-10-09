@@ -22,7 +22,7 @@ from mirage.commands.cli.builtin.ntn.util import (
     pretty_json,
     property_cell,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.client import NotionAPIError
@@ -111,13 +111,13 @@ async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
 
 
 async def filter_body(
-    fl: FlagView, doors: CLIDoors | None
+    fl: FlagView, view: CLIView | None
 ) -> dict[str, JsonValue]:
     """Read the query filter from `--filter` or `--filter-file`.
 
     Args:
         fl (FlagView): the leaf's parsed flags.
-        doors (CLIDoors | None): the workspace doors, used to read a
+        view (CLIView | None): the workspace entry points, used to read a
             filter file the user named, the way himalaya reads
             ``--attach``.
 
@@ -130,9 +130,9 @@ async def filter_body(
     sources = fl.as_paths("filter_file")
     if not sources:
         return {}
-    if doors is None or doors.dispatch is None:
+    if view is None or view.dispatch is None:
         raise UsageError("--filter-file needs a workspace to read files from")
-    data, _ = await doors.dispatch("read", sources[0])
+    data, _ = await view.dispatch("read", sources[0])
     raw = data if isinstance(data, bytes) else bytes(data)
     return parse_json_text(raw.decode("utf-8", "replace"), "--filter-file")
 
@@ -153,7 +153,7 @@ async def query(
     sorts: list[JsonValue] = [parse_sort(one) for one in fl.as_list("sort")]
     if sorts:
         body["sorts"] = sorts
-    chosen = await filter_body(fl, inv.doors)
+    chosen = await filter_body(fl, inv.view)
     if chosen:
         body["filter"] = chosen
 

@@ -256,7 +256,7 @@ async def test_a_fill_with_no_token_stores_none():
 
 @pytest.mark.asyncio
 async def test_an_empty_token_is_stored_as_none():
-    """`""` and None mean the same thing at both write doors, so the redis
+    """`""` and None mean the same thing at both write methods, so the redis
     store's `''`-means-none wire convention cannot disagree with this one."""
     cache = RAMFileCacheStore()
     await cache.set("/a", b"data", fingerprint="")
@@ -309,7 +309,7 @@ async def test_a_snapshot_round_trip_preserves_both_token_states():
 async def test_a_restored_entry_folds_a_tokenless_spelling_like_a_write(
     stored,
 ):
-    # The snapshot is a third door into the entry table, and it has to
+    # The snapshot is a third entry point into the entry table, and it has to
     # agree with `set`/`add` about what "no token" is. A document is not
     # obliged to spell it the way this version does: an older writer
     # stored `""`, and an entry restored holding it would answer

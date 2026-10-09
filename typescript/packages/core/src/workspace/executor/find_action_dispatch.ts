@@ -52,7 +52,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { concat } from '../../io/cachable_iterator.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
-export interface FindActionDoors {
+export interface FindActionOptions {
   // Runs an `-exec` line in the session; absent outside a workspace,
   // where `-exec` is refused.
   executeFn?: ExecuteFn
@@ -186,7 +186,7 @@ async function runExec(
   return io.exitCode === 0
 }
 
-/** Remove a matched entry through the operation door, which owns admission,
+/** Remove a matched entry through the dispatcher, which owns admission,
  * backend support, cache invalidation and namespace cleanup. */
 async function deleteRow(
   ps: PathSpec,
@@ -227,7 +227,7 @@ function refusalWhy(err: unknown): string {
 /**
  * Render one accepted row in `find -ls`'s own layout.
  *
- * The row's facts come from the two doors the command boundary has: a
+ * The row's facts come from the two entry points the command boundary has: a
  * symlink is namespace state no backend can see, so the link view
  * answers for one (lstat, as GNU's `-ls` reports the link itself), and
  * every other row is statted through the op dispatcher, which answers
@@ -245,7 +245,7 @@ async function rowStat(
 ): Promise<FileStat | null> {
   const path = ps.rawPath || ps.virtual
   if (statPath === null) {
-    errors.push(encodeText(`find: '${path}': no stat door\n`))
+    errors.push(encodeText(`find: '${path}': no stat function\n`))
     return null
   }
   const link = ns?.links?.statAt(ps.virtual) ?? null
@@ -414,25 +414,25 @@ export async function applyFindActions(
   texts: readonly string[],
   registry: MountRegistry,
   cwd: string,
-  doors: FindActionDoors = {},
+  options: FindActionOptions = {},
 ): Promise<[ByteSource | null, Uint8Array, number]> {
   const expr = parseFindExpression([...texts])
   const reorders = expr.depthFirst
   if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]
-  const executeFn = doors.executeFn
+  const executeFn = options.executeFn
   const execs = execActions(expr.actions)
   if (execs.length > 0 && executeFn === undefined) {
     return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
-  const sessionId = doors.sessionId ?? ''
-  const ns = doors.ns ?? null
-  const statPath = doors.statPath ?? null
-  const dispatch = doors.dispatch ?? null
-  const identity = doors.identity ?? null
-  const starts = doors.starts ?? []
-  const signal = doors.signal
+  const sessionId = options.sessionId ?? ''
+  const ns = options.ns ?? null
+  const statPath = options.statPath ?? null
+  const dispatch = options.dispatch ?? null
+  const identity = options.identity ?? null
+  const starts = options.starts ?? []
+  const signal = options.signal
   const once =
-    doors.stdin === undefined || doors.stdin === null ? null : new SharedStdin(doors.stdin)
+    options.stdin === undefined || options.stdin === null ? null : new SharedStdin(options.stdin)
   await materialize(stdout)
   if (matchedRuns === null)
     return [null, encodeText('find: actions require structured matches\n'), 1]

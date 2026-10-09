@@ -53,7 +53,7 @@ def head_visible(name: str, rules: AdmissionRules | None) -> bool:
 
 
 def line_tokens(ctx: CommandContext) -> tuple[str, ...]:
-    """The tokens a pattern reads: the door's normalization when it set
+    """The tokens a pattern reads: the entry point's normalization when it set
     one, else the name and the raw argv (a context built by hand).
 
     Args:
@@ -66,7 +66,7 @@ def line_allowed(ctx: CommandContext, rules: AdmissionRules | None) -> bool:
     """Whether the profile's allow list has a pattern for the line.
 
     A profile that states no list installs everything. A word that is not
-    a tool (``ctx.tool`` cleared by the door: the agent's own function,
+    a tool (``ctx.tool`` cleared by the entry point: the agent's own function,
     an executed path) is always allowed here; a deny rule is the only
     thing that can refuse it.
 

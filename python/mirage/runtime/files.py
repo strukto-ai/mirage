@@ -64,7 +64,7 @@ def stat_row(fs: FileStat) -> VFSStat:
     """Translate one mirage stat row into the struct a guest surface reads.
 
     Args:
-        fs (FileStat): the row the door answered with.
+        fs (FileStat): the row the dispatcher answered with.
     """
     return VFSStat(
         size=content_size(fs),
@@ -96,10 +96,10 @@ class RuntimeFiles:
     and each call blocks its caller until the op is done. A guest's call
     arrives on a worker thread (wasm) or the binding's own thread
     (monty) and hops to the workspace loop running elsewhere; the hop
-    carries no contextvars, so a guest's door is built from a binding
+    carries no contextvars, so a guest's file adapter is built from a binding
     (``of``), whose dispatch replays the launch context (the session,
     the op recorder) around each op. A ``with ws:`` block calls from
-    the only thread there is, so its door drives the block's idle loop
+    the only thread there is, so its file adapter drives the block's idle loop
     in the caller's own context, a session bound inside the block
     included. Either way the op runs as a shell command's would, and an
     OSError leaves numbered as a syscall's (``numbered``).
@@ -128,10 +128,10 @@ class RuntimeFiles:
 
     @classmethod
     def of(cls, context: RuntimeContext) -> "RuntimeFiles":
-        """The file door every engine builds from its execution context.
+        """The file adapter every engine builds from its execution context.
 
         Args:
-            context (RuntimeContext): the execution's captured doors.
+            context (RuntimeContext): the execution's captured entry points.
         """
         return cls(
             context.dispatch, asyncio.get_running_loop(), context.resolver
@@ -365,7 +365,7 @@ class RuntimeFiles:
             return None
 
     def readdir(self, path: str, *, classify: bool = True) -> list[VFSEntry]:
-        """List a directory as resolved entries (the TS door's shape).
+        """List a directory as resolved entries (the TS entry point's shape).
 
         A backend that slash-marks directories skips the stat; every
         other entry is classified by its own stat, which is RAM when
@@ -373,7 +373,7 @@ class RuntimeFiles:
         mount keeps none. The whole listing is one hop to the loop,
         where the stats run together, at most
         ``LISTING_ENTRY_CONCURRENCY`` requests at once across everything
-        this door serves.
+        this adapter serves.
 
         An entry whose stat fails, for any reason, rides unclassified:
         a size-0 non-directory with no mode and no mtime, the row that
@@ -508,7 +508,7 @@ class RuntimeFiles:
         A link is namespace state, so no backend stores one and the
         target is kept verbatim as the guest typed it. The dispatcher
         answers this op from the node table itself, which is why a
-        runtime can serve `os.symlink` at all: the door a surface
+        runtime can serve `os.symlink` at all: the dispatcher a surface
         already holds reaches the name plane, not just a mount.
 
         Args:
@@ -545,7 +545,7 @@ class RuntimeFiles:
     ) -> None:
         """Write metadata fields, natively where the backend can hold them.
 
-        Every field is passed, unset ones as None, because the door
+        Every field is passed, unset ones as None, because the dispatcher
         reads the whole set and stores in the namespace overlay whatever
         the backend cannot keep. A mount with no setattr op therefore
         still answers: chmod on an s3 or dropbox mount lands in the name

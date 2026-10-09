@@ -72,7 +72,7 @@ async function runSizelessProbe(
   }
 }
 
-// Policy probe: FUSE serves the workspace's op door, so a preVfs deny
+// Policy probe: FUSE serves the workspace's dispatcher, so a preVfs deny
 // (sealed path) and a postVfs deny (redacted content) must both surface as
 // EACCES to ordinary file APIs, while unguarded reads pass.
 class SealReadsPolicy implements Policy {
@@ -131,8 +131,8 @@ async function runPolicyProbe(
 // Link-removal probe: FUSE used to drop a link straight into the namespace
 // table, at a layer no policy or session view covers, so a preVfs deny never
 // fired on one and the removal left no OpRecord. Routing the removal through
-// the op door is exactly what makes the two answers below differ, and unlink
-// is a LINK_ENTRY_OPS member so the door answers a link path itself.
+// the dispatcher is exactly what makes the two answers below differ, and unlink
+// is a LINK_ENTRY_OPS member so the dispatcher answers a link path itself.
 class PinLinksPolicy implements Policy {
   preVfs(ctx: VfsContext): Action | null {
     if (ctx.op === 'unlink' && ctx.path.virtual.endsWith('.pinned')) {
@@ -205,9 +205,9 @@ async function absent(attempt: () => Promise<unknown>): Promise<boolean> {
 // session's profile hides /data/vault and caps /data at read. Through
 // the kernel the hidden directory is absent: a read under it and a
 // create under it both answer ENOENT and the listing omits it; the cap
-// refuses a write and leaves the file as it was. The shell door run as
+// refuses a write and leaves the file as it was. The shell entry point run as
 // the same session gives every answer the same way, and the host's own
-// door still reads the hidden file, so the hide is the session's and
+// entry point still reads the hidden file, so the hide is the session's and
 // not the mount's.
 async function runSessionProbe(
   result: Record<string, string | number | boolean | null>,

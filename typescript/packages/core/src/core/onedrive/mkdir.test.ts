@@ -100,7 +100,7 @@ describe('OneDrive mkdir under a mount root the drive does not have yet', () => 
 describe('OneDrive mkdir names a refusal', () => {
   const plain = (): OneDriveAccessor => new OneDriveAccessor({ accessToken: 'token' })
 
-  // A folder another client made after the doors looked still 409s, and
+  // A folder another client made after the lookup ran still 409s, and
   // only -p passes it.
   it.each([
     [{ folder: {} }, false, 'EEXIST'],

@@ -21,7 +21,7 @@ from mirage.types import FileStat, FileType, MountMode
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.mount import MountEntry
 
-# What the op door does around a VFS's functions: a read takes a window,
+# What the dispatcher does around a VFS's functions: a read takes a window,
 # append and pwrite are a rewrite where the VFS only writes whole files,
 # a pwrite offset is checked, and mkdir refuses a taken name first.
 

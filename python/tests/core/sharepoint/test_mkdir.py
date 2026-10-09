@@ -59,7 +59,7 @@ async def test_mkdir_parents_tolerates_an_existing_folder():
 
 @pytest.mark.asyncio
 async def test_mkdir_refuses_a_folder_made_after_the_lookup():
-    """A folder another client made after the doors looked still 409s."""
+    """A folder another client made after the lookup ran still 409s."""
     with aioresponses() as m:
         m.post(
             _DRIVE + "/root/children",

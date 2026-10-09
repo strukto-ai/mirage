@@ -463,7 +463,7 @@ async def test_the_read_record_and_the_index_stat_stamp_one_token(
 async def test_the_read_record_and_the_api_stat_stamp_one_token(
     index, fake_drive, gdrive_accessor
 ):
-    # stat's other door: with nothing to warm, it asks Drive directly.
+    # stat's other path: with nothing to warm, it asks Drive directly.
     file_id = fake_drive.add("report.pdf", content=CONTENT)
     await index.set_dir(
         "/",

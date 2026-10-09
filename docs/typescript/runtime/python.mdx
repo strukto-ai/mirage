@@ -368,7 +368,7 @@ workers. Unsupported options fail explicitly.
 Monty keeps its normal unsupported `subprocess` import; no custom guest helper
 is injected.
 
-Host applications use the same admitted argv door:
+Host applications use the same admitted argv entry point:
 
 ```typescript
 const child = ws.spawn({ argv: ['cat'] })

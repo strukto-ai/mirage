@@ -20,7 +20,7 @@ import { normalizeQdrantConfig, redactQdrantConfig, resolveQdrantConfig } from '
 const embed = (text: string): Promise<number[]> => Promise.resolve([text.length])
 
 describe('qdrant config embed hook', () => {
-  it('keeps a function through the door and resolves it', () => {
+  it('keeps a function through the config loader and resolves it', () => {
     const config = resolveQdrantConfig(normalizeQdrantConfig({ collection: 'c', embed }))
     expect(config.embed).toBe(embed)
   })

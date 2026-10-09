@@ -56,7 +56,7 @@ async def _read_store(
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         var (str): the target as the operand spelled it.
         value (str): the split word to store.
 
@@ -309,7 +309,7 @@ async def handle_read(
         args (list[str]): words after the command name.
         session (SessionState): shell session state.
         stdin (ByteSource | None): line source.
-        state (SessionView | None): the session plane's gated door.
+        state (SessionView | None): the gated session view.
     """
     parse = parse_shell_options(SHELL_SPECS["read"], args)
     if parse.invalid is not None:

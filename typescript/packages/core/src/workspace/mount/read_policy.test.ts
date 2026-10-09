@@ -135,7 +135,7 @@ describe('resolveReadSpec', () => {
 
   it('reads a null policy as absent, the way a bare YAML `read:` parses', () => {
     // Reading it as a string would die on .toLowerCase() rather than
-    // answering with this door's own refusal.
+    // answering with the dispatcher's own refusal.
     expect(resolveReadSpec(null, undefined)).toEqual(DEFAULT_READ_SPEC)
   })
 
@@ -164,7 +164,7 @@ describe('DEFAULT_READ_SPEC', () => {
 })
 
 describe('checkReadCapability', () => {
-  // The programmatic door bypasses resolveReadSpec entirely: a ReadSpec
+  // The programmatic entry point bypasses resolveReadSpec entirely: a ReadSpec
   // handed straight to `Workspace` or `addMount` never passes through
   // the coercer, so before this the mount was accepted and then kept
   // nothing -- RAM marks a ttl=0 entry expired as it is written and
@@ -185,7 +185,7 @@ describe('checkReadCapability', () => {
 
   // `ReadPolicy` is a string-const object, so a runtime spec carrying
   // 'FRESH' or 'banana' matched no `===` and the verdict silently
-  // no-opped on the one door that skips resolveReadSpec. Worse on a
+  // no-opped on the one path that skips resolveReadSpec. Worse on a
   // capable backend: it mounted and then read as `bounded` everywhere.
   it.each(['FRESH', 'banana', 'PINNED'])('judges the wire string %s like a member', (policy) => {
     expect(() => {
@@ -197,7 +197,7 @@ describe('checkReadCapability', () => {
   })
 
   it('names the policy before the bound', () => {
-    // The coercer's order, applied at the mount door too. Python judged
+    // The coercer's order, applied at the mount entry point too. Python judged
     // the bound first here, so one `ReadSpec(policy='banana', ttl=0)`
     // came back naming the bound there and the policy here, and an
     // embedder fixing what it was told was wrong hit the other next.

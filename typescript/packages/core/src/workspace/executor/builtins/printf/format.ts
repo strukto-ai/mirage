@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { C_SPACE, INTMAX, UINTMAX } from '../../../../commands/builtin/constants.ts'
+import { STRTOD, strtodDouble, strtoldErange } from '../../../../commands/builtin/utils/strtod.ts'
+import { quoteText } from '../../../../commands/quote.ts'
 import { byteChar, encodeText } from '../../../../shell/bytes.ts'
 import { codePointText } from '../../../../shell/escapes.ts'
 
@@ -30,13 +33,22 @@ const PRINTF_SIMPLE_ESCAPES: Record<string, string> = {
   v: '\v',
 }
 
-const PRINTF_INT = /^[+-]?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)/
+// C's int, which bounds a `*` width or precision.
+const INT_MAX = (1n << 31n) - 1n
+const INT_MIN = -(1n << 31n)
+
+// The integer strtoimax and strtoumax read at base 0 in the C locale: the
+// blanks and sign, then hex after 0x, binary after 0b (glibc 2.38 on), octal
+// after a leading 0, else decimal. A 0x or 0b with no digit after it reads
+// as the 0 alone.
+const STRTOL = new RegExp(
+  `^${C_SPACE}([+-]?)(?:0[xX]([0-9a-fA-F]+)|0[bB]([01]+)|(0[0-7]*)|([1-9][0-9]*))`,
+)
 const PRINTF_FLAGS = '-+ 0#'
 const PRINTF_CONV = 'sdiouxXeEfFgGaAcbq%'
 const HEX_DIGIT = /[0-9a-fA-F]/
 const OCT_DIGIT = /[0-7]/
 const DEC_DIGIT = /[0-9]/
-const UINT64_MASK = (1n << 64n) - 1n
 
 const ANSIC_ESCAPES: Record<string, string> = {
   '\x07': '\\a',
@@ -55,108 +67,149 @@ const Q_SAFE = /[A-Za-z0-9%+\-./:=@_]/
 
 type Star = number | '*' | null
 
-/** Wrap an integer into signed 64-bit two's-complement range. */
-function wrapSigned(n: bigint): bigint {
-  return BigInt.asIntN(64, n)
-}
-
 /**
- * Parse a printf integer argument like C's `strtol` (base auto: `0x`
- * hex, leading `0` octal, else decimal, optional sign). Returns
- * [value, ok]; ok is false on a trailing or wholly invalid tail.
+ * Read an integer argument as strtoimax (signed) or strtoumax does.
+ *
+ * Returns the value, how many characters were read (0 when no number
+ * starts the text) and whether it was out of range. A signed value stops at
+ * the 64-bit bounds and an unsigned one at 2**64 - 1, while a negative
+ * unsigned one in range wraps around 2**64.
  */
-function parsePrintfInt(value: string): [bigint, boolean] {
-  const s = value.trim()
-  if (s === '') return [0n, true]
-  const m = PRINTF_INT.exec(s)
-  if (!m) return [0n, false]
-  const tok = m[0]
-  const ok = tok === s
-  const sign = tok.startsWith('-') ? -1n : 1n
-  const digits = tok.replace(/^[+-]/, '')
+function readInt(text: string, signed: boolean): [bigint, number, boolean] {
+  const found = STRTOL.exec(text)
+  if (found === null) return [0n, 0, false]
+  const [, sign, hexa, binary, octal, decimal] = found
   let n: bigint
-  if (digits.startsWith('0x') || digits.startsWith('0X')) n = BigInt('0x' + digits.slice(2))
-  else if (digits.length > 1 && digits.startsWith('0')) n = BigInt('0o' + digits.slice(1))
-  else n = BigInt(digits)
-  return [sign * n, ok]
+  if (hexa !== undefined) n = BigInt('0x' + hexa)
+  else if (binary !== undefined) n = BigInt('0b' + binary)
+  else if (octal !== undefined) n = BigInt('0o' + octal)
+  else n = (decimal ?? '0').length <= 20 ? BigInt(decimal ?? '0') : UINTMAX + 1n
+  const read = found[0].length
+  if (signed) {
+    const limit = INTMAX + (sign === '-' ? 1n : 0n)
+    const value = n > limit ? limit : n
+    return [sign === '-' ? -value : value, read, n > limit]
+  }
+  if (n > UINTMAX) return [UINTMAX, read, true]
+  return [sign === '-' ? -n & UINTMAX : n, read, false]
 }
 
 /**
- * Resolve a numeric argument, honoring the GNU leading-quote form (`"A`
- * / `'A` yields the code point of the next character).
+ * The error a numeric argument fails printf with, or null.
+ *
+ * bash's builtin says `invalid number` for an argument it could not read
+ * whole, naming the base when the text opens as an octal (`0` and a digit)
+ * or hex (`0x`) number, and only warns when the value was out of range; an
+ * empty argument is a quiet 0. GNU's program refuses an empty or unread
+ * argument, a partly read one and an out of range one alike, quoting the
+ * argument. A warning that does not fail printf goes to `warnings`.
  */
-function numericValue(value: string): [bigint, boolean] {
-  if (value.startsWith("'") || value.startsWith('"')) {
-    const rest = value.slice(1)
-    return [rest ? BigInt(rest.codePointAt(0) ?? 0) : 0n, true]
+function numericError(
+  raw: string,
+  read: number,
+  erange: boolean,
+  program: boolean,
+  warnings: string[],
+): string | null {
+  if (program) {
+    let problem: string
+    if (erange) problem = 'Numerical result out of range'
+    else if (read === 0) problem = 'expected a numeric value'
+    else if (read < raw.length) problem = 'value not completely converted'
+    else return null
+    return `printf: '${quoteText(raw)}': ${problem}\n`
   }
-  return parsePrintfInt(value)
+  if (read < raw.length) {
+    const base = /^0[0-9]/.test(raw) ? 'octal ' : raw.startsWith('0x') ? 'hex ' : ''
+    return `printf: ${raw}: invalid ${base}number\n`
+  }
+  if (erange) warnings.push(`printf: warning: ${raw}: Numerical result out of range\n`)
+  return null
 }
 
-function isDecimalDigit(code: number): boolean {
-  return code >= 48 && code <= 57
+/**
+ * The value of a leading-quote argument: its next character's code. bash's
+ * builtin takes a lone quote as 0. GNU's program refuses it, and warns that
+ * it ignored any characters after the first unless `POSIXLY_CORRECT` is in
+ * its environment (`posix`).
+ */
+function characterValue(
+  raw: string,
+  program: boolean,
+  posix: boolean,
+  warnings: string[],
+): [number, string | null] {
+  const rest = raw.slice(1)
+  const code = rest.codePointAt(0)
+  if (code === undefined)
+    return [0, program ? `printf: '${quoteText(raw)}': expected a numeric value\n` : null]
+  const after = rest.slice(String.fromCodePoint(code).length)
+  if (program && !posix && after !== '')
+    warnings.push(
+      `printf: warning: ${after}: character(s) following character constant have been ignored\n`,
+    )
+  return [code, null]
 }
 
-function isDecimalFloat(value: string): boolean {
-  let index = 0
-  if (value[index] === '+' || value[index] === '-') index += 1
-  const integerStart = index
-  while (isDecimalDigit(value.charCodeAt(index))) index += 1
-  const integerDigits = index - integerStart
-  let fractionalDigits = 0
-  if (value[index] === '.') {
-    index += 1
-    const fractionalStart = index
-    while (isDecimalDigit(value.charCodeAt(index))) index += 1
-    fractionalDigits = index - fractionalStart
+/** An integer argument's value and the error it fails printf with. */
+function intArgument(
+  raw: string,
+  signed: boolean,
+  program: boolean,
+  posix: boolean,
+  warnings: string[],
+): [bigint, string | null] {
+  if (raw.startsWith("'") || raw.startsWith('"')) {
+    const [code, err] = characterValue(raw, program, posix, warnings)
+    return [BigInt(code), err]
   }
-  if (integerDigits === 0 && fractionalDigits === 0) return false
-  if (value[index] === 'e' || value[index] === 'E') {
-    index += 1
-    if (value[index] === '+' || value[index] === '-') index += 1
-    const exponentStart = index
-    while (isDecimalDigit(value.charCodeAt(index))) index += 1
-    if (index === exponentStart) return false
-  }
-  return index === value.length
+  const [value, read, erange] = readInt(raw, signed)
+  return [value, numericError(raw, read, erange, program, warnings)]
 }
 
-/** Resolve a floating-point argument (decimal, hex float, inf/nan, or the leading-quote code-point form). Returns [value, ok]. */
-function parseFloatArg(value: string): [number, boolean] {
-  const s = value.trim()
-  if (s === '') return [0, true]
-  if (s.startsWith("'") || s.startsWith('"')) {
-    const rest = s.slice(1)
-    return [rest ? (rest.codePointAt(0) ?? 0) : 0, true]
-  }
-  const low = s.toLowerCase().replace(/^[+-]/, '')
-  if (low.startsWith('0x')) {
-    const v = parseHexFloat(s)
-    return v === null ? [0, false] : [v, true]
-  }
-  if (isDecimalFloat(s)) return [Number(s), true]
-  const l = s.toLowerCase().replace(/^[+-]/, '')
-  if (l === 'inf' || l === 'infinity') return [s.startsWith('-') ? -Infinity : Infinity, true]
-  if (l === 'nan') return [NaN, true]
-  return [0, false]
+/** A floating-point argument's value and the error it fails printf with. */
+function floatArgument(
+  raw: string,
+  program: boolean,
+  posix: boolean,
+  warnings: string[],
+): [number, string | null] {
+  if (raw.startsWith("'") || raw.startsWith('"'))
+    return characterValue(raw, program, posix, warnings)
+  const found = STRTOD.exec(raw)
+  if (found === null) return [0, numericError(raw, 0, false, program, warnings)]
+  return [
+    strtodDouble(found),
+    numericError(raw, found[0].length, strtoldErange(found), program, warnings),
+  ]
 }
 
-function parseHexFloat(s: string): number | null {
-  const m = /^([+-]?)0[xX]([0-9a-fA-F]*)(?:\.([0-9a-fA-F]*))?(?:[pP]([+-]?\d+))?$/.exec(s)
-  if (!m) return null
-  const sign = m[1] === '-' ? -1 : 1
-  const intHex = m[2] ?? ''
-  const fracHex = m[3] ?? ''
-  const p = m[4] ? parseInt(m[4], 10) : 0
-  if (!intHex && !fracHex) return null
-  let mant = 0
-  for (const c of intHex) mant = mant * 16 + parseInt(c, 16)
-  let scale = 1
-  for (const c of fracHex) {
-    scale /= 16
-    mant += parseInt(c, 16) * scale
+/**
+ * A `*` width or precision, held to C's `int`: the value, the error that
+ * fails printf, and whether that error stops it. GNU's program refuses one
+ * outside the range and stops, except a precision under it, which reads as
+ * omitted. bash's builtin holds it at the bound and warns, naming the
+ * argument after the `*` (`following`).
+ */
+function starValue(
+  star: string,
+  precision: boolean,
+  following: string | null,
+  program: boolean,
+  posix: boolean,
+  warnings: string[],
+): [bigint, string | null, boolean] {
+  const [value, err] = intArgument(star, true, program, posix, warnings)
+  if (value >= INT_MIN && value <= INT_MAX) return [value, err, false]
+  if (program) {
+    if (precision && value < 0n) return [value, err, false]
+    if (err !== null) warnings.push(err)
+    const field = precision ? 'precision' : 'field width'
+    return [value, `printf: invalid ${field}: '${quoteText(star)}'\n`, true]
   }
-  return sign * mant * 2 ** p
+  if (following !== null)
+    warnings.push(`printf: warning: ${following}: Numerical result out of range\n`)
+  return [value < INT_MIN ? INT_MIN : value > INT_MAX ? INT_MAX : value, err, false]
 }
 
 /** Pad `prefix + body` to `width` per the justify/zero flags. */
@@ -175,7 +228,10 @@ export function applyPad(
   return ' '.repeat(pad) + s
 }
 
-/** Render `%d %i %o %u %x %X` with 64-bit wrap and GNU flag rules. */
+/**
+ * Render `%d %i %o %u %x %X` with GNU flag rules. The value is as read,
+ * signed for `%d`/`%i` and unsigned for the rest.
+ */
 function formatInt(
   value: bigint,
   conv: string,
@@ -186,18 +242,14 @@ function formatInt(
   let prefix = ''
   let digits: string
   if (conv === 'd' || conv === 'i') {
-    const n = wrapSigned(value)
-    const neg = n < 0n
-    digits = (neg ? -n : n).toString()
+    const neg = value < 0n
+    digits = (neg ? -value : value).toString()
     if (neg) prefix = '-'
     else if (flags.includes('+')) prefix = '+'
     else if (flags.includes(' ')) prefix = ' '
-  } else {
-    const u = value & UINT64_MASK
-    if (conv === 'o') digits = u.toString(8)
-    else if (conv === 'x' || conv === 'X') digits = u.toString(16)
-    else digits = u.toString(10)
-  }
+  } else if (conv === 'o') digits = value.toString(8)
+  else if (conv === 'x' || conv === 'X') digits = value.toString(16)
+  else digits = value.toString(10)
   if (precision !== null) {
     if (precision === 0 && /^0*$/.test(digits)) digits = ''
     else if (digits.length < precision) digits = digits.padStart(precision, '0')
@@ -644,6 +696,8 @@ function convert(
   flags: string,
   width: number | null,
   precision: number | null,
+  program: boolean,
+  posix: boolean,
   warnings: string[],
 ): [string, string | null, boolean] {
   if (conv === 's') return [formatPrintfStr(raw ?? '', flags, width, precision), null, false]
@@ -655,22 +709,13 @@ function convert(
   }
   if (conv === 'q') return [applyPad('', quoteShell(raw ?? ''), flags, width, false), null, false]
   if ('diouxX'.includes(conv)) {
-    let value = 0n
-    let err: string | null = null
-    if (raw !== null) {
-      const [v, valid] = numericValue(raw)
-      value = v
-      if (!valid) err = `printf: ${raw}: invalid number\n`
-    }
+    const [value, err] =
+      raw === null
+        ? [0n, null]
+        : intArgument(raw, conv === 'd' || conv === 'i', program, posix, warnings)
     return [formatInt(value, conv, flags, width, precision), err, false]
   }
-  let value = 0
-  let err: string | null = null
-  if (raw !== null) {
-    const [v, valid] = parseFloatArg(raw)
-    value = v
-    if (!valid) err = `printf: ${raw}: invalid number\n`
-  }
+  const [value, err] = raw === null ? [0, null] : floatArgument(raw, program, posix, warnings)
   if (conv === 'f' || conv === 'F')
     return [formatF(value, flags, width, precision, conv === 'F'), err, false]
   if (conv === 'e' || conv === 'E')
@@ -693,9 +738,18 @@ function convert(
  * A `\c` in a `%b` argument returns at once and reports no failure. bash's
  * `%b` returns there with the status it has so far, and only the end of
  * the builtin folds an invalid number into it, so bash 5.2.37 exits 0 for
- * `printf '%d%b' abc '\c'`.
+ * `printf '%d%b' abc '\c'`. coreutils 9.7's program stops there with status
+ * 0 as well, an earlier numeric error or not (`env printf '%f%b' 1e99999
+ * '\c'`). `program` words numeric errors as the
+ * coreutils program does rather than as bash's builtin, and `posix` says
+ * the program runs with `POSIXLY_CORRECT` set.
  */
-export function runPrintf(fmt: string, args: string[]): [string, string[], boolean, string | null] {
+export function runPrintf(
+  fmt: string,
+  args: string[],
+  program = false,
+  posix = false,
+): [string, string[], boolean, string | null] {
   const out: string[] = []
   const messages: string[] = []
   let failed = false
@@ -733,7 +787,13 @@ export function runPrintf(fmt: string, args: string[]): [string, string[], boole
         if (widthStar === '*') {
           const star = argI < total ? (args[argI] ?? '0') : '0'
           if (argI < total) argI += 1
-          const [wv] = numericValue(star)
+          const following = argI < total ? (args[argI] ?? null) : null
+          const [wv, err, fatal] = starValue(star, false, following, program, posix, messages)
+          if (err !== null) {
+            messages.push(err)
+            failed = true
+          }
+          if (fatal) return [out.join(''), messages, true, null]
           const w = Number(wv)
           if (w < 0) {
             flags += '-'
@@ -744,13 +804,28 @@ export function runPrintf(fmt: string, args: string[]): [string, string[], boole
         if (precStar === '*') {
           const star = argI < total ? (args[argI] ?? '0') : '0'
           if (argI < total) argI += 1
-          const [pv] = numericValue(star)
+          const following = argI < total ? (args[argI] ?? null) : null
+          const [pv, err, fatal] = starValue(star, true, following, program, posix, messages)
+          if (err !== null) {
+            messages.push(err)
+            failed = true
+          }
+          if (fatal) return [out.join(''), messages, true, null]
           const p = Number(pv)
           precision = p < 0 ? null : p
         }
         const raw = argI < total ? (args[argI] ?? '') : null
         if (raw !== null) argI += 1
-        const [text, err, stopHere] = convert(conv, raw, flags, width, precision, messages)
+        const [text, err, stopHere] = convert(
+          conv,
+          raw,
+          flags,
+          width,
+          precision,
+          program,
+          posix,
+          messages,
+        )
         if (err !== null) {
           messages.push(err)
           failed = true

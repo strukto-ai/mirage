@@ -27,10 +27,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "grep -c s /data/a.txt /data2/xm.txt",
+      "command": "grep -c s /data/a.txt /data2/xm.txt; grep -Fxc world /data/a.txt /data2/xm.txt",
       "expect": {
         "exit": 0,
-        "stdout": "/data/a.txt:0\n/data2/xm.txt:1\n",
+        "stdout": "/data/a.txt:0\n/data2/xm.txt:1\n/data/a.txt:1\n/data2/xm.txt:0\n",
         "stderr": ""
       }
     },

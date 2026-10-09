@@ -48,7 +48,7 @@ export interface CondContext {
   namespace: Namespace
   session: SessionState
   name: string
-  // The session plane's gated door, which an assignment inside a numeric
+  // The gated session view, which an assignment inside a numeric
   // operand lands through; absent outside a workspace.
   view?: SessionView
 }

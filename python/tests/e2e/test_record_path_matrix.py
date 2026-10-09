@@ -44,8 +44,8 @@ SCRIPT = [
     "csplit -f /m/m/cs /m/m/k.txt 2",
 ]
 
-# Namespace ops record at the door with the virtual path already, so they
-# cannot tell the two behaviours apart; exempt by op name, not by source.
+# Namespace ops record at the dispatcher with the virtual path already, so
+# they cannot tell the two behaviours apart; exempt by op name, not by source.
 EXEMPT_OPS = {
     "setattr",
     "symlink",
@@ -193,7 +193,7 @@ async def _run_records(
         # A loud failure trips the exit code; a silent no-op, the exact ledger.
         assert io.exit_code == 0, (line, await io.stderr_str())
     records = list(ws._files.records)
-    # touch records write, so only the op door reaches create.
+    # touch records write, so only the dispatcher reaches create.
     scope = RecordingScope()
     try:
         path = PathSpec.from_str_path(C)

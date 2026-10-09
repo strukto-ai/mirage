@@ -19,7 +19,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIDoors, CLIInvocation } from '../../types.ts'
+import type { CLIView, CLIInvocation } from '../../types.ts'
 import { headEntries } from './changes.ts'
 import { GITLINK_MODE, HEAD } from './constants.ts'
 import {
@@ -137,20 +137,20 @@ export async function sourceTree(
  * "make it match the source" means for it. Pinned against git 2.50.1.
  */
 export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let notes: string[] = []
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     if (texts.length === 0) throw new NoRestorePathsError()
     const flags = parseFlags(fl)
-    const repo = await opened(fl, doors, true)
+    const repo = await opened(fl, view, true)
     let source: Map<string, TreeEntry> | null
     if (flags.source !== undefined) {
       ;[, source] = await sourceTree(repo, flags.source)
@@ -169,7 +169,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     ;[notes] = await restorePaths(
       repo,
-      doors,
+      view,
       texts,
       startPoint(fl).virtual,
       source,
@@ -194,7 +194,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
  * is; without it, restore's own reading, such a path is removed.
  *
  * @param repo the opened repository
- * @param doors the invocation's doors
+ * @param view the invocation's view
  * @param operands the pathspecs as typed
  * @param start the directory the line runs in
  * @param source the tree to restore from, null for the index
@@ -205,7 +205,7 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
  */
 export async function restorePaths(
   repo: Repo,
-  doors: CLIDoors,
+  view: CLIView,
   operands: readonly string[],
   start: string,
   source: Map<string, TreeEntry> | null,
@@ -213,8 +213,8 @@ export async function restorePaths(
   worktree: boolean,
   overlay: boolean,
 ): Promise<[string[], number]> {
-  const dispatch = doors.dispatch
-  const statPath = doors.statPath
+  const dispatch = view.dispatch
+  const statPath = view.statPath
   if (statPath === undefined || dispatch === undefined) throw new NoWorkspaceError()
   const notes: string[] = []
   let updated = 0
@@ -249,8 +249,8 @@ export async function restorePaths(
   // simply removed.
   const unmerged = absent.filter((name) => state.conflicts.has(name))
   if (unmerged.length > 0) throw new UnmergedPathError(unmerged)
-  const links = doors.ns?.links ?? null
-  const mounts = doors.ns?.mounts ?? null
+  const links = view.ns?.links ?? null
+  const mounts = view.ns?.mounts ?? null
   // Before the index is written, not at the entry that meets it: `-SW`
   // stages first and restores after, so a refusal in the working-tree pass
   // would leave the index moved and the tree exactly as it was, which is the

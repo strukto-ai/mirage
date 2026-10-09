@@ -164,7 +164,7 @@ async def _fan_out_traversal(
         cmd_str (str): The command as typed, for the execution record.
         stdin (ByteSource | None): Standard input for the command.
         ns (NamespaceView | None): Name-plane facts.
-        session_view (SessionView | None): The session plane's door.
+        session_view (SessionView | None): The session view.
         dispatch (DispatchFn | None): Workspace operation dispatcher.
         native (RunSingle | None): Single-mount runner each mount's part
             of the walk runs on.
@@ -212,7 +212,7 @@ async def _fan_out_traversal(
     except Exception as exc:
         # A backend failure anywhere in the walk (a 5xx from a nested
         # mount) is this command's result, in its voice, as the
-        # single-mount door reports it; the rest of the line still runs.
+        # single-mount entry point reports it; the rest of the line still runs.
         logger.debug("%s traversal failed", cmd_name, exc_info=True)
         stdout, io = (
             None,

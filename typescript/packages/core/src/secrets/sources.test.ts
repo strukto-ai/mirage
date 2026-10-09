@@ -67,7 +67,7 @@ describe('resolveSources', () => {
   })
 
   it('takes a raw declaration, not only a parsed one', async () => {
-    // The config door and a clone override hand over what they were
+    // The config loader and a clone override hand over what they were
     // given; only the constructor parses eagerly.
     const built = await resolveSources({
       prod: { source: 'demo-sources', config: { account: 'raw' } },
@@ -393,7 +393,7 @@ describe('resolveSourcesFor', () => {
 
   it('builds nothing when no config points', async () => {
     // Building a source reads its bootstrap pointers, and a dotenv file
-    // is I/O; a door whose configs hold no pointer must not pay it, or
+    // is I/O; a loader whose configs hold no pointer must not pay it, or
     // a momentarily unreadable file fails a workspace that never
     // needed the source.
     expect(await resolveSourcesFor(brokenBootstrap(), [{ token: 'literal' }, {}])).toBeUndefined()
@@ -415,7 +415,7 @@ describe('resolveSourcesFor', () => {
     expect(await resolveSourcesFor(null, [{ token: pointer }])).toBeUndefined()
     expect(await resolveSourcesFor({}, [{ token: pointer }])).toBeUndefined()
     // A list from an untyped REST override is not a mapping; the
-    // constructor refuses it with the wording every door shares.
+    // constructor refuses it with the wording every loader shares.
     expect(await resolveSourcesFor([brokenBootstrap()], [{ token: pointer }])).toBeUndefined()
   })
 })

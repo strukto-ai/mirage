@@ -87,7 +87,7 @@ async function evalCondBinary(
     // so a hidden name reads as unset here too.
     // bash evaluates the left operand, binds what it assigned, then
     // evaluates the right (`[[ x=5 -eq x ]]` is true and leaves x at 5),
-    // so each operand lands its assignments through the gated door before
+    // so each operand lands its assignments through the gated session view before
     // the next reads, RANDOM's seed included (`[[ RANDOM=42 -eq RANDOM ]]`
     // seeds, then draws).
     const reader = randomReader(ctx.session)

@@ -8,7 +8,7 @@ from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import fatal
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 
@@ -22,11 +22,11 @@ async def stash_list(
         inv (CLIInvocation[None]): repository invocation.
     """
     try:
-        doors = inv.doors or CLIDoors()
-        _, location = await opened(FlagView(inv.flags), doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        _, location = await opened(FlagView(inv.flags), view)
+        assert view.dispatch is not None
         data = await read_optional(
-            doors.dispatch, location.commondir.join("logs/refs/stash")
+            view.dispatch, location.commondir.join("logs/refs/stash")
         )
         lines = (data or b"").splitlines()
         text = b"".join(
@@ -47,14 +47,14 @@ async def stash_show(
         inv (CLIInvocation[None]): optional stash selector and diff options.
     """
     try:
-        doors = inv.doors or CLIDoors()
-        repo, location = await opened(FlagView(inv.flags), doors)
-        assert doors.dispatch is not None
+        view = inv.view or CLIView()
+        repo, location = await opened(FlagView(inv.flags), view)
+        assert view.dispatch is not None
         selector = inv.texts[0] if inv.texts else "stash@{0}"
         match = re.fullmatch(r"(?:stash@\{(\d+)\}|(\d+))", selector)
         if match is not None:
             data = await read_optional(
-                doors.dispatch, location.commondir.join("logs/refs/stash")
+                view.dispatch, location.commondir.join("logs/refs/stash")
             )
             rows = list(reversed((data or b"").splitlines()))
             index = int(match.group(1) or match.group(2))
@@ -69,9 +69,9 @@ async def stash_show(
         if len(commit.parents) < 2:
             raise GitError(f"'{selector}' is not a stash-like commit")
         flags = dict(inv.flags)
-        view = FlagView(flags)
+        flag_view = FlagView(flags)
         if not any(
-            view.as_bool(name)
+            flag_view.as_bool(name)
             for name in (
                 "patch",
                 "name_only",

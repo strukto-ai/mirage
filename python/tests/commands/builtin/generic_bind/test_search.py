@@ -24,8 +24,11 @@ from mirage.commands.builtin.generic_bind.search import (
     narrow_scope,
     run_search,
 )
+from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.search import make_search_op
 from mirage.errors.fs import efbig, enoent
@@ -143,20 +146,29 @@ def test_unmatched_kind_takes_the_generic_scan():
     assert result.exit_code == 0
 
 
-def test_shaping_flag_defers_to_the_generic_scan():
-    search = _search_command({"room": _room_searcher}, IO)
+@pytest.mark.parametrize(
+    "flags,pattern,expected,code",
+    [
+        ({"v": True}, "ada", b"y\n", 0),
+        ({"line_regexp": True}, "ada", b"", 1),
+        ({"line_regexp": True}, "y", b"y\n", 0),
+    ],
+)
+def test_shaping_flag_defers_to_the_generic_scan(
+    flags, pattern, expected, code
+):
+    provider = AsyncMock(return_value=["provider substring hit"])
+    search = _search_command({"note": provider}, IO)
     out, result = asyncio.run(
         search(
             FakeAccessor(),
             [spec("/rooms/red/a.json")],
-            ["ada"],
-            CommandOpts(flags={"v": True}),
+            [pattern],
+            CommandOpts(flags=flags),
         )
     )
-    drained = asyncio.run(_drain(out))
-    assert result.exit_code == 0
-    assert b"y" in drained
-    assert b"x ada" not in drained
+    assert (asyncio.run(_drain(out)), result.exit_code) == (expected, code)
+    provider.assert_not_awaited()
 
 
 def test_guard_probes_existence_before_searching():
@@ -205,7 +217,6 @@ def test_stream_first_pull_failure_falls_back_to_bytes():
 
 
 def test_stream_failure_after_data_is_reported():
-
     async def _breaking_stream(
         accessor: FakeAccessor, path: PathSpec, index=NULL_INDEX
     ):
@@ -385,7 +396,16 @@ def test_a_recursive_whole_word_literal_narrows_to_candidates():
 
 @pytest.mark.parametrize(
     "gates",
-    [{"recursive": False}, {"exact_file_set": True}, {"whole_word": False}],
+    [
+        {"recursive": False},
+        {"exact_file_set": True},
+        {"whole_word": False},
+        {
+            "exact_file_set": grep_needs_every_file(
+                FlagView({"w": True, "line_regexp": True}, spec=SPECS["grep"])
+            )
+        },
+    ],
 )
 def test_a_failed_gate_scans_every_file(gates):
     io, narrow = _narrowing()

@@ -12,24 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, type FileStat, FileType } from '../../../../types.ts'
+import { PathSpec, FileType } from '../../../../types.ts'
+import type { StatFn } from './walk.ts'
 
-export type StatDoor = (p: PathSpec) => Promise<FileStat>
-export type MkdirDoor = (p: PathSpec, parents?: boolean) => Promise<void>
+export type MkdirFn = (p: PathSpec, parents?: boolean) => Promise<void>
 
 /**
  * Where extraction lands: the explicit operand, else the cwd.
  *
  * The explicit operand is tar's last -C or unzip's -d, already validated
- * before extracting any members. TypeScript doors use virtual paths;
- * Python accessor doors use mount-relative paths.
+ * before extracting any members. TypeScript functions use virtual paths;
+ * Python accessor functions use mount-relative paths.
  */
 export function extractDest(explicit: PathSpec | string | null, cwd: string): string {
   const target = explicit ?? cwd
   return target instanceof PathSpec ? target.virtual : target || '/'
 }
 
-async function dirExists(stat: StatDoor, level: PathSpec): Promise<boolean> {
+async function dirExists(stat: StatFn, level: PathSpec): Promise<boolean> {
   try {
     return (await stat(level)).type === FileType.DIRECTORY
   } catch {
@@ -50,8 +50,8 @@ async function dirExists(stat: StatDoor, level: PathSpec): Promise<boolean> {
 export async function ensureDir(
   dirPath: string,
   toSpec: (virtual: string) => PathSpec,
-  mkdir: MkdirDoor,
-  stat: StatDoor,
+  mkdir: MkdirFn,
+  stat: StatFn,
   made: Set<string>,
 ): Promise<void> {
   const parts = dirPath.split('/').filter((part) => part !== '')

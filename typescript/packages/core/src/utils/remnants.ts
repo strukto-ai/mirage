@@ -47,7 +47,7 @@ export class VisibleRemnant extends Error {
  * deletion must still answer for its path's mode and rules exactly as
  * a first-class op would (the command plane binds its mode- and
  * rule-guarded slots, the dispatcher routes through its own fenced op
- * door), while the visibility filter stays off because the cascade
+ * call), while the visibility filter stays off because the cascade
  * exists to see and destroy what the session cannot. The cascade never
  * sprinkles those checks itself; wiring a raw, unguarded channel here
  * is the bug this contract exists to prevent.
@@ -75,7 +75,7 @@ export function entryName(entry: string): string {
  * The one emptiness predicate every remnant arm judges with, fed every
  * name source its plane can enumerate (the backend listing, and on the
  * ops plane the namespace's merged children too), so "visibly empty"
- * cannot mean different things at different doors.
+ * cannot mean different things at different entry points.
  */
 export function visibleBelow(base: string, names: Iterable<string>, allowed: Allowed): boolean {
   const root = rstripSlash(base)

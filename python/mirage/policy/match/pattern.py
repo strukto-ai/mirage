@@ -38,7 +38,7 @@ def pattern_matches(pattern: str, tokens: Sequence[str]) -> bool:
 
     Args:
         pattern (str): the pattern as written.
-        tokens (Sequence[str]): the line as the door normalized it,
+        tokens (Sequence[str]): the line as the entry point normalized it,
             command name first.
     """
     want = split_pattern(pattern)

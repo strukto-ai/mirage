@@ -42,7 +42,7 @@ export function headVisible(name: string, rules: AdmissionRules | null): boolean
 }
 
 /**
- * The tokens a pattern reads: the door's normalization when it set one,
+ * The tokens a pattern reads: the entry point's normalization when it set one,
  * else the name and the raw argv (a context built by hand).
  */
 export function lineTokens(ctx: CommandContext): readonly string[] {
@@ -51,7 +51,7 @@ export function lineTokens(ctx: CommandContext): readonly string[] {
 
 /**
  * Whether the profile's allow list has a pattern for the whole line. A
- * word that is not a tool (`ctx.tool` cleared by the door: the agent's
+ * word that is not a tool (`ctx.tool` cleared by the entry point: the agent's
  * own function, an executed path) is always allowed here; a deny rule
  * is the only thing that can refuse it.
  */

@@ -69,9 +69,21 @@ it.each([false, true])('checks native loose and packed objects (packed=%s)', asy
     native(root, ['stash', 'push', '-m', 'saved'])
     if (packed) native(root, ['gc', '--prune=now'])
     await load(ws, root)
-    const checked = await ws.shell('git -C /repo fsck --no-dangling')
-    expect(new TextDecoder().decode(checked.stderr)).toBe('')
-    expect(checked.exitCode).toBe(0)
+    for (const options of [
+      [],
+      ['--no-dangling'],
+      ['--unreachable'],
+      ['--unreachable', '--no-dangling'],
+    ]) {
+      const checked = await ws.shell(`git -C /repo fsck ${options.join(' ')}`)
+      expect(new TextDecoder().decode(checked.stderr)).toBe('')
+      expect(checked.exitCode).toBe(0)
+      expect(new TextDecoder().decode(checked.stdout).split('\n').sort()).toEqual(
+        native(root, ['fsck', ...options])
+          .split('\n')
+          .sort(),
+      )
+    }
     if (!packed) {
       const oid = native(root, ['rev-parse', 'HEAD:a.txt']).trim()
       unlinkSync(join(root, '.git/objects', oid.slice(0, 2), oid.slice(2)))

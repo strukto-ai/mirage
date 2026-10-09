@@ -16,7 +16,7 @@
 # stdout are exact, stderr is a containment check (the CLI owns its
 # stderr framing), and the SDK-side expectations (ops_contain,
 # ops_absent, ops_count, value) are not checked because the op ledger has no CLI
-# door.
+# entry point.
 #
 # A yaml file is any JSON document here: YAML is a superset of JSON,
 # so the driver emits the case world as JSON with jq and both loaders
@@ -148,7 +148,7 @@ runtime_variants() {
 # Whether this case can run over the CLI at all. Worlds carrying code
 # policies (runner-local Policy classes) or a failing mount (a runner-local
 # VFS) cannot cross the yaml/daemon boundary, and read_op steps need the
-# SDK op door.
+# SDK dispatcher.
 cli_expressible() {
   local case_json="$1"
   jq -e '

@@ -28,6 +28,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-l"),
             Option(short="-L", long="--files-without-match"),
             Option(short="-w"),
+            Option(short="-x", long="--line-regexp"),
             Option(short="-F"),
             Option(short="-E"),
             # -G asks for the basic expressions grep already reads by
@@ -434,6 +435,7 @@ SPECS: dict[str, CommandSpec] = {
             # lines are gzip's (gzip 1.13).
             Option(short="-s"),
             Option(short="-w"),
+            Option(short="-x", long="--line-regexp"),
         ),
         positional=(Operand(type="str", provided_by=("-e", "-f")),),
         rest=Operand(type="path"),

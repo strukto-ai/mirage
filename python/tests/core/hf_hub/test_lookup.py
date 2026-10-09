@@ -223,7 +223,7 @@ async def test_a_read_retries_when_the_index_is_cleared_under_it(
     index = _ClearedMidLookup()
     entry = await resolve_entry(accessor, ps("a.txt"), index)
     # Without the retry the cleared store answers "no such file", and
-    # through a dispatcher door that drops the file's overlay for good.
+    # through a dispatcher that drops the file's overlay for good.
     assert entry.size == 7
     assert fetch.await_count == 2
 

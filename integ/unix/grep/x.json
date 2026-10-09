@@ -1,0 +1,134 @@
+{
+  "cases": [
+    {
+      "id": "grep_x_flags_and_patterns",
+      "seq": 16801000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "grep -x world /data/a.txt; grep --line-regexp -q or /data/a.txt; echo rc=$?; grep -Fxc world /data/a.txt; grep -vxc world /data/a.txt; grep -x -f /data/patterns.txt /data/a.txt; printf 'a.b\\nc+\\nA.B\\nxa.b\\nc++\\n' | grep -Fxi -e a.b -e c+",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nrc=1\n1\n4\nworld\nbar\na.b\nc+\nA.B\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "line-regexp",
+        "q",
+        "F",
+        "c",
+        "v",
+        "f",
+        "i",
+        "e"
+      ]
+    },
+    {
+      "id": "grep_x_dialects_and_word_precedence",
+      "seq": 16801001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\nabc\\na\\n' | grep -Ex 'a|ab'; printf 'abab\\nababx\\n' | grep -x '\\(ab\\)\\1'; printf 'ab\\nabc\\n' | grep -Pxo 'a\\Kb'; printf '@\\nx@\\n@x\\n' | grep -xw @; printf '@\\nx@\\n@x\\n' | grep -wx @",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\na\nabab\nb\n@\n@\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "E",
+        "P",
+        "o",
+        "w"
+      ]
+    },
+    {
+      "id": "grep_x_line_boundaries_and_empty_patterns",
+      "seq": 16801002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\r\\nab\\n\\nabc\\nab' | grep -nbx -e ab -e ''; printf 'ab\\r\\nab\\nabc\\nab' | grep -nbx -B1 -m1 ab; printf '\\nab\\n' | grep -Fx -f /data/empty.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:4:ab\n3:7:\n5:12:ab\n1-0-ab\r\n2:4:ab\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "n",
+        "b",
+        "e",
+        "B",
+        "m",
+        "F",
+        "f"
+      ]
+    }
+  ]
+}

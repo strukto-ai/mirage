@@ -54,7 +54,7 @@ export async function handleCrossMount(
   storageKey?: (path: PathSpec) => string,
   // Name-plane facts for the RELAY generics that render them (ls).
   ns?: NamespaceView,
-  // The session plane's door, for the RELAY generic that renders the
+  // The session view, for the RELAY generic that renders the
   // session's profile (ls).
   sessionView?: SessionView,
   // The session's working directory, which a typed operand resolves against

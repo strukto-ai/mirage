@@ -234,7 +234,7 @@ UNMATCHED_CLOSE = "Unmatched ) or \\)"
 # dfa.c's refusal of a bracket that looks like a class written without
 # its outer brackets, which sed's dfawarn turns into a panic (exit 4).
 CONFUSING_BRACKET = "character class syntax is [[:space:]], not [:space:]"
-# GNU runs `e` and `s///e` through popen; mirage has no door to run a
+# GNU runs `e` and `s///e` through popen; mirage has no entry point to run a
 # shell command from inside sed, so it refuses both where GNU compiles
 # them, in the words GNU's own no-popen build uses at run time.
 NO_EVAL = "`e' command not supported"

@@ -169,7 +169,7 @@ async def lookup_retrying(
     A reconcile verdict clears the mount index, and one landing between
     the refill and the read leaves a miss that only says the store is
     empty. Read as absence, that miss reaches ``on_enoent`` through a
-    dispatcher door and drops the path's overlay for good. Two signs tell
+    dispatcher and drops the path's overlay for good. Two signs tell
     that miss from a real one: the root listing is gone (a live index
     always has one), or the accessor refilled an index while the lookup
     ran, which is a clear followed by a concurrent reseed. The first

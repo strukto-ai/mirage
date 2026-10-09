@@ -53,7 +53,7 @@ from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import Decoration
 from mirage.commands.cli.builtin.git.util import check_operands, fatal
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -289,10 +289,10 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
@@ -301,7 +301,7 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             raise NoWorkspaceError()
         check_operands(inv, texts)
         parsed = parse_flags(fl, inv.env)
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         parsed = replace(
             parsed,
             mailmap=await load_mailmap(dispatch, location),

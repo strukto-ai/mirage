@@ -412,14 +412,14 @@ describe('SessionManager admission rules', () => {
     late.commands = own
     expect(m.commandsOf('late')).toBe(own)
     // A session the profile never narrowed states no rules, and so does an
-    // id the manager does not know (the empty id of an unbound door
+    // id the manager does not know (the empty id of an unbound entry point
     // included), unless a default profile says otherwise.
     expect(m.commandsOf('early')).toBeNull()
     expect(m.commandsOf('nobody')).toBeNull()
     expect(m.commandsOf('')).toBeNull()
     expect(early.commands).toBeNull()
     // With a default profile compiled in, an unknown id answers its rules
-    // rather than nothing, so an unbound door still fails toward refusal.
+    // rather than nothing, so an unbound entry point still fails toward refusal.
     m.defaultProfile = compiled({ commands: { allow: ['cat'], ask: [], deny: [] } })
     expect(m.commandsOf('nobody')).toEqual({ allow: ['cat'], ask: [], deny: [] })
     expect(m.commandsOf('')).toEqual({ allow: ['cat'], ask: [], deny: [] })

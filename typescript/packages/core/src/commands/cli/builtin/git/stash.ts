@@ -15,7 +15,7 @@ import { fatal } from './util.ts'
 /** Read the same newest-first stash reflog that real Git writes. */
 export async function stashList(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
-    const repo = await opened(new FlagView(inv.flags), inv.doors ?? {})
+    const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
     const data = await readOptional(repo.dispatch, repo.location.commondir.join('logs/refs/stash'))
     const rows = new TextDecoder()
       .decode(data ?? new Uint8Array())
@@ -35,7 +35,7 @@ export async function stashList(inv: CLIInvocation): Promise<CommandFnResult> {
 /** Compare the saved working tree with the stash's first parent, never current HEAD. */
 export async function stashShow(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
-    const repo = await opened(new FlagView(inv.flags), inv.doors ?? {})
+    const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
     let selector = inv.texts[0] ?? 'stash@{0}'
     const match = /^(?:stash@\{(\d+)\}|(\d+))$/.exec(selector)
     if (match !== null) {

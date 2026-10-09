@@ -210,7 +210,7 @@ describe('compileCommands', () => {
     )
     const rule = rules?.deny[0] ?? { reason: 'missing' }
     expect(rule.paths).toEqual(['/repo/*.pem'])
-    // The stamp scopes the rule at admission, but the op door reads the
+    // The stamp scopes the rule at admission, but the dispatcher reads the
     // paths alone, so a raw name pattern refused a read in every other
     // mount too.
     const scope = ruleScope(rule)

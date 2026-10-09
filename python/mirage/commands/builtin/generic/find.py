@@ -330,7 +330,7 @@ async def resolve_start(
     try:
         start = await stat_path(search)
     except OSError as exc:
-        # A start point the door refuses to stat is GNU's own
+        # A start point the dispatcher refuses to stat is GNU's own
         # diagnostic for it, quoted like a missing one
         # (`find: 'P': Permission denied`), not an escaped error.
         detail = fs_strerror(exc)

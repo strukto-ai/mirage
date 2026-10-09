@@ -341,7 +341,7 @@ def _anchored(entries: tuple[str, ...], root: str) -> tuple[str, ...]:
     A name pattern (``*.pem``, no slash) anchors nothing, and both
     places a mount section's entries are read from have lost the
     section by then: the session's hidden set is one list for every
-    mount, and the op door matches a rule's paths without consulting
+    mount, and the dispatcher matches a rule's paths without consulting
     ``rule.mount``. Left raw, ``mounts./repo.paths.hide: ["*.pem"]``
     hid ``/other/key.pem`` too, and a path-only deny under ``/repo``
     refused a read of it. The dialect's ``*`` crosses ``/``, so
@@ -367,7 +367,7 @@ def _scope_rules(
     The stamp is what makes the rule apply to a line that *works
     inside* the mount, by cwd or by operand, which a path-scoped rule
     cannot express. The anchor is for the entries the stamp cannot
-    reach: the op door reads a rule's paths alone (:func:`_anchored`).
+    reach: the dispatcher reads a rule's paths alone (:func:`_anchored`).
 
     Args:
         rules (tuple[CommandRule, ...]): the rules as written.
@@ -499,7 +499,7 @@ def compile_script(
 
     Raises:
         PolicyError: the policy is still a path, which means it reached
-            the workspace without passing the config door that loads
+            the workspace without passing the config loader that loads
             one.
     """
     policy = effective.policy
@@ -508,7 +508,7 @@ def compile_script(
     if isinstance(policy.script, str):
         raise PolicyError(
             f"profile {name!r} names a policy by path "
-            f"({policy.script!r}); only the config door loads one, pass "
+            f"({policy.script!r}); only the config loader loads one, pass "
             f"ScriptSource in code"
         )
     return ProfileScript(

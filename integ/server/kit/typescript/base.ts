@@ -55,7 +55,7 @@ export interface Fake<C extends MinimalClient> {
   ) => Promise<void>
   // What a fake has to FORGET when a /reset has replaced a tenant's rows
   // underneath it -- today gws and its cached tenant world. A KIT hook because
-  // there is no other door: /reset is answered in `answer()` before the router
+  // there is no other way in: /reset is answered in `answer()` before the router
   // matches, so no route can see one. It is handed the run's CLIENT because
   // that is what such a cache is keyed by, and fires for every reset that
   // reached one, successful or not: a reset that threw has already cleared

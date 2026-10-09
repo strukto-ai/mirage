@@ -138,7 +138,7 @@ class AwkStreams:
         read_stream (Callable[..., AsyncIterator[bytes]]): the mount's
             reader for an operand.
         stdin (ByteSource | None): awk's standard input.
-        dispatch (DispatchFn | None): the workspace op door.
+        dispatch (DispatchFn | None): the workspace dispatcher.
         cwd (PathSpec): the directory relative names resolve against.
         shell (ShellFn | None): runs a nested line in the session.
         local (Callable[[PathSpec], bool]): whether this mount serves an
@@ -342,7 +342,7 @@ async def awk_generic(
             for data files.
         stdin (ByteSource | None): Standard input.
         index (IndexCacheStore): The mount's index cache store.
-        dispatch (DispatchFn | None): The workspace op door that
+        dispatch (DispatchFn | None): The workspace dispatcher that
             ``getline < file`` reads and output redirection writes
             through.
         cwd (PathSpec): What relative file names resolve against.

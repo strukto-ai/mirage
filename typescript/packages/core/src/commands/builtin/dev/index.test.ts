@@ -25,9 +25,9 @@ const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
 const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
-describe('a file in /dev is read at the door', () => {
+describe('a file in /dev is read at the dispatcher', () => {
   // cat and head read /dev in ranges, which /dev/zero answers without end;
-  // each range is a door read, so a policy refusing the file is asked
+  // each range is a dispatcher read, so a policy refusing the file is asked
   // before any byte is printed.
   it.each(['cat', 'head -n 1'])('%s', async (command) => {
     const ws = new Workspace(

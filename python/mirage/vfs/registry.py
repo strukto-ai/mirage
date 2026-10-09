@@ -303,11 +303,11 @@ def _vfs_defect(built: BaseVFS) -> str | None:
     program rather than by a line an agent types.
 
     The subclass check is the contract, not a structural one, because
-    that is what the mount door enforces:
+    that is what mounting enforces:
     ``workspace/workspace/mounts.py::check_vfs`` refuses anything
     failing ``isinstance(VFS, BaseVFS)``. A structural check
     here would accept a class that supplies every member and then watch
-    it be rejected two doors later, which is the opposite of what this
+    it be rejected two steps later, which is the opposite of what this
     guard is for. Deliberately unlike the TypeScript twin, which does
     check members: a script file there may load its own copy of the
     package, so an ``instanceof`` would refuse a class that extends
@@ -369,7 +369,7 @@ def build_vfs(name: str, config: dict[str, Any] | None = None) -> BaseVFS:
     ``mirage.vfs`` entry points from installed packages. See
     :func:`resolve_entry`.
 
-    **Synchronous on purpose. Do not make this async.** It is the door
+    **Synchronous on purpose. Do not make this async.** It is the config loader
     every caller who describes a mount as data comes through: the YAML
     loader (:meth:`mirage.config.WorkspaceConfig.to_workspace_kwargs`),
     the daemon's create/load routes, ``clone``, and every embedder

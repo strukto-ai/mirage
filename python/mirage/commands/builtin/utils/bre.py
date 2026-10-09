@@ -248,10 +248,12 @@ class BreTranslator:
         pattern: str,
         refuse_inverted_range: bool,
         syntax: PosixSyntax = PosixSyntax.BASIC,
+        dot_matches_nul: bool = True,
     ) -> None:
         self.src = pattern
         self.refuse_inverted_range = refuse_inverted_range
         self.syntax = syntax
+        self.dot_matches_nul = dot_matches_nul
         self.extended = syntax is not PosixSyntax.BASIC
         self.pos = 0
         self.out: list[str] = []
@@ -337,7 +339,7 @@ class BreTranslator:
                 self.alternate()
             elif ch == ".":
                 self.pos += 1
-                self.atom(".")
+                self.atom("." if self.dot_matches_nul else r"(?:(?!\x00).)")
             elif ch == "^":
                 self.pos += 1
                 if self.extended or self.caret_anchors:
@@ -798,6 +800,7 @@ def translate_bre(
 def translate_ere(
     pattern: str,
     syntax: PosixSyntax = PosixSyntax.EGREP,
+    dot_matches_nul: bool = True,
 ) -> tuple[str, int, tuple[str, ...]]:
     """Translate a POSIX ERE into this host's regex dialect.
 
@@ -814,6 +817,7 @@ def translate_ere(
         pattern (str): the ERE exactly as it arrived.
         syntax (PosixSyntax): ``EGREP`` for grep -E, ``EXTENDED`` for
             ``regcomp(REG_EXTENDED)``.
+        dot_matches_nul (bool): whether a dot may consume a NUL byte.
 
     Returns:
         tuple[str, int, tuple[str, ...]]: the host pattern source, its
@@ -823,7 +827,7 @@ def translate_ere(
     Raises:
         BreError: the pattern is one glibc would refuse.
     """
-    translator = BreTranslator(pattern, True, syntax)
+    translator = BreTranslator(pattern, True, syntax, dot_matches_nul)
     source, groups = translator.translate()
     return source, groups, tuple(translator.warnings)
 

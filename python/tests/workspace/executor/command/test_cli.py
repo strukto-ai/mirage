@@ -407,7 +407,7 @@ async def test_script_selects_by_language_and_runs():
 
 @pytest.mark.asyncio
 async def test_script_declared_options_still_pass_verbatim():
-    # The spec is a typed front door: a declared option validates, then
+    # The spec is a typed entry point: a declared option validates, then
     # the program still receives the raw tokens, the contract a native
     # binary could also honor.
     py = FakePyRuntime()
@@ -536,7 +536,7 @@ async def test_script_help_reaches_a_program_that_declared_nothing():
 
 @pytest.mark.asyncio
 async def test_script_help_renders_when_the_spec_declares_a_grammar():
-    # Declaring options opts back into the front door, where the
+    # Declaring options opts back into the entry point, where the
     # rendered page is truthful and the program never runs.
     py = FakePyRuntime()
     install = script_install(
@@ -895,8 +895,8 @@ class DenyAwsWrites(Policy):
 
 
 async def stash(inv: CLIInvocation[None]):
-    """A leaf that writes the session plane through its door."""
-    view = inv.doors.session_view if inv.doors is not None else None
+    """A leaf that writes the session plane through its entry point."""
+    view = inv.view.session_view if inv.view is not None else None
     if view is None:
         return b"no session plane\n", IOResult(exit_code=1)
     await view.set(inv.texts[0], inv.texts[1])
@@ -907,8 +907,8 @@ STASH = CLISpec(name="stash", fn=stash, rest=Operand(type="str"))
 
 
 @pytest.mark.asyncio
-async def test_a_leaf_writes_the_session_through_its_door():
-    # The session plane's door is what a registered CLI has instead of
+async def test_a_leaf_writes_the_session_through_its_entry_point():
+    # The session view is what a registered CLI has instead of
     # reaching into the session: the write lands, and the shell sees it.
     with Workspace({"/ram/": RAMVFS()}) as ws:
         ws.register_cli("stash", STASH)
@@ -921,9 +921,9 @@ async def test_a_leaf_writes_the_session_through_its_door():
 
 @pytest.mark.asyncio
 async def test_a_leafs_session_write_clears_the_same_gate_the_shell_does():
-    # A door that skipped the gate would make an installed CLI the way
+    # An entry point that skipped the gate would make an installed CLI the way
     # around every pre_session rule, which is the whole reason writes
-    # go through one door rather than to the session.
+    # go through one entry point rather than to the session.
     with Workspace({"/ram/": RAMVFS()}, policies=[DenyAwsWrites()]) as ws:
         ws.register_cli("stash", STASH)
         denied = await ws.shell("stash AWS_PROFILE prod")

@@ -27,7 +27,7 @@ from starlette.routing import Route
 from mirage.server.inflight import InFlight
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.jobs import JobStatus, JobTable
-from mirage.server.mcp.http import McpDoor
+from mirage.server.mcp.http import McpEndpoint
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -146,7 +146,7 @@ class DaemonRpcServer(MirageRpcServer):
         return await self._entry.runner.call(work)
 
 
-class RpcDoor:
+class RpcEndpoint:
     """Serves every workspace's Session API over JSON-RPC on HTTP.
 
     Each ``POST /v1/workspaces/{id}/rpc`` carries one message or a batch
@@ -160,11 +160,11 @@ class RpcDoor:
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
         jobs (JobTable): the daemon's job table.
-        mcp (McpDoor): the MCP endpoint, which owns the tool tables.
+        mcp (McpEndpoint): the MCP endpoint, which owns the tool tables.
     """
 
     def __init__(
-        self, registry: WorkspaceRegistry, jobs: JobTable, mcp: McpDoor
+        self, registry: WorkspaceRegistry, jobs: JobTable, mcp: McpEndpoint
     ) -> None:
         self._registry = registry
         self._jobs = jobs
@@ -300,7 +300,7 @@ class RpcDoor:
 
 
 def register_rpc_routes(
-    app: FastAPI, registry: WorkspaceRegistry, jobs: JobTable, mcp: McpDoor
+    app: FastAPI, registry: WorkspaceRegistry, jobs: JobTable, mcp: McpEndpoint
 ) -> None:
     """Serve JSON-RPC at ``/v1/workspaces/{workspace_id}/rpc``.
 
@@ -311,9 +311,14 @@ def register_rpc_routes(
         app (FastAPI): the daemon app.
         registry (WorkspaceRegistry): the daemon's workspaces.
         jobs (JobTable): the daemon's job table.
-        mcp (McpDoor): the MCP endpoint, which owns the tool tables.
+        mcp (McpEndpoint): the MCP endpoint, which owns the tool tables.
     """
-    door = RpcDoor(registry, jobs, mcp)
+    endpoint = RpcEndpoint(registry, jobs, mcp)
     app.router.routes.append(
-        Route(RPC_PATH, door.handle, methods=["POST"], include_in_schema=False)
+        Route(
+            RPC_PATH,
+            endpoint.handle,
+            methods=["POST"],
+            include_in_schema=False,
+        )
     )

@@ -116,23 +116,23 @@ export async function renderReport(
  * path neither side knows about.
  */
 export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     const parsed = parseFlags(fl)
-    const repo = await opened(fl, doors, true)
+    const repo = await opened(fl, view, true)
     const head = await readHead(dispatch, repo.location.gitdir)
     const [rows, state, noCommits] = await collect(
       repo,
       dispatch,
       statPath,
       parsed.untracked,
-      doors.ns?.links ?? null,
+      view.ns?.links ?? null,
       parsed.ignored,
     )
     const fully = await configBool(repo, 'core.quotepath', true)

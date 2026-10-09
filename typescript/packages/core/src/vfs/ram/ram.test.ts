@@ -284,7 +284,7 @@ describe('RAMVFS mkdir -p parents', () => {
 })
 
 describe('RAMVFS through Workspace', () => {
-  it('the workspace door serves the VFS functions', async () => {
+  it('the workspace dispatcher serves the VFS functions', async () => {
     const { ram, ws } = setup()
     const [resolvedRes] = await ws.resolve('/ram/hello.txt')
     expect(resolvedRes).toBe(ram)

@@ -54,7 +54,7 @@ async def create_file(
         session (SessionState): the session holding the umask.
         scope (PathSpec): the target.
         data (bytes): the bytes to write.
-        append (bool): append through the op door instead of replacing.
+        append (bool): append through the dispatcher instead of replacing.
     """
     created = False
     if session.umask != DEFAULT_UMASK:

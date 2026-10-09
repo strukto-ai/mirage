@@ -54,6 +54,8 @@ def test_tree_shape():
         "for-each-ref",
         "cat-file",
         "hash-object",
+        "grep",
+        "ls-tree",
         "ls-files",
         "fetch",
         "clone",

@@ -34,9 +34,9 @@ describe('RuntimeFiles transport', () => {
 
   it('forwards a ranged and a raw read as the read attrs', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(new Uint8Array([2])))
-    const door = new RuntimeFiles(dispatch)
-    await door.read('/ram/x.txt', { offset: 1, size: 1 })
-    await door.read('/ram/x.txt', { raw: true })
+    const files = new RuntimeFiles(dispatch)
+    await files.read('/ram/x.txt', { offset: 1, size: 1 })
+    await files.read('/ram/x.txt', { raw: true })
     expect(dispatch.mock.calls.map((call) => call[4])).toEqual([
       { offset: 1, size: 1 },
       { raw: true },
@@ -76,7 +76,7 @@ describe('RuntimeFiles transport', () => {
     ])
   })
 
-  // The projection is the door's, so preview1, monty and Emscripten read
+  // The projection is the file adapter's, so preview1, monty and Emscripten read
   // the same five facts instead of translating a FileStat three ways.
   it('projects one stat struct for every surface', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() =>
@@ -126,7 +126,7 @@ describe('RuntimeFiles transport', () => {
     })
   })
 
-  // lstat is one door question now, not a surface reaching past it: the
+  // lstat is one dispatcher question now, not a surface reaching past it: the
   // flag rides the dispatch, which answers a link's own row from the
   // node table and gates it exactly as it gates readlink.
   it('asks for the link row itself under nofollow', async () => {
@@ -141,7 +141,7 @@ describe('RuntimeFiles transport', () => {
   })
 
   // A backend that slash-marks its directories has already said what the
-  // entry is, so the door does not pay a stat to hear it again.
+  // entry is, so the file adapter does not pay a stat to hear it again.
   it('takes a trailing slash as the answer and skips the stat', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'readdir') return Promise.resolve(['/ram/sub/'])
@@ -384,7 +384,7 @@ describe('RuntimeFiles routing', () => {
   })
 })
 
-// A door over an empty world, or one where every op is refused.
+// A dispatcher over an empty world, or one where every op is refused.
 function world(refusal?: Error): { vfs: RuntimeFiles } {
   const dispatch = vi.fn<BridgeDispatchFn>((_op, path) =>
     Promise.reject(refusal ?? Object.assign(new Error(path), { code: 'ENOENT' })),
@@ -407,10 +407,10 @@ describe('RuntimeFiles guest rules', () => {
   it('serves a path reached through a link outside every mount', () => {
     const links = (directory: string): Set<string> =>
       directory === '/' ? new Set(['alias']) : new Set<string>()
-    const door = new RuntimeFiles(vi.fn(), new PrefixResolver(() => ['/data/'], links))
-    expect(door.serves('/alias')).toBe(true)
-    expect(door.serves('/alias/inner.txt')).toBe(true)
-    expect(door.serves('/tmp/a.txt')).toBe(false)
+    const files = new RuntimeFiles(vi.fn(), new PrefixResolver(() => ['/data/'], links))
+    expect(files.serves('/alias')).toBe(true)
+    expect(files.serves('/alias/inner.txt')).toBe(true)
+    expect(files.serves('/tmp/a.txt')).toBe(false)
   })
 
   it('opens structure to view_stat and withholds content', async () => {
@@ -483,10 +483,10 @@ describe('RuntimeFiles append', () => {
       if (op === 'write' && bytes !== undefined) stored = bytes
       return Promise.resolve(undefined)
     })
-    const door = new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a']))
-    await door.append('/a/x', enc.encode('-1'))
+    const files = new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a']))
+    await files.append('/a/x', enc.encode('-1'))
     stored = enc.encode('other')
-    await door.append('/a/x', enc.encode('-2'))
+    await files.append('/a/x', enc.encode('-2'))
     const writes = dispatch.mock.calls.filter((c) => c[0] === 'write')
     expect(writes.map((c) => new TextDecoder().decode(c[2]))).toEqual(['head-1', 'other-2'])
   })

@@ -63,7 +63,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     multivar,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -642,9 +642,9 @@ async def fetch(
     fl = FlagView(inv.flags)
     try:
         check_switches(inv, inv.texts)
-        doors = inv.doors or CLIDoors()
-        _, location = await opened(fl, doors)
-        dispatch = doors.dispatch
+        view = inv.view or CLIView()
+        _, location = await opened(fl, view)
+        dispatch = view.dispatch
         if dispatch is None:
             raise NoWorkspaceError()
         config = _config(
@@ -691,7 +691,7 @@ async def fetch(
         start = location.gitdir if bare else location.worktree
         try:
             transport = await open_transport(
-                url, start, doors, await configured_headers(inv, config)
+                url, start, view, await configured_headers(inv, config)
             )
         except MissingRepositoryError as exc:
             raise GitError(

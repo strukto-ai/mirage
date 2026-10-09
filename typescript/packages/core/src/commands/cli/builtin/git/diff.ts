@@ -87,20 +87,20 @@ async function sides(
  * every format shows only the paths they name.
  */
 export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   const cached = fl.asBool('cached') || fl.asBool('staged')
   const [revisions, paths] = splitMarked(texts, inv.argv)
   try {
-    const statPath = doors.statPath
-    if (statPath === undefined || doors.dispatch === undefined) throw new NoWorkspaceError()
+    const statPath = view.statPath
+    if (statPath === undefined || view.dispatch === undefined) throw new NoWorkspaceError()
     const word = optionOperand(inv, texts, STDERR)
     if (word !== null && (cached || revisions.some((text) => !text.startsWith('-')))) {
       throw new UsageError('', verbUsage(inv))
     }
     if (word !== null) throw new InvalidOptionError(word, verbUsage(inv))
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const parsed = parseDiffFlags(
       fl,
       true,
@@ -124,7 +124,7 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
       warning = note
       if (fresh === null) {
         const state = await readIndex(repo, repo.dispatch)
-        after = await workEntries(repo, repo.dispatch, statPath, state, doors.ns?.links ?? null)
+        after = await workEntries(repo, repo.dispatch, statPath, state, view.ns?.links ?? null)
         if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
         before = old ?? stagedEntries(state)
       } else {

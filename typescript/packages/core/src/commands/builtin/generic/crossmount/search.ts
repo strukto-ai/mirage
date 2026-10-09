@@ -42,7 +42,7 @@ import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { walkErrorLine } from '../../rg_scan.ts'
-import { LinkDoor } from '../../utils/links.ts'
+import { LinkResolver } from '../../utils/links.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -84,7 +84,15 @@ export async function runSearch(
   if (grep !== null) {
     const pattern = patternArg(texts, bag)
     if (pattern !== null)
-      compilePattern(pattern, grep.ignoreCase, grep.fixedString, grep.wholeWord, grep.syntax)
+      compilePattern(
+        pattern,
+        grep.ignoreCase,
+        grep.fixedString,
+        grep.wholeWord,
+        grep.syntax,
+        false,
+        grep.lineRegexp,
+      )
   }
   if (rg !== null && !rg.listFiles) {
     const pattern = patternArg(texts, bag, 'regexp')
@@ -115,7 +123,7 @@ export async function runSearch(
   async function* scopes(): AsyncIterable<OwnedScope> {
     if (planned && walk !== null) {
       const warnings: string[] = []
-      const door = ns?.links === undefined ? null : new LinkDoor(ns.links, dispatch, cwd)
+      const resolver = ns?.links === undefined ? null : new LinkResolver(ns.links, dispatch, cwd)
       const found = haystacks(
         paths,
         readdir,
@@ -125,7 +133,7 @@ export async function runSearch(
         rg,
         warnings,
         rg.oneFileSystem ? (ns?.mounts ?? null) : null,
-        door,
+        resolver,
       )
       if (rg.sort !== null && rg.sort !== 'none' && !(rg.sort === 'path' && !rg.sortReverse)) {
         const listed = []

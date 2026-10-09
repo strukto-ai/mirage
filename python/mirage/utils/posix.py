@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 
 # Character classes use the C locale in both runtimes.
 POSIX_CLASSES = {
@@ -164,3 +165,25 @@ def compile_posix_regex(
     return re.compile(
         skip_raw_bytes(source) if utf8 else source, flags | re.ASCII
     )
+
+
+def posix_line_matcher(
+    pattern: re.Pattern[str], nonempty: bool = False
+) -> Callable[[str], bool]:
+    """Prepare a reusable line matcher for translated POSIX expressions.
+
+    Args:
+        pattern (re.Pattern[str]): compiled POSIX source, whose assertions
+            require at most one preceding character of context.
+        nonempty (bool): require a match that consumes input, retrying
+            alternatives at the same position after an empty match.
+    """
+
+    def matches(line: str) -> bool:
+        if not nonempty:
+            return pattern.search(line) is not None
+        return any(
+            match.start() != match.end() for match in pattern.finditer(line)
+        )
+
+    return matches

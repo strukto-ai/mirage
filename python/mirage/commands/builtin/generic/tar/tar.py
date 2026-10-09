@@ -705,7 +705,7 @@ async def tar(
     # tar's compiled-in default (no TAPE in the environment).
     archive = f or replace(PathSpec.from_str_path("/dev/stdin"), raw_path="-")
     if relay and archive is not None:
-        # Relay doors address by full virtual path (flat_scopes'
+        # Relay functions address by full virtual path (flat_scopes'
         # convention), not by the mount-relative key the wrapper's
         # accessor stamped.
         archive = replace(archive, vfs_path=archive.virtual.strip("/"))

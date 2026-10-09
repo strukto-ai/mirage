@@ -26,7 +26,7 @@ from mirage.server.ssh.constants import DEFAULT_SSH_HOST, SSH_ENV_KEYS
 from mirage.server.ssh.errors import SSHConfigError
 
 
-def test_no_port_means_the_door_stays_shut(tmp_path):
+def test_no_port_means_the_endpoint_stays_shut(tmp_path):
     shut = resolve_ssh_config(env={}, table={}, home=tmp_path)
     assert shut.port is None
     assert shut.host_key_file == tmp_path / "ssh" / "host_ed25519_key"
