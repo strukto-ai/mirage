@@ -26,6 +26,7 @@ import {
   globPattern,
   hasGlob as hasGlobChars,
   literalWord,
+  markGlobs,
   spellMatch,
   unmarkGlobs,
 } from '../../utils/glob_walk.ts'
@@ -136,7 +137,7 @@ function toSpecs(
       virtual: base.virtual,
       directory: base.directory,
       vfsPath: base.vfsPath,
-      rawPath: spellMatch(unmarkGlobs(item.rawPath), v, walked),
+      rawPath: spellMatch(item.rawPath, v, walked),
     })
   })
 }
@@ -197,10 +198,11 @@ async function levelMatches(
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
   if (owner.answers('glob')) {
+    const patternDir = prefix + markGlobs(real.slice(prefix.length))
     const spec = new PathSpec({
-      virtual: real,
-      directory: real,
-      vfsPath: mountKey(real, prefix),
+      virtual: patternDir,
+      directory: patternDir,
+      vfsPath: markGlobs(mountKey(real, prefix)),
       pattern: seg,
       resolved: false,
     })
@@ -300,7 +302,7 @@ async function walk(
 ): Promise<PathSpec[]> {
   const typed = globParts(stripSlash(item.dotted ?? item.virtual))
   const first = typed.findIndex((seg) => hasGlobChars(seg) || seg === '.' || seg === '..')
-  const raw = globParts(rstripSlash(unmarkGlobs(item.rawPath)))
+  const raw = globParts(rstripSlash(item.rawPath)).map(unmarkGlobs)
   let spelledHead = raw.slice(0, raw.length - (typed.length - first)).join('/')
   if (item.rawPath.startsWith('/') && spelledHead === '') spelledHead = '/'
   // The head above the first glob or dot segment is a real directory, so a
@@ -407,7 +409,7 @@ function withTrailingSlash(spec: PathSpec): PathSpec {
 }
 
 function hasGlobstarSegment(item: PathSpec): boolean {
-  return globParts(unmarkGlobs(item.virtual)).includes('**')
+  return globParts(item.virtual).includes('**')
 }
 
 export async function resolveGlobs(

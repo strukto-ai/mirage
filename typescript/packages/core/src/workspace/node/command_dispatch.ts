@@ -118,6 +118,8 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
  * names the command, whose redirects bash had not applied. Mirrors Python's
  * _own_words.
  */
+class ProcessSubError extends Error {}
+
 async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
   try {
     return await pending
@@ -424,76 +426,50 @@ async function runCommandBody(
 
   // Input substitutions are buffered virtual files, not host pipes. Each
   // operand has its own lifetime; they never consume the caller's stdin.
-  let dev: DevVFS | null = null
-  const procSubInputs: (readonly [string, number])[] = []
-  const procSubStderr: Uint8Array[] = []
-  const cleanParts: TSNodeLike[] = []
-  try {
-    for (const word of parts) {
-      const children = word.type === NT.CONCATENATION ? word.children : [word]
-      if (!children.some((p) => p.type === NT.PROCESS_SUBSTITUTION)) {
-        cleanParts.push(word)
-        continue
-      }
-      const cleanChildren: TSNodeLike[] = []
-      for (const p of children) {
-        if (p.type !== NT.PROCESS_SUBSTITUTION) {
-          cleanChildren.push(p)
-          continue
-        }
-        if (getProcessSubDirection(p) === ProcessSubDirection.OUTPUT) {
-          const err = encodeText('mirage: unsupported: process substitution >(...)\n')
-          return [
-            null,
-            new IOResult({ exitCode: 2, stderr: err }),
-            new ExecutionNode({ command: name || 'process_sub', exitCode: 2, stderr: err }),
-          ]
-        }
-        if (dev === null) {
-          const [candidate] = registry.resolve('/dev/null')
-          if (!(candidate instanceof DevVFS)) throw new Error('missing device filesystem')
-          dev = candidate
-        }
-        const [path, allocation] = dev.allocateInput()
-        procSubInputs.push([path, allocation])
-        const inner = getProcessSubBody(p)
-        if (inner !== '') {
-          const io = await childLine(context, executeFn, inner, p, callStack)
-          dev.setInput(path, allocation, await materialize(io.stdout))
-          procSubStderr.push(await materialize(io.stderr))
-        }
-        cleanChildren.push({
-          type: NT.WORD,
-          isNamed: true,
-          text: path,
-          children: [],
-          namedChildren: [],
-        })
-      }
-      if (word.type === NT.CONCATENATION) {
-        cleanParts.push({
-          type: NT.CONCATENATION,
-          isNamed: true,
-          text: word.text,
-          children: cleanChildren,
-          namedChildren: cleanChildren.filter((p) => p.isNamed ?? true),
-        })
-      } else cleanParts.push(...cleanChildren)
+  const procSubInputs: (readonly [DevVFS, string, number])[] = []
+  const processSub = async (p: TSNodeLike): Promise<string> => {
+    if (getProcessSubDirection(p) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
+    const [dev] = registry.resolve('/dev/null')
+    if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
+    const [path, allocation] = dev.allocateInput()
+    procSubInputs.push([dev, path, allocation])
+    const inner = getProcessSubBody(p)
+    if (inner !== '') {
+      const io = await childLine(context, executeFn, inner, p, callStack)
+      dev.setInput(path, allocation, await materialize(io.stdout))
+      context.frame.diagnostics.push(await materialize(io.stderr))
     }
-
-    const argv = await ownWords(
-      node,
-      expandArgv(
-        cleanParts,
-        context,
-        executeFn,
-        callStack,
-        registry,
-        namespace,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-        routingDecision,
-      ),
-    )
+    return path
+  }
+  try {
+    const previous = context.frame.processSub
+    context.frame.processSub = processSub
+    let argv: Argv
+    try {
+      argv = await ownWords(
+        node,
+        expandArgv(
+          parts,
+          context,
+          executeFn,
+          callStack,
+          registry,
+          namespace,
+          sessionView(session, registry.policies, context.frame.diagnostics),
+          routingDecision,
+        ),
+      )
+    } catch (error) {
+      if (!(error instanceof ProcessSubError)) throw error
+      const err = encodeText('mirage: unsupported: process substitution >(...)\n')
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: name || 'process_sub', exitCode: 2, stderr: err }),
+      ]
+    } finally {
+      context.frame.processSub = previous
+    }
 
     // Limits resolve against the expanded name, so `$CMD`-style
     // invocations get their real command's policy.
@@ -569,11 +545,6 @@ async function runCommandBody(
         execNode.exitCode = io.exitCode
       }
     }
-    if (procSubStderr.length > 0) {
-      const stderr = await materialize(io.stderr)
-      io.stderr = concat([...procSubStderr, stderr])
-      execNode.stderr = io.stderr
-    }
     if (xtrace) {
       const existing = await materialize(io.stderr)
       io.stderr = concat([traceCommand([argv.name, ...argv.args]), existing])
@@ -584,7 +555,7 @@ async function runCommandBody(
       execNode,
     ]
   } finally {
-    for (const [path, allocation] of procSubInputs) dev?.releaseInput(path, allocation)
+    for (const [dev, path, allocation] of procSubInputs) dev.releaseInput(path, allocation)
   }
 }
 

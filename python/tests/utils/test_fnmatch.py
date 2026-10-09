@@ -249,3 +249,17 @@ def test_sparse_repetition_keeps_discovery_linear():
 )
 def test_invalid_range_does_not_erase_a_posix_class(char, expected):
     assert fnmatch(char, "[[:digit:]z-a]", extglob=True) == expected
+
+
+@pytest.mark.parametrize(
+    "pattern", ["+(*(aa))", "+(?(aa))", "*(+(aa)|b)", "+(@(*(aa)|b))"]
+)
+def test_nested_repetitions_share_active_states(pattern):
+    assert fnmatch("a" * 16000, pattern, extglob=True)
+    assert not fnmatch("a" * 16001, pattern, extglob=True)
+    assert not fnmatch("a" * 16000 + "c", pattern, extglob=True)
+
+
+def test_negative_suffixes_share_scheduled_offsets():
+    assert fnmatch("a" * 16000, "*!(a)", extglob=True)
+    assert not fnmatch("a" * 16000, "*!(*)", extglob=True)

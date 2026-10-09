@@ -38,7 +38,8 @@ export function classifyWord(
   // like a path at all is a question about the name itself, so the shape
   // tests below read the literal spelling.
   const wordHasGlob = hasGlob(word)
-  const shape = unmarkGlobs(getCurrentSession()?.shopts.extglob ? patternShape(word) : word)
+  const shape =
+    wordHasGlob && getCurrentSession()?.shopts.extglob ? patternShape(word) : unmarkGlobs(word)
 
   if (word.startsWith('/')) {
     const mount = registry.tryMountFor(word)

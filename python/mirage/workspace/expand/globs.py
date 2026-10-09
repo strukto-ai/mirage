@@ -27,6 +27,7 @@ from mirage.utils.glob_walk import (
     glob_pattern,
     has_glob,
     literal_word,
+    mark_globs,
     spell_match,
     unmark_globs,
 )
@@ -269,10 +270,11 @@ async def _level_matches(
     owner = _mount_of(registry, real, mount)
     await owner.ensure_ready()
     prefix = owner.prefix.rstrip("/")
+    pattern_dir = prefix + mark_globs(real[len(prefix) :])
     spec = PathSpec(
-        virtual=real,
-        directory=real,
-        vfs_path=mount_key(real, prefix),
+        virtual=pattern_dir,
+        directory=pattern_dir,
+        vfs_path=mark_globs(mount_key(real, prefix)),
         pattern=seg,
         resolved=False,
     )
@@ -389,7 +391,9 @@ async def _walk(
     first = next(
         i for i, seg in enumerate(typed) if has_glob(seg) or seg in (".", "..")
     )
-    raw = glob_parts(unmark_globs(item.raw_path).rstrip("/"))
+    raw = [
+        unmark_globs(part) for part in glob_parts(item.raw_path.rstrip("/"))
+    ]
     spelled_head = "/".join(raw[: len(raw) - (len(typed) - first)])
     if item.raw_path.startswith("/") and not spelled_head:
         spelled_head = "/"
@@ -469,7 +473,7 @@ def _to_specs(
         mount (MountEntry): the mount owning the word.
         walked (int): segment count from the word's first glob segment.
     """
-    raw = unmark_globs(item.raw_path)
+    raw = item.raw_path
     return [
         dataclasses.replace(
             PathSpec.from_str_path(
@@ -550,7 +554,7 @@ def _has_globstar_segment(item: PathSpec) -> bool:
     Args:
         item (PathSpec): the glob word.
     """
-    return "**" in glob_parts(unmark_globs(item.virtual))
+    return "**" in glob_parts(item.virtual)
 
 
 async def resolve_globs(

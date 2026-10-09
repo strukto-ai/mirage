@@ -657,8 +657,10 @@ function globStrip(
   extglob = false,
 ): string {
   if (pattern === '') return value
-  const step = greedy === prefix ? -1 : 1
-  for (let i = step < 0 ? value.length : 0; i >= 0 && i <= value.length; i += step) {
+  const boundaries = [0]
+  for (const char of value) boundaries.push((boundaries.at(-1) ?? 0) + char.length)
+  if (greedy === prefix) boundaries.reverse()
+  for (const i of boundaries) {
     const candidate = prefix ? value.slice(0, i) : value.slice(i)
     if (fnmatch(candidate, pattern, extglob)) return prefix ? value.slice(i) : value.slice(0, i)
   }

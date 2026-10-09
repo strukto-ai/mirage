@@ -91,7 +91,7 @@ class Positions implements Iterable<number> {
   }
 }
 
-/** Next unvisited position, with successor-chain compression. */
+/** Next unscheduled offset for a state, with successor-chain compression. */
 function unseen(links: Uint32Array, position: number): number {
   let root = position
   while (links[root] !== root) root = links[root] ?? root
@@ -104,7 +104,9 @@ function unseen(links: Uint32Array, position: number): number {
 }
 
 /**
- * Match extended groups by memoized reachable character positions.
+ * Positive groups compile to epsilon transitions. Active states advance
+ * together, sharing nested repetition work at each subject offset.
+ * Negative groups request memoized branch endpoints on an explicit stack.
  * Deliberate GNU 5.2 divergence: empty subjects obey group composition.
  * GNU's star fast path accepts `*!(a)x` but rejects `*+([!a]|!([!a]))`
  * against empty text; here the suffix is required and the group is nullable.
@@ -115,6 +117,7 @@ class Matcher {
   private readonly classes = new Map<number, number>()
   readonly groups = new Map<number, { end: number; branches: [number, number][] }>()
   private readonly memo = new Map<string, Positions>()
+  private readonly transitions = new Map<number, readonly number[]>()
   private readonly period: boolean
 
   constructor(name: string, pattern: string, period = false, extglob = true) {
@@ -151,6 +154,18 @@ class Matcher {
         })
       }
       i += 1
+    }
+
+    for (const [opened, { end, branches }] of this.groups) {
+      const operator = p[opened]
+      if (operator === '!') continue
+      this.transitions.set(opened, [
+        ...branches.map(([a]) => a),
+        ...(operator === '*' || operator === '?' ? [end] : []),
+      ])
+      for (const [, stop] of branches) {
+        this.transitions.set(stop, [end, ...(operator === '*' || operator === '+' ? [opened] : [])])
+      }
     }
   }
 
@@ -195,82 +210,91 @@ class Matcher {
     hi: number,
     start: number,
   ): Generator<[number, number, number], Positions, Positions> {
-    let positions = new Positions([[start, start + 1]])
-    let i = lo
-    while (i < hi && positions.spans.length > 0) {
-      const c = this.pattern[i] ?? ''
-      const group = this.groups.get(i)
-      if (group && group.end <= hi) {
-        const spans: (readonly [number, number])[] = []
-        for (const position of positions) {
+    if (hi === lo + 1 && this.pattern[lo] === '*') {
+      return this.period && start === 0
+        ? new Positions()
+        : new Positions([[start, this.name.length + 1]])
+    }
+    const pending = new Map<number, Set<number>>([[start, new Set([lo])]])
+    const scheduled = new Map<number, Uint32Array>()
+    const accepted: [number, number][] = []
+    for (let position = start; position <= this.name.length; position += 1) {
+      if (pending.size === 0) break
+      const seen = pending.get(position) ?? new Set<number>()
+      pending.delete(position)
+      const active = [...seen]
+      const schedule = (target: number, offset = position): void => {
+        if (offset === position) {
+          if (!seen.has(target)) {
+            seen.add(target)
+            active.push(target)
+          }
+        } else {
+          let states = pending.get(offset)
+          if (!states) {
+            states = new Set()
+            pending.set(offset, states)
+          }
+          states.add(target)
+        }
+      }
+      while (active.length > 0) {
+        const i = active.pop()
+        if (i === undefined) break
+        if (i === hi) {
+          accepted.push([position, position + 1])
+          continue
+        }
+        const transitions = this.transitions.get(i)
+        if (transitions) {
+          for (const target of transitions) schedule(target)
+          continue
+        }
+        const c = this.pattern[i] ?? ''
+        const group = this.groups.get(i)
+        if (group && group.end <= hi) {
+          if (this.period && position === 0) continue
           const matched: (readonly [number, number])[] = []
           for (const [a, b] of group.branches) {
             const once = yield [a, b, position]
             for (const span of once.spans) matched.push(span)
           }
-          let once = new Positions(matched)
-          if (c === '!') {
-            if (this.period && position === 0) continue
-            once = new Positions([[position, this.name.length + 1]]).subtract(once)
-          }
-          for (const span of once.spans) spans.push(span)
-        }
-        if (c === '*' || c === '?') {
-          for (const span of positions.spans) spans.push(span)
-        }
-        let reached = new Positions(spans)
-        if (c === '*' || c === '+') {
-          const discovered = [...reached]
-          const pending = discovered.slice()
-          const links = Uint32Array.from({ length: this.name.length + 2 }, (_, i) => i)
-          for (const position of discovered) links[position] = position + 1
-          while (pending.length > 0) {
-            const current = pending.pop()
-            if (current === undefined) break
-            for (const [a, b] of group.branches) {
-              const once = yield [a, b, current]
-              for (const [lower, upper] of once.spans) {
-                let target = unseen(links, lower)
-                while (target < upper) {
-                  links[target] = target + 1
-                  discovered.push(target)
-                  pending.push(target)
-                  target = unseen(links, target)
-                }
-              }
+          const reached = new Positions([[position, this.name.length + 1]]).subtract(
+            new Positions(matched),
+          )
+          if (reached.contains(position)) schedule(group.end)
+          for (const [lower, upper] of reached.spans) {
+            if (upper <= position + 1) continue
+            let links = scheduled.get(group.end)
+            if (!links) {
+              links = Uint32Array.from({ length: this.name.length + 2 }, (_, i) => i)
+              scheduled.set(group.end, links)
+            }
+            let target = unseen(links, Math.max(lower, position + 1))
+            while (target < upper) {
+              schedule(group.end, target)
+              links[target] = target + 1
+              target = unseen(links, target)
             }
           }
-          reached = new Positions(discovered.map((p) => [p, p + 1]))
+          continue
         }
-        positions = reached
-        i = group.end
-        continue
-      }
-      if (c === '*') {
-        if (this.period) positions = positions.subtract(new Positions([[0, 1]]))
-        const first = positions.spans[0]
-        if (!first) break
-        positions = new Positions([[first[0], this.name.length + 1]])
-        i += 1
-        continue
-      }
-      const end = this.classes.get(i) ?? i + 1
-      const token = this.pattern.slice(i, end).join('')
-      const spans: [number, number][] = []
-      for (const position of positions) {
-        if (
+        const end = this.classes.get(i) ?? i + 1
+        const wildcard = c === '*' || c === '?' || end > i + 1
+        if (this.period && position === 0 && wildcard) continue
+        if (c === '*') {
+          schedule(end)
+          if (position < this.name.length) schedule(i, position + 1)
+        } else if (
           position < this.name.length &&
-          !(this.period && position === 0 && (c === '?' || end > i + 1)) &&
           (end > i + 1
-            ? extendedClassMatches(this.name[position] ?? '', token)
+            ? extendedClassMatches(this.name[position] ?? '', this.pattern.slice(i, end).join(''))
             : c === '?' || (QUOTED_CHARS[c] ?? c) === this.name[position])
         )
-          spans.push([position + 1, position + 2])
+          schedule(end, position + 1)
       }
-      positions = new Positions(spans)
-      i = end
     }
-    return positions
+    return new Positions(accepted)
   }
 }
 

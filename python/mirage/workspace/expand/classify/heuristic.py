@@ -54,8 +54,8 @@ def classify_word(
     word_has_glob = has_glob(word)
     shape = unmark_globs(word)
     session = get_current_session()
-    if session is not None and session.shopts.get("extglob"):
-        shape = unmark_globs(pattern_shape(word))
+    if word_has_glob and session is not None and session.shopts.get("extglob"):
+        shape = pattern_shape(word)
 
     if word.startswith("/"):
         mount = registry.try_mount_for(word)

@@ -462,6 +462,12 @@ async def _node_chunks(
         )
         return [Piece(prefix), *braces] if prefix else braces
 
+    if (
+        ntype == NT.PROCESS_SUBSTITUTION
+        and context.frame.process_sub is not None
+    ):
+        return [Piece(await context.frame.process_sub(ts_node))]
+
     if ntype in (NT.COMMAND_SUBSTITUTION, NT.ARITHMETIC_EXPANSION):
         text = await _substitution(
             ts_node, context, execute_fn, call_stack, view

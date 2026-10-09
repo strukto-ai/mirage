@@ -147,7 +147,7 @@
         "ram",
         "disk"
       ],
-      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ '\"'\"'\"'\"'\"'\"'\"'\"'1\ud83d\ude00'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]\ud83d\ude00]) ]]; echo $?; [[ '\"'\"'\"'\"'\"'\"'\"'\"'\ud83d\ude00\ud83d\ude00'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]\ud83d\ude00]) ]]; echo $?; [[ a == +([[:digit:]\ud83d\ude00]) ]]; echo $?'\"'\"''",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ '\"'\"'\"'\"'\"'\"'\"'\"'1😀'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]😀]) ]]; echo $?; [[ '\"'\"'\"'\"'\"'\"'\"'\"'😀😀'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]😀]) ]]; echo $?; [[ a == +([[:digit:]😀]) ]]; echo $?'\"'\"''",
       "expect": {
         "exit": 0,
         "stdout": "0\n0\n1\n",
@@ -250,6 +250,62 @@
         "exit": 0,
         "stdout": "@(/dev/fd/63|b)\nafter\n",
         "stderr": "ran"
+      }
+    },
+    {
+      "id": "extglob_nested_repeats",
+      "seq": 960818,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf -v x '\"'\"'\"'\"'\"'\"'\"'\"'%12s'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"'; x=${x// /a}; [[ $x == +(*(aa)) ]]; echo $?; x=${x}a; [[ $x == +(*(aa)) ]]; echo $?'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_quoted_slash_globstar",
+      "seq": 960819,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'shopt -s globstar; mkdir -p '\"'\"'\"'\"'\"'\"'\"'\"'/data/extglob-spelling/@(a/b)'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"'/data/extglob-spelling/sub/@(a/b)'\"'\"'\"'\"'\"'\"'\"'\"'; printf first > '\"'\"'\"'\"'\"'\"'\"'\"'/data/extglob-spelling/@(a/b)/x'\"'\"'\"'\"'\"'\"'\"'\"'; printf second > '\"'\"'\"'\"'\"'\"'\"'\"'/data/extglob-spelling/sub/@(a/b)/x'\"'\"'\"'\"'\"'\"'\"'\"'; for p in /data/extglob-spelling/**/'\"'\"'\"'\"'\"'\"'\"'\"'@(a/b)'\"'\"'\"'\"'\"'\"'\"'\"'/x; do printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"$p\"; cat \"$p\"; echo; done; cd /data; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' extglob-spelling/**/'\"'\"'\"'\"'\"'\"'\"'\"'@(a/b)'\"'\"'\"'\"'\"'\"'\"'\"'/x; cd /; rm -r /data/extglob-spelling'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "</data/extglob-spelling/@(a/b)/x>\nfirst\n</data/extglob-spelling/sub/@(a/b)/x>\nsecond\n<extglob-spelling/@(a/b)/x>\n<extglob-spelling/sub/@(a/b)/x>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_process_expansion_order",
+      "seq": 960820,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'x=old; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' @($((x=7))<(printf '\"'\"'\"'\"'\"'\"'\"'\"'%s\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"$x\" >&2)|b); printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' @(<(printf '\"'\"'\"'\"'\"'\"'\"'\"'%s\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"$x\" >&2)$((x=9))|b); printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"$x\"; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' @($(printf first >&2)<(printf second >&2)$(printf third >&2)|b); echo after'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "<@(7/dev/fd/63|b)>\n<@(/dev/fd/639|b)>\n<9>\n<@(/dev/fd/63|b)>\nafter\n",
+        "stderr": "7\n7\nfirstsecondthird"
+      }
+    },
+    {
+      "id": "extglob_unicode_strip",
+      "seq": 960821,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'x=😀; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x#@(?)}\" \"${x%@(?)}\" \"${x##@(?)}\" \"${x%%@(?)}\"; x=😀🦊; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x#@(?)}\" \"${x%@(?)}\" \"${x##+(?)}\" \"${x%%+(?)}\"; x=a😀b; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x##@(a?)}\" \"${x%%@(?b)}\"'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "<>\n<>\n<>\n<>\n<🦊>\n<😀>\n<>\n<>\n<b>\n<a>\n",
+        "stderr": ""
       }
     }
   ]

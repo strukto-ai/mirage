@@ -410,6 +410,10 @@ async function nodeChunks(
     return prefix !== '' ? [piece(prefix), ...chunks] : chunks
   }
 
+  if (ntype === NT.PROCESS_SUBSTITUTION && context.frame.processSub !== null) {
+    return [piece(await context.frame.processSub(tsNode))]
+  }
+
   if (ntype === NT.COMMAND_SUBSTITUTION || ntype === NT.ARITHMETIC_EXPANSION) {
     const text = await substitution(tsNode, context, executeFn, callStack, view)
     const prefix = foldedWhitespace(tsNode)

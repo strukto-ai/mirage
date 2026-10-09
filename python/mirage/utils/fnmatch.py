@@ -72,26 +72,29 @@ class _Positions:
 
 
 def _unseen(links: list[int], position: int) -> int:
-    """Find the next unvisited position, compressing the successor chain.
+    """Next unscheduled offset for a state, with successor-chain compression.
 
     Args:
-        links (list[int]): next candidates, a position points to itself until visited.
+        links (list[int]): next candidates, initially self-linked.
         position (int): first candidate.
     """
     root = position
     while links[root] != root:
         root = links[root]
     while links[position] != position:
-        position, links[position] = links[position], root
+        following = links[position]
+        links[position] = root
+        position = following
     return root
 
 
 class _Matcher:
     """Match extended groups by reachable character positions.
 
-    Each group/position pair is evaluated once. Repetition visits each
-    reachable position once, including alternatives that match nothing,
-    so nested alternatives do not trigger regex backtracking.
+    Positive groups compile to epsilon transitions. The active states
+    advance together over the subject, so nested repetitions share work
+    at each offset instead of retaining a suffix result per repetition.
+    Negative groups request memoized branch endpoints on an explicit stack.
 
     Deliberate GNU 5.2 divergence: empty subjects obey group composition.
     GNU's star fast path accepts ``*!(a)x`` but rejects
@@ -118,6 +121,7 @@ class _Matcher:
         self.classes: dict[int, int] = {}
         self.groups: dict[int, tuple[int, tuple[tuple[int, int], ...]]] = {}
         self.memo: dict[tuple[int, int, int], _Positions] = {}
+        self.transitions: dict[int, tuple[int, ...]] = {}
         stack: list[tuple[int, list[int]]] = []
         literal_depth: list[int] = []
         i = 0
@@ -158,6 +162,18 @@ class _Matcher:
                 stops = [start - 1 for start in starts[1:]] + [i]
                 self.groups[opened] = (i + 1, tuple(zip(starts, stops)))
             i += 1
+
+        for opened, (end, branches) in self.groups.items():
+            operator = pattern[opened]
+            if operator == "!":
+                continue
+            self.transitions[opened] = tuple(a for a, _ in branches) + (
+                (end,) if operator in "*?" else ()
+            )
+            for _, stop in branches:
+                self.transitions[stop] = (end,) + (
+                    (opened,) if operator in "*+" else ()
+                )
 
     def matches(self) -> bool:
         if (
@@ -211,78 +227,81 @@ class _Matcher:
             hi (int): end of the pattern slice.
             start (int): first character to match.
         """
-        positions = _Positions(((start, start + 1),))
-        i = lo
-        while i < hi and positions:
-            c = self.pattern[i]
-            group = self.groups.get(i)
-            if group is not None and group[0] <= hi:
-                end, branches = group
-                spans: list[tuple[int, int]] = []
-                for position in positions:
+        if self.pattern[lo:hi] == "*":
+            return (
+                _Positions()
+                if self.period and start == 0
+                else _Positions(((start, len(self.name) + 1),))
+            )
+        pending: dict[int, set[int]] = {start: {lo}}
+        scheduled: dict[int, list[int]] = {}
+        accepted: list[tuple[int, int]] = []
+        for position in range(start, len(self.name) + 1):
+            if not pending:
+                break
+            seen = pending.pop(position, set())
+            active = list(seen)
+            while active:
+                i = active.pop()
+                if i == hi:
+                    accepted.append((position, position + 1))
+                    continue
+                transitions = self.transitions.get(i)
+                if transitions is not None:
+                    for target in transitions:
+                        if target not in seen:
+                            seen.add(target)
+                            active.append(target)
+                    continue
+                c = self.pattern[i]
+                group = self.groups.get(i)
+                if group is not None and group[0] <= hi:
+                    if self.period and position == 0:
+                        continue
+                    end, branches = group
                     matched: list[tuple[int, int]] = []
                     for a, b in branches:
                         once = yield (a, b, position)
                         matched.extend(once.spans)
-                    once = _Positions(matched)
-                    if c == "!":
-                        if self.period and position == 0:
+                    reached = _Positions(
+                        ((position, len(self.name) + 1),)
+                    ).subtract(_Positions(matched))
+                    if reached.contains(position) and end not in seen:
+                        seen.add(end)
+                        active.append(end)
+                    for lower, upper in reached.spans:
+                        if upper <= position + 1:
                             continue
-                        once = _Positions(
-                            ((position, len(self.name) + 1),)
-                        ).subtract(once)
-                    spans.extend(once.spans)
-                if c in ("*", "?"):
-                    spans.extend(positions.spans)
-                reached = _Positions(spans)
-                if c in ("*", "+"):
-                    discovered = list(reached)
-                    pending = discovered.copy()
-                    links = list(range(len(self.name) + 2))
-                    for position in discovered:
-                        links[position] = position + 1
-                    while pending:
-                        current = pending.pop()
-                        for a, b in branches:
-                            once = yield (a, b, current)
-                            for lower, upper in once.spans:
-                                target = _unseen(links, lower)
-                                while target < upper:
-                                    links[target] = target + 1
-                                    discovered.append(target)
-                                    pending.append(target)
-                                    target = _unseen(links, target)
-                    reached = _Positions((p, p + 1) for p in discovered)
-                positions, i = reached, end
-                continue
-            if c == "*":
-                if self.period:
-                    positions = positions.subtract(_Positions(((0, 1),)))
-                if not positions:
-                    break
-                positions = _Positions(
-                    ((positions.spans[0][0], len(self.name) + 1),)
-                )
-                i += 1
-                continue
-            end = self.classes.get(i, i + 1)
-            token = self.pattern[i:end]
-            positions = _Positions(
-                (position + 1, position + 2)
-                for position in positions
-                if position < len(self.name)
-                and not (
-                    self.period and position == 0 and (c == "?" or end > i + 1)
-                )
-                and (
-                    _extended_class_matches(self.name[position], token)
+                        links = scheduled.get(end)
+                        if links is None:
+                            links = list(range(len(self.name) + 2))
+                            scheduled[end] = links
+                        target = _unseen(links, max(lower, position + 1))
+                        while target < upper:
+                            pending.setdefault(target, set()).add(end)
+                            links[target] = target + 1
+                            target = _unseen(links, target)
+                    continue
+                end = self.classes.get(i, i + 1)
+                wildcard = c in "*?" or end > i + 1
+                if self.period and position == 0 and wildcard:
+                    continue
+                if c == "*":
+                    if end not in seen:
+                        seen.add(end)
+                        active.append(end)
+                    if position < len(self.name):
+                        pending.setdefault(position + 1, set()).add(i)
+                elif position < len(self.name) and (
+                    _extended_class_matches(
+                        self.name[position], self.pattern[i:end]
+                    )
                     if end > i + 1
                     else c == "?"
                     or QUOTED_CHARS.get(c, c) == self.name[position]
-                )
-            )
-            i = end
-        return positions
+                ):
+                    pending.setdefault(position + 1, set()).add(end)
+        return _Positions(accepted)
 
 
 def _extended_class_matches(char: str, pattern: str) -> bool:

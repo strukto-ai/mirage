@@ -17,7 +17,6 @@ import dataclasses
 from collections.abc import Awaitable, Callable
 from functools import partial
 from itertools import accumulate
-from types import SimpleNamespace
 from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
@@ -55,7 +54,7 @@ from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.parse.source import source_offsets
 from mirage.shell.parse.syntax import find_syntax_issue
-from mirage.shell.types import AliasExpansion, ProcessSubDirection
+from mirage.shell.types import AliasExpansion, ProcessSubDirection, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
@@ -118,6 +117,10 @@ from mirage.workspace.session.state import (
 from mirage.workspace.types import ExecutionNode
 
 T = TypeVar("T")
+
+
+class _ProcessSubError(Exception):
+    """An unsupported process substitution encountered during word expansion."""
 
 
 async def _own_words(node: Any, pending: Awaitable[T]) -> T:
@@ -423,89 +426,55 @@ async def _dispatch_command_body(
     execute_fn = partial(execute_fn, node=node)
 
     # Buffered virtual files preserve operand identity without host pipes.
-    dev: DevVFS | None = None
-    proc_sub_inputs: list[tuple[str, int]] = []
-    proc_sub_stderr = []
-    clean_parts = []
-    try:
-        for word in parts:
-            children = (
-                word.children if word.type == NT.CONCATENATION else [word]
-            )
-            if not any(p.type == NT.PROCESS_SUBSTITUTION for p in children):
-                clean_parts.append(word)
-                continue
-            clean_children = []
-            for p in children:
-                if p.type != NT.PROCESS_SUBSTITUTION:
-                    clean_children.append(p)
-                    continue
-                if get_process_sub_direction(p) == ProcessSubDirection.OUTPUT:
-                    err = b"mirage: unsupported: process substitution >(...)\n"
-                    return (
-                        None,
-                        IOResult(exit_code=2, stderr=err),
-                        ExecutionNode(
-                            command=name or "process_sub",
-                            exit_code=2,
-                            stderr=err,
-                        ),
-                    )
-                if dev is None:
-                    dev, _, _ = registry.resolve("/dev/null")
-                    assert isinstance(dev, DevVFS)
-                path, allocation = dev.allocate_input()
-                proc_sub_inputs.append((path, allocation))
-                inner = get_process_sub_body(p)
-                if inner:
-                    io_ps = await child_line(
-                        context, execute_fn, inner, p, call_stack
-                    )
-                    data = await materialize(io_ps.stdout)
-                    dev.set_input(path, allocation, data)
-                    proc_sub_stderr.append(await materialize(io_ps.stderr))
-                clean_children.append(
-                    SimpleNamespace(
-                        type=NT.WORD,
-                        is_named=True,
-                        text=encode_text(path),
-                        children=[],
-                        named_children=[],
-                    )
-                )
-            if word.type == NT.CONCATENATION:
-                clean_parts.append(
-                    SimpleNamespace(
-                        type=NT.CONCATENATION,
-                        is_named=True,
-                        text=word.text,
-                        children=clean_children,
-                        named_children=[
-                            p for p in clean_children if p.is_named
-                        ],
-                    )
-                )
-            else:
-                clean_parts.extend(clean_children)
-        parts = clean_parts
+    proc_sub_inputs: list[tuple[DevVFS, str, int]] = []
 
-        argv = await _own_words(
-            node,
-            expand_argv(
-                parts,
-                context,
-                execute_fn,
-                call_stack,
-                registry,
-                namespace,
-                view=session_view(
-                    session,
-                    registry.policies,
-                    diagnostics=context.frame.diagnostics,
+    async def process_sub(p: TSNodeLike) -> str:
+        if get_process_sub_direction(p) == ProcessSubDirection.OUTPUT:
+            raise _ProcessSubError
+        dev, _, _ = registry.resolve("/dev/null")
+        assert isinstance(dev, DevVFS)
+        path, allocation = dev.allocate_input()
+        proc_sub_inputs.append((dev, path, allocation))
+        inner = get_process_sub_body(p)
+        if inner:
+            io_ps = await child_line(context, execute_fn, inner, p, call_stack)
+            data = await materialize(io_ps.stdout)
+            dev.set_input(path, allocation, data)
+            context.frame.diagnostics.append(await materialize(io_ps.stderr))
+        return path
+
+    try:
+        previous = context.frame.process_sub
+        context.frame.process_sub = process_sub
+        try:
+            argv = await _own_words(
+                node,
+                expand_argv(
+                    parts,
+                    context,
+                    execute_fn,
+                    call_stack,
+                    registry,
+                    namespace,
+                    view=session_view(
+                        session,
+                        registry.policies,
+                        diagnostics=context.frame.diagnostics,
+                    ),
+                    routing=routing_decision,
                 ),
-                routing=routing_decision,
-            ),
-        )
+            )
+        except _ProcessSubError:
+            err = b"mirage: unsupported: process substitution >(...)\n"
+            return (
+                None,
+                IOResult(exit_code=2, stderr=err),
+                ExecutionNode(
+                    command=name or "process_sub", exit_code=2, stderr=err
+                ),
+            )
+        finally:
+            context.frame.process_sub = previous
 
         # Limits resolve against the expanded name, so `$CMD`-style
         # invocations get their real command's policy.
@@ -578,11 +547,6 @@ async def _dispatch_command_body(
                 )
                 stdout = guard_io(stdout, io, bound, io.producer.command)
                 exec_node.exit_code = io.exit_code
-        if proc_sub_stderr:
-            io.stderr = b"".join(proc_sub_stderr) + await materialize(
-                io.stderr
-            )
-            exec_node.stderr = io.stderr
         if xtrace:
             existing = await materialize(io.stderr) or b""
             io.stderr = trace_command([argv.name, *argv.args]) + existing
@@ -590,9 +554,8 @@ async def _dispatch_command_body(
             stdout = await materialize(stdout)
         return stdout, io, exec_node
     finally:
-        if dev is not None:
-            for path, allocation in proc_sub_inputs:
-                dev.release_input(path, allocation)
+        for dev, path, allocation in proc_sub_inputs:
+            dev.release_input(path, allocation)
 
 
 async def _run_argv(

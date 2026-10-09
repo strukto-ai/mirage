@@ -302,3 +302,17 @@ it.each([
 ] as const)('invalid ranges preserve POSIX class membership: %s', (char, expected) => {
   expect(fnmatch(char, '[[:digit:]z-a]', true)).toBe(expected)
 })
+
+it.each(['+(*(aa))', '+(?(aa))', '*(+(aa)|b)', '+(@(*(aa)|b))'])(
+  'shares nested repetition states for %s',
+  (pattern) => {
+    expect(fnmatch('a'.repeat(16000), pattern, true)).toBe(true)
+    expect(fnmatch('a'.repeat(16001), pattern, true)).toBe(false)
+    expect(fnmatch('a'.repeat(16000) + 'c', pattern, true)).toBe(false)
+  },
+)
+
+it('shares scheduled offsets for negative suffixes', () => {
+  expect(fnmatch('a'.repeat(16000), '*!(a)', true)).toBe(true)
+  expect(fnmatch('a'.repeat(16000), '*!(*)', true)).toBe(false)
+})

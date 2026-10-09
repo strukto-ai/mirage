@@ -323,7 +323,7 @@ export function globParts(pattern: string): string[] {
 export function spellMatch(raw: string, virtual: string, walked: number): string {
   const head = globParts(rstripSlash(raw)).slice(0, -walked)
   const tail = rstripSlash(virtual).split('/').slice(-walked)
-  return [...head, ...tail].join('/')
+  return [...head.map(unmarkGlobs), ...tail].join('/')
 }
 
 function isMissingDir(err: unknown): boolean {
@@ -566,7 +566,7 @@ export async function expandPattern<A, I>(
   // form and keep the resolved virtual.
   if (path.rawPath === path.virtual) return matches
   const walked = segments.length - first
-  const raw = unmarkGlobs(path.rawPath)
+  const raw = path.rawPath
   return matches.map(
     (m) =>
       new PathSpec({

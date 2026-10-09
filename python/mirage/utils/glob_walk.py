@@ -399,7 +399,7 @@ def spell_match(raw: str, virtual: str, walked: int) -> str:
     """
     head = glob_parts(raw.rstrip("/"))[:-walked]
     tail = virtual.rstrip("/").split("/")[-walked:]
-    return "/".join([*head, *tail])
+    return "/".join([*(unmark_globs(part) for part in head), *tail])
 
 
 def glob_name_matches(name: str, pattern: str) -> bool:
@@ -522,7 +522,7 @@ async def expand_pattern(
     if path.raw_path == path.virtual:
         return matches
     walked = len(segments) - first
-    raw = unmark_globs(path.raw_path)
+    raw = path.raw_path
     return [
         dataclasses.replace(m, raw_path=spell_match(raw, m.virtual, walked))
         for m in matches
