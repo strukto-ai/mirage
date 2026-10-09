@@ -92,7 +92,7 @@ def line_runtime_for(
     the command's runtime is looked up in the decision: its binding,
     or the decision's fallback when no entry captures it. A resolved
     WorkspaceRuntime means the executor serves the command itself (the
-    workspace runtime has no interpreter door); None means no runtime
+    workspace runtime has no interpreter entry point); None means no runtime
     accepted it: exit 126, like a shell refusing to exec.
 
     Args:

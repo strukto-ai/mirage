@@ -5,7 +5,7 @@
 # four must answer the same line, because the point of the ref form is
 # that a deployment ships one CLI and both hosts run it.
 #
-# Every case goes through the real door: `mirage workspace create` reads
+# Every case goes through the real entry point: `mirage workspace create` reads
 # the YAML, rebases the relative ref against the file's directory, sends
 # the checked config to the daemon, and the daemon imports it. The ref is
 # spelled relative on purpose; an absolute one would pass even with the

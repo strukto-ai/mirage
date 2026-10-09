@@ -334,7 +334,7 @@ class CLIBlock(BaseModel):
         # config is opaque: nothing declares which key is a credential,
         # so the snapshot captures it verbatim, and a pointer resolved
         # into it would be written out as the value it fetched. The
-        # block refuses rather than the dump, so every door that reads
+        # block refuses rather than the dump, so every loader that reads
         # a config inherits the rule.
         if self.script is not None and config_holds_pointer(self.config):
             raise ValueError(
@@ -395,7 +395,7 @@ class MountBlock(BaseModel):
         # as 1, so a document TypeScript refuses outright would load
         # here and the two hosts would disagree about the same bytes --
         # `ttl: true` silently bounding the mount at one second. The
-        # snapshot door reads its bound through the same coercer.
+        # snapshot loader reads its bound through the same coercer.
         if v is None:
             return v
         return coerce_read_ttl(v)
@@ -413,8 +413,8 @@ class MountBlock(BaseModel):
         # Last, so the dependent-key rules name the missing key first,
         # as TypeScript's `validateReadBlock` does. `resolve_read_spec`
         # refuses this too, but only at `to_workspace_kwargs`, which is
-        # a door later than the one TypeScript refuses it at: the shared
-        # `integ/fixtures/config/rejected.json` loads the config and
+        # a step later than the one TypeScript refuses it at: the
+        # shared `integ/fixtures/config/rejected.json` loads the config and
         # nothing more.
         if self.ttl is not None and self.ttl < 1:
             raise ValueError(f"ttl must be at least 1 second, got {self.ttl}")
@@ -440,7 +440,7 @@ def _load_script_source(value: str) -> ScriptSource:
     Config carries a reference, the wire carries content (the docker
     build-context model): the value must be a path to a ``.py`` file,
     read at load time. In code, scripts are callables; config is the
-    only door for script source.
+    only entry point for script source.
 
     Args:
         value (str): the yaml ``script``/``route_policy`` value.
@@ -756,7 +756,7 @@ class WorkspaceConfig(BaseModel):
     def to_workspace_kwargs(self) -> dict[str, Any]:
         """Produce kwargs ready to splat into ``Workspace(**kwargs)``.
 
-        Synchronous, and must stay that way: this is the YAML door, and
+        Synchronous, and must stay that way: this is the YAML loader, and
         :func:`mirage.vfs.registry.build_vfs` behind it is the
         one every embedder calls. A backend needing I/O hydrates lazily
         instead of moving that cost into construction; see
@@ -826,7 +826,7 @@ class WorkspaceConfig(BaseModel):
             }
         if self.profile is not None:
             kwargs["profile"] = self.profile
-        # Passed through as-is: this door is sync, and env-plane
+        # Passed through as-is: this method is sync, and env-plane
         # resolution is async at command time, so no fetching here.
         if self.env is not None:
             kwargs["env"] = self.env
@@ -989,7 +989,7 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
 async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
     """A config with every mount and CLI pointer replaced by its secret.
 
-    The async half of the YAML door, and the reason
+    The async half of the YAML loader, and the reason
     :meth:`WorkspaceConfig.to_workspace_kwargs` can stay sync: a
     `{from, ref, key}` in `mounts.*.config` or `clis.*.config` is
     fetched here, so `build_vfs` receives the credential itself

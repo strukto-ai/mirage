@@ -127,7 +127,7 @@ export interface SessionInit {
   /**
    * The operator's reasons for grouped hides: never rendered to the
    * agent (a reason on ENOENT would confirm the path exists),
-   * persisted so the host's read-back doors survive a restart.
+   * persisted so the host's read-back entry points survive a restart.
    */
   hideReasons?: readonly HideReason[]
   /**
@@ -374,7 +374,7 @@ export class SessionState {
   lastExitCode: number
   // `${PIPESTATUS[@]}`: the exit status of every segment of the last
   // pipeline, where a simple command is a one-segment pipeline. Written
-  // only through `recordStatus` (`executor/statement.ts`), the one door
+  // only through `recordStatus` (`executor/statement.ts`), the one function
   // `$?` goes through as well, so the two can never disagree.
   // Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
   // expands to nothing until a statement records one.

@@ -64,7 +64,7 @@ an immediate handle. Arguments enter the same command lookup, admission and
 runtime routing as shell commands. For example, `['printf', '%s', '$(whoami)']`
 prints the literal operand. To interpret a script, explicitly spawn
 `['sh', '-c', script]`. Command and CLI handlers receive the same scoped spawn
-door on `opts.processes` and `inv.doors.processes`; runtime contexts carry it too.
+entry point on `opts.processes` and `inv.view.processes`; runtime contexts carry it too.
 
 ```mermaid
 flowchart LR
@@ -134,7 +134,7 @@ Python and in a Pyodide guest's `subprocess`.
 A spawned child's output is its handle's result, so the command limits
 bound it as they bound a typed line's, wherever the parent's own output goes. Inline permissions only narrow these grants.
 Two sessions using the same profile do not thereby share their processes.
-Replacing a profile revokes captured doors and requests cancellation of that
+Replacing a profile revokes captured entry points and requests cancellation of that
 session's executions; closing the session also cancels its managed work.
 Output remains owned by the returned child handle or shell job console: listing
 a process does not grant its output stream or replay. Only live
@@ -146,7 +146,7 @@ by hydration fails a pending spawn instead of executing with stale permissions.
 
 | Runtime or entry point | Managed execution | Guest child execution |
 | --- | --- | --- |
-| Builtins, commands, registered CLIs | Shared supervisor and admission | Scoped process door for handlers |
+| Builtins, commands, registered CLIs | Shared supervisor and admission | Scoped process entry point for handlers |
 | Monty, both SDKs | Managed worker execution | No subprocess module; import fails normally |
 | Pyodide, TypeScript | Managed execution | `subprocess.Popen` and standard helpers in a shared-memory worker |
 | QuickJS and WASI | Managed execution | No subprocess ABI supplied by Mirage |

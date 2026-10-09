@@ -111,7 +111,7 @@ async def run_ls(
             itself, and it has to, because nothing runs behind a relay
             to contribute that group the way the fan-out does for a
             single-mount run.
-        session_view (SessionView | None): The session plane's door,
+        session_view (SessionView | None): The session view,
             for the profile the group column renders.
     """
     p = functools.partial

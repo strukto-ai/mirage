@@ -46,7 +46,7 @@ def record_status(
     """Record a finished statement's exit status: ``$?`` and
     ``${PIPESTATUS[@]}`` together.
 
-    The one door every status write goes through, so the two can never
+    The one function every status write goes through, so the two can never
     disagree. ``handle_pipe`` parks its per-segment statuses on the
     session, and the boundary that closes the pipeline claims them here;
     a boundary with nothing parked stamps its own one-element status,

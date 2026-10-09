@@ -27,7 +27,7 @@ from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.types import CLIDoors
+from mirage.commands.cli.types import CLIView
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
@@ -322,8 +322,8 @@ async def open_mounted(ws):
     return await open_repo(ws.dispatch, location)
 
 
-def repo_doors(ws) -> CLIDoors:
-    """The doors the dispatcher offers a git leaf inside a workspace.
+def repo_view(ws) -> CLIView:
+    """The entry points the dispatcher offers a git leaf inside a workspace.
 
     Built the way ``handle_command`` builds them, so a test exercising
     a leaf directly sees the same planes a typed line would.
@@ -331,7 +331,7 @@ def repo_doors(ws) -> CLIDoors:
     Args:
         ws (Workspace): the workspace under test.
     """
-    return CLIDoors(
+    return CLIView(
         dispatch=ws.dispatch,
         stat_path=functools.partial(path_stat, ws.dispatch),
         ns=namespace_view_of(ws._registry, ws._namespace, ws.dispatch, None),

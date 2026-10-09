@@ -31,11 +31,11 @@ async def _ranged(
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
-    """Stream ``path`` as successive ranged reads at the door.
+    """Stream ``path`` as successive ranged reads at the dispatcher.
 
     ``/dev/zero`` answers every range in full, so the stream ends only
     when the reader stops; ``/dev/null`` and a regular file end at the
-    first short range. Each range is a door read, so hides, path rules
+    first short range. Each range is a dispatcher read, so hides, path rules
     and policies judge it.
 
     Args:

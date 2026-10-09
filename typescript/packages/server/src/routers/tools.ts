@@ -18,11 +18,11 @@ import {
   type JsonSchemaType,
 } from '@modelcontextprotocol/server'
 import type { FastifyInstance } from 'fastify'
-import type { McpDoor } from '../mcp/http.ts'
+import type { McpEndpoint } from '../mcp/http.ts'
 import { TOOLS } from '../mcp/server.ts'
 
 export interface ToolsRoutesDeps {
-  mcp: McpDoor
+  mcp: McpEndpoint
 }
 
 const INPUTS: ReadonlyMap<string, JsonSchemaType> = new Map(
@@ -42,7 +42,7 @@ interface ToolResponse {
  * back. Answers the status and body to send.
  */
 async function callTool(
-  mcp: McpDoor,
+  mcp: McpEndpoint,
   workspaceId: string,
   name: string,
   input: JsonSchemaType,

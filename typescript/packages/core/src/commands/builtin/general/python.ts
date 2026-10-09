@@ -76,7 +76,7 @@ export async function handlePython(
     env: Record<string, string>
     cwd?: PathSpec
     code: string | null
-    // argv[0], derived from which door the source came through; '' is
+    // argv[0], derived from which entry point the source came through; '' is
     // CPython's own answer for a program piped in with no operand, so a
     // runtime must not treat it as absent.
     prog?: string
@@ -173,7 +173,7 @@ async function pythonCommand(
   const hasCode = code !== null
   let scriptPath: PathSpec | null = null
   let argStrs: string[]
-  // Which door the source came through decides argv[0], so the two are
+  // Which entry point the source came through decides argv[0], so the two are
   // computed together. CPython spells it '-c' for a payload, the file as
   // typed for a script, '-' for the explicit stdin operand, and '' for
   // stdin with no operand at all; under -m runpy's alter_sys overwrites
@@ -211,11 +211,11 @@ async function pythonCommand(
     argv0 = ''
   }
 
-  // The x check follows the source's door: a file operand asks the
-  // per-path door about the script's own path, so a session whose only
+  // The x check follows the source's entry point: a file operand asks the
+  // per-path entry point about the script's own path, so a session whose only
   // x grant is one show subtree runs scripts there and nowhere else;
   // inline code, -m and stdin keep the whole-session rule, since no
-  // path holds them. Outside a workspace no door is wired and
+  // path holds them. Outside a workspace no entry point is wired and
   // execAllowed answers for files too.
   if (mode === 'file' && scriptPath !== null) {
     const allowed = opts.execPathAllowed?.(scriptPath.virtual) ?? opts.execAllowed !== false

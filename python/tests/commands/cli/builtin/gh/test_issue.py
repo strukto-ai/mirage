@@ -62,7 +62,7 @@ def _inv(flags) -> CLIInvocation:
         texts=("4",),
         flags={"repo": "o/r", **flags},
         stdin=None,
-        doors=None,
+        view=None,
     )
 
 

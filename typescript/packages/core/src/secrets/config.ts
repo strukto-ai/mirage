@@ -71,7 +71,7 @@ export const EnvVarSchema = z
 
 export type EnvVar = z.infer<typeof EnvVarSchema>
 
-/** The env block as an embedder or the config door writes it. */
+/** The env block as an embedder or the config loader writes it. */
 export type EnvEntries = Record<string, string | z.input<typeof EnvVarSchema>>
 
 /**
@@ -128,7 +128,7 @@ export const SecretSourceSchema = z.strictObject({
           continue
         }
         // Reported, never thrown: a throw from inside a transform
-        // escapes safeParse, and the config door's own wrapper (which
+        // escapes safeParse, and the config loader's own wrapper (which
         // names the instance) would never see the failure.
         const parsed = SecretRefSchema.safeParse(item)
         if (!parsed.success) {
@@ -165,5 +165,5 @@ export const SecretSourceSchema = z.strictObject({
 
 export type SecretSource = z.infer<typeof SecretSourceSchema>
 
-/** The `secrets:` block as an embedder or the config door writes it. */
+/** The `secrets:` block as an embedder or the config loader writes it. */
 export type SecretEntries = Record<string, z.input<typeof SecretSourceSchema>>

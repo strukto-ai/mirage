@@ -67,7 +67,7 @@ export const XATTR_OPS: ReadonlySet<string> = new Set([
 ])
 
 // Ops the node table itself answers: a symlink is namespace state with
-// no backend behind it, so the door is the authority for both
+// no backend behind it, so the dispatcher is the authority for both
 // directions (create and readlink) rather than a router to a mount.
 export const NAMESPACE_TABLE_OPS = callNames(NAMESPACE_CALLS, { targets: [Target.LINK] })
 

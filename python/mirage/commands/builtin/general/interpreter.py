@@ -61,7 +61,7 @@ async def runtime_version(
     return run_output(await runtime.version(env or {}))
 
 
-# Which of an interpreter's four doors the source came through. The
+# Which of an interpreter's four entry points the source came through. The
 # mode is what decides argv[0], so the two travel together: CPython
 # spells it "-c" for a payload, the module's file for -m, the file as
 # typed for a script, "-" for the explicit stdin operand, and "" for
@@ -88,7 +88,7 @@ def skip_first_line(code: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Argv0Rules:
-    """What an interpreter calls itself in the doors with no file name.
+    """What an interpreter calls itself in the entry points with no file name.
 
     File mode is universal (the operand as typed), so only these three
     differ, and they differ per interpreter rather than per language:
@@ -168,7 +168,7 @@ class Source:
             source.
         script_path (PathSpec | None): the resolved script operand,
             None for payload/stdin sources.
-        mode (SourceMode): which door the source came through.
+        mode (SourceMode): which entry point the source came through.
         argv0 (str | None): the program's own name for argv[0],
             derived from the mode and the interpreter's own rules. ""
             is meaningful (CPython's answer for stdin with no operand);
@@ -204,12 +204,12 @@ async def resolve_source(
     (read through the workspace dispatch), else piped stdin is the
     source. Words after the script pass through verbatim as argv.
 
-    The ``x`` check follows the source's door. A file operand asks
+    The ``x`` check follows the source's entry point. A file operand asks
     ``exec_path_allowed`` about the script's own path, so a session
     whose only ``x`` grant is one show subtree runs scripts there and
     nowhere else; inline code (-c/-e), -m and stdin keep the
     whole-session rule (``exec_allowed``: any ``x`` grant), since no
-    path holds them. Outside a workspace no door is wired and
+    path holds them. Outside a workspace no entry point is wired and
     ``exec_allowed`` answers for files too.
 
     Args:
@@ -225,12 +225,12 @@ async def resolve_source(
         exec_allowed (bool): whether any mount region is in EXEC mode.
         module (str | None): the -m module name, if given.
         argv0_rules (Argv0Rules): what this interpreter calls itself in
-            the doors that carry no file name.
+            the entry points that carry no file name.
         skip_line (bool): drop the script file's first line (CPython's
             -x). File mode only, which is CPython's own scope: -c, -m
             and stdin are unaffected.
         exec_path_allowed (ExecPathFn | None): whether code may be
-            loaded from one path, for the file door; None outside a
+            loaded from one path, for the file adapter; None outside a
             workspace.
 
     Returns:
@@ -360,7 +360,7 @@ async def run_code(
         # GNU wording (bash prints `bash: python3: command not found`;
         # the shell prefix is dropped workspace-wide), unless the
         # default world recorded why the entry failed to build. A bound
-        # entry without the interpreter door (not a LanguageRuntime) is
+        # entry without the interpreter entry point (not a LanguageRuntime) is
         # refused the same way: there is nothing to run code on.
         hint = unavailable or "command not found"
         return None, IOResult(

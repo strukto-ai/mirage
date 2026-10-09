@@ -45,7 +45,7 @@ from mirage.policy.match.rule import (
     rule_applies,
     rule_reach,
     rule_scope,
-    skipped_at_op_doors,
+    skipped_at_dispatch,
     subjects,
 )
 from mirage.policy.types import Outcome, Ruling
@@ -74,7 +74,7 @@ __all__ = [
     "node_visible",
     "op_reach",
     "posix_level",
-    "skipped_at_op_doors",
+    "skipped_at_dispatch",
     "op_refusal",
     "op_ruling",
     "outranks",

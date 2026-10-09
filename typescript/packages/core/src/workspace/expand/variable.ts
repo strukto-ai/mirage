@@ -123,7 +123,7 @@ const UNSET_GUARD_OPS: ReadonlySet<string> = new Set(['-', ':-', '+', ':+', '=',
  * Refuse expansion-time writes that name hidden variables.
  *
  * `${X:=d}` and `$((X=5))` land on the raw session env rather than the
- * async session door, so the hidden half of that door
+ * async session view, so the hidden half of the session view
  * (`ensureVarVisible`) is applied here, and the refusal takes the
  * fatal expansion-error shape `${var:?}` uses.
  */
@@ -935,16 +935,16 @@ function valueOp(op: string, val: string, groups: string[]): string {
 }
 
 /**
- * One expansion-time write, through the session plane's door.
+ * One expansion-time write, through the session view.
  *
  * `${X:=d}`, `${a[i]:=d}` and `$((X=5))` are assignments the shell
  * performs while expanding a word rather than while running a command,
  * and they used to land on the raw session env. That made a `preSession`
  * rule one `${X:=d}` away from irrelevant: a deployment refusing `AWS_*`
- * still had `${AWS_PROFILE:=prod}` write it. They go through the door
+ * still had `${AWS_PROFILE:=prod}` write it. They go through the session view
  * now, so one rule covers every spelling.
  *
- * Without a door (a unit test outside a workspace) the write lands
+ * Without a session view (a unit test outside a workspace) the write lands
  * directly, with the hidden half still applied: skipping that would let
  * the write-back clobber a value the host's wiring reads.
  *
@@ -962,7 +962,7 @@ function valueOp(op: string, val: string, groups: string[]): string {
  * Land an arithmetic expansion's assignments and settle its draws. Each
  * write goes through `expansionWrite` in evaluation order; then the
  * `RANDOM` reader replays the draws the expression made after it seeded
- * the generator, now that the door holds the seed. One door for a
+ * the generator, now that the session view holds the seed. One entry point for a
  * completed expression and for one that failed partway, since bash
  * binds each assignment as it is made.
  */
@@ -1042,7 +1042,7 @@ export async function expansionWrite(
  *
  * An offset, length or slice bound is arithmetic and may assign
  * (`${v:x=1:y=2}`) or seed (`${v:RANDOM%10:1}`); those land through the
- * door before the next bound expands, including its nested substitutions.
+ * session view before the next bound expands, including its nested substitutions.
  * `quoted` says whether the expansion sits inside double quotes, which
  * decides the rules an operator's word follows and the shape a
  * `$*`-style splat takes.

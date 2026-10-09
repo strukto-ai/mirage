@@ -435,8 +435,8 @@ describe('workspace policies', () => {
     }
   })
 
-  it('path guards hold at the programmatic door', async () => {
-    // ws.dispatch is the one TS op door (FUSE routes through it); a
+  it('path guards hold at the programmatic entry point', async () => {
+    // ws.dispatch is the one TS dispatcher (FUSE routes through it); a
     // path-only guard must refuse it, not just shell commands (#675).
     const ws = executableWorkspace([{ reason: 'prod is protected', paths: ['/data/prod/*'] }])
     try {
@@ -453,7 +453,7 @@ describe('workspace policies', () => {
     }
   })
 
-  it('a preVfs policy holds on the shell door', async () => {
+  it('a preVfs policy holds on the shell entry point', async () => {
     // touch routes through the dispatcher, not handleCommand; a
     // preVfs-only policy must still refuse it with GNU wording.
     const ws = executableWorkspace()
@@ -470,7 +470,7 @@ describe('workspace policies', () => {
     }
   })
 
-  it('touch on an existing file is a write at the op door', async () => {
+  it('touch on an existing file is a write at the dispatcher', async () => {
     // touch on an existing file mutates via setattr, not create; the
     // write classification must cover that op too.
     const ws = executableWorkspace()
@@ -567,7 +567,7 @@ describe('Limit', () => {
     }
   })
 
-  it('a postVfs limit caps the op door', async () => {
+  it('a postVfs limit caps the dispatcher', async () => {
     const ws = executableWorkspace()
     try {
       ws.policies.add(new CapFour())
@@ -727,7 +727,7 @@ describe('Ask in the chain', () => {
   })
 
   it('an op ask with no ledger refuses like a deny', async () => {
-    // A door that cannot put the question (no ledger) refuses it, in the
+    // An entry point that cannot put the question (no ledger) refuses it, in the
     // deny voice, with the reason on the record.
     const policies = new Policies([new AskOnOps()])
     const refused = await preVfsGate(policies, 'write', path('/data/x'), true, '/data/').catch(

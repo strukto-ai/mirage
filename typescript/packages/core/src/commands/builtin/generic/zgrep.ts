@@ -30,7 +30,7 @@ import { UsageError } from '../../errors.ts'
 import type { RegexSyntax } from '../types.ts'
 import { matchStart, matchText } from '../utils/pcre.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { linkDoor } from '../utils/links.ts'
+import { linkResolver } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
@@ -238,7 +238,7 @@ export async function zgrepGeneric(
   let anyMatch = false
   const allResults: string[] = []
 
-  const door = linkDoor(opts)
+  const resolver = linkResolver(opts)
   // zgrep runs grep, so grep's compile warnings come first, in its name.
   let errors =
     pattern === null || neverMatch || fixedString ? '' : patternWarnings(rawPattern, syntax)
@@ -252,7 +252,7 @@ export async function zgrepGeneric(
       force: true,
       quiet: true,
       ...(stat !== undefined ? { stat } : {}),
-      door,
+      resolver,
     })
     const data = await materialize(body)
     errors += decodeText(await io.materializeStderr())

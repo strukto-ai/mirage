@@ -77,14 +77,14 @@ def yaml_config(**config):
 
 
 @pytest.mark.asyncio
-async def test_the_yaml_door_resolves_a_mount_pointer():
+async def test_the_yaml_loader_resolves_a_mount_pointer():
     cfg = await resolve_secrets(
         yaml_config(token=BOT.model_dump(by_alias=True))
     )
     ws = Workspace(**cfg.to_workspace_kwargs())
     token = ws._registry.mount_for_prefix("/slack").vfs.config.token
     # The credential field never sees a pointer: it is fetched before
-    # `build_vfs`, which is why that door can stay sync.
+    # `build_vfs`, which is why that loader can stay sync.
     assert token.get_secret_value() == "xoxb-SLACK_BOT_TOKEN"
     assert CALLS == [("yaml", "op://mirage/SLACK_BOT_TOKEN")]
     await ws.close()

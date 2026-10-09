@@ -129,14 +129,14 @@ def test_hide_speaks_before_the_mode():
     assert kept.stdout == b"PRIVATE needle\n"
 
 
-def test_the_op_door_runs_as_the_default_session():
+def test_the_dispatcher_runs_as_the_default_session():
     # `ws.vfs`, `ws.dispatch`, `ws.stat` and `ws.readdir` are judged
     # under the default session's profile, the way a bare `execute`
     # is, so an agent whose file tool reads through the facade is
     # confined like its shell. A session already bound is kept, and
-    # A handle runs the same door as another session over the
+    # A handle runs the same entry point as another session over the
     # same ledger; a session with an explicit empty profile is the
-    # host's door to what the default profile hides.
+    # host's entry point to what the default profile hides.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
@@ -146,11 +146,11 @@ def test_the_op_door_runs_as_the_default_session():
     host = ws.create_session("host", profile={})
 
     async def run():
-        door = Session(ws, host.session_id).vfs
-        assert door.records is ws.vfs.records
-        await door.mkdir("/data/vault")
-        await door.write("/data/vault/secret", b"top\n")
-        assert await door.read("/data/vault/secret") == b"top\n"
+        files = Session(ws, host.session_id).vfs
+        assert files.records is ws.vfs.records
+        await files.mkdir("/data/vault")
+        await files.write("/data/vault/secret", b"top\n")
+        assert await files.read("/data/vault/secret") == b"top\n"
         with pytest.raises(FileNotFoundError):
             await ws.vfs.read("/data/vault/secret")
         with pytest.raises(FileNotFoundError):
@@ -179,9 +179,9 @@ def _hiding() -> Workspace:
     )
 
 
-def test_the_op_door_does_not_adopt_another_workspaces_session():
+def test_the_dispatcher_does_not_adopt_another_workspaces_session():
     # A session bound by another workspace describes that workspace:
-    # an embedder callback reaching this door from inside the other's
+    # an embedder callback reaching this entry point from inside the other's
     # line runs as this workspace's default session, not as the wider
     # session it arrived under. A binding that names no owner is a
     # deliberate placement (a kernel mount binds one that way) and is
@@ -192,14 +192,14 @@ def test_the_op_door_does_not_adopt_another_workspaces_session():
     host = ws.create_session("host", profile={})
 
     async def run():
-        door = Session(ws, host.session_id).vfs
-        await door.mkdir("/data/vault")
-        await door.write("/data/vault/secret", b"top\n")
+        files = Session(ws, host.session_id).vfs
+        await files.mkdir("/data/vault")
+        await files.write("/data/vault/secret", b"top\n")
         token = set_current_session(wide, other._session_mgr)
         try:
             with pytest.raises(FileNotFoundError):
                 await ws.vfs.read("/data/vault/secret")
-            assert await door.read("/data/vault/secret") == b"top\n"
+            assert await files.read("/data/vault/secret") == b"top\n"
         finally:
             reset_current_session(token)
         token = set_current_session(wide)
@@ -211,27 +211,27 @@ def test_the_op_door_does_not_adopt_another_workspaces_session():
     asyncio.run(run())
 
 
-def test_the_op_door_does_not_follow_a_link_the_session_cannot_see():
-    # The facade follows links before the door so the record carries
+def test_the_dispatcher_does_not_follow_a_link_the_session_cannot_see():
+    # The facade follows links before the dispatcher so the record carries
     # the resolved path, and that follow used to run unbound: a link
-    # inside hidden space reached the door already resolved to its
-    # visible target, so the door's check of the typed path never saw
+    # inside hidden space reached the dispatcher already resolved to its
+    # visible target, so the dispatcher's check of the typed path never saw
     # the hide. The follow now runs as the session and only from a
     # path it can see, so the link reads as absent.
     ws = _hiding()
     host = ws.create_session("host", profile={})
 
     async def run():
-        door = Session(ws, host.session_id).vfs
-        await door.write("/data/pub.txt", b"pub\n")
-        await door.mkdir("/data/vault")
-        await door.symlink("/data/vault/lk", "/data/pub.txt")
-        assert await door.read("/data/vault/lk") == b"pub\n"
+        files = Session(ws, host.session_id).vfs
+        await files.write("/data/pub.txt", b"pub\n")
+        await files.mkdir("/data/vault")
+        await files.symlink("/data/vault/lk", "/data/pub.txt")
+        assert await files.read("/data/vault/lk") == b"pub\n"
         with pytest.raises(FileNotFoundError):
             await ws.vfs.read("/data/vault/lk")
         with pytest.raises(FileNotFoundError):
             await ws.vfs.write("/data/vault/lk", b"x\n")
-        assert await door.read("/data/pub.txt") == b"pub\n"
+        assert await files.read("/data/pub.txt") == b"pub\n"
 
     asyncio.run(run())
 
@@ -248,8 +248,8 @@ def test_a_write_below_the_mode_reads_read_only_file_system():
 def test_a_deeper_show_mode_refines_the_mount_cap():
     # mounts: {/repo: r} + show {"/repo/build": rw}: the deeper entry
     # wins below its anchor, the mount cap holds everywhere else, and
-    # the whole-mount write command gate lets the line reach the op
-    # door instead of refusing the command outright.
+    # the whole-mount write command gate lets the line reach the
+    # dispatcher instead of refusing the command outright.
     ws = _seeded()
     ws.create_session(
         "rev",
@@ -336,7 +336,7 @@ def test_inline_permissions_cannot_add_show():
 def test_the_write_gate_holds_per_path_inside_an_admitted_command():
     # The command gate admits mkdir because one region grants writes;
     # each write the handler then makes still answers for its own
-    # region, so the whole-mount admission opens no side door.
+    # region, so the whole-mount admission opens no side entry point.
     ws = _seeded()
     ws.create_session(
         "rev",
@@ -576,7 +576,7 @@ def test_a_read_only_hidden_remnant_keeps_the_refusal():
 
 
 def test_a_mounted_child_keeps_the_command_planes_refusal():
-    # Command-plane twin of the ops door's merged emptiness: the
+    # Command-plane twin of the dispatcher's merged emptiness: the
     # backend listing holds only hidden entries, but the namespace owes
     # the directory a visible mounted child no backend can list. The
     # stamped children join the guard's emptiness judgment, so the
@@ -606,7 +606,7 @@ def test_a_mounted_child_keeps_the_command_planes_refusal():
 def test_ops_rmdir_keeps_the_refusal_when_a_mounted_child_remains():
     # Ops-plane twin of the visible-child rule: the backend cannot see
     # a mount nested below the directory, so the remnant arm judges
-    # emptiness on the door's merged listing. The visible mounted child
+    # emptiness on the dispatcher's merged listing. The visible mounted child
     # keeps the not-empty refusal instead of the arm destroying the
     # hidden backend remnants and reporting a successful rmdir while
     # the mount remains.

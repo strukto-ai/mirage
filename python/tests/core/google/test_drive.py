@@ -326,7 +326,7 @@ async def test_list_files_asks_for_both_content_tokens(token_manager):
 
 @pytest.mark.asyncio
 async def test_get_file_asks_for_both_content_tokens_unwrapped(token_manager):
-    """`stat_from_api`'s door needs the same two fields, shaped differently.
+    """`stat_from_api`'s input needs the same two fields, shaped differently.
 
     A files.get response is a bare File resource, so its mask is top-level:
     wrapping these in `files(...)` here would ask for a field the response

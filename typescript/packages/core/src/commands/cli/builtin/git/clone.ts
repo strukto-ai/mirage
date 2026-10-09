@@ -18,7 +18,7 @@ import { PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIDoors, CLIInvocation } from '../../types.ts'
+import type { CLIView, CLIInvocation } from '../../types.ts'
 import { DETACHED_ADVICE, switchTo } from './checkout.ts'
 import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
 import { configuredHeaders, fetchObjects, HEADS, ignoreFunny, TAGS } from './fetch.ts'
@@ -95,7 +95,7 @@ export async function clone(
   credentials: Readonly<Record<string, string>> = {},
 ): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const [url, named] = inv.texts
   try {
     checkSwitches(inv, inv.texts)
@@ -116,7 +116,7 @@ export async function clone(
   let transport: Transport
   let start: PathSpec
   try {
-    const { dispatch, statPath } = doors
+    const { dispatch, statPath } = view
     if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
     start = startPoint(fl)
     target = PathSpec.fromStrPath(name, undefined, start)
@@ -130,7 +130,7 @@ export async function clone(
     transport = await openTransport(
       url,
       start,
-      doors,
+      view,
       await configuredHeaders(inv, null),
       credentials,
     )
@@ -144,12 +144,12 @@ export async function clone(
   const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {
-    notes += await populate(inv, doors, transport, target, stored, local && !quiet)
+    notes += await populate(inv, view, transport, target, stored, local && !quiet)
   } catch (err) {
     if (!(err instanceof GitError)) throw err
-    const { dispatch } = doors
-    const links = doors.ns?.links ?? null
-    const mounts = doors.ns?.mounts ?? null
+    const { dispatch } = view
+    const links = view.ns?.links ?? null
+    const mounts = view.ns?.mounts ?? null
     if (fresh && dispatch !== undefined) await removeTree(dispatch, target, links, mounts)
     else if (dispatch !== undefined)
       for (const entry of await readNames(dispatch, target)) {
@@ -165,16 +165,16 @@ export async function clone(
 /** Lay the clone out, fetch into it and check it out; returns what it prints after `Cloning into`. */
 async function populate(
   inv: CLIInvocation,
-  doors: CLIDoors,
+  view: CLIView,
   transport: Transport,
   target: PathSpec,
   url: string,
   local: boolean,
 ): Promise<string> {
   const fl = new FlagView(inv.flags)
-  const { dispatch, statPath } = doors
+  const { dispatch, statPath } = view
   if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
-  const mounts = doors.ns?.mounts ?? null
+  const mounts = view.ns?.mounts ?? null
   const gitdir = target.join('.git')
   const remote = fl.asStr('origin') ?? 'origin'
   if (!validRefName(`refs/remotes/${remote}/test`))
@@ -265,7 +265,7 @@ async function populate(
       statPath,
       new Map(),
       await commitEntries(repo, commit),
-      doors.ns?.links ?? null,
+      view.ns?.links ?? null,
       mounts,
     )
   return notes

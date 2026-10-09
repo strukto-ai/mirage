@@ -52,7 +52,7 @@
       }
     },
     {
-      "name": "deny: a rule may state paths alone, which reaches the op door too",
+      "name": "deny: a rule may state paths alone, which reaches the dispatcher too",
       "config": {
         "mounts": {
           "/d": {

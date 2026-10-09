@@ -36,7 +36,7 @@ export interface ToolResult {
   isError?: boolean
 }
 
-/** What a tool table acts through: one session's doors (`Session`). */
+/** What a tool table acts through: one session's entry points (`Session`). */
 export interface SessionLike {
   readonly sessionId: string
   readonly state: SessionState
@@ -112,7 +112,7 @@ async function missing(vfs: Files, path: string): Promise<boolean> {
   }
 }
 
-/** Every tool, in the order the doors list them. */
+/** Every tool, in the order the entry points list them. */
 export const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'ls', 'grep', 'glob'] as const
 
 /**
@@ -190,8 +190,8 @@ export class MirageToolOperations {
   }
 
   /**
-   * The tools this session can use, in the order the doors list them.
-   * Read off the session's profile, so no door offers a tool every call
+   * The tools this session can use, in the order the entry points list them.
+   * Read off the session's profile, so no entry point offers a tool every call
    * of which would be refused: `shell` needs a command the allow list
    * installs, `ls` and `grep` run those commands and need them, and
    * `write` and `edit` need somewhere the session may write. `read` and
@@ -225,7 +225,7 @@ export class MirageToolOperations {
 
   /**
    * The tools this session can use, its sessions loaded first, so a stored
-   * session answers with its own profile: what an async door lists and
+   * session answers with its own profile: what an async entry point lists and
    * calls by. Mirrors Python's `offered`.
    */
   async offered(): Promise<readonly string[]> {
@@ -256,7 +256,7 @@ export class MirageToolOperations {
   }
 
   /**
-   * Read a file for a door that hands media to the model, in one fetch:
+   * Read a file for an entry point that hands media to the model, in one fetch:
    * an image or a PDF comes back as media and counts as seen in full;
    * anything else is the `read` answer for the same bytes. Either way
    * the file is stamped for a later edit.
@@ -448,7 +448,7 @@ export class MirageToolOperations {
   }
 
   /**
-   * Run one tool by name with its JSON input. The one entry every door
+   * Run one tool by name with its JSON input. The one entry every entry point
    * shares: MCP, the HTTP routes, the CLI and the agent adapters hand a
    * tool's name and its input, as the tool's `*_INPUT` schema reads it,
    * to this method, so each tool answers the same way through each of

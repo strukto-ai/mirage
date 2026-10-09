@@ -57,7 +57,7 @@ class Runtime(ABC):
 
     name: str
     captures: tuple[str, ...] = ()
-    # Which doors this runtime's code has to the outside world (see
+    # Which entry points this runtime's code has to the outside world (see
     # RuntimeReach): "workspace" when the workspace dispatch is its only
     # one, as the bridged engines (monty, quickjs, wasi) and the vfs
     # routing marker declare, "process" or "remote" when the code can
@@ -137,8 +137,9 @@ class Runtime(ABC):
     ) -> RunResult:
         """Execute directly, or under the bound workspace's captured context.
 
-        This is the engine door. Workspace.shell remains the shell admission
-        and routing door, as it was for callers of run and run_line.
+        This is the engine entry point. Workspace.shell remains the shell
+        admission and routing entry point, as it was for callers of run and
+        run_line.
         """
         release = self.admit()
         try:

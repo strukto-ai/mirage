@@ -107,7 +107,7 @@ from mirage.commands.cli.builtin.git.util import (
     verb_usage,
     without_section,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -706,10 +706,10 @@ async def branch(
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
     words = filter_words(inv)
     texts = without_filter_values(inv.texts, words)
     flags = inv.flags
@@ -721,7 +721,7 @@ async def branch(
         if dispatch is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
-        repo, location = await opened(fl, doors)
+        repo, location = await opened(fl, view)
         mode = await track_mode(dispatch, location)
         filt = await asyncio.to_thread(ref_filter, repo, words)
         head = await read_head(dispatch, location.gitdir)

@@ -451,7 +451,7 @@ describe('resolvedConfig port', () => {
   })
 })
 
-describe('resolvedConfig ssh door', () => {
+describe('resolvedConfig ssh entry point', () => {
   it('reports the ssh keys with their defaults and env overrides', () => {
     const home = mkdtempSync(join(tmpdir(), 'mir-settings-'))
     try {

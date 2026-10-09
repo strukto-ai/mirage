@@ -23,9 +23,9 @@ const call = await explain.vfs.read('/data/keys/k')
 
 `explain.vfs` has the same 24 calls as `session.vfs`.
 
-## From any door
+## From any entry point
 
-| Door | A line | A VFS call |
+| Entry point | A line | A VFS call |
 | --- | --- | --- |
 | In-app | `session.explain.shell(line)` | `session.explain.vfs.<call>(...)` |
 | [HTTP](/home/access/http#shell-vfs-calls-and-tools) | `POST /shell?explain=true` | `POST /vfs/<call>?explain=true` |
@@ -33,7 +33,7 @@ const call = await explain.vfs.read('/data/keys/k')
 | [MCP](/home/access/mcp#vfs-calls-and-explain), with `?calls=all` | `shell` with `explain: true` | `vfs_<call>` with `explain: true` |
 | [CLI](/home/access/cli#run-lines-vfs-calls-and-tools) | `mirage shell -w ID -s SESSION -c LINE --explain` | `mirage vfs CALL ARGS -w ID -s SESSION --explain` |
 
-Every door answers the same JSON. Explain reads the line only, so stdin,
+Every entry point answers the same JSON. Explain reads the line only, so stdin,
 `cwd`, `runtime` and a background job are refused with it.
 
 ## What it asks

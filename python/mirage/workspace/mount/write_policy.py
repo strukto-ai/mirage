@@ -30,7 +30,7 @@ from mirage.workspace.mount.errors import WritePolicyError
 def coerce_write_policy(value: str | WritePolicy | None) -> WritePolicy:
     """Coerce a declared write-policy name into a WritePolicy.
 
-    None and the empty string mean unconditional here; the doors resolve
+    None and the empty string mean unconditional here; the entry points resolve
     an absent ``write:`` to the workspace default before asking.
 
     Args:

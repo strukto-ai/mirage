@@ -56,7 +56,7 @@ SUBTREE_OPS = frozenset({"rename", "rmdir", "rm_r"})
 SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
 
 # Ops that read an entry's metadata and nothing of its content, which a
-# deny rule lets through at the op door: deny means present and
+# deny rule lets through at the dispatcher: deny means present and
 # refused, not absent, so a listing shows the entry's name and size
 # and the read of it is what fails, as GNU reports an unreadable file.
 # The command tier's guard leaves its ``stat`` slot unwrapped for the

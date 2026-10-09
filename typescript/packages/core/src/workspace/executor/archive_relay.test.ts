@@ -22,7 +22,7 @@ import { Workspace } from '../workspace/workspace.ts'
 
 // Direct port of tests/workspace/executor/test_archive_relay.py: member
 // selectors stay off routing, extraction lands in the cwd or -C across
-// mounts through relay doors, and tar -c and zip write across mounts the
+// mounts through relay functions, and tar -c and zip write across mounts the
 // archive they would write on one.
 
 const ENC = new TextEncoder()

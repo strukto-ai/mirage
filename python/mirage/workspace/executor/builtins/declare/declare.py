@@ -73,7 +73,7 @@ async def premark(
     """Put a declaration's value-shaping marks on a name before its
     value stores.
 
-    The door coerces on write by reading the record's attributes, so
+    The session view coerces on write by reading the record's attributes, so
     for the declaration's *own* value to coerce (``declare -i n=3+4``
     stores ``7``), the attribute has to be there first; a ``+`` letter
     comes off first too, so ``declare -i N=5; declare +i N+=x`` stores
@@ -82,7 +82,7 @@ async def premark(
     extra gate call.
 
     Args:
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         name (str): the variable being declared.
         shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
         follow_ref (bool): the write follows a reference; a ``-n``
@@ -145,7 +145,7 @@ def start_local(session: SessionState, name: str, inherit: bool) -> None:
     This is the scope's own bookkeeping, not a session write: the
     caller's record is the frame's to put back on return, so no policy
     is asked to delete it. The local's value lands later through the
-    gated door, which judges that write.
+    gated session view, which judges that write.
 
     Args:
         session (SessionState): shell session state.
@@ -248,13 +248,13 @@ async def mark_written(
     The write's gate covered ``checked``, the target before it, so the
     mark rides on that decision; a write that re-aimed an unset
     ``declare -n`` reference (``declare -n r; export r=X``) landed on a
-    target no gate has seen, so that mark goes through the gated door,
+    target no gate has seen, so that mark goes through the gated session view,
     as does the reference mark itself (``+n``), which belongs to the
     reference's own record.
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         name (str): the name written.
         checked (str): what ``name`` resolved to before the write.
         attr (VarAttr): the attribute to set or clear.
@@ -284,11 +284,11 @@ async def stamp_marks(
 
     A written operand's marks ride on its write's gate
     (``mark_written``); a bare one wrote nothing, so each mark goes
-    through the gated door.
+    through the gated session view.
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         name (str): the operand's name.
         checked (str | None): what ``name`` resolved to before its
             write, None for a bare operand.
@@ -310,11 +310,11 @@ async def drop_reference(
 ) -> None:
     """Take the mark off an unaimed ``declare -n`` reference a declared
     array kind is about to land on, silently, as bash's
-    ``export -a ref=v`` does (an undeclared array warns at the door).
+    ``export -a ref=v`` does (an undeclared array warns at the session view).
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         name (str): the declared name.
     """
     target = deref(session, name)
@@ -352,7 +352,7 @@ def plus_refusal(
     Args:
         cmd (str): the builtin's spelling, for the diagnostic.
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         name (str): the operand's name.
         plus (str): the declaration's ``+`` letters.
     """
@@ -386,7 +386,7 @@ async def store_staged_arrays(
     global_scope: bool = False,
     inherit: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
-    """Store a declaration's array literals through the session door,
+    """Store a declaration's array literals through the session view,
     the first of bash's two passes over a declaration.
 
     bash stores every literal before it runs any other operand, then
@@ -401,8 +401,8 @@ async def store_staged_arrays(
     between cannot carry a mark past the gate.
 
     The builtin owns the store; readonly is the shell's rule, checked
-    per name before the door, and the door's gate covers the policy
-    half. Names are processed in order, so an earlier operand stays
+    per name before the session view, and the session view's gate covers the
+    policy half. Names are processed in order, so an earlier operand stays
     stored when a later one refuses, as bash does. A readonly refusal
     of an array literal is a variable-assignment error in GNU, not a
     builtin failure: for `export`/`readonly` (and `declare` at top
@@ -418,7 +418,7 @@ async def store_staged_arrays(
     Args:
         cmd (str): builtin name for refusal rendering and scoping.
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         operands (list[DeclarationOperand]): the declaration's operands
             in order; the staged literals among them store.
         errors (list[str]): filled with bash-voiced refusal lines for a
@@ -491,7 +491,7 @@ async def store_staged_arrays(
         checked = deref(session, name)
         # One try around the literal and the write: a subscript in the
         # literal may assign (`([x=2]=v)`), and that lands through the
-        # same door.
+        # same session view.
         try:
             if kind is VarKind.ASSOC or name in session.assocs:
                 built, bad_words = build_assoc_literal(
@@ -962,7 +962,7 @@ async def mark_functions(
         operands (list[DeclarationOperand]): the function names and
             staged literals in order, empty to list.
         on (bool): set the mark rather than clear it.
-        state (SessionView | None): the session plane's gated door, for
+        state (SessionView | None): the gated session view, for
             the array literals.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
     """
@@ -1019,7 +1019,7 @@ async def mark_variables(
     Args:
         cmd (str): the builtin's own name for a diagnostic.
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         operands (list[DeclarationOperand]): the operands in order.
         attr (VarAttr): EXPORT or READONLY.
         on (bool): set the mark rather than clear it.
@@ -1079,7 +1079,7 @@ async def _mark_operand(
 
     A value of the other array kind is refused and the name is still
     marked, as bash does. The bare form writes no value, so it marks
-    through the plane's no-value door rather than inventing an empty
+    through the session view's no-value call rather than inventing an empty
     string: on a new name that leaves it *unset* and marked, bash's own
     third state (``export Z`` prints ``declare -x Z`` and stays out of
     ``env``). Still gated, since marking is a session write: through
@@ -1089,7 +1089,7 @@ async def _mark_operand(
     Args:
         cmd (str): the builtin's own name for a diagnostic.
         session (SessionState): shell session state.
-        view (SessionView): the session plane's gated door.
+        view (SessionView): the gated session view.
         word (str): the operand.
         attr (VarAttr): EXPORT or READONLY.
         on (bool): set the mark rather than clear it.

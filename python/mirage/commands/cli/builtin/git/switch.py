@@ -68,7 +68,7 @@ from mirage.commands.cli.builtin.git.util import (
     links_of,
     mounts_of,
 )
-from mirage.commands.cli.types import CLIDoors, CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -135,11 +135,11 @@ async def switch(
         inv (CLIInvocation[None]): the line's invocation record.
             git declares no config_model; the planes it reads
             (data through ``dispatch``, names through ``ns``) ride
-            ``inv.doors``.
+            ``inv.view``.
     """
-    doors = inv.doors or CLIDoors()
-    dispatch = doors.dispatch
-    stat_path = doors.stat_path
+    view = inv.view or CLIView()
+    dispatch = view.dispatch
+    stat_path = view.stat_path
     texts = inv.texts
     fl = FlagView(inv.flags)
     try:
@@ -156,7 +156,7 @@ async def switch(
         # own default; only an attaching switch needs a branch to name.
         if not creating and not texts and not flags.detach:
             raise MissingBranchArgumentError()
-        repo, location = await opened(fl, doors, work_tree=True)
+        repo, location = await opened(fl, view, work_tree=True)
         mode = await track_mode(dispatch, location)
         head = await read_head(dispatch, location.gitdir)
         known = repo.refs.allkeys()
@@ -258,8 +258,8 @@ async def switch(
         moved = await move_head(
             dispatch,
             stat_path,
-            links_of(doors),
-            mounts_of(doors),
+            links_of(view),
+            mounts_of(view),
             repo,
             location,
             head,

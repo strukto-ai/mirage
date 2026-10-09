@@ -99,7 +99,7 @@ export function normalizeMounts(
   }
   // Every mount spelling converges here, which is why this is where a
   // read policy is checked against what its backend can honour: one
-  // verdict per mount, whatever door declared it.
+  // verdict per mount, whatever entry point declared it.
   const effectiveIndexes = new Map<BaseVFS, IndexConfig | undefined>()
   for (const [prefix, vfs] of Object.entries(bare)) {
     if (!effectiveIndexes.has(vfs)) effectiveIndexes.set(vfs, indexes[prefix] ?? index)

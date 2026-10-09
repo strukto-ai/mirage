@@ -87,19 +87,19 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         inv (CLIInvocation[None]): location and initialization flags.
     """
     fl = FlagView(inv.flags)
-    doors = inv.doors
+    view = inv.view
     try:
         if (
-            doors is None
-            or doors.dispatch is None
-            or doors.stat_path is None
-            or doors.ns is None
-            or doors.ns.mounts is None
+            view is None
+            or view.dispatch is None
+            or view.stat_path is None
+            or view.ns is None
+            or view.ns.mounts is None
         ):
             raise NoWorkspaceError()
-        dispatch = doors.dispatch
+        dispatch = view.dispatch
         start = start_point(fl)
-        here = await doors.stat_path(start)
+        here = await view.stat_path(start)
         if here is None or here.type is not FileType.DIRECTORY:
             raise NoWorkingDirectoryError(
                 start.raw_path,
@@ -119,15 +119,15 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             "-"
         ):
             raise GitError(f"invalid branch name: '{branch}'")
-        info = await doors.stat_path(gitdir)
+        info = await view.stat_path(gitdir)
         if info is not None and (
             info.type is not FileType.DIRECTORY
             or await read_optional(dispatch, gitdir.join("HEAD")) is not None
         ):
             location = await discover(
                 dispatch,
-                doors.stat_path,
-                doors.ns.mounts.root_of,
+                view.stat_path,
+                view.ns.mounts.root_of,
                 target,
                 gitdir,
                 worktree if (worktree := fl.as_path("work_tree")) else None,
@@ -136,7 +136,7 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         existing = (
             await read_optional(dispatch, gitdir.join("HEAD")) is not None
         )
-        made = bool(inv.texts) and await doors.stat_path(target) is None
+        made = bool(inv.texts) and await view.stat_path(target) is None
         config = (
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
             f"\tbare = {'true' if bare else 'false'}\n"

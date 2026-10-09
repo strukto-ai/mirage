@@ -432,7 +432,7 @@ async def handle_subshell(
         job_table (JobTable | None): the subshell's private job table
             (bash forks: the parent's table never sees these jobs).
         agent_id (str | None): agent identity for job bookkeeping.
-        dispatch (DispatchFn | None): the op door, so a subshell honors
+        dispatch (DispatchFn | None): the dispatcher, so a subshell honors
             an `exec` redirect the way the program loop does. A subshell
             is a child shell, so its redirects leave the parent unchanged.
         sink (JobConsole | None): where each statement's output goes as

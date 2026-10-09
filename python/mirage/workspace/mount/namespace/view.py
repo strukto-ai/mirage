@@ -48,7 +48,7 @@ def registry_child_mounts(
     """Child names the namespace owes ``parent``: mounts and links.
 
     The ``child_mounts`` fact offered to listing commands: the same
-    names the door merges into its own readdir, derived from the same
+    names the dispatcher merges into its own readdir, derived from the same
     tables (mount names session-filtered), so the shell and the ops
     surface cannot disagree about what a directory holds.
 

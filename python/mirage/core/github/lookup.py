@@ -86,7 +86,7 @@ async def lookup(
 
     Without an index the parent is read the way ``_readdir`` reads it with
     none, which answers from the truncated walk alone; TypeScript's twin
-    answers absent for an undefined index, which no door passes.
+    answers absent for an undefined index, which no caller passes.
 
     Args:
         accessor (GitHubAccessor): the mount's accessor.
@@ -166,7 +166,7 @@ async def lookup_retrying(
     A ``read: fresh`` verdict clears the mount index without taking its
     lock, and one landing mid-lookup leaves a miss that only says the store
     was emptied. Read as absence, that miss reaches ``on_enoent``
-    through a dispatcher door and drops the path's overlay for good. The
+    through a dispatcher and drops the path's overlay for good. The
     second lookup refills a cleared index, or reads the one another op
     reseeded meanwhile, so a miss is absent only when both agree. A genuine
     miss costs one more index read and no request, since the first lookup

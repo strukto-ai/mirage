@@ -124,7 +124,7 @@ export interface VFSOptions<A extends Accessor = Accessor> {
  * not define answers `Operation not supported` at that call, so `gzip -c`
  * and `tar -t` still run as readers on a read-only backend. A method
  * marked `@vfsCall` is also reachable by name through the dispatcher
- * (`ws.dispatch('search_abc', path)`), with every check the door runs; the
+ * (`ws.dispatch('search_abc', path)`), with every check the dispatcher runs; the
  * built-in ones are marked here, and an override keeps the mark.
  *
  * Everything a tree needs to run one (the placement, the index store, the

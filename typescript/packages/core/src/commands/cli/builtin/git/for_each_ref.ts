@@ -56,7 +56,7 @@ export async function forEachRef(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = withoutFilterValues(inv.texts, words)
   try {
     checkSwitches(inv, texts)
-    const repo = await opened(fl, inv.doors ?? {})
+    const repo = await opened(fl, inv.view ?? {})
     const filter = await refFilter(repo, words)
     const count = fl.asInt('count') ?? 0
     if (count < 0) throw new FormatUsageError(`invalid --count argument: \`${String(count)}'`)

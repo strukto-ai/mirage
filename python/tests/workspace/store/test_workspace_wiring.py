@@ -144,7 +144,7 @@ async def test_attach_adopts_stored_default_session():
 
 
 @pytest.mark.asyncio
-async def test_the_op_door_adopts_the_stored_default_before_binding():
+async def test_the_dispatcher_adopts_the_stored_default_before_binding():
     # The first ``ws.vfs`` call on a fresh attach used to hydrate the
     # session store alone, so it ran as the minted default rather than
     # the writer's, whose hides the discovery record points at.

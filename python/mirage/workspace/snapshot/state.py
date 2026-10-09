@@ -157,7 +157,7 @@ def cli_config_dump(
     mapping instead: with no ``config_model`` nothing declares which
     keys are secret, so it is captured verbatim rather than guessed at,
     and a script CLI that needs a credential reads it from a managed
-    env var. The yaml door refuses a secrets pointer in a script's
+    env var. The YAML loader refuses a secrets pointer in a script's
     config for exactly this reason (``CLIBlock``): resolved, the value
     would sit in this verbatim capture.
 
@@ -360,10 +360,10 @@ def check_format_version(state: dict[str, Any]) -> None:
     the read policy required, so an unversioned dict would land on a
     bare KeyError instead of this message.
 
-    Both doors run it. ``build_mount_args`` builds a workspace from the
+    Both entry points run it. ``build_mount_args`` builds a workspace from the
     state; ``apply_state_dict`` restores into one that already exists,
     and is what ``version checkout``, ``version restore`` and the agent
-    sandbox's hydrate call. Checking in one door only meant the same
+    sandbox's hydrate call. Checking in one entry point only meant the same
     bytes were refused through ``Workspace.load`` and half-restored
     through a checkout.
 
@@ -443,10 +443,10 @@ def build_mount_args(
         if m.get(MountKey.ANCHOR) and override is None:
             anchor_mode = MountMode(m[MountKey.MODE])
             continue
-        # A live override placed as a ``Mount`` names the door it came
+        # A live override placed as a ``Mount`` names the entry point it came
         # through; a bare VFS, or a rebuilt one, keeps the saved
         # reference so a second round trip rebuilds through the same
-        # door.
+        # entry point.
         if isinstance(override, Mount):
             prov, ref = override.vfs, override.vfs_ref
         else:
@@ -782,9 +782,9 @@ def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:
         # Non-RAM cache backend (e.g. Redis) — skip; its content lives
         # outside the workspace and isn't part of the snapshot anyway.
         return
-    # A snapshot is a third door into the entry table, and a document is
+    # A snapshot is a third entry point into the entry table, and a document is
     # not obliged to spell "no token" the way this version does, so each
-    # token is folded the way the live write doors fold it.
+    # token is folded the way the live write entry points fold it.
     for entry in cache_state.get(CacheKey.ENTRIES, []):
         key = entry[CacheKey.KEY]
         data = entry[CacheKey.DATA]

@@ -56,7 +56,7 @@ async def test_a_handler_sees_the_words_the_line_spelled(line, err):
 
 # jq's --rawfile/--slurpfile are read and curl's -o/-D written through
 # the dispatcher, so a file on another mount, or a process substitution
-# under /dev, is no cross-mount line (DOOR_FLAG_KEYS). Positional
+# under /dev, is no cross-mount line (DISPATCH_FLAG_KEYS). Positional
 # operands still route.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -74,7 +74,7 @@ async def test_a_handler_sees_the_words_the_line_spelled(line, err):
         ("cd /work && jq -c -n --rawfile r /data/r.txt '$r'", b'"raw\\n"\n'),
     ],
 )
-async def test_door_options_route_nothing(line, out):
+async def test_dispatch_options_route_nothing(line, out):
     ws = Workspace(
         {
             "/data": (RAMVFS(), MountMode.WRITE),

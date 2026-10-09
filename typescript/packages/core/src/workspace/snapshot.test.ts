@@ -652,7 +652,7 @@ describe('savedVfsBuild', () => {
 
   it('rebuilds through the recorded ref before a type the registry also knows', () => {
     // A subclass inherits `name`, so an alias registered over a builtin
-    // reports the builtin's type; the ref is the door it came through.
+    // reports the builtin's type; the ref is the entry point it came through.
     expect(savedVfsBuild(saved('redis', 'seeded'), known)?.name).toBe('seeded')
     expect(savedVfsBuild(saved('ram', 'seeded'), known)?.name).toBe('seeded')
     expect(restoresAsFreshRAM(saved('ram', 'seeded'))).toBe(false)
@@ -771,7 +771,7 @@ function gatedWorkspace(prefix = '/data', sessionId?: string): Workspace {
 describe('applyStateDict and the deployment', () => {
   // The restore used to seed `session.vars` directly, past the gate a live
   // `export GATE_X=1` clears (#1017); a snapshot is the one env input the
-  // deployment did not author, so this is the door where the rule matters.
+  // deployment did not author, so this is the entry point where the rule matters.
   it('a restored variable clears the session gate', async () => {
     const source = buildWorkspace()
     await source.shell('export GATE_X=1')
@@ -976,34 +976,37 @@ describe('the read policy survives a snapshot round trip', () => {
     expect(() => buildMountArgs(unversioned as typeof state)).toThrow(/unversioned/)
   })
 
-  // Both doors, or the same bytes get two answers: buildMountArgs builds
+  // Both entry points, or the same bytes get two answers: buildMountArgs builds
   // a workspace from the state, applyStateDict restores into one that
   // exists and is what `version checkout` and the sandbox hydrate call.
-  it.each([3, 4])('refuses a v%i snapshot at the applyStateDict door too', async (version) => {
-    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
-    const state = await toStateDict(ws)
-    await ws.close()
-    const target = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
-    try {
-      await target.cache.set('/d/live.txt', new TextEncoder().encode('live'))
-      // With replaceCache, which is the `version checkout` path. The
-      // check sits above `cache.clear()`; moved one line below it a
-      // refused checkout would already have wiped the live cache while
-      // still rejecting, so the rejection alone does not pin the order.
-      await expect(
-        applyStateDict(target, { ...state, version }, { replaceCache: true }),
-      ).rejects.toThrow(`v${String(version)} not supported`)
-      expect(await target.cache.exists('/d/live.txt')).toBe(true)
-    } finally {
-      await target.close()
-    }
-  })
+  it.each([3, 4])(
+    'refuses a v%i snapshot at the applyStateDict entry point too',
+    async (version) => {
+      const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+      const state = await toStateDict(ws)
+      await ws.close()
+      const target = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+      try {
+        await target.cache.set('/d/live.txt', new TextEncoder().encode('live'))
+        // With replaceCache, which is the `version checkout` path. The
+        // check sits above `cache.clear()`; moved one line below it a
+        // refused checkout would already have wiped the live cache while
+        // still rejecting, so the rejection alone does not pin the order.
+        await expect(
+          applyStateDict(target, { ...state, version }, { replaceCache: true }),
+        ).rejects.toThrow(`v${String(version)} not supported`)
+        expect(await target.cache.exists('/d/live.txt')).toBe(true)
+      } finally {
+        await target.close()
+      }
+    },
+  )
 
   // `resolveReadSpec` accepts `pinned` by design -- coercion only -- so
   // a snapshot carrying it passes the loader and must be stopped by the
-  // mount-time verdict. The constructor door is the same rule reached a
+  // mount-time verdict. The constructor entry point is the same rule reached a
   // different way, and neither was covered.
-  it('refuses pinned at the constructor door', async () => {
+  it('refuses pinned at the constructor entry point', async () => {
     const ws = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.close()
     expect(

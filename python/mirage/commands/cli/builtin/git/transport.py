@@ -36,7 +36,7 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
-from mirage.commands.cli.types import CLIDoors
+from mirage.commands.cli.types import CLIView
 from mirage.types import PathSpec
 
 FLUSH = b"0000"
@@ -459,7 +459,7 @@ def extra_headers(values: list[bytes]) -> dict[str, str]:
 async def open_transport(
     url: str,
     start: PathSpec,
-    doors: CLIDoors,
+    view: CLIView,
     headers: dict[str, str],
     credentials: Mapping[str, str] | None = None,
 ) -> LocalTransport | HttpTransport:
@@ -473,7 +473,7 @@ async def open_transport(
     Args:
         url (str): the remote as typed or configured.
         start (PathSpec): the directory a relative path resolves against.
-        doors (CLIDoors): the invocation's doors.
+        view (CLIView): the invocation's view.
         headers (dict[str, str]): extra HTTP headers from config.
         credentials (Mapping[str, str] | None): an Authorization for the
             URL's origin when it carries no userinfo, dropped with it on a
@@ -487,8 +487,8 @@ async def open_transport(
         raise GitError(f"Unable to find remote helper for '{scheme.group(1)}'")
     if scheme is None and SCP_LIKE.match(url):
         raise GitError("Unable to find remote helper for 'ssh'")
-    dispatch, stat_path = doors.dispatch, doors.stat_path
-    mounts = doors.ns.mounts if doors.ns is not None else None
+    dispatch, stat_path = view.dispatch, view.stat_path
+    mounts = view.ns.mounts if view.ns is not None else None
     if dispatch is None or stat_path is None or mounts is None:
         raise NoWorkspaceError()
     path = urlsplit(url).path if scheme is not None else url

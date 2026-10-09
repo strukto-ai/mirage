@@ -339,7 +339,7 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
         'default a cache under',
     )
   }
-  const dispatch = inv.doors?.dispatch
+  const dispatch = inv.view?.dispatch
   if (dispatch === undefined) {
     throw new UsageError('hf download needs a workspace to write into')
   }

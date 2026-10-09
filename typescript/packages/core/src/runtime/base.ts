@@ -53,7 +53,7 @@ export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
   /**
-   * Which doors this runtime's code has to the outside world (see
+   * Which entry points this runtime's code has to the outside world (see
    * RuntimeReach): 'workspace' when the workspace dispatch is its only one,
    * as the bridged engines (monty, pyodide, quickjs) and the vfs
    * routing marker declare, 'process' or 'remote' when the code can

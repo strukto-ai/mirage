@@ -14,32 +14,32 @@
 
 from dataclasses import fields
 
-from mirage.commands.cli.types import CLIDoors
+from mirage.commands.cli.types import CLIView
 from mirage.commands.config import CommandOpts
 
 
-def test_every_door_is_spelled_as_the_command_tier_spells_it():
+def test_every_entry_point_is_spelled_as_the_command_tier_spells_it():
     # A CLI leaf and a command handler reach the same planes. Spelling
     # one fact two ways is how the two tiers end up with two
     # vocabularies for one plane, and then with two behaviors.
-    doors = {f.name: f.type for f in fields(CLIDoors)}
+    view = {f.name: f.type for f in fields(CLIView)}
     opts = {f.name: f.type for f in fields(CommandOpts)}
-    missing = sorted(set(doors) - set(opts))
+    missing = sorted(set(view) - set(opts))
     assert not missing, (
-        f"CLIDoors fields absent from CommandOpts: {missing}. "
+        f"CLIView fields absent from CommandOpts: {missing}. "
         "Add the field there under the same name, or name "
         "this one whatever that tier already calls it."
     )
     mismatched = sorted(
-        name for name, hint in doors.items() if opts[name] != hint
+        name for name, hint in view.items() if opts[name] != hint
     )
     assert not mismatched, (
-        f"CLIDoors and CommandOpts disagree on the type of: {mismatched}"
+        f"CLIView and CommandOpts disagree on the type of: {mismatched}"
     )
 
 
-def test_every_door_defaults_to_none():
-    # None outside a workspace is the whole opt-in: a verb that reads a
-    # door it was not given has to refuse on its own, and a door that
-    # defaulted to something usable would take that decision away.
-    assert all(f.default is None for f in fields(CLIDoors))
+def test_every_entry_point_defaults_to_none():
+    # None outside a workspace is the whole opt-in: a verb that reads an
+    # entry point it was not given has to refuse on its own, and a field
+    # that defaulted to something usable would take that decision away.
+    assert all(f.default is None for f in fields(CLIView))

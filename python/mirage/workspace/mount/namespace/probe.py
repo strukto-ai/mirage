@@ -150,10 +150,10 @@ async def path_exists(dispatch: DispatchFn, virtual: str | PathSpec) -> bool:
 
 
 def resolve_link(namespace: Namespace, virtual: str) -> str:
-    """Where a path really points, as the door can address it.
+    """Where a path really points, as the dispatcher can address it.
 
     The namespace's walk, with a relative target's walk up from the
-    link's own directory (``../a.txt``) collapsed, which the door does
+    link's own directory (``../a.txt``) collapsed, which the dispatcher does
     not do for a path it is handed whole. The link's directory is a real
     one, since the table keys every link by its resolved parent, so the
     ``..`` it names is that directory's parent.

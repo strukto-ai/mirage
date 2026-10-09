@@ -28,7 +28,7 @@ interface PyNamespace extends PyProxy {
 }
 
 /**
- * The guest's extended-attribute door, registered as `_mirage_xattr`:
+ * The guest's extended-attribute entry point, registered as `_mirage_xattr`:
  * the op, the absolute path, the name and base64 value where the op has
  * them, the create/replace flags and nofollow, answered as JSON (`{value}`,
  * or `{code}` naming the condition).

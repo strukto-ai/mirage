@@ -17,7 +17,7 @@ import type { VarAttr } from '../../../../shell/variable.ts'
 /**
  * A staged array literal, `NAME=(...)` or `NAME+=(...)`: the name, whether
  * it appends, and its expanded items. It travels as data so the builtin
- * that owns the keyword stores it through the session door.
+ * that owns the keyword stores it through the session view.
  */
 export interface StagedArray {
   name: string

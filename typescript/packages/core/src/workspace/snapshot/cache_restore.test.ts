@@ -20,16 +20,16 @@ import { applyStateDict, toStateDict } from './state.ts'
 const ENC = new TextEncoder()
 
 describe('a cache entry restored from a snapshot', () => {
-  // The snapshot is a third door into the entry table, beside `set` and
+  // The snapshot is a third entry point into the entry table, beside `set` and
   // `add`, and it has to agree with them about what "no token" is. A
   // document is not obliged to spell it the way this version does: an
   // older writer stored `''`, and an entry restored holding that would
   // answer isFresh(path, '') with true where a freshly written one
   // answers false -- a false FRESH, the one direction that serves wrong
   // bytes. Driven through applyStateDict rather than the private
-  // restoreCache, because the public door is the one a caller reaches.
+  // restoreCache, because the public entry point is the one a caller reaches.
   it.each(['', null] as const)(
-    'folds a %j token the way the live write doors fold it',
+    'folds a %j token the way the live write entry points fold it',
     async (stored) => {
       const ws = new Workspace({ '/m/': new RAMVFS() })
       try {

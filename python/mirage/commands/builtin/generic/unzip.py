@@ -411,7 +411,7 @@ async def _file_in_chain(stat: StatFn, base: str, chain: str) -> str | None:
     the mkdir that failed under it.
 
     Args:
-        stat (StatFn): stat door in the destination's path space.
+        stat (StatFn): stat function in the destination's path space.
         base (str): the extraction directory, which exists.
         chain (str): the directory an entry needs.
     """
@@ -432,17 +432,17 @@ async def _make_dirs(
     stat: StatFn | None,
     made: set[str],
 ) -> None:
-    """Create the chain for one entry, per door space.
+    """Create the chain for one entry, per path space.
 
-    With a stat door the shared single-level walk runs (dispatch mkdir
+    With a stat function the shared single-level walk runs (dispatch mkdir
     is single-level on most backends); without one the accessor's own
     mkdir handles the chain, which is the pre-workspace construction
     path where no dispatcher exists.
 
     Args:
         dir_path (str): the directory whose chain must exist.
-        mkdir_fn (Callable): mkdir door.
-        stat (StatFn | None): stat door in the same path space, if any.
+        mkdir_fn (Callable): mkdir function.
+        stat (StatFn | None): stat function in the same path space, if any.
         made (set[str]): levels already ensured this run.
     """
     if stat is None:
@@ -558,7 +558,7 @@ async def unzip(
                 )
     archive_path = paths[0]
     if relay:
-        # Relay doors address by full virtual path (flat_scopes'
+        # Relay functions address by full virtual path (flat_scopes'
         # convention), not by the mount-relative key the wrapper's
         # accessor stamped.
         archive_path = dataclasses.replace(
@@ -663,9 +663,9 @@ async def _run(
         archive_path (PathSpec): the archive operand.
         members (tuple[str, ...]): include patterns.
         excludes (tuple[str, ...]): ``-x`` patterns.
-        write_bytes (Callable): write door.
-        mkdir_fn (Callable): mkdir door.
-        stat (StatFn | None): stat door in the same path space, if any.
+        write_bytes (Callable): write function.
+        mkdir_fn (Callable): mkdir function.
+        stat (StatFn | None): stat function in the same path space, if any.
         args_l (bool): ``-l``.
         d (str | PathSpec | None): ``-d``.
         q (bool): ``-q``.
@@ -679,7 +679,7 @@ async def _run(
         m (bool): ``-m``.
         h (bool): ``-h``.
         cwd (PathSpec | str): the session's working directory.
-        relay (bool): dispatch-relayed doors.
+        relay (bool): dispatch-relayed calls.
         warning (str): the archive's offset warning, which -t prints on
             stdout after the archive line.
         overwrite (bool): ``-o``, replace a file without asking.

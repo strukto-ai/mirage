@@ -32,8 +32,8 @@ import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } fr
  * `mirage workspace create` in the image entrypoint or by hand) with
  * mounts at the same prefixes as the host workspace, so the session
  * cwd and every path in a line resolve unchanged. Mirage only
- * connects and execs lines: the whole-line door is LineExecutor's
- * runLine, and there is no interpreter door. Subclasses adapt one
+ * connects and execs lines: the whole-line entry point is LineExecutor's
+ * runLine, and there is no interpreter entry point. Subclasses adapt one
  * provider by implementing connect() and execLine(); routing,
  * captures, and per-line scripts are inherited. Constructed like
  * every runtime (captures, config, script); config is how to reach

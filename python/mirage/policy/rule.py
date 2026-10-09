@@ -54,7 +54,7 @@ class RulePolicy(Policy):
 
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         # The op-layer twin: pure path protection (no command scope)
-        # also holds at the op doors, so FUSE, programmatic ops, and
+        # also holds at the dispatcher, so FUSE, programmatic ops, and
         # the warm cache cannot bypass it. Command-scoped rules stay
         # command-layer: an op does not know which command issued it.
         if match_op(self.rule, self._scope, ctx):

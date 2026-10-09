@@ -61,7 +61,7 @@ POLICY_WRITE_OPS = call_names(_CALLS, effects=WRITE_EFFECTS)
 XATTR_OPS = frozenset({"getxattr", "listxattr", "setxattr", "removexattr"})
 
 # Ops the node table itself answers: a symlink is namespace state with
-# no backend behind it, so the door is the authority for both
+# no backend behind it, so the dispatcher is the authority for both
 # directions (create and readlink) rather than a router to a mount.
 NAMESPACE_TABLE_OPS = call_names(NAMESPACE_CALLS, targets={Target.LINK})
 

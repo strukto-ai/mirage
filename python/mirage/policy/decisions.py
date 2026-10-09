@@ -463,7 +463,7 @@ class Decisions:
     async def resolve_op(
         self, ctx: VfsContext, ask: Ask
     ) -> Deny | Pending | None:
-        """An Ask from the op door where no line is running: a standing
+        """An Ask from the dispatcher where no line is running: a standing
         answer settles it, else the question is raised now.
 
         The op has no command behind it, so its record names none: the

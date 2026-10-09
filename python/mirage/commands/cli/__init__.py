@@ -18,15 +18,15 @@ from mirage.commands.cli.specs import (
     unregister_cli_spec,
 )
 from mirage.commands.cli.types import (
-    CLIDoors,
     CLIInvocation,
     CLISpec,
+    CLIView,
     WalkResult,
 )
 from mirage.commands.cli.walk import node_help, walk
 
 __all__ = [
-    "CLIDoors",
+    "CLIView",
     "CLIInvocation",
     "CLISpec",
     "WalkResult",

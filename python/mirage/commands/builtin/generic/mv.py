@@ -376,7 +376,7 @@ async def mv_generic(
         readdir (ReaddirFn | None): Directory lister for backup version
             scans and the ``-T`` empty-directory probe; the primitive
             strategy's own lister is used when None.
-        copies (TransferLinks | None): Namespace entries and transfer doors
+        copies (TransferLinks | None): Namespace entries and transfer calls
             for link-aware stat, rename, and backup operations.
         guard (Callable | None): Judges one (source, target) pair before
             the move touches anything, the backup included, raising to

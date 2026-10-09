@@ -162,7 +162,7 @@ def _declared_marks(flag_chars: set[str], plus_chars: set[str]) -> AttrMarks:
     lands, in order, readonly last.
 
     The letters that shape a value (`-i -l -u`) are stored as
-    attributes and applied by the door on every *later* write, which is
+    attributes and applied by the session view on every *later* write, which is
     GNU's rule: `v=MiXeD; declare -l v` keeps `MiXeD`, and the next
     `v=ABC` stores `abc`. So this marks and never rewrites. `-l` and
     `-u` are exclusive: setting one clears the other, and a cluster
@@ -215,7 +215,7 @@ async def execute_declaration(
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
-        view (SessionView): the session plane's gated door, bound once
+        view (SessionView): the gated session view, bound once
             for the line so a pre_session rule governs an
             expansion-time write exactly as it governs `X=d`.
     """
@@ -398,7 +398,7 @@ async def execute_declaration(
             else:
                 seed_var(session, bare, [] if scalar is None else [scalar])
     # Array literals travel as data: the handler stores them through
-    # the session door and owns both refusal voices, so the executor
+    # the session view and owns both refusal voices, so the executor
     # only expands and stages.
     if keyword == "readonly":
         result = await handle_readonly(

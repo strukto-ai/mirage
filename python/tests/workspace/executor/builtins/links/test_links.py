@@ -213,10 +213,10 @@ async def test_ln_keeps_going_after_a_source_it_cannot_read():
 
 
 @pytest.mark.asyncio
-async def test_rm_of_a_link_goes_through_the_door():
+async def test_rm_of_a_link_goes_through_the_dispatcher():
     # The strip used to write the node table directly, so a pre_vfs
     # policy protecting a link never fired for `rm` while it fired for
-    # every other door (the FUSE unlink hole, one tier up). The mount is
+    # every other entry point (the FUSE unlink hole, one tier up). The mount is
     # writable, so only the policy can be what refuses.
     ws = Workspace(
         {"/data": (RAMVFS(), MountMode.WRITE)},
@@ -328,7 +328,7 @@ async def test_rm_f_silences_a_hidden_link():
 async def test_every_refused_operand_speaks_in_one_voice():
     # GNU reports each operand it could not remove, so a read grant is
     # one line per operand -- a link the node table refuses and a
-    # backend file the op door refuses say the same thing.
+    # backend file the dispatcher refuses say the same thing.
     ws = _ws()
     await ws.shell("echo b > /data/f.txt")
     await ws.shell("ln -s f.txt /data/l1; ln -s f.txt /data/l2")
@@ -461,7 +461,7 @@ async def test_ln_refuses_a_slashed_link_name_that_is_not_there():
     # Pinned on coreutils 9.7: symlink(2) and link(2) answer `missing/`
     # with ENOENT and create nothing, the hard-link line naming its
     # source; a directory takes the link inside it as before, and a file
-    # behind the slash is still the door's "File exists".
+    # behind the slash is still the dispatcher's "File exists".
     ws = _ws()
     await ws.shell(
         "printf hi > /data/a.txt; printf y > /data/reg; mkdir -p /data/d"

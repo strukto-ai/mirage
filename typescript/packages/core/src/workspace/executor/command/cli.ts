@@ -22,7 +22,7 @@ import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
-import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { verbVisible } from '../../lookup/lookup.ts'
 import { type DispatchFn, type ScriptSource } from '../../../runtime/types.ts'
@@ -212,7 +212,7 @@ export function dropsMountCaches(spec: CLISpec): boolean {
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
  * a grammar to render it from (parseSpecFor). The workspace facts in
- * `context` reach a verb as one `inv.doors` field, one door per state
+ * `context` reach a verb as one `inv.view` field, one entry point per state
  * plane, so a verb that never reads it cannot touch a mount.
  */
 export async function handleCli(
@@ -334,11 +334,11 @@ export async function handleCli(
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
 
-  // The workspace doors a mount-reading verb needs ride the record as one
+  // The workspace entry points a mount-reading verb needs ride the record as one
   // field. Most CLIs never read it: an API client has no filesystem,
   // while `git` is nothing but one. Absent outside a workspace, so a verb
   // that needs a mount refuses there on its own.
-  const doors: CLIDoors = {
+  const view: CLIView = {
     ...(context.processes === undefined ? {} : { processes: context.processes }),
     ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
     ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
@@ -363,7 +363,7 @@ export async function handleCli(
     flags,
     stdin,
     env: envSnapshot(session),
-    ...(Object.keys(doors).length > 0 ? { doors } : {}),
+    ...(Object.keys(view).length > 0 ? { view } : {}),
     spec: leaf,
   }
 

@@ -86,10 +86,10 @@ export function weakerMode(a: MountMode, b: MountMode): MountMode {
 }
 
 /**
- * What the data door treats as nonexistent for one session.
+ * What the dispatcher treats as nonexistent for one session.
  *
  * A sibling of `SessionState.mountModes`: per-session narrowing that the
- * doors enforce, null-on-the-session means unrestricted. Hiding is
+ * entry points enforce, null-on-the-session means unrestricted. Hiding is
  * "does not exist", never "forbidden" — matching paths answer ENOENT
  * and drop out of listings, which is what makes a hide the way a profile
  * keeps a session away from a mount: naming mounts only narrows their
@@ -124,7 +124,7 @@ export interface ShowEntry {
 /**
  * The `show` half of one session's path axis.
  *
- * A sibling of `HiddenPaths`: per-session state the doors read,
+ * A sibling of `HiddenPaths`: per-session state the entry points read,
  * null-on-the-session means the document states no show. An entry does
  * two things, each on the one anchor-depth rule: it re-opens a subtree
  * inside a hidden region when its anchor is deeper than the hide's,
@@ -136,7 +136,7 @@ export interface ShownPaths {
 }
 
 /**
- * What the session door treats as unset for one session.
+ * What the session view treats as unset for one session.
  *
  * Enforced where env leaves the session: `get` misses, `snapshot`
  * omits, expansion sees unset. Field names differ from `HiddenPaths`
@@ -860,8 +860,8 @@ export type StatFn<Args extends unknown[] = [path: PathSpec, index?: IndexCacheS
 /**
  * What proving a running command's `.` and `..` reads.
  *
- * The command tier reaches its backend past the dispatcher's door, so
- * `Mount.runCommand` binds the door's facts for it: `stat` is the door's
+ * The command tier reaches its backend past the dispatcher, so
+ * `Mount.runCommand` binds the dispatcher's facts for it: `stat` is the dispatcher's
  * stat (throwing when nothing is there) and `follow` the namespace's link
  * resolution, null while it holds none. The kernel walk (`followPaths`)
  * rewrites an operand to its link's target before the handler runs;

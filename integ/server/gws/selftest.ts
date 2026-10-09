@@ -648,7 +648,7 @@ async function compatibilityHttp(at: string): Promise<void> {
     '2026-09-25T19:59:00+08:00',
   ])
   // Rendering in a zone means handing it to Intl, which throws for one
-  // it cannot resolve; the door refuses rather than crashing the read.
+  // it cannot resolve; the request is refused rather than crashing the read.
   const badZone = await api(`${events}?timeZone=Not/AZone`, 't1')
   eq('HTTP Calendar list refuses a zone it cannot resolve', badZone.status, 400)
 }
@@ -1172,7 +1172,7 @@ async function main(): Promise<void> {
     check('an unknown extras key is a 400', unknown === 400, String(unknown))
     // Every timed event renders in its calendar's zone, so a zone Intl
     // cannot resolve would throw a RangeError out of a later read. Both
-    // doors that set one refuse it here instead.
+    // reset fields that set one refuse it here instead.
     const badDefault = await reset(at, {
       tenants: ['t1'],
       extras: { calendarTimeZone: 'Not/AZone' },
@@ -1292,7 +1292,7 @@ async function main(): Promise<void> {
       'Unknown route: POST /v1/documents/a:b:batchUpdate',
     )
 
-    // ---- an event time is validated at the door, never stored as typed
+    // ---- an event time is validated on arrival, never stored as typed
     const rv = `${at}/_run/rv`
     check('run rv seeds', (await reset(rv, seed)) === 200)
     const events = `${rv}/calendar/v3/calendars/primary/events`
@@ -1447,7 +1447,7 @@ async function main(): Promise<void> {
     const rw = `${at}/_run/rw`
     check('run rw seeds', (await reset(rw, seed)) === 200)
     await post(`${rw}/v1/documents`, 't1', { title: 'before-reset' })
-    // Door one: /reset replaces the rows with no route involved, which is
+    // Way one: /reset replaces the rows with no route involved, which is
     // what `Fake.afterReset` exists for.
     check('resetting run rw again', (await reset(rw, seed)) === 200)
     eq('a scoped reset drops the cached world', await fileNames(rw, 't1'), ['Recall Survey'])
@@ -1459,7 +1459,7 @@ async function main(): Promise<void> {
       const db = home.runtime.pool.client(DEFAULT_RUN)
       const T = DEFAULT_TENANT
 
-      // Door two: a write handler that THROWS mutated in place and flushed
+      // Way two: a write handler that THROWS mutated in place and flushed
       // nothing. Asserted on the cache rather than a later response: the one
       // write route that can be made to throw from outside (`multipart/mixed`
       // with no boundary=) parses before it mints, so nothing observable
@@ -1479,7 +1479,7 @@ async function main(): Promise<void> {
       check('a write route that throws is a 500', boom.status === 500, String(boom.status))
       check('and its half-applied world is evicted', cachedState(db, T) === undefined)
 
-      // Door three: a read that missed can still be inside loadState when a
+      // Way three: a read that missed can still be inside loadState when a
       // /reset drops the entry, or when a write that missed alongside it
       // flushes its own copy; see `Cached` in store/cache.ts.
       //
@@ -1710,7 +1710,7 @@ async function main(): Promise<void> {
       await bulk.close()
     }
 
-    // Door four: keyed by the run's CLIENT, not its name, so two servers in
+    // Way four: keyed by the run's CLIENT, not its name, so two servers in
     // ONE process cannot reach each other's worlds. A map keyed by
     // `run|tenant` passes every other check here and fails this one.
     const a = await start(gwsFake, 0)

@@ -103,7 +103,7 @@ describe('Files', () => {
     expect(ws.records.map((r) => r.op)).toContain('append')
   })
 
-  it('pwrite is one write at the door, so a refused read does not stop it', async () => {
+  it('pwrite is one write at the dispatcher, so a refused read does not stop it', async () => {
     const ws = mkWorkspace()
     await ws.vfs.write('/data/f.txt', 'abc')
     const seen: [string, boolean][] = []
@@ -203,9 +203,9 @@ describe('Files existence probes', () => {
   })
 })
 
-// `ws.vfs` is an op door like the dispatcher: FUSE and programmatic
+// `ws.vfs` is an entry point like the dispatcher: FUSE and programmatic
 // access read through it, so policy hooks must fire here too.
-describe('Files policy door', () => {
+describe('Files policy entry point', () => {
   class SealReads implements Policy {
     preVfs(ctx: VfsContext): Action | null {
       if (!ctx.write && ctx.path.virtual.endsWith('.sealed')) {
@@ -328,7 +328,7 @@ async function seed(ws: Workspace, path: string): Promise<void> {
 // The facade is not a second pipeline: it hands every op to the
 // dispatcher, so what the shell sees and what ws.vfs sees cannot drift,
 // and each gate fires exactly once per op.
-describe('Files is one door with the dispatcher', () => {
+describe('Files goes through the dispatcher', () => {
   class CountPre implements Policy {
     readonly seen: string[] = []
     preVfs(ctx: VfsContext): Action | null {
@@ -405,7 +405,7 @@ describe('Files is one door with the dispatcher', () => {
   })
 
   it('renders a registered filetype, and raw asks for the stored bytes', async () => {
-    // The door stamps the path's extension so a filetype-scoped op wins;
+    // The dispatcher stamps the path's extension so a filetype-scoped op wins;
     // `raw` passes an explicit null filetype to stop that, which is the
     // read the FUSE read-modify-write path needs.
     const vfs = render(new RAMVFS(), '.gdoc.json', () =>
@@ -540,7 +540,7 @@ describe('Files is one door with the dispatcher', () => {
     expect(await ws.vfs.cat('/b/books.tally')).toBe('cached')
   })
 
-  it('refuses a write to a read-only mount at the door', async () => {
+  it('refuses a write to a read-only mount at the dispatcher', async () => {
     const vfs = new RAMVFS()
     const ws = new Workspace({ '/ro': vfs }, { mode: MountMode.READ })
     await expect(ws.vfs.write('/ro/a.txt', 'x')).rejects.toThrow('read-only')
@@ -548,7 +548,7 @@ describe('Files is one door with the dispatcher', () => {
 })
 
 /**
- * A RAM store wearing the s3 name, so the accounting door reads the mount as
+ * A RAM store wearing the s3 name, so the accounting reads the mount as
  * network-backed rather than local. The mount serves RAM's commands under the
  * name it wears.
  */
@@ -637,7 +637,7 @@ describe('Files accounting survives the delegation', () => {
     // The backend applied the write, then a step after it (here an
     // invalid postVfs return, but any foreign bookkeeping error looks
     // the same) blew up. The error must propagate AND the transfer
-    // must stay on the books: the door stamped the report at
+    // must stay on the books: the dispatcher stamped the report at
     // completion, so the record does not depend on what kind of
     // exception followed. Mirrors Python's test_policies.py.
     const vfs = s3NamedRam()
@@ -815,7 +815,7 @@ describe('Files.setattr', () => {
     await ws.vfs.mkdir('/data/dir')
     await ws.vfs.write('/data/dir/f.txt', 'hello')
     await ws.vfs.symlink('/data/dir/link', 'f.txt')
-    // A link has no backend inode, so the door keeps its attrs and the
+    // A link has no backend inode, so the dispatcher keeps its attrs and the
     // target is left alone.
     expect(await ws.vfs.setattr('/data/dir/link', { mode: 0o640, nofollow: true })).toEqual({
       mode: 0o640,
@@ -916,7 +916,7 @@ describe('Files.readlink', () => {
 // `sessionId` on an op, and the one rule that bounds it. A shell line
 // *sets* the session; an op *inherits* it. So the argument names the
 // session to run as when no line is running, and the line's session
-// wins when one is -- which is what keeps a handler reaching this door
+// wins when one is -- which is what keeps a handler reaching the dispatcher
 // from widening the view it was given. Mirrors python's
 // `TestPerCallSession`.
 describe('Files per-call sessionId', () => {
@@ -955,7 +955,7 @@ describe('Files per-call sessionId', () => {
   })
 
   it('lets a line in progress outrank the named session', async () => {
-    // The door never widens a caller's view: a command running for a
+    // The dispatcher never widens a caller's view: a command running for a
     // confined session cannot read as a wider one by naming it.
     const ws = await splitWs()
     const blind = ws.getSession('blind')

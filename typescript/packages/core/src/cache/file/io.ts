@@ -78,7 +78,7 @@ export function latestFingerprint(
  * `claimed` value is what the command that made it put in `IOResult.writes`,
  * so it vouches for `written` only when it is that very value, or equal
  * bytes. Any other value means another writer landed last (a concurrent
- * pipeline stage, an `xargs -P` run, a background job, a door write that
+ * pipeline stage, an `xargs -P` run, a background job, a dispatcher write that
  * claims nothing, a `truncate`), and neither the cached bytes nor the
  * pre-write entry are the file. A size other than `nbytes` means the write
  * moved other bytes than the command claims. A line with no write record
@@ -283,8 +283,8 @@ export async function applyIo(
   nested = false,
 ): Promise<void> {
   // A path both read and written is dropped: neither side is the file.
-  // A read at the door reaches here as the backend's read record, and
-  // counts once it follows the path's last write: the door kept what the
+  // A read at the dispatcher reaches here as the backend's read record, and
+  // counts once it follows the path's last write: the dispatcher kept what the
   // backend held by then, which need not be the bytes sent.
   const read = new Set(Object.keys(io.reads))
   const readAfter = new Set<string>()

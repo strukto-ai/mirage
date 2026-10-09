@@ -26,7 +26,7 @@ const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter
 const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 describe('a warm read command reads nothing from the backend', () => {
-  // Every read command reads at the door, which serves the warm entry
+  // Every read command reads at the dispatcher, which serves the warm entry
   // whatever reader the command binds.
   it.each([
     'cat /c/a.txt',

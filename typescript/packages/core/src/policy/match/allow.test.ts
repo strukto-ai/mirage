@@ -71,7 +71,7 @@ describe('allow lists', () => {
     expect(lineAllowed(ctx('git', { tokens: ['git', 'push'] }), rules)).toBe(false)
     // A word that is not a tool is never refused by an allow list.
     expect(lineAllowed(ctx('cd', { tokens: ['cd', '/x'], tool: false }), rules)).toBe(true)
-    // A context built without the door's tokens reads the raw argv.
+    // A context built without the entry point's tokens reads the raw argv.
     const raw = ctx('git', { argv: ['push'] })
     expect(lineTokens(raw)).toEqual(['git', 'push'])
     expect(lineAllowed(raw, rules)).toBe(false)

@@ -297,7 +297,7 @@ class SessionState:
     # `${PIPESTATUS[@]}`: the exit status of every segment of the last
     # pipeline, where a simple command is a one-segment pipeline. Written
     # only through `record_status` (`executor/statement.py`), the one
-    # door `$?` goes through as well, so the two can never disagree.
+    # function `$?` goes through as well, so the two can never disagree.
     # Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
     # expands to nothing until a statement records one.
     pipe_status: tuple[int, ...] = ()
@@ -335,7 +335,7 @@ class SessionState:
     visibility: Visibility = DEFAULT_VISIBILITY
     # The operator's reasons for grouped hides: never rendered to the
     # agent (a reason on ENOENT would confirm the path exists),
-    # persisted so the host's read-back doors survive a restart.
+    # persisted so the host's read-back entry points survive a restart.
     hide_reasons: tuple[HideReason, ...] = ()
     # The profile's admission rules, compiled: its allow list, its ask and
     # deny rules, and every rule its mount entries carry. One document,

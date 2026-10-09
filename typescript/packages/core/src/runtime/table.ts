@@ -95,7 +95,7 @@ const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set(Object.keys(NAMED))
  * calls it, never a line the agent types. Once registered the name works
  * everywhere a builtin's does: a `runtimes:` entry in workspace config, a
  * string in `new Workspace(..., { runtimes })`, and `execute({ runtime })`.
- * Runtime packages use the same door for their own runtimes (`daytona`
+ * Runtime packages use the same entry point for their own runtimes (`daytona`
  * from `@struktoai/mirage-node`). Mirrors `register_runtime` in
  * `mirage/runtime/table.py`: a core builtin cannot be shadowed, and
  * re-registering any other name replaces it.

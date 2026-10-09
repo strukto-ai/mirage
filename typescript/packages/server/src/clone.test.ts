@@ -52,7 +52,7 @@ describe('cloneWorkspaceWithOverride', () => {
   })
 
   it('leaves a null override write to the saved policy', async () => {
-    // null means absent, as on every other door.
+    // null means absent, as on every other entry point.
     const built = await buildOverrideMounts({ mounts: { '/r': { vfs: 'ram', write: null } } }, null)
     expect((built['/r/'] as Mount).options.write).toBeUndefined()
   })

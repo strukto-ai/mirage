@@ -33,13 +33,13 @@ PATH_ONLY: dict[str, Schema] = {"path": PATH}
 
 @dataclass(frozen=True, slots=True)
 class VfsCall:
-    """One ``session.vfs`` call as the remote doors carry it. A door calls
-    the method of the same name on ``session.vfs``, or on
+    """One ``session.vfs`` call as the remote endpoints carry it. An endpoint
+    calls the method of the same name on ``session.vfs``, or on
     ``session.explain.vfs`` to explain it, passing each argument by name;
     ``<name>_base64`` carries the bytes ``<name>`` takes.
 
     Args:
-        name (str): the call's name; ``vfs/<name>`` on every door.
+        name (str): the call's name; ``vfs/<name>`` on every entry point.
         description (str): what the call does, in one line.
         params (Mapping[str, Schema]): each argument's JSON schema, in
             the order the call takes them.

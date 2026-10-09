@@ -109,7 +109,7 @@ describe('PermissionsPolicy', () => {
 
   it('a deny rule speaks by scope and by where it was written', () => {
     const p = policy()
-    // Whole-command rule: reason only, the door renders `git: policy
+    // Whole-command rule: reason only, the command plane renders `git: policy
     // denied: ...` at 126. A mount section's rule applies when the line
     // works inside that mount (here by cwd).
     expect(
@@ -254,7 +254,7 @@ describe('PermissionsPolicy', () => {
   it('an ask rule speaks after every deny', () => {
     const p = policy()
     // A line an ask rule covers, refused by nothing: the Ask names the
-    // rule so the door can key a session grant on it.
+    // rule so the entry point can key a session grant on it.
     expect(
       p.preCommand(
         ctx('git', ['push', 'origin', 'main'], { cwd: '/scratch', program: ['git', 'push'] }),
@@ -273,11 +273,11 @@ describe('PermissionsPolicy', () => {
       ask: [{ reason: 'shared', commands: ['rm'], paths: ['/repo/shared/*'] }],
       deny: [],
     }
-    const door = new PermissionsPolicy(new Sessions({ s: shared }))
+    const perms = new PermissionsPolicy(new Sessions({ s: shared }))
     expect(
-      door.preCommand(ctx('rm', ['/repo/shared/a'], { paths: [path('/repo/shared/a')] })),
+      perms.preCommand(ctx('rm', ['/repo/shared/a'], { paths: [path('/repo/shared/a')] })),
     ).toEqual({ kind: 'ask', reason: 'shared', rule: shared.ask[0], rules: [shared.ask[0]] })
-    expect(door.preCommand(ctx('rm', ['/repo/b'], { paths: [path('/repo/b')] }))).toBeNull()
+    expect(perms.preCommand(ctx('rm', ['/repo/b'], { paths: [path('/repo/b')] }))).toBeNull()
   })
 
   it('preVfs holds the pure path rules', () => {
@@ -290,7 +290,7 @@ describe('PermissionsPolicy', () => {
       sessionId: 's',
     }
     expect(p.preVfs(locked)).toEqual({ kind: 'deny', reason: 'frozen', rule: FULL.deny[2] })
-    // Command-scoped rules do not reach the op door: an op does not
+    // Command-scoped rules do not reach the dispatcher: an op does not
     // know which command issued it.
     expect(
       p.preVfs({
@@ -316,7 +316,7 @@ describe('PermissionsPolicy', () => {
     expect(policies.wants('preVfs')).toBe(true)
   })
 
-  it('speaks at the op door only through a pure path rule', async () => {
+  it('speaks at the dispatcher only through a pure path rule', async () => {
     const p = policy()
     expect(await p.wantsFor('preVfs', 's')).toBe(true)
     expect(await p.wantsFor('preVfs', 'rev')).toBe(false)

@@ -52,7 +52,7 @@ async def handle_test(
             test/[, a CondNode tree for [[.
         session (SessionState): session for cwd, env, and BASH_REMATCH.
         name (str): invocation name for diagnostics: "test", "[", "[[".
-        view (SessionView | None): the session plane's gated door, for
+        view (SessionView | None): the gated session view, for
             an assignment inside a numeric operand.
     """
     ctx = CondContext(

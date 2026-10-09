@@ -62,7 +62,7 @@ describe('MountRootPolicy', () => {
     expect(deny?.kind).toBe('deny')
     expect(deny && 'reason' in deny ? deny.reason : '').toContain(needle)
     // Every mount-root refusal is about one operand and speaks in the
-    // command's own voice; the door renders `<cmd>: <reason>`.
+    // command's own voice; the command plane renders `<cmd>: <reason>`.
     expect(deny && 'scope' in deny ? deny.scope : '').toBe('operand')
     const [err, code] = renderDeny(cmd, deny as Deny)
     expect(new TextDecoder().decode(err)).toBe(`${cmd}: ${(deny as Deny).reason}\n`)

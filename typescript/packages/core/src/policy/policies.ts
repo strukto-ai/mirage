@@ -175,9 +175,9 @@ function denyOnly(hook: Hook, action: Deny | Ask | null): Deny | null {
 }
 
 /**
- * The error a door throws for a policy's Deny, or for a question the host
+ * The error an entry point throws for a policy's Deny, or for a question the host
  * has not answered, its record noted for the line running it. The message
- * says what the terminal would (`Permission denied` unless the door words
+ * says what the terminal would (`Permission denied` unless the entry point words
  * its own); the reason (or the ask id the agent quotes) rides the record,
  * on the error for a caller that catches it and on the line's result for
  * one that only reads what a command printed.
@@ -195,7 +195,7 @@ export function policyDenied(
 /**
  * What the gate would answer one VFS call, as `preVfsGate` decides it and
  * without its consequences: every policy's answer, the one that wins,
- * and the error the door would throw. A question reads the ledger's
+ * and the error the entry point would throw. A question reads the ledger's
  * settled records and records nothing. Mirrors the Python `_explained_op`.
  */
 async function explainedOp(
@@ -246,22 +246,22 @@ async function explainedOp(
 }
 
 /**
- * Fire preVfs at the op door; a Deny becomes a PolicyDenied (EACCES),
+ * Fire preVfs at the dispatcher; a Deny becomes a PolicyDenied (EACCES),
  * or the built-in's own error (ENOENT for a hide, EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
  * FUSE, and the warm cache all pass through it. `access` carries the
- * owning mount's mode (unset at a door that judges it itself), whether
+ * owning mount's mode (unset at an entry point that judges it itself), whether
  * the op creates the path or mutates below it, `checkHidden` false only
- * for a door that has already answered the hides itself, and the
+ * for an entry point that has already answered the hides itself, and the
  * approval ledger. An Ask is a question only where no line is running and
- * the door holds the ledger (a file tool, the host's facade): the ledger
+ * the entry point holds the ledger (a file tool, the host's facade): the ledger
  * answers it from a standing grant or records it, and an unanswered one
  * refuses with the ask id on the record. Inside a line an Ask refuses
  * like a deny, since the line was admitted without it. `final` is false
  * only for a rename's source, whose destination is gated next. In a dry
  * run (`explaining`) the gate notes its answer and throws `Explained`
- * once the op would refuse or has no gate left, so the door stops before
+ * once the op would refuse or has no gate left, so the entry point stops before
  * any backend or cache is touched; a write a policy makes while it
  * decides that op throws EROFS, since the dry run may change nothing, and
  * an ask its read meets reads the ledger and records nothing.
@@ -324,9 +324,9 @@ export async function preVfsGate(
 }
 
 /**
- * Fire postVfs at the op door; a Deny suppresses the result. Returns
+ * Fire postVfs at the dispatcher; a Deny suppresses the result. Returns
  * the merged Limit bound (tightest per field across every opining
- * policy) for the door to apply to a byte-producing result, or null
+ * policy) for the entry point to apply to a byte-producing result, or null
  * when no policy bounds this op.
  */
 export async function postVfsGate(
@@ -445,7 +445,7 @@ export class Policies {
    * counts, unless it speaks per session (`SessionScoped`) and says this
    * is not one of its. For a seam that pays ahead for a hook rather than
    * gating on it: the secret fill drops its masks under a session-write
-   * gate, and a profile's policy at that door is one profile's, not
+   * gate, and a profile's policy at that entry point is one profile's, not
    * every session's.
    */
   async wantsFor(hook: Hook, sessionId: string): Promise<boolean> {
@@ -504,13 +504,13 @@ export class Policies {
 
   /**
    * The one loop every stage runs: each policy's answer, named and checked
-   * against what the hook may carry. The door stops at the first Deny,
+   * against what the hook may carry. The entry point stops at the first Deny,
    * since nothing after it can change the outcome; `every` goes on, so
    * `explain` shows the answers a Deny would hide. A policy that throws
    * answers with a Deny naming it (fail closed), except the built-in
    * placement, which throws to the caller. A kind the hook cannot carry
    * (VALIDITY) throws PolicyError: a programming error, not a refusal, and
-   * as loud in a dry run as at the door. Mirrors the Python `_said`.
+   * as loud in a dry run as at the entry point. Mirrors the Python `_said`.
    */
   private async said(
     hook: Hook,
@@ -573,7 +573,7 @@ export class Policies {
   }
 
   /**
-   * One stage at a door: the first Deny wins (limits are moot once the
+   * One stage at an entry point: the first Deny wins (limits are moot once the
    * result is suppressed), Limit actions merge to the tightest value per
    * field, and Routes are collected for the caller to reconcile. An Ask is
    * remembered and the loop goes on looking for a Deny, so a later
@@ -602,12 +602,12 @@ export class Policies {
   /**
    * The policies' answers at one stage, in the order the stage asks them,
    * each naming its policy: what `explain` shows, from the same loop the
-   * door runs. With `every` no answer stops the loop, so a Deny does not
+   * entry point runs. With `every` no answer stops the loop, so a Deny does not
    * hide the answers after it; without it the answers end at the first
-   * Deny, as the door's do. The built-in hides never answer here, since a
+   * Deny, as the entry point's do. The built-in hides never answer here, since a
    * hide never surfaces; the built-in placement answers first at
    * `preExecute` and the built-in mount mode last at `preVfs`, as they do
-   * at the door. Mirrors the Python `answers`.
+   * at the entry point. Mirrors the Python `answers`.
    */
   async answers(
     hook: Hook,
@@ -650,12 +650,12 @@ export class Policies {
 
   /**
    * Fire preVfs across the policies; the first Deny wins, else the first
-   * Ask, which the door decides how to put. The built-in
+   * Ask, which the entry point decides how to put. The built-in
    * hides answer before every policy, with a Hide that outranks whatever
    * a policy would say, so a refusal never tells a session a hidden name
    * exists; the built-in mount mode answers after them. Both hold
    * whether or not any policy overrides the hook; `checkHidden` false
-   * only for a door that has already answered the hides itself.
+   * only for an entry point that has already answered the hides itself.
    */
   async preVfs(ctx: VfsContext, checkHidden = true): Promise<Hide | Deny | Ask | null> {
     if (checkHidden) {
@@ -708,7 +708,7 @@ export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): 
  * the innermost binding, so a suspension answers null exactly as
  * bound. On the fallback storage a suspension yields to any
  * concurrently armed frame, because disarming another command's op
- * doors is the worse failure: find's delegated `rm` then double-admits
+ * gates is the worse failure: find's delegated `rm` then double-admits
  * its removal (an over-count, failing closed) instead of a concurrent
  * command's ops running unguarded.
  */

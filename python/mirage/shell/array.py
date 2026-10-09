@@ -55,7 +55,7 @@ async def build_indexed_literal(
         append (bool): extend rather than replace.
         index_of (Callable[[str], Awaitable[int]]): arithmetic subscript
             resolver; async because a subscript may assign, and the
-            assignment lands through the session door.
+            assignment lands through the session view.
     """
     arr: ShellArray = list(base) if append and base is not None else []
     cursor = array_extent(arr) if append else 0
@@ -199,7 +199,7 @@ def array_set(arr: ShellArray, idx: int, value: str) -> None:
 def array_with(arr: ShellArray, idx: int, value: str) -> ShellArray:
     """A copy of ``arr`` with ``value`` assigned at ``idx``.
 
-    What a writer hands the session plane's door: the door speaks in
+    What a writer hands the session view: the session view speaks in
     whole variables, so an element write states itself as the array the
     write produces. Building it on a copy is what keeps a refusal from
     leaving the element applied.

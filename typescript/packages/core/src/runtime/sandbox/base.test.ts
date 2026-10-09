@@ -147,7 +147,7 @@ describe('RemoteSandbox', () => {
 
   it('sandboxes take lines, not stages', () => {
     // A sandbox is a line executor, never the engine inside one
-    // command: it carries the line door and no interpreter door.
+    // command: it carries the line entry point and no interpreter entry point.
     const box = new RecordingSandbox()
     expect(isLineExecutor(box)).toBe(true)
     expect('run' in box).toBe(false)

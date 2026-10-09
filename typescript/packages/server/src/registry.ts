@@ -135,7 +135,7 @@ export class WorkspaceRegistry {
 
   /**
    * The live entry `account` may use, else null. The one access rule
-   * every door asks: a caller with no account may use every workspace
+   * every entry point asks: a caller with no account may use every workspace
    * unless accounts are required; an account may use only the workspaces
    * it owns, so one created by a caller with no account is closed to
    * every account. A workspace that exists but belongs to another

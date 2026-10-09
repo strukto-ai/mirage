@@ -81,7 +81,7 @@ async def _drain(source) -> bytes:
     ],
 )
 async def test_a_warm_read_command_reads_nothing_from_the_backend(line):
-    # Every read command reads at the door, which serves the warm entry
+    # Every read command reads at the dispatcher, which serves the warm entry
     # whatever reader the command binds.
     ram = RAMVFS()
     ram.caches_reads = True

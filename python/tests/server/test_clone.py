@@ -256,7 +256,7 @@ async def test_an_override_pointer_still_builds_the_declared_sources():
 
 @pytest.mark.asyncio
 async def test_an_override_mount_with_a_null_write_keeps_the_saved_policy():
-    # null means absent, as on every other door.
+    # null means absent, as on every other entry point.
     built = await build_override_mounts(
         {"mounts": {"/r": {"vfs": "ram", "write": None}}}, None
     )

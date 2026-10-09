@@ -151,7 +151,7 @@ def test_call_names_keeps_what_matches_every_filter():
     assert call_names(calls, targets={Target.LINK}) == set()
 
 
-def test_the_door_serves_what_a_vfs_defines_and_marks():
+def test_the_dispatcher_serves_what_a_vfs_defines_and_marks():
     shelf = Shelf()
     mount = MountEntry("/", shelf)
     assert shelf.supports("search_abc") and mount.answers("search_abc")
@@ -246,7 +246,7 @@ async def test_policies_judge_a_function_by_its_effect_and_every_path():
 
 
 @pytest.mark.asyncio
-async def test_a_second_path_passes_the_door():
+async def test_a_second_path_passes_the_dispatcher():
     ws = Workspace(
         {"/shelf/": Shelf(), "/ram/": RAMVFS()}, mode=MountMode.WRITE
     )

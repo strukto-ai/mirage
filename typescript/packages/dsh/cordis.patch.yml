@@ -104,7 +104,7 @@
 # under the host's temporary directory — a path that names nothing in
 # this world, so the recovery the notice invites fails on a file the
 # model cannot open, and an oversized result becomes truncation with a
-# dead pointer. The mirage store writes through the same op door every
+# dead pointer. The mirage store writes through the same dispatcher every
 # other effect here passes, so the locator is an ordinary workspace path
 # and the tool that produced the output is the one that can go read it.
 #

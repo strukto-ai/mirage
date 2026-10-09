@@ -110,7 +110,7 @@ async def delete_session(
 async def cancel_session_lines(
     workspace_id: str, session_id: str, request: Request
 ) -> CancelLinesResponse:
-    """Cancel the session's running and queued lines, from every door.
+    """Cancel the session's running and queued lines, from every entry point.
 
     The session stays open; returns once those lines have ended.
     """

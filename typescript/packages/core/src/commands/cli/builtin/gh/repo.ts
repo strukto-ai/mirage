@@ -465,7 +465,7 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     flags: { ...parseToKwargs(parsed), C: inv.cwd },
     stdin: inv.stdin,
     env: inv.env,
-    ...(inv.doors !== undefined ? { doors: inv.doors } : {}),
+    ...(inv.view !== undefined ? { view: inv.view } : {}),
     spec: leaf,
   }
   return gitClone(git, tokenHeader(config))

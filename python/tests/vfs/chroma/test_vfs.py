@@ -50,10 +50,10 @@ async def test_chroma_vfs_registers_expected_commands_and_ops():
 
 
 # chroma lists from one tree document, so a refused listing refetches the
-# whole tree. A burst through the op door belongs to no shell command; fresh
+# whole tree. A burst through the dispatcher belongs to no shell command; fresh
 # trusts its own refill for the window instead of refetching per call.
 @pytest.mark.asyncio
-async def test_an_ops_door_burst_under_fresh_fetches_the_tree_once(
+async def test_an_ops_entry_point_burst_under_fresh_fetches_the_tree_once(
     monkeypatch,
 ):
     fetch = AsyncMock(wraps=tree.fetch_path_tree)

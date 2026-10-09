@@ -406,7 +406,7 @@ export async function handleFor(
     if (session.shellOptions.noexec === true) break
     // env stores strings only; bash keeps `for f in sub/*.txt`
     // matches relative, so the loop variable takes the typed form.
-    // The write goes through the session door; a policy denial
+    // The write goes through the session view; a policy denial
     // aborts the loop before its body runs.
     const textVal = wordText(val)
     try {
@@ -612,7 +612,7 @@ export async function handleCfor(
     }
   } catch (err) {
     // PolicyDenied is a header expression assigning a hidden name,
-    // refused by the same door as any denied assignment.
+    // refused by the same session view as any denied assignment.
     if (
       !(err instanceof ArithError) &&
       !(err instanceof ReadonlyError) &&

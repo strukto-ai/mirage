@@ -482,11 +482,11 @@ async def test_claimed_written_bytes_take_the_verdict(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nested", [False, True], ids=["line", "nested"])
-async def test_a_path_read_at_the_door_and_written_keeps_nothing(
+async def test_a_path_read_at_the_dispatcher_and_written_keeps_nothing(
     cache, nested
 ):
     # SharePoint rewrites an uploaded Office file, so the bytes `tee` sent
-    # are not the file the door read back and kept; the read's record is
+    # are not the file the dispatcher read back and kept; the read's record is
     # what tells apply_io the line read the path too, a nested line's
     # (`eval`) as well, whose read tokens label nothing.
     await cache.set("/s3/f.pptx", b"abc<meta/>")

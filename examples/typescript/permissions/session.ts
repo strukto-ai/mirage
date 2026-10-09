@@ -25,18 +25,18 @@ import type {
 } from "@struktoai/mirage-node";
 
 // One agent, one session. `ws.session(id, { profile })` creates a session
-// under a role and hands back its two doors bound together: `shell`
+// under a role and hands back its two entry points bound together: `shell`
 // runs a shell line as the session and `vfs` is the file API run as it.
-// Whichever door an agent's tools use, the same profile answers.
+// Whichever entry point an agent's tools use, the same profile answers.
 //
 // Two roles read one world and see two filesystems. The reviewer's
 // profile hides /repo/secrets and its session caps /repo at read, so the
-// directory does not exist for it on either door and a write is a
-// read-only file system on either door. The editor may write, and a
+// directory does not exist for it on either entry point and a write is a
+// read-only file system on either entry point. The editor may write, and a
 // deny rule keeps it out of the secrets by name, so the same file is
 // "does not exist" for one role and "permission denied" for the other,
 // through the shell and through vfs.read alike. The workspace names no
-// default profile, so its own doors (`ws.vfs`, bare `ws.shell`) are
+// default profile, so its own entry points (`ws.vfs`, bare `ws.shell`) are
 // the host's view. A second `ws.session(id)` adopts the session as is;
 // naming a profile for a session that already exists is refused.
 
@@ -70,12 +70,12 @@ function pad(text: string, width: number): string {
 
 function show(
   role: string,
-  door: string,
+  entry: string,
   call: string,
   answer: string,
   note: string,
 ): void {
-  console.log(`${pad(role, 9)} ${pad(door, 9)} ${pad(call, 34)} ${answer}`);
+  console.log(`${pad(role, 9)} ${pad(entry, 9)} ${pad(call, 34)} ${answer}`);
   console.log(`${pad("", 9)} ${pad("", 9)} ${pad("", 34)} ${note}`);
 }
 
@@ -83,7 +83,7 @@ function codeOf(err: unknown): string {
   return String((err as { code?: string }).code ?? err);
 }
 
-interface Doors {
+interface Handle {
   shell(
     cmd: string,
     options?: SessionExecuteOptions,
@@ -97,7 +97,7 @@ interface Doors {
 
 async function line(
   role: string,
-  handle: Doors,
+  handle: Handle,
   cmd: string,
   note: string,
   options: SessionExecuteOptions = {},
@@ -110,7 +110,7 @@ async function line(
 
 async function read(
   role: string,
-  handle: Doors,
+  handle: Handle,
   path: string,
   note: string,
   sessionId?: string,
@@ -131,7 +131,7 @@ async function read(
 
 async function write(
   role: string,
-  handle: Doors,
+  handle: Handle,
   path: string,
   note: string,
 ): Promise<void> {
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
     mounts: { "/repo": "read" },
   });
   const editor = await ws.session("editor", { profile: "editor" });
-  const host: Doors = {
+  const host: Handle = {
     shell: (cmd, options) => ws.shell(cmd, options),
     vfs: ws.vfs,
   };
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
     "reviewer",
     reviewer,
     "cat /repo/README.md",
-    "the shell door, as the reviewer",
+    "the shell entry point, as the reviewer",
   );
   await line(
     "reviewer",
@@ -190,25 +190,25 @@ async function main(): Promise<void> {
     "reviewer",
     reviewer,
     "/repo/secrets/key.pem",
-    "the op door, the same hide, the same answer",
+    "the dispatcher, the same hide, the same answer",
   );
   await read(
     "editor",
     editor,
     "/repo/secrets/key.pem",
-    "the op door, the same rule, the same answer",
+    "the dispatcher, the same rule, the same answer",
   );
   await read(
     "host",
     host,
     "/repo/secrets/key.pem",
-    "no default profile: the workspace's own door sees it",
+    "no default profile: the workspace's own entry point sees it",
   );
   await read(
     "host",
     host,
     "/repo/secrets/key.pem",
-    "the same door, named per call: the reviewer's hide",
+    "the same entry point, named per call: the reviewer's hide",
     "reviewer",
   );
   await read(
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
     "reviewer",
     reviewer,
     "echo x > /repo/new.txt",
-    "the shell door reads the same cap",
+    "the shell entry point reads the same cap",
   );
   await line("editor", editor, "echo x > /repo/new.txt", "and the same grant");
 

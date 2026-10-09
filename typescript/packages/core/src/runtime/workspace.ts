@@ -28,8 +28,8 @@ import type { RuntimeOptions } from './config.ts'
  *
  * It is a pure routing marker, so it carries no capability mixin: a
  * line resolved to workspace runs on the workspace executor inline, the path
- * the line takes anyway, so there is no interpreter door (run) and no
- * delegate door (runLine) to implement.
+ * the line takes anyway, so there is no interpreter entry point (run) and no
+ * delegate entry point (runLine) to implement.
  *
  * Constructed like every runtime (captures, config, script), with two
  * workspace readings: captures undefined (the default) keeps the catch-all
@@ -39,7 +39,7 @@ import type { RuntimeOptions } from './config.ts'
 export class WorkspaceRuntime extends Runtime {
   readonly name = 'workspace'
   // A workspace-routed line runs on the workspace executor itself: it IS the
-  // gate, so there is no door around it.
+  // gate, so there is no entry point around it.
   override readonly reach = 'workspace'
   // Declaring captures (even empty) turns the catch-all off; the
   // dispatcher reads this bit, not the array's length.

@@ -131,8 +131,8 @@ async function js(
     argStrs = []
   }
 
-  // The x check follows the source's door, exactly as python3's: a
-  // file operand asks the per-path door, everything else keeps the
+  // The x check follows the source's entry point, exactly as python3's: a
+  // file operand asks the per-path entry point, everything else keeps the
   // whole-session rule.
   if (scriptPath !== null) {
     const allowed = opts.execPathAllowed?.(scriptPath.virtual) ?? opts.execAllowed !== false

@@ -27,7 +27,7 @@ WORKSPACE_ID = "demo"
 
 
 class SSHHarness:
-    """A daemon-shaped SSH door on a free port, serving one RAM workspace.
+    """A daemon-shaped SSH endpoint on a free port, serving one RAM workspace.
 
     Args:
         registry (WorkspaceRegistry): the served workspaces.
@@ -113,7 +113,7 @@ def bind_key(harness: SSHHarness, options: str) -> asyncssh.SSHKey:
     """Authorize a fresh client key whose line carries ``options``.
 
     Args:
-        harness (SSHHarness): the running door; its keys file is read
+        harness (SSHHarness): the running entry point; its keys file is read
             again on every login.
         options (str): the OpenSSH options field, e.g.
             ``mirage-profile="guarded"``.

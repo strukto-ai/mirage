@@ -58,7 +58,7 @@ const PROFILES = {
       deny: [
         {
           reason: 'credentials are never read by hand',
-          // A rule with paths and no command reaches the op door too,
+          // A rule with paths and no command reaches the dispatcher too,
           // so FUSE and the cache cannot go around it.
           paths: ['/vault/*'],
         },

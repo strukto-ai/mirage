@@ -79,18 +79,18 @@ export function restored(oid: string, mode: number): StagedEntry {
  * unstaged.
  */
 export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
-  const doors = inv.doors ?? {}
+  const view = inv.view ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let unstaged: Map<string, string>
   try {
-    const dispatch = doors.dispatch
-    const statPath = doors.statPath
+    const dispatch = view.dispatch
+    const statPath = view.statPath
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
-    const repo = await opened(fl, doors)
+    const repo = await opened(fl, view)
     const named = fl.asPath('work_tree') !== undefined
     if (!named && (await isBare(dispatch, repo.location))) throw new BareResetError()
     await requireWorkTree(dispatch, statPath, repo.location, named)
@@ -128,7 +128,7 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
       repo.location,
       new Set(visibleEntries(repo.location, after.entries).keys()),
       UNTRACKED_NO,
-      doors.ns?.links ?? null,
+      view.ns?.links ?? null,
     )
     unstaged = await workChanges(
       repo,

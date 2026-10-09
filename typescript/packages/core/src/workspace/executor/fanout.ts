@@ -171,7 +171,7 @@ export async function fanOutTraversal(
       })
     } else {
       // A backend failure anywhere in the walk (a 5xx from a nested mount)
-      // is this command's result, in its voice, as the single-mount door
+      // is this command's result, in its voice, as the single-mount entry point
       // reports it; the rest of the line still runs.
       io = new IOResult({
         exitCode: readFailExitCode(cmdName, err),

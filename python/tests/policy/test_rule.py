@@ -156,7 +156,7 @@ async def test_rule_policy_without_commands_covers_every_command():
 
 @pytest.mark.asyncio
 async def test_rule_policy_op_twin_holds_for_path_only_rules():
-    # Pure path protection also fires at the op doors, so FUSE and
+    # Pure path protection also fires at the dispatcher, so FUSE and
     # programmatic ops cannot bypass it.
     policy = RulePolicy(
         CommandRule(reason="frozen", paths=("/data/locked/*",))

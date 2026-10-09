@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
-import { linkDoor } from '../utils/links.ts'
+import { linkResolver } from '../utils/links.ts'
 import { decompressInputs } from './decompress.ts'
 
 /** zcat is `gzip -cd`, so -f copies input that is not gzip, -q drops the
@@ -35,6 +35,6 @@ export async function zcatGeneric(
     force: fl.asBool('f'),
     quiet: fl.asBool('q'),
     suffix: fl.asStr('S') ?? GZIP_SUFFIX,
-    door: linkDoor(opts),
+    resolver: linkResolver(opts),
   })
 }

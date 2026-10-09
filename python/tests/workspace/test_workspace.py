@@ -2798,7 +2798,7 @@ def test_add_mount_refuses_duplicates_invalid_mounts_and_closed_workspace():
 
 
 def test_add_mount_runs_the_same_read_verdict_as_the_constructor():
-    """The runtime door is a mount door too.
+    """The runtime entry point is a mount entry point too.
 
     Without the verdict here a mount added at runtime could declare a
     policy its backend cannot honour, which reads as enabled and does
