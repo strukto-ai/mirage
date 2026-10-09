@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { IOConfig } from '../io/config.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
+import type { Policy } from '../policy/base.ts'
+import type { Action, ExecuteResultContext } from '../policy/types.ts'
 import { Channel } from '../shell/console/types.ts'
 import { ExecutionScope } from './execution.ts'
 import { ShellExecution } from './shell_execution.ts'
@@ -16,6 +19,12 @@ function gate(): { promise: Promise<void>; release: () => void } {
     release = resolve
   })
   return { promise, release }
+}
+
+class ApproveOutput implements Policy {
+  postExecute(_ctx: ExecuteResultContext): Action | null {
+    return null
+  }
 }
 
 describe('ShellExecution', () => {
@@ -213,6 +222,24 @@ describe('ShellExecution', () => {
       await execution.close()
       expect((await ws.shell('echo "$SHOULD_NOT_EXIST"')).stdoutText).toBe('\n')
     } finally {
+      await ws.close()
+    }
+  })
+
+  it('cancel reaches a held output drain', async () => {
+    const ws = new Workspace(
+      {},
+      { shellParser: await getTestParser(), io: new IOConfig({ bufferBytes: CHUNK_SIZE }) },
+    )
+    ws.policies.add(new ApproveOutput())
+    const execution = await ws.shell('seq 1 20000', { stream: true })
+    try {
+      while (execution['output'].pipe.bufferedBytes < CHUNK_SIZE)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(await ws.cancel()).toBe(1)
+      await expect(execution.wait()).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      await execution.close()
       await ws.close()
     }
   })

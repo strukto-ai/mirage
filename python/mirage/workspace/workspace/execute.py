@@ -416,6 +416,22 @@ class LineFrame:
     writer: StatusWriter = field(default_factory=StatusWriter)
 
 
+async def drain_to_sink(sink: JobConsole, result: IOResult) -> None:
+    """Hand a line's held output to its sink, leaving the result empty.
+
+    Args:
+        sink (JobConsole): where the line's output goes.
+        result (IOResult): the line's answer, its output still held.
+    """
+    for channel, data in (
+        (Channel.STDOUT, await result.materialize_stdout()),
+        (Channel.STDERR, await result.materialize_stderr()),
+    ):
+        if data:
+            await sink.emit(channel, data)
+    result.stdout = result.stderr = None
+
+
 async def execute_line(
     ws: ExecuteEnv,
     command: str,

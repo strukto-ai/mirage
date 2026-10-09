@@ -3,8 +3,10 @@ import asyncio
 import pytest
 
 from mirage import ShellExecution, Workspace
+from mirage.io.config import IOConfig
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
+from mirage.policy import Action, ExecuteResultContext, Policy
 from mirage.shell.console.types import Channel
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
@@ -255,4 +257,25 @@ async def test_immediate_session_cancel_reaches_streamed_invocation():
             await execution.wait()
         await execution.aclose()
     finally:
+        await ws.close()
+
+
+class _ApproveOutput(Policy):
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_held_output_drain():
+    ws = Workspace({}, io=IOConfig(buffer_bytes=CHUNK_SIZE))
+    ws.policies.add(_ApproveOutput())
+    execution = await ws.shell("seq 1 20000", stream=True)
+    try:
+        while execution._output.pipe.buffered_bytes < CHUNK_SIZE:
+            await asyncio.sleep(0.01)
+        assert await ws.cancel() == 1
+        with pytest.raises(MirageAbortError):
+            await asyncio.wait_for(execution.wait(), 2)
+    finally:
+        await execution.aclose()
         await ws.close()

@@ -192,6 +192,7 @@ from mirage.workspace.workspace.cache import build_file_cache
 from mirage.workspace.workspace.execute import (
     ExecuteEnv,
     LineFrame,
+    drain_to_sink,
     execute_line,
 )
 from mirage.workspace.workspace.explainer import Explainer
@@ -2597,6 +2598,10 @@ class Workspace:
                 cancel,
                 stop,
             )
+            if sink is not None and isinstance(result, IOResult):
+                await run_cancellable(
+                    drain_to_sink(sink, result), cancel, stop
+                )
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the
             # shell's, whether it arrived on the event or as a cancel
@@ -2614,14 +2619,6 @@ class Workspace:
                 self._admitted.discard(stop)
                 ended.set()
                 LINE_STOP.reset(token)
-        if sink is not None and isinstance(result, IOResult):
-            for channel, data in (
-                (Channel.STDOUT, await result.materialize_stdout()),
-                (Channel.STDERR, await result.materialize_stderr()),
-            ):
-                if data:
-                    await sink.emit(channel, data)
-            result.stdout = result.stderr = None
         return result
 
 
