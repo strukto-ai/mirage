@@ -1,12 +1,14 @@
 import asyncio
 import base64
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage import MountMode, Workspace
 from mirage.server.rpc.server import MirageRpcServer
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.workspace import Session
 
 
 def server() -> MirageRpcServer:
@@ -121,6 +123,19 @@ async def test_errors_carry_codes_and_the_errno():
     typed = await call(rpc, "vfs/read", {"path": 3})
     assert typed["error"]["code"] == -32602
     assert await rpc.handle({"jsonrpc": "2.0", "method": "shell"}) is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_failure_is_redacted_in_message_and_data(monkeypatch):
+    monkeypatch.setattr(
+        Session, "glob", AsyncMock(side_effect=RuntimeError("token=secret"))
+    )
+    result = await call(server(), "glob", {"pattern": "/*"})
+    assert result["error"] == {
+        "code": -32603,
+        "message": "internal server error",
+        "data": {"detail": "internal server error"},
+    }
 
 
 @pytest.mark.asyncio

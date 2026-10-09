@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stderr, stdout } from 'node:process'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Workspace } from '@struktoai/mirage-node'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as ioSerde from '../io_serde.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
 import { createMirageMcpServer } from './server.ts'
 
@@ -182,6 +184,33 @@ describe('createMirageMcpServer', () => {
     await client.close()
     await server.close()
     await workspace.close()
+  })
+
+  it('keeps the original VFS failure on stderr while redacting the MCP response', async () => {
+    const workspace = mkWs()
+    const server = createMirageMcpServer(workspace, { allCalls: true })
+    const client = new Client({ name: 'mirage-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const err = new Error('backend token=secret')
+    const answered = vi.spyOn(ioSerde, 'answered').mockRejectedValue(err)
+    const diagnostics = vi.spyOn(stderr, 'write').mockReturnValue(true)
+    const protocolOutput = vi.spyOn(stdout, 'write').mockReturnValue(true)
+    try {
+      const result = await client.callTool({ name: 'vfs_read', arguments: { path: '/file' } })
+      expect(result.isError).toBe(true)
+      expect(JSON.parse(firstText(result.content))).toEqual({ detail: 'internal server error' })
+      expect(diagnostics.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(err.stack)
+      expect(protocolOutput).not.toHaveBeenCalled()
+    } finally {
+      answered.mockRestore()
+      diagnostics.mockRestore()
+      protocolOutput.mockRestore()
+      await client.close()
+      await server.close()
+      await workspace.close()
+    }
   })
 
   it('serves the VFS calls and explain with allCalls', async () => {
