@@ -2284,13 +2284,10 @@ class Dispatcher:
             source (PathSpec): the name the subtree left.
             dst (PathSpec): the name it now lives under.
         """
-        for (owner, src), (_, to) in zip(
-            self._aliases(mount, source),
-            self._aliases(mount, dst),
-            strict=True,
-        ):
+        for owner, src in self._aliases(mount, source):
+            await self._manager_for(owner).invalidate_subtree(src)
+        for owner, to in self._aliases(mount, dst):
             manager = self._manager_for(owner)
-            await manager.invalidate_subtree(src)
             await manager.invalidate_subtree(to)
             await manager.invalidate_ancestors(to)
 
@@ -2300,7 +2297,8 @@ class Dispatcher:
         """``path`` under each mount of its store, its own mount first.
 
         One store mounted at two prefixes holds one file under two names,
-        so what a write makes stale under one name is stale under each.
+        so what a write makes stale under one name is stale under each. A
+        name another mount holds is that mount's file and is left out.
 
         Args:
             mount (MountEntry): the mount the path was reached through.
@@ -2312,12 +2310,9 @@ class Dispatcher:
             if other is mount or other.vfs is not mount.vfs:
                 continue
             base = other.prefix.rstrip("/")
-            found.append(
-                (
-                    other,
-                    PathSpec.from_str_path(
-                        f"{base}/{key}" if key else base or "/"
-                    ),
-                )
+            name = PathSpec.from_str_path(
+                f"{base}/{key}" if key else base or "/"
             )
+            if self._namespace.try_mount_for(name.virtual) is other:
+                found.append((other, name))
         return found

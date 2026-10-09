@@ -522,3 +522,34 @@ def test_a_write_keeps_nothing_for_a_name_a_new_mount_took():
                 await ws.close()
 
         assert asyncio.run(run()) == b"child"
+
+
+def test_a_write_leaves_a_name_another_mount_holds():
+    # /b/c is its own mount, so a write to /a/c/f through the store at /a
+    # and /b is not the file at /b/c/f and leaves its saved time alone.
+    session = MultiBucketSession(
+        {"test-bucket": {}, "child-bucket": {"f": b"x"}}, etag_suffix=SUFFIX
+    )
+    with patch_s3_session(session):
+        vfs = S3VFS(_config("test-bucket"))
+        ws = Workspace(
+            {
+                "/a": (vfs, MountMode.WRITE),
+                "/b": (vfs, MountMode.WRITE),
+                "/b/c": (S3VFS(_config("child-bucket")), MountMode.WRITE),
+            },
+            mode=MountMode.WRITE,
+            read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        )
+
+        async def run() -> bytes:
+            try:
+                io = await ws.shell("touch -d '2001-02-03 04:05:06' /b/c/f")
+                await io.materialize_stdout()
+                await ws.vfs.write("/a/c/f", b"y")
+                io = await ws.shell("stat -c %y /b/c/f")
+                return await io.materialize_stdout()
+            finally:
+                await ws.close()
+
+        assert asyncio.run(run()).startswith(b"2001-02-03 04:05:06")

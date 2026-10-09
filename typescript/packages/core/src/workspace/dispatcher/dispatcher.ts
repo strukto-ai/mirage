@@ -2224,11 +2224,11 @@ export class Dispatcher {
     const to = rstripSlash(dst) || '/'
     const mount = this.namespace.tryMountFor(from)
     if (mount === null) return
-    const targets = this.aliases(mount, to)
-    for (const [index, [owner, src]] of this.aliases(mount, from).entries()) {
-      const dst = targets[index]?.[1] ?? to
+    for (const [owner, src] of this.aliases(mount, from)) {
+      await this.managerFor(owner).invalidateSubtree(src)
+    }
+    for (const [owner, dst] of this.aliases(mount, to)) {
       const manager = this.managerFor(owner)
-      await manager.invalidateSubtree(src)
       await manager.invalidateSubtree(dst)
       await manager.invalidateAncestors(dst)
     }
@@ -2238,7 +2238,8 @@ export class Dispatcher {
    * `path` under each mount of its store, its own mount first.
    *
    * One store mounted at two prefixes holds one file under two names, so what
-   * a write makes stale under one name is stale under each. Mirrors Python's
+   * a write makes stale under one name is stale under each. A name another
+   * mount holds is that mount's file and is left out. Mirrors Python's
    * Dispatcher._aliases.
    */
   private aliases(mount: MountEntry, path: string): [MountEntry, string][] {
@@ -2248,7 +2249,8 @@ export class Dispatcher {
       const other = this.namespace.mountFor(prefix)
       if (other === mount || other.vfs !== mount.vfs) continue
       const base = rstripSlash(other.prefix)
-      found.push([other, key === '' ? base || '/' : `${base}/${key}`])
+      const name = key === '' ? base || '/' : `${base}/${key}`
+      if (this.namespace.tryMountFor(name) === other) found.push([other, name])
     }
     return found
   }

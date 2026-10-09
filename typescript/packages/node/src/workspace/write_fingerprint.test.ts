@@ -191,6 +191,25 @@ describe('object-store write fingerprint (mocked S3)', () => {
     }
   })
 
+  it('a write leaves a name another mount holds', async () => {
+    // /b/c is its own mount, so a write to /a/c/f through the store at /a
+    // and /b is not the file at /b/c/f and leaves its saved time alone.
+    mock.store.set('child-bucket', 'f', ENC.encode('x'))
+    const vfs = new S3VFS(makeConfig())
+    const ws = new Workspace(
+      { '/a': vfs, '/b': vfs, '/b/c': new S3VFS({ ...makeConfig(), bucket: 'child-bucket' }) },
+      { mode: MountMode.WRITE, read: BOUNDED },
+    )
+    try {
+      await ws.shell("touch -d '2001-02-03 04:05:06' /b/c/f")
+      await ws.vfs.write('/a/c/f', ENC.encode('y'))
+      const io = await ws.shell('stat -c %y /b/c/f')
+      expect(DEC.decode(io.stdout)).toMatch(/^2001-02-03 04:05:06/)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('read-then-write on one line keeps the read token', async () => {
     // `IOResult.merge` unions a line's reads and writes, and applyIo
     // caches the read's bytes. If those bytes were stamped with the
