@@ -96,11 +96,37 @@ async def retaken(
     return await stale(dst, gone=True)
 
 
+def _landed(
+    changed: list[tuple[PathSpec, bool]],
+    dst: PathSpec,
+    whole: bool,
+    timer: OpTimer,
+    upto: int,
+) -> None:
+    """Record a path the copy changed, as soon as it changed.
+
+    A later step of the same copy can take a while, and another stage of
+    the line may read the path meanwhile: recorded now, the retract
+    stays older than that read.
+
+    Args:
+        changed (list[tuple[PathSpec, bool]]): the copy's changed paths.
+        dst (PathSpec): the path cleared or landed.
+        whole (bool): a folder copied whole.
+        timer (OpTimer): the step's timer.
+        upto (int): :func:`lost_count` when the step began.
+    """
+    changed.append((dst, whole))
+    record("copy_prefix" if whole else "copy", dst.virtual, "box", 0, timer)
+    if whole:
+        lift_lost(dst, upto, subtree=True)
+
+
 async def _copy_into(
     accessor: BoxAccessor,
     item: dict[str, Any],
     dst: PathSpec,
-    changed: list[tuple[PathSpec, OpTimer, bool]],
+    changed: list[tuple[PathSpec, bool]],
     sent: list[tuple[PathSpec, bool]],
 ) -> None:
     """Copy ``item`` to ``dst``, merging a folder into a folder.
@@ -109,16 +135,16 @@ async def _copy_into(
         accessor (BoxAccessor): Box accessor.
         item (dict[str, Any]): the source as its lookup found it.
         dst (PathSpec): where it lands.
-        changed (list[tuple[PathSpec, OpTimer, bool]]): receives each path
-            this copy changed (a destination cleared, a file or a whole
-            folder landed), with its step's timer and whether it is a
-            folder.
+        changed (list[tuple[PathSpec, bool]]): receives each path this
+            copy changed (a destination cleared, a file or a whole folder
+            landed), recorded as it changed, and whether it is a folder.
         sent (list[tuple[PathSpec, bool]]): receives each path a request
             may have gone out for, landed or not, and whether it is a
             folder.
     """
     tm = accessor.token_manager
     timer = start_op()
+    upto = lost_count()
     dst_parts = path_parts(dst)
     existing = await resolve_item(accessor, dst_parts)
     if (
@@ -150,7 +176,7 @@ async def _copy_into(
             raise enotdir(dst.virtual)
         sent.append((dst, False))
         cond = await replace_file(accessor, dst, existing)
-        changed.append((dst, timer, False))
+        _landed(changed, dst, False, timer, upto)
         cleared = True
     elif existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
@@ -158,12 +184,12 @@ async def _copy_into(
         if item.get("type") == "folder":
             sent.append((dst, True))
             await copy_folder(tm, item["id"], dst_parent, name=new_name)
-            changed.append((dst, timer, True))
+            _landed(changed, dst, True, timer, upto)
         else:
             sent.append((dst, False))
             await copy_file(tm, item["id"], dst_parent, name=new_name)
             if not cleared:
-                changed.append((dst, timer, False))
+                _landed(changed, dst, False, timer, upto)
     except BoxApiError as exc:
         raise (await retaken(exc, cond, dst)) or exc
 
@@ -171,7 +197,8 @@ async def _copy_into(
 async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     """Copy a file or folder server-side, recording each path it changed.
 
-    The eviction runs also when the copy fails. A conditional mount evicts
+    Each path is recorded as it changes; the eviction runs once the copy
+    ends, also when it fails. A conditional mount evicts
     only what changed, and a request that raised keeps its held version. A
     folder copied whole also lifts the line's lost marks beneath it; one
     whose request raised evicts its subtree and records nothing.
@@ -185,28 +212,22 @@ async def copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     if item is None:
         raise enoent(src.virtual)
     folder = item.get("type") == "folder"
-    changed: list[tuple[PathSpec, OpTimer, bool]] = []
+    changed: list[tuple[PathSpec, bool]] = []
     sent: list[tuple[PathSpec, bool]] = []
-    upto = lost_count()
 
     async def evict(_: None) -> None:
-        for spec, timer, whole in changed:
-            op = "copy_prefix" if whole else "copy"
-            record(op, spec.virtual, "box", 0, timer)
-            if whole:
-                lift_lost(spec, upto, subtree=True)
         if not writes_conditioned():
             if folder:
                 await invalidate_subtree(dst)
             else:
                 await invalidate_after_write(dst)
             return
-        for spec, _timer, whole in changed:
+        for spec, whole in changed:
             if whole:
                 await invalidate_subtree(spec)
             else:
                 await invalidate_after_write(spec)
-        landed = {spec.virtual for spec, _timer, _whole in changed}
+        landed = {spec.virtual for spec, _whole in changed}
         for spec, whole in sent:
             if spec.virtual in landed:
                 continue

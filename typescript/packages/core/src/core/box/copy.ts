@@ -78,9 +78,27 @@ export async function retaken(
 }
 
 /**
+ * Record a path the copy changed, as soon as it changed. A later step of the
+ * same copy can take a while, and another stage of the line may read the path
+ * meanwhile: recorded now, the retract stays older than that read. Mirrors
+ * Python's `_landed`.
+ */
+function landed(
+  changed: [PathSpec, boolean][],
+  dst: PathSpec,
+  whole: boolean,
+  timer: OpTimer,
+  upto: number,
+): void {
+  changed.push([dst, whole])
+  record(whole ? 'copy_prefix' : 'copy', dst.virtual, 'box', 0, timer)
+  if (whole) liftLost(dst, upto, true)
+}
+
+/**
  * Copy `item` to `dst`, merging a folder into a folder. `changed` receives each
  * path this copy changed (a destination cleared, a file or a whole folder
- * landed), with its step's timer and whether it is a folder; `sent` receives
+ * landed), recorded as it changed, and whether it is a folder; `sent` receives
  * each path a request may have gone out for, landed or not, and whether it is
  * a folder. Mirrors Python's `_copy_into`.
  */
@@ -88,11 +106,12 @@ async function copyInto(
   accessor: BoxAccessor,
   item: BoxItem,
   dst: PathSpec,
-  changed: [PathSpec, OpTimer, boolean][],
+  changed: [PathSpec, boolean][],
   sent: [PathSpec, boolean][],
 ): Promise<void> {
   const tm = accessor.tokenManager
   const timer = startOp()
+  const upto = lostCount()
   const dstParts = pathParts(dst)
   const existing = await resolveItem(accessor, dstParts)
   if (item.type === 'folder' && existing !== null && existing.type === 'folder') {
@@ -117,7 +136,7 @@ async function copyInto(
     if (item.type === 'folder') throw enotdir(dst.virtual)
     sent.push([dst, false])
     cond = await replaceFile(accessor, dst, existing)
-    changed.push([dst, timer, false])
+    landed(changed, dst, false, timer, upto)
     cleared = true
   } else if (existing === null && item.type === 'file') {
     cond = await replaceFile(accessor, dst, null)
@@ -126,11 +145,11 @@ async function copyInto(
     if (item.type === 'folder') {
       sent.push([dst, true])
       await copyFolder(tm, item.id, dstParent, newName)
-      changed.push([dst, timer, true])
+      landed(changed, dst, true, timer, upto)
     } else {
       sent.push([dst, false])
       await copyFile(tm, item.id, dstParent, newName)
-      if (!cleared) changed.push([dst, timer, false])
+      if (!cleared) landed(changed, dst, false, timer, upto)
     }
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
@@ -138,8 +157,9 @@ async function copyInto(
 }
 
 /**
- * Copy a file or folder server-side, recording each path it changed. The
- * eviction runs also when the copy fails. A conditional mount evicts only what
+ * Copy a file or folder server-side, recording each path it changed. Each path
+ * is recorded as it changes; the eviction runs once the copy ends, also when it
+ * fails. A conditional mount evicts only what
  * changed, and a request that raised keeps its held version. A folder copied
  * whole also lifts the line's lost marks beneath it; one whose request raised
  * evicts its subtree and records nothing.
@@ -148,27 +168,22 @@ export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec):
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
   const folder = item.type === 'folder'
-  const changed: [PathSpec, OpTimer, boolean][] = []
+  const changed: [PathSpec, boolean][] = []
   const sent: [PathSpec, boolean][] = []
-  const upto = lostCount()
   await evictAfter(
     () => copyInto(accessor, item, dst, changed, sent),
     async () => {
-      for (const [spec, timer, whole] of changed) {
-        record(whole ? 'copy_prefix' : 'copy', spec.virtual, 'box', 0, timer)
-        if (whole) liftLost(spec, upto, true)
-      }
       if (!writesConditioned(dst)) {
         await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
         return
       }
-      for (const [spec, , whole] of changed) {
+      for (const [spec, whole] of changed) {
         if (whole) await invalidateSubtree(spec)
         else await invalidateAfterWrite(spec)
       }
-      const landed = new Set(changed.map(([spec]) => spec.virtual))
+      const done = new Set(changed.map(([spec]) => spec.virtual))
       for (const [spec, whole] of sent) {
-        if (landed.has(spec.virtual)) continue
+        if (done.has(spec.virtual)) continue
         if (whole) await invalidateSubtree(spec)
         else await evictKeepingVersion(spec)
       }

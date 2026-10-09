@@ -324,6 +324,35 @@ describe('box write ops', () => {
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy_prefix', '/data/new']])
   })
 
+  it('a merge records each folder before copying the next', async () => {
+    const tree: Record<string, ApiModule.BoxItem[]> = {
+      '0': [{ type: 'folder', id: '100', name: 'data' }],
+      '100': [
+        { type: 'folder', id: '300', name: 'sub' },
+        { type: 'folder', id: '400', name: 'dst' },
+      ],
+      '300': [
+        { type: 'folder', id: '310', name: 'x' },
+        { type: 'folder', id: '320', name: 'y' },
+      ],
+      '400': [],
+    }
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+      Promise.resolve(tree[folderId] ?? []),
+    )
+    vi.mocked(api.copyFolder).mockImplementation(() => {
+      H.order.push('copyFolder')
+      return Promise.resolve({} as ApiModule.BoxItem)
+    })
+    H.order = []
+    try {
+      await runWithRecording(() => copy(makeAccessor(), spec('/data/sub'), spec('/data/dst')))
+      expect(H.order).toEqual(['copyFolder', 'record', 'copyFolder', 'record'])
+    } finally {
+      vi.mocked(api.copyFolder).mockReset()
+    }
+  })
+
   const COPY_TREE: Record<string, ApiModule.BoxItem[]> = {
     '0': [{ type: 'folder', id: '100', name: 'data' }],
     '100': [

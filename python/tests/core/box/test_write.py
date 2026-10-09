@@ -531,6 +531,43 @@ async def test_copy_of_a_whole_folder_is_recorded_as_a_prefix(root_accessor):
 
 
 @pytest.mark.asyncio
+async def test_a_merge_records_each_folder_before_copying_the_next(
+    root_accessor,
+):
+    tree = {
+        **_TREE,
+        "300": [
+            {"id": "310", "name": "x", "type": "folder"},
+            {"id": "320", "name": "y", "type": "folder"},
+        ],
+    }
+
+    async def listing(_tm, folder_id, limit=1000):
+        return tree.get(folder_id, [])
+
+    scope = RecordingScope()
+    seen: list[list[tuple[str, str]]] = []
+
+    async def copied(*_args, **_kwargs):
+        seen.append([(r.op, r.path) for r in scope.records])
+
+    try:
+        with (
+            patch("mirage.core.box.resolve.list_folder_items", new=listing),
+            patch("mirage.core.box.copy.list_folder_items", new=listing),
+            patch("mirage.core.box.copy.copy_folder", new=copied),
+            patch(
+                "mirage.core.box.copy.invalidate_subtree",
+                new_callable=AsyncMock,
+            ),
+        ):
+            await copy(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+    finally:
+        scope.close()
+    assert seen == [[], [("copy_prefix", "/data/dst/x")]]
+
+
+@pytest.mark.asyncio
 async def test_write_records_the_virtual_path(root_accessor):
     # A key named like its mount: neither m/k.txt nor /m/k.txt is virtual.
     spec = PathSpec(
