@@ -58,9 +58,12 @@ async def test_a_full_buffer_blocks_the_writer_until_the_reader_advances():
     await asyncio.sleep(0)
     assert not writer.done()
     stream = pipe.stream()
-    assert len(await anext(stream)) == 65536
+    assert len(await anext(stream)) == 16384
     await asyncio.wait_for(writer, 1)
+    for _ in range(3):
+        assert len(await anext(stream)) == 16384
     assert await anext(stream) == b"y"
+    await stream.aclose()
 
 
 @pytest.mark.asyncio

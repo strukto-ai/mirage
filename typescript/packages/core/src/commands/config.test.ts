@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { invoke } from '../io/stdio.ts'
+import { materialize } from '../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { command, Command } from './config.ts'
 import { specOf } from './spec/builtins.ts'
@@ -114,12 +117,14 @@ describe('command()', () => {
     const rc = out[0]
     if (rc === undefined) throw new Error('expected a registered command')
     expect(rc.spec.epilog).toBe('Services:\n  drive')
-    const result = await rc.fn({} as never, [], [], {
-      stdin: null,
-      flags: { help: true },
-      cwd: '/',
-    })
+    const result = await invoke(() =>
+      rc.fn({} as never, [], [], {
+        stdin: null,
+        flags: { help: true },
+        cwd: '/',
+      }),
+    )
     if (result === null) throw new Error('expected result')
-    expect(new TextDecoder().decode(result[0] as Uint8Array)).toContain('Services:\n  drive\n')
+    expect(new TextDecoder().decode(await materialize(result[0]))).toContain('Services:\n  drive\n')
   })
 })

@@ -39,6 +39,18 @@ function join(chunks: ConsoleChunk[]): Uint8Array {
 export class JobConsole {
   private readonly backing: ConsoleStore
   private finishedFlag: boolean
+  private execution: string | null = null
+
+  get executionId(): string | null {
+    return this.execution
+  }
+
+  /** Associate this job's output with its one managed execution. */
+  bindExecution(executionId: string): void {
+    if (this.execution !== null && this.execution !== executionId)
+      throw new Error('console already belongs to another execution')
+    this.execution = executionId
+  }
 
   /**
    * @param store where chunks live. Defaults to memory, which is the

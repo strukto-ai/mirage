@@ -61,6 +61,7 @@ export interface SessionSnapshot {
 }
 
 export interface JobSnapshot {
+  execution_id?: string | null
   id: number
   command: string
   cwd: string
@@ -108,6 +109,7 @@ export interface CLISnapshot {
 }
 
 export interface WorkspaceStateDict {
+  io?: { buffer_bytes: number }
   version: number
   mirage_version: string
   /** The workspace's default write policy, which a mount added later takes. */

@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+from mirage.cache.index import IndexEntry
 from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.slack import SlackVFS
+from mirage.workspace.workspace.workspace import Workspace
 
 
 @pytest.fixture
@@ -48,3 +54,64 @@ def test_vfs_commands_registered(config):
     # md5sum/sha1sum/sha384sum/sha512sum); acting on Slack moved to the
     # slack CLI
     assert len(commands_for(vfs)) == 71
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", [False, True])
+async def test_cancel_cat_releases_stalled_attachment(
+    config, monkeypatch, prefix
+):
+    cancel = asyncio.Event()
+    stalled = asyncio.Event()
+
+    async def body(size):
+        assert size == 16384
+        if prefix:
+            yield b"first\n"
+        stalled.set()
+        await asyncio.Event().wait()
+
+    response = MagicMock(status=200)
+    response.content.iter_chunked = body
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = response
+    session.close = AsyncMock()
+    monkeypatch.setattr(
+        "mirage.core.api.client.resolve_session",
+        lambda value: (session, False),
+    )
+    ws = Workspace({"/chat": SlackVFS(config)})
+    path = "/chat/channels/general__C1/2026-04-24/files/report__F1.txt"
+    await ws.mount("/chat").index.set_dir(
+        path.rsplit("/", 1)[0],
+        [
+            (
+                "report__F1.txt",
+                IndexEntry(
+                    id="F1",
+                    name="report.txt",
+                    vfs_name="report__F1.txt",
+                    resource_type="slack/file",
+                    extra={"url_private_download": "https://cdn.test/report"},
+                ),
+            )
+        ],
+    )
+    running = asyncio.create_task(ws.shell(f"cat {path}", cancel=cancel))
+    try:
+        await asyncio.wait_for(stalled.wait(), 1)
+        cancel.set()
+        with pytest.raises(MirageAbortError):
+            await asyncio.wait_for(running, 1)
+        await ws.processes.drain()
+        response.__aexit__.assert_awaited_once()
+        session.close.assert_not_awaited()
+        assert await ws.cache.get(path) is None
+    finally:
+        cancel.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
+        await ws.close()

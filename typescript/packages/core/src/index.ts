@@ -101,3 +101,6 @@ export { S3WorkspaceStateStore } from './workspace/store/s3.ts'
 export { Workspace } from './workspace/workspace/workspace.ts'
 export { Session, type SessionExecuteOptions } from './workspace/workspace/workspace.ts'
 export type { MountSpec } from './workspace/workspace/workspace.ts'
+
+export { ShellExecution } from './workspace/shell_execution.ts'
+export { IOConfig } from './io/config.ts'

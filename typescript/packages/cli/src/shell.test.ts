@@ -17,19 +17,16 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Writable } from 'node:stream'
 import { Command } from 'commander'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { formatExplanation, registerShellCommand } from './shell.ts'
 
-class Exited extends Error {
-  constructor(readonly code: number | undefined) {
-    super(`exit ${String(code)}`)
-  }
-}
-
 const tty = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+const exitCode = process.exitCode
 
 afterEach(() => {
+  process.exitCode = exitCode
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   if (tty === undefined) delete (process.stdin as { isTTY?: boolean }).isTTY
@@ -37,43 +34,87 @@ afterEach(() => {
 })
 
 describe('mirage shell', () => {
-  it('cancels the job when Ctrl-C comes while the line is submitted', async () => {
-    const seen: string[] = []
-    const server = createServer((req, res) => {
-      req.resume()
-      req.on('end', () => {
-        const url = req.url ?? ''
-        seen.push(`${req.method ?? ''} ${url}`)
-        if (url.endsWith('/shell?background=true')) process.emit('SIGINT')
-        const answer =
-          url === '/v1/health'
-            ? { status: 'ok' }
-            : url.endsWith('/shell?background=true')
-              ? { job_id: 'j1' }
-              : { status: 'canceled', finished_at: 1, result: null, error: null }
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer))
+  it.each([false, true])(
+    'uses the same foreground stream transport (json=%s)',
+    async (jsonOutput) => {
+      const seen: string[] = []
+      const server = createServer((req, res) => {
+        req.resume()
+        req.on('end', () => {
+          const url = req.url ?? ''
+          seen.push(`${req.method ?? ''} ${url}`)
+          if (url === '/v1/health') {
+            res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+            return
+          }
+          res.writeHead(200, { 'content-type': 'application/x-ndjson' }).end(
+            [
+              { stream: 'stdout', data: Buffer.from([0xe2]).toString('base64') },
+              { stream: 'stderr', data: Buffer.from('diagnostic').toString('base64') },
+              { stream: 'stdout', data: Buffer.from([0x82, 0xac, 0xff, 0]).toString('base64') },
+              {
+                status: 'done',
+                result: { kind: 'io', exit_code: 7, refusal: { reason: 'test' } },
+                error: null,
+              },
+            ]
+              .map((value) => JSON.stringify(value) + '\n')
+              .join(''),
+          )
+        })
       })
-    })
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const home = mkdtempSync(join(tmpdir(), 'mirage-shell-'))
-    try {
-      const { port } = server.address() as AddressInfo
-      vi.stubEnv('MIRAGE_HOME', home)
-      vi.stubEnv('MIRAGE_DAEMON_URL', `http://127.0.0.1:${String(port)}`)
-      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
-      vi.spyOn(process, 'exit').mockImplementation((code) => {
-        throw new Exited(typeof code === 'number' ? code : undefined)
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const home = mkdtempSync(join(tmpdir(), 'mirage-shell-'))
+      const out: Buffer[] = []
+      const err: Buffer[] = []
+      const stdout = new Writable({
+        write(data: Buffer, _encoding, done) {
+          out.push(data)
+          done()
+        },
       })
-      const program = new Command()
-      registerShellCommand(program)
-      const ran = program.parseAsync(['shell', '-w', 'w', '-c', 'sleep 20'], { from: 'user' })
-      await expect(ran).rejects.toEqual(new Exited(130))
-      expect(seen).toContain('DELETE /v1/jobs/j1')
-    } finally {
-      server.close()
-      rmSync(home, { recursive: true, force: true })
-    }
-  })
+      const stderr = new Writable({
+        write(data: Buffer, _encoding, done) {
+          err.push(data)
+          done()
+        },
+      })
+      try {
+        const { port } = server.address() as AddressInfo
+        vi.stubEnv('MIRAGE_HOME', home)
+        vi.stubEnv('MIRAGE_DAEMON_URL', `http://127.0.0.1:${String(port)}`)
+        Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+        vi.spyOn(process, 'stdout', 'get').mockReturnValue(stdout as typeof process.stdout)
+        vi.spyOn(process, 'stderr', 'get').mockReturnValue(stderr as typeof process.stderr)
+        const program = new Command()
+        registerShellCommand(program)
+        await program.parseAsync(
+          ['shell', '-w', 'w', '-c', 'test', ...(jsonOutput ? ['--json'] : [])],
+          { from: 'user' },
+        )
+        expect(process.exitCode).toBe(7)
+        expect(seen).toEqual(['GET /v1/health', 'POST /v1/workspaces/w/shell?stream=true'])
+        if (jsonOutput) {
+          expect(JSON.parse(Buffer.concat(out).toString())).toEqual({
+            kind: 'io',
+            exit_code: 7,
+            refusal: { reason: 'test' },
+            stdout: '€�\0',
+            stderr: 'diagnostic',
+          })
+          expect(Buffer.concat(err).length).toBe(0)
+        } else {
+          expect(Buffer.concat(out)).toEqual(Buffer.from([0xe2, 0x82, 0xac, 0xff, 0]))
+          expect(Buffer.concat(err).toString()).toBe('diagnostic')
+        }
+      } finally {
+        vi.restoreAllMocks()
+        server.closeAllConnections()
+        server.close()
+        rmSync(home, { recursive: true, force: true })
+      }
+    },
+  )
 })
 
 function command(text: string, outcome: string, reason = '', exitCode = 0) {

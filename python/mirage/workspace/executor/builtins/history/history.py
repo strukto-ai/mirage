@@ -130,7 +130,11 @@ async def handle_history(
         [],
         texts,
         flags,
-        ExecContext(cwd=session.cwd, session_id=session.session_id),
+        ExecContext(
+            cwd=session.cwd,
+            session_id=session.session_id,
+            buffer_bytes=registry.io.buffer_bytes,
+        ),
     )
     # The view command always returns byte stderr, but io.stderr is typed
     # as a ByteSource (a possible lazy stream); resolve it to bytes so the

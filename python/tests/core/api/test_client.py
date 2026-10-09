@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
@@ -27,6 +28,7 @@ from mirage.core.api.client import (
     SessionPool,
     _body_delay,
     api_request,
+    api_stream,
     floored_delay,
     header_delay,
     resolve_session,
@@ -560,3 +562,71 @@ async def test_a_repeated_header_reads_joined_the_way_fetch_joins_it(
         read=read,
     )
     assert response.headers["etag"] == '"one", "two"'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owned", [False, True])
+@pytest.mark.parametrize("finish", ["close", "cancel", "error"])
+async def test_stream_pulls_on_demand_and_releases_response(
+    monkeypatch, owned, finish
+):
+    pulled = []
+    stalled = asyncio.Event()
+
+    async def body(size):
+        pulled.append(size)
+        yield b"first"
+        stalled.set()
+        if finish == "error":
+            raise OSError("broken body")
+        await asyncio.Event().wait()
+
+    response = MagicMock(status=200)
+    response.content.iter_chunked = body
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = response
+    session.close = AsyncMock()
+    monkeypatch.setattr(
+        "mirage.core.api.client.resolve_session",
+        lambda value: (session, owned),
+    )
+    source = api_stream(TARGET, error_of=_error_of)
+    assert await anext(source) == b"first"
+    assert pulled == [16384]
+    assert not stalled.is_set()
+    response.read.assert_not_called()
+    if finish == "cancel":
+        pending = asyncio.create_task(anext(source))
+        await asyncio.wait_for(stalled.wait(), 1)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+    elif finish == "error":
+        with pytest.raises(OSError, match="broken body"):
+            await anext(source)
+    else:
+        await source.aclose()
+    response.__aexit__.assert_awaited_once()
+    assert session.close.await_count == int(owned)
+
+
+@pytest.mark.asyncio
+async def test_stream_splits_a_large_response_and_preserves_all_bytes():
+    data = ("a" * 16383 + "é\n").encode() * 4
+    with aioresponses() as mocked:
+        mocked.get(TARGET, body=data)
+        parts = [part async for part in api_stream(TARGET, error_of=_error_of)]
+    assert b"".join(parts) == data
+    assert max(map(len, parts)) <= 16384
+
+
+@pytest.mark.asyncio
+async def test_stream_maps_http_errors_before_yielding():
+    with aioresponses() as mocked:
+        mocked.get(TARGET, status=403, body="denied")
+        with pytest.raises(_Boom) as exc:
+            await anext(api_stream(TARGET, error_of=_error_of))
+    assert exc.value.status == 403
+    assert exc.value.body == "denied"

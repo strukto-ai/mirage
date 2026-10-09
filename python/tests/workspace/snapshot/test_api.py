@@ -149,3 +149,22 @@ async def test_a_snapshot_round_trips_through_an_s3_store(store):
 async def test_a_missing_key_is_file_not_found(store):
     with pytest.raises(FileNotFoundError):
         await Workspace.load("nope.tar", s3=store)
+
+
+@pytest.mark.asyncio
+async def test_io_buffer_limit_survives_copy_and_snapshot():
+    ws = Workspace({}, io={"buffer_bytes": 262144}, runtimes=["workspace"])
+    copies = []
+    try:
+        copies.append(await ws.copy())
+        snapshot = io.BytesIO()
+        await ws.snapshot(snapshot)
+        snapshot.seek(0)
+        copies.append(await Workspace.load(snapshot))
+        for restored in copies:
+            assert restored.io.buffer_bytes == 262144
+            assert restored.registry.io is restored.io
+    finally:
+        for restored in copies:
+            await restored.close()
+        await ws.close()

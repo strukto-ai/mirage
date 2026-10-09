@@ -23,6 +23,7 @@ import {
   gunzipChecked,
   gunzipPartial,
   gzip,
+  gzipCompressStream,
 } from './compress.ts'
 import { GzipDataError } from './compress.ts'
 
@@ -303,4 +304,44 @@ it('stores the filename before the compressed bytes', async () => {
   expect(new TextDecoder().decode(data)).toBe('hel')
   expect(failure).not.toBeNull()
   expect(new TextDecoder().decode(await gunzipChecked(named))).toBe('hello\nworld\n')
+})
+
+it.each([null, 1, 9])(
+  'bounds gzip output and round trips incompressible input at level %s',
+  async (level) => {
+    const data = new Uint8Array(512 * 1024)
+    let state = 42
+    for (let i = 0; i < data.length; i++) {
+      state ^= state << 13
+      state ^= state >>> 17
+      state ^= state << 5
+      data[i] = state & 255
+    }
+    async function* source() {
+      yield await Promise.resolve(data)
+    }
+    const parts: Uint8Array[] = []
+    for await (const part of gzipCompressStream(source(), level)) {
+      expect(part.byteLength).toBeLessThanOrEqual(16384)
+      parts.push(part)
+    }
+    const joined = new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer())
+    expect(await gunzipChecked(joined)).toEqual(data)
+  },
+)
+
+it('produces gzip output before EOF and closes its source on early return', async () => {
+  let closed = false
+  async function* source() {
+    try {
+      yield await Promise.resolve(new TextEncoder().encode('hello'))
+      throw new Error('read past first output')
+    } finally {
+      closed = true
+    }
+  }
+  const stream = gzipCompressStream(source())
+  expect((await stream.next()).value?.subarray(0, 2)).toEqual(new Uint8Array([0x1f, 0x8b]))
+  await stream.return()
+  expect(closed).toBe(true)
 })

@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { compileSpec } from './spec/compile.ts'
+import { invoke } from '../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { command, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
-import { IOResult } from '../io/types.ts'
+import { IOResult, materialize } from '../io/types.ts'
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([new Uint8Array(), new IOResult()])
@@ -92,11 +93,13 @@ describe('command() registers multiple mounts', () => {
       cwd: '/',
       vfs: {} as never,
     }
-    const result = await cmds[0]?.fn({} as never, [], [], opts)
+    const cmd = cmds[0]
+    if (cmd === undefined) throw new Error('expected a registered command')
+    const result = await invoke(() => cmd.fn({} as never, [], [], opts))
     expect(handlerCalled).toBe(false)
     const stdout = result?.[0]
     expect(stdout).toBeDefined()
-    const text = new TextDecoder().decode(stdout as Uint8Array)
+    const text = new TextDecoder().decode(await materialize(stdout ?? null))
     expect(text).toContain('bar: do bar')
     expect(text).toContain('--help')
   })
@@ -131,11 +134,13 @@ describe('command() registers multiple mounts', () => {
       cwd: '/',
       vfs: {} as never,
     }
-    const result = await cmds[0]?.fn({} as never, [], [], opts)
+    const cmd = cmds[0]
+    if (cmd === undefined) throw new Error('expected a registered command')
+    const result = await invoke(() => cmd.fn({} as never, [], [], opts))
     expect(handlerCalled).toBe(false)
     const stdout = result?.[0]
     expect(stdout).toBeDefined()
-    const text = new TextDecoder().decode(stdout as Uint8Array)
+    const text = new TextDecoder().decode(await materialize(stdout ?? null))
     expect(text).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+(?:-[\w.]+)?\n$/)
   })
 })

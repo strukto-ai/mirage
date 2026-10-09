@@ -155,10 +155,7 @@ async def test_create_falls_back_to_the_repo_url_it_can_derive(mock_create):
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.repo.create_tag")
 async def test_tag_create_refuses_a_missing_tag_before_calling_out(mock_tag):
-    """`Operand.required` only refuses under the clap dialect, and hf is
-    argparse, so each leaf owns the check. Without it the line reached
-    the Hub and came back as an authentication error instead of naming
-    the empty slot."""
+    """Direct handler calls reject missing arguments before contacting the Hub."""
     with pytest.raises(
         UsageError, match="the following arguments are required: tag"
     ):

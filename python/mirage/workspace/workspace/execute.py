@@ -416,6 +416,22 @@ class LineFrame:
     writer: StatusWriter = field(default_factory=StatusWriter)
 
 
+async def drain_to_sink(sink: JobConsole, result: IOResult) -> None:
+    """Hand a line's held output to its sink, leaving the result empty.
+
+    Args:
+        sink (JobConsole): where the line's output goes.
+        result (IOResult): the line's answer, its output still held.
+    """
+    for channel, data in (
+        (Channel.STDOUT, await result.materialize_stdout()),
+        (Channel.STDERR, await result.materialize_stderr()),
+    ):
+        if data:
+            await sink.emit(channel, data)
+    result.stdout = result.stderr = None
+
+
 async def execute_line(
     ws: ExecuteEnv,
     command: str,
@@ -488,6 +504,9 @@ async def execute_line(
         tty = session.tty
     execution_scope = execution_scope or ExecutionScope()
     await execution_scope.start()
+    # Whole-invocation policies must approve the result before bytes escape.
+    if ws.registry.policies.wants("post_execute"):
+        sink = None
     run_line = partial(
         run_prepared_line,
         ws,
@@ -510,10 +529,14 @@ async def execute_line(
         job_table=job_table,
     )
     if tty is None:
-        return await _run_line(ws, command, session, cwd, run_line)
+        return await _run_line(
+            ws, command, session, cwd, run_line, execution_scope
+        )
     try:
         await tty.attach(sink)
-        io = await _run_line(ws, command, session, cwd, run_line)
+        io = await _run_line(
+            ws, command, session, cwd, run_line, execution_scope
+        )
         for channel, data in (
             (Channel.STDOUT, await io.materialize_stdout()),
             (Channel.STDERR, await io.materialize_stderr()),
@@ -534,6 +557,7 @@ async def _run_line(
     session: SessionState,
     cwd: str | None,
     run_line: Callable[[], Awaitable[IOResult]],
+    execution_scope: ExecutionScope,
 ) -> IOResult:
     """Run a line as the session's process, starting one if it has none.
 
@@ -543,6 +567,7 @@ async def _run_line(
         session (SessionState): the session it runs on.
         cwd (str | None): the per-call directory, if any.
         run_line (Callable): the line.
+        execution_scope (ExecutionScope): the admitted line's identity.
     """
     if session.process_id is None:
         results: list[IOResult] = []
@@ -563,6 +588,7 @@ async def _run_line(
                 cwd=PathSpec.from_str_path(cwd or session.cwd),
                 run=run,
                 limit=session.processes.max,
+                execution_id=execution_scope.id,
             )
         except BlockingIOError:
             record_status(session, FORK_FAILED_STATUS)
@@ -586,10 +612,13 @@ async def _shown(io: IOResult, sink: JobConsole | None) -> IOResult:
         io (IOResult): the line's result.
         sink (JobConsole | None): where the line wrote.
     """
-    if not isinstance(sink, Terminal) or sink.reader is not None:
+    if not isinstance(sink, Terminal):
         return io
-    out, err = sink.drain()
-    sink.put_back(out, err)
+    if sink.reader is not None:
+        out = sink.stdout_prefix
+    else:
+        out, err = sink.drain()
+        sink.put_back(out, err)
     return IOResult(
         stdout=out + await io.materialize_stdout(), exit_code=io.exit_code
     )

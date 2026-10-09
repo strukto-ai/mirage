@@ -218,14 +218,22 @@ export async function runClaiming(
     const [out, result] = await call()
     return [out, result, records] as const
   })
-  if (prefix !== '') {
-    io.reads = prefixKeys(io.reads, prefix)
-    io.writes = prefixKeys(io.writes, prefix)
-    io.cache = io.cache.map((p) => prefix + p)
+  let output = stdout
+  const finalize = (): void => {
+    if (prefix !== '') {
+      io.reads = prefixKeys(io.reads, prefix)
+      io.writes = prefixKeys(io.writes, prefix)
+      io.cache = io.cache.map((p) => prefix + p)
+    }
+    ;[output] = wrapCachableStreams(output, io)
+    markClaimedWrites(mine, io)
   }
-  const wrapped = wrapCachableStreams(stdout, io)
-  markClaimedWrites(mine, wrapped[1])
-  return wrapped
+  if (io.output !== null && !io.output.settled) {
+    io.output.callbacks.push(finalize)
+    return [stdout, io]
+  }
+  finalize()
+  return [output, io]
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared
@@ -312,6 +320,7 @@ export async function runOnMount(
     return await runClaiming(rstripSlash(mount.prefix), () =>
       mount.runCommand(cmdName, paths, texts, flags, {
         stdin: opts.stdin ?? null,
+        bufferBytes: registry.io.bufferBytes,
         cwd: session.cwd,
         dispatch,
         sessionId: session.sessionId,

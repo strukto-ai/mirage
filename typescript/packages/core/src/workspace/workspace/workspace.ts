@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOConfig } from '../../io/config.ts'
+import { ShellExecution } from '../shell_execution.ts'
+import { ExecutionScope } from '../execution.ts'
+
 import { ParseScope } from '../../shell/parse/scope.ts'
 
 import { indexConfigDump } from '../snapshot/config.ts'
@@ -172,6 +176,7 @@ const LINE_STOP = createAsyncContext<AbortController>()
 const WRITE_HELD = createAsyncContext<boolean>()
 
 export class Workspace {
+  readonly io: IOConfig
   private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
   readonly sessionManager: SessionManager
@@ -197,6 +202,7 @@ export class Workspace {
   readonly vfs: Files
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
+  private readonly shellExecutions = new Set<ShellExecution>()
   private closed = false
   readonly documents: Documents
   private readonly lineLock = new KeyLock()
@@ -261,6 +267,7 @@ export class Workspace {
       )
     }
     // The workspace-level default a mount overrides, as `mode` is.
+    this.io = new IOConfig(options.io)
     this.readDefault = options.read ?? DEFAULT_READ_SPEC
     this.writeDefault = coerceWritePolicy(options.write)
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
@@ -285,6 +292,7 @@ export class Workspace {
         defaultWrite: this.writeDefault,
         writes: normalized.write,
       },
+      this.io,
     )
     this.registry.processView = (session) => this.processView(session)
     this.wsId = options.workspaceId ?? newWorkspaceId()
@@ -689,8 +697,8 @@ export class Workspace {
       ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
-    const input = new ProcessInput(),
-      output = new ProcessOutput(request.mergeStderr),
+    const input = new ProcessInput(this.io.bufferBytes),
+      output = new ProcessOutput(request.mergeStderr, this.io.bufferBytes),
       abort = new AbortController()
     const env = request.env === undefined ? undefined : { ...request.env }
     const owner = this.sessionManager.get(session.sessionId)
@@ -1563,7 +1571,47 @@ export class Workspace {
     }
   }
 
-  async shell(command: string, options: ExecuteOptions = {}): Promise<ExecuteResult> {
+  shell(command: string, options: ExecuteOptions & { stream: true }): Promise<ShellExecution>
+  shell(command: string, options?: ExecuteOptions & { stream?: false }): Promise<ExecuteResult>
+  shell(command: string, options: ExecuteOptions): Promise<ExecuteResult | ShellExecution>
+  async shell(
+    command: string,
+    options: ExecuteOptions = {},
+  ): Promise<ExecuteResult | ShellExecution> {
+    if (options.stream && options.sink !== undefined)
+      throw new Error('stream and sink are mutually exclusive')
+    if (
+      !options.stream &&
+      (options.sink !== undefined ||
+        options.evaluation !== undefined ||
+        options.executionScope !== undefined)
+    )
+      return this.runShell(command, options)
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const execution = new ShellExecution(
+      (sink, signal, executionScope) =>
+        this.runShell(command, {
+          ...options,
+          stream: false,
+          sink,
+          signal,
+          executionScope,
+        }),
+      options.executionScope ?? new ExecutionScope(),
+      options.signal,
+      this.io.bufferBytes,
+    )
+    if (options.stream) {
+      this.shellExecutions.add(execution)
+      execution.onSettled(() => {
+        this.shellExecutions.delete(execution)
+      })
+      return execution
+    }
+    return execution.collect()
+  }
+
+  private async runShell(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
     // The top-level entry point, so it shuts as soon as a close starts. A line that
     // got in after `jobTable.killAll()` could submit a background job that
     // teardown then never stops, and mounts would close under it. The
@@ -1919,6 +1967,10 @@ export class Workspace {
       )
     }
     const mergedOptions: WorkspaceOptions = {
+      io:
+        state.io === undefined
+          ? new IOConfig()
+          : new IOConfig({ bufferBytes: state.io.buffer_bytes }),
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
@@ -1954,6 +2006,7 @@ export class Workspace {
       // Every restored mount keeps its saved mode, the scratch root
       // included, unless the caller names one.
       ...(options.mode !== undefined ? { mode: options.mode } : {}),
+      io: options.io ?? this.io,
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the
@@ -2022,6 +2075,9 @@ export class Workspace {
   }
 
   private async runClose(dropState: boolean): Promise<void> {
+    const executions = [...this.shellExecutions]
+    for (const execution of executions) execution.cancel()
+    await Promise.all(executions.map((execution) => execution.close()))
     this.stateDropped = dropState
     try {
       await closeWorkspace({
@@ -2131,7 +2187,16 @@ export class Session {
   }
 
   /** Run a shell line as this session; `Workspace.shell` with the session fixed. */
-  shell(command: string, options: SessionExecuteOptions = {}): Promise<ExecuteResult> {
+  shell(command: string, options: SessionExecuteOptions & { stream: true }): Promise<ShellExecution>
+  shell(
+    command: string,
+    options?: SessionExecuteOptions & { stream?: false },
+  ): Promise<ExecuteResult>
+  shell(command: string, options: SessionExecuteOptions): Promise<ExecuteResult | ShellExecution>
+  shell(
+    command: string,
+    options: SessionExecuteOptions = {},
+  ): Promise<ExecuteResult | ShellExecution> {
     return this.ws.shell(command, this.id === null ? options : { ...options, sessionId: this.id })
   }
 

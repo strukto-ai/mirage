@@ -20,6 +20,7 @@ from typing import Any
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import reset_current_session, set_current_evaluation
 from mirage.io import IOResult
+from mirage.io.pipe import CAPACITY
 from mirage.io.stream import (
     async_chain,
     close_quietly,
@@ -84,11 +85,14 @@ async def handle_pipe(
     call_stack: CallStack | None = None,
     processes: ProcessSupervisor | None = None,
     execute_fn: Callable[..., Any] | None = None,
+    buffer_bytes: int = CAPACITY,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Connect commands via pipes: stdout -> stdin.
 
     Each stage is a child shell, which runs its own EXIT action through
-    ``execute_fn`` when it ends.
+    ``execute_fn`` when it ends. With a ``sink`` the last stage streams
+    into it as it runs instead of being collected first.
     """
     session = context.session
     # Reassociated pipelines can enter here without execute_node resetting
@@ -96,7 +100,7 @@ async def handle_pipe(
     # the caller applies this pipeline's own negation after it finishes.
     session.errexit_immune = False
     pipes = [
-        PipeConsole(i < len(stderr_flags) and stderr_flags[i])
+        PipeConsole(i < len(stderr_flags) and stderr_flags[i], buffer_bytes)
         for i in range(len(commands))
     ]
     ios: list[IOResult] = [IOResult() for _ in commands]
@@ -205,8 +209,14 @@ async def handle_pipe(
                 ) from exc
             children[i].session.process_id = process.info.pid
             tasks.append(process.task)
+        last = pipes[-1].stream()
         result = await run_with_timeout(
-            asyncio.gather(materialize(pipes[-1].stream()), *tasks),
+            asyncio.gather(
+                materialize(last)
+                if sink is None
+                else pump(sink, Channel.STDOUT, last),
+                *tasks,
+            ),
             session.pipeline_timeout_seconds,
             "pipeline",
         )

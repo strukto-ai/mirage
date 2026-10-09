@@ -1810,3 +1810,29 @@ describe('mount write block', () => {
     expect(mounts['/b']?.options.write).toBe(WritePolicy.UNCONDITIONAL)
   })
 })
+
+describe('workspace I/O config', () => {
+  it('passes the buffer limit from YAML to the workspace', async () => {
+    const cfg = loadWorkspaceConfig({ mounts: {}, io: { buffer_bytes: 262144 } })
+    const args = await configToWorkspaceArgs(cfg)
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      expect(ws.io.bufferBytes).toBe(262144)
+      expect(ws.registry.io).toBe(ws.io)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    null,
+    [],
+    { buffer_bytes: true },
+    { buffer_bytes: '65536' },
+    { buffer_bytes: 16383 },
+    { buffer_bytes: 2 ** 53 },
+    { bufferBytes: 262144 },
+  ])('rejects invalid block %j', (io) => {
+    expect(() => loadWorkspaceConfig({ mounts: {}, io })).toThrow()
+  })
+})

@@ -54,7 +54,28 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_exit_trap,
 )
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecutionNode
+
+
+class StatementRecorder(Recorder):
+    """Forward ordinary output while retaining chunks needing descriptor routing."""
+
+    def __init__(self, session: SessionState, sink: JobConsole | None) -> None:
+        super().__init__()
+        self._session = session
+        self._sink = sink
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        if (
+            self._sink is not None
+            and not self.chunks
+            and self._session.exec_stdout is None
+            and self._session.exec_stderr is None
+        ):
+            await self._sink.emit(channel, data)
+        else:
+            await super().emit(channel, data)
 
 
 async def execute_program(
@@ -246,11 +267,9 @@ async def _run_program(
         at = i
         i += 1
         armed = err_trap_armed(session)
-        # Each statement writes to a recorder rather than straight to the
-        # program's output, so what it wrote to the terminal through a
-        # copy (`exec 3>&1`) keeps its place, past an `exec` diversion,
-        # and what it wrote to an enclosing level's stream goes on there.
-        recorder = Recorder()
+        # Ordinary output progresses while the statement runs. Descriptor
+        # copies and exec diversions retain their order for routing below.
+        recorder = StatementRecorder(session, sink)
         try:
             with recording(session, recorder):
                 # `exec < file` feeds the shell's stdin: a later `read` or

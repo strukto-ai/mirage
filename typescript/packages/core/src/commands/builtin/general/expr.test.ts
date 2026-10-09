@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -27,11 +28,13 @@ async function runExpr(texts: string[]): Promise<{ out: string; err: string; exi
   const vfs = new RAMVFS()
   const cmd = GENERAL_EXPR[0]
   if (cmd === undefined) throw new Error('expr not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-    stdin: null,
-    flags: {},
-    cwd: '/',
-  })
+  const result = await invoke(() =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+      stdin: null,
+      flags: {},
+      cwd: '/',
+    }),
+  )
   if (result === null) return { out: '', err: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -69,11 +72,13 @@ async function runExprByteView(texts: string[]): Promise<{ out: string; exitCode
   const vfs = new RAMVFS()
   const cmd = GENERAL_EXPR[0]
   if (cmd === undefined) throw new Error('expr not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-    stdin: null,
-    flags: {},
-    cwd: '/',
-  })
+  const result = await invoke(() =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+      stdin: null,
+      flags: {},
+      cwd: '/',
+    }),
+  )
   if (result === null) throw new Error('expr answered nothing')
   const [out, ioResult] = result
   const buf =

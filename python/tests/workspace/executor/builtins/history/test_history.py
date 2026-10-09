@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.config import ExecContext
+from mirage.io.config import IOConfig
 from mirage.io.types import IOResult
 from mirage.workspace.executor.builtins.history.history import (
     _parse_args,
@@ -38,6 +39,7 @@ class FakeMount:
 class FakeRegistry:
     def __init__(self, mount=None):
         self.mount = mount
+        self.io = IOConfig()
 
     def try_mount_for(self, prefix):
         return self.mount

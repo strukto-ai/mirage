@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { stubMongoDriver } from '../../../core/mongodb/_test_util.ts'
@@ -45,12 +46,14 @@ async function wcLines(path: PathSpec, counted: string[]): Promise<[string, numb
     },
   })
   const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
-  const result = await cmd.fn(accessor, [path], [], {
-    stdin: null,
-    flags: { lines: true },
-    io: ioFor(MongoDBVFSBase, accessor),
-    cwd: '/',
-  })
+  const result = await invoke(() =>
+    cmd.fn(accessor, [path], [], {
+      stdin: null,
+      flags: { lines: true },
+      io: ioFor(MongoDBVFSBase, accessor),
+      cwd: '/',
+    }),
+  )
   if (result === null) throw new Error('wc returned nothing')
   const [out, io] = result
   const dec = new TextDecoder()

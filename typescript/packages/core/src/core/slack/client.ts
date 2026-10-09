@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { windowFor } from '../../utils/ranges.ts'
-import { apiRequest } from '../api/client.ts'
+import { apiRequest, apiStream } from '../api/client.ts'
 
 export interface SlackResponse {
   ok: boolean
@@ -71,6 +71,7 @@ function slackHttpError(endpoint: string, response: Response, text: string): Sla
 export interface SlackTransport {
   call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse>
   downloadFile?(url: string, offset?: number, size?: number | null): Promise<Uint8Array>
+  downloadFileStream?(url: string, signal?: AbortSignal): AsyncIterable<Uint8Array>
   // Whether this transport's credentials can reach search.* at all. Slack
   // rejects a bot token there, so a doomed call is worth not making; the
   // python twin is `search_available(config)`. A transport that cannot tell
@@ -130,6 +131,16 @@ export abstract class HttpSlackTransport implements SlackTransport {
       fetchFn: this.fetch,
     })
     return data as Uint8Array
+  }
+
+  async *downloadFileStream(url: string, signal?: AbortSignal): AsyncGenerator<Uint8Array, void> {
+    yield* apiStream(url, {
+      errorOf: (response) =>
+        new Error(`slack: download failed (${String(response.status)}): ${url}`),
+      headers: await this.authHeaders(),
+      fetchFn: this.fetch,
+      ...(signal === undefined ? {} : { signal }),
+    })
   }
 }
 

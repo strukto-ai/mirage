@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import gzip
+import random
 import zlib
 
 import pytest
@@ -27,6 +28,7 @@ from mirage.utils.compress import (
     gunzip_partial,
     gunzip_stream,
     gzip_compress,
+    gzip_compress_stream,
 )
 
 HELLO = gzip.compress(b"hello\n", mtime=0)
@@ -282,3 +284,33 @@ def test_named_gzip_header_moves_the_truncation_boundary():
     assert gunzip_checked(named) == b"hello\nworld\n"
     unnamed = gzip_compress(b"hello\nworld\n")
     assert gunzip_partial(unnamed[:20])[0] == b"hello\nwor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level", [-1, 1, 9])
+async def test_gzip_stream_bounds_incompressible_output(level):
+    data = random.Random(42).randbytes(512 * 1024)
+
+    async def source():
+        yield data
+
+    parts = [part async for part in gzip_compress_stream(source(), level)]
+    assert max(map(len, parts)) <= 16384
+    assert gzip.decompress(b"".join(parts)) == data
+
+
+@pytest.mark.asyncio
+async def test_gzip_stream_produces_output_before_eof_and_closes_its_source():
+    closed = []
+
+    async def source():
+        try:
+            yield b"hello"
+            raise AssertionError("read past first output")
+        finally:
+            closed.append(True)
+
+    stream = gzip_compress_stream(source(), -1)
+    assert (await anext(stream))[:2] == b"\x1f\x8b"
+    await stream.aclose()
+    assert closed == [True]

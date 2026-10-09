@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -248,3 +249,45 @@ async def test_all_calls_serves_the_vfs_calls_and_explain(workspace):
     assert json.loads(missing.content[0].text)["errno"] == "ENOENT"
     assert json.loads(line.content[0].text)["outcome"] == "allow"
     assert await workspace.vfs.exists("/a")
+
+
+@pytest.mark.asyncio
+async def test_progress_previews_arrive_before_completion_and_keep_final_result(
+    workspace,
+):
+
+    updates = []
+    first = asyncio.Event()
+
+    async def progress(value, total, message):
+        updates.append((value, total, message))
+        first.set()
+
+    server = MirageMcpServer(workspace)
+    async with Client(server.server) as client:
+        task = asyncio.create_task(
+            client.call_tool(
+                "shell",
+                {
+                    "command": (
+                        "echo ready; while [ ! -f /gate ]; do sleep 0.01; done; "
+                        "echo problem >&2; false"
+                    )
+                },
+                progress_callback=progress,
+                meta={"progress_token": "preview-test"},
+            )
+        )
+        try:
+            await asyncio.wait_for(first.wait(), 5)
+            assert not task.done()
+            await workspace.vfs.write("/gate", b"ready")
+            result = await asyncio.wait_for(task, 5)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert result.content[0].text == "ready\n\nproblem\n"
+    assert result.is_error
+    assert updates[0] == (1, None, "[stdout] ready\n")
+    assert any(item[2] == "[stderr] problem\n" for item in updates)
+    assert [item[0] for item in updates] == list(range(1, len(updates) + 1))

@@ -254,12 +254,20 @@ async def run_claiming(
     """
     with command_records() as mine:
         stdout, io = await call()
-    if prefix:
-        io.reads = {prefix + k: v for k, v in io.reads.items()}
-        io.writes = {prefix + k: v for k, v in io.writes.items()}
-        io.cache = [prefix + p for p in io.cache]
-    stdout, io = wrap_cachable_streams(stdout, io)
-    _mark_claimed_writes(mine, io)
+
+    def finalize() -> None:
+        nonlocal stdout
+        if prefix:
+            io.reads = {prefix + k: v for k, v in io.reads.items()}
+            io.writes = {prefix + k: v for k, v in io.writes.items()}
+            io.cache = [prefix + p for p in io.cache]
+        stdout, _ = wrap_cachable_streams(stdout, io)
+        _mark_claimed_writes(mine, io)
+
+    if io.output is not None and not io.output.settled:
+        io.output.callbacks.append(finalize)
+        return stdout, io
+    finalize()
     return stdout, io
 
 
@@ -371,6 +379,7 @@ async def run_on_mount(
                         or registry.command_limits.get(cmd_name)
                     ),
                     stdin=stdin,
+                    buffer_bytes=registry.io.buffer_bytes,
                     cwd=session.cwd,
                     dispatch=dispatch,
                     session_id=session.session_id,

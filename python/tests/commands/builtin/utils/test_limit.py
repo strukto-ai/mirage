@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
 )
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.stdio import invoke
 from mirage.io.types import materialize
 from mirage.types import Limit, OnExceed
 
@@ -180,3 +181,28 @@ async def test_limit_closes_its_source_when_output_is_cut():
     result, io = await apply_limit(source(), Limit(max_lines=1))
     assert await materialize(result) == b"a\n"
     assert closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending_pull", [False, True])
+async def test_timeout_wrapper_retains_owned_producer_close(pending_pull):
+    closed = asyncio.Event()
+
+    async def run(stdio):
+        try:
+            await stdio.stdout.write(b"prefix")
+            await stdio.wait_cancelled()
+        finally:
+            closed.set()
+
+    source, _ = await invoke(run)
+    wrapped = maybe_with_timeout(source, Limit(timeout_seconds=30), "writer")
+    pending = None
+    if pending_pull:
+        assert await anext(wrapped) == b"prefix"
+        pending = asyncio.create_task(anext(wrapped))
+        await asyncio.sleep(0)
+    await asyncio.wait_for(wrapped.aclose(), 1)
+    if pending is not None:
+        await asyncio.gather(pending, return_exceptions=True)
+    assert closed.is_set()

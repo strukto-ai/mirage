@@ -13,11 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessView } from '../../process/view.ts'
-import type { ByteSource, IOResult } from '../../io/types.ts'
+import {
+  type IOResult,
+  type ByteSource,
+  type CommandOutput,
+  type HandlerResult,
+} from '../../io/types.ts'
+import type { Stdio } from '../../io/stdio.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../view/types.ts'
 import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
-import type { CommandFnResult } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { compileSpec } from '../spec/compile.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -50,6 +55,7 @@ export interface CLIInvocation<ConfigT = unknown> {
   /** Merged group and leaf flags keyed by kwarg name; read through FlagView. */
   flags: Record<string, FlagValue>
   stdin: ByteSource | null
+  stdio?: Stdio
   /** Frozen process environment; live access uses view.sessionView. */
   env: Readonly<Record<string, string>>
   /** Workspace capabilities, absent for direct calls. */
@@ -64,19 +70,21 @@ export interface CLIInvocation<ConfigT = unknown> {
 }
 
 /** A leaf callback receiving the parsed invocation and validated account config. */
-export type CLIVerbFn = (inv: CLIInvocation) => Promise<CommandFnResult> | CommandFnResult
+export type CLIVerbFn<Result = CommandOutput | null> = (
+  inv: CLIInvocation,
+) => Promise<Result> | Result
 
 export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 
 export interface CLIHandlerInit {
-  fn?: CLIVerbFn | null
+  fn?: CLIVerbFn<HandlerResult> | null
   write?: boolean
   limit?: Limit | null
 }
 
 /** Execution and policy for one canonical command path. */
 export class CLIHandler {
-  readonly fn: CLIVerbFn | null
+  readonly fn: CLIVerbFn<HandlerResult> | null
   readonly write: boolean
   readonly limit: Limit | null
 
@@ -100,6 +108,7 @@ export interface CLIInit {
 export class CLI {
   readonly spec: CommandSpec
   readonly handlers: Readonly<Record<string, CLIHandler>>
+
   readonly configModel: CLIConfigModel | null
   readonly script: ScriptSource | null
   readonly runtime: string | null

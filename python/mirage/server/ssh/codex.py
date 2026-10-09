@@ -499,10 +499,11 @@ async def run_process(
     stdin: ByteSource,
     send: Send,
 ) -> int:
-    """Run one process's line as the session, streaming its output.
+    """Run one process's line as the session, streaming its output as
+    the line produces it.
 
-    Runs on the workspace's loop. The status is read after the streams
-    drain, because a streaming command settles it only then.
+    Runs on the workspace's loop. The status is read once the output
+    has ended, because a streaming command settles it only then.
 
     Args:
         ws (Workspace): the workspace.
@@ -517,15 +518,16 @@ async def run_process(
     Returns:
         int: the line's exit status.
     """
-    io = await ws.shell(
+    async with await ws.shell(
         line,
         session_id=session_id,
         stdin=stdin,
         agent_id=constants.CODEX_AGENT_ID,
         cwd=cwd,
         env=env or None,
-    )
-    await deliver(io, send)
+        stream=True,
+    ) as execution:
+        io = await deliver(execution, send)
     return io.exit_code
 
 

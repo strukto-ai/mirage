@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
@@ -19,6 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack.constants import DU_MAX_ENTRIES
 from mirage.core.slack.read import read as _read
 from mirage.core.slack.read import read_range as _read_range
+from mirage.core.slack.read import read_stream as _read_stream
 from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.slack.stat import stat as _stat
 from mirage.core.time_range import TimeRange
@@ -67,6 +69,11 @@ class SlackVFS(BaseVFS):
         if not offset and size is None:
             return await _read(self.accessor, path, index)
         return await _read_range(self.accessor, path, index, offset, size)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

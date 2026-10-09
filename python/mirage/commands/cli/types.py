@@ -23,6 +23,7 @@ from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue
+from mirage.io.stdio import Stdio
 from mirage.io.types import ByteSource, IOResult
 from mirage.process.view import ProcessView
 from mirage.runtime.types import DispatchFn, ScriptSource
@@ -76,6 +77,7 @@ class CLIInvocation(Generic[ConfigT]):
         flags (Mapping[str, FlagValue]): merged group and leaf flags keyed
             by kwarg name; read through FlagView. Path values are PathSpec.
         stdin (ByteSource | None): piped input.
+        stdio (Stdio | None): streaming output and cancellation lifetime.
         env (Mapping[str, str]): frozen process environment; live access uses
             view.session_view.
         view (CLIView | None): workspace capabilities, absent for direct calls.
@@ -92,6 +94,7 @@ class CLIInvocation(Generic[ConfigT]):
     cwd: PathSpec = ROOT_CWD
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     stdin: ByteSource | None = None
+    stdio: Stdio | None = None
     env: Mapping[str, str] = field(default_factory=dict)
     view: CLIView | None = None
     spec: "CommandSpec | None" = None

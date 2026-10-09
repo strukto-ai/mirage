@@ -366,6 +366,7 @@ async def _recurse_lifted(
         stdin,
         call_stack,
         processes,
+        sink,
     )
 
 
@@ -460,6 +461,7 @@ async def _run_pipeline(
     stdin: Any,
     call_stack: CallStack | None,
     processes: ProcessSupervisor | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Run a pipeline as bash reads it (``get_pipeline_stages``).
 
@@ -480,6 +482,7 @@ async def _run_pipeline(
         call_stack (CallStack | None): shell call stack.
         processes (ProcessSupervisor | None): where the stages run as
             managed processes.
+        sink (JobConsole | None): where the output goes as it arrives.
     """
     session = context.session
     if stages.lead is not None:
@@ -533,6 +536,8 @@ async def _run_pipeline(
             call_stack,
             processes,
             execute_fn,
+            registry.io.buffer_bytes,
+            sink,
         )
     if stages.negated:
         io = IOResult(
@@ -1266,16 +1271,18 @@ async def _execute_node(
     # A sink turns this walk from "return your output" into "write your
     # output". Sequencing constructs pass it to their children so each
     # statement lands as it finishes, and so do a command (a function
-    # body, a nested shell) and a redirect (what it routes), draining
-    # whatever they return after; everything else runs unchanged and has
-    # its result drained here. Only these kinds inherit a sink, so
-    # capture sites keep receiving their output as a value.
+    # body, a nested shell), a pipeline (its last stage) and a redirect
+    # (what it routes), draining whatever they return after; everything
+    # else runs unchanged and has its result drained here. Only these
+    # kinds inherit a sink, so capture sites keep receiving their output
+    # as a value.
     if (
         sink is not None
         and kind not in STREAMING_KINDS
         and kind
         not in (
             NodeKind.COMMAND,
+            NodeKind.PIPELINE,
             NodeKind.REDIRECT,
             NodeKind.VAR_ASSIGN,
             NodeKind.VAR_ASSIGNS,
@@ -1389,7 +1396,7 @@ async def _execute_node(
         # redirect followed by `|` closes over everything to its left, so
         # the stages are read the way bash reads them rather than as the
         # parse nested them (see get_pipeline_stages).
-        return await _run_pipeline(
+        result = await _run_pipeline(
             recurse,
             dispatch,
             execute_fn,
@@ -1400,7 +1407,9 @@ async def _execute_node(
             stdin,
             cs,
             job_table.processes if job_table is not None else None,
+            sink,
         )
+        return result if sink is None else await drained(sink, *result)
 
     # ── list (&&, ||) ───────────────────────────
     if kind == NodeKind.LIST:

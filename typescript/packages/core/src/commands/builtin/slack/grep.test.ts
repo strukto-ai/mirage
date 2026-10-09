@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { SlackAccessor } from '../../../accessor/slack.ts'
@@ -31,24 +32,26 @@ describe('slack grep on a time-scoped mount', () => {
     const cmd = SLACK_GREP[0]
     if (cmd === undefined) throw new Error('grep not registered')
     const accessor = new SlackAccessor(transport, { startTime: '2026-01-01T00:00:00Z' })
-    const result = await cmd.fn(
-      accessor,
-      [
-        new PathSpec({
-          virtual: '/mnt/slack/channels/general__C1',
-          directory: '/mnt/slack/channels/general__C1',
-          resolved: false,
-          vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
-        }),
-      ],
-      ['hello'],
-      {
-        stdin: null,
-        flags: { w: true },
-        io: ioFor(SlackVFSBase, accessor),
-        cwd: '/',
-        index: idx,
-      },
+    const result = await invoke(() =>
+      cmd.fn(
+        accessor,
+        [
+          new PathSpec({
+            virtual: '/mnt/slack/channels/general__C1',
+            directory: '/mnt/slack/channels/general__C1',
+            resolved: false,
+            vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
+          }),
+        ],
+        ['hello'],
+        {
+          stdin: null,
+          flags: { w: true },
+          io: ioFor(SlackVFSBase, accessor),
+          cwd: '/',
+          index: idx,
+        },
+      ),
     )
     expect(transport.calls.map((c) => c.endpoint)).not.toContain('search.messages')
     expect(await materialize(result?.[0] ?? null)).toEqual(new Uint8Array())

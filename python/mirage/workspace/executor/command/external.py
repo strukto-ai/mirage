@@ -22,7 +22,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
-from mirage.runtime.types import ProcessExecution, RunResult, ShellExecution
+from mirage.runtime.types import ProcessExecution, RunResult, ShellRequest
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.workspace.expand.argv import Argv
@@ -69,7 +69,7 @@ async def run_external(
                 )
             )
         return await runtime.execute(
-            ShellExecution(line=command, cwd=cwd, env=env, stdin=data)
+            ShellRequest(line=command, cwd=cwd, env=env, stdin=data)
         )
 
     try:

@@ -1015,3 +1015,64 @@ it.each([
     expect(fn).not.toHaveBeenCalled()
   }
 })
+
+it.each([null, 1])(
+  'joins native producer when unstarted output closes (timeout=%s)',
+  async (timeout) => {
+    let closed = false
+    const cli = new CLI({
+      spec: new CommandSpec({ name: 'writer' }),
+      handlers: {
+        '': new CLIHandler({
+          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+          fn: async (inv) => {
+            if (inv.stdio === undefined) throw new Error('missing stdio')
+            try {
+              await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
+              await inv.stdio.waitCancelled()
+              return new IOResult()
+            } finally {
+              closed = true
+            }
+          },
+        }),
+      },
+    })
+    const [output] = await handleCli(
+      { name: 'writer', cli, config: null },
+      ['writer'],
+      new SessionState({ sessionId: 'test' }),
+    )
+    await (output as AsyncIterableIterator<Uint8Array>).return?.()
+    expect(closed).toBe(true)
+  },
+)
+
+it.each([0.05, null])(
+  'releases a native writer that ignores cancellation (timeout=%s)',
+  async (timeout) => {
+    const cli = new CLI({
+      spec: new CommandSpec({ name: 'writer' }),
+      handlers: {
+        '': new CLIHandler({
+          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
+          fn: async (inv) => {
+            if (inv.stdio === undefined) throw new Error('missing stdio')
+            await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
+            return new Promise<never>(() => undefined)
+          },
+        }),
+      },
+    })
+    const [output] = await handleCli(
+      { name: 'writer', cli, config: null },
+      ['writer'],
+      new SessionState({ sessionId: 'test' }),
+    )
+    const iterator = output as AsyncIterableIterator<Uint8Array>
+    expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
+    if (timeout === null) await iterator.return?.()
+    else await expect(iterator.next()).rejects.toThrow(/writer: timed out after 0.05s/)
+  },
+  2000,
+)

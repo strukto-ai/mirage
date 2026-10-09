@@ -28,6 +28,8 @@ from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.routers.vfs import session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
+from mirage.server.stream import ShellOutput, ShellResponse
+from mirage.shell.console.types import Channel
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.workspace import Workspace
@@ -81,9 +83,20 @@ def _build_shell_kwargs(
 
 
 async def _invoke_shell(
-    ws: Workspace, kwargs: dict[str, Any], scope: ExecutionScope
+    ws: Workspace,
+    kwargs: dict[str, Any],
+    scope: ExecutionScope,
+    output: ShellOutput | None = None,
 ) -> JsonValue:
-    result = await ws.shell(**kwargs, execution_scope=scope)
+    if output is None:
+        result = await ws.shell(**kwargs, execution_scope=scope)
+    else:
+        async with await ws.shell(
+            **kwargs, execution_scope=scope, stream=True
+        ) as execution:
+            async for chunk in execution.events:
+                await output.emit(Channel(chunk.stream), chunk.data)
+            result = await execution.wait()
     return await io_result_to_dict(result)
 
 
@@ -94,8 +107,14 @@ async def shell(
     background: bool = Query(False),
     session_id: str | None = Query(None),
     explain: bool = Query(False),
+    stream: bool = Query(False),
 ) -> Response:
     entry = _require_entry(request, workspace_id)
+    if stream and (background or explain):
+        raise HTTPException(
+            status_code=400,
+            detail="stream cannot be combined with background or explain",
+        )
     if explain:
         return await _explained(entry, request, session_id, background)
     job_table = request.app.state.jobs
@@ -108,7 +127,12 @@ async def shell(
             asyncio.get_running_loop().create_future()
         )
         upload = asyncio.ensure_future(
-            _read_shell_body(request, content_type, started, UploadStdin())
+            _read_shell_body(
+                request,
+                content_type,
+                started,
+                UploadStdin(entry.runner.ws.io.buffer_bytes),
+            )
         )
         req_obj, part = await started
         if part is not None and background:
@@ -121,10 +145,13 @@ async def shell(
     kwargs = _build_shell_kwargs(req_obj, stdin)
     session_id = session_id or entry.runner.ws.default_session_id
     kwargs["session_id"] = session_id
+    output = ShellOutput(entry.runner.ws.io.buffer_bytes) if stream else None
 
     async def run(scope: ExecutionScope) -> JsonValue:
+        if output is not None:
+            output.bind_execution(scope.id)
         return await entry.runner.call(
-            _invoke_shell(entry.runner.ws, kwargs, scope)
+            _invoke_shell(entry.runner.ws, kwargs, scope, output)
         )
 
     if background and upload is not None:
@@ -135,6 +162,8 @@ async def shell(
         factory=run,
         session_id=session_id,
     )
+    if output is not None:
+        return ShellResponse(output, job_table, job, request, upload, part)
     if background:
         return Response(
             content=BackgroundResponse(

@@ -32,6 +32,7 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
+from mirage.io.config import IOConfig
 from mirage.policy.profile import SessionProfile
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
@@ -679,6 +680,7 @@ class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mounts: dict[str, MountBlock]
+    io: IOConfig = Field(default_factory=IOConfig)
     command_limits: dict[str, Limit] | None = None
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLI plus its own config.
@@ -798,6 +800,7 @@ class WorkspaceConfig(BaseModel):
             )
         kwargs: dict[str, Any] = {
             "mounts": mounts,
+            "io": self.io,
             "command_limits": self.command_limits,
             "mode": self.mode,
             "read": default_read,

@@ -9,6 +9,9 @@ export interface ProcessInfo {
   readonly command: string
   readonly cwd: PathSpec
   readonly startedAt: number
+  readonly executionId: string
+  readonly parentExecutionId: string | null
+  readonly rootExecutionId: string
   readonly state: ProcessState
   readonly cancellationRequested: boolean
   readonly exitCode: number | null

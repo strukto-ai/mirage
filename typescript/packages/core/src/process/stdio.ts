@@ -1,17 +1,20 @@
 import { Channel, JobConsole } from '../shell/console/index.ts'
-import { PipeConsole } from '../shell/console/pipe.ts'
-import { PipeClosed } from '../shell/errors.ts'
+import { BytePipe, CAPACITY } from '../io/pipe.ts'
+import { PipeClosed } from '../io/errors.ts'
 
 export class ProcessInput {
-  private readonly pipe = new PipeConsole()
+  private readonly pipe: BytePipe
   private closed = false
   bytesRead = 0
+
+  constructor(capacity = CAPACITY) {
+    this.pipe = new BytePipe(capacity)
+  }
 
   async write(data: Uint8Array): Promise<void> {
     if (data.byteLength === 0) return
     if (this.closed) throw new PipeClosed()
-    for (let start = 0; start < data.byteLength; start += 65536)
-      await this.pipe.emit(Channel.STDOUT, data.slice(start, start + 65536))
+    await this.pipe.write(data)
   }
 
   close(): void {
@@ -31,11 +34,16 @@ export class ProcessInput {
 }
 
 export class ProcessOutput extends JobConsole {
-  readonly stdout = new ProcessInput()
-  readonly stderr = new ProcessInput()
+  readonly stdout: ProcessInput
+  readonly stderr: ProcessInput
 
-  constructor(private readonly mergeStderr = false) {
+  constructor(
+    private readonly mergeStderr = false,
+    bufferBytes = CAPACITY,
+  ) {
     super()
+    this.stdout = new ProcessInput(bufferBytes)
+    this.stderr = new ProcessInput(bufferBytes)
   }
 
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {

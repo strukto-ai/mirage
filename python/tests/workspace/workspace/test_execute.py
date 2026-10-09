@@ -21,14 +21,49 @@ from mirage import MountMode, Workspace
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
+from mirage.execution.context import current_execution
 from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.store import SessionFields
 from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks
+
+
+@pytest.mark.asyncio
+async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
+    ws = _make_ws()
+    seen = []
+
+    def probe(inv):
+        seen.append(current_execution())
+        return b"tracked\n", IOResult()
+
+    ws.register_cli(
+        "probe",
+        CLI(
+            spec=CommandSpec(name="probe"), handlers={"": CLIHandler(fn=probe)}
+        ),
+    )
+    try:
+        result = await ws.shell(
+            "probe | cat > /ram/tracked; cat /ram/tracked",
+            execution_scope=ExecutionScope(execution_id="exec-request"),
+        )
+        assert await result.stdout_str() == "tracked\n"
+        identity = seen[0]
+        assert identity is not None
+        assert identity.id != "exec-request"
+        assert identity.parent_id == identity.root_id == "exec-request"
+        events = await ws.observer.events()
+        assert events[-1]["execution_id"] == "exec-request"
+        ops = [event for event in events if event["type"] == "op"]
+        assert ops and all(event.get("execution_id") for event in ops)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -609,8 +644,8 @@ async def test_line_queued_behind_a_running_one_is_refused_once_close_starts():
     queued = asyncio.ensure_future(ws.shell("echo queued"))
     await asyncio.sleep(0.01)
     closing = asyncio.ensure_future(ws.close())
-    gate.set()
-    await first
+    with pytest.raises(asyncio.CancelledError):
+        await first
     with pytest.raises(RuntimeError, match="Workspace is closed"):
         await queued
     await closing

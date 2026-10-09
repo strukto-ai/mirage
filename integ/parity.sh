@@ -102,44 +102,44 @@ probe() {
   $cli shell -w pw -c 'mkdir -p /data' </dev/null >/dev/null
 
   # ── subshell: cd / export must not leak; exit + pipe ──
-  echo "subshell.cd_inner=$($cli shell -w pw -c '(cd /data && pwd)' </dev/null | sout)"
-  echo "subshell.cd_after=$($cli shell -w pw -c 'pwd' </dev/null | sout)"
-  echo "subshell.export_inner=$($cli shell -w pw -c '(export FOO=bar; echo $FOO)' </dev/null | sout)"
-  echo "subshell.export_after=$($cli shell -w pw -c 'echo [$FOO]' </dev/null | sout)"
-  echo "subshell.false_exit=$($cli shell -w pw -c '(false)' </dev/null | sexit)"
-  echo "subshell.pipe=$($cli shell -w pw -c '(echo a; echo b) | wc -l' </dev/null | sout)"
-  echo "subshell.oldpwd_no_leak=$($cli shell -w pw -c '(cd /data && (cd /) && echo $OLDPWD)' </dev/null | sout)"
-  echo "subshell.func_redef=$($cli shell -w pw -c '(f(){ echo A; }; (f(){ echo B; }); f)' </dev/null | sout)"
-  echo "subshell.func_no_leak=$($cli shell -w pw -c '(nofn(){ echo x; }); nofn 2>/dev/null || echo gone' </dev/null | sout)"
-  echo "subshell.positional=$($cli shell -w pw -c '(set -- a b c; (set -- x); echo $#)' </dev/null | sout)"
+  echo "subshell.cd_inner=$($cli shell --json -w pw -c '(cd /data && pwd)' </dev/null | sout)"
+  echo "subshell.cd_after=$($cli shell --json -w pw -c 'pwd' </dev/null | sout)"
+  echo "subshell.export_inner=$($cli shell --json -w pw -c '(export FOO=bar; echo $FOO)' </dev/null | sout)"
+  echo "subshell.export_after=$($cli shell --json -w pw -c 'echo [$FOO]' </dev/null | sout)"
+  echo "subshell.false_exit=$($cli shell --json -w pw -c '(false)' </dev/null | sexit)"
+  echo "subshell.pipe=$($cli shell --json -w pw -c '(echo a; echo b) | wc -l' </dev/null | sout)"
+  echo "subshell.oldpwd_no_leak=$($cli shell --json -w pw -c '(cd /data && (cd /) && echo $OLDPWD)' </dev/null | sout)"
+  echo "subshell.func_redef=$($cli shell --json -w pw -c '(f(){ echo A; }; (f(){ echo B; }); f)' </dev/null | sout)"
+  echo "subshell.func_no_leak=$($cli shell --json -w pw -c '(nofn(){ echo x; }); nofn 2>/dev/null || echo gone' </dev/null | sout)"
+  echo "subshell.positional=$($cli shell --json -w pw -c '(set -- a b c; (set -- x); echo $#)' </dev/null | sout)"
 
   # ── cwd/env: HOME, PWD, OLDPWD, cd -, tilde (GNU cd + pwd) ──
   $cli shell -w pw -c 'echo hi > /data/f.txt' </dev/null >/dev/null
-  echo "cwd.home_default=$($cli shell -w pw -c 'echo $HOME' </dev/null | sout)"
-  echo "cwd.pwd_var=$($cli shell -w pw -c '(cd /data && echo $PWD)' </dev/null | sout)"
-  echo "cwd.oldpwd=$($cli shell -w pw -c '(cd /data && cd / && echo $OLDPWD)' </dev/null | sout)"
-  echo "cwd.cd_dash=$($cli shell -w pw -c '(cd /data && cd / && cd -)' </dev/null | sout)"
-  echo "cwd.tilde_pwd=$($cli shell -w pw -c '(export HOME=/data && cd ~ && pwd)' </dev/null | sout)"
-  echo "cwd.tilde_cat=$($cli shell -w pw -c '(export HOME=/data && cat ~/f.txt)' </dev/null | sout)"
-  echo "cwd.rel_cat=$($cli shell -w pw -c '(cd /data && cat f.txt)' </dev/null | sout)"
-  echo "cwd.wc_disp=$($cli shell -w pw -c '(cd /data && wc -l f.txt)' </dev/null | sout)"
+  echo "cwd.home_default=$($cli shell --json -w pw -c 'echo $HOME' </dev/null | sout)"
+  echo "cwd.pwd_var=$($cli shell --json -w pw -c '(cd /data && echo $PWD)' </dev/null | sout)"
+  echo "cwd.oldpwd=$($cli shell --json -w pw -c '(cd /data && cd / && echo $OLDPWD)' </dev/null | sout)"
+  echo "cwd.cd_dash=$($cli shell --json -w pw -c '(cd /data && cd / && cd -)' </dev/null | sout)"
+  echo "cwd.tilde_pwd=$($cli shell --json -w pw -c '(export HOME=/data && cd ~ && pwd)' </dev/null | sout)"
+  echo "cwd.tilde_cat=$($cli shell --json -w pw -c '(export HOME=/data && cat ~/f.txt)' </dev/null | sout)"
+  echo "cwd.rel_cat=$($cli shell --json -w pw -c '(cd /data && cat f.txt)' </dev/null | sout)"
+  echo "cwd.wc_disp=$($cli shell --json -w pw -c '(cd /data && wc -l f.txt)' </dev/null | sout)"
 
   # ── sessions: default session persists cwd; -s session is isolated ──
   $cli session create pw --id s2 </dev/null >/dev/null
   $cli shell -w pw -c 'cd /data' </dev/null >/dev/null
-  echo "session.default_pwd=$($cli shell -w pw -c 'pwd' </dev/null | sout)"
-  echo "session.s2_pwd=$($cli shell -w pw -s s2 -c 'pwd' </dev/null | sout)"
+  echo "session.default_pwd=$($cli shell --json -w pw -c 'pwd' </dev/null | sout)"
+  echo "session.s2_pwd=$($cli shell --json -w pw -s s2 -c 'pwd' </dev/null | sout)"
 
   # ── symlinks: namespace links follow on read; rm/mv act on the entry ──
   $cli shell -w pw -c 'echo sym1 > /data/s.txt && ln -s /data/s.txt /data/link.txt' </dev/null >/dev/null
-  echo "sym.readlink=$($cli shell -w pw -c 'readlink /data/link.txt' </dev/null | sout)"
-  echo "sym.cat_follow=$($cli shell -w pw -c 'cat /data/link.txt' </dev/null | sout)"
-  echo "sym.write_through=$($cli shell -w pw -c 'echo via >> /data/link.txt && tail -n 1 /data/s.txt' </dev/null | sout)"
-  echo "sym.ls_arrow=$($cli shell -w pw -c 'ls -l /data | grep -- "->"' </dev/null | sout | no_ls_time)"
-  echo "sym.mv_entry=$($cli shell -w pw -c 'mv /data/link.txt /data/moved.txt && readlink /data/moved.txt' </dev/null | sout)"
-  echo "sym.rm_entry=$($cli shell -w pw -c 'rm /data/moved.txt; readlink /data/moved.txt' </dev/null | sexit)"
-  echo "sym.dangle=$($cli shell -w pw -c 'ln -s /data/none /data/d.txt; cat /data/d.txt' </dev/null | sexit)"
-  echo "sym.eloop=$($cli shell -w pw -c 'ln -s /data/l2 /data/l1 && ln -s /data/l1 /data/l2; cat /data/l1 2>&1' </dev/null | sout)"
+  echo "sym.readlink=$($cli shell --json -w pw -c 'readlink /data/link.txt' </dev/null | sout)"
+  echo "sym.cat_follow=$($cli shell --json -w pw -c 'cat /data/link.txt' </dev/null | sout)"
+  echo "sym.write_through=$($cli shell --json -w pw -c 'echo via >> /data/link.txt && tail -n 1 /data/s.txt' </dev/null | sout)"
+  echo "sym.ls_arrow=$($cli shell --json -w pw -c 'ls -l /data | grep -- "->"' </dev/null | sout | no_ls_time)"
+  echo "sym.mv_entry=$($cli shell --json -w pw -c 'mv /data/link.txt /data/moved.txt && readlink /data/moved.txt' </dev/null | sout)"
+  echo "sym.rm_entry=$($cli shell --json -w pw -c 'rm /data/moved.txt; readlink /data/moved.txt' </dev/null | sexit)"
+  echo "sym.dangle=$($cli shell --json -w pw -c 'ln -s /data/none /data/d.txt; cat /data/d.txt' </dev/null | sexit)"
+  echo "sym.eloop=$($cli shell --json -w pw -c 'ln -s /data/l2 /data/l1 && ln -s /data/l1 /data/l2; cat /data/l1 2>&1' </dev/null | sout)"
 
   $cli workspace delete pw >/dev/null 2>&1 </dev/null || true
 
@@ -157,14 +157,14 @@ probe() {
   $cli session create gw --id lister -m /data </dev/null >/dev/null
   $cli session create gw --id capped -m /ro:write </dev/null >/dev/null
   $cli session create gw --id blind -p blind </dev/null >/dev/null
-  echo "mode.reader_cat=$($cli shell -w gw -s reader -c 'cat /data/a.txt' </dev/null | sout)"
-  echo "mode.reader_rm_err=$($cli shell -w gw -s reader -c 'rm /data/a.txt' </dev/null | serr)"
-  echo "mode.reader_redirect=$($cli shell -w gw -s reader -c 'echo leak > /data/new.txt' </dev/null | verdict)"
-  echo "mode.reader_side=$($cli shell -w gw -s reader -c 'cat /side/s.txt' </dev/null | sout)"
-  echo "mode.blind_side_err=$($cli shell -w gw -s blind -c 'cat /side/s.txt' </dev/null | serr)"
-  echo "mode.writer_write=$($cli shell -w gw -s writer -c 'echo w > /data/w.txt && cat /data/w.txt' </dev/null | sout)"
-  echo "mode.lister_inherits=$($cli shell -w gw -s lister -c 'echo l > /data/l.txt && cat /data/l.txt' </dev/null | sout)"
-  echo "mode.capped_ro=$($cli shell -w gw -s capped -c 'echo up > /ro/y.txt' </dev/null | verdict)"
+  echo "mode.reader_cat=$($cli shell --json -w gw -s reader -c 'cat /data/a.txt' </dev/null | sout)"
+  echo "mode.reader_rm_err=$($cli shell --json -w gw -s reader -c 'rm /data/a.txt' </dev/null | serr)"
+  echo "mode.reader_redirect=$($cli shell --json -w gw -s reader -c 'echo leak > /data/new.txt' </dev/null | verdict)"
+  echo "mode.reader_side=$($cli shell --json -w gw -s reader -c 'cat /side/s.txt' </dev/null | sout)"
+  echo "mode.blind_side_err=$($cli shell --json -w gw -s blind -c 'cat /side/s.txt' </dev/null | serr)"
+  echo "mode.writer_write=$($cli shell --json -w gw -s writer -c 'echo w > /data/w.txt && cat /data/w.txt' </dev/null | sout)"
+  echo "mode.lister_inherits=$($cli shell --json -w gw -s lister -c 'echo l > /data/l.txt && cat /data/l.txt' </dev/null | sout)"
+  echo "mode.capped_ro=$($cli shell --json -w gw -s capped -c 'echo up > /ro/y.txt' </dev/null | verdict)"
   $cli workspace delete gw >/dev/null 2>&1 </dev/null || true
 
   # ── session modes: the exec gate is per session on an EXEC mount ──
@@ -172,8 +172,8 @@ probe() {
   $cli workspace create "$EXEC_YAML" --id gx >/dev/null </dev/null
   $cli session create gx --id noexec -m /data:write </dev/null >/dev/null
   $cli session create gx --id withexec -m /data:rwx </dev/null >/dev/null
-  echo "mode.exec_denied_err=$($cli shell -w gx -s noexec -c 'python3 -c "print(1)"' </dev/null | serr)"
-  echo "mode.exec_allowed=$($cli shell -w gx -s withexec -c 'python3 -c "print(1)"' </dev/null | sout)"
+  echo "mode.exec_denied_err=$($cli shell --json -w gx -s noexec -c 'python3 -c "print(1)"' </dev/null | serr)"
+  echo "mode.exec_allowed=$($cli shell --json -w gx -s withexec -c 'python3 -c "print(1)"' </dev/null | sout)"
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true
 
   # ── asks: an ask rule pends at 126; allow passes the retry once, deny refuses it ──
@@ -181,17 +181,17 @@ probe() {
   $cli workspace delete aw >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$ASKS_YAML" --id aw >/dev/null </dev/null
   $cli shell -w aw -c 'touch /f.txt /g.txt' </dev/null >/dev/null
-  echo "ask.refused=$($cli shell -w aw -c 'rm /f.txt' </dev/null | sexit)"
+  echo "ask.refused=$($cli shell --json -w aw -c 'rm /f.txt' </dev/null | sexit)"
   echo "ask.pending_count=$($cli workspace list-asks aw </dev/null | jq 'length')"
   echo "ask.reason=$($cli workspace list-asks aw </dev/null | jq -r '.[0].reason')"
   ask_id="$($cli workspace list-asks aw </dev/null | jq -r '.[0].id')"
   echo "ask.allow_scope=$($cli workspace allow aw "$ask_id" </dev/null | jq -r '.scope')"
-  echo "ask.retry=$($cli shell -w aw -c 'rm /f.txt' </dev/null | sexit)"
+  echo "ask.retry=$($cli shell --json -w aw -c 'rm /f.txt' </dev/null | sexit)"
   echo "ask.spent=$($cli workspace list-asks aw --all </dev/null | jq 'length')"
   $cli shell -w aw -c 'rm /g.txt' </dev/null >/dev/null
   ask_id="$($cli workspace list-asks aw </dev/null | jq -r '.[0].id')"
   echo "ask.deny_outcome=$($cli workspace deny aw "$ask_id" --note veto </dev/null | jq -r '.outcome')"
-  denied="$($cli shell -w aw -c 'rm /g.txt' </dev/null)"
+  denied="$($cli shell --json -w aw -c 'rm /g.txt' </dev/null)"
   echo "ask.denied_err=$(printf '%s' "$denied" | serr)"
   echo "ask.denied_reason=$(printf '%s' "$denied" | sreason)"
   echo "ask.drained=$($cli workspace list-asks aw </dev/null | jq 'length')"
@@ -205,14 +205,14 @@ probe() {
   echo "ws.list_has_vw=$($cli workspace list </dev/null | jq -r 'if (map(.id) | index("vw")) != null then "yes" else "no" end')"
   $cli workspace delete vwc >/dev/null 2>&1 </dev/null || true
   $cli workspace clone vw --id vwc </dev/null >/dev/null
-  echo "clone.content=$($cli shell -w vwc -c 'cat /a.txt' </dev/null | sout)"
+  echo "clone.content=$($cli shell --json -w vwc -c 'cat /a.txt' </dev/null | sout)"
   $cli workspace delete vwc >/dev/null 2>&1 </dev/null || true
   $cli workspace delete vw >/dev/null 2>&1 </dev/null || true
 
   # ── fuse: backend:fuse config is accepted and the workspace operates ──
   $cli workspace delete fw >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$FUSE_YAML" --id fw >/dev/null </dev/null
-  echo "fuse.operates=$($cli shell -w fw -c 'echo alive' </dev/null | sout)"
+  echo "fuse.operates=$($cli shell --json -w fw -c 'echo alive' </dev/null | sout)"
   $cli workspace delete fw >/dev/null 2>&1 </dev/null || true
   freeport
 }
