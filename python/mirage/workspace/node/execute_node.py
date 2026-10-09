@@ -223,7 +223,6 @@ STREAMING_KINDS = frozenset(
     {
         NodeKind.PROGRAM,
         NodeKind.COMPOUND,
-        NodeKind.ARITH,
         NodeKind.LIST,
         NodeKind.SUBSHELL,
         NodeKind.IF,
