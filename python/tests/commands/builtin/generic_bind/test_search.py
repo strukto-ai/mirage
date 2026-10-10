@@ -343,20 +343,34 @@ TREE = {
     "/d/c.txt": b"nothing\n",
     "/d/sub/d.txt": b"ADA upper\nada lovelace\n",
     "/d/w.bin": b"ada in a blob\n",
+    "/d/z.txt": b"\0noise\n",
 }
+
+
+async def _no_answer(path, query, index=NULL_INDEX):
+    return None
 
 
 class SearchRAM(RAMVFS):
     """A RAM mount whose search answers by substring, counting reads.
 
-    Like a real index it never covers a binary-extension file.
+    Like a real index it never covers a binary-extension file. ``lines``
+    answers as "bytes", "stream" or "decline" (None for every file), or
+    is None for no line search; ``upper`` spells hits in another case,
+    ``resource`` adds a search grep has no metadata for, and ``refuse``
+    is what ``before_full_scan`` raises.
     """
 
     def __init__(
-        self, files: bool = True, lines: bool = True, stream: bool = False
+        self,
+        files: bool = True,
+        lines: str | None = "bytes",
+        upper: bool = False,
+        resource: bool = False,
+        refuse: type[Exception] | None = None,
     ) -> None:
         super().__init__()
-        self.stream = stream
+        self.lines, self.upper, self.refuse = lines, upper, refuse
         self.reads: list[str] = []
         self.asked: list[tuple[str, bool]] = []
         self.scans: list[ScanReason] = []
@@ -365,8 +379,10 @@ class SearchRAM(RAMVFS):
         self.streams: list[AsyncIterator[bytes]] = []
         if not files:
             self.files_containing = None  # type: ignore[assignment]
-        if not lines:
+        if lines is None:
             self.lines_containing = None  # type: ignore[assignment]
+        if resource:
+            self.search = _no_answer  # type: ignore[method-assign]
 
     async def read(self, path, index=NULL_INDEX, offset=0, size=None):
         self.reads.append(path.vfs_path)
@@ -381,7 +397,7 @@ class SearchRAM(RAMVFS):
     ):
         self.asked.append((text, whole_word))
         return [
-            mounted_path(under[0], key)
+            mounted_path(under[0], key.upper() if self.upper else key)
             for key, data in self._store.files.items()
             if _holds(data, text, ignore_case) and not key.endswith(".bin")
         ]
@@ -389,13 +405,15 @@ class SearchRAM(RAMVFS):
     async def lines_containing(
         self, path, text, *, ignore_case, index=NULL_INDEX
     ):
+        if self.lines == "decline":
+            return None
         data = self._store.files["/" + path.vfs_path]
         found = [
             line
             for line in data.splitlines(keepends=True)
             if _holds(line, text, ignore_case)
         ]
-        if not self.stream:
+        if self.lines == "bytes":
             return b"".join(found)
         self.streams.append(self._pull(found))
         return self.streams[-1]
@@ -411,6 +429,8 @@ class SearchRAM(RAMVFS):
 
     async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
         self.scans.append(reason)
+        if self.refuse is not None:
+            raise self.refuse(f"{reason}; narrow the path")
 
 
 def _holds(data: bytes, text: str, ignore_case: bool) -> bool:
@@ -419,19 +439,24 @@ def _holds(data: bytes, text: str, ignore_case: bool) -> bool:
     return text.encode() in data
 
 
-def _seed(vfs: RAMVFS) -> RAMVFS:
-    vfs._store.dirs.update({"/d", "/d/sub"})
-    vfs._store.files.update(TREE)
-    return vfs
+def _run(
+    vfs: RAMVFS, line: str, hide: tuple[str, ...] = ()
+) -> tuple[bytes, bytes, int]:
+    async def run() -> tuple[bytes, bytes, int]:
+        vfs._store.dirs.update({"/d", "/d/sub"})
+        vfs._store.files.update(TREE)
+        ws = Workspace({"/": vfs})
+        try:
+            session = None
+            if hide:
+                session = "agent"
+                ws.create_session(session, profile={"paths": {"hide": hide}})
+            result = await ws.shell(line, session_id=session)
+            return result.stdout, result.stderr or b"", result.exit_code
+        finally:
+            await ws.close()
 
-
-async def _run(vfs: RAMVFS, line: str) -> tuple[bytes, bytes, int]:
-    ws = Workspace({"/": _seed(vfs)})
-    try:
-        result = await ws.shell(line)
-        return result.stdout, result.stderr or b"", result.exit_code
-    finally:
-        await ws.close()
+    return asyncio.run(run())
 
 
 LINES = [
@@ -453,253 +478,163 @@ LINES = [
     "rg ada /d",
     "rg -c ada /d",
     "rg --files-without-match ada /d",
+    "rg -q --files-without-match ada /d",
+    "rg -c --include-zero ada /d",
     "rg -g '*.txt' -i ADA /d",
     "rg -n ada /d",
     "rg -w -e ada -e nothing /d",
+    "rg --files /d",
 ]
 
+MOUNTS = {
+    "files": {"lines": None},
+    "lines": {"files": False},
+    "both": {},
+    "stream": {"files": False, "lines": "stream"},
+    "decline": {"files": False, "lines": "decline"},
+    "upper": {"lines": None, "upper": True},
+    "resource": {"lines": None, "resource": True},
+    "decline-resource": {"files": False, "lines": "decline", "resource": True},
+}
 
-@pytest.mark.parametrize(
-    "files, lines, stream", [(1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 1, 1)]
-)
+
+@pytest.mark.parametrize("mount", MOUNTS)
 @pytest.mark.parametrize("line", LINES)
-def test_a_search_never_changes_what_grep_and_rg_print(
-    line, files, lines, stream
-):
-    plain = asyncio.run(_run(RAMVFS(), line))
-    vfs = SearchRAM(bool(files), bool(lines), bool(stream))
-    assert asyncio.run(_run(vfs, line)) == plain
+def test_a_search_never_changes_what_grep_and_rg_print(line, mount):
+    assert _run(SearchRAM(**MOUNTS[mount]), line) == _run(RAMVFS(), line)
+
+
+EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
 
 
 @pytest.mark.parametrize(
-    "line, reads, asked",
+    "line, mount, reads, asked, scan",
     [
-        # Only the files holding the text are read; -c and -L still
-        # print the rest from the walk.
-        ("grep -rc ada /d", ["a.txt", "sub/d.txt"], [("ada", False)]),
-        ("rg -lw ada /d", ["a.txt", "sub/d.txt"], [("ada", True)]),
-        # A regex is asked for the text every match holds.
-        ("grep -rE 'conn.*refused' /d", ["b.txt"], [("refused", False)]),
-        # -a reads the binary-extension file the search cannot vouch for.
-        ("grep -ra ada /d", ["a.txt", "sub/d.txt", "w.bin"], [("ada", False)]),
-        # A named file is read whatever the search said, here twice, as
-        # GNU reads it once in the walk and once as the operand.
+        # Only the files holding the text are read; -c and -L still print
+        # the rest from the walk. A regex asks the text every match holds.
+        ("grep -rc ada /d", "files", "a.txt sub/d.txt", "ada", None),
+        ("rg -lw ada /d", "files", "a.txt sub/d.txt", "ada -w", None),
+        ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused", None),
+        # -a reads the binary-extension file no search vouches for, and a
+        # named file is read whatever the search said (twice, as GNU does).
+        ("grep -ra ada /d", "files", "a.txt sub/d.txt w.bin", "ada", None),
         (
             "grep -r ada /d /d/c.txt",
-            ["a.txt", "c.txt", "c.txt", "sub/d.txt"],
-            [("ada", False)],
+            "files",
+            "a.txt c.txt c.txt sub/d.txt",
+            "ada",
+            None,
         ),
+        ("grep -r ada /d", "upper", "a.txt sub/d.txt", "ada", None),
+        ("grep -r ada /d", "resource", "a.txt sub/d.txt", "ada", None),
+        # Lines stand in for a file; -n reads a file holding one.
+        ("grep -r ada /d", "lines", "", "", None),
+        ("grep -rn ada /d", "lines", "a.txt sub/d.txt", "", None),
+        ("grep -rn ada /d", "stream", "a.txt sub/d.txt", "", None),
+        ("grep -r ada /d", "decline", EVERY, "", ScanReason.UNANSWERED),
+        ("grep -rn ada /d", "decline", EVERY, "", ScanReason.UNANSWERED),
+        ("grep -rv ada /d", "both", None, "", ScanReason.EVERY_LINE),
+        ("rg --passthru ada /d", "both", None, "", ScanReason.EVERY_LINE),
+        ("grep -r 'a.b' /d", "both", None, "", ScanReason.NO_TEXT),
+        ("rg -L ada /d", "both", None, "", ScanReason.LINKS),
+        (
+            "rg --files-without-match ada /d",
+            "both",
+            None,
+            "",
+            ScanReason.EVERY_FILE,
+        ),
+        (
+            "rg -c --include-zero ada /d",
+            "both",
+            None,
+            "",
+            ScanReason.EVERY_FILE,
+        ),
+        ("rg -q --files-without-match ada /d", "files", None, "ada", None),
+        ("rg --files /d", "both", "", "", None),
     ],
 )
-def test_only_the_files_a_search_returns_are_read(line, reads, asked):
-    vfs = SearchRAM(lines=False)
-    asyncio.run(_run(vfs, line))
-    assert (sorted(vfs.reads), vfs.asked) == (
-        [f"d/{key}" for key in reads],
-        asked,
-    )
-
-
-def test_matching_lines_stand_in_for_a_file_when_nothing_else_prints():
-    lines = SearchRAM(files=False)
-    assert asyncio.run(_run(lines, "grep -r ada /d"))[2] == 0
-    assert lines.reads == []
-    # -n needs the real line numbers, so a file with a matching line is
-    # read whole.
-    numbered = SearchRAM(files=False)
-    asyncio.run(_run(numbered, "grep -rn ada /d"))
-    assert sorted(numbered.reads) == ["d/a.txt", "d/sub/d.txt"]
-
-
-def test_a_streamed_answer_is_pulled_only_as_far_as_it_is_needed():
-    # The lines stand in for the file, so every one is pulled.
-    whole = SearchRAM(files=False, stream=True)
-    asyncio.run(_run(whole, "grep -ri ada /d"))
-    assert b"ada lovelace\n" in whole.pulled
-    # -n reads the file instead; the answer only says whether to, so
-    # the pull stops at its first line.
-    numbered = SearchRAM(files=False, stream=True)
-    asyncio.run(_run(numbered, "grep -rin ada /d"))
-    assert b"ada lovelace\n" not in numbered.pulled
-    assert "d/sub/d.txt" in numbered.reads
-
-
-@pytest.mark.parametrize("line", ["grep -ril ada /d", "grep -riq ada /d"])
-def test_a_streamed_answer_is_closed_when_grep_stops_early(line):
-    vfs = SearchRAM(files=False, stream=True)
-
-    async def run() -> int:
-        ws = Workspace({"/": _seed(vfs)})
-        try:
-            await ws.shell(line)
-            return vfs.open
-        finally:
-            await ws.close()
-
-    assert asyncio.run(run()) == 0
-
-
-@pytest.mark.parametrize(
-    "line, reason",
-    [
-        ("grep -rv ada /d", ScanReason.EVERY_LINE),
-        ("rg --passthru ada /d", ScanReason.EVERY_LINE),
-        ("grep -r 'a.b' /d", ScanReason.NO_TEXT),
-        ("rg -L ada /d", ScanReason.LINKS),
-        ("rg --files-without-match ada /d", ScanReason.EVERY_FILE),
-        ("rg -c --include-zero ada /d", ScanReason.EVERY_FILE),
-    ],
-)
-def test_a_walk_that_reads_every_file_says_why(line, reason):
-    vfs = SearchRAM()
-    asyncio.run(_run(vfs, line))
-    assert (vfs.scans, vfs.asked) == ([reason], [])
-
-
-def test_a_mount_may_refuse_a_full_scan():
-    class Refusing(SearchRAM):
-        async def before_full_scan(
-            self, command, under, reason, index=NULL_INDEX
-        ):
-            raise ValueError(f"{reason}; narrow the path")
-
-    assert asyncio.run(_run(Refusing(), "grep -rv ada /d")) == (
-        b"",
-        b"grep: the output needs lines that do not match; narrow the path\n",
-        1,
-    )
-    assert asyncio.run(_run(Refusing(), "grep -r ada /d"))[2] == 0
-    # A file listing reads no content, so nothing is refused.
-    assert asyncio.run(_run(Refusing(), "rg --files /d")) == asyncio.run(
-        _run(RAMVFS(), "rg --files /d")
-    )
+def test_what_a_search_reads_asks_and_scans(line, mount, reads, asked, scan):
+    vfs = SearchRAM(**MOUNTS[mount])
+    assert _run(vfs, line) == _run(RAMVFS(), line)
+    text, _, word = asked.partition(" ")
+    assert vfs.asked == ([(text, bool(word))] if text else [])
+    assert vfs.scans == ([scan] if scan else [])
+    if reads is not None:
+        assert sorted(vfs.reads) == [f"d/{key}" for key in reads.split()]
 
 
 def test_a_hidden_path_is_walked_without_the_search():
-    vfs = SearchRAM()
-
-    async def run() -> bytes:
-        ws = Workspace({"/": _seed(vfs)})
-        try:
-            ws.create_session("agent", profile={"paths": {"hide": ["/d/sub"]}})
-            result = await ws.shell("grep -r ada /d", session_id="agent")
-            return await result.materialize_stdout()
-        finally:
-            await ws.close()
-
-    assert asyncio.run(run()) == b"/d/a.txt:ada here\n"
-    assert vfs.asked == []
-
-
-class Declining(SearchRAM):
-    """Line search that answers no file."""
-
-    async def lines_containing(
-        self, path, text, *, ignore_case, index=NULL_INDEX
-    ):
-        return None
-
-
-@pytest.mark.parametrize("line", ["grep -r ada /d", "grep -rn ada /d"])
-def test_a_line_search_that_declines_asks_before_reading_once(line):
-    vfs = Declining(files=False)
-    assert asyncio.run(_run(vfs, line)) == asyncio.run(_run(RAMVFS(), line))
-    assert vfs.scans == [ScanReason.UNANSWERED]
-
-    class Refusing(Declining):
-        async def before_full_scan(
-            self, command, under, reason, index=NULL_INDEX
-        ):
-            raise ValueError(f"{reason}; narrow the path")
-
-    assert asyncio.run(_run(Refusing(files=False), "grep -r ada /d")) == (
-        b"",
-        b"grep: the search could not answer; narrow the path\n",
-        1,
-    )
-
-
-class Uppercase(SearchRAM):
-    """A search that spells its hits in another case."""
-
-    async def files_containing(
-        self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
-    ):
-        found = await super().files_containing(
-            text, under, whole_word=whole_word, ignore_case=ignore_case
-        )
-        return [
-            mounted_path(under[0], hit.mount_path.upper()) for hit in found
-        ]
-
-
-def test_hits_are_matched_without_case():
-    vfs = Uppercase(lines=False)
-    assert asyncio.run(_run(vfs, "grep -r ada /d")) == asyncio.run(
-        _run(RAMVFS(), "grep -r ada /d")
-    )
-    assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"]
-
-
-class Resource(SearchRAM):
-    """A mount with a resource search that grep has no metadata for."""
-
-    async def search(self, path, query, index=NULL_INDEX):
-        return None
-
-
-def test_a_resource_search_still_narrows_the_scan():
-    vfs = Resource(lines=False)
-    asyncio.run(_run(vfs, "grep -r ada /d"))
-    assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"]
-
-
-class DecliningResource(Declining, Resource):
-    """A resource search beside a line search that answers no file."""
-
-
-@pytest.mark.parametrize("mount", [Declining, DecliningResource])
-def test_a_refusal_stands_for_every_unanswered_file(mount):
-    # An OSError is a per-file read error to grep, which goes on to the
-    # next file; that file is refused too, not read.
-    class Refusing(mount):
-        async def before_full_scan(
-            self, command, under, reason, index=NULL_INDEX
-        ):
-            raise PermissionError(f"{reason}; narrow the path")
-
-    vfs = Refusing(files=False)
-    assert asyncio.run(_run(vfs, "grep -r ada /d")) == (
-        b"",
-        b"".join(
-            b"grep: /d/%s: Permission denied\n" % name
-            for name in (b"a.txt", b"b.txt", b"c.txt", b"sub/d.txt")
-        ),
-        2,
-    )
-    assert vfs.reads == []
+    vfs, hide = SearchRAM(), ("/d/sub",)
+    line = "grep -r ada /d"
+    assert _run(vfs, line, hide) == _run(RAMVFS(), line, hide)
+    assert (vfs.asked, vfs.scans) == ([], [ScanReason.NO_SEARCH])
 
 
 @pytest.mark.parametrize(
-    "line",
+    "line, pulls_every_line",
     [
-        "rg --files-without-match ada /d",
-        "rg -c --include-zero ada /d",
-        "rg -q --files-without-match ada /d",
-        "rg -q -c --include-zero ada /d",
+        ("grep -ri ada /d", True),
+        ("grep -rin ada /d", False),
+        ("grep -ril ada /d", False),
+        ("grep -riq ada /d", False),
     ],
 )
-def test_rg_leaves_a_binary_file_out_whatever_the_search_says(line):
-    async def run(vfs: RAMVFS) -> tuple[bytes, bytes, int]:
-        _seed(vfs)._store.files["/d/z.txt"] = b"\0noise\n"
+def test_a_streamed_answer_is_pulled_as_far_as_needed(line, pulls_every_line):
+    # Lines that stand in for the file are all pulled; -n only asks
+    # whether to read it, and -l and -q stop early. Closed either way.
+    vfs = SearchRAM(files=False, lines="stream")
+
+    async def run() -> tuple[bool, int]:
         ws = Workspace({"/": vfs})
+        vfs._store.dirs.update({"/d", "/d/sub"})
+        vfs._store.files.update(TREE)
         try:
-            result = await ws.shell(line)
-            return result.stdout, result.stderr or b"", result.exit_code
+            await ws.shell(line)
+            return b"ada lovelace\n" in vfs.pulled, vfs.open
         finally:
             await ws.close()
 
-    vfs = SearchRAM(lines=False)
-    assert asyncio.run(run(vfs)) == asyncio.run(run(RAMVFS()))
-    # -q prints no row, so the search still narrows.
-    assert bool(vfs.asked) == (" -q " in line)
+    assert asyncio.run(run()) == (pulls_every_line, 0)
+
+
+def _refused(reason: ScanReason) -> bytes:
+    return f"grep: {reason}; narrow the path\n".encode()
+
+
+DENIED = b"".join(
+    b"grep: /d/%s: Permission denied\n" % key.encode() for key in EVERY.split()
+)
+
+
+@pytest.mark.parametrize(
+    "line, mount, refuse, out",
+    [
+        (
+            "grep -rv ada /d",
+            "both",
+            ValueError,
+            (_refused(ScanReason.EVERY_LINE), 1),
+        ),
+        (
+            "grep -r ada /d",
+            "decline",
+            ValueError,
+            (_refused(ScanReason.UNANSWERED), 1),
+        ),
+        # An OSError is a per-file read error to grep, which goes on to the
+        # next file; that file is refused too, not read.
+        ("grep -r ada /d", "decline", PermissionError, (DENIED, 2)),
+        ("grep -r ada /d", "decline-resource", PermissionError, (DENIED, 2)),
+        # A narrowed line, and one that reads no content, run.
+        ("grep -r ada /d", "both", ValueError, None),
+        ("rg --files /d", "both", ValueError, None),
+    ],
+)
+def test_a_mount_may_refuse_a_full_scan(line, mount, refuse, out):
+    vfs = SearchRAM(**MOUNTS[mount], refuse=refuse)
+    if out is None:
+        assert _run(vfs, line) == _run(RAMVFS(), line)
+    else:
+        assert (_run(vfs, line), vfs.reads) == ((b"", *out), [])

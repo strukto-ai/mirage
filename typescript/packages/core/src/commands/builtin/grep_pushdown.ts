@@ -21,7 +21,7 @@ import { BINARY_EXTENSIONS, PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
 import { breSource, ereSource, perlRegex, rustSource } from './grep_pattern.ts'
-import { UNICODE_FOLDED, requiredNeedles } from './grep_prefilter.ts'
+import { UNICODE_FOLDED, foldsByUnicode, requiredNeedles } from './grep_prefilter.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import { type FlagValue } from '../spec/types.ts'
 
@@ -222,9 +222,8 @@ export function searchTerms(
   ignoreCase: boolean,
 ): [string[], boolean] | null {
   const words = wholeWordLiterals(pattern, fixedString, wholeWord, lineRegexp)
-  const unicodeFold = ignoreCase && (matcher.unicode || matcher.flags.includes('v'))
   const untrusted = (w: string): boolean =>
-    /[\u0080-\uffff]/.test(w) || (unicodeFold && UNICODE_FOLDED.test(w.toLowerCase()))
+    /[\u0080-\uffff]/.test(w) || (foldsByUnicode(matcher) && UNICODE_FOLDED.test(w.toLowerCase()))
   if (words !== null && !(ignoreCase && words.some(untrusted))) {
     return [words, true]
   }

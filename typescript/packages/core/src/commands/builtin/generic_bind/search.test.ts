@@ -277,12 +277,21 @@ const TREE: Record<string, string> = {
   '/d/c.txt': 'nothing\n',
   '/d/sub/d.txt': 'ADA upper\nada lovelace\n',
   '/d/w.bin': 'ada in a blob\n',
+  '/d/z.txt': '\0noise\n',
 }
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function holds(data: string, text: string, ignoreCase: boolean): boolean {
   return ignoreCase ? data.toLowerCase().includes(text.toLowerCase()) : data.includes(text)
+}
+
+interface Mount {
+  files?: boolean
+  lines?: 'bytes' | 'stream' | 'decline' | null
+  upper?: boolean
+  resource?: boolean
+  refuse?: (message: string) => Error
 }
 
 // A RAM mount whose search answers by substring, counting reads. Like a real
@@ -295,14 +304,11 @@ class SearchRAM extends RAMVFS {
   open = 0
   streams: AsyncIterable<Uint8Array>[] = []
 
-  constructor(
-    files = true,
-    lines = true,
-    readonly stream = false,
-  ) {
+  constructor(readonly mount: Mount = {}) {
     super()
-    if (!files) Object.assign(this, { filesContaining: undefined })
-    if (!lines) Object.assign(this, { linesContaining: undefined })
+    if (mount.files === false) Object.assign(this, { filesContaining: undefined })
+    if (mount.lines === null) Object.assign(this, { linesContaining: undefined })
+    if (mount.resource === true) Object.assign(this, { search: () => Promise.resolve(null) })
   }
 
   override read(
@@ -332,7 +338,7 @@ class SearchRAM extends RAMVFS {
       .filter(
         ([key, data]) => holds(DEC.decode(data), text, opts.ignoreCase) && !key.endsWith('.bin'),
       )
-      .map(([key]) => mountedPath(scope, key))
+      .map(([key]) => mountedPath(scope, this.mount.upper === true ? key.toUpperCase() : key))
     return Promise.resolve(found)
   }
 
@@ -341,9 +347,10 @@ class SearchRAM extends RAMVFS {
     text: string,
     opts: { ignoreCase: boolean },
   ): Promise<ByteSource | null> {
+    if (this.mount.lines === 'decline') return Promise.resolve(null)
     const data = DEC.decode(this.store.files.get(`/${path.vfsPath}`))
     const kept = data.split(/(?<=\n)/).filter((line) => holds(line, text, opts.ignoreCase))
-    if (!this.stream) return Promise.resolve(ENC.encode(kept.join('')))
+    if (this.mount.lines !== 'stream') return Promise.resolve(ENC.encode(kept.join('')))
     const pulled = this.pull(kept)
     this.streams.push(pulled)
     return Promise.resolve(pulled)
@@ -364,269 +371,150 @@ class SearchRAM extends RAMVFS {
 
   override beforeFullScan(_command: string, _under: PathSpec[], reason: ScanReason): Promise<void> {
     this.scans.push(reason)
-    return Promise.resolve()
+    const refuse = this.mount.refuse
+    return refuse === undefined
+      ? Promise.resolve()
+      : Promise.reject(refuse(`${reason}; narrow the path`))
   }
 }
 
-async function run(vfs: RAMVFS, line: string): Promise<[string, string, number]> {
+async function run(vfs: RAMVFS, line: string, hide?: string[]): Promise<[string, string, number]> {
   for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
   for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
   const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
   try {
-    const out = await ws.shell(line)
+    if (hide !== undefined) {
+      ws.createSession('agent', { profile: parseSessionProfile({ paths: { hide } }) })
+    }
+    const out = await ws.shell(line, hide === undefined ? {} : { sessionId: 'agent' })
     return [DEC.decode(out.stdout), DEC.decode(out.stderr), out.exitCode]
   } finally {
     await ws.close()
   }
 }
 
+const LINES = [
+  'grep -r ada /d',
+  'grep -rc ada /d',
+  'grep -rL ada /d',
+  'grep -rlw ada /d',
+  'grep -rn ada /d',
+  'grep -ri ADA /d',
+  "grep -rx 'ada lovelace' /d",
+  'grep -r -e ada -e bob /d',
+  "grep -rE 'conn.*refused' /d",
+  'grep -r --exclude-dir=sub ada /d',
+  'grep -r -C1 ada /d',
+  'grep -rv ada /d',
+  'grep -ra ada /d',
+  'grep -rh ada /d /d/w.bin',
+  'grep -rq ada /d',
+  'rg ada /d',
+  'rg -c ada /d',
+  'rg --files-without-match ada /d',
+  'rg -q --files-without-match ada /d',
+  'rg -c --include-zero ada /d',
+  "rg -g '*.txt' -i ADA /d",
+  'rg -n ada /d',
+  'rg -w -e ada -e nothing /d',
+  'rg --files /d',
+]
+
+const MOUNTS: Record<string, Mount> = {
+  files: { lines: null },
+  lines: { files: false },
+  both: {},
+  stream: { files: false, lines: 'stream' },
+  decline: { files: false, lines: 'decline' },
+  upper: { lines: null, upper: true },
+  resource: { lines: null, resource: true },
+  'decline-resource': { files: false, lines: 'decline', resource: true },
+}
+
 // Twin of test_a_search_never_changes_what_grep_and_rg_print.
-describe('a search never changes what grep and rg print', () => {
-  const lines = [
-    'grep -r ada /d',
-    'grep -rc ada /d',
-    'grep -rL ada /d',
-    'grep -rlw ada /d',
-    'grep -rn ada /d',
-    'grep -ri ADA /d',
-    "grep -rx 'ada lovelace' /d",
-    'grep -r -e ada -e bob /d',
-    "grep -rE 'conn.*refused' /d",
-    'grep -r --exclude-dir=sub ada /d',
-    'grep -r -C1 ada /d',
-    'grep -rv ada /d',
-    'grep -ra ada /d',
-    'grep -rh ada /d /d/w.bin',
-    'grep -rq ada /d',
-    'rg ada /d',
-    'rg -c ada /d',
-    'rg --files-without-match ada /d',
-    "rg -g '*.txt' -i ADA /d",
-    'rg -n ada /d',
-    'rg -w -e ada -e nothing /d',
-  ]
-  const flavors: [boolean, boolean, boolean][] = [
-    [true, false, false],
-    [false, true, false],
-    [true, true, false],
-    [false, true, true],
-  ]
-  it.each(
-    lines.flatMap((line) =>
-      flavors.map(([files, ls, stream]) => [line, files, ls, stream] as const),
-    ),
-  )('%s (files=%s, lines=%s, stream=%s)', async (line, files, ls, stream) => {
-    expect(await run(new SearchRAM(files, ls, stream), line)).toEqual(await run(new RAMVFS(), line))
-  })
-})
+it.each(LINES.flatMap((line) => Object.keys(MOUNTS).map((mount) => [line, mount] as const)))(
+  'prints what a plain scan prints: %s (%s)',
+  async (line, mount) => {
+    expect(await run(new SearchRAM(MOUNTS[mount]), line)).toEqual(await run(new RAMVFS(), line))
+  },
+)
 
-// Twin of test_only_the_files_a_search_returns_are_read.
-describe('only the files a search returns are read', () => {
-  it.each<[string, string[], [string, boolean][]]>([
-    ['grep -rc ada /d', ['a.txt', 'sub/d.txt'], [['ada', false]]],
-    ['rg -lw ada /d', ['a.txt', 'sub/d.txt'], [['ada', true]]],
-    ["grep -rE 'conn.*refused' /d", ['b.txt'], [['refused', false]]],
-    ['grep -ra ada /d', ['a.txt', 'sub/d.txt', 'w.bin'], [['ada', false]]],
-    ['grep -r ada /d /d/c.txt', ['a.txt', 'c.txt', 'c.txt', 'sub/d.txt'], [['ada', false]]],
-  ])('%s', async (line, reads, asked) => {
-    const vfs = new SearchRAM(true, false)
-    await run(vfs, line)
-    expect([[...vfs.reads].sort(), vfs.asked]).toEqual([reads.map((key) => `d/${key}`), asked])
-  })
-})
+const EVERY = 'a.txt b.txt c.txt sub/d.txt z.txt'
 
-describe('matching lines', () => {
-  it('stand in for a file when nothing else prints', async () => {
-    const lines = new SearchRAM(false, true)
-    expect((await run(lines, 'grep -r ada /d'))[2]).toBe(0)
-    expect(lines.reads).toEqual([])
-    const numbered = new SearchRAM(false, true)
-    await run(numbered, 'grep -rn ada /d')
-    expect([...numbered.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'])
-  })
-
-  // Twin of test_a_streamed_answer_is_pulled_only_as_far_as_it_is_needed.
-  it('are pulled from a stream only as far as needed', async () => {
-    const whole = new SearchRAM(false, true, true)
-    await run(whole, 'grep -ri ada /d')
-    expect(whole.pulled).toContain('ada lovelace\n')
-    const numbered = new SearchRAM(false, true, true)
-    await run(numbered, 'grep -rin ada /d')
-    expect(numbered.pulled).not.toContain('ada lovelace\n')
-    expect(numbered.reads).toContain('d/sub/d.txt')
-  })
-
-  // Twin of test_a_streamed_answer_is_closed_when_grep_stops_early.
-  it.each(['grep -ril ada /d', 'grep -riq ada /d'])(
-    'close their stream when grep stops early: %s',
-    async (line) => {
-      const vfs = new SearchRAM(false, true, true)
-      for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
-      for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
-      const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
-      try {
-        await ws.shell(line)
-        expect(vfs.open).toBe(0)
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-})
-
-describe('a walk that reads every file', () => {
-  it.each<[string, ScanReason]>([
-    ['grep -rv ada /d', ScanReason.EVERY_LINE],
-    ['rg --passthru ada /d', ScanReason.EVERY_LINE],
-    ["grep -r 'a.b' /d", ScanReason.NO_TEXT],
-    ['rg -L ada /d', ScanReason.LINKS],
-    ['rg --files-without-match ada /d', ScanReason.EVERY_FILE],
-    ['rg -c --include-zero ada /d', ScanReason.EVERY_FILE],
-  ])('%s says why', async (line, reason) => {
-    const vfs = new SearchRAM()
-    await run(vfs, line)
-    expect([vfs.scans, vfs.asked]).toEqual([[reason], []])
-  })
-
-  it('may be refused by the mount', async () => {
-    class Refusing extends SearchRAM {
-      override beforeFullScan(_c: string, _u: PathSpec[], reason: ScanReason): Promise<void> {
-        return Promise.reject(new Error(`${reason}; narrow the path`))
-      }
-    }
-    expect(await run(new Refusing(), 'grep -rv ada /d')).toEqual([
-      '',
-      'grep: the output needs lines that do not match; narrow the path\n',
-      1,
-    ])
-    expect((await run(new Refusing(), 'grep -r ada /d'))[2]).toBe(0)
-    // A file listing reads no content, so nothing is refused.
-    expect(await run(new Refusing(), 'rg --files /d')).toEqual(
-      await run(new RAMVFS(), 'rg --files /d'),
-    )
-  })
+// Twin of test_what_a_search_reads_asks_and_scans.
+it.each<[string, string, string | null, string, ScanReason | null]>([
+  ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada', null],
+  ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w', null],
+  ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused', null],
+  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', null],
+  ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada', null],
+  ['grep -r ada /d', 'upper', 'a.txt sub/d.txt', 'ada', null],
+  ['grep -r ada /d', 'resource', 'a.txt sub/d.txt', 'ada', null],
+  ['grep -r ada /d', 'lines', '', '', null],
+  ['grep -rn ada /d', 'lines', 'a.txt sub/d.txt', '', null],
+  ['grep -rn ada /d', 'stream', 'a.txt sub/d.txt', '', null],
+  ['grep -r ada /d', 'decline', EVERY, '', ScanReason.UNANSWERED],
+  ['grep -rn ada /d', 'decline', EVERY, '', ScanReason.UNANSWERED],
+  ['grep -rv ada /d', 'both', null, '', ScanReason.EVERY_LINE],
+  ['rg --passthru ada /d', 'both', null, '', ScanReason.EVERY_LINE],
+  ["grep -r 'a.b' /d", 'both', null, '', ScanReason.NO_TEXT],
+  ['rg -L ada /d', 'both', null, '', ScanReason.LINKS],
+  ['rg --files-without-match ada /d', 'both', null, '', ScanReason.EVERY_FILE],
+  ['rg -c --include-zero ada /d', 'both', null, '', ScanReason.EVERY_FILE],
+  ['rg -q --files-without-match ada /d', 'files', null, 'ada', null],
+  ['rg --files /d', 'both', '', '', null],
+])('%s (%s) reads, asks and scans what it should', async (line, mount, reads, asked, scan) => {
+  const vfs = new SearchRAM(MOUNTS[mount])
+  expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
+  const [text = '', word] = asked.split(' ')
+  expect(vfs.asked).toEqual(text === '' ? [] : [[text, word !== undefined]])
+  expect(vfs.scans).toEqual(scan === null ? [] : [scan])
+  if (reads !== null) {
+    const keys = reads === '' ? [] : reads.split(' ')
+    expect([...vfs.reads].sort()).toEqual(keys.map((key) => `d/${key}`))
+  }
 })
 
 // Twin of test_a_hidden_path_is_walked_without_the_search.
 it('walks a hidden path without the search', async () => {
   const vfs = new SearchRAM()
-  for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
-  for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
-  const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
-  try {
-    ws.createSession('agent', { profile: parseSessionProfile({ paths: { hide: ['/d/sub'] } }) })
-    const out = await ws.shell('grep -r ada /d', { sessionId: 'agent' })
-    expect(DEC.decode(out.stdout)).toBe('/d/a.txt:ada here\n')
-    expect(vfs.asked).toEqual([])
-  } finally {
-    await ws.close()
-  }
+  const line = 'grep -r ada /d'
+  expect(await run(vfs, line, ['/d/sub'])).toEqual(await run(new RAMVFS(), line, ['/d/sub']))
+  expect([vfs.asked, vfs.scans]).toEqual([[], [ScanReason.NO_SEARCH]])
 })
 
-// Line search that answers no file.
-class Declining extends SearchRAM {
-  override linesContaining(): Promise<ByteSource | null> {
-    return Promise.resolve(null)
-  }
-}
-
-// Twin of test_a_line_search_that_declines_asks_before_reading_once.
-describe('a line search that declines', () => {
-  it.each(['grep -r ada /d', 'grep -rn ada /d'])('asks before reading, once: %s', async (line) => {
-    const vfs = new Declining(false, true)
-    expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
-    expect(vfs.scans).toEqual([ScanReason.UNANSWERED])
-  })
-
-  it('may be refused', async () => {
-    class Refusing extends Declining {
-      override beforeFullScan(_c: string, _u: PathSpec[], reason: ScanReason): Promise<void> {
-        return Promise.reject(new Error(`${reason}; narrow the path`))
-      }
-    }
-    expect(await run(new Refusing(false, true), 'grep -r ada /d')).toEqual([
-      '',
-      'grep: the search could not answer; narrow the path\n',
-      1,
-    ])
-  })
-})
-
-// A resource search beside a line search that answers no file.
-class DecliningResource extends Declining {
-  override search(): Promise<string[] | null> {
-    return Promise.resolve(null)
-  }
-}
-
-// Twin of test_a_refusal_stands_for_every_unanswered_file.
-it.each([Declining, DecliningResource])(
-  'lets a refusal stand for every unanswered file (%o)',
-  async (Mount) => {
-    // A filesystem error is a per-file read error to grep, which goes on to
-    // the next file; that file is refused too, not read.
-    class Refusing extends Mount {
-      override beforeFullScan(): Promise<void> {
-        return Promise.reject(eacces('/d', 'narrow the path'))
-      }
-    }
-    const vfs = new Refusing(false, true)
-    expect(await run(vfs, 'grep -r ada /d')).toEqual([
-      '',
-      ['a.txt', 'b.txt', 'c.txt', 'sub/d.txt']
-        .map((name) => `grep: /d/${name}: Permission denied\n`)
-        .join(''),
-      2,
-    ])
-    expect(vfs.reads).toEqual([])
-  },
-)
-
-// Twin of test_rg_leaves_a_binary_file_out_whatever_the_search_says.
+// Twin of test_a_streamed_answer_is_pulled_as_far_as_needed.
 it.each([
-  'rg --files-without-match ada /d',
-  'rg -c --include-zero ada /d',
-  'rg -q --files-without-match ada /d',
-  'rg -q -c --include-zero ada /d',
-])('leaves a binary file out of %s whatever the search says', async (line) => {
-  const seeded = async (vfs: RAMVFS): Promise<[string, string, number]> => {
-    vfs.store.files.set('/d/z.txt', ENC.encode('\0noise\n'))
-    return run(vfs, line)
-  }
-  const vfs = new SearchRAM(true, false)
-  expect(await seeded(vfs)).toEqual(await seeded(new RAMVFS()))
-  // -q prints no row, so the search still narrows.
-  expect(vfs.asked.length > 0).toBe(line.includes(' -q '))
+  ['grep -ri ada /d', true],
+  ['grep -rin ada /d', false],
+  ['grep -ril ada /d', false],
+  ['grep -riq ada /d', false],
+] as const)('pulls a streamed answer as far as %s needs', async (line, pullsEveryLine) => {
+  const vfs = new SearchRAM(MOUNTS.stream)
+  await run(vfs, line)
+  expect([vfs.pulled.includes('ada lovelace\n'), vfs.open]).toEqual([pullsEveryLine, 0])
 })
 
-// Twin of test_hits_are_matched_without_case.
-it('matches hits without case', async () => {
-  class Uppercase extends SearchRAM {
-    override async filesContaining(
-      text: string,
-      under: PathSpec[],
-      opts: { wholeWord: boolean; ignoreCase: boolean },
-    ): Promise<PathSpec[]> {
-      const [scope] = under
-      const found = await super.filesContaining(text, under, opts)
-      return scope === undefined
-        ? found
-        : found.map((hit) => mountedPath(scope, hit.mountPath.toUpperCase()))
-    }
-  }
-  const vfs = new Uppercase(true, false)
-  expect(await run(vfs, 'grep -r ada /d')).toEqual(await run(new RAMVFS(), 'grep -r ada /d'))
-  expect([...vfs.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'])
-})
+const refused = (reason: ScanReason): string => `grep: ${reason}; narrow the path\n`
+const DENIED = EVERY.split(' ')
+  .map((key) => `grep: /d/${key}: Permission denied\n`)
+  .join('')
+const plainError = (message: string): Error => new Error(message)
+const fsError = (message: string): Error => eacces('/d', message)
 
-// Twin of test_a_resource_search_still_narrows_the_scan.
-it('narrows the scan of a mount with a resource search', async () => {
-  class Resource extends SearchRAM {
-    override search(): Promise<string[] | null> {
-      return Promise.resolve(null)
-    }
+// Twin of test_a_mount_may_refuse_a_full_scan.
+it.each<[string, string, (message: string) => Error, [string, number] | null]>([
+  ['grep -rv ada /d', 'both', plainError, [refused(ScanReason.EVERY_LINE), 1]],
+  ['grep -r ada /d', 'decline', plainError, [refused(ScanReason.UNANSWERED), 1]],
+  ['grep -r ada /d', 'decline', fsError, [DENIED, 2]],
+  ['grep -r ada /d', 'decline-resource', fsError, [DENIED, 2]],
+  ['grep -r ada /d', 'both', plainError, null],
+  ['rg --files /d', 'both', plainError, null],
+])('lets a mount refuse %s (%s)', async (line, mount, refuse, out) => {
+  const vfs = new SearchRAM({ ...MOUNTS[mount], refuse })
+  if (out === null) {
+    expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
+  } else {
+    expect([await run(vfs, line), vfs.reads]).toEqual([['', ...out], []])
   }
-  const vfs = new Resource(true, false)
-  await run(vfs, 'grep -r ada /d')
-  expect([...vfs.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'])
 })

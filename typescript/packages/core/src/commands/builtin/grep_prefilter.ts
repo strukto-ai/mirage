@@ -1,3 +1,5 @@
+import { foldsAsciiOnly } from '../../utils/posix.ts'
+
 /**
  * What every match of a subexpression consumes: `literal` when the text is
  * fixed, and `needles`, one of which it always contains (none known when
@@ -170,6 +172,11 @@ class RequiredLiterals {
   }
 }
 
+/** Whether `pat` ignores case by Unicode folding (`ſ` matches `s`). */
+export function foldsByUnicode(pat: RegExp): boolean {
+  return pat.ignoreCase && (pat.unicode || pat.flags.includes('v')) && !foldsAsciiOnly(pat)
+}
+
 /**
  * Byte-view literals, one of which every line `pat` matches contains.
  * Under `i` they are lowercase, for a search of a lowercased view. Unicode
@@ -182,7 +189,6 @@ export function requiredNeedles(pat: RegExp): string[] | null {
     return null
   const found = new RequiredLiterals(pat.source).needles()
   const needles = pat.ignoreCase ? [...new Set(found.map((s) => s.toLowerCase()))] : [...found]
-  const unicodeFold = pat.ignoreCase && (pat.unicode || pat.flags.includes('v'))
-  if (unicodeFold && needles.some((needle) => UNICODE_FOLDED.test(needle))) return null
+  if (foldsByUnicode(pat) && needles.some((needle) => UNICODE_FOLDED.test(needle))) return null
   return needles.length > 0 ? needles : null
 }

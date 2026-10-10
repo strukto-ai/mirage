@@ -34,6 +34,7 @@ import {
   wholeWordLiteral,
   wholeWordLiterals,
 } from './grep_pushdown.ts'
+import { compilePosixRegex } from '../../utils/posix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { commandIo } from './generic_bind/adapter.ts'
@@ -446,6 +447,11 @@ describe('searchTerms', () => {
     // trusted.
     const matcher = new RegExp(pattern.replaceAll('\n', '|'), flags)
     expect(searchTerms(pattern, matcher, false, w, false, i)).toEqual(expected)
+  })
+  it("asks grep's ASCII-folding words under a UTF-8 locale", () => {
+    expect(
+      searchTerms('sun', compilePosixRegex('sun', 'i', true), false, true, false, true),
+    ).toEqual([['sun'], true])
   })
 })
 

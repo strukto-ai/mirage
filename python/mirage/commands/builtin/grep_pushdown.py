@@ -25,6 +25,7 @@ from mirage.commands.builtin.grep_pattern import (
 )
 from mirage.commands.builtin.grep_prefilter import (
     UNICODE_FOLDED,
+    folds_by_unicode,
     required_needles,
 )
 from mirage.commands.builtin.types import (
@@ -283,12 +284,13 @@ def search_terms(
         ignore_case (bool): the match folds case.
     """
     words = whole_word_literals(pattern, fixed_string, whole_word, line_regexp)
-    unicode_fold = ignore_case and not matcher.flags & re.ASCII
     if words is not None and not (
         ignore_case
         and not all(
             w.isascii()
-            and not (unicode_fold and UNICODE_FOLDED & set(w.lower()))
+            and not (
+                folds_by_unicode(matcher) and UNICODE_FOLDED & set(w.lower())
+            )
             for w in words
         )
     ):
