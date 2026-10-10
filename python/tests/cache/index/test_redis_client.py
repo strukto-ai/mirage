@@ -71,7 +71,7 @@ def client():
 
 @pytest.mark.asyncio
 async def test_list_dir_decodes_injected_client_values(client):
-    store = RedisIndexCacheStore(client=client)
+    store = RedisIndexCacheStore(client=client, key_prefix="")
     result = await store.list_dir("/folder")
     assert result.entries == ["/folder/a.txt"]
     client.mget.assert_awaited_once_with(
@@ -86,7 +86,7 @@ async def test_invalidate_dir_is_one_script_over_its_three_keys(client):
     # The rows go and the child list becomes a tombstone in one step, so no
     # writer lands between reading the listing and dropping it.
     client.eval = AsyncMock()
-    store = RedisIndexCacheStore(client=client)
+    store = RedisIndexCacheStore(client=client, key_prefix="")
     await store.invalidate_dir("/folder")
     args = client.eval.await_args.args
     assert args[1:5] == (
@@ -1055,3 +1055,10 @@ async def test_redis_conditional_replacement_is_atomic(
     else:
         assert current == (latest if peer == "replace" else None)
     assert await client.get(listing_key) == listing_raw
+
+
+def test_a_store_built_without_a_prefix_shares_the_config_default():
+    # A store built from config and one built directly must name the same
+    # keys, or two workers on one Redis keep two indexes.
+    store = RedisIndexCacheStore(client=FakeRedis(decode_responses=True))
+    assert store._entry_key("/dir/a") == "mirage:index:mirage:idx:entry:/dir/a"
