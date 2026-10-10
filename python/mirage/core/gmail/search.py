@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 MAX_HITS = 500
 
 # What a .gmail.json holds besides the headers, body and attachment names
-# Gmail searches: its key names, JSON literals, system label ids and the
-# words of a Date header. The snippet and the attachments' MIME types are
-# checked against the listing instead (``unsearched_text``).
+# Gmail searches: its key names, JSON literals and system label ids. The
+# snippet, the Date header and the attachments' MIME types are checked
+# against the listing instead (``unsearched_text``).
 RECORD_KEYS = frozenset(
     {
         "id",
@@ -65,45 +65,6 @@ RECORD_KEYS = frozenset(
         "starred",
         "important",
         "chat",
-        "mon",
-        "tue",
-        "wed",
-        "thu",
-        "fri",
-        "sat",
-        "sun",
-        "jan",
-        "feb",
-        "mar",
-        "apr",
-        "may",
-        "jun",
-        "jul",
-        "aug",
-        "sep",
-        "oct",
-        "nov",
-        "dec",
-        "gmt",
-        "utc",
-        "ut",
-        "est",
-        "edt",
-        "cst",
-        "cdt",
-        "mst",
-        "mdt",
-        "pst",
-        "pdt",
-        "time",
-        "standard",
-        "daylight",
-        "universal",
-        "coordinated",
-        "pacific",
-        "eastern",
-        "central",
-        "mountain",
     }
 )
 

@@ -47,6 +47,7 @@ def _message(
     attachment: str = "",
     mime: str = "text/plain",
     snippet: str | None = None,
+    date: str = "Mon, 5 Jan 2026 09:00:00 +0000",
 ) -> dict[str, Any]:
     at = datetime.fromisoformat(f"{day}T09:00:00+00:00")
     parts: list[dict[str, Any]] = [
@@ -75,7 +76,7 @@ def _message(
                 {"name": "From", "value": sender},
                 {"name": "To", "value": "me@example.com"},
                 {"name": "Subject", "value": subject},
-                {"name": "Date", "value": "Mon, 5 Jan 2026 09:00:00 +0000"},
+                {"name": "Date", "value": date},
             ],
             "parts": parts,
         },
@@ -132,6 +133,23 @@ MESSAGES = [
         "Trip",
         "the traveler program",
         snippet="the travel",
+    ),
+    _message(
+        "h8",
+        ["INBOX"],
+        "2026-01-08",
+        "Ha <ha@example.com>",
+        "Hike",
+        "the mountain trail",
+    ),
+    _message(
+        "i9",
+        ["INBOX"],
+        "2026-01-08",
+        "Io <io@example.com>",
+        "Ping",
+        "quiet",
+        date="Thu, 8 Jan 2026 09:00:00 -0700 (Mountain Standard Time)",
     ),
 ]
 

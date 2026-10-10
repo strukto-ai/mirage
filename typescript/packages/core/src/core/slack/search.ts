@@ -437,14 +437,21 @@ function searchFacts(
   accessor: SlackAccessor,
 ): Promise<[ReadonlySet<string>, ReadonlySet<string> | null]> {
   if (accessor.searchFacts === null) {
-    const pending = Promise.all([fetchNameWords(accessor), searchedChannels(accessor)]).finally(
-      () => {
-        if (accessor.searchFacts === pending) accessor.searchFacts = null
-      },
-    )
+    const pending = fetchSearchFacts(accessor).finally(() => {
+      if (accessor.searchFacts === pending) accessor.searchFacts = null
+    })
     accessor.searchFacts = pending
   }
   return accessor.searchFacts
+}
+
+// One after the other, so a failed users.list leaves no channel listing
+// paging on after the search has given up.
+async function fetchSearchFacts(
+  accessor: SlackAccessor,
+): Promise<[ReadonlySet<string>, ReadonlySet<string> | null]> {
+  const words = await fetchNameWords(accessor)
+  return [words, await searchedChannels(accessor)]
 }
 
 function dayOf(ts: unknown): string | null {
