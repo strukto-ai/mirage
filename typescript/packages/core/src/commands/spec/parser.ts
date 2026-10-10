@@ -239,10 +239,6 @@ export class ParsedArgs {
     return this.args.filter(([, k]) => k === 'path').map(([v]) => v)
   }
 
-  routingPaths(): string[] {
-    return [...this.paths(), ...this.pathFlagValues]
-  }
-
   texts(): string[] {
     return this.args.filter(([, k]) => k !== 'path').map(([v]) => v)
   }

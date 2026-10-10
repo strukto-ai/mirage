@@ -43,6 +43,19 @@ async function ensureParentDirectory(
   throw enotdir(virtualTarget)
 }
 
+/** Upload bytes over a volume file. Mirrors Python's `upload_bytes_sync`. */
+export async function uploadBytes(
+  accessor: DatabricksVolumeAccessor,
+  remotePath: string,
+  data: Uint8Array,
+): Promise<void> {
+  await dbxFetch(accessor, 'PUT', 'files', remotePath, {
+    query: { overwrite: 'true' },
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: data,
+  })
+}
+
 export async function write(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
@@ -55,11 +68,7 @@ export async function write(
   const timer = startOp()
   await ensureParentDirectory(accessor, remoteParent, p.virtual)
   try {
-    await dbxFetch(accessor, 'PUT', 'files', remotePath, {
-      query: { overwrite: 'true' },
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: data,
-    })
+    await uploadBytes(accessor, remotePath, data)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc

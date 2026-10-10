@@ -297,104 +297,97 @@ export async function dispatchedCall(
   return result
 }
 
-type Send = (
-  name: string,
-  path: PathSpec,
-  args?: readonly unknown[],
-  kwargs?: Record<string, unknown>,
-) => Promise<unknown>
-
-// Each slot the dispatcher answers, built over one call that sends it: the
-// dispatcher function and how a command's arguments travel there. Mirrors
-// Python's `_DISPATCHED_SLOTS`.
+// Each slot the dispatcher answers: the dispatcher function it sends and how
+// a command's arguments travel there. Mirrors Python's `_DISPATCHED_SLOTS`.
 const DISPATCHED_SLOTS = {
   write:
-    (send: Send): CommandIO['write'] =>
+    (dispatch: DispatchFn): CommandIO['write'] =>
     async (_accessor, path, data) => {
-      await send('write', path, [data])
+      await dispatchedCall(dispatch, 'write', path, [data])
     },
   append:
-    (send: Send): CommandIO['append'] =>
+    (dispatch: DispatchFn): CommandIO['append'] =>
     async (_accessor, path, data) => {
-      await send('append', path, [data])
+      await dispatchedCall(dispatch, 'append', path, [data])
     },
   pwrite:
-    (send: Send): CommandIO['pwrite'] =>
+    (dispatch: DispatchFn): CommandIO['pwrite'] =>
     async (_accessor, path, data, offset) => {
-      await send('pwrite', path, [data, offset])
+      await dispatchedCall(dispatch, 'pwrite', path, [data, offset])
     },
   create:
-    (send: Send): CommandIO['create'] =>
+    (dispatch: DispatchFn): CommandIO['create'] =>
     async (_accessor, path) => {
-      await send('create', path)
+      await dispatchedCall(dispatch, 'create', path)
     },
   mkdir:
-    (send: Send): CommandIO['mkdir'] =>
+    (dispatch: DispatchFn): CommandIO['mkdir'] =>
     async (_accessor, path, parents) => {
-      await send('mkdir', path, [], { parents: parents ?? false })
+      await dispatchedCall(dispatch, 'mkdir', path, [], { parents: parents ?? false })
     },
   unlink:
-    (send: Send): CommandIO['unlink'] =>
+    (dispatch: DispatchFn): CommandIO['unlink'] =>
     async (_accessor, path) => {
-      await send('unlink', path)
+      await dispatchedCall(dispatch, 'unlink', path)
     },
   rmdir:
-    (send: Send): CommandIO['rmdir'] =>
+    (dispatch: DispatchFn): CommandIO['rmdir'] =>
     async (_accessor, path) => {
-      await send('rmdir', path)
+      await dispatchedCall(dispatch, 'rmdir', path)
     },
   rmR:
-    (send: Send): CommandIO['rmR'] =>
+    (dispatch: DispatchFn): CommandIO['rmR'] =>
     async (_accessor, path) => {
-      await send('rm_r', path)
+      await dispatchedCall(dispatch, 'rm_r', path)
     },
   rename:
-    (send: Send): CommandIO['rename'] =>
+    (dispatch: DispatchFn): CommandIO['rename'] =>
     async (_accessor, src, dst) => {
-      await send('rename', src, [dst])
+      await dispatchedCall(dispatch, 'rename', src, [dst])
     },
   copy:
-    (send: Send): CommandIO['copy'] =>
+    (dispatch: DispatchFn): CommandIO['copy'] =>
     async (_accessor, src, dst) => {
-      await send('copy', src, [dst])
+      await dispatchedCall(dispatch, 'copy', src, [dst])
     },
   dirCopy:
-    (send: Send): CommandIO['dirCopy'] =>
+    (dispatch: DispatchFn): CommandIO['dirCopy'] =>
     async (_accessor, src, dst) => {
-      await send('dir_copy', src, [dst])
+      await dispatchedCall(dispatch, 'dir_copy', src, [dst])
     },
   truncate:
-    (send: Send): CommandIO['truncate'] =>
+    (dispatch: DispatchFn): CommandIO['truncate'] =>
     async (_accessor, path, length, noCreate) => {
-      await send('truncate', path, [length], { no_create: noCreate ?? false })
+      await dispatchedCall(dispatch, 'truncate', path, [length], { no_create: noCreate ?? false })
     },
   setAttrs:
-    (send: Send): CommandIO['setAttrs'] =>
+    (dispatch: DispatchFn): CommandIO['setAttrs'] =>
     async (_accessor, path, fields) =>
-      (await send('setattr', path, [], { ...fields })) as Record<string, number | string>,
+      (await dispatchedCall(dispatch, 'setattr', path, [], { ...fields })) as Record<
+        string,
+        number | string
+      >,
   find:
-    (send: Send): CommandIO['find'] =>
+    (dispatch: DispatchFn): CommandIO['find'] =>
     async (_accessor, path, options) =>
-      (await send('find', path, [options])) as string[],
-} satisfies Partial<Record<keyof CommandIO, (send: Send) => unknown>>
-
-export type DispatchedSlot = keyof typeof DISPATCHED_SLOTS
+      (await dispatchedCall(dispatch, 'find', path, [options])) as string[],
+} satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
 
 // The slots that change the mount: with no dispatcher there is nowhere to
 // judge and settle them.
 const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
-  (Object.keys(DISPATCHED_SLOTS) as DispatchedSlot[]).filter((slot) => slot !== 'find'),
+  (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
+    (slot) => slot !== 'find',
+  ),
 )
 
 /** `slots`, each sent to the dispatcher. Mirrors Python's `dispatched_slots`. */
 export function dispatchedSlots(
   dispatch: DispatchFn,
-  slots: readonly DispatchedSlot[],
+  slots: readonly (keyof typeof DISPATCHED_SLOTS)[],
 ): Partial<CommandIO> {
-  const send: Send = (name, path, args = [], kwargs = {}) =>
-    dispatchedCall(dispatch, name, path, args, kwargs)
   const built: Partial<CommandIO> = {}
-  for (const slot of slots) Object.assign(built, { [slot]: DISPATCHED_SLOTS[slot](send) })
+  for (const slot of slots) Object.assign(built, { [slot]: DISPATCHED_SLOTS[slot](dispatch) })
   return built
 }
 
@@ -423,22 +416,22 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
     }
     return refused
   }
-  const send: Send = (name, path, args = [], kwargs = {}) =>
-    dispatchedCall(dispatch, name, path, args, kwargs)
   return {
     ...ops,
     ...dispatchedSlots(
       dispatch,
-      (Object.keys(DISPATCHED_SLOTS) as DispatchedSlot[]).filter((slot) => ops[slot] !== undefined),
+      (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
+        (slot) => ops[slot] !== undefined,
+      ),
     ),
     ...(ops.du === undefined
       ? {}
       : {
           du: {
             size: async (_accessor: Accessor, path: PathSpec) =>
-              (await send('du_size', path)) as number,
+              (await dispatchedCall(dispatch, 'du_size', path)) as number,
             entries: async (_accessor: Accessor, path: PathSpec) =>
-              (await send('du_entries', path)) as DuEntries,
+              (await dispatchedCall(dispatch, 'du_entries', path)) as DuEntries,
           },
         }),
     ...(ops.search === undefined
@@ -447,7 +440,7 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
           search: {
             ...ops.search,
             search: async (_accessor: Accessor, path: PathSpec, query: SearchQuery) =>
-              (await send('search', path, [query])) as string[] | null,
+              (await dispatchedCall(dispatch, 'search', path, [query])) as string[] | null,
           },
         }),
     readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),

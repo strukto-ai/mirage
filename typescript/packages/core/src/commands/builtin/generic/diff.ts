@@ -28,6 +28,7 @@ import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_format.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
+import { splitLinesKeepends } from '../utils/lines.ts'
 import { UsageError } from '../../errors.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
@@ -172,19 +173,6 @@ function childSpec(parent: PathSpec, name: string): PathSpec {
   })
 }
 
-function splitLinesKeepEnds(text: string): string[] {
-  const lines: string[] = []
-  let start = 0
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\n') {
-      lines.push(text.slice(start, i + 1))
-      start = i + 1
-    }
-  }
-  if (start < text.length) lines.push(text.slice(start))
-  return lines
-}
-
 function takesValue(option: Argument): boolean {
   return option.action !== 'store_true' && option.action !== 'count' && !(option.nargs === '?')
 }
@@ -277,8 +265,8 @@ async function diffPair(
       : new Uint8Array(0)
   }
   if (flags.brief) return ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)
-  const aLines = splitLinesKeepEnds(textA)
-  const bLines = splitLinesKeepEnds(textB)
+  const aLines = splitLinesKeepends(textA)
+  const bLines = splitLinesKeepends(textB)
   let result: string[]
   if (flags.ed) result = edScript(aLines, bLines)
   else if (flags.unified)

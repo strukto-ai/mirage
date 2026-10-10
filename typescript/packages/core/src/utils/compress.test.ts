@@ -20,7 +20,6 @@ import {
   GZIP_CHUNK_SIZE,
   crc32,
   gunzipStream,
-  gunzipChecked,
   gunzipPartial,
   gzip,
   gzipCompressStream,
@@ -45,11 +44,12 @@ function render(err: unknown): string {
   return err.render('f')
 }
 
-describe('gunzipChecked', () => {
+describe('gunzipPartial', () => {
   it('decompresses every member', async () => {
     const hello = await gzip(ENC.encode('hello\n'))
     const both = new Uint8Array([...hello, ...hello])
-    expect(DEC.decode(await gunzipChecked(both))).toBe('hello\nhello\n')
+    const [out, failure] = await gunzipPartial(both)
+    expect([DEC.decode(out), failure]).toEqual(['hello\nhello\n', null])
   })
 
   // gzip 1.13: no header, or a header gzip does not support, is reported and
@@ -96,9 +96,9 @@ describe('gunzipChecked', () => {
       false,
     ],
   ] as const)('refuses %s with gzip reason and severity', async (_name, data, reason, fatal) => {
-    const err: unknown = await gunzipChecked(data).catch((e: unknown) => e)
-    expect(render(err)).toBe(reason)
-    expect(err).toMatchObject({ fatal })
+    const [, failure] = await gunzipPartial(data)
+    expect(render(failure)).toBe(reason)
+    expect(failure).toMatchObject({ fatal })
   })
 
   it('skips the optional header fields', async () => {
@@ -107,7 +107,8 @@ describe('gunzipChecked', () => {
     const named = cat(fields, ENC.encode('name\0comment\0'))
     const crc = crc32(named) & 0xffff
     const data = cat(named, new Uint8Array([crc & 0xff, crc >> 8]), HELLO.subarray(10))
-    expect(DEC.decode(await gunzipChecked(data))).toBe('hello\n')
+    const [out, failure] = await gunzipPartial(data)
+    expect([DEC.decode(out), failure]).toEqual(['hello\n', null])
   })
 
   it.each([
@@ -160,7 +161,8 @@ describe('gunzipChecked', () => {
     ['a second member', cat(HELLO, HELLO.subarray(0, 2), new Uint8Array([7])), true],
     ['trailing garbage', cat(HELLO, ENC.encode('junk')), true],
   ] as const)('keeps the members before a refusal of %s: %s', async (_name, data, keeps) => {
-    await expect(gunzipChecked(data)).rejects.toMatchObject({ fatal: false, keepsOutput: keeps })
+    const [, failure] = await gunzipPartial(data)
+    expect(failure).toMatchObject({ fatal: false, keepsOutput: keeps })
   })
 })
 
@@ -206,7 +208,8 @@ describe('gunzipStream', () => {
 
 it('preserves buffered output in a large member', async () => {
   const text = 'x'.repeat(GZIP_CHUNK_SIZE * 20 + 13)
-  expect(DEC.decode(await gunzipChecked(await gzip(ENC.encode(text))))).toBe(text)
+  const [out, failure] = await gunzipPartial(await gzip(ENC.encode(text)))
+  expect([DEC.decode(out), failure]).toEqual([text, null])
 })
 
 it.each([1, 7, 65536])(
@@ -253,7 +256,8 @@ it.each([0x04, 0x08, 0x10, 0x02])('rejects EOF in consumed optional field %i', a
   for (const prefix of [new Uint8Array(), HELLO]) {
     const head = cat(HELLO.subarray(0, 3), new Uint8Array([flag]), HELLO.subarray(4, 10))
     const extra = flag === 0x04 ? new Uint8Array([255, 255, 97, 98, 99]) : new Uint8Array()
-    await expect(gunzipChecked(cat(prefix, head, extra))).rejects.toMatchObject({
+    const [, failure] = await gunzipPartial(cat(prefix, head, extra))
+    expect(failure).toMatchObject({
       fatal: true,
       keepsOutput: prefix.length > 0,
     })
@@ -303,7 +307,8 @@ it('stores the filename before the compressed bytes', async () => {
   const [data, failure] = await gunzipPartial(named.subarray(0, 20))
   expect(new TextDecoder().decode(data)).toBe('hel')
   expect(failure).not.toBeNull()
-  expect(new TextDecoder().decode(await gunzipChecked(named))).toBe('hello\nworld\n')
+  const [whole, none] = await gunzipPartial(named)
+  expect([new TextDecoder().decode(whole), none]).toEqual(['hello\nworld\n', null])
 })
 
 it.each([null, 1, 9])(
@@ -326,7 +331,7 @@ it.each([null, 1, 9])(
       parts.push(part)
     }
     const joined = new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer())
-    expect(await gunzipChecked(joined)).toEqual(data)
+    expect(await gunzipPartial(joined)).toEqual([data, null])
   },
 )
 

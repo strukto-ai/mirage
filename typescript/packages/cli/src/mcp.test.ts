@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer as createHttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readLogin, removeLogin, writeLogin, type Login } from './credentials.ts'
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
-import { relayWorkspace, resolveMcpConfig } from './mcp.ts'
+import { MCP_ENV_NAMES, relayWorkspace } from './mcp.ts'
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'bin', 'mirage.js')
 const tempDirs: string[] = []
@@ -37,30 +37,9 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-describe('resolveMcpConfig', () => {
-  it('uses an explicit config path', () => {
-    const dir = mkTempDir()
-    const path = join(dir, 'custom.yaml')
-    writeFileSync(path, 'mounts: {}\n')
-    expect(resolveMcpConfig('custom.yaml', { cwd: dir, env: {} })).toBe(path)
-  })
-
-  it('uses MIRAGE_MCP_CONFIG', () => {
-    const dir = mkTempDir()
-    const path = join(dir, 'env.yaml')
-    writeFileSync(path, 'mounts: {}\n')
-    expect(resolveMcpConfig(undefined, { cwd: dir, env: { MIRAGE_MCP_CONFIG: path } })).toBe(path)
-  })
-
-  it('finds .mirage/workspace.yaml from a child directory', () => {
-    const dir = mkTempDir()
-    const configDir = join(dir, '.mirage')
-    const child = join(dir, 'src', 'nested')
-    mkdirSync(configDir)
-    mkdirSync(child, { recursive: true })
-    const path = join(configDir, 'workspace.yaml')
-    writeFileSync(path, 'mounts: {}\n')
-    expect(resolveMcpConfig(undefined, { cwd: child, env: {} })).toBe(path)
+describe('mirage mcp', () => {
+  it('reads the mcp config names first', () => {
+    expect(MCP_ENV_NAMES).toEqual(['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG'])
   })
 })
 

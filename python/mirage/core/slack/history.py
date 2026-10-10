@@ -96,21 +96,6 @@ async def fetch_messages_for_day(
     return messages
 
 
-def messages_to_jsonl(messages: list[dict[str, Any]]) -> bytes:
-    """Render messages as the chat.jsonl byte content.
-
-    The single renderer behind both read and the readdir-time size, so
-    stat().size == len(read()) by construction.
-
-    Args:
-        messages (list[dict]): messages sorted by ts ascending.
-
-    Returns:
-        bytes: JSONL-encoded messages.
-    """
-    return jsonl_bytes(messages)
-
-
 async def get_history_jsonl(
     config: SlackConfig,
     channel_id: str,
@@ -133,7 +118,7 @@ async def get_history_jsonl(
     messages = await fetch_messages_for_day(
         config, channel_id, date_str, scope, session=session
     )
-    return messages_to_jsonl(messages)
+    return jsonl_bytes(messages)
 
 
 async def fetch_recent_messages(

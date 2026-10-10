@@ -163,20 +163,10 @@ export class Files {
     })
   }
 
-  /** Files that moved bytes over the network, in arrival order. */
-  get networkRecords(): OpRecord[] {
-    return this.records.filter((r) => !r.isCache)
-  }
-
   get networkBytes(): number {
     let total = 0
     for (const r of this.records) if (!r.isCache) total += r.bytes
     return total
-  }
-
-  /** Files a warm cache answered, in arrival order. */
-  get cacheRecords(): OpRecord[] {
-    return this.records.filter((r) => r.isCache)
   }
 
   get cacheBytes(): number {

@@ -15,7 +15,7 @@
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { BIN_PREFIX } from '@struktoai/mirage-core/shell/constants'
 import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
-import { normMountPrefix } from '@struktoai/mirage-core/workspace/snapshot/utils'
+import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceEntry } from './registry.ts'
 import type {
@@ -26,11 +26,7 @@ import type {
   WorkspaceInternals,
 } from './schemas.ts'
 
-const AUTO_PREFIXES = new Set([
-  '/dev/',
-  normMountPrefix(HISTORY_PREFIX),
-  normMountPrefix(BIN_PREFIX),
-])
+const AUTO_PREFIXES = new Set(['/dev/', normDir(HISTORY_PREFIX), normDir(BIN_PREFIX)])
 const DESCRIPTION_MAX = 120
 
 function isAutoPrefix(prefix: string): boolean {

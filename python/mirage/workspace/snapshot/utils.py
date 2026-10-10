@@ -39,13 +39,3 @@ def is_safe_blob_path(path: str) -> bool:
     if "\x00" in path:
         return False
     return ".." not in path.split("/")
-
-
-def norm_mount_prefix(prefix: str) -> str:
-    """Normalize mount prefix to '/x/' form.
-
-    Registry stores mounts with leading + trailing slash. Users may
-    pass '/m', '/m/', 'm/', or 'm' — all should match the same mount.
-    """
-    s = prefix.strip("/")
-    return "/" + s + "/" if s else "/"

@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from mirage.policy.types import Decision, Outcome, Scope
-from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
+from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/asks")
 
@@ -42,14 +42,6 @@ class AnswerAskRequest(BaseModel):
     answer: Literal["allow", "deny"]
     scope: Literal["once", "session"] = "once"
     note: str = ""
-
-
-def _require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
-    registry: WorkspaceRegistry = request.app.state.registry
-    entry = registry.visible(workspace_id, request.state.account)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return entry
 
 
 def _to_response(record: Decision) -> AskResponse:
@@ -78,7 +70,7 @@ async def list_asks(
     """The workspace's asks: pending by default, every decision under
     ``all=true``. The ledger already serves both views from one store,
     so the entry point only picks which query to run."""
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     # The ledger reads a named session through SessionManager.get, which
     # raises for an unknown id; a mistyped filter is the caller's error,
@@ -104,7 +96,7 @@ async def answer_ask(
     record. A known id with nothing waiting is 409 rather than 404, so
     an operator retrying a click reads "already answered", not "not
     found"."""
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     if req.answer == "deny" and req.scope == "session":
         # covers() never lets a session-scoped deny answer anything: a

@@ -17,8 +17,6 @@ from mirage.core.opendal.watch import OpendalWalk
 from mirage.watch.base import DeltaHook
 from mirage.watch.delta import ListingDeltaHook
 
-NextcloudWalk = OpendalWalk
-
 
 def build_delta_hook(accessor: NextcloudAccessor) -> DeltaHook:
     """Build the Nextcloud delta hook.

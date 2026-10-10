@@ -128,17 +128,3 @@ async def test_stop_is_idempotent():
     await runner.stop()
     await runner.stop()
     assert not runner._thread.is_alive()
-
-
-def test_call_sync_runs_on_workspace_loop():
-    ws = _make_ws()
-    runner = WorkspaceRunner(ws)
-    try:
-        result = runner.call_sync(runner.ws.shell("echo sync"), timeout=5.0)
-        assert result.exit_code == 0
-        assert (result.stdout or b"").startswith(b"sync")
-    finally:
-        runner.call_sync(runner.ws.close(), timeout=5.0)
-        runner.loop.call_soon_threadsafe(runner.loop.stop)
-        runner._thread.join(timeout=2.0)
-        runner.loop.close()

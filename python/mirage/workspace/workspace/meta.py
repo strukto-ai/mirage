@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from typing import Any
 
 from mirage.workspace.session import SessionManager
 from mirage.workspace.store import WorkspaceStateStore
@@ -74,12 +73,6 @@ class WorkspaceMeta:
             },
         )
         self._written = True
-
-    async def load(self) -> dict[str, Any]:
-        """The record, registering this workspace first if needed."""
-        await self.ensure()
-        meta = await self._store.load_meta(self._workspace_id)
-        return meta if meta is not None else {}
 
     async def ensure(self) -> None:
         """Write the record once per process.

@@ -35,12 +35,6 @@ export function rmWithoutOperands(force: boolean): CommandFnResult {
   throw new UsageError("rm: missing operand\nTry 'rm --help' for more information.", 1)
 }
 
-/** What a removal entry by entry did: what it removed, children first, and what it could not. */
-export interface TreeRemoval {
-  removed: { path: string; isDir: boolean }[]
-  failures: [PathSpec, unknown][]
-}
-
 /**
  * Remove a directory tree entry by entry, as GNU `rm -r` does.
  *
@@ -59,20 +53,21 @@ export async function removeTree(
     rmdir: (path: PathSpec) => Promise<void>
     links: LinkView | null
   },
-): Promise<TreeRemoval> {
-  const removal: TreeRemoval = { removed: [], failures: [] }
+): Promise<{ removed: { path: string; isDir: boolean }[]; failures: [PathSpec, unknown][] }> {
+  const removed: { path: string; isDir: boolean }[] = []
+  const failures: [PathSpec, unknown][] = []
   const remove = async (path: PathSpec, isDir: boolean): Promise<boolean> => {
     let names: string[]
     try {
       if (!isDir) {
         await ops.unlink(path)
-        removal.removed.push({ path: path.virtual, isDir: false })
+        removed.push({ path: path.virtual, isDir: false })
         return true
       }
       names = await ops.readdir(path)
     } catch (err) {
       if (!isFsError(err)) throw err
-      removal.failures.push([path, err])
+      failures.push([path, err])
       return false
     }
     const base = path.virtual.replace(/\/+$/, '')
@@ -86,7 +81,7 @@ export async function removeTree(
       } catch (err) {
         if (!isFsError(err)) throw err
         if ((err as { code?: string }).code === 'ENOENT') continue
-        removal.failures.push([child, err])
+        failures.push([child, err])
         cleared = false
         continue
       }
@@ -102,14 +97,14 @@ export async function removeTree(
       await ops.rmdir(path)
     } catch (err) {
       if (!isFsError(err)) throw err
-      removal.failures.push([path, err])
+      failures.push([path, err])
       return false
     }
-    removal.removed.push({ path: path.virtual, isDir: true })
+    removed.push({ path: path.virtual, isDir: true })
     return true
   }
   await remove(root, true)
-  return removal
+  return { removed, failures }
 }
 
 /**

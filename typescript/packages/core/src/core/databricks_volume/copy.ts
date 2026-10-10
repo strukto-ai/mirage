@@ -23,20 +23,8 @@ import { backendPath } from './path.ts'
 import { read } from './read.ts'
 import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
-import { write } from './write.ts'
+import { uploadBytes, write } from './write.ts'
 import { eisdir } from '../../errors/fs.ts'
-
-async function uploadBytes(
-  accessor: DatabricksVolumeAccessor,
-  remotePath: string,
-  data: Uint8Array,
-): Promise<void> {
-  await dbxFetch(accessor, 'PUT', 'files', remotePath, {
-    query: { overwrite: 'true' },
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: data,
-  })
-}
 
 async function downloadBytes(
   accessor: DatabricksVolumeAccessor,

@@ -2,7 +2,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mirage.cli.main import app
-from mirage.cli.rpc import RPC_ENV_NAMES, resolve_rpc_config
+from mirage.cli.rpc import RPC_ENV_NAMES
 
 MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
@@ -31,9 +31,5 @@ def test_a_config_and_a_workspace_are_exclusive(tree, flag):
     assert "pass a config or --workspace, not both" in result.stderr
 
 
-def test_env_names_are_rpc_then_shared(tree):
+def test_env_names_are_rpc_then_shared():
     assert RPC_ENV_NAMES == ("MIRAGE_RPC_CONFIG", "MIRAGE_CONFIG")
-    found = resolve_rpc_config(
-        cwd=tree, env={"MIRAGE_RPC_CONFIG": str(tree / "workspace.yaml")}
-    )
-    assert found == tree / "workspace.yaml"

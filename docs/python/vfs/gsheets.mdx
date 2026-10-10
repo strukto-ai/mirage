@@ -77,9 +77,9 @@ the cache expires.
 ## Cache
 
 The Google Sheets VFS uses `IndexCacheStore`. Index entries
-store spreadsheet IDs and metadata. There is no separate content
-cache -- file content caching is handled by the workspace `IOResult`
-mechanism.
+store spreadsheet IDs and metadata. File bytes go through the workspace
+[file cache](/home/cache); a rendered read through FUSE, `ws.vfs`, a
+`< file` redirect or a cross-mount `cp`, `sed` or `diff` is not cached ([caveats](/home/cache#caveats)).
 
 ## Example
 

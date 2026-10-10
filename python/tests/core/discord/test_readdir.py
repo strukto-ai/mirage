@@ -18,7 +18,7 @@ import pytest
 
 import mirage.core.discord.readdir as readdir_mod
 from mirage.core.discord.readdir import readdir
-from mirage.core.discord.render import history_jsonl_bytes, member_json_bytes
+from mirage.core.render.json import compact_json_bytes, jsonl_bytes
 from mirage.types import PathSpec
 from tests.core.discord.conftest import DAY, MEMBERS, MESSAGES
 
@@ -89,13 +89,13 @@ async def test_readdir_channel_dates(api, accessor, index):
 async def test_readdir_date_sizes_chat_jsonl(api, accessor, index):
     await readdir(accessor, spec(f"/{CHANNEL}/{DAY}"), index)
     lookup = await index.get(f"/{CHANNEL}/{DAY}/chat.jsonl")
-    assert lookup.entry.size == len(history_jsonl_bytes(MESSAGES))
+    assert lookup.entry.size == len(jsonl_bytes(MESSAGES))
 
 
 async def test_readdir_members_sized(api, accessor, index):
     await readdir(accessor, spec(f"/{GUILD_DIR}/members"), index)
     lookup = await index.get(f"/{GUILD_DIR}/members/alice__U001.json")
-    assert lookup.entry.size == len(member_json_bytes(MEMBERS[0]))
+    assert lookup.entry.size == len(compact_json_bytes(MEMBERS[0]))
 
 
 async def test_readdir_unknown_shape_raises_enoent(api, accessor, index):

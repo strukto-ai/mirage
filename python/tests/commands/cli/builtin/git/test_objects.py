@@ -19,7 +19,6 @@ from dulwich.pack import Pack
 
 from mirage.commands.cli.builtin.git.objects import (
     LooseObjects,
-    VfsObjectStore,
     load_object_store,
     load_packs,
 )
@@ -192,12 +191,3 @@ async def test_a_prefix_that_is_not_lowercase_hex_names_nothing(
             lambda: list(packed.iter_prefix(prefix))
         )
     assert found == []
-
-
-def test_store_refuses_to_write_a_pack():
-    # Loose objects go back through the dispatcher one at a time, which
-    # is what git writes as it works. A pack cannot be built that way,
-    # and packing is a maintenance step mirage does not offer.
-    store = VfsObjectStore(None, [])
-    with pytest.raises(NotImplementedError):
-        store.add_pack()

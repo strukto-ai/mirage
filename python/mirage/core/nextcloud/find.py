@@ -23,8 +23,8 @@ from mirage.core.nextcloud.search import (
     search_files,
     supports_query,
 )
-from mirage.core.nextcloud.util import raw_path_of
 from mirage.types import FindType, PathSpec
+from mirage.utils.key_prefix import raw_path_of
 from mirage.utils.stat_view import DIR_SIZE
 
 logger = logging.getLogger(__name__)

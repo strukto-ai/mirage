@@ -86,8 +86,8 @@ async def test_a_written_path_carries_no_token_then_heals_in_one_read():
             await _out(ws, "tee /m/w.txt", stdin=b"hi\n")
             writes = [
                 r.fingerprint
-                for r in ws.vfs.network_records
-                if r.op == "write"
+                for r in ws.vfs.records
+                if not r.is_cache and r.op == "write"
             ]
             assert writes == [None]
             # Absent, not merely different: an invented token would pass a

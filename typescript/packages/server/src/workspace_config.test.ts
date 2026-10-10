@@ -31,6 +31,14 @@ afterEach(() => {
 })
 
 describe('resolveWorkspaceConfig', () => {
+  it('uses an explicit config path', () => {
+    const dir = mkTempDir()
+    const path = join(dir, 'custom.yaml')
+    writeFileSync(path, 'mounts: {}\n')
+
+    expect(resolveWorkspaceConfig('custom.yaml', { cwd: dir, env: {} })).toBe(path)
+  })
+
   it('resolves a named environment variable', () => {
     const dir = mkTempDir()
     const path = join(dir, 'custom.yaml')

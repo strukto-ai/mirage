@@ -323,18 +323,6 @@ export function opRuling(
   return [chosen.rule, chosen.verb === ASK_SECOND]
 }
 
-/**
- * The reason an op may not run, null when it may: the reason of
- * `opRuling`'s rule, an ask read as a refusal.
- */
-export function opRefusal(
-  rules: AdmissionRules | null,
-  ctx: VfsContext,
-  granted: readonly CommandRule[],
-): string | null {
-  return opRuling(rules, ctx, granted)?.[0].reason ?? null
-}
-
 const scopes = new WeakMap<CommandRule, HiddenPaths | null>()
 
 /**

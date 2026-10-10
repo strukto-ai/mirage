@@ -1,5 +1,5 @@
 {
- "baseline": 3945,
+ "baseline": 3902,
  "modules": {
   "execution/context": {
    "typescript_only": {
@@ -204,7 +204,6 @@
   },
   "server/routers/workspaces": {
    "python_only": {
-    "_require_entry": "The account check every workspace route shares, raising 404; TypeScript calls registry.visible inline and answers 404 in each route.",
     "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "close_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",

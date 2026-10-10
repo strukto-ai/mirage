@@ -204,14 +204,6 @@ class BoxTokenManager(OAuthTokenManager):
             # ~1h and the user has to update the token manually.
             self.seed(reveal_secret(config.access_token), float("inf"))
 
-    def get_refresh_token(self) -> str:
-        """Latest refresh token; Box rotates it on each refresh.
-
-        Persist this value to survive restarts without re-authenticating.
-        Empty in developer-token and client-credentials modes.
-        """
-        return self._current_refresh_token
-
     async def refresh_pair(self) -> tuple[str, float]:
         if self._dev_token_mode:
             raise BoxApiError(

@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.core.nextcloud.watch import NextcloudWalk, build_delta_hook
+from mirage.core.nextcloud.watch import build_delta_hook
+from mirage.core.opendal.watch import OpendalWalk
 from mirage.types import FileChangeKind, PathSpec
 
 
@@ -11,7 +12,7 @@ def _root() -> PathSpec:
 @pytest.mark.asyncio
 async def test_walk_yields_files_and_dirs(make_acc):
     acc = make_acc({"data/a.txt": b"x", "data/sub/b.txt": b"yy"})
-    walk = NextcloudWalk(acc)
+    walk = OpendalWalk(acc)
     entries = {e.virtual: e async for e in walk(_root())}
     assert "/data/a.txt" in entries
     assert "/data/sub/b.txt" in entries
@@ -27,7 +28,7 @@ async def test_walk_detector_carries_the_etag_in_the_composite(make_acc):
     # one second share it; the size beside it is what catches the
     # update the etag cannot express.
     acc = make_acc({"data/a.txt": b"x"})
-    walk = NextcloudWalk(acc)
+    walk = OpendalWalk(acc)
     entries = {e.virtual: e async for e in walk(_root())}
     assert entries["/data/a.txt"].fingerprint == "etag-data/a.txt|1"
 

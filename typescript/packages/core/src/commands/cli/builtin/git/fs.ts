@@ -17,7 +17,8 @@ import { FileSystem } from 'isomorphic-git/models'
 
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { enoent } from '../../../../errors/fs.ts'
-import { basename, ensureDir, exists, readNames, removeFile, writeFile as writePath } from './io.ts'
+import { ensureDir, exists, readNames, removeFile, writeFile as writePath } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
@@ -198,7 +199,7 @@ export function gitFs(
       // isomorphic-git wants bare names; backends may report either those or
       // whole paths, with or without a trailing slash.
       readdir: async (path: string) =>
-        (await readNames(dispatch, PathSpec.fromStrPath(path))).map(basename),
+        (await readNames(dispatch, PathSpec.fromStrPath(path))).map(entryName),
       mkdir: async (path: string) => {
         await ensureDir(dispatch, PathSpec.fromStrPath(path))
       },

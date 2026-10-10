@@ -3,11 +3,10 @@ from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, ResourceType
-from mirage.core.nextcloud.util import raw_path_of
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.utils.key_prefix import mount_prefix_of, raw_path_of
 
 
 async def stat(

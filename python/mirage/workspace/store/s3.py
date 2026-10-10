@@ -73,11 +73,6 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
         fields, _ = await self._meta.get(workspace_id)
         return fields
 
-    async def _set_meta(
-        self, workspace_id: str, fields: WorkspaceFields
-    ) -> None:
-        await self._meta.put(workspace_id, fields)
-
     async def _cas_set_meta(
         self,
         workspace_id: str,

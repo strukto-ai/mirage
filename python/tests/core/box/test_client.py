@@ -69,7 +69,6 @@ def test_token_manager_refresh_requires_client_id():
 async def test_dev_token_mode_returns_token_without_refresh():
     tm = BoxTokenManager(BoxConfig(access_token="dev-token"))
     assert await tm.get_token() == "dev-token"
-    assert tm.get_refresh_token() == ""
 
 
 @pytest.mark.asyncio
@@ -94,7 +93,6 @@ async def test_refresh_mode_rotates_refresh_token():
         # Cached until expiry: no second HTTP call.
         assert await tm.get_token() == "at-1"
         mock_refresh.assert_awaited_once_with(config, "rt-1")
-    assert tm.get_refresh_token() == "rt-2"
     assert rotated == ["rt-2"]
 
 
@@ -108,7 +106,6 @@ async def test_refresh_fn_overrides_default_flow():
         BoxConfig(client_id="cid", refresh_token="rt-1", refresh_fn=refresh_fn)
     )
     assert await tm.get_token() == "at-custom"
-    assert tm.get_refresh_token() == "rt-1"
 
 
 @pytest.mark.asyncio
@@ -124,7 +121,6 @@ async def test_ccg_mode_refetches_via_client_credentials():
     ) as mock_ccg:
         assert await tm.get_token() == "at-ccg"
         mock_ccg.assert_awaited_once_with(config)
-    assert tm.get_refresh_token() == ""
 
 
 GET_URL = "https://api.example/x"

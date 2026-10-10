@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { compareCodePoints } from './sort.ts'
+import { compareCodePoints, compareComponents } from './sort.ts'
 
 // U+E000 is a BMP private-use character; U+1F600 is astral, stored as the
 // surrogate pair D83D DE00. Code-point order puts E000 first, UTF-16 code
@@ -65,6 +65,16 @@ describe('compareCodePoints', () => {
       '\u{10000}',
       '\u{1F600}',
       '\u{1F601}',
+    ])
+  })
+})
+
+describe('compareComponents', () => {
+  it('puts a path right after its parent, before a sibling that shares its prefix', () => {
+    expect(['/m/a-b', '/m/a/x', '/m/a'].sort(compareComponents)).toEqual([
+      '/m/a',
+      '/m/a/x',
+      '/m/a-b',
     ])
   })
 })

@@ -49,7 +49,7 @@ CAPABILITIES = (
     "side-band-64k ofs-delta include-tag no-progress agent=git/mirage"
 )
 USER_AGENT = "git/mirage"
-PACK_BAND, PROGRESS_BAND, ERROR_BAND = 1, 2, 3
+PACK_BAND, ERROR_BAND = 1, 3
 REMOTE_HELPER = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*)://")
 SCP_LIKE = re.compile(r"^[^/:]+:")
 # The places git's enter_repo tries for a local path, in its order.

@@ -20,32 +20,10 @@ from mirage.core.linear.pathing import (
     issue_dirname,
     member_filename,
     project_filename,
-    split_suffix_id,
     team_dirname,
 )
+from mirage.utils.naming import parse_id_name
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
-
-
-def test_split_suffix_id_basic():
-    label, obj_id = split_suffix_id("ENG__Engineering__TEAM1")
-    assert label == "ENG__Engineering"
-    assert obj_id == "TEAM1"
-
-
-def test_split_suffix_id_with_suffix():
-    label, obj_id = split_suffix_id("Alice__USER1.json", suffix=".json")
-    assert label == "Alice"
-    assert obj_id == "USER1"
-
-
-def test_split_suffix_id_missing_suffix():
-    with pytest.raises(FileNotFoundError):
-        split_suffix_id("Alice__USER1.json", suffix=".txt")
-
-
-def test_split_suffix_id_no_separator():
-    with pytest.raises(FileNotFoundError):
-        split_suffix_id("noseparator")
 
 
 def test_team_dirname():
@@ -126,7 +104,7 @@ def test_a_cjk_label_fits_name_max_and_still_addresses_the_id(
     name = build(record)
     assert byte_length(name) <= NAME_MAX_BYTES
     assert "\ufffd" not in name
-    assert split_suffix_id(name, suffix=suffix)[1] == UUID
+    assert parse_id_name(name, suffix=suffix)[1] == UUID
 
 
 def test_team_dirname_keeps_the_separator_between_its_parts():

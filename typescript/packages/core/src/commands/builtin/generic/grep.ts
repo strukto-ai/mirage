@@ -19,7 +19,7 @@ import { guardInput } from '../utils/limit.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { fsStrerror, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
-import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf, sameMountSpec } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -174,15 +174,6 @@ export function printsContext(f: FlagSet): boolean {
   )
 }
 
-function makeSpec(path: string, template: PathSpec): PathSpec {
-  return new PathSpec({
-    virtual: path,
-    directory: path,
-    resolved: false,
-    vfsPath: mountKey(path, mountPrefixOf(template.virtual, template.vfsPath)),
-  })
-}
-
 export async function grepGeneric(
   name: string,
   paths: PathSpec[],
@@ -262,8 +253,8 @@ export async function grepGeneric(
   }
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   const mounts = opts.ns?.mounts
-  const rd = mountParentReaddir((p: string) => readdir(makeSpec(p, first)), mounts, prefix)
-  const st = mountParentStat((p: string) => stat(makeSpec(p, first)), mounts)
+  const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, prefix)
+  const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
   let failed = false
   const notices: Uint8Array[] = []
   let matched = false

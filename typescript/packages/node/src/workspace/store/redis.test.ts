@@ -52,7 +52,7 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     try {
       await store.sessions('ws1').set('s1', { session_id: 's1' })
       await store.namespace('ws1').set('/a', { mode: 0o600 })
-      await store.setMeta('ws1', { workspace_id: 'ws1' })
+      await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
       const c = createClient({ url: REDIS_URL ?? 'redis://localhost:6379/0' })
       await c.connect()
       const keys = new Set<string>()
@@ -74,7 +74,7 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     const storeA = makeStore(prefix)
     const storeB = makeStore(prefix)
     try {
-      await storeA.setMeta('ws1', { workspace_id: 'ws1', default_session_id: 'default' })
+      await storeA.casSetMeta('ws1', { workspace_id: 'ws1', default_session_id: 'default' }, 0)
       const meta = await storeB.loadMeta('ws1')
       expect(meta?.default_session_id).toBe('default')
       expect(await storeB.loadMeta('other')).toBeNull()
@@ -106,12 +106,16 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     const prefix = testPrefix()
     const store = makeStore(prefix)
     try {
-      await store.setMeta('ws1', {
-        workspace_id: 'ws1',
-        default_session_id: 'old',
-        created_at: 1.0,
-        generation: 4,
-      })
+      await store.casSetMeta(
+        'ws1',
+        {
+          workspace_id: 'ws1',
+          default_session_id: 'old',
+          created_at: 1.0,
+          generation: 4,
+        },
+        0,
+      )
       const written = await store.replaceMeta('ws1', { default_session_id: 'new' })
       expect(written.generation).toBe(5)
       expect(written.created_at).toBe(1.0)
@@ -155,8 +159,8 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
       await store.sessions('ws1').set('s1', { session_id: 's1' })
       await store.namespace('ws1').set('/a', { mode: 0o600 })
       await store.observer('ws1').append('d/s1.jsonl', new TextEncoder().encode('{}\n'))
-      await store.setMeta('ws1', { workspace_id: 'ws1' })
-      await store.setMeta('ws2', { workspace_id: 'ws2' })
+      await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
+      await store.casSetMeta('ws2', { workspace_id: 'ws2' }, 0)
       await store.drop('ws1')
       const c = createClient({ url: REDIS_URL ?? 'redis://localhost:6379/0' })
       await c.connect()

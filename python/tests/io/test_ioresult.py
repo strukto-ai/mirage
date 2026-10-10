@@ -37,7 +37,7 @@ def test_merged_read_follows_a_late_settling_origin():
     """The read is fresh however late the origin settles, with no sync.
 
     This is grep's shape: merge happens while the stream is still lazy,
-    and exit_on_empty writes the origin only when the stream drains.
+    and grep writes the origin only when its stream drains.
     The early read before the settle is deliberate: the old
     sync_exit_code() assigned through the setter, which severed the
     link, so one too-early sync froze the provisional 0 forever.

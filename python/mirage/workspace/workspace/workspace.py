@@ -1953,10 +1953,6 @@ class Workspace:
         one to the agent tools, so none keeps what was read before."""
         self._reads.clear()
 
-    async def workspace_meta(self) -> dict[str, Any]:
-        """This workspace's metadata record (discovery surface)."""
-        return await self._meta.load()
-
     async def flush_sessions(self) -> None:
         """Persist every session's durable fields to the session store."""
         await self._session_mgr.flush()
@@ -2116,19 +2112,6 @@ class Workspace:
         await self.job_table.close_session(session_id)
         self._tools.pop(session_id, None)
         self._reads.pop(session_id, None)
-
-    async def close_all_sessions(self) -> None:
-        closed = [
-            s.session_id
-            for s in self.list_sessions()
-            if s.session_id != self.default_session_id
-        ]
-        await self._session_mgr.close_all()
-        for session_id in closed:
-            await self._documents.release_session(session_id)
-            await self.job_table.close_session(session_id)
-            self._tools.pop(session_id, None)
-            self._reads.pop(session_id, None)
 
     # ── mount management ────────────────────────────────────────────────────
 

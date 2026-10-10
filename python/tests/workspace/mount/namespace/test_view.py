@@ -61,12 +61,6 @@ def test_registry_child_mounts_includes_link_ancestors():
 class _FakeNamespace:
     """Enough of Namespace for _link_view to bind against."""
 
-    def __init__(self, has_links: bool = True) -> None:
-        self._has_links = has_links
-
-    def has_links(self) -> bool:
-        return self._has_links
-
     def link_stat_at(self, path: str) -> None:
         return None
 
@@ -90,7 +84,7 @@ def test_a_view_is_offered_whenever_the_workspace_holds_links():
 
 def test_empty_namespace_still_offers_a_live_view():
     """A captured view must remain usable when the first link appears."""
-    view = link_view(_FakeNamespace(has_links=False), _dispatch)
+    view = link_view(_FakeNamespace(), _dispatch)
     assert view is not None
     assert view.children("/") == []
     assert view.stat_at("/missing") is None

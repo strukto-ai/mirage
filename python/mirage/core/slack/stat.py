@@ -12,19 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
 from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
-from mirage.core.time_range import guard_day
-from mirage.errors.fs import enoent
+from mirage.core.time_range import day_stat, guard_day
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.filetype import content_type_for_mime
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 def _slack_modified(remote_time: str) -> str | None:
@@ -82,57 +78,6 @@ def _file_blob_stat(
     )
 
 
-async def _channel_proven(
-    accessor: SlackAccessor, path: PathSpec, index: IndexCacheStore, up: int
-) -> None:
-    """Raise ENOENT unless the path's channel ancestor exists.
-
-    Args:
-        accessor (SlackAccessor): slack accessor.
-        path (PathSpec): the day or chat.jsonl path being stat'd.
-        index (IndexCacheStore): index cache.
-        up (int): how many trailing segments to drop to reach the
-            channel (1 for a day dir, 2 for its children).
-    """
-    virtual = path.virtual.rstrip("/")
-    for _ in range(up):
-        virtual = virtual.rsplit("/", 1)[0]
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    spec = PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=mount_key(virtual, prefix)
-    )
-    if await resolve_entry(readdir, accessor, spec, index) is None:
-        raise enoent(path.virtual)
-
-
-async def _stat_day(
-    accessor: SlackAccessor,
-    match: ScopeMatch,
-    path: PathSpec,
-    index: IndexCacheStore,
-) -> FileStat:
-    """Stat a day directory, which resolves beyond the listed window.
-
-    The channel listing synthesizes a bounded window of recent days,
-    but the history API answers a range query for any date, so a
-    well-formed day under a channel that exists is a directory whether
-    or not the window lists it. A bogus channel chain is ENOENT.
-
-    Args:
-        accessor (SlackAccessor): slack accessor.
-        match (ScopeMatch): a match holding ``container``/``channel``/
-            ``day``.
-        path (PathSpec): the path to stat.
-        index (IndexCacheStore): index cache.
-    """
-    await guard_day(accessor, match, path.virtual)
-    entry = await resolve_entry(readdir, accessor, path, index)
-    if entry is not None:
-        return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
-    await _channel_proven(accessor, path, index, up=1)
-    return FileStat(name=match.slots["day"], type=FileType.DIRECTORY)
-
-
 def _chat_stat(
     match: ScopeMatch, path: PathSpec, entry: IndexEntry
 ) -> FileStat:
@@ -158,5 +103,5 @@ stat = make_stat(
         "files": _dir_stat,
         "file_blob": _file_blob_stat,
     },
-    overrides={"day": _stat_day},
+    overrides={"day": day_stat(readdir, guard_day)},
 )

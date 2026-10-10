@@ -23,26 +23,6 @@ from mirage.server.workspace_config import resolve_workspace_config
 RPC_ENV_NAMES = ("MIRAGE_RPC_CONFIG", "MIRAGE_CONFIG")
 
 
-def resolve_rpc_config(
-    config: str | None = None,
-    cwd: str | Path | None = None,
-    env: dict[str, str] | None = None,
-) -> Path:
-    """Find the config `mirage rpc` should serve.
-
-    Args:
-        config (str | None): explicit path, relative to cwd.
-        cwd (str | Path | None): directory to resolve from.
-        env (dict[str, str] | None): environment mapping to read.
-
-    Returns:
-        Path: the resolved config path.
-    """
-    return resolve_workspace_config(
-        config, cwd=cwd, env=env, env_names=RPC_ENV_NAMES
-    )
-
-
 def rpc_cmd(
     config: str | None = typer.Argument(
         None, help="Mirage workspace YAML config."
@@ -71,7 +51,9 @@ def rpc_cmd(
     """
     if workspace_id is None:
         try:
-            path: Path | None = resolve_rpc_config(config)
+            path: Path | None = resolve_workspace_config(
+                config, env_names=RPC_ENV_NAMES
+            )
         except FileNotFoundError as e:
             fail(str(e), exit_code=2)
     elif config is not None:

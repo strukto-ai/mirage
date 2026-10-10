@@ -17,10 +17,6 @@ import { sanitizeName } from '../../utils/sanitize.ts'
 
 export { sanitizeName } from '../../utils/sanitize.ts'
 
-export function stripDashes(id: string): string {
-  return id.replace(/-/g, '')
-}
-
 /**
  * Join a Notion object's title to its id inside the NAME_MAX budget. The one
  * place the pair is composed, so a title long enough to be trimmed is trimmed

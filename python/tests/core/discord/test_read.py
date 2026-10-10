@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.core.discord.read import read, read_range, read_stream
-from mirage.core.discord.render import history_jsonl_bytes
+from mirage.core.render.json import jsonl_bytes
 from mirage.types import PathSpec
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
 
@@ -39,7 +39,7 @@ async def test_read_jsonl(api, accessor, index):
     # Cold: no prior listing is needed, the read resolves the channel
     # through the index itself.
     result = await read(accessor, spec(CHAT), index)
-    assert result == history_jsonl_bytes(MESSAGES)
+    assert result == jsonl_bytes(MESSAGES)
 
 
 async def test_read_jsonl_bogus_channel_is_enoent(api, accessor, index):
@@ -60,7 +60,7 @@ async def test_read_not_found(api, accessor, index):
 
 async def test_read_jsonl_window_is_sliced_locally(api, accessor, index):
     # A rendered branch has no remote range, so the window is taken after.
-    whole = history_jsonl_bytes(MESSAGES)
+    whole = jsonl_bytes(MESSAGES)
     result = await read_range(accessor, spec(CHAT), index, offset=1, size=4)
     assert result == whole[1:5]
 

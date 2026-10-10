@@ -243,9 +243,8 @@ describe('object-store write fingerprint (mocked S3)', () => {
   })
 
   it('write then copy over it does not pin stale bytes', async () => {
-    // `cp` replaces the path's entry in IOResult.writes with an empty
-    // eviction marker while tee's write record stays the last one, so
-    // the token would land on bytes it does not describe.
+    // `cp` over a file tee just wrote must not leave tee's token on the
+    // copied bytes: tee's write record describes bytes that are gone.
     mock.store.set(BUCKET, 'a.txt', ENC.encode('x\n'))
     const ws = makeWorkspace(FRESH)
     try {

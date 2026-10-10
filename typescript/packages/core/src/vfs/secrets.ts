@@ -167,6 +167,15 @@ export function refuseRepeatedFields(input: Record<string, unknown>): void {
   if (issues.length > 0) throw new z.ZodError(issues)
 }
 
+/** A string field trimmed, refused when nothing is left. */
+export function normalizeNonEmpty(value: string, field: string): string {
+  const normalized = value.trim()
+  if (normalized === '') {
+    throw new Error(`${field} cannot be empty`)
+  }
+  return normalized
+}
+
 // A schema that declares its own policy for extra keys keeps it: a loose
 // one passes them through the way pydantic's `extra="allow"` does. A strict
 // one refuses them in parse as well, but after the renames, so zod would

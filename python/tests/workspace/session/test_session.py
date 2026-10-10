@@ -21,10 +21,7 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.constants import (
-    INHERITED_FIELDS,
-    TRANSIENT_FIELDS,
-)
+from mirage.workspace.session.constants import INHERITED_FIELDS
 from mirage.workspace.session.session import (
     vars_from_entries,
     vars_from_env,
@@ -32,6 +29,31 @@ from mirage.workspace.session.session import (
     vars_to_fields,
 )
 from mirage.workspace.session.state import seed_var, set_attr
+
+# State that belongs to the line being executed, not to the shell, so a
+# fork starts it fresh: the errexit marker and the running function's
+# locals.
+TRANSIENT_FIELDS = (
+    "errexit_immune",
+    "errexit_exiting",
+    "err_trap_running",
+    "return_trap_running",
+    "_local_vars",
+    "_local_frames",
+    "_local_random",
+    "_reached",
+    "_trap_status",
+    "_pipe_status_pending",
+    "_random_state",
+    "_random_seed",
+    "_random_last",
+    "_parse_current",
+    "_parse_row",
+    "_line_open",
+    "terminal",
+    "_alias_expansion",
+    "status_writer",
+)
 
 
 def test_session_defaults():

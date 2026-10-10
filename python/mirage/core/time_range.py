@@ -10,9 +10,11 @@ from mirage.core.hierarchy.probe import (
     ancestor_entry,
     resolve_entry,
 )
+from mirage.core.hierarchy.readdir import Guard
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import StatHook
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})\Z"
@@ -155,3 +157,34 @@ async def day_channel_id(
     if channel is None:
         raise enoent(path.virtual)
     return channel.id
+
+
+def day_stat(
+    readdir: ReaddirFn[A], guard: Guard[A] | None = None
+) -> StatHook[A]:
+    """Stat a day directory, which resolves beyond the listed window.
+
+    The parent listing synthesizes a bounded window of recent days, but
+    the API answers a range query for any date, so a well-formed day
+    under a parent that exists is a directory whether or not the window
+    lists it. A bogus parent chain is ENOENT.
+
+    Args:
+        readdir (ReaddirFn): the backend's readdir.
+        guard (Guard | None): refuses a day outside the mount's scope
+            before any lookup, ``guard_day`` on a scoped mount.
+    """
+
+    async def stat(
+        accessor: A, match: ScopeMatch, path: PathSpec, index: IndexCacheStore
+    ) -> FileStat:
+        if guard is not None:
+            await guard(accessor, match, path.virtual)
+        entry = await resolve_entry(readdir, accessor, path, index)
+        if entry is not None:
+            return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
+        if await ancestor_entry(readdir, accessor, path, index, up=1) is None:
+            raise enoent(path.virtual)
+        return FileStat(name=match.slots["day"], type=FileType.DIRECTORY)
+
+    return stat

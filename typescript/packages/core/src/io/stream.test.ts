@@ -21,10 +21,8 @@ import {
   discardStreams,
   drain,
   ensureStream,
-  exitOnEmpty,
   yieldBytes,
 } from './stream.ts'
-import { IOResult } from './types.ts'
 
 async function* fromChunks(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
   await Promise.resolve()
@@ -40,21 +38,6 @@ async function collect(stream: AsyncIterable<Uint8Array>): Promise<string> {
   for await (const c of stream) out.push(new TextDecoder().decode(c))
   return out.join('')
 }
-
-describe('exitOnEmpty', () => {
-  it('passes chunks through unchanged', async () => {
-    const io = new IOResult()
-    const out = await collect(exitOnEmpty(fromChunks([encode('a')]), io))
-    expect(out).toBe('a')
-    expect(io.exitCode).toBe(0)
-  })
-
-  it('sets exit_code=1 on empty stream', async () => {
-    const io = new IOResult()
-    await collect(exitOnEmpty(fromChunks([]), io))
-    expect(io.exitCode).toBe(1)
-  })
-})
 
 describe('drain', () => {
   it('consumes all chunks from a stream', async () => {

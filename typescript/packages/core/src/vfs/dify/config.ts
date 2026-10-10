@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   type ConfigOf,
+  normalizeNonEmpty,
   parseConfigWithSchema,
   REDACTED_SECRET,
   type RedactedConfig,
@@ -48,14 +49,6 @@ export interface DifyConfigResolved {
   requestTimeout: number
   retryAttempts: number
   retryMaxDelay: number
-}
-
-function normalizeNonEmpty(value: string, field: string): string {
-  const normalized = value.trim()
-  if (normalized === '') {
-    throw new Error(`${field} cannot be empty`)
-  }
-  return normalized
 }
 
 function normalizePositive(value: number | undefined, fallback: number, field: string): number {

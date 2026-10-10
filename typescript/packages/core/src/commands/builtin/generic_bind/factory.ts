@@ -169,6 +169,19 @@ function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView
 }
 
 /**
+ * A mount's table with its native `find` and `du` set aside. Shell traversals
+ * need partial results and per-directory errors, which the shared readdir/stat
+ * walker owns; the VFS's own aggregate methods stay strict. Disk and ssh pass
+ * this as their `table`. Mirrors Python's `walked`.
+ */
+export function walked(io: CommandIO): CommandIO {
+  const rest = { ...io }
+  delete rest.find
+  delete rest.du
+  return rest
+}
+
+/**
  * Generate the default command set for a backend. Each command runs over
  * the table of the mount it runs on (`opts.io`), so the set is built once
  * per backend name. Mirrors Python's `generic_commands`.

@@ -27,6 +27,7 @@ from mirage.core.hierarchy.readdir import Guard
 from mirage.core.hierarchy.scope import ROOT, DetectFn, ScopeMatch
 from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.utils.filetype import content_type_for_path
 
 ExtraFn = Callable[[ScopeMatch], dict[str, str]]
 StatHook = Callable[
@@ -35,7 +36,9 @@ StatHook = Callable[
 EntryStatFn = Callable[[ScopeMatch, PathSpec, IndexEntry], FileStat]
 
 
-def entry_stat(id_field: str, filetype: ContentType | FileType) -> EntryStatFn:
+def entry_stat(
+    id_field: str, filetype: ContentType | FileType | None = None
+) -> EntryStatFn:
     """The shape most id-addressed nodes share, keyed by an id field.
 
     Name from the entry's ``vfs_name``, size and modified straight off
@@ -43,12 +46,13 @@ def entry_stat(id_field: str, filetype: ContentType | FileType) -> EntryStatFn:
     kind whose shape differs writes its own ``EntryStatFn`` instead.
 
     ``filetype`` is the node's kind: a ``FileType`` for a non-regular
-    node (a directory entry, e.g. a linear team or trello board) or a
-    ``ContentType`` for a regular file, whose node kind is then FILE.
+    node (a directory entry, e.g. a linear team or trello board), a
+    ``ContentType`` for a regular file, whose node kind is then FILE, or
+    None for a regular file typed by its name (a mail attachment).
 
     Args:
         id_field (str): the ``extra`` key the entry's id rides under.
-        filetype (ContentType | FileType): the node's kind.
+        filetype (ContentType | FileType | None): the node's kind.
     """
 
     def build(
@@ -65,7 +69,9 @@ def entry_stat(id_field: str, filetype: ContentType | FileType) -> EntryStatFn:
         return FileStat(
             name=entry.vfs_name,
             type=FileType.FILE,
-            content=filetype,
+            content=content_type_for_path(entry.vfs_name)
+            if filetype is None
+            else filetype,
             size=entry.size,
             modified=entry.remote_time or None,
             extra={id_field: entry.id},

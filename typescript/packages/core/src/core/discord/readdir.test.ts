@@ -26,7 +26,7 @@ import {
 } from './client.ts'
 import { dateRangeDescending, listFiles, readdir } from './readdir.ts'
 import { snowflakeToDate } from './entry.ts'
-import { historyJsonlBytes, memberJsonBytes } from './render.ts'
+import { compactJsonBytes, jsonlBytes } from '../render/json.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -350,7 +350,7 @@ describe('readdir /<guild>/members', () => {
       idx,
     )
     const lookup = await idx.get('/mnt/discord/My Server__G1/members/alice__U1.json')
-    expect(lookup.entry?.size).toBe(memberJsonBytes(member).byteLength)
+    expect(lookup.entry?.size).toBe(compactJsonBytes(member).byteLength)
   })
 })
 
@@ -384,7 +384,7 @@ describe('readdir /<guild>/channels/<ch>/<date>', () => {
     const lookup = await idx.get(
       '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
     )
-    expect(lookup.entry?.size).toBe(historyJsonlBytes(messages).byteLength)
+    expect(lookup.entry?.size).toBe(jsonlBytes(messages).byteLength)
   })
 
   it('skips tombstoned attachments in the files listing', async () => {

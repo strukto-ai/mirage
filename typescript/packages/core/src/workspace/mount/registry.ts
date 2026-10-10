@@ -16,7 +16,7 @@ import { IOConfig } from '../../io/config.ts'
 import { commandsFor } from '../../commands/builtin/backends.ts'
 import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
-import { isNoMount, noMount } from '../../errors/fs.ts'
+import { noMount } from '../../errors/fs.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { WorkspaceRuntime } from '../../runtime/workspace.ts'
@@ -456,40 +456,6 @@ export class MountRegistry {
 
   mountPrefixes(): string[] {
     return this.visibleMounts().map((m) => m.prefix)
-  }
-
-  findVfsByName(vfsName: string | null): BaseVFS | null {
-    if (vfsName === null) return null
-    for (const m of this.mountList) {
-      if (m.vfs.name === vfsName) return m.vfs
-    }
-    return null
-  }
-
-  getResourceType(path: string | null): string | null {
-    if (path === null) return null
-    try {
-      const [vfs] = this.resolve(path)
-      return vfs.name
-    } catch (err) {
-      if (isNoMount(err)) return null
-      throw err
-    }
-  }
-
-  groupByMount(paths: readonly string[]): [MountEntry, string[]][] {
-    const groups = new Map<MountEntry, string[]>()
-    for (const path of paths) {
-      const m = this.mountFor(path)
-      const [, spec] = this.resolve(path)
-      let bucket = groups.get(m)
-      if (bucket === undefined) {
-        bucket = []
-        groups.set(m, bucket)
-      }
-      bucket.push(spec.virtual)
-    }
-    return [...groups.entries()]
   }
 
   get rootMount(): MountEntry | null {

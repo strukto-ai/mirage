@@ -15,10 +15,47 @@
 import inspect
 import os
 
-from mirage.runtime.python.host.constants import (
-    PASSTHROUGH_CALLS,
-    REFUSED_CALLS,
-    ROUTED_CALLS,
+from mirage.runtime.python.host.constants import REFUSED_CALLS, ROUTED_CALLS
+
+# Names whose path-shaped argument is not a mount-addressable path:
+# string conversions, environment and sysconf keys, descriptor-to-
+# descriptor transfers, and the exec and spawn families, which name a
+# program for the host to run rather than a file to serve. They keep
+# host behavior even when a mounted path is spelled, so a surface must
+# not route or refuse them.
+PASSTHROUGH_CALLS = frozenset(
+    {
+        "confstr",
+        "copy_file_range",
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "fpathconf",
+        "fsdecode",
+        "fsencode",
+        "fspath",
+        "memfd_create",
+        "pathconf",
+        "posix_spawn",
+        "posix_spawnp",
+        "putenv",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+        "splice",
+        "sysconf",
+        "unsetenv",
+    }
 )
 
 CLASSIFIED = (

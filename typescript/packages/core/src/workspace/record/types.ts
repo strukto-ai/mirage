@@ -27,6 +27,21 @@ export type RecordFields = Record<string, unknown>
 export const CAS_MAX_RETRIES = 3
 
 /**
+ * A keyed-record client: one JSON record per name, written with a
+ * generation-CAS. `DiskRecordClient` (node) and `S3RecordClient` are the two.
+ * Mirrors Python's `RecordClient`.
+ */
+export interface RecordClient {
+  get(name: string): Promise<[RecordFields | null, string]>
+  put(name: string, fields: RecordFields): Promise<void>
+  casPut(name: string, fields: RecordFields, expectedGeneration: number): Promise<boolean>
+  listNames(): Promise<string[]>
+  delete(names: readonly string[]): Promise<void>
+  clear(): Promise<void>
+  close(): Promise<void>
+}
+
+/**
  * A stored record's CAS generation; a missing record or a legacy record
  * without the field counts as 0.
  */

@@ -23,7 +23,7 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { fail, recordDelimiter, requireView } from '../shared.ts'
+import { countOperand, fail, recordDelimiter, requireView } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
@@ -32,10 +32,6 @@ const USAGE =
   'mapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]'
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_QUANTUM = 5000
-
-function count(text: string): number | null {
-  return /^[0-9]+$/.test(text) ? parseInt(text, 10) : null
-}
 
 /**
  * Read input into an indexed array, one element per line. `-d C` splits
@@ -80,7 +76,7 @@ export async function handleMapfile(
   for (const [key, label, apply] of numeric) {
     const raw = flags[key]
     if (typeof raw !== 'string') continue
-    const value = count(raw)
+    const value = countOperand(raw)
     if (value === null || (key === 'c' && value === 0)) {
       return fail(cmd, `bash: ${cmd}: ${raw}: invalid ${label}\n`, 1)
     }

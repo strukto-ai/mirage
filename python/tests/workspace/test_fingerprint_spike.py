@@ -899,10 +899,12 @@ def test_one_line_serves_each_mount_under_its_own_policy(
             bounded_objects["f.txt"] = b"v2\n"
             client.calls.clear()
             client.bucket_calls.clear()
-            mark = len(ws.vfs.network_records)
+            mark = len(ws.vfs.records)
             result = await ws.shell(line)
             out = await result.materialize_stdout()
-            records = [(r.op, r.path) for r in ws.vfs.network_records[mark:]]
+            records = [
+                (r.op, r.path) for r in ws.vfs.records[mark:] if not r.is_cache
+            ]
             line_calls = dict(client.bucket_calls)
             client.bucket_calls.clear()
             single = await ws.shell(f"cat {bounded}/f.txt")

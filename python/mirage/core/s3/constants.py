@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-SCOPE_WARN = 500
 SCOPE_ERROR = 5000
 CONDITION_LOST_CODES = frozenset(
     {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}

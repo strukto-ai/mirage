@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rawPathOf } from '../../utils/key_prefix.ts'
+import { concat } from '../../utils/bytes.ts'
 import { recordStream, revisionFor } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
@@ -23,18 +24,9 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
-function concatChunks(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const out = new Uint8Array(a.byteLength + b.byteLength)
-  out.set(a, 0)
-  out.set(b, a.byteLength)
-  return out
-}
-
 export async function* readStream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const rawPath =
-    prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual
+  const rawPath = rawPathOf(path)
 
   const { config } = accessor
   const { GetObjectCommand } = await loadS3Module(config)
@@ -69,7 +61,7 @@ export async function* readStream(accessor: S3Accessor, path: PathSpec): AsyncIt
     if (typeof body[Symbol.asyncIterator] === 'function') {
       let pending: Uint8Array = new Uint8Array(0)
       for await (const chunk of body) {
-        pending = concatChunks(pending, chunk)
+        pending = concat([pending, chunk])
         while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
           const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
           if (rec !== null) rec.bytes += piece.byteLength

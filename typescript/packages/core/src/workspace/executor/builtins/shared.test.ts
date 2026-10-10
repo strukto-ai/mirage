@@ -24,6 +24,7 @@ import { sessionView } from '../../session/state.ts'
 import { IDENTIFIER_RE } from './constants.ts'
 import {
   absPath,
+  countOperand,
   expandOperands,
   fail,
   finish,
@@ -194,4 +195,18 @@ it.each([
   [String.fromCharCode(0xe9), 0xc3],
 ])('record delimiter of %j is its first byte', (text, delimiter) => {
   expect(recordDelimiter(text)).toBe(delimiter)
+})
+
+// A count option takes a run of ASCII digits and nothing else. Mirrors test_shared.py.
+it.each([
+  ['0', 0],
+  ['12', 12],
+  ['', null],
+  ['-1', null],
+  ['+3', null],
+  [' 3', null],
+  [String.fromCharCode(0x663), null],
+  [String.fromCharCode(0xb2), null],
+])('count operand of %j is %j', (text, count) => {
+  expect(countOperand(text)).toBe(count)
 })

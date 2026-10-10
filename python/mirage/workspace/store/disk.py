@@ -112,11 +112,6 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
         fields, _ = await self._meta_client(workspace_id).get("workspace")
         return fields
 
-    async def _set_meta(
-        self, workspace_id: str, fields: WorkspaceFields
-    ) -> None:
-        await self._meta_client(workspace_id).put("workspace", fields)
-
     async def _cas_set_meta(
         self,
         workspace_id: str,

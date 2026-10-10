@@ -135,9 +135,15 @@ def test_a_long_file_name_fits_name_max_and_keeps_id_and_extension(ext):
 def test_parse_id_name_recovers_the_id():
     assert parse_id_name("general__C123456") == ("general", "C123456")
     assert parse_id_name("team__uuid.json", suffix=".json") == ("team", "uuid")
+    assert parse_id_name("ENG__Eng__T1") == ("ENG__Eng", "T1")
 
 
 @pytest.mark.parametrize("name", ["nosep", "trailing__", "wrong.txt"])
 def test_parse_id_name_refuses_a_name_it_did_not_build(name):
     with pytest.raises(FileNotFoundError):
         parse_id_name(name)
+
+
+def test_parse_id_name_refuses_another_suffix():
+    with pytest.raises(FileNotFoundError):
+        parse_id_name("team__uuid.json", suffix=".md")

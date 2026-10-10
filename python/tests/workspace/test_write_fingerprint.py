@@ -77,7 +77,8 @@ def test_write_record_carries_the_backend_token():
                 await io.materialize_stdout()
                 return [
                     (r.op, r.path, r.fingerprint)
-                    for r in ws.vfs.network_records
+                    for r in ws.vfs.records
+                    if not r.is_cache
                 ]
             finally:
                 await ws.close()
@@ -256,9 +257,8 @@ def test_write_then_truncate_on_one_line_does_not_pin_stale_bytes():
 
 
 def test_write_then_copy_over_it_does_not_pin_stale_bytes():
-    """`cp` replaces the path's entry in `IOResult.writes` with an empty
-    eviction marker while tee's write record stays the last one, so the
-    token would land on bytes it does not describe."""
+    """`cp` over a file tee just wrote must not leave tee's token on the
+    copied bytes: tee's write record describes bytes that are gone."""
     store = {"a.txt": b"x\n"}
     with _workspace(store, ReadSpec(policy=ReadPolicy.FRESH)) as (ws, _client):
 

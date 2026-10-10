@@ -118,7 +118,7 @@ describe('IOResult.merge', () => {
 describe('IOResult exit code delegation', () => {
   it('a merged read follows a late-settling origin, with no sync call', async () => {
     // grep's shape: merge happens while the stream is still lazy, and
-    // exitOnEmpty writes the origin only when the stream drains. The
+    // grep writes the origin only when its stream drains. The
     // early read is deliberate: the old syncExitCode() assigned through
     // the setter, severing the link, so one too-early sync froze the
     // provisional 0 forever.

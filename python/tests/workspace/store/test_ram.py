@@ -44,7 +44,7 @@ async def test_meta_roundtrip_and_copies():
     store = RAMWorkspaceStateStore()
     assert await store.load_meta("a") is None
     fields = {"workspace_id": "a", "default_session_id": "default"}
-    await store.set_meta("a", fields)
+    await store.cas_set_meta("a", fields, 0)
     loaded = await store.load_meta("a")
     assert loaded == fields
     loaded["default_session_id"] = "mutated"
@@ -65,7 +65,7 @@ async def test_cas_set_meta_create_if_absent():
 @pytest.mark.asyncio
 async def test_cas_set_meta_stale_generation_conflicts():
     store = RAMWorkspaceStateStore()
-    await store.set_meta("a", {"workspace_id": "a", "generation": 2})
+    await store.cas_set_meta("a", {"workspace_id": "a", "generation": 2}, 0)
     lost = {"workspace_id": "a", "generation": 1}
     assert await store.cas_set_meta("a", lost, 0) is False
     assert (await store.load_meta("a"))["generation"] == 2
@@ -74,7 +74,7 @@ async def test_cas_set_meta_stale_generation_conflicts():
 @pytest.mark.asyncio
 async def test_cas_set_meta_legacy_record_counts_as_generation_zero():
     store = RAMWorkspaceStateStore()
-    await store.set_meta("a", {"workspace_id": "a"})
+    await store.cas_set_meta("a", {"workspace_id": "a"}, 0)
     fields = {"workspace_id": "a", "default_session_id": "s", "generation": 1}
     assert await store.cas_set_meta("a", fields, 0) is True
     assert (await store.load_meta("a"))["default_session_id"] == "s"
@@ -83,7 +83,7 @@ async def test_cas_set_meta_legacy_record_counts_as_generation_zero():
 @pytest.mark.asyncio
 async def test_replace_meta_preserves_created_at_and_serializes():
     store = RAMWorkspaceStateStore()
-    await store.set_meta(
+    await store.cas_set_meta(
         "a",
         {
             "workspace_id": "a",
@@ -91,6 +91,7 @@ async def test_replace_meta_preserves_created_at_and_serializes():
             "created_at": 1.0,
             "generation": 4,
         },
+        0,
     )
     written = await store.replace_meta("a", {"default_session_id": "new"})
     assert written["default_session_id"] == "new"

@@ -153,7 +153,7 @@ def _offset_of(moment: datetime) -> int:
     return int(delta.total_seconds()) if delta is not None else 0
 
 
-def _plural(count: int, unit: str) -> str:
+def plural(count: int, unit: str) -> str:
     """``1 day`` or ``2 days``, git's Q_ in the untranslated locale.
 
     Args:
@@ -175,27 +175,27 @@ def relative_date(timestamp: int, now: int) -> str:
         return "in the future"
     diff = now - timestamp
     if diff < 90:
-        return f"{_plural(diff, 'second')} ago"
+        return f"{plural(diff, 'second')} ago"
     diff = (diff + 30) // 60
     if diff < 90:
-        return f"{_plural(diff, 'minute')} ago"
+        return f"{plural(diff, 'minute')} ago"
     diff = (diff + 30) // 60
     if diff < 36:
-        return f"{_plural(diff, 'hour')} ago"
+        return f"{plural(diff, 'hour')} ago"
     diff = (diff + 12) // 24
     if diff < 14:
-        return f"{_plural(diff, 'day')} ago"
+        return f"{plural(diff, 'day')} ago"
     if diff < 70:
-        return f"{_plural((diff + 3) // 7, 'week')} ago"
+        return f"{plural((diff + 3) // 7, 'week')} ago"
     if diff < 365:
-        return f"{_plural((diff + 15) // 30, 'month')} ago"
+        return f"{plural((diff + 15) // 30, 'month')} ago"
     if diff < 1825:
         total = (diff * 12 * 2 + 365) // (365 * 2)
         years, months = divmod(total, 12)
         if months:
-            return f"{_plural(years, 'year')}, {_plural(months, 'month')} ago"
-        return f"{_plural(years, 'year')} ago"
-    return f"{_plural((diff + 183) // 365, 'year')} ago"
+            return f"{plural(years, 'year')}, {plural(months, 'month')} ago"
+        return f"{plural(years, 'year')} ago"
+    return f"{plural((diff + 183) // 365, 'year')} ago"
 
 
 def _normal(

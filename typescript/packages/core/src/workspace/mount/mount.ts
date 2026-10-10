@@ -511,16 +511,6 @@ export class MountEntry {
     return this.cmdSpecs.get(cmdName) ?? null
   }
 
-  unregister(names: string[]): void {
-    for (const name of names) {
-      for (const [key, rc] of this.cmds) {
-        if (rc.name === name) this.cmds.delete(key)
-      }
-      this.generalCmds.delete(name)
-      this.cmdSpecs.delete(name)
-    }
-  }
-
   commands(): Record<string, (string | null)[]> {
     const result = new Map<string, (string | null)[]>()
     for (const rc of this.cmds.values()) {

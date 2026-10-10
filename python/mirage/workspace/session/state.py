@@ -91,26 +91,6 @@ def env_snapshot(session: SessionState) -> dict[str, str]:
     }
 
 
-def exported_names(session: SessionState) -> list[str]:
-    """The names carrying the export attribute, sorted, hidden removed.
-
-    Wider than `env_snapshot`'s keys by exactly the unset ones: a name
-    `export Z` marked but never assigned is listed by `export -p` as
-    `declare -x Z` while staying out of the environment. So the
-    printers read this and the process view reads `env_snapshot`,
-    rather than one of them re-deriving the other's filter.
-
-    Args:
-        session (SessionState): the session to read.
-    """
-    return sorted(
-        name
-        for name, var in session.vars.items()
-        if VarAttr.EXPORT in var.attrs
-        and not var_hidden(session.visibility, name)
-    )
-
-
 def nameref_target(session: SessionState, name: str) -> str | None:
     """The name a ``declare -n`` reference points at, None otherwise.
 

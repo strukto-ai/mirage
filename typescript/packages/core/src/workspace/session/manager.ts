@@ -19,7 +19,7 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMSessionStore } from './ram.ts'
 import { applyProfile, narrow } from './resolve.ts'
 import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
-import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../policy/types.ts'
+import type { AdmissionRules, Decision, ProfileScript } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
@@ -185,19 +185,6 @@ export class SessionManager extends SessionOwner {
     return session === undefined
       ? (this.defaultProfileInternal?.policies.script ?? null)
       : session.script
-  }
-
-  /**
-   * The operator's hide reasons for one session's profile. The default
-   * profile's for an id this manager does not know, the same fallback
-   * `commandsOf` makes and for the same reason. Host-side only:
-   * nothing on the command surface renders these, because a reason on
-   * a nonexistent path would confirm the path exists.
-   */
-  hideReasonsOf(sessionId: string): readonly HideReason[] {
-    const session = this.sessions.get(sessionId)
-    if (session === undefined) return this.defaultProfileInternal?.hideReasons ?? []
-    return session.hideReasons
   }
 
   /**
@@ -441,15 +428,6 @@ export class SessionManager extends SessionOwner {
       this.persisted.delete(sessionId)
       await this.sessionStore.delete([sessionId])
     })
-  }
-
-  async closeAll(): Promise<void> {
-    const ids = [...this.sessions.keys()].filter((id) => id !== this.defaultId)
-    for (const id of ids) await this.close(id)
-  }
-
-  closeStore(): Promise<void> {
-    return this.sessionStore.close()
   }
 
   private defaultSession(): SessionState {

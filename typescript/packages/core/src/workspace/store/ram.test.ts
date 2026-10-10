@@ -40,7 +40,7 @@ describe('RAMWorkspaceStateStore', () => {
   it('meta round-trips and returns copies', async () => {
     const store = new RAMWorkspaceStateStore()
     expect(await store.loadMeta('a')).toBeNull()
-    await store.setMeta('a', { workspace_id: 'a', default_session_id: 'default' })
+    await store.casSetMeta('a', { workspace_id: 'a', default_session_id: 'default' }, 0)
     const loaded = await store.loadMeta('a')
     expect(loaded).toEqual({ workspace_id: 'a', default_session_id: 'default' })
     if (loaded === null) throw new Error('missing meta')
@@ -58,14 +58,14 @@ describe('RAMWorkspaceStateStore', () => {
 
   it('casSetMeta rejects a stale generation', async () => {
     const store = new RAMWorkspaceStateStore()
-    await store.setMeta('a', { workspace_id: 'a', generation: 2 })
+    await store.casSetMeta('a', { workspace_id: 'a', generation: 2 }, 0)
     expect(await store.casSetMeta('a', { workspace_id: 'a', generation: 1 }, 0)).toBe(false)
     expect((await store.loadMeta('a'))?.generation).toBe(2)
   })
 
   it('casSetMeta treats a legacy record as generation 0', async () => {
     const store = new RAMWorkspaceStateStore()
-    await store.setMeta('a', { workspace_id: 'a' })
+    await store.casSetMeta('a', { workspace_id: 'a' }, 0)
     expect(
       await store.casSetMeta('a', { workspace_id: 'a', default_session_id: 's', generation: 1 }, 0),
     ).toBe(true)
@@ -74,12 +74,16 @@ describe('RAMWorkspaceStateStore', () => {
 
   it('replaceMeta preserves created_at and serializes on the counter', async () => {
     const store = new RAMWorkspaceStateStore()
-    await store.setMeta('a', {
-      workspace_id: 'a',
-      default_session_id: 'old',
-      created_at: 1.0,
-      generation: 4,
-    })
+    await store.casSetMeta(
+      'a',
+      {
+        workspace_id: 'a',
+        default_session_id: 'old',
+        created_at: 1.0,
+        generation: 4,
+      },
+      0,
+    )
     const written = await store.replaceMeta('a', { default_session_id: 'new' })
     expect(written.default_session_id).toBe('new')
     expect(written.created_at).toBe(1.0)
@@ -108,7 +112,7 @@ describe('WorkspaceStateStore group overrides', () => {
     const control = new RAMWorkspaceStateStore()
     const base = new RAMWorkspaceStateStore({ workspace: control })
     expect(base.sessions('ws')).toBe(control.sessions('ws'))
-    await base.setMeta('ws', { workspace_id: 'ws', created_at: 1 })
+    await base.casSetMeta('ws', { workspace_id: 'ws', created_at: 1 }, 0)
     expect(await control.loadMeta('ws')).toEqual({ workspace_id: 'ws', created_at: 1 })
   })
 
@@ -118,7 +122,7 @@ describe('WorkspaceStateStore group overrides', () => {
       await store.namespace(id).set('/a', { mode: 0o600 })
       await store.observer(id).append('d/s1.jsonl', new TextEncoder().encode('{}\n'))
       await store.sessions(id).set('s1', { session_id: 's1' })
-      await store.setMeta(id, { workspace_id: id })
+      await store.casSetMeta(id, { workspace_id: id }, 0)
     }
     const held = async (id: string): Promise<string[]> => {
       const planes: [string, boolean][] = [
