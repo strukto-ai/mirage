@@ -16,7 +16,7 @@ import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { eacces, enoent, enotsup } from '../../../../errors/fs.ts'
+import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandIO } from '../../../config.ts'
 import type { MountView } from '../../../../view/types.ts'
@@ -96,8 +96,8 @@ const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
 const NATIVE: CommandIO = {
   ...OPS,
   du: {
-    size: (_a, p) => Promise.reject(enotsup('ram', 'du_size', p)),
-    entries: (_a, p) => Promise.reject(enotsup('ram', 'du_entries', p)),
+    size: (_a, p) => Promise.reject(walkDeclined('ram', 'du_size', p)),
+    entries: (_a, p) => Promise.reject(walkDeclined('ram', 'du_entries', p)),
   },
 } as CommandIO
 
@@ -117,6 +117,19 @@ describe('du walk fallback under a path rule', () => {
   it('walks when the native du op declines', async () => {
     const [out] = await runScoped(NATIVE, [PathSpec.fromStrPath('/db')])
     expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
+  })
+
+  it("does not walk a backend's own refusal", async () => {
+    const refusing: CommandIO = {
+      ...OPS,
+      du: {
+        size: (_a, p) => Promise.reject(enotsup('ram', 'du_size', p)),
+        entries: (_a, p) => Promise.reject(enotsup('ram', 'du_entries', p)),
+      },
+    } as CommandIO
+    await expect(runScoped(refusing, [PathSpec.fromStrPath('/db')])).rejects.toMatchObject({
+      code: 'ENOTSUP',
+    })
   })
 
   it('propagates a throttled listing rather than reporting an undersized total', async () => {

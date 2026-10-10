@@ -26,7 +26,7 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.errors.types import OperationNotSupportedError
+from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
@@ -220,7 +220,7 @@ async def _native_or_walk(
     """
     try:
         return await native(path)
-    except OperationNotSupportedError:
+    except WalkDeclinedError:
         return await walk(path)
 
 

@@ -15,7 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec, type VFSName } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -23,7 +23,8 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountIo, requireOp, resolveGlobOf } from '../generic_bind/adapter.ts'
 import { formatRecords } from '../utils/output.ts'
 import { descendantPath } from '../utils/paths.ts'
-import type { LinkView } from '../../../view/types.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
+import type { NamespaceView } from '../../../view/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -42,7 +43,11 @@ export function rmWithoutOperands(force: boolean): CommandFnResult {
  * is judged on its own. An entry that cannot be removed, or a directory that
  * cannot be opened, is a failure, and the directories above it stay without a
  * line of their own, since they are not empty (coreutils 9.7). The links a
- * directory holds go with it. Mirrors Python's `remove_tree`.
+ * directory holds go with it; a hidden one is left to the directory's own
+ * removal, which takes what the session cannot see. A mount below is never
+ * entered, as GNU's `--one-file-system` does, and the directories holding one
+ * stay. Under `-f` an entry gone before its removal is no failure. Mirrors
+ * Python's `remove_tree`.
  */
 export async function removeTree(
   root: PathSpec,
@@ -51,9 +56,13 @@ export async function removeTree(
     stat: (path: PathSpec) => Promise<FileStat>
     unlink: (path: PathSpec) => Promise<void>
     rmdir: (path: PathSpec) => Promise<void>
-    links: LinkView | null
+    ns: NamespaceView | null | undefined
+    force: boolean
   },
 ): Promise<{ removed: { path: string; isDir: boolean }[]; failures: [PathSpec, unknown][] }> {
+  const links = ops.ns?.links
+  const vis = ops.ns?.visibility
+  const roots = new Set(ops.ns?.mounts?.descendants(root.virtual) ?? [])
   const removed: { path: string; isDir: boolean }[] = []
   const failures: [PathSpec, unknown][] = []
   const remove = async (path: PathSpec, isDir: boolean): Promise<boolean> => {
@@ -67,6 +76,7 @@ export async function removeTree(
       names = await ops.readdir(path)
     } catch (err) {
       if (!isFsError(err)) throw err
+      if (ops.force && isEnoent(err)) return true
       failures.push([path, err])
       return false
     }
@@ -74,7 +84,8 @@ export async function removeTree(
     let cleared = true
     for (const name of names) {
       const child = descendantPath(root, name.replace(/\/+$/, ''))
-      if (ops.links?.statAt(child.virtual) != null) continue
+      if (roots.has(child.virtual)) continue
+      if (links?.statAt(child.virtual) != null) continue
       let info: FileStat
       try {
         info = await ops.stat(child)
@@ -88,15 +99,18 @@ export async function removeTree(
       const gone = await remove(child, info.type === FileType.DIRECTORY)
       cleared = cleared && gone
     }
-    for (const row of ops.links?.children(base) ?? []) {
-      const gone = await remove(descendantPath(root, `${base}/${row.name}`), false)
+    for (const row of links?.children(base) ?? []) {
+      const link = descendantPath(root, `${base}/${row.name}`)
+      if (!pathVisible(vis, link.virtual)) continue
+      const gone = await remove(link, false)
       cleared = cleared && gone
     }
-    if (!cleared) return false
+    if (!cleared || [...roots].some((r) => r.startsWith(`${base}/`))) return false
     try {
       await ops.rmdir(path)
     } catch (err) {
       if (!isFsError(err)) throw err
+      if (ops.force && isEnoent(err)) return true
       failures.push([path, err])
       return false
     }

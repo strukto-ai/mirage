@@ -31,7 +31,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import LinkView
+from mirage.utils.hidden import path_visible
+from mirage.view.types import NamespaceView
 
 
 def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
@@ -59,7 +60,8 @@ async def remove_tree(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     unlink: Callable[[PathSpec], Awaitable[None]],
     rmdir: Callable[[PathSpec], Awaitable[None]],
-    links: LinkView | None,
+    ns: NamespaceView | None,
+    force: bool,
 ) -> tuple[list[tuple[PathSpec, bool]], list[tuple[PathSpec, OSError]]]:
     """Remove a directory tree entry by entry, as GNU ``rm -r`` does.
 
@@ -67,7 +69,11 @@ async def remove_tree(
     removal is judged on its own. An entry that cannot be removed, or a
     directory that cannot be opened, is a failure, and the directories
     above it stay without a line of their own, since they are not empty
-    (coreutils 9.7). The links a directory holds go with it.
+    (coreutils 9.7). The links a directory holds go with it; a hidden one
+    is left to the directory's own removal, which takes what the session
+    cannot see. A mount below is never entered, as GNU's
+    ``--one-file-system`` does, and the directories holding one stay.
+    Under ``-f`` an entry gone before its removal is no failure.
 
     Args:
         root (PathSpec): the directory operand.
@@ -75,12 +81,21 @@ async def remove_tree(
         stat (Callable): stats a path.
         unlink (Callable): removes a file or a link.
         rmdir (Callable): removes an empty directory.
-        links (LinkView | None): the namespace's symlinks.
+        ns (NamespaceView | None): the namespace's links, mounts and the
+            session's visibility.
+        force (bool): ``-f``.
 
     Returns:
         tuple: the removed entries as ``(path, is_dir)``, children
         first, and each failure with its error.
     """
+    links = ns.links if ns is not None else None
+    vis = ns.visibility if ns is not None else None
+    roots = (
+        set(ns.mounts.descendants(root.virtual))
+        if ns is not None and ns.mounts is not None
+        else set()
+    )
     removed: list[tuple[PathSpec, bool]] = []
     failures: list[tuple[PathSpec, OSError]] = []
 
@@ -92,12 +107,16 @@ async def remove_tree(
                 return True
             names = await readdir(path)
         except FS_ERRORS as exc:
+            if force and isinstance(exc, FileNotFoundError):
+                return True
             failures.append((path, exc))
             return False
         base = path.virtual.rstrip("/")
         cleared = True
         for name in names:
             child = descendant_path(root, name.rstrip("/"))
+            if child.virtual in roots:
+                continue
             if links is not None and links.stat_at(child.virtual) is not None:
                 continue
             try:
@@ -111,15 +130,18 @@ async def remove_tree(
             gone = await remove(child, info.type == FileType.DIRECTORY)
             cleared = cleared and gone
         for row in links.children(base) if links is not None else []:
-            gone = await remove(
-                descendant_path(root, f"{base}/{row.name}"), False
-            )
+            link = descendant_path(root, f"{base}/{row.name}")
+            if not path_visible(vis, link.virtual):
+                continue
+            gone = await remove(link, False)
             cleared = cleared and gone
-        if not cleared:
+        if not cleared or any(r.startswith(f"{base}/") for r in roots):
             return False
         try:
             await rmdir(path)
         except FS_ERRORS as exc:
+            if force and isinstance(exc, FileNotFoundError):
+                return True
             failures.append((path, exc))
             return False
         removed.append((path, True))

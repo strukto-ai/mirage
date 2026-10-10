@@ -151,6 +151,15 @@ describe('Namespace symlink table', () => {
     expect(ws.namespace.isLink('/data/sub/a')).toBe(false)
     await ws.close()
   })
+
+  it('purgeUnder keeps a mount below', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS(), '/data/sub/m': new RAMVFS() })
+    await ws.namespace.symlink('/data/sub/a', '/t1', 1)
+    await ws.namespace.symlink('/data/sub/m/b', '/t2', 1)
+    expect(await ws.namespace.purgeUnder('/data/sub')).toBe(1)
+    expect(ws.namespace.isLink('/data/sub/m/b')).toBe(true)
+    await ws.close()
+  })
 })
 
 describe('Namespace node metadata overlay', () => {

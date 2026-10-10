@@ -615,8 +615,7 @@ class SealedPaths implements Policy {
     if (!ctx.write && ctx.path.virtual === '/a/secret.txt') {
       return { kind: 'deny', reason: 'secret is sealed' }
     }
-    // The subtree spelling covers the root too: a native tree op
-    // (rm_r) admits as one op on the root, per the preVfs docstring.
+    // The subtree spelling covers the root too.
     if (ctx.write && (ctx.path.virtual === '/a/prod' || ctx.path.virtual.startsWith('/a/prod/'))) {
       return { kind: 'deny', reason: 'prod is read-only' }
     }
@@ -769,6 +768,31 @@ describe('op hooks bind at the dispatcher and the command tier', () => {
     expect(refused.exitCode).not.toBe(0)
     const survives = await sealed.shell('cat /a/prod/keep.txt')
     expect(survives.exitCode).toBe(0)
+  })
+
+  it('shell rm -rv removes what a sealed listing allows', async () => {
+    // -v lists the tree before it goes in one call; a listing a policy
+    // refuses sends the removal entry by entry, as without -v.
+    const sealedListing: Policy = {
+      preVfs: (ctx) =>
+        ctx.op === 'readdir' && ctx.path.virtual === '/a/prod/sub'
+          ? { kind: 'deny', reason: 'sub is sealed' }
+          : null,
+    }
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /a/prod/sub')
+    await ws.vfs.write('/a/prod/a.txt', ENC.encode('a\n'))
+    await ws.vfs.write('/a/prod/sub/b.txt', ENC.encode('b\n'))
+    ws.policies.add(sealedListing)
+    const io = await ws.shell('rm -rv /a/prod')
+    expect(io.exitCode).toBe(1)
+    expect(stdoutStr(io)).toBe("removed '/a/prod/a.txt'\n")
+    expect(stderrStr(io)).toBe("rm: cannot remove '/a/prod/sub': Permission denied\n")
+    expect(await ws.vfs.exists('/a/prod/a.txt')).toBe(false)
   })
 
   it('find -delete admits each deletion exactly once', async () => {

@@ -517,15 +517,20 @@ export class Namespace {
   }
 
   // Drop every node entry under a directory (`rm -r` semantics), except
-  // the entries in `keep`.
+  // the entries in `keep`. Entries in a mount below stay: removing a tree
+  // never reaches into another mount, so its links and overlays are still
+  // that mount's.
   async purgeUnder(
     directory: string,
     keep: ReadonlySet<string> = new Set<string>(),
   ): Promise<number> {
     const base = rstripSlash(directory) + '/'
+    const roots = this.registry.descendantMounts(directory).map((m) => rstripSlash(m.prefix))
     const doomed: string[] = []
     for (const path of this.nodeTable.keys()) {
-      if (path.startsWith(base) && !keep.has(path)) doomed.push(path)
+      if (!path.startsWith(base) || keep.has(path)) continue
+      if (roots.some((r) => path === r || path.startsWith(r + '/'))) continue
+      doomed.push(path)
     }
     for (const path of doomed) this.nodeTable.delete(path)
     if (doomed.length > 0) await this.store.delete(doomed)

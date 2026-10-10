@@ -481,9 +481,7 @@ class SealedPaths(Policy):
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if not ctx.write and ctx.path.virtual == "/data/secret.txt":
             return Deny("secret is sealed")
-        # The subtree spelling covers the root too: a native tree op
-        # (rm_r) admits as one op on the root, per the pre_vfs
-        # docstring.
+        # The subtree spelling covers the root too.
         if ctx.write and (
             ctx.path.virtual == "/data/prod"
             or ctx.path.virtual.startswith("/data/prod/")
@@ -649,6 +647,34 @@ async def test_shell_rm_r_admits_through_pre_vfs():
         assert refused.exit_code != 0
         survives = await ws.shell("cat /data/prod/a.txt")
         assert survives.exit_code == 0
+    finally:
+        await ws.close()
+
+
+class SealedListing(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.op == "readdir" and ctx.path.virtual == "/data/prod/sub":
+            return Deny("sub is sealed")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_shell_rm_rv_removes_what_a_sealed_listing_allows():
+    # -v lists the tree before it goes in one call; a listing a policy
+    # refuses sends the removal entry by entry, as without -v.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/prod/sub")
+        await ws.vfs.write("/data/prod/a.txt", b"a\n")
+        await ws.vfs.write("/data/prod/sub/b.txt", b"b\n")
+        ws.policies.add(SealedListing())
+        io = await ws.shell("rm -rv /data/prod")
+        assert io.exit_code == 1
+        assert await io.stdout_str() == "removed '/data/prod/a.txt'\n"
+        assert await io.stderr_str() == (
+            "rm: cannot remove '/data/prod/sub': Permission denied\n"
+        )
+        assert not await ws.vfs.exists("/data/prod/a.txt")
     finally:
         await ws.close()
 

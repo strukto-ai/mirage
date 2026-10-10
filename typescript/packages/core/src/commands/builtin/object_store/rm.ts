@@ -15,8 +15,9 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
-import type { LinkView } from '../../../view/types.ts'
+import type { NamespaceView } from '../../../view/types.ts'
 import { fsStrerror, innerSuffix, isFsError, withInner } from '../../../errors/fs.ts'
+import type { WalkDeclinedError } from '../../../errors/types.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
 import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -54,7 +55,7 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     path: PathSpec,
     opts: RmOpts,
     index: CommandOpts['index'],
-    links: LinkView | null,
+    ns: NamespaceView | undefined,
   ): Promise<[string[], string[]]> {
     const label = path.rawPath
     let isDir = false
@@ -74,31 +75,37 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
             readdir(accessor, dir, index ?? undefined)
           const probe = (spec: PathSpec): Promise<FileStat> =>
             stat(accessor, spec, index ?? undefined)
-          const lines = opts.verbose
-            ? removalLines(await cpWalk(listing, probe, path, index ?? undefined), path)
+          // -v names each entry before the tree goes in one call; a tree it
+          // cannot list whole goes entry by entry, as does one the
+          // dispatcher declines for the caller's view.
+          const unlisted: string[] = []
+          const listed = opts.verbose
+            ? await cpWalk(listing, probe, path, index ?? undefined, 'rm', unlisted)
             : []
-          try {
-            await rmR(accessor, path)
-          } catch (err) {
-            // The dispatcher declines a tree removal the caller's view
-            // restricts: each entry's own removal is judged instead.
-            if ((err as { code?: string }).code !== 'ENOTSUP') throw err
-            const { removed, failures } = await removeTree(path, {
-              readdir: listing,
-              stat: probe,
-              unlink: (spec) => unlink(accessor, spec),
-              rmdir: (spec) => rmdir(accessor, spec),
-              links,
-            })
-            return [
-              failures.map(
-                ([entry, why]) =>
-                  `rm: cannot remove '${entry.rawPath}': ${String(fsStrerror(why))}`,
-              ),
-              opts.verbose ? removalLines(removed, path) : [],
-            ]
+          let declined = unlisted.length > 0
+          if (!declined) {
+            try {
+              await rmR(accessor, path)
+            } catch (err) {
+              if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+              declined = true
+            }
           }
-          return [[], lines]
+          if (!declined) return [[], removalLines(listed, path)]
+          const { removed, failures } = await removeTree(path, {
+            readdir: listing,
+            stat: probe,
+            unlink: (spec) => unlink(accessor, spec),
+            rmdir: (spec) => rmdir(accessor, spec),
+            ns,
+            force: opts.force,
+          })
+          return [
+            failures.map(
+              ([entry, why]) => `rm: cannot remove '${entry.rawPath}': ${String(fsStrerror(why))}`,
+            ),
+            opts.verbose ? removalLines(removed, path) : [],
+          ]
         }
         if (opts.removeDir) {
           const children = await readdir(accessor, path, index ?? undefined)
@@ -151,7 +158,7 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
         p,
         { recursive, force, removeDir, verbose },
         opts.index,
-        links,
+        opts.ns,
       )
       errors.push(...failed)
       if (verbose) verboseParts.push(...entryLines)

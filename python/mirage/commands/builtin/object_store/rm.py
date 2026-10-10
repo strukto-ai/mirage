@@ -39,10 +39,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
-from mirage.errors.types import OperationNotSupportedError
+from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.view.types import LinkView
+from mirage.view.types import NamespaceView
 
 
 def _build(io: CommandIO) -> Callable[..., Any]:
@@ -71,7 +71,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
         verbose: bool = False,
         *,
         index: IndexCacheStore,
-        links: LinkView | None,
+        ns: NamespaceView | None,
     ) -> tuple[list[str], list[str]]:
         """Remove one operand, returning GNU stderr lines on failure.
 
@@ -86,8 +86,8 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                 entry.
             index (IndexCacheStore): Cache index threaded into the core
                 ops.
-            links (LinkView | None): the namespace's symlinks, removed
-                with a tree removed entry by entry.
+            ns (NamespaceView | None): the namespace's links, mounts and
+                visibility, for a tree removed entry by entry.
 
         Returns:
             tuple[list[str], list[str]]: The ``rm: cannot remove ...``
@@ -114,31 +114,38 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                 if recursive:
                     listing = functools.partial(readdir, accessor, index=index)
                     probe = functools.partial(stat, accessor, index=index)
-                    lines = (
-                        removal_lines(await walk(listing, probe, path), path)
+                    # -v names each entry before the tree goes in one
+                    # call; a tree it cannot list whole goes entry by
+                    # entry, as does one the dispatcher declines for
+                    # the caller's view.
+                    unlisted: list[str] = []
+                    listed = (
+                        await walk(listing, probe, path, "rm", unlisted)
                         if verbose
                         else []
                     )
-                    try:
-                        await rm_r(accessor, path)
-                    except OperationNotSupportedError:
-                        # The dispatcher declines a tree removal the
-                        # caller's view restricts: each entry's own
-                        # removal is judged instead.
-                        gone, failures = await remove_tree(
-                            path,
-                            readdir=listing,
-                            stat=probe,
-                            unlink=functools.partial(unlink, accessor),
-                            rmdir=functools.partial(rmdir, accessor),
-                            links=links,
-                        )
-                        return [
-                            f"rm: cannot remove '{entry.raw_path}': "
-                            f"{fs_strerror(exc)}"
-                            for entry, exc in failures
-                        ], (removal_lines(gone, path) if verbose else [])
-                    return [], lines
+                    declined = bool(unlisted)
+                    if not declined:
+                        try:
+                            await rm_r(accessor, path)
+                        except WalkDeclinedError:
+                            declined = True
+                    if not declined:
+                        return [], removal_lines(listed, path)
+                    gone, failures = await remove_tree(
+                        path,
+                        readdir=listing,
+                        stat=probe,
+                        unlink=functools.partial(unlink, accessor),
+                        rmdir=functools.partial(rmdir, accessor),
+                        ns=ns,
+                        force=force,
+                    )
+                    return [
+                        f"rm: cannot remove '{entry.raw_path}': "
+                        f"{fs_strerror(exc)}"
+                        for entry, exc in failures
+                    ], (removal_lines(gone, path) if verbose else [])
                 if remove_dir:
                     children = await readdir(accessor, path, index)
                     if children:
@@ -193,7 +200,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                 remove_dir=d,
                 verbose=v,
                 index=opts.index,
-                links=links,
+                ns=opts.ns,
             )
             errors.extend(failed)
             verbose_parts.extend(entry_lines)

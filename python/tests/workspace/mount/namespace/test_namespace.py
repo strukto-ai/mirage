@@ -14,8 +14,10 @@
 
 import pytest
 
+from mirage import Workspace
 from mirage.types import FileType
 from mirage.utils.dates import epoch_to_iso
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 
@@ -126,6 +128,18 @@ async def test_purge_under_drops_nested_entries(namespace):
     assert await namespace.purge_under("/data/sub") == 2
     assert namespace.is_link("/data/keep") is True
     assert namespace.is_link("/data/sub/a") is False
+
+
+@pytest.mark.asyncio
+async def test_purge_under_keeps_a_mount_below():
+    ws = Workspace({"/data": RAMVFS(), "/data/sub/m": RAMVFS()})
+    try:
+        await ws.namespace.symlink("/data/sub/a", "/t1", 1.0)
+        await ws.namespace.symlink("/data/sub/m/b", "/t2", 1.0)
+        assert await ws.namespace.purge_under("/data/sub") == 1
+        assert ws.namespace.is_link("/data/sub/m/b") is True
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

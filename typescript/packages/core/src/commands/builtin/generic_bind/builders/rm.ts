@@ -30,6 +30,7 @@ import {
   isFsError,
 } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
+import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
 const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
@@ -76,35 +77,45 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
         if (recursive) {
           const listing = (dir: PathSpec): Promise<string[]> => ops.readdir(accessor, dir, idx)
           const probe = (spec: PathSpec): Promise<FileStat> => ops.stat(accessor, spec, idx)
-          if (verbose) entryLines = removalLines(await cpWalk(listing, probe, p, idx), p)
-          try {
-            await rmR(accessor, p)
-          } catch (err) {
-            // The dispatcher declines a tree removal the caller's view
-            // restricts: each entry's own removal is judged instead.
-            if (ops.rmR === undefined || (err as { code?: string }).code !== 'ENOTSUP') throw err
-            const { removed, failures } = await removeTree(p, {
+          // -v names each entry before the tree goes in one call; a tree it
+          // cannot list whole goes entry by entry, as does one the
+          // dispatcher declines for the caller's view.
+          const unlisted: string[] = []
+          let listed = verbose ? await cpWalk(listing, probe, p, idx, 'rm', unlisted) : []
+          let declined = unlisted.length > 0
+          if (!declined) {
+            try {
+              await rmR(accessor, p)
+            } catch (err) {
+              if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+              declined = true
+            }
+          }
+          let failures: [PathSpec, unknown][] = []
+          if (declined) {
+            ;({ removed: listed, failures } = await removeTree(p, {
               readdir: listing,
               stat: probe,
               unlink: (spec) => unlink(accessor, spec),
               rmdir: (spec) => rmdir(accessor, spec, idx),
-              links,
-            })
-            entryLines = verbose ? removalLines(removed, p) : []
+              ns: opts.ns,
+              force,
+            }))
             for (const [entry, why] of failures) {
               errors.push(`rm: cannot remove '${entry.rawPath}': ${fsStrerror(why) ?? String(why)}`)
             }
-            if (failures.length > 0) {
-              if (verbose) lines.push(...entryLines)
-              continue
-            }
           }
+          entryLines = verbose ? removalLines(listed, p) : []
           // A removal never crosses into a mount below, so it says so as
           // GNU's --one-file-system does.
           for (const root of mountPoints(opts.ns?.mounts, p.virtual))
             errors.push(
               `rm: skipping '${operandSpelling(root, p)}', since it's on a different device`,
             )
+          if (failures.length > 0) {
+            if (verbose) lines.push(...entryLines)
+            continue
+          }
         } else if (dirFlag) {
           if ((await ops.readdir(accessor, p, idx)).length > 0) {
             errors.push(`rm: cannot remove '${p.rawPath}': Directory not empty`)

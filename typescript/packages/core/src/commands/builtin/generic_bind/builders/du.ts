@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isEacces, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
+import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
@@ -192,7 +193,7 @@ async function nativeOrWalk<T>(native: () => Promise<T>, walk: () => Promise<T>)
   try {
     return await native()
   } catch (err) {
-    if ((err as { code?: string }).code !== 'ENOTSUP') throw err
+    if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
     return walk()
   }
 }

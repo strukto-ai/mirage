@@ -82,6 +82,15 @@ class OperationNotSupportedError(OSError):
     """
 
 
+class WalkDeclinedError(OperationNotSupportedError):
+    """A one-call walk the dispatcher declined for the caller's view.
+
+    A hide, the command's path rule or a coded ``pre_vfs`` policy reaches
+    below the path, so the caller walks it entry by entry and each call is
+    judged on its own. A backend's own refusal stays the parent class.
+    """
+
+
 class ReadOnlyError(PermissionError):
     """A write into a region whose mode stops below ``w``.
 

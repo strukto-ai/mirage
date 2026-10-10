@@ -30,7 +30,6 @@ import {
   eisdir,
   enotdir,
   enotempty,
-  enotsup,
   erofs,
   isEnoent,
   isEnotdir,
@@ -38,6 +37,7 @@ import {
   isMissingOp,
   eloop,
   exdev,
+  walkDeclined,
   noMount,
   noXattr,
   walkRefusal,
@@ -533,7 +533,7 @@ export class Dispatcher {
       await this.refuseCrossMount(call, owner)
       if (await this.declines(call)) {
         if (name === 'search') return [null, new IOResult()]
-        throw enotsup(owner.vfs.name, name, call.path)
+        throw walkDeclined(owner.vfs.name, name, call.path)
       }
       await this.admit(call, owner, boundary)
       if (looksUp) {

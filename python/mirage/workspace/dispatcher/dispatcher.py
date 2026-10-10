@@ -44,11 +44,11 @@ from mirage.errors.fs import (
     enoent,
     enotdir,
     enotempty,
-    enotsup,
     erofs,
     exdev,
     no_mount,
     no_xattr,
+    walk_declined,
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
@@ -712,7 +712,7 @@ class Dispatcher:
         if await self._declines(call):
             if call.name == "search":
                 return None, IOResult()
-            raise enotsup(str(mount.vfs.name), call.name, call.path)
+            raise walk_declined(str(mount.vfs.name), call.name, call.path)
         # mkdir(2) looks its name up first, so on a read-only region that
         # lookup answers for the mode, after every other policy has spoken.
         # A dry run never looks, so it explains the mode's refusal.

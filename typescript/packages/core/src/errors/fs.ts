@@ -20,6 +20,7 @@ import type {
   MissingOpError,
   NoMountError,
   StaleWriteError,
+  WalkDeclinedError,
 } from './types.ts'
 import { stripSlash } from '../utils/slash.ts'
 
@@ -318,6 +319,16 @@ export function enotsup(
   return Object.assign(fsError(path, 'ENOTSUP', `no op registered: ${op} for VFS ${vfs}`), {
     op,
   })
+}
+
+// The dispatcher's refusal of a one-call walk the caller makes itself.
+// Mirrors Python's walk_declined.
+export function walkDeclined(
+  vfs: string,
+  op: string,
+  path: string | { virtual: string; rawPath?: string },
+): WalkDeclinedError {
+  return Object.assign(enotsup(vfs, op, path), { declined: true as const })
 }
 
 // True when the error is the missing-op stamp for this specific op — the

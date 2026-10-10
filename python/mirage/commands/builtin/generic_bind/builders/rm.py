@@ -39,7 +39,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_path, fs_strerror
 from mirage.errors.render import operand_spelling
-from mirage.errors.types import OperationNotSupportedError
+from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -95,19 +95,25 @@ async def rm(
                         ops.readdir, accessor, index=opts.index
                     )
                     stat = bound_op(ops.stat, accessor, opts.index)
-                    if v:
-                        entry_lines = removal_lines(
-                            await walk(readdir, stat, p), p
-                        )
-                    try:
-                        await require_op(ops, Operation.RM_R)(accessor, p)
-                    except OperationNotSupportedError:
-                        # The dispatcher declines a tree removal the
-                        # caller's view restricts: each entry's own
-                        # removal is judged instead.
-                        if ops.rm_r is None:
-                            raise
-                        gone, failures = await remove_tree(
+                    # -v names each entry before the tree goes in one
+                    # call; a tree it cannot list whole goes entry by
+                    # entry, as does one the dispatcher declines for
+                    # the caller's view.
+                    unlisted: list[str] = []
+                    listed = (
+                        await walk(readdir, stat, p, "rm", unlisted)
+                        if v
+                        else []
+                    )
+                    declined = bool(unlisted)
+                    if not declined:
+                        try:
+                            await require_op(ops, Operation.RM_R)(accessor, p)
+                        except WalkDeclinedError:
+                            declined = True
+                    failures: list[tuple[PathSpec, OSError]] = []
+                    if declined:
+                        listed, failures = await remove_tree(
                             p,
                             readdir=readdir,
                             stat=stat,
@@ -117,17 +123,15 @@ async def rm(
                             rmdir=functools.partial(
                                 require_op(ops, Operation.RMDIR), accessor
                             ),
-                            links=links,
+                            ns=opts.ns,
+                            force=f,
                         )
-                        entry_lines = removal_lines(gone, p) if v else []
                         errors.extend(
                             f"rm: cannot remove '{entry.raw_path}': "
                             f"{fs_strerror(exc)}"
                             for entry, exc in failures
                         )
-                        if failures:
-                            verbose_parts.extend(entry_lines)
-                            continue
+                    entry_lines = removal_lines(listed, p) if v else []
                     # A removal never crosses into a mount below, so it
                     # says so as GNU's --one-file-system does.
                     errors.extend(
@@ -138,6 +142,9 @@ async def rm(
                             p.virtual,
                         )
                     )
+                    if failures:
+                        verbose_parts.extend(entry_lines)
+                        continue
                 elif d:
                     if await ops.readdir(accessor, p, index=opts.index):
                         errors.append(

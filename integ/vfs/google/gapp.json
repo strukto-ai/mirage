@@ -210,20 +210,20 @@
       }
     },
     {
-      "id": "gapp_x_mv_out_rejected",
+      "id": "gapp_x_mv_out_moves",
       "seq": 520015,
       "targets": [
         "gapps"
       ],
       "command": "mv /docs/owned/*.gdoc.json /scratch/moved.json",
       "expect": {
-        "exit": 1,
+        "exit": 0,
         "stdout": "",
-        "stderr": "mv: cannot remove '/docs/owned/2026-01-01_Q1_Plan__doc0001.gdoc.json': Operation not supported\n"
+        "stderr": ""
       }
     },
     {
-      "id": "gapp_x_mv_out_kept",
+      "id": "gapp_x_mv_out_removes_source",
       "seq": 520016,
       "targets": [
         "gapps"
@@ -231,7 +231,7 @@
       "command": "ls /scratch && ls /docs/owned | wc -l",
       "expect": {
         "exit": 0,
-        "stdout": "doc.json\nmoved.json\n1\n",
+        "stdout": "doc.json\nmoved.json\n0\n",
         "stderr": ""
       }
     },
