@@ -20,7 +20,7 @@ import aiohttp
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.gmail.date_query import date_dir_to_gmail_query
-from mirage.core.gmail.messages import list_messages
+from mirage.core.gmail.messages import list_message_page
 from mirage.core.gmail.readdir import MSG_SUFFIX, readdir
 from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.probe import resolve_entry
@@ -197,13 +197,13 @@ async def _hits_under(
         return None
     ids: set[str] = set()
     for query in queries:
-        stubs = await list_messages(
+        stubs, more = await list_message_page(
             accessor.token_manager,
             label_id=entry.id,
             query=f"{query} {bound}".strip(),
             max_results=MAX_HITS,
         )
-        if len(stubs) >= MAX_HITS:
+        if more is not None or len(stubs) >= MAX_HITS:
             return None
         ids.update(stub["id"] for stub in stubs)
     files = await _messages_under(accessor, directory, index)
@@ -225,8 +225,8 @@ async def files_containing(
     to files by the message id the listing names them with. None when
     ``text`` could match the JSON around those fields
     (``record_queries``), on an API or connection error, at ``MAX_HITS``
-    hits, or with no hit at all, since Gmail indexes a message some time
-    after it arrives.
+    hits or when the answer names a next page, or with no hit at all,
+    since Gmail indexes a message some time after it arrives.
 
     Args:
         accessor (GmailAccessor): the account.

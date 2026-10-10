@@ -121,11 +121,15 @@ function header(m: Message, name: string): string {
  * words of the From, To, Cc and Subject headers and the body in any case,
  * `filename:` an attachment name, and `after:`/`before:` take epoch seconds,
  * as Gmail does. A search answers 429 when `fails` is 'status' and rejects
- * with it when it is an error. Mirrors Python's `FakeGmail`.
+ * with it when it is an error, and with `more` names a next page however few
+ * stubs it returns. Mirrors Python's `FakeGmail`.
  */
 class FakeGmail {
   readonly searches: string[] = []
-  constructor(private readonly fails: 'status' | Error | null = null) {}
+  constructor(
+    private readonly fails: 'status' | Error | null = null,
+    private readonly more = false,
+  ) {}
 
   readonly fetch = (input: string | URL | Request): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input))
@@ -158,7 +162,9 @@ class FakeGmail {
     const found = MESSAGES.filter(
       (m) => (label === null || m.labelIds.includes(label)) && this.matches(m, query),
     ).map((m) => ({ id: m.id, threadId: m.threadId }))
-    return this.json({ messages: found.slice(0, Number(params.get('maxResults') ?? 100)) })
+    const messages = found.slice(0, Number(params.get('maxResults') ?? 100))
+    const searched = query !== '' && !query.startsWith('after:')
+    return this.json(this.more && searched ? { messages, nextPageToken: 'next' } : { messages })
   }
 
   private matches(m: Message, query: string): boolean {
@@ -246,6 +252,7 @@ describe('filesContaining', () => {
     ['grep -rlw deploy /gmail', () => new FakeGmail('status')],
     ['grep -rlw deploy /gmail', () => new FakeGmail(new TypeError('fetch failed'))],
     ['grep -rlw deploy /gmail', () => new FakeGmail(new DOMException('timed out', 'TimeoutError'))],
+    ['grep -rlw deploy /gmail', () => new FakeGmail(null, true)],
   ])('reads every message when search cannot answer %s', async (line, fake) => {
     const full = await onGmail(line, new FakeGmail(), false)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)

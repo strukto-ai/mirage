@@ -78,6 +78,12 @@ export interface SlackTransport {
   // (the browser one holds no token, the proxy does) leaves it unimplemented
   // and callers read that as "try it".
   searchAvailable?(): boolean
+  // The transport search runs through when that is another user than this
+  // one's (a separate search token): that user sees every public channel but
+  // only the private ones they are in. null when search runs as this
+  // transport's user; unimplemented reads the same. The python twin compares
+  // `search_token`.
+  searcher?(): SlackTransport | null
 }
 
 export abstract class HttpSlackTransport implements SlackTransport {
@@ -169,5 +175,9 @@ export class NodeSlackTransport extends HttpSlackTransport {
   searchAvailable(): boolean {
     if (this.searchToken !== undefined && this.searchToken !== '') return true
     return this.token.startsWith('xoxp-')
+  }
+  searcher(): SlackTransport | null {
+    if (this.searchToken === undefined || this.searchToken === '') return null
+    return new NodeSlackTransport(this.searchToken, undefined, this.baseUrlOverride)
   }
 }

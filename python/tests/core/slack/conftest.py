@@ -31,6 +31,7 @@ CHANNELS = [
     {"id": "C2", "name": "random", "created": START},
 ]
 DMS = [{"id": "D1", "user": "U1", "created": START}]
+SEARCHER = "xoxp-searcher"
 PROFILE = {"real_name": "Ana Lima", "display_name": "ana"}
 USERS = [
     {"id": "U1", "name": "ana", "real_name": "Ana Lima", "profile": PROFILE}
@@ -92,8 +93,10 @@ class FakeSlack:
     (``search.messages``), a reaction name (``has::name:``) and a file's
     name or title (``search.files``, naming every message that shares it
     unless ``shares`` is off), scoped by ``in:#name``. Every page answers
-    ``pages`` as its page count; a search raises ``fails`` when set. Each
-    call yields to the loop once, as a request does.
+    ``pages`` as its page count; a search raises ``fails`` when set. The
+    ``hidden`` channels are private ones the ``SEARCHER`` token's user is
+    not in: that user neither lists nor finds them. Each call yields to
+    the loop once, as a request does.
     """
 
     def __init__(
@@ -101,10 +104,12 @@ class FakeSlack:
         pages: int = 1,
         fails: Exception | None = None,
         shares: bool = True,
+        hidden: frozenset[str] = frozenset(),
     ) -> None:
         self.pages = pages
         self.fails = fails
         self.shares = shares
+        self.hidden = hidden
         self.searches: list[str] = []
         self.user_lists = 0
 
@@ -112,10 +117,10 @@ class FakeSlack:
         await asyncio.sleep(0)
         params = params or {}
         if method == "conversations.list":
-            return {
-                "ok": True,
-                "channels": DMS if "im" in params["types"] else CHANNELS,
-            }
+            channels = DMS if "im" in params["types"] else CHANNELS
+            if config.token.get_secret_value() == SEARCHER:
+                channels = [c for c in channels if c["id"] not in self.hidden]
+            return {"ok": True, "channels": channels}
         if method == "users.list":
             self.user_lists += 1
             return {"ok": True, "members": USERS}
@@ -147,7 +152,11 @@ class FakeSlack:
         text = " ".join(
             w for w in words if not w.startswith(("in:#", "has::"))
         )
-        ids = [c["id"] for c in CHANNELS if not names or c["name"] in names]
+        ids = [
+            c["id"]
+            for c in CHANNELS
+            if (not names or c["name"] in names) and c["id"] not in self.hidden
+        ]
         if not names:
             ids.append("D1")
         matches: list[dict[str, Any]] = []

@@ -132,11 +132,15 @@ class FakeGmail:
     A bare word matches whole words of the From, To, Cc and Subject
     headers and the body in any case, ``filename:`` an attachment name,
     and ``after:``/``before:`` take epoch seconds, as Gmail does. A
-    search raises ``fails`` when set.
+    search raises ``fails`` when set, and with ``more`` names a next page
+    however few stubs it returns.
     """
 
-    def __init__(self, fails: Exception | None = None) -> None:
+    def __init__(
+        self, fails: Exception | None = None, more: bool = False
+    ) -> None:
         self.fails = fails
+        self.more = more
         self.searches: list[str] = []
 
     async def list_labels(self, token_manager):
@@ -156,6 +160,14 @@ class FakeGmail:
             and self._matches(m, query or "")
         ]
         return found[:max_results]
+
+    async def list_message_page(
+        self, token_manager, label_id=None, query=None, max_results=50
+    ):
+        found = await self.list_messages(
+            token_manager, label_id, query, max_results
+        )
+        return found, "next" if self.more else None
 
     def _matches(self, message: dict[str, Any], query: str) -> bool:
         seconds = int(message["internalDate"]) // 1000
@@ -207,7 +219,9 @@ def gmail(monkeypatch):
         monkeypatch.setattr(
             readdir_mod, "get_message_raw", fake.get_message_raw
         )
-        monkeypatch.setattr(search_mod, "list_messages", fake.list_messages)
+        monkeypatch.setattr(
+            search_mod, "list_message_page", fake.list_message_page
+        )
         monkeypatch.setattr(read_mod, "get_attachment", fake.get_attachment)
         reads: list[str] = []
 

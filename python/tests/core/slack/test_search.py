@@ -26,7 +26,7 @@ from mirage.core.slack.search import (
     search_files,
     search_messages,
 )
-from tests.core.slack.conftest import FakeSlack
+from tests.core.slack.conftest import SEARCHER, FakeSlack
 
 
 @pytest.mark.asyncio
@@ -189,4 +189,21 @@ async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
 async def test_every_day_is_read_when_search_cannot_answer(slack, line, fake):
     full = await slack(line, content_search=False)
     out, code, read, _ = await slack(line, fake)
+    assert (out, code, read) == full[:3]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -rlw deploy /slack/channels",
+        "rg -lw deploy /slack/channels/random__C2",
+    ],
+)
+async def test_a_channel_the_search_user_is_not_in_is_read(slack, line):
+    # random is private and the search token's user is not in it, so no
+    # search names its days; ruling them out would miss its deploy.
+    full = await slack(line, content_search=False)
+    hidden = FakeSlack(hidden=frozenset({"C2"}))
+    out, code, read, _ = await slack(line, hidden, search_token=SEARCHER)
     assert (out, code, read) == full[:3]

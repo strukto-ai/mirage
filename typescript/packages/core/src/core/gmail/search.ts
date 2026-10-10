@@ -22,7 +22,7 @@ import { GoogleApiError } from '../google/client.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { dateDirToGmailQuery } from './date_query.ts'
-import { listMessages } from './messages.ts'
+import { listMessagePage } from './messages.ts'
 import { MSG_SUFFIX, readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
@@ -187,12 +187,12 @@ async function hitsUnder(
   if (entry === null || bound === null) return null
   const ids = new Set<string>()
   for (const query of queries) {
-    const stubs = await listMessages(accessor.tokenManager, {
+    const [stubs, more] = await listMessagePage(accessor.tokenManager, {
       labelId: entry.id,
       query: `${query} ${bound}`.trim(),
       maxResults: MAX_HITS,
     })
-    if (stubs.length >= MAX_HITS) return null
+    if (more !== null || stubs.length >= MAX_HITS) return null
     for (const stub of stubs) ids.add(stub.id)
   }
   const files = await messagesUnder(accessor, directory, index)
@@ -207,8 +207,8 @@ async function hitsUnder(
  * label is searched on its own, since an account search leaves out spam and
  * trash; a day adds its UTC bounds. Hits map to files by the message id the
  * listing names them with. null when `text` could match the JSON around
- * those fields (`recordQueries`), on an API or connection error, at `MAX_HITS` hits, or
- * with no hit at all, since Gmail indexes a message some time after it
+ * those fields (`recordQueries`), on an API or connection error, at `MAX_HITS` hits or
+ * when the answer names a next page, or with no hit at all, since Gmail indexes a message some time after it
  * arrives. Mirrors Python's `files_containing`.
  */
 export async function filesContaining(
