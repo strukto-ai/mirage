@@ -122,7 +122,7 @@ from mirage.workspace.expand import (
     expand_redirect,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.node import child_line, expand_arith
+from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.lookup.constants import BASH_BUILTINS
 from mirage.workspace.mount import MountRegistry
@@ -1102,7 +1102,7 @@ async def execute_node(
                     err = _diagnostic_stderr(node, context)
                     io.stderr = err + await io.materialize_stderr()
                     exec_node.stderr = err + (exec_node.stderr or b"")
-            except ExitSignal as exc:
+            except (ExitSignal, _ProcessSubError) as exc:
                 exc.stderr = _diagnostic_stderr(node, context) + exc.stderr
                 raise
             finally:
@@ -1110,9 +1110,9 @@ async def execute_node(
         if held and stdout is not None:
             stdout = await materialize(stdout)
         return stdout, io, exec_node
-    except _ProcessSubError:
+    except _ProcessSubError as exc:
         # The node fails, as an unsupported command does; the line goes on.
-        err = b"mirage: unsupported: process substitution >(...)\n"
+        err = exc.stderr
         return (
             None,
             IOResult(exit_code=2, stderr=err),
@@ -1127,13 +1127,17 @@ async def execute_node(
 class _ProcessSubError(Exception):
     """An output process substitution, which mirage does not run."""
 
+    def __init__(self) -> None:
+        super().__init__("unsupported: process substitution >(...)")
+        self.stderr = b"mirage: unsupported: process substitution >(...)\n"
+
 
 def _process_input(
     context: EvaluationContext,
     registry: MountRegistry,
     held: list[tuple[DevVFS, str, int]],
 ) -> Callable[
-    [TSNodeLike, Callable[..., Any], CallStack | None], Awaitable[str]
+    [TSNodeLike, Callable[[str], Awaitable[IOResult]]], Awaitable[str]
 ]:
     """The hook that opens a node's input process substitutions.
 
@@ -1152,8 +1156,7 @@ def _process_input(
 
     async def open_input(
         node: TSNodeLike,
-        execute_fn: Callable[..., Any],
-        call_stack: CallStack | None,
+        execute_line: Callable[[str], Awaitable[IOResult]],
     ) -> str:
         if get_process_sub_direction(node) == ProcessSubDirection.OUTPUT:
             raise _ProcessSubError
@@ -1163,7 +1166,7 @@ def _process_input(
         held.append((dev, path, allocation))
         inner = get_process_sub_body(node)
         if inner:
-            io = await child_line(context, execute_fn, inner, node, call_stack)
+            io = await execute_line(inner)
             dev.set_input(path, allocation, await materialize(io.stdout))
             context.frame.diagnostics.append(await materialize(io.stderr))
         return path

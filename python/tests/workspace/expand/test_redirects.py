@@ -177,6 +177,26 @@ async def test_procsub_output_word_fails_only_its_node():
     assert (io.stderr or b"").count(b"unsupported: process substitution") == 2
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(printf warning >&2) >(cat)",
+        "echo <(printf warning >&2) >(cat)",
+        "echo $(printf warning >&2) >(cat) 2>/dev/null",
+        "value=$(printf warning >&2)>(cat)",
+        "for value in $(printf warning >&2) >(cat); do echo BAD; done",
+    ],
+)
+@pytest.mark.asyncio
+async def test_procsub_refusal_preserves_earlier_diagnostics(command: str):
+    ws = await _workspace_at("/data")
+    io = await ws.shell(command + "; echo after=$?; echo <(true)")
+    assert (io.exit_code, io.stdout) == (0, b"after=2\n/dev/fd/63\n")
+    assert io.stderr == (
+        b"warningmirage: unsupported: process substitution >(...)\n"
+    )
+
+
 # ── quoted redirect targets ────────────────────
 
 

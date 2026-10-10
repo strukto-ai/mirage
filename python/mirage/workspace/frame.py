@@ -1,8 +1,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
 
-from mirage.shell.call_stack import CallStack
+from mirage.io.types import IOResult
 from mirage.shell.types import TSNodeLike
 
 
@@ -15,7 +14,7 @@ class ExecutionFrame:
     cmdsub_status: int = 0
     process_sub: (
         Callable[
-            [TSNodeLike, Callable[..., Any], CallStack | None], Awaitable[str]
+            [TSNodeLike, Callable[[str], Awaitable[IOResult]]], Awaitable[str]
         ]
         | None
     ) = None

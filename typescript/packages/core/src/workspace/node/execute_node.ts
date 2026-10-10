@@ -75,7 +75,7 @@ import {
   type RedirectRunner,
 } from '../../context/session_context.ts'
 import { expandRedirect } from '../expand/redirects.ts'
-import { type ExecuteFn, childLine, expandArith, expandNode } from '../expand/node.ts'
+import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
@@ -971,7 +971,7 @@ export async function executeNode(
       }
       return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
     } catch (err) {
-      if (err instanceof ExitSignal) {
+      if (err instanceof ExitSignal || err instanceof ProcessSubError) {
         const extra = diagnosticStderr(node, context)
         const merged = new Uint8Array(extra.length + err.stderr.length)
         merged.set(extra)
@@ -985,7 +985,7 @@ export async function executeNode(
   } catch (err) {
     if (!(err instanceof ProcessSubError)) throw err
     // The node fails, as an unsupported command does; the line goes on.
-    const stderr = encodeText('mirage: unsupported: process substitution >(...)\n')
+    const stderr = err.stderr
     return [
       null,
       new IOResult({ exitCode: 2, stderr }),
@@ -998,7 +998,9 @@ export async function executeNode(
 }
 
 /** An output process substitution, which mirage does not run. */
-class ProcessSubError extends Error {}
+class ProcessSubError extends Error {
+  stderr = encodeText('mirage: unsupported: process substitution >(...)\n')
+}
 
 /**
  * The hook that opens a node's input process substitutions. Each `<(...)`
@@ -1014,7 +1016,7 @@ function processInput(
   registry: MountRegistry,
   held: (readonly [DevVFS, string, number])[],
 ): NonNullable<EvaluationContext['frame']['processSub']> {
-  return async (node, executeFn, callStack) => {
+  return async (node, executeLine) => {
     if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
     const [dev] = registry.resolve('/dev/null')
     if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
@@ -1022,7 +1024,7 @@ function processInput(
     held.push([dev, path, allocation])
     const inner = getProcessSubBody(node)
     if (inner !== '') {
-      const io = await childLine(context, executeFn, inner, node, callStack)
+      const io = await executeLine(inner)
       dev.setInput(path, allocation, await materialize(io.stdout))
       context.frame.diagnostics.push(await materialize(io.stderr))
     }

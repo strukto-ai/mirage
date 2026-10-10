@@ -411,7 +411,13 @@ async function nodeChunks(
   }
 
   if (ntype === NT.PROCESS_SUBSTITUTION && context.frame.processSub !== null) {
-    return [piece(await context.frame.processSub(tsNode, executeFn, callStack))]
+    return [
+      piece(
+        await context.frame.processSub(tsNode, (text) =>
+          childLine(context, executeFn, text, tsNode, callStack),
+        ),
+      ),
+    ]
   }
 
   if (ntype === NT.COMMAND_SUBSTITUTION || ntype === NT.ARITHMETIC_EXPANSION) {

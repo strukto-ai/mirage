@@ -1,6 +1,5 @@
-import type { CallStack } from '../shell/call_stack.ts'
+import type { IOResult } from '../io/types.ts'
 import type { TSNodeLike } from '../shell/types.ts'
-import type { ExecuteFn } from './expand/node.ts'
 
 /** Temporary state of one evaluation; never part of a session record. */
 export class ExecutionFrame {
@@ -8,7 +7,7 @@ export class ExecutionFrame {
   cmdsubSeq = 0
   cmdsubStatus = 0
   processSub:
-    | ((node: TSNodeLike, executeFn: ExecuteFn, callStack: CallStack | null) => Promise<string>)
+    | ((node: TSNodeLike, executeLine: (text: string) => Promise<IOResult>) => Promise<string>)
     | null = null
   // The cancel channel for work running under this evaluation: killing a
   // background job aborts it, and the mount layer folds it into the signal
