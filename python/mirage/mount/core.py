@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from mirage.context import reset_current_session, set_current_session
-from mirage.errors.fs import enoent, erofs
+from mirage.errors.fs import enoent
 from mirage.mount.platform.macos import is_macos_metadata
 from mirage.mount.types import Handle, MountAttrs, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
@@ -223,13 +223,7 @@ class MountCore:
             path (str): mount path being removed or replaced.
             fn (Callable[[], Awaitable[None]]): the removal.
         """
-        if self._names_link(path):
-            return fn()
         return self._queue(self._removals, self.identity(path), fn)
-
-    def _names_link(self, path: str) -> bool:
-        links = self._files.links
-        return links is not None and links.is_link(self.resolve(path))
 
     async def _settled(self, key: str) -> None:
         """Wait for a flush or truncation of ``key`` still landing."""
@@ -335,11 +329,6 @@ class MountCore:
                 return target
         parent = path.rsplit("/", 1)[0] or "/"
         return posixpath.relpath(virtual_target, parent)
-
-    def drain_ops(self) -> list[dict[str, Any]]:
-        records = [r.to_dict() for r in self._files.records]
-        self._files.records.clear()
-        return records
 
     def held_size(self, path: str) -> int | None:
         """The length of the bytes an open handle on the file holds.
@@ -625,11 +614,7 @@ class MountCore:
             target (str): mount path of the link being created.
             source (str): what the link points to, as typed.
 
-        Raises:
-            OSError: EROFS when the workspace has no namespace links.
         """
-        if self._files.links is None:
-            raise erofs(target)
         stored = self.resolve(source) if source.startswith("/") else source
         await self._op(self._files.symlink(self.resolve(target), stored))
 
@@ -987,10 +972,6 @@ class MountCore:
         Args:
             path (str): mount path about to be removed or replaced.
         """
-        if self._names_link(path):
-            # Removing a link entry takes the link, never its target's
-            # bytes.
-            return
         key = self.identity(path)
         held = [
             ctx
@@ -999,8 +980,15 @@ class MountCore:
         ]
         if not held:
             return
+        virtual = self.resolve(path)
         try:
-            data = await self._op(self._files.read(self.resolve(path)))
+            if is_link(
+                await self._op(self._files.stat(virtual, nofollow=True))
+            ):
+                # Removing a link entry takes the link, never its target's
+                # bytes.
+                return
+            data = await self._op(self._files.read(virtual))
         except Exception as err:
             logger.warning(
                 "fuse: holding %s before it goes failed: %r", path, err

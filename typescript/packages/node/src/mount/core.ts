@@ -14,7 +14,6 @@
 
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
-import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import {
   ChunkedHandle,
@@ -43,7 +42,7 @@ import {
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { enoent, erofs } from '@struktoai/mirage-core/errors/fs'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { isMacosMetadata } from './platform/macos.ts'
 import type { MountAttrs, Handle } from './types.ts'
 
@@ -72,9 +71,9 @@ export interface MountCoreOptions {
  *
  * Every op goes through `ws.vfs`, which delegates to the dispatcher, so
  * a mount walks the same dispatcher as a shell line (mount modes, policies,
- * cache, invalidation) and every op it runs lands in `ws.records` for
- * `drainOps`. Reaching `ws.dispatch` from here instead would skip the
- * record; reaching a backend directly would skip the dispatcher.
+ * cache, invalidation) and every op it runs lands on the `ws.vfs.records`
+ * ledger. Reaching `ws.dispatch` from here instead would skip the record;
+ * reaching a backend directly would skip the dispatcher.
  */
 export class MountCore {
   readonly files: Files
@@ -273,13 +272,7 @@ export class MountCore {
    * there too would let two renames that cross wait on each other.
    */
   private removing(path: string, fn: () => Promise<void>): Promise<void> {
-    if (this.namesLink(path)) return fn()
     return this.queue(this.removals, this.identity(path), fn)
-  }
-
-  /** Whether `path` names a link entry: removing it takes the link, never its target's bytes. */
-  private namesLink(path: string): boolean {
-    return this.files.links?.isLink(this.resolve(path)) === true
   }
 
   /**
@@ -302,13 +295,6 @@ export class MountCore {
       if (queues.get(key) === tail) queues.delete(key)
     })
     return run
-  }
-
-  /** Drain and return accumulated op records (mirrors Python's drainOps). */
-  drainOps(): OpRecord[] {
-    const records = [...this.files.records]
-    this.files.records.length = 0
-    return records
   }
 
   /**
@@ -517,7 +503,6 @@ export class MountCore {
     // The write routes through the dispatcher like every other FUSE op, so
     // session grants and admission policies refuse a scoped kernel
     // mount exactly like a scoped shell.
-    if (this.files.links === null) throw erofs(dest)
     const stored = src.startsWith('/') ? this.resolve(src) : src
     await this.op(() => this.files.symlink(this.resolve(dest), stored))
   }
@@ -800,15 +785,18 @@ export class MountCore {
    * Mirrors Python's `MountCore._hold`.
    */
   private async hold(path: string): Promise<void> {
-    if (this.namesLink(path)) return
     const key = this.identity(path)
     const held = [...this.handles.values()].filter(
       (ctx) => ctx.key === key && ctx.chunked !== undefined,
     )
     if (held.length === 0) return
+    const virtual = this.resolve(path)
     let data: Uint8Array
     try {
-      data = await this.op(() => this.files.read(this.resolve(path)))
+      const own = await this.op(() => this.files.stat(virtual, undefined, { nofollow: true }))
+      // Removing a link entry takes the link, never its target's bytes.
+      if (isLink(own)) return
+      data = await this.op(() => this.files.read(virtual))
     } catch (err) {
       console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
       return

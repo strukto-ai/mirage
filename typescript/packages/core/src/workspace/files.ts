@@ -113,8 +113,8 @@ async function* recorded(
 export class Files {
   private readonly dispatchFn: DispatchFn
   private readonly sink: OpSink | null
-  // Injected namespace seam (workspace wires it); FUSE reads `links`
-  // for its symlink surface.
+  // Injected namespace seam (workspace wires it); the mount core follows
+  // `links` to recognise one file opened through a link and its target.
   readonly links: NamespaceLinks | null
   private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null

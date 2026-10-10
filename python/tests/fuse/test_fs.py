@@ -432,27 +432,27 @@ async def test_release_cleans_handles(seed_ws):
 
 
 @pytest.mark.asyncio
-async def test_drain_ops_returns_and_clears(rw_ws):
+async def test_mount_ops_land_on_the_workspace_ledger(rw_ws):
     await rw_ws.shell("tee /track.txt", stdin=b"x")
     fs = MirageFS(rw_ws.vfs)
     fh = fs.create("/new.txt", 0o644)
     fs.write("/new.txt", b"y", 0, fh)
     fs.flush("/new.txt", fh)
-    ops = fs.drain_ops()
-    assert any(o["op"] == "create" for o in ops)
-    assert any(o["op"] == "write" for o in ops)
-    assert len(fs.drain_ops()) == 0
+    ops = [r.op for r in rw_ws.vfs.records]
+    assert "create" in ops
+    assert "write" in ops
 
 
 @pytest.mark.asyncio
-async def test_drain_ops_read_deduplication(seed_ws):
+async def test_reads_through_a_handle_land_on_the_ledger(seed_ws):
     fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     fs.read("/a.txt", 1024, 0, fh)
     fs.read("/a.txt", 1024, 0, fh)
-    ops = fs.drain_ops()
-    read_ops = [o for o in ops if o["op"] == "read" and o["path"] == "/a.txt"]
-    assert len(read_ops) >= 1
+    reads = [
+        r for r in seed_ws.vfs.records if r.op == "read" and r.path == "/a.txt"
+    ]
+    assert len(reads) >= 1
 
 
 @pytest.mark.asyncio
@@ -473,19 +473,9 @@ async def test_fuse_read_uses_cache_when_populated():
 async def test_readdir_logs_ls_op(seed_ws):
     fs = MirageFS(seed_ws.vfs)
     fs.readdir("/", None)
-    ops = fs.drain_ops()
-    assert any(o["op"] == "readdir" and o["path"] == "/" for o in ops)
-
-
-@pytest.mark.asyncio
-async def test_total_ops_persists_across_drains(seed_ws):
-    fs = MirageFS(seed_ws.vfs)
-    fs.readdir("/", None)
-    first = fs.drain_ops()
-    fs.readdir("/sub", None)
-    second = fs.drain_ops()
-    assert len(first) >= 1
-    assert len(second) >= 1
+    assert any(
+        r.op == "readdir" and r.path == "/" for r in seed_ws.vfs.records
+    )
 
 
 @pytest.mark.asyncio
@@ -498,8 +488,7 @@ async def test_total_ops_counts_reads_and_writes(rw_ws):
     fh2 = fs.create("/g.txt", 0o644)
     fs.write("/g.txt", b"y", 0, fh2)
     fs.flush("/g.txt", fh2)
-    ops = fs.drain_ops()
-    assert len(ops) >= 3
+    assert len(rw_ws.vfs.records) >= 3
 
 
 def test_permission_error_logged_on_create():
@@ -515,8 +504,7 @@ def test_permission_error_not_counted_as_op():
     fs.core._files.records.clear()
     with pytest.raises(Exception):
         fs.create("/new.txt", 0o644)
-    ops = fs.drain_ops()
-    assert len(ops) == 0
+    assert ro_ws.vfs.records == []
 
 
 @pytest.mark.asyncio

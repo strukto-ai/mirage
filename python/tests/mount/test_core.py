@@ -24,7 +24,6 @@ import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
 from mirage.mount.core import MountCore
-from mirage.observe import OpRecord
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
@@ -568,23 +567,6 @@ async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
     got = seeded.attrs(epoch)
     assert got.mtime == 0
     assert got.ctime == 0
-
-
-def test_drain_ops_omits_internal_mount_identity():
-    ws = Workspace({"/data": RAMVFS()})
-    record = OpRecord(
-        op="read",
-        path="/data/file",
-        source="ram",
-        bytes=3,
-        timestamp=1,
-        duration_ms=2,
-        mount_id="internal-mount",
-    )
-    ws.vfs.records.append(record)
-    core = MountCore(ws.vfs)
-    assert core.drain_ops() == [record.to_dict()]
-    assert core.drain_ops() == []
 
 
 @pytest.mark.asyncio

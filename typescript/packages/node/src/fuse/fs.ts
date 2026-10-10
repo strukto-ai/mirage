@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '@struktoai/mirage-core/errors/index'
-import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
@@ -47,11 +46,6 @@ export class MirageFS {
 
   constructor(files: Files, options: MirageFSOptions = {}) {
     this.core = new MountCore(files, options)
-  }
-
-  /** Drain and return accumulated op records (mirrors Python's drainOps). */
-  drainOps(): OpRecord[] {
-    return this.core.drainOps()
   }
 
   // ── FUSE op surface (mirrors mfusepy Operations) ─────────────────

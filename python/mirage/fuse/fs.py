@@ -113,9 +113,6 @@ class MirageFS:
                 )
             raise OSError(code, os.strerror(code)) from err
 
-    def drain_ops(self) -> list[dict[str, Any]]:
-        return self.core.drain_ops()
-
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
         return stat_dict(self._call(self.core.fgetattr, path, fh))
 

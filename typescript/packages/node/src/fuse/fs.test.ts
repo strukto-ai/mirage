@@ -304,29 +304,18 @@ describe('MirageFS — read-only mount write consistency', () => {
   })
 })
 
-describe('MirageFS — drainOps()', () => {
-  it('returns and clears the workspace op records buffer', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    // Trigger a few ops
-    await callOp(mfs, 'getattr', '/data/greeting.txt')
-    await callOp(mfs, 'readdir', '/data')
-    const drained = mfs.drainOps()
-    expect(Array.isArray(drained)).toBe(true)
-    expect(mfs.drainOps()).toHaveLength(0)
-  })
-
+describe('MirageFS — the op ledger', () => {
   it('accounts for writes too, not only reads', async () => {
     // The mount runs every op through `ws.vfs`, which is what
     // records them; a write issued straight at the dispatcher would
-    // mutate the mount and leave drainOps reporting nothing.
+    // mutate the mount and leave the ledger reporting nothing.
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
     const bytes = Buffer.from('written through the mount\n')
     const [, fh] = await callOp<[number, number]>(mfs, 'create', '/data/fresh.txt', 0o100644)
     await callOp(mfs, 'write', '/data/fresh.txt', fh, bytes, bytes.byteLength, 0)
     await callOp(mfs, 'flush', '/data/fresh.txt', fh)
-    const ops = mfs.drainOps().map((r) => r.op)
+    const ops = ws.vfs.records.map((r) => r.op)
     expect(ops).toContain('create')
     expect(ops).toContain('write')
   })
