@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.errors.fs import enotsup
+from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
     CapacityState,
@@ -37,6 +38,7 @@ from mirage.vfs.types import (
     DuEntries,
     Effect,
     FindOptions,
+    ScanReason,
     SearchQuery,
     Target,
 )
@@ -605,25 +607,105 @@ class BaseVFS:
         """
         raise enotsup(self.name, "search", paths[0] if paths else "")
 
-    async def narrow_paths(
-        self, query: str, paths: list[PathSpec]
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        """The files under ``paths`` a content index says may hold
-        ``query``, so a recursive grep scans only those.
+        """Files under ``under`` whose content may contain ``text``.
 
-        A superset is harmless, since the scan still runs over the
-        answer; None means the index cannot answer and the scan walks
-        everything. Consulted only while ``content_search_enabled``.
+        grep and rg still walk, filter, order and label every file, and
+        read only the ones answered here, matched on ``vfs_path`` without
+        case, so an extra file costs a read and a missing one is a wrong
+        answer. A search that holds only keys names each one with
+        ``mounted_path(under[0], "/" + key)``. Return None when the answer
+        may be incomplete (an error, a truncated result, an index that
+        lags writes), and every file is read; raise to refuse the
+        command, and the error's message is what it prints.
 
         Args:
-            query (str): the whole-word literal.
-            paths (list[PathSpec]): the scopes.
+            text (str): plain text every match holds, never a pattern:
+                the pattern or each -e of grep and rg, or for a regex a
+                fixed piece of at least three characters every match
+                contains. Asked once per text; a file any answer holds
+                is read.
+            under (list[PathSpec]): the directories walked: grep's
+                directory operands under -r or -R, rg's directory
+                operands or the cwd.
+            whole_word (bool): True under -w or -x with a plain-text
+                pattern, where ``text`` is a whole word of every match;
+                False otherwise, where it may sit inside a word.
+            ignore_case (bool): True under -i, and under rg -S with a
+                lowercase pattern; folding case when False is fine.
+            index (IndexCacheStore): the mount's index.
         """
         return None
 
-    def content_search_enabled(self) -> bool:
-        """Whether this mount opted in to ``narrow_paths``."""
-        return False
+    async def lines_containing(
+        self,
+        path: PathSpec,
+        text: str,
+        *,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> ByteSource | None:
+        """The lines of ``path`` that may contain ``text``, in file order.
+
+        grep and rg match each line themselves, so an extra line is fine
+        and a missing one is a wrong answer. Each line keeps the newline
+        the file has, whole or streamed. The lines stand in for the file
+        when the output shows no line positions (no -n, -b, --column,
+        --vimgrep), no context (no -A, -B, -C) and there is one text;
+        otherwise the file is read only when some answer holds a line,
+        and only a stream's first chunk is pulled. None reads the file;
+        answer None for a file that may hold a NUL byte, since grep and rg
+        call such a file binary from bytes outside its matching lines.
+        Raise to refuse the command.
+
+        Args:
+            path (PathSpec): the file.
+            text (str): plain text every match holds, as
+                ``files_containing`` gets it.
+            ignore_case (bool): True under -i, and under rg -S with a
+                lowercase pattern.
+            index (IndexCacheStore): the mount's index.
+        """
+        return None
+
+    async def before_full_scan(
+        self,
+        command: str,
+        under: list[PathSpec],
+        reason: ScanReason,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        """Called before grep or rg reads a file no search answered.
+
+        Once per command: before the walk when neither search can be
+        asked, else at the first file ``lines_containing`` declines after
+        ``files_containing`` did not narrow, and a refusal then stands for
+        every such file. Return to let the scan run; raise to refuse it,
+        and the error's message is what the command prints (an OSError
+        raised at a file is that file's read error).
+
+        Args:
+            command (str): grep or rg.
+            under (list[PathSpec]): the directories about to be walked,
+                as ``files_containing`` gets them.
+            reason (ScanReason): why the search cannot stand in:
+                NO_SEARCH (no search on this mount or this path),
+                NO_TEXT (-f, or no plain text every match holds),
+                EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
+                --files-without-match, rg -c with --include-zero, without
+                -q), LINKS
+                (rg -L) or UNANSWERED (a search returned None).
+            index (IndexCacheStore): the mount's index.
+        """
+        return None
 
     def is_mounted(self) -> bool:
         """Whether the backend is there to answer at all."""

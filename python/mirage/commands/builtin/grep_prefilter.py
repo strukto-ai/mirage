@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 
+from mirage.utils.posix import folds_ascii_only
+
 LIMIT = 64
 # Long enough for a translated Unicode class: ripgrep's `\b` alone spells
 # its word class out four times, some 45,000 characters of host source.
@@ -189,6 +191,15 @@ class RequiredLiterals:
         return UNKNOWN
 
 
+def folds_by_unicode(pat: re.Pattern[str]) -> bool:
+    """Whether ``pat`` ignores case by Unicode folding (``ſ`` matches ``s``).
+
+    Args:
+        pat (re.Pattern[str]): the compiled line matcher.
+    """
+    return bool(pat.flags & re.IGNORECASE) and not folds_ascii_only(pat)
+
+
 def required_needles(pat: re.Pattern[str]) -> tuple[bytes, ...] | None:
     """Byte literals, one of which every line ``pat`` matches contains.
 
@@ -211,7 +222,7 @@ def required_needles(pat: re.Pattern[str]) -> tuple[bytes, ...] | None:
     needles = RequiredLiterals(pat.pattern).needles()
     if fold:
         needles = tuple(dict.fromkeys(needle.lower() for needle in needles))
-        if not pat.flags & re.ASCII and any(
+        if folds_by_unicode(pat) and any(
             UNICODE_FOLDED & set(needle) for needle in needles
         ):
             return None

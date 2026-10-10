@@ -34,6 +34,7 @@ from mirage import (
     command,
     register_vfs,
 )
+from mirage.utils.key_prefix import mounted_path
 
 # A whole custom backend in one script: a BaseVFS whose methods answer
 # over your data source. readdir, read and stat are enough for every
@@ -66,6 +67,14 @@ def _node(pages: dict, key: str):
             raise FileNotFoundError(key)
         node = node[part]
     return node
+
+
+def _pages(pages: dict, prefix: str = ""):
+    for name, child in pages.items():
+        if isinstance(child, dict):
+            yield from _pages(child, f"{prefix}{name}/")
+        else:
+            yield f"{prefix}{name}", child
 
 
 class PagesVFS(BaseVFS):
@@ -116,6 +125,25 @@ class PagesVFS(BaseVFS):
             content=ContentType.TEXT,
             fingerprint=hashlib.sha256(data).hexdigest()[:16],
         )
+
+    # Optional: say which pages may hold a text, and grep and rg read
+    # only those. What they print is unchanged; None reads every page.
+    # mounted_path names a page key at the prefix the walk runs under.
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec]:
+        fold = str.lower if ignore_case else str
+        return [
+            mounted_path(under[0], "/" + key)
+            for key, page in _pages(self.accessor.pages)
+            if fold(text) in fold(page)
+        ]
 
 
 # Optional: a bespoke domain verb, registered alongside the generics.

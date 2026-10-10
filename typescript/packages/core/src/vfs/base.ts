@@ -16,13 +16,21 @@ import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
+import type { ByteSource } from '../io/types.ts'
 import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { methodName, vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import { type DuEntries, type FindOptions, Effect, type SearchQuery, Target } from './types.ts'
+import {
+  type DuEntries,
+  type FindOptions,
+  Effect,
+  type ScanReason,
+  type SearchQuery,
+  Target,
+} from './types.ts'
 
 /**
  * The two keys the snapshot machinery reads out of a VFS's state.
@@ -510,19 +518,89 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * The files under `paths` a content index says may hold `query`, so a
-   * recursive grep scans only those. A superset is harmless, since the
-   * scan still runs over the answer; null means the index cannot answer
-   * and the scan walks everything. Consulted only while
-   * `contentSearchEnabled`.
+   * Files under `under` whose content may contain `text`. grep and rg still
+   * walk, filter, order and label every file, and read only the ones answered
+   * here, matched on `vfsPath` without case, so an extra file costs a read and
+   * a missing one is a wrong answer. A search that holds only keys names each one with
+   * `mountedPath(under[0], '/' + key)`. Resolve null when the answer may be
+   * incomplete (an error, a truncated result, an index that lags writes), and
+   * every file is read; reject to refuse the command, and the error's message
+   * is what it prints.
+   *
+   * @param text plain text every match holds, never a pattern: the pattern
+   *   or each -e of grep and rg, or for a regex a fixed piece of at least
+   *   three characters every match contains. Asked once per text; a file any
+   *   answer holds is read.
+   * @param under the directories walked: grep's directory operands under -r
+   *   or -R, rg's directory operands or the cwd.
+   * @param opts `wholeWord` is true under -w or -x with a plain-text
+   *   pattern, where `text` is a whole word of every match, and false
+   *   otherwise, where it may sit inside a word. `ignoreCase` is true under
+   *   -i, and under rg -S with a lowercase pattern; folding case when false
+   *   is fine.
+   * @param index the mount's index.
    */
-  narrowPaths(_query: string, _paths: PathSpec[]): Promise<PathSpec[] | null> {
+  filesContaining(
+    _text: string,
+    _under: PathSpec[],
+    _opts: { wholeWord: boolean; ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
     return Promise.resolve(null)
   }
 
-  /** Whether this mount opted in to `narrowPaths`. */
-  contentSearchEnabled(): boolean {
-    return false
+  /**
+   * The lines of `path` that may contain `text`, in file order. grep and rg
+   * match each line themselves, so an extra line is fine and a missing one is
+   * a wrong answer. Each line keeps the newline the file has, whole or
+   * streamed. The lines stand in for the file when the output shows no line
+   * positions (no -n, -b, --column, --vimgrep), no context (no -A, -B, -C) and
+   * there is one text; otherwise the file is read only when some answer holds
+   * a line, and only a stream's first chunk is pulled. null reads the file;
+   * answer null for a file that may hold a NUL byte, since grep and rg call
+   * such a file binary from bytes outside its matching lines. Reject to refuse
+   * the command.
+   *
+   * @param path the file.
+   * @param text plain text every match holds, as `filesContaining` gets it.
+   * @param opts `ignoreCase` is true under -i, and under rg -S with a
+   *   lowercase pattern.
+   * @param index the mount's index.
+   */
+  linesContaining(
+    _path: PathSpec,
+    _text: string,
+    _opts: { ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<ByteSource | null> {
+    return Promise.resolve(null)
+  }
+
+  /**
+   * Called before grep or rg reads a file no search answered, once per command:
+   * before the walk when neither search can be asked, else at the first file
+   * `linesContaining` declines after `filesContaining` did not narrow, and a
+   * refusal then stands for every such file. Resolve to let the scan run;
+   * reject to refuse it, and the error's message is what the command prints
+   * (a filesystem error rejected at a file is that file's read error).
+   *
+   * @param command grep or rg.
+   * @param under the directories about to be walked, as `filesContaining`
+   *   gets them.
+   * @param reason why the search cannot stand in: NO_SEARCH (no search on
+   *   this mount or this path), NO_TEXT (-f, or no plain text every match
+   *   holds), EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
+   *   --files-without-match, rg -c with --include-zero, without -q), LINKS
+   *   (rg -L) or UNANSWERED (a search resolved null).
+   * @param index the mount's index.
+   */
+  beforeFullScan(
+    _command: string,
+    _under: PathSpec[],
+    _reason: ScanReason,
+    _index?: IndexCacheStore,
+  ): Promise<void> {
+    return Promise.resolve()
   }
 
   /** Whether the backend is there to answer at all. */

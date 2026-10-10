@@ -1,6 +1,7 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../core/generic/find_eval.ts'
+import type { ByteSource } from '../io/types.ts'
 import type {
   PathSpec,
   JsonValue,
@@ -194,26 +195,55 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
 
 /** Optional resource search. Consumers validate their own metadata namespace. */
 /**
- * Files under the scopes that may hold the whole-word literal `query`. A
- * superset is harmless, since the scan still runs over the answer; null
- * means the index cannot answer and the scan walks everything.
+ * Why grep or rg reads every file instead of asking the mount. Mirrors
+ * Python's `ScanReason`. NO_SEARCH: no `filesContaining` or
+ * `linesContaining` on the mount, or a hide or path rule covers the walk.
+ * NO_TEXT: -f, or no plain text of three characters that every match holds
+ * (under -i, a word with a non-ASCII letter, or with k or s when case folds by
+ * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
+ * do not match. EVERY_FILE: rg --files-without-match, or rg -c or
+ * --count-matches with --include-zero, without -q, lists files that do not
+ * match, and rg leaves a binary one out. LINKS: rg -L follows links out of the walk. UNANSWERED:
+ * `filesContaining` resolved null, or `linesContaining` resolved null for a
+ * file.
  */
-export type NarrowPathsOp<A extends Accessor = Accessor> = (
+export const ScanReason = Object.freeze({
+  NO_SEARCH: 'the mount has no search',
+  NO_TEXT: 'the pattern has no plain text to search for',
+  EVERY_LINE: 'the output needs lines that do not match',
+  EVERY_FILE: 'the output lists files that do not match',
+  LINKS: 'links are followed',
+  UNANSWERED: 'the search could not answer',
+} as const)
+
+export type ScanReason = (typeof ScanReason)[keyof typeof ScanReason]
+
+/** Files under `under` whose content may contain `text`; null when the search cannot answer for every file. */
+export type FilesContainingOp<A extends Accessor = Accessor> = (
   accessor: A,
-  query: string,
-  paths: PathSpec[],
+  text: string,
+  under: PathSpec[],
+  opts: { wholeWord: boolean; ignoreCase: boolean },
+  index?: IndexCacheStore,
 ) => Promise<PathSpec[] | null>
 
-/**
- * A content index that narrows a recursive grep/rg to candidate files. The
- * scan still runs locally over the files it names, so an empty answer falls
- * back to the full walk: a search index lags recent writes. Mirrors Python's
- * `ContentSearchOps`.
- */
-export interface ContentSearchOps<A extends Accessor = Accessor> {
-  narrowPaths: NarrowPathsOp<A>
-  enabled: (accessor: A) => boolean
-}
+/** The lines of `path` that may contain `text`, in file order, whole or streamed; null when the search cannot answer for this file. */
+export type LinesContainingOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  text: string,
+  opts: { ignoreCase: boolean },
+  index?: IndexCacheStore,
+) => Promise<ByteSource | null>
+
+/** Called before grep or rg reads a file no search answered; reject to refuse. */
+export type BeforeFullScanOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  command: string,
+  under: PathSpec[],
+  reason: ScanReason,
+  index?: IndexCacheStore,
+) => Promise<void>
 
 export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>

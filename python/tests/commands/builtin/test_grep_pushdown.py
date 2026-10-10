@@ -440,6 +440,63 @@ def test_whole_word_literal_is_the_term_a_word_index_answers_for(
     )
 
 
+@pytest.mark.parametrize(
+    "pattern, fixed, whole_word, line_regexp, expected",
+    [
+        ("import", False, True, False, ["import"]),
+        ("import", False, False, True, ["import"]),
+        ("import", False, False, False, None),
+        ("ada\nbob", False, True, False, ["ada", "bob"]),
+        ("ada\nada", True, True, False, ["ada"]),
+        ("ada\n", False, True, False, None),
+        ("ada\nb.b", False, True, False, None),
+        ("ada\nb.b", True, True, False, ["ada", "b.b"]),
+        (None, False, True, False, None),
+    ],
+)
+def test_whole_word_literals_union_only_complete_alternatives(
+    pattern, fixed, whole_word, line_regexp, expected
+):
+    # A pattern list narrows by one search per alternative, so every
+    # alternative must be a whole-word literal; an empty one matches every
+    # line, and -x is a whole-line, hence whole-word, match.
+    assert (
+        grep_pushdown.whole_word_literals(
+            pattern, fixed, whole_word, line_regexp
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "pattern, flags, w, i, expected",
+    [
+        ("ada\nbob", 0, True, False, (("ada", "bob"), True)),
+        ("conn.*refused", 0, False, False, (("refused",), False)),
+        ("Conn.*TOMORROW", re.I, False, True, (("tomorrow",), False)),
+        ("Conn.*REFUSED", re.I, False, True, None),
+        ("a.b", 0, False, False, None),
+        ("café", re.I, True, True, None),
+        ("ada", re.I, True, True, (("ada",), True)),
+        ("sun", re.I, True, True, None),
+        ("sun", re.I | re.ASCII, True, True, (("sun",), True)),
+    ],
+)
+def test_search_terms_ask_words_or_the_text_every_match_holds(
+    pattern, flags, w, i, expected
+):
+    # Whole-word literals go as words; any other pattern as the needles
+    # every match holds, never shorter than three characters. Under -i a
+    # needle or word with s, k or i is dropped when case folds by Unicode
+    # (the long s folds to s), and a mount's folding of a non-ASCII
+    # literal is not trusted.
+    matcher = re.compile(pattern.replace("\n", "|"), flags)
+    assert (
+        grep_pushdown.search_terms(pattern, matcher, False, w, False, i)
+        == expected
+    )
+
+
 def test_text_candidates_drops_what_a_walk_never_reads():
     paths = [
         PathSpec.from_str_path(p)

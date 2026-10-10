@@ -28,7 +28,7 @@ from mirage.core.dropbox.readdir import readdir as _readdir
 from mirage.core.dropbox.rename import rename as _rename
 from mirage.core.dropbox.rm import rm_r as _rm_r
 from mirage.core.dropbox.rmdir import rmdir as _rmdir
-from mirage.core.dropbox.search import narrow_paths
+from mirage.core.dropbox.search import files_containing as _files_containing
 from mirage.core.dropbox.stat import stat as _stat
 from mirage.core.dropbox.unlink import unlink as _unlink
 from mirage.core.dropbox.watch import build_delta_hook
@@ -140,13 +140,18 @@ class DropboxVFS(BaseVFS):
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         await _copy(self.accessor, src, dst)
 
-    async def narrow_paths(
-        self, query: str, paths: list[PathSpec]
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        return await narrow_paths(self.accessor, query, paths)
-
-    def content_search_enabled(self) -> bool:
-        return self.accessor.config.content_search
+        if not whole_word or not self.accessor.config.content_search:
+            return None
+        return await _files_containing(self.accessor, text, under)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

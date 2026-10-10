@@ -23,6 +23,7 @@ import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
 import { CONTENT_HASH } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 function resourceTypeFor(entry: DropboxEntry): string {
   if (entry['.tag'] === 'folder') return 'dropbox/folder'
@@ -113,6 +114,7 @@ export async function readdir(
     })
     entries.push({ name: filename, entry, isDir })
   }
+  entries.sort((a, b) => compareCodePoints(a.name, b.name))
 
   if (index !== undefined) {
     await index.setDir(

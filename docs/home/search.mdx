@@ -1,0 +1,67 @@
+---
+title: Search
+description: How grep and rg use a mount's own search, which flags it covers, and which mounts answer.
+icon: magnifying-glass
+---
+
+`grep` and `rg` always walk, filter, order and label the files themselves. A
+mount's search only tells them which files and lines they can skip, so the
+output is byte for byte what a full scan prints.
+
+## What a mount answers
+
+| Method | Asked | Answer |
+| --- | --- | --- |
+| `files_containing` | which files under the walked directories may hold a text | the files, or none to read every file |
+| `lines_containing` | which lines of one file may hold a text | the lines (whole or streamed), or none to read the file |
+| `before_full_scan` | nothing can narrow, so files are about to be read in full | return to scan, raise to refuse |
+
+Box and Dropbox answer `files_containing` for whole words when the mount sets
+`content_search: true`. Postgres, MongoDB and Langfuse answer a single-operand
+grep or rg with their own query and fall back to the walk above. GitHub,
+Slack, Discord, Gmail and email run their own grep and rg. Any VFS can answer
+the three methods: see [Python](/python/vfs/new) and
+[TypeScript](/typescript/vfs/new).
+
+## Flags
+
+| Flag | grep | rg | Effect |
+| --- | --- | --- | --- |
+| pattern, `-e` | yes | yes | the text asked; for a regex, a plain-text piece of three or more characters every match holds |
+| `-w`, `-x` | yes | yes | asked as a whole word when the pattern is plain text |
+| `-i` | yes | yes, and `-S` with a lowercase pattern | asked ignoring case; a word with a non-ASCII letter, or with i, k or s under Unicode folding, scans instead |
+| `-r`, `-R` / directory operands | yes | yes, the cwd when none | the directories asked about |
+| `-n`, `-b`, `-A`, `-B`, `-C` | yes | yes, with `--column`, `--vimgrep`, `--stop-on-nonmatch`, `--null-data` | matching lines only decide whether a file is read |
+| `-a`, `--binary-files=text` | yes | `-a`, `--binary`, `-uuu` | binary-extension files are always read |
+| `-v` | scan | scan, with `--passthru` | output needs lines that do not match |
+| files without a match: grep `-L`, rg `--files-without-match` or `-c --include-zero` | narrows | scan, unless `-q` | rg leaves a binary file out of these |
+| `-f` | scan | scan | patterns the search never sees |
+| rg `-L` (follow links) | | scan | links lead out of the walk |
+| `--files`, `--type-list` | | no search | no file content is read, nothing is refused |
+
+Every other flag (`-l`, `-c`, `-q`, `-h`, `-m`, `--include`, `--exclude`,
+`-g`, `-t`, ...) is applied by the walk as usual.
+
+## Always read
+
+A file named on the command line, a binary-extension file under `-a`, and any
+path under a hide, a path rule or a `pre_vfs` policy, where the search is not
+asked at all.
+
+## Refusing a scan
+
+When nothing can narrow, `before_full_scan` is called once, before the first
+file read in full, with why:
+
+| Reason | When |
+| --- | --- |
+| `NO_SEARCH` | the mount answers neither search, or a hide or path rule covers the walk |
+| `NO_TEXT` | `-f`, or no plain text every match holds |
+| `EVERY_LINE` | `-v`, rg `--passthru` |
+| `EVERY_FILE` | rg `--files-without-match` or `-c --include-zero`, without `-q` |
+| `LINKS` | rg `-L` |
+| `UNANSWERED` | a search answered none |
+
+Raise from it to refuse: the command prints `grep: <message>` and exits 1.
+A filesystem error raised at a file, after `lines_containing` declined it, is
+that file's read error instead: each such file reports it and grep exits 2.

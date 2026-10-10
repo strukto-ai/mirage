@@ -167,6 +167,15 @@ def compile_posix_regex(
     )
 
 
+def folds_ascii_only(pattern: re.Pattern[str]) -> bool:
+    """Whether ``pattern`` ignores case for ASCII letters only, as POSIX grep does.
+
+    Args:
+        pattern (re.Pattern[str]): a compiled matcher.
+    """
+    return bool(pattern.flags & re.ASCII)
+
+
 def posix_line_matcher(
     pattern: re.Pattern[str], nonempty: bool = False
 ) -> Callable[[str], bool]:
