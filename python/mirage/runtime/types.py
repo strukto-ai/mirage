@@ -199,6 +199,10 @@ class VFSEntry:
             mtime collapses to once a stat did happen).
         rdev (int): encoded logical major:minor for a character device,
             otherwise 0.
+        atime_ns (int | None): access time a stat reported, on the same
+            rows as the mode.
+        uid (int | None): owner a stat reported; None when it had none.
+        gid (int | None): group, read the same way.
     """
 
     path: str
@@ -208,6 +212,9 @@ class VFSEntry:
     mode: int | None = None
     mtime_ns: int | None = None
     rdev: int = 0
+    atime_ns: int | None = None
+    uid: int | None = None
+    gid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

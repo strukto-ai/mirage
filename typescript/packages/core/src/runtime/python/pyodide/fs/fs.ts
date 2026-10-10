@@ -144,8 +144,9 @@ function ownRow(sync: SyncVFS, path: string, entry: VFSEntry): VFSEntry | VFSSta
   }
 }
 
-/** The owner a mount's row reports, kept on the node `getattr` reads. */
-function takeOwner(node: FSNode, stat: VFSStat): void {
+/** The owner a mount's row reports, kept on the node `getattr` reads; the
+ * owner and the group each on its own, since a chown may set either. */
+function takeOwner(node: FSNode, stat: VFSStat | VFSEntry): void {
   if (typeof stat.uid === 'number') node.uid = stat.uid
   if (typeof stat.gid === 'number') node.gid = stat.gid
 }
@@ -204,6 +205,7 @@ export class PyodideFs {
     const streamOps: StreamOps = {
       open: this.streamOpen.bind(this),
       close: (stream) => {
+        stream.node.opens = Math.max(0, (stream.node.opens ?? 1) - 1)
         this.settle(this.nodes.pathOf(stream.node))
       },
       read: this.streamRead.bind(this),
@@ -448,8 +450,8 @@ export class PyodideFs {
     const node = this.nodes.makeNode(parent, name, mode, stat.rdev ?? 0)
     node.usedBytes = stat.size
     if (stat.mtimeMs !== undefined) node.atime = node.mtime = node.ctime = stat.mtimeMs
-    if ('atimeMs' in stat) node.atime = stat.atimeMs
-    if ('uid' in stat) takeOwner(node, stat)
+    if (stat.atimeMs !== undefined) node.atime = stat.atimeMs
+    takeOwner(node, stat)
     if (target !== undefined) node.link = target
     else if (this.host.isFile(mode)) node.loaded = false
     // Emscripten's getdents looks up every name it lists, so a row the
@@ -486,17 +488,25 @@ export class PyodideFs {
   }
 
   /**
-   * Fetch a node's bytes on its first open. A writing open reads what is
-   * stored, since its writes land on that; a reading one the rendering.
+   * Fetch a node's bytes for an open. A writing open reads what is stored,
+   * since its writes land on that; a reading one the rendering. Bytes
+   * already held in the other view are fetched again only when no stream
+   * has the node open and nothing for it is pending (a close lands the
+   * file's writes): a stream opened beside another shares its bytes.
    */
   private loadContents(node: FSNode, raw = false): void {
     const sync = this.sync
-    if (node.loaded !== false) return
     const path = this.nodes.pathOf(node)
+    if (node.loaded === undefined) return
+    if (node.loaded) {
+      const pending = (node.opens ?? 0) > 0 || this.deferred.has(path)
+      if (node.raw === raw || pending) return
+    }
     const bytes = this.readThrough([path], () => sync.read(path, raw))
     node.contents = bytes
     node.usedBytes = bytes.length
     node.loaded = true
+    node.raw = raw
   }
 
   /**
@@ -534,6 +544,7 @@ export class PyodideFs {
 
   private streamOpen(stream: FSStream): void {
     this.loadContents(stream.node, (stream.flags & O_ACCMODE) !== 0)
+    stream.node.opens = (stream.node.opens ?? 0) + 1
   }
 
   private streamRead(

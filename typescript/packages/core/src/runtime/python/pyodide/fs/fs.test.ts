@@ -697,6 +697,36 @@ f.close()
     ])
   })
 
+  it('fetches the other view for an open once the last one closed', async () => {
+    const p = prefix()
+    const row = { size: 6, isDir: false, mode: FILE_MODE, mtimeMs: 0 }
+    const sync = syncOver({}, { [`${p}a.txt`]: row, [`${p}b.txt`]: row }, [])
+    mountOver(p, {
+      ...sync,
+      read: (_path, raw = false) => enc.encode(raw ? 'STORED' : 'RENDER'),
+    })
+    await py.runPythonAsync(`
+open('${p}a.txt', 'r+').close()
+_a = open('${p}a.txt').read()
+open('${p}b.txt').read()
+f = open('${p}b.txt', 'r+')
+_b = f.read()
+f.close()
+`)
+    expect([py.globals.get('_a'), py.globals.get('_b')]).toEqual(['RENDER', 'STORED'])
+  })
+
+  it('keeps a group the mount reports without an owner', async () => {
+    const p = prefix()
+    const row = { size: 1, isDir: false, mode: FILE_MODE, mtimeMs: 0, gid: 20 }
+    mountOver(p, syncOver({}, { [`${p}g.txt`]: row }, []))
+    await py.runPythonAsync(`
+import os
+_gid = os.stat('${p}g.txt').st_gid
+`)
+    expect(py.globals.get('_gid')).toBe(20)
+  })
+
   // A truncating open reaches setattr too (Emscripten routes the resize
   // through it), and that must not turn into a metadata write the guest
   // never asked for: the bytes are the mutation, the stamp is not.

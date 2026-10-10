@@ -108,6 +108,10 @@ export interface FSNode {
   /** The owner the mount reported; absent reads as 0. */
   uid?: number
   gid?: number
+  /** Whether the loaded bytes are the stored ones rather than the
+   * rendering, and how many streams have the node open. */
+  raw?: boolean
+  opens?: number
   /**
    * A symlink's target, verbatim as it was typed. Emscripten's own
    * MEMFS keeps it under this name and `FS.readlink` reads it, so the
