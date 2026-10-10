@@ -94,6 +94,63 @@ describe('handleRedirect > / >>', () => {
     expect(decode(writes[0]?.data ?? null)).toBe('new')
     expect(dispatch.mock.calls.map(([op]) => op)).toEqual(['append', 'append'])
   })
+
+  // A `>` on stdout of an output-only builtin opens with its output in one
+  // write; a `>>` target opens first, and a target nothing reaches still
+  // opens, empty.
+  it.each([
+    ['one-target', 'echo', ['hi'], [[1, '/ram/f', false]], [['write', '/ram/f', 'hi\n']]],
+    [
+      'append-opens-first',
+      'echo',
+      ['hi'],
+      [[1, '/ram/f', true]],
+      [
+        ['append', '/ram/f', ''],
+        ['append', '/ram/f', 'hi\n'],
+      ],
+    ],
+    ['no-output', ':', [], [[1, '/ram/f', false]], [['write', '/ram/f', '']]],
+  ] as const)(
+    'opens an output-only target with its output (%s)',
+    async (_id, name, args, targets, ops) => {
+      const calls: [string, string, string][] = []
+      const dispatch = vi.fn<DispatchFn>((op, path, opArgs) => {
+        if (op === 'write' || op === 'append' || op === 'pwrite') {
+          calls.push([op, path.virtual, decode((opArgs?.[0] as Uint8Array | undefined) ?? null)])
+        }
+        return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+      })
+      const output = { ':': null, echo: encode('hi\n') }[name]
+      const execute: ExecuteNodeFn = () =>
+        Promise.resolve([output, new IOResult(), new ExecutionNode()])
+      const redirects = targets.map(
+        ([fd, target, append]) =>
+          new Redirect({
+            fd,
+            target,
+            kind: RedirectKind.STDOUT,
+            append,
+          }),
+      )
+      await handleRedirect(
+        execute,
+        dispatch,
+        STUB_NODE,
+        redirects,
+        new EvaluationContext(new SessionState({ sessionId: 'test' })),
+        null,
+        null,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        name,
+        args,
+      )
+      expect(calls).toEqual(ops)
+    },
+  )
 })
 
 describe('handleRedirect < (stdin)', () => {
@@ -727,19 +784,22 @@ describe('handleRedirect unwritable > target', () => {
     }
   })
 
-  it.each(['echo x >> /nodir/f', 'echo x 2> /nodir/f', '> /nodir/f'])(
-    'spells %s the same way',
-    async (line) => {
-      const { ws } = await makeIntegrationWS()
-      try {
-        const [exit, , err] = await runResult(ws, line)
-        expect(exit).toBe(1)
-        expect(err).toBe('/nodir/f: No such file or directory\n')
-      } finally {
-        await ws.close()
-      }
-    },
-  )
+  it.each([
+    'echo x >> /nodir/f',
+    'echo x 2> /nodir/f',
+    '> /nodir/f',
+    'echo x &> /nodir/f',
+    "printf '%d\\n' abc > /nodir/f",
+  ])('spells %s the same way', async (line) => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, , err] = await runResult(ws, line)
+      expect(exit).toBe(1)
+      expect(err).toBe('/nodir/f: No such file or directory\n')
+    } finally {
+      await ws.close()
+    }
+  })
 
   it('stops at the first failure and skips the later target', async () => {
     // GNU: `echo x > /nodir/f > /data/out` reports /nodir/f once and

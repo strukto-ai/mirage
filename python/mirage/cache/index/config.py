@@ -18,6 +18,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
+
 
 class ResourceType(str, Enum):
     FILE = "file"
@@ -59,6 +61,12 @@ class IndexType(str, Enum):
 class LookupStatus(str, Enum):
     EXPIRED = "expired"
     NOT_FOUND = "not_found"
+
+
+class ListedMiss(Enum):
+    """A name missing from a cached listing this command did not fetch."""
+
+    UNTRUSTED = "untrusted"
 
 
 class IndexEntry(BaseModel):
@@ -126,4 +134,4 @@ class IndexConfig(BaseModel):
 class RedisIndexConfig(IndexConfig):
     type: IndexType = IndexType.REDIS
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "mirage:index:"
+    key_prefix: str = DEFAULT_KEY_PREFIX

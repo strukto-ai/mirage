@@ -42,6 +42,20 @@ export function commandStarted(): number | null {
 }
 
 /**
+ * The running command's own stamp, for a check that it fetched a listing.
+ *
+ * On an isolating runtime that is `commandStarted`. On the fallback storage
+ * the latest live stamp may be another command's, so with more than one
+ * command live this answers null: no listing is proven the caller's own. A
+ * replayed scope (a command's output drained later) repeats its own stamp,
+ * so stamps are counted once each. Mirrors Python's `sole_command_started`.
+ */
+export function soleCommandStarted(): number | null {
+  const stamps = new Set(started.liveStores())
+  return stamps.size === 1 ? (stamps.values().next().value ?? null) : null
+}
+
+/**
  * Mark one command's run, so a fresh listing it writes can be trusted.
  *
  * Entered before the command's words expand, so its own globs count. A

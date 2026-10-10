@@ -598,7 +598,7 @@ async def test_a_dropbox_held_write_costs_one_lookup_more(drive, workspace):
         log = drive.dropbox.log[before:]
         counts.append([name for name, _ in log if name != "token"])
         drive.put("f", SEED["f"])
-    assert counts == [["upload", "upload"], ["get_metadata", "upload"] * 2]
+    assert counts == [["upload"], ["get_metadata", "upload"]]
 
 
 @pytest.mark.asyncio
@@ -686,3 +686,30 @@ async def test_an_unread_dropbox_destination_retaken_is_refused_once(
     assert drive.fake.read("g") == b"new\n"
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (0, "", "")
     assert drive.fake.read("g") == b"one\n"
+
+
+@pytest.mark.asyncio
+@DROPBOX
+async def test_a_read_past_an_outdated_listing_keeps_the_version(
+    drive, workspace
+):
+    ws = workspace()
+    await _run(ws, "ls /dbx")
+    drive.put("n", b"v1\n")
+    assert await _run(ws, "cat /dbx/n") == (0, "v1\n", "")
+    drive.put("n", b"theirs\n")
+    code, _, err = await _run(ws, "echo mine > /dbx/n")
+    assert (code, err) == (1, f"/dbx/n: {STALE}\n")
+    assert drive.fake.read("n") == b"theirs\n"
+
+
+@pytest.mark.asyncio
+async def test_an_append_keeps_a_file_created_after_the_listing(
+    drive, workspace
+):
+    ws = workspace(WritePolicy.UNCONDITIONAL)
+    await _run(ws, f"ls {drive.root}")
+    drive.put("n", b"v1\n")
+    code, _, err = await _run(ws, f"echo x >> {drive.root}/n")
+    assert (code, err) == (0, "")
+    assert drive.fake.read("n") == b"v1\nx\n"

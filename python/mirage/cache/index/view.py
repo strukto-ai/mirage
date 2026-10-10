@@ -50,6 +50,7 @@ class IndexView(IndexCacheStore):
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         note_written: Callable[[str], None] | None = None,
+        listed_this_command: Callable[[str], bool] | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
     ) -> None:
         """Args:
@@ -70,6 +71,8 @@ class IndexView(IndexCacheStore):
             serves every cached listing.
         note_written (Callable[[str], None] | None): told each folder
             whose listing this view has just written.
+        listed_this_command (Callable[[str], bool] | None): whether the
+            running command fetched a folder's listing; None answers False.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
         """
@@ -83,12 +86,18 @@ class IndexView(IndexCacheStore):
         self._on_gone = on_gone
         self._may_serve_listing = may_serve_listing
         self._note_written = note_written
+        self._command_listed = listed_this_command
         self._excluded_prefixes = excluded_prefixes
 
     @property
     def store(self) -> IndexCacheStore:
         """The store this view writes through."""
         return self._store
+
+    def listed_this_command(self, folder: str) -> bool:
+        return self._command_listed is not None and self._command_listed(
+            folder
+        )
 
     @property
     def ttl(self) -> float:

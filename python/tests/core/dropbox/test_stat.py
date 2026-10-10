@@ -60,10 +60,6 @@ async def _meta_500(_tm, _endpoint, _body):
     raise DropboxApiError("boom", 500)
 
 
-async def _all_absent(_tm, _endpoint, _body):
-    raise DropboxApiError("nf", 409, "path/not_found/...")
-
-
 async def _list_500(_tm, endpoint, _body):
     if endpoint == "/files/list_folder":
         raise DropboxApiError("boom", 500)
@@ -78,6 +74,16 @@ async def _under_file(_tm, endpoint, body):
             return {".tag": "file", "name": "a.txt"}
         raise DropboxApiError("nf", 409, "path/not_found/...")
     raise AssertionError(f"unexpected endpoint {endpoint}")
+
+
+class _AbsentRpc:
+    def __init__(self) -> None:
+        self.metadata_paths: list[str] = []
+
+    async def __call__(self, _tm, endpoint, body):
+        if endpoint == "/files/get_metadata":
+            self.metadata_paths.append(body["path"])
+        raise DropboxApiError("nf", 409, "path/not_found/...")
 
 
 @pytest.fixture
@@ -310,7 +316,7 @@ async def test_stat_miss_after_populate_is_enoent(dropbox_accessor, index):
                 index,
             )
     assert excinfo.value.filename == "/note.txt"
-    assert rpc.list_requests == 1
+    assert (rpc.list_requests, rpc.metadata_paths) == (1, [])
 
 
 @pytest.mark.asyncio
@@ -336,9 +342,10 @@ async def test_stat_under_mount_prefix(dropbox_accessor, index):
 @pytest.mark.asyncio
 async def test_stat_failed_populate_is_enoent(dropbox_accessor, index):
     # A genuinely missing parent (409 on the listing and on every ancestor
-    # probe) surfaces as ENOENT through readdir; stat swallows that and
-    # answers its own ENOENT naming the child, not the parent.
-    with patch(RPC, new=_all_absent):
+    # probe) surfaces as ENOENT through readdir; stat answers its own ENOENT
+    # naming the child, not the parent, and never asks for the child by path.
+    rpc = _AbsentRpc()
+    with patch(RPC, new=rpc):
         with pytest.raises(FileNotFoundError) as excinfo:
             await stat(
                 dropbox_accessor,
@@ -350,6 +357,7 @@ async def test_stat_failed_populate_is_enoent(dropbox_accessor, index):
                 index,
             )
     assert excinfo.value.filename == "/ghost/missing.txt"
+    assert "/ghost/missing.txt" not in rpc.metadata_paths
 
 
 @pytest.mark.asyncio
@@ -531,3 +539,52 @@ async def test_stat_from_api_answer_in_another_case_is_enoent(
     with patch(RPC, new=rpc):
         with pytest.raises(FileNotFoundError):
             await stat(dropbox_accessor, PathSpec.from_str_path("/A.TXT"))
+
+
+A_TXT = PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/")
+
+
+async def _listed_without_a(accessor, index) -> FakeDropboxRpc:
+    # The listing was cached before another client created a.txt: a miss
+    # there is no proof, so stat asks once by path instead of answering
+    # ENOENT until the listing's ttl.
+    root = PathSpec(vfs_path="", virtual="/", directory="/")
+    with patch(RPC, new=FakeDropboxRpc(entries=[FOLDER_ENTRY])):
+        await readdir(accessor, root, index)
+    return FakeDropboxRpc(entries=[FOLDER_ENTRY, FILE_ENTRY])
+
+
+class _CountingIndex(RAMIndexCacheStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.listings = 0
+
+    async def list_dir(self, vfs_path: str):
+        self.listings += 1
+        return await super().list_dir(vfs_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata, expected",
+    [(FILE_ENTRY, (FileType.FILE, "hash-a")), (None, FileNotFoundError)],
+    ids=["found", "absent"],
+)
+async def test_a_name_past_an_earlier_listing_asks_once(
+    dropbox_accessor, metadata, expected
+):
+    # One get_metadata and one read of the cached listing (one MGET of the
+    # whole folder on a Redis index).
+    index = _CountingIndex()
+    rpc = await _listed_without_a(dropbox_accessor, index)
+    index.listings = 0
+    rpc.metadata = metadata
+    with patch(RPC, new=rpc):
+        if isinstance(expected, tuple):
+            out = await stat(dropbox_accessor, A_TXT, index)
+            assert (out.type, out.fingerprint) == expected
+        else:
+            with pytest.raises(expected):
+                await stat(dropbox_accessor, A_TXT, index)
+    assert (rpc.metadata_paths, rpc.list_requests) == (["/a.txt"], 0)
+    assert index.listings == 1

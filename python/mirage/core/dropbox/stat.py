@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 import posixpath
+from functools import partial
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index.config import ListedMiss
 from mirage.cache.index.ram import ListingCheckStore
+from mirage.cache.index.warm import entry_or_listed_miss
 from mirage.core.dropbox.api import get_metadata
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
@@ -29,8 +31,6 @@ from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-logger = logging.getLogger(__name__)
 
 
 def stat_from_entry(entry: dict[str, Any]) -> FileStat:
@@ -64,12 +64,10 @@ def stat_from_entry(entry: dict[str, Any]) -> FileStat:
 async def _stat_from_api(
     accessor: DropboxAccessor, path: PathSpec
 ) -> FileStat:
-    # API-truthful stat for index-less callers (unlink/rmdir
-    # classification, walk fallbacks) and the fresh checks' throwaway
-    # store: one get_metadata. Only a not_found or not_folder 409 is a
-    # miss; any other (restricted_content, ...) names a path that may
-    # exist, so a fresh probe must not call it gone. get_metadata matches
-    # names case-insensitively where a listing is exact.
+    # One get_metadata: for index-less callers, the fresh checks' store
+    # and a name missing from a listing the running command did not fetch.
+    # Only a not_found or not_folder 409 is a miss; any other names a path
+    # that may exist. get_metadata matches names case-insensitively.
     try:
         entry = await get_metadata(
             accessor.token_manager, dropbox_path_of(accessor, path)
@@ -97,48 +95,38 @@ async def stat(
         return await _stat_from_api(accessor, path)
     virtual_key = prefix + "/" + key if prefix else "/" + key
 
-    result = await index.get(virtual_key)
-    if result.entry is None:
+    entry = (await index.get(virtual_key)).entry
+    if entry is None:
         parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
-        try:
-            await readdir(
-                accessor,
-                PathSpec(
-                    virtual=parent_virtual,
-                    directory=parent_virtual,
-                    vfs_path=mount_key(parent_virtual, prefix),
-                ),
-                index=index,
-            )
-        except FileNotFoundError as exc:
-            # readdir already maps a genuinely missing path to ENOENT, so
-            # catch only that. A non-409 DropboxApiError (a 5xx/429 while
-            # listing the parent) was previously swallowed here and
-            # re-answered as a destructively actionable false ENOENT; it now
-            # surfaces. NotADirectoryError (a path under a file) was never in
-            # this catch and already propagated.
-            logger.debug(
-                "stat found no parent listing for %s: %s", virtual, exc
-            )
-        result = await index.get(virtual_key)
-        if result.entry is None:
+        parent = PathSpec(
+            virtual=parent_virtual,
+            directory=parent_virtual,
+            vfs_path=mount_key(parent_virtual, prefix),
+        )
+        found = await entry_or_listed_miss(
+            index, virtual_key, partial(readdir, accessor, parent, index=index)
+        )
+        if found is ListedMiss.UNTRUSTED:
+            return await _stat_from_api(accessor, path)
+        if found is None:
             raise enoent(virtual)
-    if result.entry.resource_type == "dropbox/folder":
+        entry = found
+    if entry.resource_type == "dropbox/folder":
         return FileStat(
-            name=result.entry.vfs_name or result.entry.name,
+            name=entry.vfs_name or entry.name,
             type=FileType.DIRECTORY,
-            modified=result.entry.remote_time,
-            extra={"dropbox_id": result.entry.id},
+            modified=entry.remote_time,
+            extra={"dropbox_id": entry.id},
         )
     return FileStat(
-        name=result.entry.vfs_name or result.entry.name,
-        size=result.entry.size,
+        name=entry.vfs_name or entry.name,
+        size=entry.size,
         type=FileType.FILE,
-        content=content_type_for_path(result.entry.vfs_name),
-        modified=result.entry.remote_time,
-        fingerprint=token_of(result.entry.extra.get(CONTENT_HASH)),
+        content=content_type_for_path(entry.vfs_name),
+        modified=entry.remote_time,
+        fingerprint=token_of(entry.extra.get(CONTENT_HASH)),
         extra={
-            "dropbox_id": result.entry.id,
-            "resource_type": result.entry.resource_type,
+            "dropbox_id": entry.id,
+            "resource_type": entry.resource_type,
         },
     )

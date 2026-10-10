@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { enoent, enotdir } from '../../errors/fs.ts'
-import { IndexEntry, LookupStatus } from './config.ts'
+import { IndexEntry, ListedMiss, LookupStatus } from './config.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import { IndexCacheStore } from './store.ts'
-import { entryOrWarm } from './warm.ts'
+import { entryOrListedMiss, entryOrWarm } from './warm.ts'
 
 const KEY = '/owned/notes.json'
 
@@ -370,4 +370,43 @@ it('releases a parent after the refresh rejects', async () => {
     index.setDir('/owned', [['notes.json', entryFor('new')]]),
   )
   expect(found?.id).toBe('new')
+})
+
+function past(): Date {
+  return new Date(Date.now() - 1000)
+}
+
+class AskedIndex extends RAMIndexCacheStore {
+  readonly asked: string[] = []
+
+  constructor(private readonly listed: boolean) {
+    super()
+  }
+
+  override listedThisCommand(folder: string): boolean {
+    this.asked.push(folder)
+    return this.listed
+  }
+}
+
+describe('cache/index/warm: entryOrListedMiss', () => {
+  // Only a complete, unexpired listing the running command did not fetch
+  // answers UNTRUSTED; with no warm, every other state answers null, as
+  // entryOrWarm does. The trust question names the key's folder.
+  it.each([
+    ['earlier-listing-lacks-it', false, 'absent', ListedMiss.UNTRUSTED],
+    ['this-command-listed-it', true, 'absent', null],
+    ['expired', false, 'expired', null],
+    ['partial', false, 'partial', null],
+    ['no-listing', false, 'none', null],
+  ] as const)('%s', async (_id, listed, state, found) => {
+    const index = new AskedIndex(listed)
+    if (state === 'absent') await index.setDir('/owned', [['old.json', entryFor('old')]])
+    if (state === 'expired') {
+      await index.setDir('/owned', [['old.json', entryFor('old')]], past())
+    }
+    if (state === 'partial') await index.setPartialDir('/owned', [['old.json', entryFor('old')]])
+    expect(await entryOrListedMiss(index, KEY, null)).toBe(found)
+    expect(index.asked.every((folder) => folder === '/owned')).toBe(true)
+  })
 })

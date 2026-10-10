@@ -517,8 +517,31 @@ describe('conditional writes only Box has', () => {
   })
 })
 
+describe.each(['box', 'dropbox'] as const)('an append on %s', (kind) => {
+  use(kind)
+
+  it('keeps a file created after the listing', async () => {
+    const ws = await workspace(WritePolicy.UNCONDITIONAL)
+    await run(ws, `ls ${drive.root}`)
+    drive.put('n', 'v1\n')
+    const [code, , err] = await run(ws, `echo x >> ${drive.root}/n`)
+    expect([code, err]).toEqual([0, ''])
+    expect(drive.text('n')).toBe('v1\nx\n')
+  })
+})
+
 describe('conditional writes only Dropbox has', () => {
   use('dropbox')
+
+  it('keeps the version a read past an outdated listing took', async () => {
+    const ws = await workspace()
+    await run(ws, 'ls /dbx')
+    drive.put('n', 'v1\n')
+    expect(await run(ws, 'cat /dbx/n')).toEqual([0, 'v1\n', ''])
+    drive.put('n', 'theirs\n')
+    expect(await run(ws, 'echo mine > /dbx/n')).toEqual([1, '', `/dbx/n: ${STALE}\n`])
+    expect(drive.text('n')).toBe('theirs\n')
+  })
 
   it('costs a held write one lookup more than a plain one', async () => {
     const routes: string[][] = []
@@ -530,10 +553,7 @@ describe('conditional writes only Dropbox has', () => {
       routes.push(drive.dropbox.log.slice(before).filter((r) => r !== 'token'))
       drive.put('f', SEED.f ?? '')
     }
-    expect(routes).toEqual([
-      ['upload', 'upload'],
-      ['get_metadata', 'upload', 'get_metadata', 'upload'],
-    ])
+    expect(routes).toEqual([['upload'], ['get_metadata', 'upload']])
   })
 
   it.each([

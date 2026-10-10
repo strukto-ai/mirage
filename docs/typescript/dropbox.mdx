@@ -92,6 +92,25 @@ slightly stale results are acceptable. See
 [Dropbox (Python) — Search push-down](/python/vfs/dropbox#search-push-down) for the
 mirrored Python knob.
 
+## Names missing from a listing
+
+A name missing from a cached listing that the running command did not
+fetch is looked up on Dropbox by path before mirage answers that it does
+not exist: one `get_metadata` for a `stat`, or the download itself for a
+read. A file another client created after the listing is therefore found,
+and `>>`, `touch` and `sed -i` act on it instead of replacing it.
+
+A listing the running command fetched itself is trusted as is, for the
+whole command. Each command of a script is its own command, but one
+long-running command, such as a program a runtime runs, does not see a
+file another client creates after it listed the folder.
+
+Some lookups run outside any shell command: FUSE, programmatic calls,
+`[ ]` and `[[ ]]` tests, and a redirect on anything but a simple command
+(a brace group, subshell, loop, `if` or `case`). No listing is the
+caller's own there, so each lookup of a name missing from a cached
+listing costs one request.
+
 ## Reads under `fresh`
 
 Under `read: fresh`, a cached file is checked against its `content_hash`

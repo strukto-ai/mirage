@@ -864,6 +864,55 @@ async def test_find_walks_every_start_point_in_operand_order():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("door", ["native", "walk"])
+async def test_find_stats_each_start_point_once(door):
+    """Streaming a start point's own row early must not stat it again.
+
+    Each stat of a start point is a HEAD and a probe listing on an
+    object store, so a second one doubles what find costs before its walk.
+    """
+    asked: list[str] = []
+    stats = _stat_map({"/mnt/sub": _DIR_STAT, "/mnt/a.txt": _FILE_STAT})
+
+    async def stat_path(path: str | PathSpec) -> FileStat | None:
+        asked.append(path.virtual if isinstance(path, PathSpec) else path)
+        return await stats(path)
+
+    backend: list[str] = []
+
+    async def backend_stat(path: PathSpec, index=None) -> FileStat:
+        backend.append(path.virtual)
+        found = await stats(path)
+        if found is None:
+            raise FileNotFoundError(path.virtual)
+        return found
+
+    specs = [
+        _file_spec(virtual="/mnt/sub", key="sub"),
+        _file_spec(virtual="/mnt/a.txt", key="a.txt"),
+        _file_spec(virtual="/mnt/gone", key="gone"),
+    ]
+    if door == "native":
+        _, io = await find(
+            specs,
+            (),
+            find_core=AsyncMock(return_value=[]),
+            stat_path=stat_path,
+        )
+    else:
+        _, io = await find_walk_generic(
+            specs,
+            (),
+            CommandOpts(stat_path=stat_path),
+            readdir=AsyncMock(return_value=[]),
+            stat=backend_stat,
+        )
+    assert io.exit_code == 1
+    assert asked == ["/mnt/sub", "/mnt/a.txt", "/mnt/gone"]
+    assert backend == ([] if door == "native" else ["/mnt/sub", "/mnt/gone"])
+
+
+@pytest.mark.asyncio
 async def test_find_no_operands_defaults_to_the_mount_root():
     async def core(path: PathSpec, **_kw) -> list[str]:
         assert path.virtual == "/"

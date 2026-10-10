@@ -18,12 +18,12 @@ import type { EvaluationContext } from '../evaluation.ts'
 import type { ExecutionScope } from '../execution.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import type { CacheConfig } from '../../cache/file/config.ts'
+import type { CacheConfig, RedisCacheConfig } from '../../cache/file/config.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
+import type { IndexConfig, RedisIndexConfig } from '../../cache/index/config.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
@@ -91,8 +91,8 @@ export interface WorkspaceOptions {
    * uses — so the workspace always builds this cache, and always
    * closes it.
    */
-  cache?: CacheConfig
-  index?: IndexConfig
+  cache?: CacheConfig | RedisCacheConfig
+  index?: IndexConfig | RedisIndexConfig
   /**
    * Builds each background job's console from its job id, so job
    * output can live somewhere a reader in another process reaches

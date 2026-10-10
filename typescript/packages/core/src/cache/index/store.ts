@@ -99,6 +99,17 @@ export abstract class IndexCacheStore {
    */
   abstract invalidatePrefix(vfsPath: string, excluded?: readonly string[]): Promise<void>
   /**
+   * Whether the running command fetched `folder`'s listing itself.
+   *
+   * A raw store belongs to no mount and no command, so it cannot tell and
+   * answers false; a mount's view answers from its cache manager. Mirrors
+   * Python's `listed_this_command`.
+   */
+  listedThisCommand(_folder: string): boolean {
+    return false
+  }
+
+  /**
    * Whether a listing is cached at `vfsPath` or anywhere under it.
    *
    * Asked when a removed path may be a folder, to avoid a subtree scan for
