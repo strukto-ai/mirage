@@ -40,14 +40,12 @@ import { rmdir as dropboxRmdir } from '../../core/dropbox/rmdir.ts'
 import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
 import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
 import { copy as dropboxCopy } from '../../core/dropbox/copy.ts'
-import { narrowPaths as dropboxNarrowPaths } from '../../core/dropbox/search.ts'
+import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
 
 const du = makeWalkedDu(dropboxStat, dropboxReaddir)
 
 const mkdirOp: MkdirOp<DropboxAccessor> = (accessor, path, parents) =>
   dropboxMkdir(accessor, path, parents)
-
-const enabledOp = (accessor: DropboxAccessor) => accessor.contentSearch
 
 export interface DropboxVFSState {
   type: string
@@ -158,12 +156,13 @@ export class DropboxVFS extends BaseVFS {
     return dropboxCopy(this.accessor, src, dst)
   }
 
-  override narrowPaths(query: string, paths: PathSpec[]): Promise<PathSpec[] | null> {
-    return dropboxNarrowPaths(this.accessor, query, paths)
-  }
-
-  override contentSearchEnabled(): boolean {
-    return enabledOp(this.accessor)
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[] | null> {
+    if (!opts.wholeWord || !this.accessor.contentSearch) return Promise.resolve(null)
+    return dropboxFilesContaining(this.accessor, text, under)
   }
 
   override deltaHook(): DeltaHook {

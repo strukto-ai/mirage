@@ -24,45 +24,30 @@ from mirage.core.box.resolve import (
     root_id,
 )
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import respell_raw
+from mirage.utils.key_prefix import mounted_path
 
 logger = logging.getLogger(__name__)
 
 
-async def narrow_paths(
-    accessor: BoxAccessor,
-    query: str,
-    paths: list[PathSpec],
+async def files_containing(
+    accessor: BoxAccessor, text: str, under: list[PathSpec]
 ) -> list[PathSpec] | None:
-    """Use Box content search to narrow grep/rg scopes to candidate files.
+    """The files under ``under`` Box content search returns.
 
-    Each scope is resolved to its Box folder id and searched with that id as
-    the `ancestor_folder_ids` scope; hits are mapped back to mount paths from
-    their `path_collection` ancestor chain, sorted component-wise so they line
-    up with a sorted readdir walk, and each `raw_path` is rebased onto the
-    scope's as-typed spelling so output labels match a walk's.
-
-    Returns None whenever the narrowed set cannot be trusted as a superset of
-    what a full scan would read (API failure, the 10,000-match ceiling, or a
-    scope that no longer resolves to a folder), so the caller falls back to
-    the full scan.
+    Each scope is searched with its folder id as ``ancestor_folder_ids``
+    and each hit keyed from its ``path_collection``. None whenever the
+    answer may miss a match: an API failure, the 10,000-match ceiling, a
+    scope that no longer resolves to a folder, or no hit at all, since
+    Box indexes a write some time after it lands.
 
     Args:
         accessor (BoxAccessor): backend handle.
-        query (str): literal search query.
-        paths (list[PathSpec]): scope paths, possibly mount-prefixed.
-
-    Returns:
-        list[PathSpec] | None: one PathSpec per matching file under the
-            scopes, or None when narrowing is unusable.
+        text (str): the whole word searched for.
+        under (list[PathSpec]): the directories walked.
     """
-    if not paths:
-        return []
-    mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     root = root_id(accessor)
-    narrowed: list[PathSpec] = []
-    for p in paths:
+    found: list[PathSpec] = []
+    for p in under:
         parts = path_parts(p)
         if parts:
             item = await resolve_item(accessor, parts)
@@ -73,34 +58,15 @@ async def narrow_paths(
             folder_id = root
         try:
             results, truncated = await search_content(
-                accessor.token_manager, query, folder_id
+                accessor.token_manager, text, folder_id
             )
         except BoxApiError as exc:
-            logger.warning(
-                "box search push-down failed (%s); "
-                "falling back to per-file scan",
-                exc,
-            )
+            logger.warning("box search failed (%s); reading every file", exc)
             return None
         if truncated:
             return None
-        scoped: list[str] = []
         for item in results:
             key = mount_relative_key(item, root)
-            if key is None:
-                continue
-            scoped.append(
-                f"{mount_prefix}/{key}" if key else mount_prefix or "/"
-            )
-        scoped.sort(key=lambda virtual: virtual.split("/"))
-        for virtual in scoped:
-            narrowed.append(
-                PathSpec(
-                    virtual=virtual,
-                    directory="",
-                    vfs_path=mount_key(virtual, mount_prefix),
-                    resolved=True,
-                    raw_path=respell_raw([virtual], p.virtual, p.raw_path)[0],
-                )
-            )
-    return narrowed
+            if key:
+                found.append(mounted_path(p, "/" + key))
+    return found or None

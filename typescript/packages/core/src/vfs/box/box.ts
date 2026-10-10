@@ -39,11 +39,9 @@ import { rmdir as boxRmdir, rmR as boxRmR } from '../../core/box/rmdir.ts'
 import { rename as boxRename } from '../../core/box/rename.ts'
 import { copy as boxCopy } from '../../core/box/copy.ts'
 import { truncate as boxTruncate } from '../../core/box/truncate.ts'
-import { narrowPaths as boxNarrowPaths } from '../../core/box/search.ts'
+import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
 
 const du = makeWalkedDu(boxStat, boxReaddir)
-
-const enabledOp = (accessor: BoxAccessor) => accessor.contentSearch
 
 export interface BoxVFSState {
   type: string
@@ -156,12 +154,13 @@ export class BoxVFS extends BaseVFS {
     return boxTruncate(this.accessor, path, length, noCreate)
   }
 
-  override narrowPaths(query: string, paths: PathSpec[]): Promise<PathSpec[] | null> {
-    return boxNarrowPaths(this.accessor, query, paths)
-  }
-
-  override contentSearchEnabled(): boolean {
-    return enabledOp(this.accessor)
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[] | null> {
+    if (!opts.wholeWord || !this.accessor.contentSearch) return Promise.resolve(null)
+    return boxFilesContaining(this.accessor, text, under)
   }
 
   override deltaHook(): DeltaHook {

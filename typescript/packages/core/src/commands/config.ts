@@ -29,11 +29,13 @@ import type {
 } from '../view/types.ts'
 import type { TargetStat } from '../utils/glob_walk.ts'
 import type {
-  ContentSearchOps,
+  BeforeFullScanOp,
   CopyOp,
   DuOps,
   ExistsOp,
+  FilesContainingOp,
   FindOp,
+  LinesContainingOp,
   MkdirOp,
   PathOp,
   PwriteOp,
@@ -122,7 +124,9 @@ export interface CommandIO<A extends Accessor = Accessor> {
   maxGlobMatches?: number
   maxDuEntries?: number | null
   search?: SearchOps<A>
-  contentSearch?: ContentSearchOps<A>
+  filesContaining?: FilesContainingOp<A>
+  linesContaining?: LinesContainingOp<A>
+  beforeFullScan?: BeforeFullScanOp<A>
   // Child names the namespace owes a directory (nested mount roots and
   // symlinks). Stamped per invocation from opts.childMounts by the
   // factory, because it is session-scoped state while the adapter itself

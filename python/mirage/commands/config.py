@@ -35,11 +35,13 @@ from mirage.types import Limit, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.types import (
-    ContentSearchOps,
+    BeforeFullScanOp,
     DuOps,
     ExistsOp,
+    FilesContainingOp,
     FindOp,
     IsMountedOp,
+    LinesContainingOp,
     MkdirOp,
     PairOp,
     PathOp,
@@ -149,7 +151,9 @@ class CommandIO:
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     search: SearchOps | None = None
-    content_search: ContentSearchOps | None = None
+    files_containing: FilesContainingOp | None = None
+    lines_containing: LinesContainingOp | None = None
+    before_full_scan: BeforeFullScanOp | None = None
     glob_children: ChildMounts | None = None
     glob_target_stat: LinkTargetStat | None = None
 

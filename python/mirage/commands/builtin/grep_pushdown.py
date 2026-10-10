@@ -23,6 +23,11 @@ from mirage.commands.builtin.grep_pattern import (
     perl_regex,
     rust_source,
 )
+from mirage.commands.builtin.grep_prefilter import (
+    UNICODE_FOLDED,
+    folds_by_unicode,
+    required_needles,
+)
 from mirage.commands.builtin.types import (
     GrepSearchMeta,
     GrepSearchOptions,
@@ -217,6 +222,83 @@ def whole_word_literal(
     if pattern is None or not whole_word or "\n" in pattern:
         return None
     return pattern if is_literal_pattern(pattern, fixed_string) else None
+
+
+def whole_word_literals(
+    pattern: str | None,
+    fixed_string: bool,
+    whole_word: bool,
+    line_regexp: bool = False,
+) -> list[str] | None:
+    """The terms a whole-word search index may narrow a scan on, or None.
+
+    The list form of ``whole_word_literal``. A newline-joined pattern list
+    (several -e, or the lines of -f) matches a line when any one
+    alternative does, so one search per alternative, unioned, is complete
+    when every alternative is itself a whole-word literal. -x narrows as
+    -w does: a line that is the literal entire is a word match of it. An
+    empty alternative matches every line, which no search can stand in
+    for.
+
+    Args:
+        pattern (str | None): the newline-joined patterns, or None.
+        fixed_string (bool): True if -F is set.
+        whole_word (bool): True if -w is set.
+        line_regexp (bool): True if -x is set.
+
+    Returns:
+        list[str] | None: each distinct alternative in order, or None when
+            no union of searches is complete.
+    """
+    if pattern is None or not (whole_word or line_regexp):
+        return None
+    terms = pattern.split("\n")
+    if any(not t or not is_literal_pattern(t, fixed_string) for t in terms):
+        return None
+    return list(dict.fromkeys(terms))
+
+
+def search_terms(
+    pattern: str | None,
+    matcher: re.Pattern[str],
+    fixed_string: bool,
+    whole_word: bool,
+    line_regexp: bool,
+    ignore_case: bool,
+) -> tuple[tuple[str, ...], bool] | None:
+    """The texts a mount's search is asked for, and whether as whole words.
+
+    Literals under -w or -x are asked as whole words, which a word index
+    can answer; any other pattern is narrowed on the needles one of which
+    every match contains, asked anywhere. Under -i a literal with a
+    non-ASCII letter, or with i, k or s when case folds by Unicode (``ſ``
+    matches ``s``), is left to the scan, since a mount's case folding need
+    not be grep's.
+
+    Args:
+        pattern (str | None): the newline-joined patterns.
+        matcher (re.Pattern[str]): the compiled line matcher.
+        fixed_string (bool): True if -F is set.
+        whole_word (bool): True if -w is set.
+        line_regexp (bool): True if -x is set.
+        ignore_case (bool): the match folds case.
+    """
+    words = whole_word_literals(pattern, fixed_string, whole_word, line_regexp)
+    if words is not None and not (
+        ignore_case
+        and not all(
+            w.isascii()
+            and not (
+                folds_by_unicode(matcher) and UNICODE_FOLDED & set(w.lower())
+            )
+            for w in words
+        )
+    ):
+        return tuple(words), True
+    needles = required_needles(matcher)
+    if needles is None or any(len(n) < _MIN_SEARCH_LITERAL for n in needles):
+        return None
+    return tuple(n.decode("ascii") for n in needles), False
 
 
 def grep_needs_every_file(fl: FlagView) -> bool:

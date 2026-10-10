@@ -1,3 +1,5 @@
+import { foldsAsciiOnly } from '../../utils/posix.ts'
+
 /**
  * What every match of a subexpression consumes: `literal` when the text is
  * fixed, and `needles`, one of which it always contains (none known when
@@ -15,7 +17,7 @@ export const LONGEST = 1 << 18
 // The ASCII letters a non-ASCII character matches under JavaScript's Unicode
 // case folding (the Kelvin sign for k, `ſ` for s): a lowercased byte search
 // for a needle holding one could miss a line.
-const UNICODE_FOLDED = /[ks]/
+export const UNICODE_FOLDED = /[ks]/
 const QUANTIFIER = /[*+?]|\{(?<least>[0-9]+)(?:,[0-9]*)?\}/y
 const GROUP = /\?(?:(?<look>=|!|<=|<!)|[:>]|P?<[A-Za-z_$][A-Za-z0-9_$]*>)/y
 const UNKNOWN: Required = { literal: null, needles: [] }
@@ -170,6 +172,11 @@ class RequiredLiterals {
   }
 }
 
+/** Whether `pat` ignores case by Unicode folding (`ſ` matches `s`). */
+export function foldsByUnicode(pat: RegExp): boolean {
+  return pat.ignoreCase && (pat.unicode || pat.flags.includes('v')) && !foldsAsciiOnly(pat)
+}
+
 /**
  * Byte-view literals, one of which every line `pat` matches contains.
  * Under `i` they are lowercase, for a search of a lowercased view. Unicode
@@ -182,7 +189,6 @@ export function requiredNeedles(pat: RegExp): string[] | null {
     return null
   const found = new RequiredLiterals(pat.source).needles()
   const needles = pat.ignoreCase ? [...new Set(found.map((s) => s.toLowerCase()))] : [...found]
-  const unicodeFold = pat.ignoreCase && (pat.unicode || pat.flags.includes('v'))
-  if (unicodeFold && needles.some((needle) => UNICODE_FOLDED.test(needle))) return null
+  if (foldsByUnicode(pat) && needles.some((needle) => UNICODE_FOLDED.test(needle))) return null
   return needles.length > 0 ? needles : null
 }

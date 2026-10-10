@@ -28,7 +28,7 @@ from mirage.core.box.readdir import readdir as _readdir
 from mirage.core.box.rename import rename as _rename
 from mirage.core.box.rmdir import rm_r as _rm_r
 from mirage.core.box.rmdir import rmdir as _rmdir
-from mirage.core.box.search import narrow_paths
+from mirage.core.box.search import files_containing as _files_containing
 from mirage.core.box.stat import stat as _stat
 from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
@@ -140,13 +140,18 @@ class BoxVFS(BaseVFS):
     ) -> None:
         await _truncate(self.accessor, path, length, no_create)
 
-    async def narrow_paths(
-        self, query: str, paths: list[PathSpec]
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        return await narrow_paths(self.accessor, query, paths)
-
-    def content_search_enabled(self) -> bool:
-        return self.accessor.config.content_search
+        if not whole_word or not self.accessor.config.content_search:
+            return None
+        return await _files_containing(self.accessor, text, under)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

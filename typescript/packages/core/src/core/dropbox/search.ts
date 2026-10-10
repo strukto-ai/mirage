@@ -12,74 +12,48 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { PathSpec } from '../../types.ts'
-import { respellRaw } from '../../utils/path.ts'
-import { compareComponents } from '../../utils/sort.ts'
+import type { PathSpec } from '../../types.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchFiles } from './api.ts'
 import { DropboxApiError } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
 
 /**
- * Use Dropbox file search to narrow grep/rg scopes to candidate files.
- *
- * Search results are compared against each scope on `path_lower` (Dropbox
- * paths are case-insensitive) and mapped back to mount paths from
- * `path_display`. Per-scope results are sorted component-wise so they line
- * up with the order a sorted readdir walk would visit, and each `rawPath`
- * is rebased onto the scope's as-typed spelling so output labels match a
- * walk's.
- *
- * Returns null whenever the narrowed set cannot be trusted as a superset
- * of what a full scan would read (API failure, or the 10,000-match search
- * ceiling), so the caller falls back to the full scan.
+ * The files under `under` Dropbox search returns. Hits are
+ * kept inside each scope on `path_lower` (Dropbox paths are case-insensitive)
+ * and keyed from `path_display`. Null whenever the answer may miss a match:
+ * an API failure, the 10,000-match ceiling, or no hit at all, since Dropbox
+ * indexes a write some time after it lands. Mirrors Python's
+ * `files_containing`.
  */
-export async function narrowPaths(
+export async function filesContaining(
   accessor: DropboxAccessor,
-  query: string,
-  paths: readonly PathSpec[],
+  text: string,
+  under: readonly PathSpec[],
 ): Promise<PathSpec[] | null> {
-  const first = paths[0]
-  if (first === undefined) return []
-  const mountPrefix = mountPrefixOf(first.virtual, first.vfsPath)
   const root = accessor.rootPath
-  const narrowed: PathSpec[] = []
-  for (const p of paths) {
+  const found: PathSpec[] = []
+  for (const p of under) {
     const scopeApi = dropboxPathOf(accessor, p)
     let results: [string, string][]
     try {
-      const out = await searchFiles(accessor.tokenManager, query, { path: scopeApi })
+      const out = await searchFiles(accessor.tokenManager, text, { path: scopeApi })
       if (out.truncated) return null
       results = out.paths
     } catch (err) {
       if (!(err instanceof DropboxApiError)) throw err
-      console.warn(
-        `dropbox search push-down failed (${String(err)}); falling back to per-file scan`,
-      )
+      console.warn(`dropbox search failed (${String(err)}); reading every file`)
       return null
     }
     const scopeLower = scopeApi.toLowerCase()
     const scopePrefix = rstripSlash(scopeLower) + '/'
-    const scoped: string[] = []
     for (const [lower, display] of results) {
       if (lower !== scopeLower && !lower.startsWith(scopePrefix)) continue
       const key = stripSlash(display.slice(root.length))
-      scoped.push(key === '' ? mountPrefix || '/' : `${mountPrefix}/${key}`)
-    }
-    scoped.sort(compareComponents)
-    for (const virtual of scoped) {
-      narrowed.push(
-        new PathSpec({
-          virtual,
-          directory: '',
-          vfsPath: mountKey(virtual, mountPrefix),
-          resolved: true,
-          rawPath: respellRaw([virtual], p.virtual, p.rawPath)[0] ?? virtual,
-        }),
-      )
+      if (key) found.push(mountedPath(p, `/${key}`))
     }
   }
-  return narrowed
+  return found.length > 0 ? found : null
 }
