@@ -540,14 +540,23 @@ async def find(
     async def stream() -> AsyncIterator[bytes]:
         missing: list[str] = []
         for search_path in searches:
+            start = await resolve_start(
+                search_path,
+                args,
+                stat_path,
+                is_link=is_link(links, search_path),
+                stat=stat,
+                follow=link_follow(links),
+            )
             first = await early_root(
-                search_path, args, stat_path, stat, links, visibility
+                search_path, args, start, stat, visibility
             )
             for row in first:
                 yield (row + "\n").encode()
             rows, detail = await _find_root(
                 search_path,
                 args,
+                start,
                 find_core=find_core,
                 stat_path=stat_path,
                 stat=stat,
@@ -576,9 +585,8 @@ async def find(
 async def early_root(
     search: PathSpec,
     args: find_eval.FindArgs,
-    stat_path: StatPath | None,
+    start: StartPoint,
     stat: Callable[[PathSpec], Awaitable[FileStat]] | None,
-    links: LinkView | None,
     visibility: Visibility | None,
 ) -> list[str]:
     """Emit an independently known start point before asking for descendants.
@@ -590,10 +598,9 @@ async def early_root(
     Args:
         search (PathSpec): the start point, as the operand named it.
         args (FindArgs): parsed find expression, shared across operands.
-        stat_path (StatPath | None): dispatcher-backed stat probe.
+        start (StartPoint): the start point as resolve_start found it.
         stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
             overlay-aware stat for the mtime filter.
-        links (LinkView | None): the namespace's symlink facts.
         visibility (Visibility | None): the session's visibility.
 
     Returns:
@@ -605,13 +612,6 @@ async def early_root(
         and (args.mtime_min is not None or args.mtime_max is not None)
     ):
         return []
-    start = await resolve_start(
-        search,
-        args,
-        stat_path,
-        is_link=is_link(links, search),
-        follow=link_follow(links),
-    )
     if start.stat is None or not path_visible(visibility, search.virtual):
         return []
     prefix = mount_prefix_of(search.virtual, search.vfs_path)
@@ -635,6 +635,7 @@ async def early_root(
 async def _find_root(
     search_path: PathSpec,
     args: find_eval.FindArgs,
+    start: StartPoint,
     *,
     find_core: Callable[..., Awaitable[list[str]]],
     stat_path: StatPath | None,
@@ -653,6 +654,7 @@ async def _find_root(
     Args:
         search_path (PathSpec): the start point, as the operand named it.
         args (FindArgs): parsed find expression, shared across operands.
+        start (StartPoint): the start point as resolve_start found it.
         find_core (Callable): the backend's native find op.
         stat_path (StatPath | None): dispatcher-backed stat probe.
         stat (Callable[[PathSpec], Awaitable[FileStat]] | None):
@@ -672,8 +674,8 @@ async def _find_root(
     )
     # Fallback existence guard for a caller with no dispatcher probe (a
     # unit test, or a command run outside a workspace). With stat_path
-    # wired, resolve_start below answers absence for every backend, so
-    # spending a second stat here would only duplicate it.
+    # wired, the caller's resolve_start answered absence for every
+    # backend, so spending a second stat here would only duplicate it.
     if stat_path is None and stat is not None and not root_is_link:
         try:
             await stat(search_path)
@@ -699,20 +701,6 @@ async def _find_root(
     # only see native times and would drop files whose mtime lives in
     # the namespace (touch results, observed writes).
     push_mtime = stat is None
-    # What the start point is decides which walk is even possible, so it
-    # is resolved once, ahead of all of them: a symlink has no backend
-    # inode (link_results reports it), a non-directory has no subtree,
-    # and nothing at all is GNU's diagnostic. Statted through the
-    # dispatcher, so a start point the router already resolved into
-    # another mount answers there rather than on this command's mount.
-    start = await resolve_start(
-        search_path,
-        args,
-        stat_path,
-        is_link=root_is_link,
-        stat=stat,
-        follow=link_follow(links),
-    )
     if start.missing:
         return None, start.detail
     if not start.walk and not root_is_link:
@@ -937,16 +925,6 @@ async def find_walk_generic(
     async def stream() -> AsyncIterator[bytes]:
         missing: list[str] = []
         for search in searches:
-            first = await early_root(
-                search,
-                args,
-                stat_path,
-                None,
-                links,
-                opts.ns.visibility if opts.ns is not None else None,
-            )
-            for row in first:
-                yield (row + "\n").encode()
             # Same start-point rule as the native-op path, so what `find` does
             # with a file or a missing operand does not depend on whether the
             # mounted backend ships a find op.
@@ -958,6 +936,15 @@ async def find_walk_generic(
                 is_link=is_link(links, search),
                 follow=link_follow(links),
             )
+            first = await early_root(
+                search,
+                args,
+                start,
+                None,
+                opts.ns.visibility if opts.ns is not None else None,
+            )
+            for row in first:
+                yield (row + "\n").encode()
             if start.missing:
                 missing.append(missing_start_line(search, start.detail))
                 matched_runs.append([])
