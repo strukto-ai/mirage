@@ -496,7 +496,9 @@ def main() -> None:
         )
         # A create and a mkdir keep the mode they ask for, and utime,
         # touch and cp -p keep the times they set. Windows maps a mode
-        # onto the read-only flag alone and has no touch or cp.
+        # onto the read-only flag alone and has no touch or cp, and its
+        # os.utime holds the GIL through SetFileTime, which a mount this
+        # process serves needs to answer.
         os.close(os.open(f"{data_mp}/secret", os.O_CREAT | os.O_WRONLY, 0o600))
         os.mkdir(f"{data_mp}/private", 0o700)
         modes = tuple(
@@ -506,15 +508,17 @@ def main() -> None:
         result["kernel_create_keeps_mode"] = sys.platform == "win32" or (
             modes == (0o600, 0o700)
         )
-        os.utime(f"{data_mp}/a.txt", (981173106, 981173107))
-        st = os.stat(f"{data_mp}/a.txt")
-        result["kernel_utime_kept"] = sys.platform == "win32" or (
-            (int(st.st_atime), int(st.st_mtime)) == (981173106, 981173107)
-        )
         if sys.platform == "win32":
+            result["kernel_utime_kept"] = True
             result["kernel_cp_p_keeps_mtime"] = True
             result["kernel_touch_is_now"] = True
         else:
+            os.utime(f"{data_mp}/a.txt", (981173106, 981173107))
+            st = os.stat(f"{data_mp}/a.txt")
+            result["kernel_utime_kept"] = (
+                int(st.st_atime),
+                int(st.st_mtime),
+            ) == (981173106, 981173107)
             subprocess.run(
                 ["cp", "-p", f"{data_mp}/a.txt", f"{data_mp}/kept.txt"],
                 check=True,
