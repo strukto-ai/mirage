@@ -1156,3 +1156,58 @@ async def test_a_read_waits_for_a_flush_a_rename_moved():
     writes.go.set()
     await flushing
     assert await reading == b"XYZW"
+
+
+@pytest.mark.asyncio
+async def test_a_removal_holds_the_bytes_when_only_the_stat_is_refused():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    body = bytes(i % 251 for i in range(3 * READ_CHUNK))
+    await ws.vfs.write("/big.bin", body)
+    core = MountCore(ws.vfs)
+    fh = await core.open("/big.bin")
+    await core.read("/big.bin", 3, 0, fh)
+    ws.policies.add(_NoStats())
+    await core.unlink("/big.bin")
+    far = 2 * READ_CHUNK + 5
+    assert await core.read("/big.bin", 4, far, fh) == body[far : far + 4]
+
+
+@pytest.mark.asyncio
+async def test_an_open_a_removal_overtook_opens_again_after_it():
+    # Its stat found the file going away; registered as it was, the handle
+    # would be neither held nor detached.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf fresh > /a; printf stale-file > /b")
+    stats = _Held(ws.vfs, "stat", answered=True)
+    files = _Held(stats, "read", answered=True)
+    core = MountCore(files)
+    opening = asyncio.create_task(core.open("/b"))
+    await stats.out.wait()
+    early = await core.open("/b")
+    renaming = asyncio.create_task(core.rename("/a", "/b"))
+    await files.out.wait()
+    stats.go.set()
+    await asyncio.sleep(0.01)
+    assert not opening.done()
+    files.go.set()
+    await renaming
+    late = await opening
+    assert await core.read("/b", 100, 0, late) == b"fresh"
+    assert await core.read("/b", 100, 0, early) == b"stale-file"
+
+
+@pytest.mark.asyncio
+async def test_a_hold_a_write_raced_reads_again():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf fresh > /a; printf old-body > /b")
+    files = _Held(ws.vfs, "read", answered=True)
+    core = MountCore(files)
+    reader = await core.open("/b")
+    writer = await core.open("/b", os.O_WRONLY)
+    await core.write("/b", b"NEW", 0, writer)
+    renaming = asyncio.create_task(core.rename("/a", "/b"))
+    await files.out.wait()
+    await core.flush("/b", writer)
+    files.go.set()
+    await renaming
+    assert await core.read("/b", 100, 0, reader) == b"NEW-body"

@@ -933,12 +933,8 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        # A removal is keyed by the name it takes, so an open through a link
-        # waits on the link's removal and then on its target's.
-        for follow in (False, True):
-            removal = self._removals.get(self.identity(path, follow=follow))
-            if removal is not None:
-                await asyncio.shield(removal)
+        while (removal := self._removal_of(path)) is not None:
+            await asyncio.shield(removal)
         s = await self._op(self._files.stat(self.resolve(path)))
         ctx = Handle(
             path=path,
@@ -946,7 +942,7 @@ class MountCore:
             live=s.extra.get(LIVE_KEY) is True,
         )
         if s.type == FileType.DIRECTORY:
-            return self._handles.add(ctx)
+            return await self._register(path, flags, ctx)
         if flags & os.O_TRUNC:
             # libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
             # kernel sends no SETATTR ahead of an O_TRUNC open: the flag on
@@ -956,7 +952,7 @@ class MountCore:
             # fuse3-only host, where a shorter overwrite kept the old tail.
             await self.truncate(path, 0)
         if ctx.live:
-            return self._handles.add(ctx)
+            return await self._register(path, flags, ctx)
         if s.size is None:
             # API-backed mounts cannot size a file without fetching it, so
             # hydrate now: fgetattr and read() then serve real bytes. This
@@ -972,6 +968,35 @@ class MountCore:
             # kernel asks in small pieces, and fetching the whole file on
             # the first one moved all of it to answer a `head`.
             ctx.chunked = ChunkedHandle(path=path, size=s.size)
+        return await self._register(path, flags, ctx)
+
+    def _removal_of(self, path: str) -> asyncio.Future[None] | None:
+        """A removal of ``path`` still running. One is keyed by the name it
+        takes, so an open through a link meets the link's removal and then
+        its target's.
+
+        Args:
+            path (str): mount path being opened.
+        """
+        for follow in (False, True):
+            removal = self._removals.get(self.identity(path, follow=follow))
+            if removal is not None:
+                return removal
+        return None
+
+    async def _register(self, path: str, flags: int, ctx: Handle) -> int:
+        """Track the handle an open built, or open again when a removal of
+        its name began while the open was out: what it opened may be the
+        file going away, and a removal keeps and detaches only the handles
+        it finds.
+
+        Args:
+            path (str): mount path opened.
+            flags (int): the open(2) flags it passed.
+            ctx (Handle): the handle the open built.
+        """
+        if self._removal_of(path) is not None:
+            return await self.open(path, flags)
         return self._handles.add(ctx)
 
     async def _read_chunk(
@@ -1056,9 +1081,10 @@ class MountCore:
         such handle shares; it runs under ``_removing``, so no handle opens
         on the file meanwhile. The handles are matched by the entry itself,
         so removing a link holds nothing: it takes the link, never its
-        target's bytes. A stat or read that fails (a policy may allow the
-        removal and refuse the read) leaves them as they are rather than
-        refusing a mutation the caller is allowed.
+        target's bytes. A stat or a read that fails (a policy may allow the
+        removal and refuse either) leaves a bare row or the handles as they
+        are, each on its own, rather than refusing a mutation the caller is
+        allowed.
 
         Args:
             path (str): mount path about to be removed or replaced.
@@ -1072,20 +1098,30 @@ class MountCore:
         if not named:
             return bare
         virtual = self.resolve(path)
-        lacking = [c for c in named if c.data is None and not c.live]
+        row = bare
         try:
             row = await self._op(self._files.stat(virtual))
-            data = (
-                await self._op(self._files.read(virtual)) if lacking else b""
-            )
         except Exception as err:
             logger.warning(
-                "fuse: holding %s before it goes failed: %r", path, err
+                "fuse: the row of %s before it goes failed: %r", path, err
             )
-            return bare
-        for ctx in lacking:
-            ctx.data = data
-            ctx.chunked = None
+        lacking = [c for c in named if c.data is None and not c.live]
+        while lacking:
+            seen = [c.generation for c in lacking]
+            try:
+                data = await self._op(self._files.read(virtual))
+            except Exception as err:
+                logger.warning(
+                    "fuse: holding %s before it goes failed: %r", path, err
+                )
+                return row
+            # A write that landed while the read was out made what it
+            # fetched stale: read again.
+            if [c.generation for c in lacking] == seen:
+                for ctx in lacking:
+                    ctx.data = data
+                    ctx.chunked = None
+                return row
         return row
 
     async def release(self, fh: int) -> None:

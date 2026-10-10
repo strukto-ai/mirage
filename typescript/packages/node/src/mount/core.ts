@@ -802,13 +802,16 @@ export class MountCore {
   }
 
   async open(path: string, flags = 0): Promise<number> {
-    // A removal is keyed by the name it takes, so an open through a link
-    // waits on the link's removal and then on its target's.
-    await this.removals.get(this.identity(path, false))
-    await this.removals.get(this.identity(path))
+    for (
+      let removal = this.removalOf(path);
+      removal !== undefined;
+      removal = this.removalOf(path)
+    ) {
+      await removal
+    }
     const s = await this.op(() => this.files.stat(this.resolve(path)))
     const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
-    if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
+    if (s.type === FileType.DIRECTORY) return this.register(path, flags, ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
       // libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
       // kernel sends no SETATTR ahead of an O_TRUNC open: the flag on the
@@ -819,7 +822,7 @@ export class MountCore {
       // (#1032). Mirrors Python's MountCore.open.
       await this.truncate(path, 0)
     }
-    if (ctx.live === true) return this.handles.add(ctx)
+    if (ctx.live === true) return this.register(path, flags, ctx)
     if (s.size === null) {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored
@@ -835,6 +838,24 @@ export class MountCore {
         this.op(() => this.files.read(this.resolve(ctx.path), { offset, size })),
       )
     }
+    return this.register(path, flags, ctx)
+  }
+
+  /**
+   * A removal of `path` still running. One is keyed by the name it takes, so
+   * an open through a link meets the link's removal and then its target's.
+   */
+  private removalOf(path: string): Promise<void> | undefined {
+    return this.removals.get(this.identity(path, false)) ?? this.removals.get(this.identity(path))
+  }
+
+  /**
+   * Track the handle an open built, or open again when a removal of its name
+   * began while the open was out: what it opened may be the file going away,
+   * and a removal keeps and detaches only the handles it finds.
+   */
+  private register(path: string, flags: number, ctx: Handle): Promise<number> | number {
+    if (this.removalOf(path) !== undefined) return this.open(path, flags)
     return this.handles.add(ctx)
   }
 
@@ -847,28 +868,40 @@ export class MountCore {
    * from one read every such handle shares; it runs under `removing`, so no
    * handle opens on the file meanwhile. The handles are matched by the
    * entry itself, so removing a link holds nothing: it takes the link,
-   * never its target's bytes. A stat or read that fails (a policy may allow
-   * the removal and refuse the read) leaves them as they are rather than
-   * refusing a mutation the caller is allowed. Mirrors Python's
-   * `MountCore._hold`.
+   * never its target's bytes. A stat or a read that fails (a policy may
+   * allow the removal and refuse either) leaves a bare row or the handles
+   * as they are, each on its own, rather than refusing a mutation the
+   * caller is allowed. Mirrors Python's `MountCore._hold`.
    */
   private async hold(path: string, named: Handle[]): Promise<FileStat> {
     const bare = new FileStat({ name: path.slice(path.lastIndexOf('/') + 1), type: FileType.FILE })
     if (named.length === 0) return bare
     const virtual = this.resolve(path)
-    const lacking = named.filter((ctx) => ctx.data === undefined && ctx.live !== true)
-    let row: FileStat
-    let data: Uint8Array
+    let row = bare
     try {
       row = await this.op(() => this.files.stat(virtual))
-      data = lacking.length > 0 ? await this.op(() => this.files.read(virtual)) : new Uint8Array()
     } catch (err) {
-      console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
-      return bare
+      console.warn(`fuse: the row of ${path} before it goes failed: ${String(err)}`)
     }
-    for (const ctx of lacking) {
-      ctx.data = data
-      delete ctx.chunked
+    const lacking = named.filter((ctx) => ctx.data === undefined && ctx.live !== true)
+    while (lacking.length > 0) {
+      const seen = lacking.map((ctx) => ctx.generation ?? 0)
+      let data: Uint8Array
+      try {
+        data = await this.op(() => this.files.read(virtual))
+      } catch (err) {
+        console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
+        return row
+      }
+      // A write that landed while the read was out made what it fetched
+      // stale: read again.
+      if (lacking.every((ctx, i) => (ctx.generation ?? 0) === seen[i])) {
+        for (const ctx of lacking) {
+          ctx.data = data
+          delete ctx.chunked
+        }
+        return row
+      }
     }
     return row
   }

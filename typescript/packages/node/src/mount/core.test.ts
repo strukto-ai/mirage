@@ -992,7 +992,7 @@ it("holds an open through a link back until the link's removal is done", async (
  */
 function holdFirst(
   ws: Workspace,
-  op: 'pwrite' | 'read' | 'rename',
+  op: 'pwrite' | 'read' | 'rename' | 'stat',
   answered = false,
 ): { out: Promise<void>; go: () => void } {
   let go = (): void => undefined
@@ -1133,4 +1133,63 @@ it('keeps the file a detached handle never read', async () => {
   const attrs = await core.fgetattr('/data/b', fd)
   expect([attrs.size, attrs.mode & 0o7777]).toEqual([10, 0o600])
   expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('stale-file')
+})
+
+it('holds the bytes of a removed file when only its stat is refused', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const body = Uint8Array.from({ length: 3 * READ_CHUNK }, (_, i) => i % 251)
+  await ws.vfs.write('/data/big.bin', body)
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/big.bin')
+  await core.read('/data/big.bin', fd, 0, 3)
+  vi.spyOn(ws.vfs, 'stat').mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  await core.unlink('/data/big.bin')
+  const far = 2 * READ_CHUNK + 5
+  expect(await core.read('/data/big.bin', fd, far, 4)).toEqual(body.slice(far, far + 4))
+})
+
+it('opens again after a removal that overtook the open', async () => {
+  // Its stat found the file going away; registered as it was, the handle
+  // would be neither held nor detached.
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('stale-file'))
+  const core = new MountCore(ws.vfs)
+  const stats = holdFirst(ws, 'stat', true)
+  let opened = false
+  const opening = core.open('/data/b').finally(() => {
+    opened = true
+  })
+  await stats.out
+  const early = await core.open('/data/b')
+  const reads = holdFirst(ws, 'read', true)
+  const renaming = core.rename('/data/a', '/data/b')
+  await reads.out
+  stats.go()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(opened).toBe(false)
+  reads.go()
+  await renaming
+  const late = await opening
+  const dec = new TextDecoder()
+  expect(dec.decode(await core.read('/data/b', late, 0, 100))).toBe('fresh')
+  expect(dec.decode(await core.read('/data/b', early, 0, 100))).toBe('stale-file')
+})
+
+it('reads again when a write raced the hold before a removal', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('old-body'))
+  const core = new MountCore(ws.vfs)
+  const reader = await core.open('/data/b')
+  const writer = await core.open('/data/b', fsConstants.O_WRONLY)
+  await core.write('/data/b', writer, new TextEncoder().encode('NEW'), 0)
+  const reads = holdFirst(ws, 'read', true)
+  const renaming = core.rename('/data/a', '/data/b')
+  await reads.out
+  await core.flush('/data/b', writer)
+  reads.go()
+  await renaming
+  expect(new TextDecoder().decode(await core.read('/data/b', reader, 0, 100))).toBe('NEW-body')
 })
