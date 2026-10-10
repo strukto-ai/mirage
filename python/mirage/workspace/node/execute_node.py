@@ -1110,10 +1110,22 @@ async def execute_node(
         if held and stdout is not None:
             stdout = await materialize(stdout)
         return stdout, io, exec_node
+    except _ProcessSubError:
+        # The node fails, as an unsupported command does; the line goes on.
+        err = b"mirage: unsupported: process substitution >(...)\n"
+        return (
+            None,
+            IOResult(exit_code=2, stderr=err),
+            ExecutionNode(command="process_sub", exit_code=2, stderr=err),
+        )
     finally:
         context.frame.process_sub = previous
         for dev, path, allocation in held:
             dev.release_input(path, allocation)
+
+
+class _ProcessSubError(Exception):
+    """An output process substitution, which mirage does not run."""
 
 
 def _process_input(
@@ -1129,8 +1141,8 @@ def _process_input(
     other expansions and through the evaluator a ``$(...)`` there uses,
     and reads back as a buffered device file rather than a host pipe,
     held until the node ends; a nested node opens its own, so each lasts
-    as long as the command naming it. An output ``>(...)`` is refused, as
-    it is as a redirect target.
+    as long as the command naming it. An output ``>(...)`` is refused:
+    the node naming it fails with status 2.
 
     Args:
         context (EvaluationContext): the evaluation the node runs in.
@@ -1144,11 +1156,7 @@ def _process_input(
         call_stack: CallStack | None,
     ) -> str:
         if get_process_sub_direction(node) == ProcessSubDirection.OUTPUT:
-            raise ExitSignal(
-                2,
-                stderr=b"mirage: unsupported: process substitution >(...)\n",
-                contained_code=2,
-            )
+            raise _ProcessSubError
         dev, _, _ = registry.resolve("/dev/null")
         assert isinstance(dev, DevVFS)
         path, allocation = dev.allocate_input()

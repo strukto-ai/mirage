@@ -158,6 +158,20 @@ describe('process substitution output redirect', () => {
       await ws.close()
     }
   })
+
+  it('fails only the node naming one among its words', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(
+        ws,
+        'echo hi >(cat); [[ -n >(true) ]]; echo after=$?',
+      )
+      expect([exit, out]).toEqual([0, 'after=2\n'])
+      expect(err.split('unsupported: process substitution').length - 1).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 describe('quoted redirect targets', () => {

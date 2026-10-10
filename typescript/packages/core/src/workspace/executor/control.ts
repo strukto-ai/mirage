@@ -520,8 +520,9 @@ export async function handleCase(
   // Each arm reads the fd 0 the `case` started with, so an `exec < f` in one
   // reaches an arm it falls into.
   const bound = fd0Binding(session)
-  const extglob = session.shopts.extglob ?? false
   for (const [patterns, body, terminator] of items) {
+    // An arm a `;;&` left can have turned extglob on for this one.
+    const extglob = session.shopts.extglob ?? false
     if (!(fallthrough || patterns.some((p) => fnmatch(word, p, extglob)))) continue
     try {
       const [stdout, io, execNode] = await run(body, bound)

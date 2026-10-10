@@ -63,10 +63,10 @@
         "ram",
         "disk"
       ],
-      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case ab in +(a|b)) echo repeated;; *) echo missed;; esac; case c in !(a|b)) echo negative;; esac'\"'\"''",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case ab in +(a|b)) echo repeated;; *) echo missed;; esac; case c in !(a|b)) echo negative;; esac; shopt -u extglob; p='\"'\"'\"'\"'\"'\"'\"'\"'@(b)'\"'\"'\"'\"'\"'\"'\"'\"'; case b in b) shopt -s extglob;;& $p) echo late;; esac'\"'\"''",
       "expect": {
         "exit": 0,
-        "stdout": "repeated\nnegative\n",
+        "stdout": "repeated\nnegative\nlate\n",
         "stderr": ""
       }
     },

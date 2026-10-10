@@ -982,11 +982,23 @@ export async function executeNode(
     } finally {
       context.frame.diagnostics = outer
     }
+  } catch (err) {
+    if (!(err instanceof ProcessSubError)) throw err
+    // The node fails, as an unsupported command does; the line goes on.
+    const stderr = encodeText('mirage: unsupported: process substitution >(...)\n')
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr }),
+      new ExecutionNode({ command: 'process_sub', exitCode: 2, stderr }),
+    ]
   } finally {
     context.frame.processSub = previous
     for (const [dev, path, allocation] of held) dev.releaseInput(path, allocation)
   }
 }
+
+/** An output process substitution, which mirage does not run. */
+class ProcessSubError extends Error {}
 
 /**
  * The hook that opens a node's input process substitutions. Each `<(...)`
@@ -994,8 +1006,8 @@ export async function executeNode(
  * through the evaluator a `$(...)` there uses, and reads back as a buffered
  * device file rather than a host pipe, held until the node ends; a nested
  * node opens its own, so each lasts as long as the command naming it. An
- * output `>(...)` is refused, as it is as a redirect target. Mirrors
- * Python's `_process_inputs`.
+ * output `>(...)` is refused: the node naming it fails with status 2.
+ * Mirrors Python's `_process_input`.
  */
 function processInput(
   context: EvaluationContext,
@@ -1003,14 +1015,7 @@ function processInput(
   held: (readonly [DevVFS, string, number])[],
 ): NonNullable<EvaluationContext['frame']['processSub']> {
   return async (node, executeFn, callStack) => {
-    if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) {
-      throw new ExitSignal(
-        2,
-        encodeText('mirage: unsupported: process substitution >(...)\n'),
-        null,
-        2,
-      )
-    }
+    if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
     const [dev] = registry.resolve('/dev/null')
     if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
     const [path, allocation] = dev.allocateInput()

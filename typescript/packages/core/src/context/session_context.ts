@@ -225,12 +225,12 @@ export function dotglobActive(): boolean {
  * `dotglobActive` is, for the same reason: pathname expansion runs in every
  * backend's resolveGlob, and whether `@(a|b)` is a group or text decides
  * both how a word splits into segments and how a name matches one. False
- * when no session is bound (bash's default), and unanimous across live
- * sessions otherwise, as `dotglobActive` is.
+ * when no session is bound, which is bash's default. Unlike dotglob it is
+ * the evaluating session's alone: it is grammar, which a nested shell turns
+ * on for itself while its parent's stays off.
  */
 export function extglobActive(): boolean {
-  const live = liveSessions()
-  return live.length > 0 && live.every((sess) => sess.shopts.extglob === true)
+  return getCurrentSession()?.shopts.extglob === true
 }
 
 /**

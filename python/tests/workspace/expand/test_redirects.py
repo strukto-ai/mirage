@@ -169,6 +169,14 @@ async def test_procsub_output_redirect_errors_loudly():
     assert b"unsupported: process substitution" in (io.stderr or b"")
 
 
+@pytest.mark.asyncio
+async def test_procsub_output_word_fails_only_its_node():
+    ws = await _workspace_at("/data")
+    io = await ws.shell("echo hi >(cat); [[ -n >(true) ]]; echo after=$?")
+    assert (io.exit_code, io.stdout) == (0, b"after=2\n")
+    assert (io.stderr or b"").count(b"unsupported: process substitution") == 2
+
+
 # ── quoted redirect targets ────────────────────
 
 
