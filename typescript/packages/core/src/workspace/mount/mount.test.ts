@@ -108,6 +108,23 @@ describe('Mount.resolveCommand fallback chain', () => {
     const m = makeMount()
     expect(m.resolveCommand('nope')).toBeNull()
   })
+
+  it('keeps the shared command for other files when a filetype command is added', () => {
+    const m = makeMount()
+    const shared = generic('cat')
+    m.registerGeneral(shared)
+    const [csv] = command({
+      name: 'cat',
+      vfs: null,
+      spec: BASIC_SPEC,
+      fn: OK_CMD,
+      filetype: '.csv',
+    })
+    if (csv === undefined) throw new Error('missing')
+    m.registerCommands([csv])
+    expect(m.resolveCommand('cat', '.csv')).toBe(csv)
+    expect(m.resolveCommand('cat', '.txt')).toBe(shared)
+  })
 })
 
 describe('Mount.runCommand glob operands', () => {

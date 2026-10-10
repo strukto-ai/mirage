@@ -362,6 +362,18 @@ def test_resolve_command_missing(registry):
     assert cmd is None
 
 
+@command("cat", vfs=None, spec=CommandSpec(), filetype=".csv")
+async def csv_cat(accessor, paths, texts, opts):
+    return b"", IOResult()
+
+
+def test_a_filetype_command_added_later_keeps_the_generic(registry):
+    mount = registry.mount_for("/data/hello.txt")
+    mount.register_commands([csv_cat])
+    assert mount.resolve_command("cat", ".csv").fn is csv_cat
+    assert mount.resolve_command("cat", ".txt") is generic("cat")
+
+
 @pytest.mark.asyncio
 async def test_a_path_guarded_command_is_still_held_at_its_write():
     vfs = RAMVFS()
