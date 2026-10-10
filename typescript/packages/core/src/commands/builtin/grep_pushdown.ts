@@ -180,6 +180,29 @@ export function wholeWordLiteral(
   return isLiteralPattern(pattern, fixedString) ? pattern : null
 }
 
+/**
+ * The terms a whole-word search index may narrow a scan on, or null.
+ *
+ * The list form of `wholeWordLiteral`. A newline-joined pattern list (several
+ * -e, or the lines of -f) matches a line when any one alternative does, so one
+ * search per alternative, unioned, is complete when every alternative is
+ * itself a whole-word literal. -x narrows as -w does: a line that is the
+ * literal entire is a word match of it. An empty alternative matches every
+ * line, which no search can stand in for. Mirrors Python's
+ * `whole_word_literals`.
+ */
+export function wholeWordLiterals(
+  pattern: string | null,
+  fixedString: boolean,
+  wholeWord: boolean,
+  lineRegexp = false,
+): string[] | null {
+  if (pattern === null || !(wholeWord || lineRegexp)) return null
+  const terms = pattern.split('\n')
+  if (terms.some((t) => t === '' || !isLiteralPattern(t, fixedString))) return null
+  return [...new Set(terms)]
+}
+
 // Drop the candidates a recursive walk would never have read. A narrowing
 // stands in for the walk it replaces, and that walk skips binary extensions,
 // so a candidate with one is dropped rather than downloaded. The result may

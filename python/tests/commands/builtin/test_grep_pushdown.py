@@ -440,6 +440,34 @@ def test_whole_word_literal_is_the_term_a_word_index_answers_for(
     )
 
 
+@pytest.mark.parametrize(
+    "pattern, fixed, whole_word, line_regexp, expected",
+    [
+        ("import", False, True, False, ["import"]),
+        ("import", False, False, True, ["import"]),
+        ("import", False, False, False, None),
+        ("ada\nbob", False, True, False, ["ada", "bob"]),
+        ("ada\nada", True, True, False, ["ada"]),
+        ("ada\n", False, True, False, None),
+        ("ada\nb.b", False, True, False, None),
+        ("ada\nb.b", True, True, False, ["ada", "b.b"]),
+        (None, False, True, False, None),
+    ],
+)
+def test_whole_word_literals_union_only_complete_alternatives(
+    pattern, fixed, whole_word, line_regexp, expected
+):
+    # A pattern list narrows by one search per alternative, so every
+    # alternative must be a whole-word literal; an empty one matches every
+    # line, and -x is a whole-line, hence whole-word, match.
+    assert (
+        grep_pushdown.whole_word_literals(
+            pattern, fixed, whole_word, line_regexp
+        )
+        == expected
+    )
+
+
 def test_text_candidates_drops_what_a_walk_never_reads():
     paths = [
         PathSpec.from_str_path(p)

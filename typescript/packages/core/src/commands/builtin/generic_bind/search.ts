@@ -102,8 +102,8 @@ async function* nativeOrBytes<A extends Accessor>(
  */
 export function candidateReads(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  candidates: ReadonlySet<string>,
-  operands: ReadonlySet<string>,
+  candidates: Pick<ReadonlySet<string>, 'has'>,
+  operands: Pick<ReadonlySet<string>, 'has'>,
 ): (p: PathSpec) => AsyncIterable<Uint8Array> {
   return async function* (p: PathSpec): AsyncIterable<Uint8Array> {
     if (!candidates.has(p.virtual) && !operands.has(p.virtual)) return

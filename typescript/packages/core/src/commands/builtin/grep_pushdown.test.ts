@@ -32,6 +32,7 @@ import {
   searchQuery,
   textCandidates,
   wholeWordLiteral,
+  wholeWordLiterals,
 } from './grep_pushdown.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { Accessor } from '../../accessor/base.ts'
@@ -402,6 +403,26 @@ describe('wholeWordLiteral', () => {
     // a word index under-fetches substrings, a regex narrows on a term that
     // is only part of the match, and a pattern list has no required term.
     expect(wholeWordLiteral(pattern, fixed, wholeWord)).toBe(expected)
+  })
+})
+
+// Twin of test_whole_word_literals_union_only_complete_alternatives.
+describe('wholeWordLiterals', () => {
+  it.each<[string | null, boolean, boolean, boolean, string[] | null]>([
+    ['import', false, true, false, ['import']],
+    ['import', false, false, true, ['import']],
+    ['import', false, false, false, null],
+    ['ada\nbob', false, true, false, ['ada', 'bob']],
+    ['ada\nada', true, true, false, ['ada']],
+    ['ada\n', false, true, false, null],
+    ['ada\nb.b', false, true, false, null],
+    ['ada\nb.b', true, true, false, ['ada', 'b.b']],
+    [null, false, true, false, null],
+  ])('answers %j (fixed=%s, -w=%s, -x=%s) with %j', (pattern, fixed, w, x, expected) => {
+    // A pattern list narrows by one search per alternative, so every
+    // alternative must be a whole-word literal; an empty one matches every
+    // line, and -x is a whole-line, hence whole-word, match.
+    expect(wholeWordLiterals(pattern, fixed, w, x)).toEqual(expected)
   })
 })
 
