@@ -178,7 +178,7 @@ class MountCore:
         done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         queues[key] = done
 
-        def settle(_: object = None) -> None:
+        def settle(_: asyncio.Future[None] | None = None) -> None:
             if not done.done():
                 done.set_result(None)
             if queues.get(key) is done:
