@@ -904,6 +904,9 @@ class EmailService:
                 username=EMAIL_USERNAME,
                 password=self.password,
                 use_ssl=False,
+                # The fake answers IMAP SEARCH TEXT, so exercise grep/rg
+                # narrowing in the battery.
+                content_search=True,
             )
         )
 

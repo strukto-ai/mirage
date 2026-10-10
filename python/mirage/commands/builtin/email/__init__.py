@@ -13,11 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.email.find import find
-from mirage.commands.builtin.email.grep import grep
-from mirage.commands.builtin.email.rg import rg
 from mirage.commands.builtin.generic_bind import generic_commands
 
-_EMAIL_OVERRIDES = {"find", "grep", "rg"}
+_EMAIL_OVERRIDES = {"find"}
 
 # Mail verbs live in the himalaya CLI
 # (mirage.commands.cli.builtin.himalaya), installed by name; the mount
@@ -28,6 +26,4 @@ COMMANDS = [
         overrides=_EMAIL_OVERRIDES,
     ),
     find,
-    grep,
-    rg,
 ]

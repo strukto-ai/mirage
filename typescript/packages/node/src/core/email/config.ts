@@ -33,6 +33,13 @@ export const EmailConfigSchema = z.object({
   useSsl: z.boolean().default(true),
   maxMessages: z.number().default(200),
   /**
+   * grep and rg ask IMAP SEARCH TEXT which messages may match and read only
+   * those. Off by default: the server searches headers and body, not the
+   * mounted JSON's keys, uids or flags (`recordQueries` refuses words that
+   * can sit there, but a custom keyword cannot be told apart from a word).
+   */
+  contentSearch: z.boolean().default(false),
+  /**
    * Upstream himalaya's message.send.save-copy, whose default is true
    * since pimalaya/himalaya#536.
    */
@@ -62,6 +69,7 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
     password: input.password,
     useSsl: input.useSsl ?? true,
     maxMessages: input.maxMessages ?? 200,
+    contentSearch: input.contentSearch ?? false,
     saveCopy: input.saveCopy ?? true,
     sentFolder: input.sentFolder ?? null,
   }

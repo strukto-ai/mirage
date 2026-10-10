@@ -12,10 +12,50 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '@struktoai/mirage-core/types'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+import { recordQueries } from '@struktoai/mirage-core/utils/record_search'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchMessage, listMessageUids, quoteString, type FetchedMessage } from './client.ts'
+import { fetchHeaders, listMessageUids, quoteString, type FetchedMessage } from './client.ts'
 import { dateBucket, msgFilename } from './readdir.ts'
-import { messageJsonText } from './render.ts'
+import { NATIVE_KINDS, detectScope } from './scope.ts'
+
+// What a mounted .email.json holds besides the headers and body IMAP
+// searches: its key names, JSON literals, the system flags and the name an
+// unnamed attachment is given.
+const RECORD_KEYS: ReadonlySet<string> = new Set([
+  'from',
+  'name',
+  'email',
+  'reply_to',
+  'to',
+  'cc',
+  'subject',
+  'date',
+  'body_text',
+  'body_html',
+  'snippet',
+  'message_id',
+  'in_reply_to',
+  'references',
+  'has_attachments',
+  'attachments',
+  'filename',
+  'content_type',
+  'size',
+  'uid',
+  'flags',
+  'true',
+  'false',
+  'null',
+  'seen',
+  'answered',
+  'flagged',
+  'deleted',
+  'draft',
+  'recent',
+  'unnamed',
+])
 
 interface SearchOptions {
   text?: string | null
@@ -80,28 +120,47 @@ export function buildVfsPath(prefix: string, folder: string, msg: FetchedMessage
 }
 
 /**
- * Runs a native TEXT search and returns (vfsPath, messageJson) pairs.
+ * The message files under `under` IMAP SEARCH TEXT names.
  *
- * `query` is the substring IMAP is asked for, never a caller's regex: the
- * server matches it case-insensitively against the raw message, so a grep
- * hands over the literal every match must contain and runs its real
- * pattern over the rendered text itself.
+ * IMAP matches a substring of the headers or body in any case, so each hit
+ * is a message that may hold `text`; its file is named from its Subject and
+ * Date, fetched alone. A day is asked for its whole folder. null when a scope
+ * is not a folder or a day, when `text` could match the JSON outside the
+ * headers and body (`recordQueries`), or when the server fails.
  */
-export async function searchAndFormat(
+export async function filesContaining(
   accessor: EmailAccessor,
-  folder: string,
-  query: string,
-  prefix: string,
-  maxResults: number | null = null,
-): Promise<[string, string][]> {
-  if (folder === '') return []
-  const uids = await searchMessages(accessor, folder, { text: query }, maxResults)
-  const pairs: [string, string][] = []
-  for (const uid of uids) {
-    const msg = await fetchMessage(accessor, folder, uid)
-    const msgText = messageJsonText(msg)
-    const vfsPath = buildVfsPath(prefix, folder, msg)
-    pairs.push([vfsPath, msgText])
+  text: string,
+  under: readonly PathSpec[],
+  wholeWord: boolean,
+): Promise<PathSpec[] | null> {
+  const queries = recordQueries(text, RECORD_KEYS, wholeWord)
+  if (queries === null) return null
+  const found: PathSpec[] = []
+  for (const scope of under) {
+    const match = detectScope(scope)
+    const folder = match.slots.folder
+    if (!NATIVE_KINDS.has(match.kind) || folder === undefined) return null
+    const segment = scope.mountPath.replace(/^\/+/, '').split('/')[0] ?? ''
+    let named: FetchedMessage[]
+    try {
+      const uids = new Set<string>()
+      for (const query of queries) {
+        const hits = await searchMessages(
+          accessor,
+          folder,
+          { text: query },
+          accessor.config.maxMessages,
+        )
+        for (const uid of hits) uids.add(uid)
+      }
+      const ordered = [...uids].sort((a, b) => Number(a) - Number(b))
+      named = await fetchHeaders(accessor, folder, ordered, true)
+    } catch (err) {
+      console.warn(`imap search failed (${String(err)}); reading every file`)
+      return null
+    }
+    for (const msg of named) found.push(mountedPath(scope, `/${buildVfsPath('', segment, msg)}`))
   }
-  return pairs
+  return found
 }

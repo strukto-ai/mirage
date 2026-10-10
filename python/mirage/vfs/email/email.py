@@ -19,6 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.email.config import EmailConfig
 from mirage.core.email.read import read as _read
 from mirage.core.email.readdir import readdir as _readdir
+from mirage.core.email.search import files_containing as _files_containing
 from mirage.core.email.stat import stat as _stat
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
@@ -40,6 +41,8 @@ class EmailVFS(BaseVFS):
     index_ttl: float = 86_400
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
+    # IMAP search names messages; an attachment is read as usual.
+    searchable = ("*/*/*.email.json",)
 
     def __init__(self, config: EmailConfig) -> None:
         super().__init__()
@@ -65,6 +68,19 @@ class EmailVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec] | None:
+        if not self.config.content_search:
+            return None
+        return await _files_containing(self.accessor, text, under, whole_word)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

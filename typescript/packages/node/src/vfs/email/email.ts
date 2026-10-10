@@ -30,6 +30,7 @@ import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { read as emailRead } from '../../core/email/read.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
+import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
 
 export interface EmailVFSState {
   type: string
@@ -46,6 +47,8 @@ export class EmailVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = PROMPT
   override readonly writePrompt: string = WRITE_PROMPT
+  // IMAP search names messages; an attachment is read as usual.
+  override readonly searchable: readonly string[] = ['*/*/*.email.json']
   readonly config: EmailConfig
   override readonly accessor: EmailAccessor
 
@@ -76,6 +79,15 @@ export class EmailVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return emailStat(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[] | null> {
+    if (!this.config.contentSearch) return Promise.resolve(null)
+    return emailFilesContaining(this.accessor, text, under, opts.wholeWord)
   }
 
   override getState(): Promise<EmailVFSState> {

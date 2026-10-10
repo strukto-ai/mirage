@@ -706,6 +706,9 @@ async function openEmail(target: Target): Promise<Open> {
       password,
       useSsl: false,
       maxMessages: 200,
+      // The fake answers IMAP SEARCH TEXT, so exercise grep/rg narrowing in
+      // the battery.
+      contentSearch: true,
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE, ...permissionOptions(target) })

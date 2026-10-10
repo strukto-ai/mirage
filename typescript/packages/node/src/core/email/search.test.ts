@@ -12,11 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { NAME_MAX_BYTES, byteLength } from '@struktoai/mirage-core/utils/sanitize'
-import { describe, expect, it } from 'vitest'
-import { parseSearchCriteria } from './client.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ClientModule from './client.ts'
+
+vi.mock('./client.ts', async () => {
+  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
+  return { ...actual, listMessageUids: vi.fn(), fetchHeaders: vi.fn() }
+})
+
+import type { EmailAccessor } from '../../accessor/email.ts'
+import * as client from './client.ts'
 import { msgFilename } from './readdir.ts'
-import { buildSearchCriteria, buildVfsPath } from './search.ts'
+import { buildSearchCriteria, buildVfsPath, filesContaining } from './search.ts'
+
+const { parseSearchCriteria } = client
+const uids = vi.mocked(client.listMessageUids)
+const named = vi.mocked(client.fetchHeaders)
 
 const CJK_SUBJECT = '会議の記録'.repeat(40)
 const MSG = { subject: CJK_SUBJECT, uid: '7', date: 'Mon, 5 Jan 2026 10:00:00 +0000' }
@@ -67,5 +80,55 @@ describe('buildSearchCriteria', () => {
     expect(parseSearchCriteria(buildSearchCriteria({ text: 'say "hi" \\ done' }))).toEqual({
       text: 'say "hi" \\ done',
     })
+  })
+})
+
+// Twins of the files_containing tests in python/tests/core/email/test_search.py.
+describe('filesContaining', () => {
+  const accessor = { config: { maxMessages: 200 } } as unknown as EmailAccessor
+  const headers = [
+    { uid: '3', subject: 'Q2 Budget', date: 'Mon, 5 Jan 2026 10:00 +0000' },
+    { uid: '9', subject: '', date: '', internalDate: '06-Jan-2026 09:30:00 +0000' },
+  ]
+  const scope = (key: string): PathSpec =>
+    PathSpec.fromStrPath(`/mail${key}`, key.replace(/^\//, ''))
+
+  beforeEach(() => {
+    uids.mockReset().mockResolvedValue(['3', '9'])
+    named.mockReset().mockResolvedValue(headers as never)
+  })
+
+  // A day is asked for its whole folder; hits on other days are never
+  // walked, so naming them costs nothing.
+  it.each(['/INBOX', '/INBOX/2026-01-05'])(
+    'names the files the folder lists for %s',
+    async (key) => {
+      const hits = await filesContaining(accessor, 'budget', [scope(key)], false)
+      expect(hits?.map((hit) => hit.virtual)).toEqual([
+        '/mail/INBOX/2026-01-05/Q2_Budget__3.email.json',
+        '/mail/INBOX/2026-01-06/No_Subject__9.email.json',
+      ])
+      expect(uids.mock.calls[0]?.slice(1, 3)).toEqual(['INBOX', 'TEXT "udget"'])
+      expect(named.mock.calls[0]?.[3]).toBe(true)
+    },
+  )
+
+  it.each([
+    ['budget', ''],
+    ['budget', '/INBOX/2026-01-05/Q2_Budget__3.email.json'],
+    ['subject', '/INBOX'],
+    ['seen', '/INBOX'],
+    ['deploy 42', '/INBOX'],
+  ])('does not ask for %j under %j', async (text, key) => {
+    expect(await filesContaining(accessor, text, [scope(key)], false)).toBeNull()
+    expect(uids).not.toHaveBeenCalled()
+  })
+
+  it('reads a failed search as no answer and no hit as one', async () => {
+    uids.mockRejectedValueOnce(new Error('IMAP rejected the search'))
+    expect(await filesContaining(accessor, 'budget', [scope('/INBOX')], false)).toBeNull()
+    uids.mockResolvedValueOnce([])
+    named.mockResolvedValueOnce([])
+    expect(await filesContaining(accessor, 'budget', [scope('/INBOX')], false)).toEqual([])
   })
 })

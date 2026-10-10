@@ -228,9 +228,23 @@ async def fetch_headers(
     accessor: EmailAccessor,
     folder: str,
     uids: list[str],
+    header_only: bool = False,
 ) -> list[dict[str, Any]]:
+    """Fetch messages by uid, parsed.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox holding them.
+        uids (list[str]): the messages.
+        header_only (bool): fetch the header block alone, which names a
+            message's file (Subject, Date, INTERNALDATE for a message
+            without one) without its body.
+    """
     if not uids:
         return []
+    items = (
+        "(UID INTERNALDATE BODY.PEEK[HEADER])" if header_only else FETCH_ITEMS
+    )
     imap = await accessor.get_imap()
     await select_folder(imap, folder)
     results: list[dict[str, Any]] = []
@@ -242,7 +256,7 @@ async def fetch_headers(
         # in the MIME structure, and listings must surface attachment dirs
         # without flipping \Seen (the gmail backend fetches full messages
         # on readdir the same way).
-        response = await imap.uid("fetch", uid_set, FETCH_ITEMS)
+        response = await imap.uid("fetch", uid_set, items)
         results.extend(_parse_multi_fetch(response, batch))
     return results
 

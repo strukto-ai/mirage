@@ -12,16 +12,62 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email.client import (
-    fetch_message,
+    fetch_headers,
     list_message_uids,
     quote_string,
 )
 from mirage.core.email.readdir import _date_bucket, _msg_filename
-from mirage.core.email.render import message_json_text
+from mirage.core.email.scope import NATIVE_KINDS, detect_scope
+from mirage.types import PathSpec
+from mirage.utils.key_prefix import mounted_path
+from mirage.utils.record_search import record_queries
+
+logger = logging.getLogger(__name__)
+
+# What a mounted .email.json holds besides the headers and body IMAP
+# searches: its key names, JSON literals, the system flags and the name
+# an unnamed attachment is given.
+RECORD_KEYS = frozenset(
+    {
+        "from",
+        "name",
+        "email",
+        "reply_to",
+        "to",
+        "cc",
+        "subject",
+        "date",
+        "body_text",
+        "body_html",
+        "snippet",
+        "message_id",
+        "in_reply_to",
+        "references",
+        "has_attachments",
+        "attachments",
+        "filename",
+        "content_type",
+        "size",
+        "uid",
+        "flags",
+        "true",
+        "false",
+        "null",
+        "seen",
+        "answered",
+        "flagged",
+        "deleted",
+        "draft",
+        "recent",
+        "unnamed",
+    }
+)
 
 
 def build_search_criteria(
@@ -108,36 +154,56 @@ def _build_vfs_path(prefix: str, folder: str, msg: dict[str, Any]) -> str:
     return "/".join(p for p in parts if p)
 
 
-async def search_and_format(
+async def files_containing(
     accessor: EmailAccessor,
-    folder: str,
-    query: str,
-    prefix: str,
-    max_results: int | None = None,
-) -> list[tuple[str, str]]:
-    """Run a native TEXT search and return (vfs_path, message_json) pairs.
+    text: str,
+    under: list[PathSpec],
+    whole_word: bool,
+) -> list[PathSpec] | None:
+    """The message files under ``under`` IMAP SEARCH TEXT names.
 
-    ``query`` is the substring IMAP is asked for, never a caller's regex:
-    the server matches it case-insensitively against the raw message, so
-    a grep hands over the literal every match must contain and runs its
-    real pattern over the rendered text itself.
+    IMAP matches a substring of the headers or body in any case, so each
+    hit is a message that may hold ``text``; its file is named from its
+    Subject and Date, fetched alone. A day is asked for its whole folder.
+    None when a scope is not a folder or a day, when ``text`` could match
+    the JSON outside the headers and body (``record_queries``), or when
+    the server fails.
 
     Args:
         accessor (EmailAccessor): the account.
-        folder (str): the mailbox to search.
-        query (str): the substring every candidate must contain.
-        prefix (str): the mount prefix hits are spelled under.
-        max_results (int | None): keep only the newest this many uids.
+        text (str): what grep or rg searches for.
+        under (list[PathSpec]): the directories walked.
+        whole_word (bool): whether only whole words of ``text`` match.
     """
-    if not folder:
-        return []
-    uids = await search_messages(
-        accessor, folder, text=query, max_results=max_results
-    )
-    pairs: list[tuple[str, str]] = []
-    for uid in uids:
-        msg = await fetch_message(accessor, folder, uid)
-        msg_text = message_json_text(msg)
-        vfs_path = _build_vfs_path(prefix, folder, msg)
-        pairs.append((vfs_path, msg_text))
-    return pairs
+    queries = record_queries(text, RECORD_KEYS, whole_word)
+    if queries is None:
+        return None
+    found: list[PathSpec] = []
+    for scope in under:
+        match = detect_scope(scope)
+        if match.kind not in NATIVE_KINDS:
+            return None
+        folder = match.slots["folder"]
+        segment = scope.mount_path.strip("/").split("/")[0]
+        try:
+            uids: set[str] = set()
+            for query in queries:
+                uids.update(
+                    await search_messages(
+                        accessor,
+                        folder,
+                        text=query,
+                        max_results=accessor.config.max_messages,
+                    )
+                )
+            named = await fetch_headers(
+                accessor, folder, sorted(uids, key=int), header_only=True
+            )
+        except (OSError, ValueError, asyncio.TimeoutError) as exc:
+            logger.warning("imap search failed (%s); reading every file", exc)
+            return None
+        found.extend(
+            mounted_path(scope, "/" + _build_vfs_path("", segment, msg))
+            for msg in named
+        )
+    return found
