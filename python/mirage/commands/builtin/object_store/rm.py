@@ -28,6 +28,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     over_mount_io,
     require_op,
 )
+from mirage.commands.builtin.utils.operands import mount_points
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.slash_links import (
     is_slashed_link,
@@ -39,6 +40,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
+from mirage.errors.render import operand_spelling
 from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
@@ -130,8 +132,18 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                             await rm_r(accessor, path)
                         except WalkDeclinedError:
                             declined = True
+                    # A removal never crosses into a mount below, so it
+                    # says so as GNU's --one-file-system does.
+                    skipped = [
+                        f"rm: skipping '{operand_spelling(root, path)}', "
+                        "since it's on a different device"
+                        for root in mount_points(
+                            ns.mounts if ns is not None else None,
+                            path.virtual,
+                        )
+                    ]
                     if not declined:
-                        return [], removal_lines(listed, path)
+                        return skipped, removal_lines(listed, path)
                     gone, failures = await remove_tree(
                         path,
                         readdir=listing,
@@ -145,7 +157,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                         f"rm: cannot remove '{entry.raw_path}': "
                         f"{fs_strerror(exc)}"
                         for entry, exc in failures
-                    ], (removal_lines(gone, path) if verbose else [])
+                    ] + skipped, (removal_lines(gone, path) if verbose else [])
                 if remove_dir:
                     children = await readdir(accessor, path, index)
                     if children:

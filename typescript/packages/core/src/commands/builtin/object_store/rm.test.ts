@@ -2,6 +2,7 @@ import { invoke } from '../../../io/stdio.ts'
 import { expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
+import { walkDeclined } from '../../../errors/fs.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { withCommandGuards } from '../generic_bind/adapter.ts'
 import type { CommandIO } from '../../config.ts'
@@ -58,3 +59,55 @@ it.each([
     expect(unlink.mock.calls).toHaveLength(1)
   },
 )
+
+it('rm -r names a mount below and fails', async () => {
+  const tree: Record<string, string[]> = { '/data': ['/data/a.txt', '/data/inner'] }
+  const unlink = vi.fn(() => Promise.resolve())
+  const rmdir = vi.fn(() => Promise.resolve())
+  const io: CommandIO = {
+    readdir: (_a, path) => Promise.resolve(tree[path.virtual] ?? []),
+    readBytes: () => Promise.resolve(new Uint8Array()),
+    readStream: () => {
+      throw new Error('unexpected read')
+    },
+    stat: (_a, path) =>
+      Promise.resolve(
+        new FileStat({
+          name: path.virtual,
+          type: path.virtual in tree ? FileType.DIRECTORY : FileType.FILE,
+        }),
+      ),
+    unlink,
+    rmdir,
+    rmR: (_a, path) => Promise.reject(walkDeclined('s3', 'rm_r', path)),
+    isMounted: () => true,
+  }
+  const roots = ['/data/inner']
+  const command = makeRm('s3', withCommandGuards)[0]
+  if (command === undefined) throw new Error('rm was not registered')
+  const result = await invoke(() =>
+    command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
+      flags: { r: true },
+      stdin: null,
+      cwd: '/',
+      io,
+      ns: {
+        mounts: {
+          descendants: () => roots,
+          visibleDescendants: () => roots,
+          isRoot: (path) => roots.includes(path),
+          rootOf: () => '/data',
+        },
+      },
+    }),
+  )
+  await materialize(result?.[0] ?? null)
+  expect(result?.[1].exitCode).toBe(1)
+  expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(
+    "rm: skipping '/data/inner', since it's on a different device\n",
+  )
+  expect(unlink.mock.calls.map((call) => (call as unknown[])[1])).toEqual([
+    PathSpec.fromStrPath('/data/a.txt'),
+  ])
+  expect(rmdir).not.toHaveBeenCalled()
+})

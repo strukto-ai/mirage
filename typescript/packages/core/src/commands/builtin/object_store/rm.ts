@@ -17,6 +17,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { NamespaceView } from '../../../view/types.ts'
 import { fsStrerror, innerSuffix, isFsError, withInner } from '../../../errors/fs.ts'
+import { operandSpelling } from '../../../errors/render.ts'
 import type { WalkDeclinedError } from '../../../errors/types.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
 import type { Command, CommandIO } from '../../config.ts'
@@ -26,6 +27,7 @@ import { cpWalk } from '../generic/cp.ts'
 import { removeTree, rmWithoutOperands } from '../generic/rm_cmd.ts'
 import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
+import { mountPoints } from '../utils/operands.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isSlashedLink, rmLinkRefusal } from '../utils/slash_links.ts'
 import { removalLines } from '../utils/verbose.ts'
@@ -91,7 +93,13 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
               declined = true
             }
           }
-          if (!declined) return [[], removalLines(listed, path)]
+          // A removal never crosses into a mount below, so it says so as
+          // GNU's --one-file-system does.
+          const skipped = mountPoints(ns?.mounts, path.virtual).map(
+            (root) =>
+              `rm: skipping '${operandSpelling(root, path)}', since it's on a different device`,
+          )
+          if (!declined) return [skipped, removalLines(listed, path)]
           const { removed, failures } = await removeTree(path, {
             readdir: listing,
             stat: probe,
@@ -101,9 +109,13 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
             force: opts.force,
           })
           return [
-            failures.map(
-              ([entry, why]) => `rm: cannot remove '${entry.rawPath}': ${String(fsStrerror(why))}`,
-            ),
+            [
+              ...failures.map(
+                ([entry, why]) =>
+                  `rm: cannot remove '${entry.rawPath}': ${String(fsStrerror(why))}`,
+              ),
+              ...skipped,
+            ],
             opts.verbose ? removalLines(removed, path) : [],
           ]
         }
