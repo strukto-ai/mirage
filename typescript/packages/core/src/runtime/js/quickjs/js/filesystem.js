@@ -36,7 +36,8 @@ std.open = (path, mode, errorObj) => {
       const [pos, len] = span(buffer, position, length)
       return __mirage_write_bytes(fd, buffer.slice(pos, pos + len))
     },
-    seek: (offset, whence) => __mirage_seek(fd, Number(offset), whence === undefined ? 0 : whence | 0),
+    seek: (offset, whence) =>
+      __mirage_seek(fd, Number(offset), whence === undefined ? 0 : whence | 0),
     tell: () => __mirage_tell(fd),
     error: () => __mirage_ferror(fd),
     clearerr: () => {

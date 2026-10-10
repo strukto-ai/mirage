@@ -5,9 +5,9 @@ What only the SDK's in-process entry point has: `with ws:` on the python host an
 `os` and node `fs` at the mounts. A case gives a `python` and a `node`
 program, and both answer alike.
 
-| File         | Pins                                                                                                                                                                                                                                                        |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `files.json` | reads, writes and appends reach the mount and its ledger; `mkdir -p`, rename, symlink, readlink, unlink and rmdir; utime, chmod and chown read back through stat and the shell                                                                              |
+| File         | Pins                                                                                                                                                                                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files.json` | reads, writes and appends reach the mount and its ledger; `mkdir -p`, rename, symlink, readlink, unlink and rmdir; utime, chmod and chown read back through stat and the shell                                                                                                                           |
 | `edges.json` | a copy crosses the mount's edge both ways and a rename across it is EXDEV, while host paths stay the host's; a mount root is EBUSY to rmdir and to a tree removal that holds one, with nothing removed; node's sync calls and watches refuse a mounted path, and `existsSync` answers rather than throws |
 
 The dispatcher serves mounted paths only: a path no mount owns, the structure
