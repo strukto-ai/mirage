@@ -44,6 +44,8 @@ interface IndexViewOptions {
   readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>
   /** Told each folder whose listing this view has just written. */
   readonly noteWritten?: (folder: string) => void
+  /** Whether the running command fetched a folder's listing; unset answers false. */
+  readonly listedThisCommand?: (folder: string) => boolean
 }
 
 /** A mount-owned index view; delayed backend writes retain their original owner. */
@@ -56,6 +58,7 @@ export class IndexView extends IndexCacheStore {
     | undefined
   private readonly excludedPrefixes: () => readonly string[]
   private readonly noteWritten: ((folder: string) => void) | undefined
+  private readonly commandListed: ((folder: string) => boolean) | undefined
 
   constructor(
     private readonly inner: IndexCacheStore,
@@ -70,7 +73,12 @@ export class IndexView extends IndexCacheStore {
     this.onGone = options.onGone
     this.mayServeListing = options.mayServeListing
     this.noteWritten = options.noteWritten
+    this.commandListed = options.listedThisCommand
     this.excludedPrefixes = options.excludedPrefixes ?? (() => [])
+  }
+
+  override listedThisCommand(folder: string): boolean {
+    return this.commandListed?.(folder) ?? false
   }
 
   /** The store this view writes through. */

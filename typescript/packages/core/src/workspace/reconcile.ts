@@ -217,8 +217,8 @@ export class Reconciler {
    * Gate a cached listing: may it be served without re-listing?
    *
    * Under `bounded` the listing is trusted within its bound. Under `fresh` a
-   * listing the running command wrote itself is served (a read outside any
-   * command trusts one written within the last `LISTING_TRUST_WINDOW`
+   * listing the running command fetched itself is served (a read outside any
+   * command trusts one fetched within the last `LISTING_TRUST_WINDOW`
    * seconds instead, `CacheManager.listingTrusted`). Past that, a listing
    * stored at the mount's pin is served without asking: github pins a
    * full-sha ref and serves its listing unchecked when the stored version

@@ -23,7 +23,7 @@ import { concat } from '../io/cachable_iterator.ts'
 import type { IndexCacheStore } from './index/store.ts'
 import type { Evicted, IndexEntry } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
-import { commandStarted, tick } from './index/scope.ts'
+import { commandStarted, soleCommandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { withCacheMutation, latestFingerprint } from './file/io.ts'
 
@@ -46,9 +46,9 @@ export class CacheManager {
   private readonly ownsPath: (path: string) => boolean
   private readGeneration = 0
   private view: IndexView | null = null
-  // Folder to the tick and the monotonic millisecond its listing was last
-  // written at, by any view of this mount, shared or lock-held.
-  private readonly written = new Map<string, [number, number]>()
+  // Folder to the tick, the monotonic millisecond and the command stamp of
+  // its listing's last write, by any view of this mount, shared or lock-held.
+  private readonly written = new Map<string, [number, number, number | null]>()
   // Cache key to what the freshness probe got from the backend: its command
   // identity, the read generation then, and the stat.
   private readonly probed = new Map<string, [number, number, FileStat]>()
@@ -132,8 +132,11 @@ export class CacheManager {
   scopeIndex(index: IndexCacheStore): IndexCacheStore {
     if (this.fileCache === null || index instanceof IndexView) return index
     if (this.view?.store !== index) {
-      this.written.clear()
-      if (this.view !== null) this.forgetChecks()
+      // The notes describe the old store; a first view keeps them.
+      if (this.view !== null) {
+        this.written.clear()
+        this.forgetChecks()
+      }
       this.view = new IndexView(
         index,
         this.fileCache,
@@ -151,6 +154,7 @@ export class CacheManager {
     onGone?: (gone: readonly Evicted[]) => Promise<void>
     mayServeListing?: (folder: string, version: string | null) => Promise<boolean>
     noteWritten: (folder: string) => void
+    listedThisCommand: (folder: string) => boolean
   } {
     return {
       readTtl: this.readTtl,
@@ -163,22 +167,40 @@ export class CacheManager {
       noteWritten: (folder) => {
         this.noteWritten(folder)
       },
+      listedThisCommand: (folder) => this.listedThisCommand(folder),
     }
   }
 
   private noteWritten(folder: string): void {
-    this.written.set(folder, [tick(), performance.now()])
+    this.written.set(folder, [tick(), performance.now(), soleCommandStarted()])
+  }
+
+  /**
+   * Whether the running command fetched `folder`'s listing itself.
+   *
+   * Stricter than `listingTrusted`: outside a command no listing is the
+   * caller's own, and inside one only a listing fetched under the same command
+   * stamp is: not one another session fetched meanwhile, nor one a nested
+   * `$(...)` or function body fetched. A listing the command fetched stays its
+   * own until the command ends, so a long-running command does not see a name
+   * another client creates after it listed the folder. Mirrors Python's
+   * `listed_this_command`.
+   */
+  listedThisCommand(folder: string): boolean {
+    const written = this.written.get(folder)
+    const started = soleCommandStarted()
+    return written !== undefined && started !== null && written[2] === started
   }
 
   /**
    * Whether `folder`'s listing is recent enough to serve under fresh.
    *
-   * Inside a command: only if the command wrote it itself, so one command
-   * re-lists a folder once however often it reads it. Outside any command
-   * (FUSE, a programmatic op) there is no command to belong to, so a listing
-   * written within `LISTING_TRUST_WINDOW` seconds is trusted instead: one
-   * `ls -l` over FUSE is a burst of calls that can share a re-list until
-   * the window expires.
+   * Inside a command: only if it was fetched since the command started, so
+   * one command re-lists a folder once however often it reads it. Outside
+   * any command (FUSE, a programmatic op) there is no command to belong to,
+   * so a listing fetched within `LISTING_TRUST_WINDOW` seconds is trusted
+   * instead: one `ls -l` over FUSE is a burst of calls that can share a
+   * re-list until the window expires.
    *
    * Every view of the mount, shared or lock-held, records into one map, so
    * a glob's write counts for the `ls` that follows it.

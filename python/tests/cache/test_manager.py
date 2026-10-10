@@ -533,6 +533,38 @@ async def test_a_write_before_the_command_does_not_count():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("producer", ["none", "earlier", "later"])
+async def test_a_listing_another_command_fetched_is_not_this_ones(producer):
+    # Fetched while this command runs, but by no command or by another
+    # session's, started before or after this one: its miss is no proof.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    ready, release = asyncio.Event(), asyncio.Event()
+
+    async def note():
+        ready.set()
+        await release.wait()
+        await manager.scope_index(index).set_dir("/data", [])
+
+    async def produce():
+        if producer == "none":
+            await note()
+        else:
+            async with command_scope():
+                await note()
+
+    early = None if producer == "later" else asyncio.create_task(produce())
+    if early is not None:
+        await ready.wait()
+    async with command_scope():
+        task = early or asyncio.create_task(produce())
+        await ready.wait()
+        release.set()
+        await task
+        assert manager.listed_this_command("/data") is False
+
+
+@pytest.mark.asyncio
 async def test_a_replaced_store_forgets_what_the_old_one_was_written():
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
@@ -571,7 +603,7 @@ async def test_outside_a_command_a_listing_is_trusted_for_the_window(clock):
 
 @pytest.mark.asyncio
 async def test_inside_a_command_the_window_does_not_apply(clock):
-    # A listing the previous command wrote a moment ago is still re-listed by
+    # A listing the previous command fetched a moment ago is still re-listed by
     # the next one: the window is only for reads that belong to no command.
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)

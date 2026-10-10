@@ -32,6 +32,7 @@ import {
 } from './context.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
+import { captureCommandScope, runInCommandScope } from './index/scope.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
@@ -358,4 +359,46 @@ describe('a conditional write on the fallback storage', () => {
     )
     expect(cond).toEqual({ ifMatch: 'v1' })
   })
+})
+
+describe('listedThisCommand on the fallback storage', () => {
+  // Without task isolation the latest live stamp may be another command's,
+  // so a listing counts as the caller's own only while one command is live.
+  it('counts no listing while another command is live', async () => {
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    const [listed, markListed] = gate()
+    const [checked, markChecked] = gate()
+    let mine: boolean | null = null
+    const a = runInCommandScope(async () => {
+      await listed
+      mine = manager.listedThisCommand('/data')
+      markChecked()
+    })
+    const b = runInCommandScope(async () => {
+      await manager.scopeIndex(index).setDir('/data', [])
+      markListed()
+      await checked
+    })
+    await Promise.all([a, b])
+    expect(mine).toBe(false)
+  })
+
+  // A command's lazy output drains through a replay of its own scope, which
+  // stacks a second frame with the same stamp.
+  it.each([false, true])(
+    'counts a listing the only live command fetched (replayed: %s)',
+    async (replayed) => {
+      const index = new RAMIndexCacheStore({ ttl: 600 })
+      const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+      await runInCommandScope(async () => {
+        await manager.scopeIndex(index).setDir('/data', [])
+        const check = (): boolean => manager.listedThisCommand('/data')
+        const mine = replayed
+          ? await captureCommandScope()(() => Promise.resolve(check()))
+          : check()
+        expect(mine).toBe(true)
+      })
+    },
+  )
 })

@@ -50,11 +50,11 @@ def live_of(entry: dict[str, Any] | None) -> LiveVersion | None:
     )
 
 
-def result_token(raw: str | None) -> str | None:
-    """The content token a download's ``Dropbox-API-Result`` names.
+def result_of(raw: str | None) -> dict[str, Any] | None:
+    """The file metadata a download's ``Dropbox-API-Result`` carries.
 
-    Dropbox sends the file's metadata there on a full and on a ranged
-    (206) download, so a read stamps the token with no extra request.
+    Dropbox sends it on a full and on a ranged (206) download, so a read
+    learns the file's token and name with no extra request.
 
     Args:
         raw (str | None): the header's value, or None when absent.
@@ -68,4 +68,13 @@ def result_token(raw: str | None) -> str | None:
     if not isinstance(result, dict):
         logger.warning("unreadable %s header: %s", RESULT_HEADER, raw)
         return None
-    return token_of(result.get(CONTENT_HASH))
+    return result
+
+
+def result_token(result: dict[str, Any] | None) -> str | None:
+    """The content token a download's result metadata names.
+
+    Args:
+        result (dict[str, Any] | None): what ``result_of`` parsed, or None.
+    """
+    return None if result is None else token_of(result.get(CONTENT_HASH))

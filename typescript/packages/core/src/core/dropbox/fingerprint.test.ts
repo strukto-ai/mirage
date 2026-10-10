@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resultToken } from './fingerprint.ts'
+import { resultOf, resultToken } from './fingerprint.ts'
 
 describe('dropbox fingerprint', () => {
   afterEach(() => {
@@ -32,7 +32,7 @@ describe('dropbox fingerprint', () => {
     ['not-object', JSON.stringify(['a']), null, true],
   ])('reads a result header (%s)', (_id, raw, token, warns) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    expect(resultToken(raw)).toBe(token)
+    expect(resultToken(resultOf(raw))).toBe(token)
     expect(warn.mock.calls.length > 0).toBe(warns)
   })
 })

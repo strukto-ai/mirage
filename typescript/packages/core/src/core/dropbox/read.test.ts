@@ -30,6 +30,7 @@ vi.mock('./api.ts', async () => {
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { captureRead, runWithWriteContext } from '../../cache/context.ts'
 import type { WriteContext } from '../../cache/types.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
@@ -181,14 +182,19 @@ describe('dropbox read stamps content_hash', () => {
 
   // The ops factory's emulated truncate reads with no index.
   it.each([
-    [409, { code: 'ENOENT' }],
-    [500, { status: 500 }],
-  ] as const)('maps only an index-less %s to ENOENT', async (status, raised) => {
-    vi.mocked(client.dropboxDownload).mockRejectedValue(
-      new client.DropboxApiError('refused', status, 'path/not_found/...'),
-    )
-    await expect(read(makeAccessor(), spec)).rejects.toMatchObject(raised)
-  })
+    ['missing', 409, 'path/not_found/...', { code: 'ENOENT' }],
+    ['folder', 409, 'path/not_file/...', { code: 'EISDIR' }],
+    ['restricted', 409, 'path/restricted_content/...', { status: 409 }],
+    ['server-error', 500, 'path/not_found/...', { status: 500 }],
+  ] as const)(
+    'maps only an index-less miss to ENOENT (%s)',
+    async (_id, status, summary, raised) => {
+      vi.mocked(client.dropboxDownload).mockRejectedValue(
+        new client.DropboxApiError('refused', status, summary),
+      )
+      await expect(read(makeAccessor(), spec)).rejects.toMatchObject(raised)
+    },
+  )
 })
 
 describe('dropbox read publishes its token on a conditional mount', () => {
@@ -215,5 +221,107 @@ describe('dropbox read publishes its token on a conditional mount', () => {
       captureRead(path.virtual, () => read(makeAccessor(), path, undefined, options)),
     )
     expect(tokens).toEqual(published)
+  })
+})
+
+function header(name: string): string {
+  return JSON.stringify({ name, content_hash: 'h' })
+}
+
+async function listed(): Promise<RAMIndexCacheStore> {
+  const index = new RAMIndexCacheStore()
+  await index.setDir('/', [])
+  return index
+}
+
+describe('dropbox read past an earlier listing', () => {
+  // The cached listing predates the file, so it is no proof of absence: the
+  // read goes to Dropbox by path and stamps the download's hash.
+  const n = new PathSpec({ virtual: '/n', directory: '/', vfsPath: 'n' })
+
+  async function drain(accessor: DropboxAccessor, index: RAMIndexCacheStore): Promise<number> {
+    let size = 0
+    for await (const c of readStream(accessor, n, index)) size += c.byteLength
+    return size
+  }
+
+  it('downloads a file created since', async () => {
+    vi.mocked(api.listFolder).mockReset()
+    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([7, 8]), header('n')])
+    vi.mocked(client.dropboxDownloadStream).mockImplementation(
+      async function* (_tm, _path, onResponse) {
+        await Promise.resolve()
+        onResponse?.({ 'dropbox-api-result': header('n') })
+        yield new Uint8Array([7, 8])
+      },
+    )
+    const accessor = makeAccessor()
+    const [data, records] = await runWithRecording(async () => read(accessor, n, await listed()))
+    expect(data).toEqual(new Uint8Array([7, 8]))
+    expect(records.map((r) => r.fingerprint)).toEqual(['h'])
+    expect(vi.mocked(client.dropboxDownload).mock.lastCall?.[1]).toBe('/n')
+    expect(await drain(accessor, await listed())).toBe(2)
+    expect(vi.mocked(client.dropboxDownloadStream).mock.lastCall?.[1]).toBe('/n')
+    expect(api.listFolder).not.toHaveBeenCalled()
+  })
+
+  it('names what Dropbox answered', async () => {
+    const refused = new client.DropboxApiError('refused', 409, 'path/not_file/..')
+    vi.mocked(client.dropboxDownload).mockRejectedValue(refused)
+    vi.mocked(client.dropboxDownloadStream).mockImplementation(
+      // eslint-disable-next-line require-yield
+      async function* () {
+        await Promise.resolve()
+        throw refused
+      },
+    )
+    await expect(read(makeAccessor(), n, await listed())).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(drain(makeAccessor(), await listed())).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  // A download by path matches names case-insensitively; the listing does
+  // not, so a file stored as N is not n.
+  it('refuses a file in another case', async () => {
+    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([1]), header('N')])
+    vi.mocked(client.dropboxDownloadStream).mockImplementation(
+      async function* (_tm, _path, onResponse) {
+        await Promise.resolve()
+        onResponse?.({ 'dropbox-api-result': header('N') })
+        yield new Uint8Array([1])
+      },
+    )
+    await expect(read(makeAccessor(), n, await listed())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(drain(makeAccessor(), await listed())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(read(makeAccessor(), n)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe('dropbox read of a listed file', () => {
+  // The listing-miss check rides the lookup the read already makes, so a
+  // file the listing names costs no extra listing read (one MGET of the
+  // whole folder on a Redis index).
+  it('lists its folder once', async () => {
+    class Counting extends RAMIndexCacheStore {
+      listings = 0
+      override listDir(vfsPath: string): ReturnType<RAMIndexCacheStore['listDir']> {
+        this.listings += 1
+        return super.listDir(vfsPath)
+      }
+    }
+    const index = new Counting()
+    await index.setDir('/', [
+      ['note.txt', new IndexEntry({ id: 'id:1', name: 'note.txt', resourceType: 'dropbox/file' })],
+    ])
+    vi.mocked(client.dropboxDownload).mockResolvedValue([
+      new Uint8Array([1]),
+      JSON.stringify({ name: 'note.txt', content_hash: 'h' }),
+    ])
+    index.listings = 0
+    await read(
+      makeAccessor(),
+      new PathSpec({ virtual: '/note.txt', directory: '/', vfsPath: 'note.txt' }),
+      index,
+    )
+    expect(index.listings).toBe(1)
   })
 })

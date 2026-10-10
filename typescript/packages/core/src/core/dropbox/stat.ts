@@ -15,7 +15,9 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { ListedMiss } from '../../cache/index/config.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
+import { entryOrListedMiss } from '../../cache/index/warm.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
@@ -24,7 +26,7 @@ import { dropboxPathOf } from './paths.ts'
 import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
 import { readdir as coreReaddir } from './readdir.ts'
-import { enoent, isEnoent } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
 export function statFromEntry(entry: DropboxEntry): FileStat {
@@ -51,12 +53,10 @@ export function statFromEntry(entry: DropboxEntry): FileStat {
   })
 }
 
-// API-truthful stat for index-less callers (unlink/rmdir classification,
-// the wired find core) and the fresh checks' throwaway store: one
-// get_metadata. Only a not_found or not_folder 409 is a miss; any other
-// (restricted_content, ...) names a path that may exist, so a fresh probe must
-// not call it gone. get_metadata matches names case-insensitively where a
-// listing is exact.
+// One get_metadata: for index-less callers, the fresh checks' store and a
+// name missing from a listing the running command did not fetch. Only a
+// not_found or not_folder 409 is a miss; any other names a path that may
+// exist. get_metadata matches names case-insensitively.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
   let entry: DropboxEntry
   try {
@@ -87,52 +87,40 @@ export async function stat(
 
   if (index === undefined || index instanceof ListingCheckStore) return statFromApi(accessor, path)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-  let result = await index.get(virtualKey)
-  if (result.entry === undefined || result.entry === null) {
-    const parentVirtual = virtualKey.includes('/')
-      ? virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-      : '/'
-    try {
-      await coreReaddir(
-        accessor,
-        new PathSpec({
-          virtual: parentVirtual,
-          directory: parentVirtual,
-          resolved: false,
-          vfsPath: mountKey(parentVirtual, prefix),
-        }),
-        index,
-      )
-    } catch (err) {
-      // readdir already maps a genuinely missing path to ENOENT; a listing
-      // that fails any other way — ENOTDIR under a file, or a 5xx/429 from
-      // the API — is not absence and must surface, never read back as a
-      // (destructively actionable) false ENOENT.
-      if (!isEnoent(err)) throw err
-    }
-    result = await index.get(virtualKey)
-    if (result.entry === undefined || result.entry === null) {
-      throw enoent(path.virtual)
-    }
+  let entry = (await index.get(virtualKey)).entry ?? null
+  if (entry === null) {
+    const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
+    const parent = new PathSpec({
+      virtual: parentVirtual,
+      directory: parentVirtual,
+      resolved: false,
+      vfsPath: mountKey(parentVirtual, prefix),
+    })
+    const found = await entryOrListedMiss(index, virtualKey, () =>
+      coreReaddir(accessor, parent, index),
+    )
+    if (found === ListedMiss.UNTRUSTED) return statFromApi(accessor, path)
+    if (found === null) throw enoent(path.virtual)
+    entry = found
   }
-  if (result.entry.resourceType === 'dropbox/folder') {
+  if (entry.resourceType === 'dropbox/folder') {
     return new FileStat({
-      name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
+      name: entry.vfsName !== '' ? entry.vfsName : entry.name,
       type: FileType.DIRECTORY,
-      modified: result.entry.remoteTime,
-      extra: { dropbox_id: result.entry.id },
+      modified: entry.remoteTime,
+      extra: { dropbox_id: entry.id },
     })
   }
   return new FileStat({
-    name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
-    size: result.entry.size,
+    name: entry.vfsName !== '' ? entry.vfsName : entry.name,
+    size: entry.size,
     type: FileType.FILE,
-    content: contentTypeForPath(result.entry.vfsName),
-    modified: result.entry.remoteTime,
-    fingerprint: tokenOf(result.entry.extra[CONTENT_HASH]),
+    content: contentTypeForPath(entry.vfsName),
+    modified: entry.remoteTime,
+    fingerprint: tokenOf(entry.extra[CONTENT_HASH]),
     extra: {
-      dropbox_id: result.entry.id,
-      resource_type: result.entry.resourceType,
+      dropbox_id: entry.id,
+      resource_type: entry.resourceType,
     },
   })
 }

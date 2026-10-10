@@ -108,6 +108,10 @@ describe('dropboxDownload result header', () => {
   )
 })
 
+function refuse(): void {
+  throw new Error('refused')
+}
+
 describe('dropboxDownloadStream', () => {
   // A plain lower-cased record, as bytes_response hands its own, before the
   // first chunk, so a consumer that stops early still leaves the read stamped.
@@ -126,6 +130,29 @@ describe('dropboxDownloadStream', () => {
     expect((events[0] as Record<string, string>)['dropbox-api-result']).toBe(RESULT)
     expect(events.slice(1)).toEqual(['hello'])
   })
+
+  // A caller that refuses the response from its headers (a name in another
+  // case) must not leave the body holding the connection.
+  // A cancel that fails is logged; the caller still sees why the read failed.
+  it.each([false, true])(
+    'cancels the body when onResponse throws (cancel fails: %s)',
+    async (fails) => {
+      let cancelled = false
+      const body = new ReadableStream<Uint8Array>({
+        cancel() {
+          cancelled = true
+          if (fails) throw new Error('cancel failed')
+        },
+      })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.resolve(new Response(body))),
+      )
+      const stream = dropboxDownloadStream(tokenManager(), '/a.txt', refuse)
+      await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('refused')
+      expect(cancelled).toBe(true)
+    },
+  )
 })
 
 describe('dropboxRpc', () => {

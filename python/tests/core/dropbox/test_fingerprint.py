@@ -17,7 +17,7 @@ import logging
 
 import pytest
 
-from mirage.core.dropbox.fingerprint import result_token
+from mirage.core.dropbox.fingerprint import result_of, result_token
 
 
 @pytest.mark.parametrize(
@@ -49,5 +49,5 @@ def test_a_result_header_names_its_content_hash(raw, token, warns, caplog):
     # Never the modified stamp: stat stamps content_hash. Dropbox always
     # sends a JSON object, so anything else warns.
     with caplog.at_level(logging.WARNING, logger="mirage.core.dropbox"):
-        assert result_token(raw) == token
+        assert result_token(result_of(raw)) == token
     assert ("Dropbox-API-Result" in caplog.text) is warns

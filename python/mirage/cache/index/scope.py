@@ -35,6 +35,17 @@ def command_started() -> int | None:
     return _started.get()
 
 
+def sole_command_started() -> int | None:
+    """The running command's own stamp, for a check that it fetched a listing.
+
+    A task's context holds only its own stamp, so this is
+    ``command_started``. Mirrors TS ``soleCommandStarted``, which answers
+    None where the browser storage cannot tell one live command from
+    another.
+    """
+    return _started.get()
+
+
 @asynccontextmanager
 async def command_scope() -> AsyncIterator[None]:
     """Mark one command's run, so a fresh listing it writes can be trusted.

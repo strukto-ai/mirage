@@ -19,7 +19,6 @@ import {
   addFolder,
   changesSince,
   copyTree,
-  fileAt,
   itemAt,
   listChildren,
   maxItemSeq,
@@ -198,8 +197,9 @@ async function getMetadata(ctx: Ctx<C>): Promise<Reply> {
 // a full download and on a ranged one (206), as the real service sends it;
 // a read stamps that hash.
 async function download(ctx: Ctx<C>): Promise<Reply> {
-  const item = await fileAt(ctx.db, ctx.tenant, argPath(ctx))
+  const item = await itemAt(ctx.db, ctx.tenant, argPath(ctx))
   if (item === null) return apiError('path/not_found/...')
+  if (item.isFolder) return apiError('path/not_file/...')
   const reply = rangeReply(ctx.headers, item.content ?? new Uint8Array(0))
   if (reply.status === 416) return reply
   return {
