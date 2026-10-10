@@ -345,7 +345,7 @@ export class MountCore {
    */
   async getattr(path: string, follow = false, ctx: Handle | null = null): Promise<FuseAttr> {
     let size = ctx?.data?.byteLength ?? null
-    if (path === '/') return this.dirStat()
+    if (path === '/') return this.rootAttrs()
     // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
     // Reject early to avoid hitting the ops layer.
     const name = path.slice(path.lastIndexOf('/') + 1)
@@ -389,7 +389,29 @@ export class MountCore {
     // into the handle, so answer with the real byte length instead of the
     // 0 that path-based getattr reported before open.
     const ctx = this.handles.get(fd) ?? null
-    return this.getattr(ctx?.path ?? path, false, ctx)
+    // A flush still landing has taken the handle's buffer: wait for it, so
+    // the size counts what it wrote.
+    if (ctx !== null) await this.pending.get(ctx.key)
+    // The handle is open on the file a link led to, so its stat is the
+    // target's.
+    return this.getattr(ctx?.path ?? path, ctx !== null, ctx)
+  }
+
+  /**
+   * The mount root's attrs: its own row through the dispatcher, so a chmod
+   * made on it shows, or a plain directory when nothing answers for it (a
+   * workspace with no mount at `/`). Mirrors Python's `root_attrs`.
+   */
+  async rootAttrs(): Promise<FuseAttr> {
+    let s: FileStat
+    try {
+      s = await this.op(() => this.files.stat(this.resolve('/')))
+    } catch (err) {
+      if (classify(err) !== 'ENOENT') throw err
+      console.debug(`fuse: the mount root has no row of its own: ${String(err)}`)
+      return this.dirStat()
+    }
+    return this.attrs(s)
   }
 
   async readdir(path: string): Promise<string[]> {
@@ -412,6 +434,9 @@ export class MountCore {
     // none by default, so this reads raw bytes until a mount adds one.
     // Matches Python's MountCore.read, which also dispatches.
     const ctx = this.handles.get(fd)
+    // A flush still landing has taken the handle's buffer and not yet
+    // refreshed its bytes: wait for it, so the read sees what was written.
+    if (ctx !== undefined) await this.pending.get(ctx.key)
     if (ctx === undefined) {
       // Whole, as a handle's first read is: the read that fills the cache
       // and records the version a conditional write sends.
@@ -653,7 +678,9 @@ export class MountCore {
     uid: number | null = null,
     gid: number | null = null,
   ): Promise<void> {
-    const fields: SetAttrFields = {}
+    // The kernel has already resolved any link the call follows, so the
+    // path names the entry to change, a link itself for `chown -h`.
+    const fields: SetAttrFields = { nofollow: true }
     if (mode !== null) fields.mode = mode & 0o7777
     if (uid !== null) fields.uid = uid
     if (gid !== null) fields.gid = gid

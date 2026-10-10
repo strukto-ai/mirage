@@ -75,7 +75,11 @@ class LocalRuntime(PythonRuntime):
             self._python = os.path.abspath(resolved)
         else:
             self._python = sys.executable
-        self._children: set[asyncio.subprocess.Process] = set()
+        # Each running child with the loop it runs on, which alone may
+        # wait for it.
+        self._children: dict[
+            asyncio.subprocess.Process, asyncio.AbstractEventLoop
+        ] = {}
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
@@ -102,7 +106,7 @@ class LocalRuntime(PythonRuntime):
             stderr=asyncio.subprocess.PIPE,
             env={**self.config.env, **env},
         )
-        self._children.add(proc)
+        self._children[proc] = asyncio.get_running_loop()
         try:
             stdout, stderr = await proc.communicate(input=stdin)
         except asyncio.CancelledError:
@@ -111,7 +115,7 @@ class LocalRuntime(PythonRuntime):
             await proc.wait()
             raise
         finally:
-            self._children.discard(proc)
+            self._children.pop(proc, None)
         return RunResult(
             stdout=stdout,
             stderr=stderr or None,
@@ -119,10 +123,18 @@ class LocalRuntime(PythonRuntime):
         )
 
     async def close(self) -> None:
-        """Kill every interpreter still running, so none outlives the
-        workspace."""
-        children = tuple(self._children)
-        for child in children:
+        """Kill every child still running, so none outlives the workspace.
+
+        Only a child on the closing loop is waited for. One a sync
+        ``with`` block left running belongs to the loop that block exits
+        inside, which runs nothing until the close returns; that loop
+        reaps it once the kill lands.
+        """
+        children = list(self._children.items())
+        for child, _ in children:
             if child.returncode is None:
                 child.kill()
-        await asyncio.gather(*(child.wait() for child in children))
+        loop = asyncio.get_running_loop()
+        await asyncio.gather(
+            *(child.wait() for child, owner in children if owner is loop)
+        )

@@ -215,6 +215,18 @@ class MountCore:
             "st_ctime": when,
         }
 
+    def root_attrs(self) -> dict[str, Any]:
+        """The mount root's attrs: its own row through the dispatcher, so a
+        chmod made on it shows, or a plain directory when nothing answers
+        for it (a workspace with no mount at ``/``).
+        """
+        try:
+            s = self._run(self._files.stat(self.resolve("/")))
+        except FileNotFoundError as err:
+            logger.debug("fuse: the mount root has no row of its own: %r", err)
+            return self.dir_stat()
+        return self.attrs(s)
+
     def shown_target(self, path: str, target: str) -> str:
         """The target to present for a link at a mount path.
 
@@ -294,10 +306,13 @@ class MountCore:
         size = None
         if ctx is not None:
             path = ctx.path
+            # The handle is open on the file a link led to, so its stat
+            # is the target's.
+            follow = True
             if ctx.data is not None:
                 size = len(ctx.data)
         if path == "/":
-            return self.dir_stat()
+            return self.root_attrs()
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
         # Reject early to avoid hitting the ops layer.
         name = path.rsplit("/", 1)[-1]
@@ -539,6 +554,8 @@ class MountCore:
         The backend keeps what it can and the namespace overlay the rest,
         so a chmod or chown through the mount is what ``stat`` in a shell
         reads back, on a backend with no permission bits of its own too.
+        The kernel has already resolved any link the call follows, so the
+        path names the entry to change, a link itself for ``chown -h``.
 
         Args:
             path (str): mount path to change.
@@ -552,6 +569,7 @@ class MountCore:
                 mode=None if mode is None else mode & 0o7777,
                 uid=uid,
                 gid=gid,
+                nofollow=True,
             )
         )
 

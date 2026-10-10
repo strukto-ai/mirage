@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -308,3 +309,37 @@ async def test_close_kills_an_interpreter_still_running():
     result = await asyncio.wait_for(run, timeout=5)
     assert result.exit_code != 0
     assert time.monotonic() - started < 5
+
+
+def test_close_leaves_a_blocked_loops_child_to_that_loop():
+    # A sync `with` block exits inside its caller's loop, which runs
+    # nothing until the exit returns, while the close runs on another.
+    runtime = LocalRuntime()
+    owner = asyncio.new_event_loop()
+    release = threading.Event()
+    results = []
+
+    async def start_then_block():
+        run = asyncio.ensure_future(
+            runtime.run(RunArgs(code="import time; time.sleep(30)"))
+        )
+        while not runtime._children:
+            await asyncio.sleep(0.01)
+        release.wait(10)
+        results.append(await run)
+
+    worker = threading.Thread(
+        target=owner.run_until_complete,
+        args=(start_then_block(),),
+        daemon=True,
+    )
+    worker.start()
+    while not runtime._children:
+        time.sleep(0.01)
+    try:
+        asyncio.run(asyncio.wait_for(runtime.close(), timeout=5))
+    finally:
+        release.set()
+        worker.join(10)
+        owner.close()
+    assert results[0].exit_code != 0

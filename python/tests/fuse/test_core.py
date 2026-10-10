@@ -30,6 +30,7 @@ from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.stat_view import DIR_SIZE, mtime_ns
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import render
@@ -177,6 +178,52 @@ async def test_open_without_o_trunc_keeps_the_body(seeded):
     seeded.write("/a.txt", b"J", 0, fh)
     seeded.release(fh)
     assert seeded.read("/a.txt", 100, 0, None) == b"Jello world"
+
+
+class _NoTruncateRAM(RAMVFS):
+    truncate = BaseVFS.truncate
+
+
+@pytest.mark.asyncio
+async def test_a_truncating_open_replaces_a_file_the_store_cannot_truncate():
+    ws = Workspace({"/d": _NoTruncateRAM()}, mode=MountMode.WRITE)
+    await ws.shell("echo hello > /d/f")
+    core = MountCore(ws.vfs)
+    fh = core.open("/d/f", os.O_WRONLY | os.O_TRUNC)
+    core.write("/d/f", b"new", 0, fh)
+    core.release(fh)
+    assert await ws.vfs.read("/d/f") == b"new"
+    core.truncate("/d/f", 1)
+    assert await ws.vfs.read("/d/f") == b"n"
+
+
+@pytest.mark.asyncio
+async def test_a_handle_opened_through_a_link_stats_its_target(seeded):
+    seeded._run(seeded.files.symlink("/lnk", "a.txt"))
+    fh = seeded.open("/lnk", os.O_RDONLY)
+    attrs = seeded.getattr("/lnk", fh)
+    assert stat.S_ISREG(attrs["st_mode"])
+    assert attrs["st_size"] == len(b"hello world")
+
+
+@pytest.mark.asyncio
+async def test_metadata_through_a_link_path_lands_on_the_link(seeded):
+    seeded._run(seeded.files.symlink("/lnk", "a.txt"))
+    seeded._run(seeded.files.symlink("/gone", "missing.txt"))
+    seeded.setattr("/lnk", uid=1234)
+    seeded.setattr("/gone", uid=4321)
+    assert seeded.getattr("/lnk")["st_uid"] == 1234
+    assert seeded.getattr("/gone")["st_uid"] == 4321
+    assert seeded.getattr("/a.txt")["st_uid"] != 1234
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_mount_root_shows_its_own_mode():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    core = MountCore(ws.vfs, root_prefix="/data")
+    core.setattr("/", mode=0o700)
+    assert stat.S_IMODE(core.getattr("/")["st_mode"]) == 0o700
+    assert stat.S_ISDIR(MountCore(ws.vfs).getattr("/")["st_mode"])
 
 
 @pytest.mark.asyncio

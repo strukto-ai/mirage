@@ -14,6 +14,7 @@
 
 import { constants as fsConstants } from 'node:fs'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -26,6 +27,11 @@ import { MountCore } from './core.ts'
 
 const NAIVE_STAMP = '2026-01-02T03:04:05'
 const PAYLOAD = new TextEncoder().encode('payload-bytes')
+
+/** A store with no partial write: it keeps the base's truncate. */
+class NoTruncateRAM extends RAMVFS {
+  override truncate = Reflect.get(BaseVFS.prototype, 'truncate')
+}
 
 /** A caching mount whose backend names no size, as an API mount does. */
 class UnsizedRAM extends RAMVFS {
@@ -448,6 +454,76 @@ describe('MountCore', () => {
       await core.truncate('/data/u.json', 4)
     }
     expect(generations.size).toBe(0)
+  })
+
+  it('replaces a file through a truncating open on a store that cannot truncate', async () => {
+    const ws = new Workspace({ '/d/': new NoTruncateRAM() }, { mode: MountMode.WRITE })
+    await ws.shell('echo hello > /d/f')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/d/f', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.write('/d/f', fh, new TextEncoder().encode('new'), 0)
+    await core.release(fh)
+    expect(new TextDecoder().decode(await ws.vfs.read('/d/f'))).toBe('new')
+    await core.truncate('/d/f', 1)
+    expect(new TextDecoder().decode(await ws.vfs.read('/d/f'))).toBe('n')
+  })
+
+  it('stats the target through a handle opened on a link', async () => {
+    const core = await mkCore()
+    await core.files.symlink('/data/lnk', 'greeting.txt')
+    const fh = await core.open('/data/lnk')
+    const attr = await core.fgetattr('/data/lnk', fh)
+    expect(attr.mode & 0o170000).toBe(0o100000)
+    expect(attr.size).toBe('hello world\n'.length)
+  })
+
+  it('lands metadata made through a link path on the link itself', async () => {
+    const core = await mkCore()
+    await core.files.symlink('/data/lnk', 'greeting.txt')
+    await core.files.symlink('/data/gone', 'missing.txt')
+    await core.setattr('/data/lnk', null, 1234)
+    await core.setattr('/data/gone', null, 4321)
+    expect((await core.getattr('/data/lnk')).uid).toBe(1234)
+    expect((await core.getattr('/data/gone')).uid).toBe(4321)
+    expect((await core.getattr('/data/greeting.txt')).uid).not.toBe(1234)
+  })
+
+  it('shows a scoped mount root its own mode', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs, { rootPrefix: '/data' })
+    await core.setattr('/', 0o700)
+    expect((await core.getattr('/')).mode & 0o7777).toBe(0o700)
+    expect((await new MountCore(ws.vfs).getattr('/')).mode & 0o170000).toBe(0o040000)
+  })
+
+  it('reads what a handle wrote while its flush is still landing', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("echo 'hello world' > /data/f")
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/f', fsConstants.O_RDWR)
+    await core.read('/data/f', fh, 0, 100)
+    await core.write('/data/f', fh, new TextEncoder().encode('HELLO'), 0)
+    const realPwrite = ws.vfs.pwrite.bind(ws.vfs)
+    let landed = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      landed = resolve
+    })
+    let sent = (): void => undefined
+    const inFlight = new Promise<void>((resolve) => {
+      sent = resolve
+    })
+    vi.spyOn(ws.vfs, 'pwrite').mockImplementation(async (...args) => {
+      sent()
+      await gate
+      return realPwrite(...args)
+    })
+    const flushing = core.flush('/data/f', fh)
+    // The flush has taken the buffer and its write is out.
+    await inFlight
+    const reading = core.read('/data/f', fh, 0, 100)
+    landed()
+    await flushing
+    expect(new TextDecoder().decode(await reading)).toBe('HELLO world\n')
   })
 
   it('reads its own unflushed writes through a handle', async () => {
