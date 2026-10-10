@@ -39,10 +39,8 @@ const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = 
  * The python engine a default world registers, named rather than left
  * to a slot in DEFAULT_ENTRIES because it is the one entry the two
  * implementations disagree on: TypeScript registers pyodide, Python
- * registers monty (`DEFAULT_PYTHON` in `mirage/runtime/table.py`),
- * because `@pydantic/monty` cannot answer builtin `open()` calls yet
- * while `pydantic-monty` can. Both are sandboxed; neither reaches the
- * host. Pinned by integ/runtime/routing/defaults.json, which reads the split
+ * registers monty (`DEFAULT_PYTHON` in `mirage/runtime/table.py`). Both
+ * are sandboxed; neither reaches the host. Pinned by integ/runtime/routing/defaults.json, which reads the split
  * back out of a default world on each host.
  *
  * A name, not a class: `name` is an instance field, so `PyodideRuntime.name`

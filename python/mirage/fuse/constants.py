@@ -12,25 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.handles.chunked import ChunkedHandle
-from mirage.runtime.handles.file_handle import (
-    FileHandle,
-    overlaid,
-    write_runs,
-)
-from mirage.runtime.handles.file_table import FileTable
-from mirage.runtime.handles.flush import plan_flush
-from mirage.runtime.handles.mode import parse_mode
-from mirage.runtime.handles.types import FlushKind, FlushStep
+import sys
 
-__all__ = [
-    "ChunkedHandle",
-    "FileHandle",
-    "FileTable",
-    "FlushKind",
-    "FlushStep",
-    "overlaid",
-    "parse_mode",
-    "plan_flush",
-    "write_runs",
-]
+# setxattr(2)'s flags as the kernel hands them over: linux numbers
+# XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
+# XATTR_NOFOLLOW, which the kernel has already applied).
+XATTR_CREATE, XATTR_REPLACE = (
+    (0x2, 0x4) if sys.platform == "darwin" else (0x1, 0x2)
+)

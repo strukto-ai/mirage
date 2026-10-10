@@ -12,8 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.server.summary import _mount_description
+import asyncio
+
+import pytest
+
+from mirage.server.registry import WorkspaceRegistry
+from mirage.server.summary import _mount_description, make_detail
+from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 ASTRAL = "\U00010400"
 
@@ -47,3 +54,19 @@ def test_ellipsizes_on_a_code_point_boundary():
 def test_trailing_whitespace_is_dropped_before_the_ellipsis():
     prompt = "x" * 118 + "  " + "y" * 10
     assert _mount_description(_PromptVFS(prompt)) == "x" * 118 + "…"
+
+
+@pytest.mark.asyncio
+async def test_in_flight_jobs_counts_only_running_jobs():
+    registry = WorkspaceRegistry()
+    entry = registry.add(Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE))
+    runner = entry.runner
+    try:
+        await runner.call(runner.ws.shell("true &"))
+        await runner.call(runner.ws.shell("sleep 30 &"))
+        await asyncio.sleep(0.2)
+        detail = await make_detail(entry, verbose=True)
+        assert detail.internals is not None
+        assert detail.internals.in_flight_jobs == 1
+    finally:
+        await registry.remove(entry.id)

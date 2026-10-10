@@ -210,7 +210,7 @@ def lookup(core: MountCore, path: str) -> dict[str, Any] | None:
 
 
 def followed(core: MountCore, path: str) -> dict[str, Any]:
-    return core.getattr(core.identity(path))
+    return core.getattr(path, follow=True)
 
 
 def metadata(core: MountCore, path: str) -> Message:
@@ -973,9 +973,10 @@ class CodexChannel:
         path = to_path(arg(params, "path", str))
 
         def canonical(core: MountCore) -> str:
-            target = core.identity(path)
-            core.getattr(target)
-            return target
+            # The stat goes first: it refuses a link the session cannot
+            # see before its target is named.
+            core.getattr(path, follow=True)
+            return core.identity(path)
 
         return {"path": to_uri(await self._fs(canonical))}
 

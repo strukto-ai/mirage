@@ -24,7 +24,7 @@ import { UsageError } from '../../commands/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
-import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
+import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { NamespaceView, SessionView } from '../../view/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { PathSpec } from '../../types.ts'
@@ -199,7 +199,7 @@ export async function fanOutTraversal(
     new ExecutionNode({
       command: cmdStr,
       exitCode: io.exitCode,
-      stderr: await materialize(io.stderr),
+      stderr: await io.materializeStderr(),
     }),
   ]
 }

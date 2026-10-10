@@ -18,8 +18,9 @@ import os
 
 import pytest
 
+from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import no_mount
-from mirage.fuse.errors import NO_XATTR, classify_error
+from mirage.fuse.errors import classify_error
 from mirage.policy import PolicyDenied
 from mirage.runtime.errors import CrossMountError
 from mirage.types import Refusal
@@ -91,7 +92,8 @@ def test_message_matching_is_case_insensitive():
 
 
 def test_no_xattr_is_platform_appropriate():
-    assert NO_XATTR in (getattr(errno, "ENOATTR", None), errno.ENODATA)
+    no_xattr = posix_errno(FsCondition.NO_XATTR)
+    assert no_xattr in (getattr(errno, "ENOATTR", None), errno.ENODATA)
 
 
 def test_a_policys_reason_goes_to_the_log(caplog):

@@ -43,6 +43,23 @@ describe('summary', () => {
     const dataMount = detail.mounts.find((m) => m.prefix === '/data/')
     expect(dataMount?.vfs).toBe('ram')
   })
+
+  it('counts only running jobs in flight', async () => {
+    const r = new WorkspaceRegistry()
+    const entry = r.add(
+      new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE }),
+      'ws-j',
+    )
+    try {
+      await entry.runner.ws.shell('true &')
+      await entry.runner.ws.shell('sleep 30 &')
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      const detail = await makeDetail(entry, true)
+      expect(detail.internals?.in_flight_jobs).toBe(1)
+    } finally {
+      await r.remove('ws-j')
+    }
+  })
 })
 
 const ASTRAL = '\u{10400}'

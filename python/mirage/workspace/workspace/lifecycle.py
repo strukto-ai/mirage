@@ -67,6 +67,9 @@ class CloseDeps:
         workspace_id (str): the workspace whose state is dropped.
         planes (Sequence[NamespaceStore | ObserverStore | SessionStore]):
             the stores the state lives in, however they were wired.
+        blocked_loop (asyncio.AbstractEventLoop | None): the loop a sync
+            ``with`` block is exiting inside, which runs nothing until
+            the close returns.
     """
 
     sessions: SessionManager
@@ -83,6 +86,7 @@ class CloseDeps:
     drop_state: bool
     workspace_id: str
     planes: Sequence[NamespaceStore | ObserverStore | SessionStore]
+    blocked_loop: asyncio.AbstractEventLoop | None = None
 
 
 def patch_process(
@@ -212,7 +216,7 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
         failures.append(exc)
     for close in deps.closers:
         await settle(close())
-    await settle(deps.processes.drain())
+    await settle(deps.processes.drain(deps.blocked_loop))
     await settle(deps.job_table.close_consoles())
     await settle(
         *(

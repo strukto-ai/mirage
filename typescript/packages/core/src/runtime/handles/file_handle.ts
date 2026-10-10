@@ -347,3 +347,37 @@ export function writeRuns(writes: readonly [number, Uint8Array][]): [number, Uin
   }
   return runs.map((run): [number, Uint8Array] => [run.start, concat(run.parts)])
 }
+
+/**
+ * A read window with a handle's buffered writes laid over it.
+ *
+ * The kernel adapters keep a handle's writes until flush; a read through that
+ * handle sees them, as a read after write(2) does. They apply in arrival
+ * order, so a later write wins where it overlaps, and a gap a write grew the
+ * file across reads as zeros. Mirrors Python's `overlaid`.
+ *
+ * Args:
+ *   stored: the stored bytes from `offset`, short where the stored file ends.
+ *   offset: where the window starts.
+ *   size: the window's length.
+ *   writes: the buffered writes, in arrival order.
+ */
+export function overlaid(
+  stored: Uint8Array,
+  offset: number,
+  size: number,
+  writes: readonly [number, Uint8Array][],
+): Uint8Array {
+  let reach = offset + stored.byteLength
+  for (const [start, data] of writes) reach = Math.max(reach, start + data.byteLength)
+  const end = Math.min(offset + size, reach)
+  if (end <= offset) return new Uint8Array()
+  const out = new Uint8Array(end - offset)
+  out.set(stored.subarray(0, end - offset))
+  for (const [start, data] of writes) {
+    const low = Math.max(start, offset)
+    const high = Math.min(start + data.byteLength, end)
+    if (low < high) out.set(data.subarray(low - start, high - start), low - offset)
+  }
+  return out
+}

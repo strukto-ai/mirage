@@ -114,11 +114,11 @@ export class AppleContainerRuntime
   private async probe(container: string): Promise<void> {
     const result = await this.container(['inspect', container])
     if (result.code !== 0) {
-      throw new Error(`container inspect failed: ${decode(result.stderr).trim()}`)
+      throw new Error(`container inspect failed: ${DECODER.decode(result.stderr).trim()}`)
     }
     let state: unknown
     try {
-      state = inspectedState(JSON.parse(decode(result.stdout)))
+      state = inspectedState(JSON.parse(DECODER.decode(result.stdout)))
     } catch (error) {
       throw new Error(`container inspect returned unreadable json: ${String(error)}`)
     }
@@ -176,9 +176,5 @@ function inspectedState(payload: unknown): unknown {
 }
 
 const DECODER = new TextDecoder()
-
-function decode(bytes: Uint8Array): string {
-  return DECODER.decode(bytes)
-}
 
 registerRuntime('apple_container', AppleContainerRuntime)

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from mirage.context import get_admission
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, Visibility
+from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.view.namespace_view import namespace_names
 from mirage.view.types import (
@@ -64,29 +64,69 @@ def registry_child_mounts(
 
 
 def link_view(
-    namespace: Namespace | None, dispatch: DispatchFn | None
+    namespace: Namespace | None,
+    dispatch: DispatchFn | None,
+    vis: Visibility | None = None,
 ) -> LinkView | None:
     """Live symlink facts, or None without a namespace and dispatcher.
 
     Offered to every command as ``opts.ns.links``, whether or not it
     looks: a command opts in by reading the field, so there is no list
     of symlink-aware commands to keep in step here or anywhere else.
+    Filtered by the session's hides, as the dispatcher's own answers
+    are: a hidden link has no row, no listing entry and no target, and
+    resolving one leaves the path as typed, for the dispatcher to refuse.
 
     Args:
         namespace (Namespace | None): addressing authority holding the
             link table, None outside a workspace.
         dispatch (DispatchFn | None): op dispatcher, which answers
             existence across mounts rather than within one backend.
+        vis (Visibility | None): the session's visibility, None for an
+            unrestricted view.
     """
     if namespace is None or dispatch is None:
         return None
+    links, probe = namespace, dispatch
+
+    def stat_at(virtual: str) -> FileStat | None:
+        return (
+            links.link_stat_at(virtual) if path_visible(vis, virtual) else None
+        )
+
+    def children(directory: str) -> list[FileStat]:
+        base = directory.rstrip("/")
+        return [
+            st
+            for st in links.link_stats_under(directory)
+            if path_visible(vis, f"{base}/{st.name}")
+        ]
+
+    def subtree(directory: str) -> list[tuple[str, FileStat]]:
+        return [
+            (path, st)
+            for path, st in links.link_stats_below(directory)
+            if path_visible(vis, path)
+        ]
+
+    def resolve(virtual: str) -> str:
+        if not path_visible(vis, virtual):
+            return virtual
+        return resolve_link(links, virtual)
+
+    async def target_stat(virtual: str | PathSpec) -> FileStat | None:
+        path = virtual.virtual if isinstance(virtual, PathSpec) else virtual
+        if not path_visible(vis, path):
+            return None
+        return await link_target_stat(links, probe, path)
+
     return LinkView(
-        stat_at=namespace.link_stat_at,
-        children=namespace.link_stats_under,
-        subtree=namespace.link_stats_below,
-        resolve=functools.partial(resolve_link, namespace),
+        stat_at=stat_at,
+        children=children,
+        subtree=subtree,
+        resolve=resolve,
         exists=functools.partial(path_exists, dispatch),
-        target_stat=functools.partial(link_target_stat, namespace, dispatch),
+        target_stat=target_stat,
     )
 
 
@@ -215,7 +255,7 @@ def namespace_view_of(
         )
 
     return NamespaceView(
-        links=link_view(namespace, dispatch),
+        links=link_view(namespace, dispatch, vis),
         mounts=mount_view(registry, vis),
         stat_overlay=(
             functools.partial(namespace_stat_overlay, namespace)

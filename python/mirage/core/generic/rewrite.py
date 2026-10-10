@@ -128,7 +128,8 @@ async def truncate_by_rewrite(
     """Resize by reading the file and writing it back padded or cut.
 
     For a store with no partial write. It cannot hold ``no_create``
-    atomically, so it refuses that before writing anything. Emptying reads
+    atomically, so it refuses that before writing anything, as it does a
+    negative length (EINVAL). Emptying reads
     nothing, so its write carries the version the agent read.
 
     Args:
@@ -140,6 +141,7 @@ async def truncate_by_rewrite(
     """
     if no_create:
         raise enotsup("emulated", "truncate --no-create", path)
+    length = expect_offset(length, path)
     if length == 0:
         await write(path, b"")
         return

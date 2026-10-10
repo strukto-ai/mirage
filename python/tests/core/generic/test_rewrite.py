@@ -155,6 +155,17 @@ async def test_truncate_refuses_no_create_before_io():
 
 
 @pytest.mark.asyncio
+async def test_truncate_refuses_a_negative_length_before_io():
+    read = AsyncMock()
+    write = AsyncMock()
+    with pytest.raises(OSError) as error:
+        await truncate_by_rewrite(read, write, PATH, -1, False)
+    assert error.value.errno == errno.EINVAL
+    read.assert_not_called()
+    write.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("kind", "parents", "refused"),
     [

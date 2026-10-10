@@ -174,6 +174,11 @@ LINK_TARGET_KEY = "link_target"
 # which stat, ls -l, file and tar render in place of a byte length.
 DEVICE_NUMBERS_KEY = "device_numbers"
 
+# FileStat.extra key marking a file whose bytes change on their own (a
+# generated document): a kernel mount reads it fresh on every read
+# rather than holding what an earlier read returned.
+LIVE_KEY = "mirage.live"
+
 
 class FileStat(BaseModel):
     model_config = ConfigDict(frozen=True)

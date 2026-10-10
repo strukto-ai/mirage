@@ -46,7 +46,8 @@ export { RedisStore, type RedisStoreOptions } from './vfs/redis/store.ts'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/file/redis.ts'
 export { FuseManager } from './workspace/fuse.ts'
-export { MirageFS, type MirageFSOptions, type FuseAttr } from './fuse/fs.ts'
+export { MirageFS, type MirageFSOptions } from './fuse/fs.ts'
+export type { FuseAttr } from './fuse/types.ts'
 export { MountCore, type MountCoreOptions } from './fuse/core.ts'
 export { classifyErrno, classifyError } from './fuse/errors.ts'
 export {
@@ -61,7 +62,6 @@ export {
 } from './fuse/backend.ts'
 export {
   mount as fuseMount,
-  mountBackground as fuseMountBackground,
   type FuseHandle,
   type MountOptions as FuseMountOptions,
 } from './fuse/mount.ts'

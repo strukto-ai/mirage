@@ -66,11 +66,11 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
   async connect(): Promise<void> {
     const result = await this.smolvm(['machine', 'status', '--name', this.config.machine, '--json'])
     if (result.code !== 0) {
-      throw new Error(`smolvm machine status failed: ${decode(result.stderr).trim()}`)
+      throw new Error(`smolvm machine status failed: ${DECODER.decode(result.stderr).trim()}`)
     }
     let status: { state?: unknown }
     try {
-      status = JSON.parse(decode(result.stdout)) as { state?: unknown }
+      status = JSON.parse(DECODER.decode(result.stdout)) as { state?: unknown }
     } catch (error) {
       throw new Error(`smolvm machine status returned unreadable json: ${String(error)}`)
     }
@@ -119,9 +119,5 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
 }
 
 const DECODER = new TextDecoder()
-
-function decode(bytes: Uint8Array): string {
-  return DECODER.decode(bytes)
-}
 
 registerRuntime('smolvm', SmolvmRuntime)

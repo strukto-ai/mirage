@@ -12,9 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { planFlush } from './flush.ts'
-export type { FlushKind, FlushStep } from './types.ts'
-export { parseMode, type OpenMode } from './mode.ts'
-export { FileHandle, overlaid, writeRuns } from './file_handle.ts'
-export { FileTable } from './file_table.ts'
-export { ChunkedHandle } from './chunked.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { PathSpec } from '../../types.ts'
+import { truncateByRewrite } from './rewrite.ts'
+
+const PATH = PathSpec.fromStrPath('/m/f')
+
+describe('truncateByRewrite', () => {
+  it('refuses a negative length before any io', async () => {
+    const read = vi.fn()
+    const write = vi.fn()
+    await expect(truncateByRewrite(read, write, PATH, -1, false)).rejects.toMatchObject({
+      code: 'EINVAL',
+    })
+    expect(read).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+  })
+})

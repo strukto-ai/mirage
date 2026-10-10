@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { READ_CHUNK } from './constants.ts'
-import { FileHandle, writeRuns } from './file_handle.ts'
+import { FileHandle, overlaid, writeRuns } from './file_handle.ts'
 import type { FileFetch } from './types.ts'
 
 const enc = new TextEncoder()
@@ -202,5 +202,23 @@ describe('writeRuns', () => {
       [4, enc.encode('xy')],
       [0, enc.encode('abcdef')],
     ])
+  })
+})
+
+describe('overlaid', () => {
+  const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
+
+  it('lays writes over the stored window in arrival order', () => {
+    const writes: [number, Uint8Array][] = [
+      [1, enc('XY')],
+      [2, enc('Z')],
+    ]
+    expect(overlaid(enc('abcd'), 0, 4, writes)).toEqual(enc('aXZd'))
+    expect(overlaid(enc('cd'), 2, 2, writes)).toEqual(enc('Zd'))
+  })
+
+  it('grows the file and reads a gap as zeros', () => {
+    expect(overlaid(enc('ab'), 0, 10, [[4, enc('Q')]])).toEqual(enc('ab\0\0Q'))
+    expect(overlaid(new Uint8Array(), 8, 4, [[4, enc('Q')]])).toEqual(new Uint8Array())
   })
 })

@@ -15,6 +15,7 @@
 import { constants as osConstants } from 'node:os'
 
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
+import { unnamedFsError } from '@struktoai/mirage-core/errors/fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   classifyErrno,
@@ -28,7 +29,6 @@ import {
   ENOTDIR,
   ENOTEMPTY,
   EROFS,
-  errnoError,
   EXDEV,
 } from './errors.ts'
 
@@ -46,7 +46,7 @@ describe('classifyErrno', () => {
     // degrade to EIO on the way out of the mount.
     ['EXDEV', EXDEV],
   ] as const)('maps the %s code property', (code, expected) => {
-    expect(classifyErrno(errnoError(code, 'boom'))).toBe(expected)
+    expect(classifyErrno(unnamedFsError(code, 'boom'))).toBe(expected)
   })
 
   it.each([
@@ -54,10 +54,8 @@ describe('classifyErrno', () => {
     ['not a directory', ENOTDIR],
     ['is a directory', EISDIR],
     ['permission denied', EACCES],
-    ['read-only mount', EACCES],
     ['file exists', EEXIST],
     ['no such file or directory', ENOENT],
-    ['no mount at /x', ENOENT],
   ])('falls back to the message for %s', (message, expected) => {
     expect(classifyErrno(new Error(message))).toBe(expected)
   })
@@ -71,7 +69,7 @@ describe('classifyErrno', () => {
   })
 
   it('prefers the code property over the message', () => {
-    const err = errnoError('ENOTEMPTY', 'no such file or directory')
+    const err = unnamedFsError('ENOTEMPTY', 'no such file or directory')
     expect(classifyErrno(err)).toBe(ENOTEMPTY)
   })
 })

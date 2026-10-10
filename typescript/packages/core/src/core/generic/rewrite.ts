@@ -122,7 +122,8 @@ export async function pwriteByRewrite(
  * Resize by reading the file and writing it back padded or cut.
  *
  * For a store with no partial write. It cannot hold `noCreate` atomically,
- * so it refuses that before writing anything. Emptying reads nothing, so its
+ * so it refuses that before writing anything, as it does a negative length
+ * (EINVAL). Emptying reads nothing, so its
  * write carries the version the agent read. Mirrors Python's
  * `truncate_by_rewrite`.
  */
@@ -134,6 +135,7 @@ export async function truncateByRewrite(
   noCreate: boolean,
 ): Promise<void> {
   if (noCreate) throw enotsup('emulated', 'truncate --no-create', path)
+  expectOffset(length, path)
   if (length === 0) {
     await write(path, new Uint8Array(0))
     return
