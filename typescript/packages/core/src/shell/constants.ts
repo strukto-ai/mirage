@@ -314,12 +314,6 @@ export const SHOPT_DEFAULTS: ReadonlyMap<string, boolean> = new Map([
   ['xpg_echo', false],
 ])
 
-// `shopt` names mirage refuses to turn on rather than store: `extglob`
-// changes what the parser accepts, and mirage's grammar has no such
-// mode, so a stored `on` would promise a syntax that still fails to
-// parse. Refusing is the honest answer until the parser learns it.
-export const SHOPT_UNSUPPORTED: ReadonlySet<string> = new Set(['extglob'])
-
 export const GROUP_TIER: ReadonlyMap<BuiltinGroup, BuiltinTier> = new Map<
   BuiltinGroup,
   BuiltinTier

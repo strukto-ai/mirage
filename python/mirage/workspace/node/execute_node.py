@@ -14,10 +14,11 @@
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
-from typing import Any, Callable
+from typing import Any
 
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
@@ -33,7 +34,7 @@ from mirage.context import (
 from mirage.context.session_context import redirect_syntax_for
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
@@ -60,6 +61,8 @@ from mirage.shell.helpers import (
     get_negated_command,
     get_parts,
     get_pipeline_stages,
+    get_process_sub_body,
+    get_process_sub_direction,
     get_redirects,
     get_text,
     get_unset_args,
@@ -71,8 +74,15 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
 from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import PipelineStages, Redirect, RedirectKind
+from mirage.shell.types import (
+    PipelineStages,
+    ProcessSubDirection,
+    Redirect,
+    RedirectKind,
+    TSNodeLike,
+)
 from mirage.types import PathSpec
+from mirage.vfs.dev.dev import DevVFS
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -1048,58 +1058,115 @@ async def execute_node(
             ),
         )
     await execution_scope.checkpoint(cancel)
-    # What expanding the node printed (a substitution's stderr) goes out
-    # with the node's own stderr, unless its caller collects it: a simple
-    # command's words expand before its redirects apply.
-    if not own_diagnostics:
-        return await _execute_node(
-            dispatch,
-            registry,
-            namespace,
-            job_table,
-            execute_fn,
-            agent_id,
-            node,
-            context,
-            stdin,
-            call_stack,
-            cancel,
-            routing_decision,
-            sink,
-            handed,
-            execution_scope,
-            own_diagnostics=False,
-        )
-    outer = context.frame.diagnostics
-    context.frame.diagnostics = []
+    run = partial(
+        _execute_node,
+        dispatch,
+        registry,
+        namespace,
+        job_table,
+        execute_fn,
+        agent_id,
+        node,
+        context,
+        stdin,
+        call_stack,
+        cancel,
+        routing_decision,
+        sink,
+        handed,
+        execution_scope,
+    )
+    # The node's own `<(...)` files go when it ends, so a command still
+    # reading one is read out first.
+    held: list[tuple[DevVFS, str, int]] = []
+    previous = context.frame.process_sub
+    context.frame.process_sub = _process_input(context, registry, held)
     try:
-        stdout, io, exec_node = await _execute_node(
-            dispatch,
-            registry,
-            namespace,
-            job_table,
-            execute_fn,
-            agent_id,
-            node,
-            context,
-            stdin,
-            call_stack,
-            cancel,
-            routing_decision,
-            sink,
-            handed,
-            execution_scope,
-        )
-        if context.frame.diagnostics:
-            err = _diagnostic_stderr(node, context)
-            io.stderr = err + await io.materialize_stderr()
-            exec_node.stderr = err + (exec_node.stderr or b"")
+        # What expanding the node printed (a substitution's stderr) goes
+        # out with the node's own stderr, unless its caller collects it: a
+        # simple command's words expand before its redirects apply.
+        if not own_diagnostics:
+            stdout, io, exec_node = await run(own_diagnostics=False)
+        else:
+            outer = context.frame.diagnostics
+            context.frame.diagnostics = []
+            try:
+                stdout, io, exec_node = await run()
+                if context.frame.diagnostics:
+                    err = _diagnostic_stderr(node, context)
+                    io.stderr = err + await io.materialize_stderr()
+                    exec_node.stderr = err + (exec_node.stderr or b"")
+            except ExitSignal as exc:
+                exc.stderr = _diagnostic_stderr(node, context) + exc.stderr
+                raise
+            finally:
+                context.frame.diagnostics = outer
+        if held and stdout is not None:
+            stdout = await materialize(stdout)
         return stdout, io, exec_node
-    except ExitSignal as exc:
-        exc.stderr = _diagnostic_stderr(node, context) + exc.stderr
-        raise
+    except _ProcessSubError as exc:
+        # The node fails, as an unsupported command does; the line goes on.
+        err = exc.stderr
+        return (
+            exc.stdout,
+            IOResult(exit_code=2, stderr=err),
+            ExecutionNode(command="process_sub", exit_code=2, stderr=err),
+        )
     finally:
-        context.frame.diagnostics = outer
+        context.frame.process_sub = previous
+        for dev, path, allocation in held:
+            dev.release_input(path, allocation)
+
+
+class _ProcessSubError(ExitSignal):
+    """A node-local refusal; carry earlier output until execute_node catches it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            2, stderr=b"mirage: unsupported: process substitution >(...)\n"
+        )
+
+
+def _process_input(
+    context: EvaluationContext,
+    registry: MountRegistry,
+    held: list[tuple[DevVFS, str, int]],
+) -> Callable[
+    [TSNodeLike, Callable[[str], Awaitable[IOResult]]], Awaitable[str]
+]:
+    """The hook that opens a node's input process substitutions.
+
+    Each ``<(...)`` runs as its word expands, in order with the word's
+    other expansions and through the evaluator a ``$(...)`` there uses,
+    and reads back as a buffered device file rather than a host pipe,
+    held until the node ends; a nested node opens its own, so each lasts
+    as long as the command naming it. An output ``>(...)`` is refused:
+    the node naming it fails with status 2.
+
+    Args:
+        context (EvaluationContext): the evaluation the node runs in.
+        registry (MountRegistry): mount registry holding ``/dev``.
+        held (list[tuple[DevVFS, str, int]]): the node's open files.
+    """
+
+    async def open_input(
+        node: TSNodeLike,
+        execute_line: Callable[[str], Awaitable[IOResult]],
+    ) -> str:
+        if get_process_sub_direction(node) == ProcessSubDirection.OUTPUT:
+            raise _ProcessSubError
+        dev, _, _ = registry.resolve("/dev/null")
+        assert isinstance(dev, DevVFS)
+        path, allocation = dev.allocate_input()
+        held.append((dev, path, allocation))
+        inner = get_process_sub_body(node)
+        if inner:
+            io = await execute_line(inner)
+            dev.set_input(path, allocation, await materialize(io.stdout))
+            context.frame.diagnostics.append(await materialize(io.stderr))
+        return path
+
+    return open_input
 
 
 def _diagnostic_stderr(node: Any, context: EvaluationContext) -> bytes:
@@ -1556,14 +1623,19 @@ async def _execute_node(
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, context, execute_fn, cs, view=view)
-        case_items = []
-        for pattern_nodes, body, terminator in get_case_items(node):
-            patterns = [
-                await expand_pattern(p, context, execute_fn, cs, view=view)
-                for p in pattern_nodes
-            ]
-            case_items.append((patterns, body, terminator))
-        return await handle_case(run_body, word, case_items, session)
+        return await handle_case(
+            run_body,
+            word,
+            get_case_items(node),
+            session,
+            partial(
+                expand_pattern,
+                context=context,
+                execute_fn=execute_fn,
+                call_stack=cs,
+                view=view,
+            ),
+        )
 
     if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)

@@ -162,3 +162,136 @@ describe('fnmatch edge semantics', () => {
     expect(fnmatch('-', '[a-]')).toBe(true)
   })
 })
+
+const EXTGLOB_NAMES = [
+  '',
+  'a',
+  'b',
+  'c',
+  'ab',
+  'abc',
+  'bb',
+  'aa',
+  'ac',
+  'a(b)',
+  'a(b|d)',
+  'a|b',
+  '123',
+  '😀',
+  'a\nb',
+]
+
+const EXTGLOB_GOLDEN: [string, string[]][] = [
+  ['@(a|b)', ['a', 'b']],
+  ['?(a|b)', ['', 'a', 'b']],
+  ['*(a|b)', ['', 'a', 'b', 'ab', 'bb', 'aa']],
+  ['+(a|b)', ['a', 'b', 'ab', 'bb', 'aa']],
+  [
+    '!(a|b)',
+    ['', 'c', 'ab', 'abc', 'bb', 'aa', 'ac', 'a(b)', 'a(b|d)', 'a|b', '123', '😀', 'a\nb'],
+  ],
+  [
+    '!(a)*',
+    [
+      '',
+      'a',
+      'b',
+      'c',
+      'ab',
+      'abc',
+      'bb',
+      'aa',
+      'ac',
+      'a(b)',
+      'a(b|d)',
+      'a|b',
+      '123',
+      '😀',
+      'a\nb',
+    ],
+  ],
+  ['a!(b)c', ['ac']],
+  ['@(a|+(b|c))', ['a', 'b', 'c', 'bb']],
+  [
+    '*(!(a))',
+    ['', 'b', 'c', 'ab', 'abc', 'bb', 'aa', 'ac', 'a(b)', 'a(b|d)', 'a|b', '123', '😀', 'a\nb'],
+  ],
+  ['+(?(a))', ['', 'a', 'aa']],
+  ['@(|a)', ['', 'a']],
+  [
+    '!()',
+    ['a', 'b', 'c', 'ab', 'abc', 'bb', 'aa', 'ac', 'a(b)', 'a(b|d)', 'a|b', '123', '😀', 'a\nb'],
+  ],
+  ['@(a(b)|c)', ['c', 'a(b)']],
+  ['@(a(b|d)|c)', ['c', 'a(b|d)']],
+  ['+([[:digit:]])', ['123']],
+  ['@(😀|a)', ['a', '😀']],
+  ['@([!a]|ab)', ['b', 'c', 'ab', '😀']],
+  ['@(a[|]b|c)', ['c', 'a|b']],
+]
+
+describe('extended groups match GNU Bash 5.2.37', () => {
+  it.each(EXTGLOB_GOLDEN)('pattern %s', (pattern, hits) => {
+    for (const name of EXTGLOB_NAMES)
+      expect(fnmatch(name, pattern, true), name).toBe(hits.includes(name))
+  })
+})
+
+it.each([
+  ['.h', '@(.h|a)', true],
+  ['.h', '?(.h)', true],
+  ['.h', '*(.h)', true],
+  ['.h', '!(a)', false],
+  ['.h', '!(a).h', false],
+  ['.h', '*(x).h', true],
+  ['.h', '*.h', false],
+  ['.h', '@([.]h|a)', false],
+  ['.h', '@(.*|a)', true],
+] as [string, string, boolean][])('pathname %s %s', (name, pattern, expected) => {
+  expect(fnmatch(name, pattern, true, true)).toBe(expected)
+})
+
+it('keeps extended groups opt-in and terminates nullable repetition', () => {
+  expect(fnmatch('a', '@(a|b)')).toBe(false)
+  expect(fnmatch('@(a|b)', '@(a|b)')).toBe(true)
+  expect(fnmatch('a'.repeat(80), '+(?(a))', true)).toBe(true)
+  expect(fnmatch('a'.repeat(80) + 'b', '+(?(a))', true)).toBe(false)
+})
+
+it('a star hands a group every tail', () => {
+  expect(fnmatch('', '*!(a)x', true)).toBe(false)
+  expect(fnmatch('x', '*!(a)x', true)).toBe(true)
+  expect(fnmatch('a', '*!(a)', true)).toBe(true)
+  expect(fnmatch('', '*+([!a]|!([!a]))', true)).toBe(true)
+})
+
+it.each([
+  ['+(*)', '', true],
+  ['+(*)b', '', false],
+  ['*(*)', '', true],
+  ['+(a|*)b', '', false],
+  ['*+(*)', '', true],
+  ['+(aa)', '', true],
+  ['+(aa)', 'a', false],
+  ['+(*(aa))', '', true],
+  ['+(?(aa))', 'a', false],
+  ['*(+(aa)|b)', 'c', false],
+  ['+(@(*(aa)|b))', '', true],
+  ['*!(a)', '', true],
+  ['*!(*)', '', false],
+  ['*!(a*)', '', true],
+  ['*!(*a)', '', true],
+  ['*!(*b)', '', true],
+  ['*!(+(aa))', 'a', true],
+] as [string, string, boolean][])(
+  'long subjects match in linear time: %s',
+  (pattern, tail, expected) => {
+    expect(fnmatch('a'.repeat(16000) + tail, pattern, true)).toBe(expected)
+  },
+)
+
+it.each(['@', '?', '+', '*'])('deep %s groups use an explicit stack', (operator) => {
+  const pattern = (operator + '(').repeat(1200) + 'a' + ')'.repeat(1200)
+  expect(fnmatch('a', pattern, true)).toBe(true)
+  expect(fnmatch('b', pattern, true)).toBe(false)
+})

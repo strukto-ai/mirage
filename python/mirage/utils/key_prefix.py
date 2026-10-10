@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import PathSpec
+from mirage.utils.fnmatch import QUOTED_CHARS
 
 
 def normalize(raw: str | None) -> str:
@@ -99,8 +100,16 @@ def strip_mount(virtual: str, prefix: str) -> str:
         strip_mount("/database/x.txt", "/data")    -> "/database/x.txt"
         strip_mount("/data", "/data")              -> "/"
         strip_mount("/x.txt", "")                  -> "/x.txt"
+
+    A glob word's quote marks (``glob_walk.mark_globs``) read as the
+    characters they stand for, one for one: a quoted prefix still names
+    its mount (``'/team+'/*``), and the rest keeps its marks.
     """
-    if prefix and virtual.startswith(prefix):
+    head = virtual[: len(prefix)]
+    if prefix and (
+        head == prefix
+        or "".join(QUOTED_CHARS.get(c, c) for c in head) == prefix
+    ):
         rest = virtual[len(prefix) :]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             return rest or "/"

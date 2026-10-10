@@ -158,6 +158,37 @@ describe('process substitution output redirect', () => {
       await ws.close()
     }
   })
+
+  it('fails only the node naming one among its words', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [exit, out, err] = await runResult(
+        ws,
+        'echo hi >(cat); [[ -n >(true) ]]; echo after=$?',
+      )
+      expect([exit, out]).toEqual([0, 'after=2\n'])
+      expect(err.split('unsupported: process substitution').length - 1).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+it.each([
+  'echo $(printf warning >&2) >(cat)',
+  'echo <(printf warning >&2) >(cat)',
+  'echo $(printf warning >&2) >(cat) 2>/dev/null',
+  'value=$(printf warning >&2)>(cat)',
+  'for value in $(printf warning >&2) >(cat); do echo BAD; done',
+])('preserves diagnostics before a process substitution refusal: %s', async (command) => {
+  const { ws } = await makeIntegrationWS()
+  try {
+    const [exit, out, err] = await runResult(ws, command + '; echo after=$?; echo <(true)')
+    expect([exit, out]).toEqual([0, 'after=2\n/dev/fd/63\n'])
+    expect(err).toBe('warningmirage: unsupported: process substitution >(...)\n')
+  } finally {
+    await ws.close()
+  }
 })
 
 describe('quoted redirect targets', () => {

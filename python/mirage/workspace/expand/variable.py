@@ -870,24 +870,21 @@ async def _word_chunks(
     return out
 
 
-def _glob_strip(value: str, pattern: str, greedy: bool, prefix: bool) -> str:
+def _glob_strip(
+    value: str, pattern: str, greedy: bool, prefix: bool, extglob: bool = False
+) -> str:
     if not pattern:
         return value
-    if prefix:
-        candidates = [
-            i for i in range(len(value) + 1) if fnmatch(value[:i], pattern)
-        ]
-        if not candidates:
-            return value
-        i = max(candidates) if greedy else min(candidates)
-        return value[i:]
-    candidates = [
-        i for i in range(len(value) + 1) if fnmatch(value[i:], pattern)
-    ]
-    if not candidates:
-        return value
-    i = min(candidates) if greedy else max(candidates)
-    return value[:i]
+    indices = (
+        range(len(value), -1, -1)
+        if greedy == prefix
+        else range(len(value) + 1)
+    )
+    for i in indices:
+        candidate = value[:i] if prefix else value[i:]
+        if fnmatch(candidate, pattern, extglob=extglob):
+            return value[i:] if prefix else value[:i]
+    return value
 
 
 def _glob_replace(
@@ -896,6 +893,7 @@ def _glob_replace(
     replacement: str,
     replace_all: bool,
     anchor: str | None,
+    extglob: bool = False,
 ) -> str:
     """Bash ``${var/pat/rep}``: pattern is a glob, longest match wins.
 
@@ -910,23 +908,23 @@ def _glob_replace(
         return value
     if anchor == "#":
         for j in range(len(value), -1, -1):
-            if fnmatch(value[:j], pattern):
+            if fnmatch(value[:j], pattern, extglob=extglob):
                 return replacement + value[j:]
         return value
     if anchor == "%":
         for i in range(len(value) + 1):
-            if fnmatch(value[i:], pattern):
+            if fnmatch(value[i:], pattern, extglob=extglob):
                 return value[:i] + replacement
         return value
     if not value:
-        return replacement if fnmatch("", pattern) else value
+        return replacement if fnmatch("", pattern, extglob=extglob) else value
     out: list[str] = []
     i = 0
     n = len(value)
     while i < n:
         match_end = -1
         for j in range(n, i - 1, -1):
-            if fnmatch(value[i:j], pattern):
+            if fnmatch(value[i:j], pattern, extglob=extglob):
                 match_end = j
                 break
         if match_end <= i:
@@ -942,14 +940,14 @@ def _glob_replace(
     return "".join(out)
 
 
-def _case_mod(op: str, val: str, pattern: str) -> str:
+def _case_mod(op: str, val: str, pattern: str, extglob: bool = False) -> str:
     if not val:
         return val
     chars = list(val)
     scope = range(len(chars)) if op in ("^^", ",,") else range(1)
     for i in scope:
         ch = chars[i]
-        if pattern and not fnmatch(ch, pattern):
+        if pattern and not fnmatch(ch, pattern, extglob=extglob):
             continue
         chars[i] = ch.upper() if op in ("^", "^^") else ch.lower()
     return "".join(chars)
@@ -1149,17 +1147,23 @@ async def _expand_subscript_key(
     return "".join(parts)
 
 
-def _value_op(op: str, val: str, groups: list[str]) -> str:
+def _value_op(
+    op: str, val: str, groups: list[str], extglob: bool = False
+) -> str:
     if op in _STRIP_OPS:
         pattern = groups[0] if groups else ""
-        return _glob_strip(val, pattern, op in ("##", "%%"), op in ("#", "##"))
+        return _glob_strip(
+            val, pattern, op in ("##", "%%"), op in ("#", "##"), extglob
+        )
     if op in _REPLACE_OPS:
         pattern = groups[0] if groups else ""
         replacement = groups[1] if len(groups) > 1 else ""
         anchor = op[1] if len(op) > 1 and op[1] in "#%" else None
-        return _glob_replace(val, pattern, replacement, op == "//", anchor)
+        return _glob_replace(
+            val, pattern, replacement, op == "//", anchor, extglob
+        )
     if op in _CASE_OPS:
-        return _case_mod(op, val, groups[0] if groups else "")
+        return _case_mod(op, val, groups[0] if groups else "", extglob)
     return val
 
 
@@ -1434,7 +1438,12 @@ async def _expand_braces(
                 await _substring(val, node, expand_child, operand), quoted
             )
         ]
-    return [value_piece(_value_op(p.op, val, groups), quoted)]
+    return [
+        value_piece(
+            _value_op(p.op, val, groups, session.shopts.get("extglob", False)),
+            quoted,
+        )
+    ]
 
 
 def _bad_subscript(p: _BraceParse) -> DiscardSignal:
@@ -1554,7 +1563,10 @@ async def _expand_splat(
             else await _slice_array(arr, node, expand_child, operand)
         )
     elif p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
-        items = [_value_op(p.op, el, groups) for el in values]
+        items = [
+            _value_op(p.op, el, groups, session.shopts.get("extglob", False))
+            for el in values
+        ]
     elif p.op in _UNSET_GUARD_OPS:
         triggered = (
             not values

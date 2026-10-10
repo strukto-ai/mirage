@@ -2798,17 +2798,31 @@ async function indexedTrees(): Promise<void> {
     })
     db = measured
     let queries = 0
-    measured.$on('query', () => {
-      queries += 1
+    let observed: (() => void) | undefined
+    measured.$on('query', ({ query }) => {
+      if (query === 'SELECT 1 AS mirage_query_barrier') {
+        observed?.()
+        observed = undefined
+      } else queries += 1
     })
+    const drain = async (): Promise<void> => {
+      const promise = new Promise<void>((resolve) => {
+        observed = resolve
+      })
+      await Promise.all([measured.$queryRaw`SELECT 1 AS mirage_query_barrier`, promise])
+    }
     const repo = await repoByName(measured, TENANT, REPO)
     if (repo === null) throw new Error('indexed trees fixture has no repository')
     const old = new Map([['archive/deep/old.txt', Buffer.from('old snapshot')]])
     const root = await stageTree(measured, TENANT, repo, old, new Map())
     const directory = directoryIds(old, new Map()).get('archive') ?? ''
     const lookup = async (): Promise<number> => {
+      // Query events can arrive after the query promise settles. Observed
+      // barriers exclude setup events and include the lookup's final event.
+      await drain()
       queries = 0
       const hit = await treeById(measured, TENANT, repo, directory)
+      await drain()
       const count = queries
       eq(
         'an indexed historical directory loads its original bytes',

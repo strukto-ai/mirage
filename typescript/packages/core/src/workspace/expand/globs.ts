@@ -22,9 +22,11 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {
   globNameMatches,
+  globParts,
   globPattern,
   hasGlob as hasGlobChars,
   literalWord,
+  markGlobs,
   spellMatch,
   unmarkGlobs,
 } from '../../utils/glob_walk.ts'
@@ -48,12 +50,13 @@ export interface GlobOptions {
   nullglob: boolean
   failglob: boolean
   globstar: boolean
+  extglob: boolean
 }
 
 /** Whether a mount command's glob must expand here rather than push
  * down: the backend knows none of these. */
 export function globNeedsShell(opts: GlobOptions): boolean {
-  return opts.nullglob || opts.failglob || opts.globstar
+  return opts.nullglob || opts.failglob || opts.globstar || opts.extglob
 }
 
 export function globOptions(session: SessionState): GlobOptions {
@@ -61,6 +64,7 @@ export function globOptions(session: SessionState): GlobOptions {
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
+    extglob: session.shopts.extglob ?? SHOPT_DEFAULTS.get('extglob') ?? false,
   }
 }
 
@@ -133,7 +137,7 @@ function toSpecs(
       virtual: base.virtual,
       directory: base.directory,
       vfsPath: base.vfsPath,
-      rawPath: spellMatch(unmarkGlobs(item.rawPath), v, walked),
+      rawPath: spellMatch(item.rawPath, v, walked),
     })
   })
 }
@@ -194,10 +198,11 @@ async function levelMatches(
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
   if (owner.answers('glob')) {
+    const patternDir = prefix + markGlobs(real.slice(prefix.length))
     const spec = new PathSpec({
-      virtual: real,
-      directory: real,
-      vfsPath: mountKey(real, prefix),
+      virtual: patternDir,
+      directory: patternDir,
+      vfsPath: markGlobs(mountKey(real, prefix)),
       pattern: seg,
       resolved: false,
     })
@@ -295,9 +300,9 @@ async function walk(
   links: NamespaceLinks | null,
   globstar: boolean,
 ): Promise<PathSpec[]> {
-  const typed = stripSlash(item.dotted ?? item.virtual).split('/')
+  const typed = globParts(stripSlash(item.dotted ?? item.virtual))
   const first = typed.findIndex((seg) => hasGlobChars(seg) || seg === '.' || seg === '..')
-  const raw = rstripSlash(unmarkGlobs(item.rawPath)).split('/')
+  const raw = globParts(rstripSlash(item.rawPath)).map(unmarkGlobs)
   let spelledHead = raw.slice(0, raw.length - (typed.length - first)).join('/')
   if (item.rawPath.startsWith('/') && spelledHead === '') spelledHead = '/'
   // The head above the first glob or dot segment is a real directory, so a
@@ -404,7 +409,7 @@ function withTrailingSlash(spec: PathSpec): PathSpec {
 }
 
 function hasGlobstarSegment(item: PathSpec): boolean {
-  return unmarkGlobs(item.virtual).split('/').includes('**')
+  return globParts(item.virtual).includes('**')
 }
 
 export async function resolveGlobs(
@@ -417,13 +422,18 @@ export async function resolveGlobs(
   // set -f: skip resolution entirely, so every glob word keeps its
   // literal spelling like a zero-match glob.
   if (noglob) return classified.map((item) => literalWord(item))
-  const opts: GlobOptions = options ?? { nullglob: false, failglob: false, globstar: false }
+  const opts: GlobOptions = options ?? {
+    nullglob: false,
+    failglob: false,
+    globstar: false,
+    extglob: false,
+  }
   const result: (string | PathSpec)[] = []
   for (const item of classified) {
     if (item instanceof PathSpec && item.pattern !== null) {
       // A pattern word no mount owns stays the literal word like a
       // zero-match glob.
-      const mount = registry.tryMountFor(item.virtual)
+      const mount = registry.tryMountFor(unmarkGlobs(item.virtual))
       if (mount === null) {
         result.push(item)
         continue
@@ -552,7 +562,7 @@ export async function resolveGlobs(
 // The fixed directory above a word's first glob segment.
 function globHead(spec: PathSpec): string {
   const fixed: string[] = []
-  for (const seg of spec.virtual.split('/')) {
+  for (const seg of globParts(spec.virtual)) {
     if (hasGlobChars(seg)) break
     fixed.push(seg)
   }

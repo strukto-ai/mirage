@@ -16,6 +16,7 @@ import { SHELL_SPECS, parseShellOptions } from '../../commands/spec/shell.ts'
 import { getText, literalWord } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
+import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import { timeoutMissing } from '../executor/builtins/timeout/timeout.ts'
 import { xargsMissing } from '../executor/builtins/xargs/xargs.ts'
@@ -35,7 +36,7 @@ export interface Word {
 
 function wordGlobs(node: TSNodeLike): boolean {
   if (node.type === NT.WORD || node.type === NT.NUMBER) {
-    return hasGlob(markEscapedGlobs(getText(node)))
+    return hasGlob(patternShape(markEscapedGlobs(getText(node))))
   }
   if (node.type === NT.COMMAND_NAME || node.type === NT.CONCATENATION) {
     return node.namedChildren.some(wordGlobs)

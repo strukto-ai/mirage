@@ -37,6 +37,7 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondBinary,
     CondContext,
     CondError,
+    CondLazy,
     CondNode,
     CondNot,
     CondOr,
@@ -57,6 +58,8 @@ async def eval_cond(ctx: CondContext, node: CondNode) -> bool:
         ctx (CondContext): evaluation context.
         node (CondNode): parsed condition.
     """
+    if isinstance(node, CondLazy):
+        return await eval_cond(ctx, await node.expand())
     if isinstance(node, CondAnd):
         return await eval_cond(ctx, node.left) and await eval_cond(
             ctx, node.right
@@ -87,9 +90,9 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
     # side into the glob dialect, quoted segments escaped, so a
     # wholly-literal pattern matches exactly itself.
     if node.op in ("=", "=="):
-        return fnmatch(node.left, node.right)
+        return fnmatch(node.left, node.right, extglob=True)
     if node.op == "!=":
-        return not fnmatch(node.left, node.right)
+        return not fnmatch(node.left, node.right, extglob=True)
     if node.op == "=~":
         pattern = re.escape(node.right) if node.right_literal else node.right
         # bash hands the pattern to regcomp(REG_EXTENDED): glibc's

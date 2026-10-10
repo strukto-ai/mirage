@@ -649,23 +649,25 @@ async function wordChunks(
   return out
 }
 
-function globStrip(value: string, pattern: string, greedy: boolean, prefix: boolean): string {
+// Patterns read a value one character at a time, as Python's str does, so
+// the strip and replace below cut only at the UTF-16 offset of a character
+// boundary, never inside a surrogate pair.
+function globStrip(
+  value: string,
+  pattern: string,
+  greedy: boolean,
+  prefix: boolean,
+  extglob = false,
+): string {
   if (pattern === '') return value
-  const matches: number[] = []
-  if (prefix) {
-    for (let i = 0; i <= value.length; i++) {
-      if (fnmatch(value.slice(0, i), pattern)) matches.push(i)
-    }
-    if (matches.length === 0) return value
-    const i = greedy ? Math.max(...matches) : Math.min(...matches)
-    return value.slice(i)
+  const cuts = [0]
+  for (const char of value) cuts.push((cuts.at(-1) ?? 0) + char.length)
+  if (greedy === prefix) cuts.reverse()
+  for (const i of cuts) {
+    const candidate = prefix ? value.slice(0, i) : value.slice(i)
+    if (fnmatch(candidate, pattern, extglob)) return prefix ? value.slice(i) : value.slice(0, i)
   }
-  for (let i = 0; i <= value.length; i++) {
-    if (fnmatch(value.slice(i), pattern)) matches.push(i)
-  }
-  if (matches.length === 0) return value
-  const i = greedy ? Math.min(...matches) : Math.max(...matches)
-  return value.slice(0, i)
+  return value
 }
 
 // Bash ${var/pat/rep}: pattern is a glob, longest match wins. anchor is
@@ -676,57 +678,60 @@ function globReplace(
   replacement: string,
   replaceAll: boolean,
   anchor: string | null,
+  extglob = false,
 ): string {
   if (pattern === '') return value
+  const cuts = [0]
+  for (const char of value) cuts.push((cuts.at(-1) ?? 0) + char.length)
   if (anchor === '#') {
-    for (let j = value.length; j >= 0; j--) {
-      if (fnmatch(value.slice(0, j), pattern)) return replacement + value.slice(j)
+    for (const j of [...cuts].reverse()) {
+      if (fnmatch(value.slice(0, j), pattern, extglob)) return replacement + value.slice(j)
     }
     return value
   }
   if (anchor === '%') {
-    for (let i = 0; i <= value.length; i++) {
-      if (fnmatch(value.slice(i), pattern)) return value.slice(0, i) + replacement
+    for (const i of cuts) {
+      if (fnmatch(value.slice(i), pattern, extglob)) return value.slice(0, i) + replacement
     }
     return value
   }
   if (value === '') {
-    return fnmatch('', pattern) ? replacement : value
+    return fnmatch('', pattern, extglob) ? replacement : value
   }
   const out: string[] = []
-  let i = 0
-  const n = value.length
-  while (i < n) {
+  let k = 0
+  const n = cuts.length - 1
+  while (k < n) {
+    const i = cuts[k] ?? 0
     let matchEnd = -1
-    for (let j = n; j >= i; j--) {
-      if (fnmatch(value.slice(i, j), pattern)) {
-        matchEnd = j
+    for (let m = n; m >= k; m--) {
+      if (fnmatch(value.slice(i, cuts[m]), pattern, extglob)) {
+        matchEnd = m
         break
       }
     }
-    if (matchEnd <= i) {
+    if (matchEnd <= k) {
       // No match here (or an empty one, which bash skips over).
-      out.push(value[i] ?? '')
-      i += 1
+      out.push(value.slice(i, cuts[k + 1]))
+      k += 1
       continue
     }
     out.push(replacement)
-    i = matchEnd
+    k = matchEnd
     if (!replaceAll) {
-      out.push(value.slice(i))
+      out.push(value.slice(cuts[k]))
       return out.join('')
     }
   }
   return out.join('')
 }
 
-function caseMod(op: string, val: string, pattern: string): string {
+function caseMod(op: string, val: string, pattern: string, extglob = false): string {
   if (val === '') return val
   const all = op === '^^' || op === ',,'
   let out = ''
-  for (let i = 0; i < val.length; i++) {
-    const ch = val[i] ?? ''
-    if ((!all && i > 0) || (pattern !== '' && !fnmatch(ch, pattern))) {
+  for (const [i, ch] of Array.from(val).entries()) {
+    if ((!all && i > 0) || (pattern !== '' && !fnmatch(ch, pattern, extglob))) {
       out += ch
       continue
     }
@@ -903,10 +908,10 @@ async function expandSubscriptKey(p: BraceParse, expandChild: ExpandChild): Prom
   return parts.join('')
 }
 
-function valueOp(op: string, val: string, groups: string[]): string {
+function valueOp(op: string, val: string, groups: string[], extglob = false): string {
   if (STRIP_OPS.has(op)) {
     const pattern = groups[0] ?? ''
-    return globStrip(val, pattern, op === '##' || op === '%%', op === '#' || op === '##')
+    return globStrip(val, pattern, op === '##' || op === '%%', op === '#' || op === '##', extglob)
   }
   if (REPLACE_OPS.has(op)) {
     const pattern = groups[0] ?? ''
@@ -914,10 +919,10 @@ function valueOp(op: string, val: string, groups: string[]): string {
     let anchor: string | null = null
     if (op === '/#') anchor = '#'
     else if (op === '/%') anchor = '%'
-    return globReplace(val, pattern, replacement, op === '//', anchor)
+    return globReplace(val, pattern, replacement, op === '//', anchor, extglob)
   }
   if (CASE_OPS.has(op)) {
-    return caseMod(op, val, groups[0] ?? '')
+    return caseMod(op, val, groups[0] ?? '', extglob)
   }
   return val
 }
@@ -1249,7 +1254,7 @@ async function expandBracesIn(
     if (!varInEnv) return [valuePiece('', quoted)]
     return [valuePiece(await substring(val, node, expandChild, operand), quoted)]
   }
-  return [valuePiece(valueOp(p.op, val, groups), quoted)]
+  return [valuePiece(valueOp(p.op, val, groups, session.shopts.extglob ?? false), quoted)]
 }
 
 /**
@@ -1332,7 +1337,7 @@ async function expandSplat(
     const unset = p.subscript !== null && values.length === 0
     items = unset ? [] : await sliceArray(arr, node, expandChild, operand)
   } else if (op !== null && (STRIP_OPS.has(op) || REPLACE_OPS.has(op) || CASE_OPS.has(op))) {
-    items = values.map((el) => valueOp(op, el, groups))
+    items = values.map((el) => valueOp(op, el, groups, session.shopts.extglob ?? false))
   } else if (op !== null && UNSET_GUARD_OPS.has(op)) {
     const triggered =
       op === '-' || op === '+' || op === '=' || op === '?'

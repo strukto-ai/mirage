@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
 from typing import Any
 
 from mirage.shell.bytes import decode_text
@@ -20,9 +21,10 @@ from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.executor.builtins.condition import (
+from mirage.workspace.executor.builtins.condition.types import (
     CondAnd,
     CondBinary,
+    CondLazy,
     CondNode,
     CondNot,
     CondOr,
@@ -281,11 +283,17 @@ async def _build_binary(
             continue
         operands.append(child)
     if op in ("&&", "||") and len(operands) == 2:
-        left = await _build_cond(
-            operands[0], context, execute_fn, cs, view=view
+        # Expansion is part of evaluating an operand, so skipped branches
+        # cannot run substitutions or observe state before the left side.
+        left = CondLazy(
+            partial(
+                _build_cond, operands[0], context, execute_fn, cs, view=view
+            )
         )
-        right = await _build_cond(
-            operands[1], context, execute_fn, cs, view=view
+        right = CondLazy(
+            partial(
+                _build_cond, operands[1], context, execute_fn, cs, view=view
+            )
         )
         return CondAnd(left, right) if op == "&&" else CondOr(left, right)
     if op is None or len(operands) != 2:

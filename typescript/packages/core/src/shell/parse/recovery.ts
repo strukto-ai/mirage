@@ -20,6 +20,7 @@ import { protectedSource } from './heredoc/index.ts'
 import { delimiterEnd } from './heredoc/reader.ts'
 import { walkTree } from './names.ts'
 import { SourceNode } from './source.ts'
+import { patternSource } from './syntax.ts'
 import type { ShellNode } from '../types.ts'
 
 /**
@@ -232,18 +233,20 @@ function respelled(text: string, root: ShellNode): string {
  * original parse so structural errors still reach syntax validation.
  */
 export function parseProtected(parser: NativeParser, text: string): ShellNode {
-  const tree = parser.parse(text)
+  const patterned = patternSource(text)
+  const tree = parser.parse(patterned)
   if (tree === null) throw new Error('shell parse returned null')
   let shieldedText = expansionSource(
-    (text.includes('<<') ? protectedSource(text, tree.rootNode) : null) ?? text,
+    (patterned.includes('<<') ? protectedSource(patterned, tree.rootNode) : null) ?? patterned,
     tree.rootNode,
   )
   shieldedText = operatorSource(parser, shieldedText, tree.rootNode)
-  if (shieldedText === text) return tree.rootNode
+  const original = patterned === text ? tree.rootNode : new SourceNode(tree.rootNode, text)
+  if (shieldedText === patterned) return original
   const shielded = parser.parse(shieldedText)
-  if (shielded === null) return tree.rootNode
-  const original = errors(tree.rootNode)
-  if (![...errors(shielded.rootNode)].every((span) => original.has(span))) return tree.rootNode
+  if (shielded === null) return original
+  const originalErrors = errors(tree.rootNode)
+  if (![...errors(shielded.rootNode)].every((span) => originalErrors.has(span))) return original
   return new SourceNode(shielded.rootNode, text)
 }
 

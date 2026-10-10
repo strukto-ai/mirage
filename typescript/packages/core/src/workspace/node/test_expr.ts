@@ -220,8 +220,16 @@ async function buildBinary(
   const left = operands[0]
   const right = operands[1]
   if ((op === '&&' || op === '||') && left !== undefined && right !== undefined) {
-    const leftCond = await buildCond(left, context, executeFn, cs, view)
-    const rightCond = await buildCond(right, context, executeFn, cs, view)
+    // Expansion is part of evaluating an operand, so skipped branches cannot
+    // run substitutions or observe state before the left side.
+    const leftCond: CondNode = {
+      kind: 'lazy',
+      expand: () => buildCond(left, context, executeFn, cs, view),
+    }
+    const rightCond: CondNode = {
+      kind: 'lazy',
+      expand: () => buildCond(right, context, executeFn, cs, view),
+    }
     return op === '&&'
       ? { kind: 'and', left: leftCond, right: rightCond }
       : { kind: 'or', left: leftCond, right: rightCond }

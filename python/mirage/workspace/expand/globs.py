@@ -23,9 +23,11 @@ from mirage.shell.errors import DiscardSignal
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.glob_walk import (
     glob_name_matches,
+    glob_parts,
     glob_pattern,
     has_glob,
     literal_word,
+    mark_globs,
     spell_match,
     unmark_globs,
 )
@@ -57,17 +59,19 @@ class GlobOptions:
             expansion error, `bash: no match: WORD`.
         globstar (bool): a `**` segment matches zero or more directory
             levels instead of reading as `*`.
+        extglob (bool): expand extended groups before dispatching a command.
     """
 
     nullglob: bool = False
     failglob: bool = False
     globstar: bool = False
+    extglob: bool = False
 
     @property
     def needs_shell(self) -> bool:
         """Whether a mount command's glob has to expand here rather than
         be pushed down to the backend, which knows none of these."""
-        return self.nullglob or self.failglob or self.globstar
+        return self.nullglob or self.failglob or self.globstar or self.extglob
 
 
 def glob_options(session: SessionState) -> GlobOptions:
@@ -80,6 +84,7 @@ def glob_options(session: SessionState) -> GlobOptions:
         nullglob=session.shopts.get("nullglob", SHOPT_DEFAULTS["nullglob"]),
         failglob=session.shopts.get("failglob", SHOPT_DEFAULTS["failglob"]),
         globstar=session.shopts.get("globstar", SHOPT_DEFAULTS["globstar"]),
+        extglob=session.shopts.get("extglob", SHOPT_DEFAULTS["extglob"]),
     )
 
 
@@ -265,10 +270,11 @@ async def _level_matches(
     owner = _mount_of(registry, real, mount)
     await owner.ensure_ready()
     prefix = owner.prefix.rstrip("/")
+    pattern_dir = prefix + mark_globs(real[len(prefix) :])
     spec = PathSpec(
-        virtual=real,
-        directory=real,
-        vfs_path=mount_key(real, prefix),
+        virtual=pattern_dir,
+        directory=pattern_dir,
+        vfs_path=mark_globs(mount_key(real, prefix)),
         pattern=seg,
         resolved=False,
     )
@@ -381,11 +387,13 @@ async def _walk(
         links (NamespaceLinks | None): the namespace symlink table.
         globstar (bool): whether ``**`` reads as any depth.
     """
-    typed = (item.dotted or item.virtual).strip("/").split("/")
+    typed = glob_parts((item.dotted or item.virtual).strip("/"))
     first = next(
         i for i, seg in enumerate(typed) if has_glob(seg) or seg in (".", "..")
     )
-    raw = unmark_globs(item.raw_path).rstrip("/").split("/")
+    raw = [
+        unmark_globs(part) for part in glob_parts(item.raw_path.rstrip("/"))
+    ]
     spelled_head = "/".join(raw[: len(raw) - (len(typed) - first)])
     if item.raw_path.startswith("/") and not spelled_head:
         spelled_head = "/"
@@ -465,7 +473,7 @@ def _to_specs(
         mount (MountEntry): the mount owning the word.
         walked (int): segment count from the word's first glob segment.
     """
-    raw = unmark_globs(item.raw_path)
+    raw = item.raw_path
     return [
         dataclasses.replace(
             PathSpec.from_str_path(
@@ -546,7 +554,7 @@ def _has_globstar_segment(item: PathSpec) -> bool:
     Args:
         item (PathSpec): the glob word.
     """
-    return "**" in unmark_globs(item.virtual).split("/")
+    return "**" in glob_parts(item.virtual)
 
 
 async def resolve_globs(
@@ -586,7 +594,7 @@ async def resolve_globs(
             pattern = item.pattern
             # A pattern word no mount owns cannot match anything, so it
             # stays the literal word like a zero-match glob.
-            mount = registry.try_mount_for(item.virtual)
+            mount = registry.try_mount_for(unmark_globs(item.virtual))
             if mount is None:
                 result.append(item)
                 continue
@@ -712,7 +720,7 @@ def _glob_head(spec: PathSpec) -> str:
         spec (PathSpec): the glob word.
     """
     fixed: list[str] = []
-    for seg in spec.virtual.split("/"):
+    for seg in glob_parts(spec.virtual):
         if has_glob(seg):
             break
         fixed.append(seg)

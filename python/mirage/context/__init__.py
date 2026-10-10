@@ -21,6 +21,7 @@ from mirage.context.session_context import (
     effective_mount_mode,
     effective_path_mode,
     explaining,
+    extglob_active,
     get_admission,
     get_current_evaluation,
     get_current_session,
@@ -64,6 +65,7 @@ from mirage.context.session_context import (
 __all__ = [
     "DEFAULT_UMASK",
     "dotglob_active",
+    "extglob_active",
     "effective_mount_mode",
     "effective_path_mode",
     "get_admission",

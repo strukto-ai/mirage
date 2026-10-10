@@ -129,10 +129,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo /data/[a-c].txt",
+      "command": "echo /data/[a-c].txt; x=a5b; case $x in *[[:digit:]]*) echo \"${x//[[:digit:]]/X}\";; esac",
       "expect": {
         "exit": 0,
-        "stdout": "/data/a.txt /data/b.txt /data/c.txt\n",
+        "stdout": "/data/a.txt /data/b.txt /data/c.txt\naXb\n",
         "stderr": ""
       }
     },

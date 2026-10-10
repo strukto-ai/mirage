@@ -56,8 +56,9 @@ export function checkSyntax(
   command: string,
   aliases: ReadonlySet<string> = new Set(),
   own: ((name: string, at: number) => boolean) | null = null,
+  extglob = false,
 ): SyntaxDiagnostic | null {
-  const found = new LineReader(command, aliases, own).refusals()
+  const found = new LineReader(command, aliases, own, extglob).refusals()
   const first = found[0]
   const last = found.at(-1)
   if (first === undefined || last === undefined) return null
@@ -73,7 +74,7 @@ export function checkSyntax(
  * carries out first), and each substitution that closes with bodies still to
  * read. `null` when bash refuses the line, whose heredocs nothing reads. */
 export function heredocPlan(command: string): HeredocPlan | null {
-  const reader = new LineReader(command, new Set(), null)
+  const reader = new LineReader(command, new Set(), null, true)
   if (reader.refusals().length > 0) return null
   return {
     order: [...reader.bodies].map(([at, [start, end]]) => [at, start, end] as const),
@@ -217,15 +218,30 @@ function isTestClose(tok: ReaderToken): boolean {
   return tok.kind === 'word' && tok.plain && tok.text === ']]'
 }
 
+/** Shield pattern operators while preserving expansions and source spans.
+ * Process substitutions borrow command-substitution grammar to remain inside
+ * one word; SourceNode restores their original types and text. */
+export function patternSource(text: string): string {
+  if (!text.includes('[') && ![...constants.EXTGLOB_OPENERS].some((c) => text.includes(c + '(')))
+    return text
+  const reader = new LineReader(text, new Set(), null, true)
+  reader.refusals()
+  const out = text.split('')
+  for (const [start, end] of reader.patterns) {
+    if (end === start + 1 && '<>'.includes(text.charAt(start)) && text.charAt(start + 1) === '(')
+      out[start] = '$'
+    else for (let i = start; i < end; i += 1) out[i] = ':'
+  }
+  return out.join('')
+}
+
 /**
- * bash's reader over one line: a lexer whose modes the grammar sets. The line
- * is read as bash reads its input: a newline ends the input if none does, a
- * trailing backslash quotes the end of it, and each heredoc body is skipped
- * after the newline that ends its command. `frames` tracks the arrays and
- * substitutions being read, which decide the status of an error inside them;
- * `bodies` and `closes` keep the heredoc plan (see `heredocPlan`).
+ * Bash's reader over one line: a lexer whose modes the grammar sets.
+ * `frames` tracks arrays and substitutions; `bodies` and `closes` keep
+ * the heredoc plan. Pattern spans share this reader's quote boundaries.
  */
 class LineReader {
+  readonly patterns: [number, number][] = []
   private readonly n: number
   private readonly quotedEnd: boolean
   private pos = 0
@@ -250,6 +266,7 @@ class LineReader {
     private readonly text: string,
     private readonly aliases: ReadonlySet<string>,
     private readonly own: ((name: string, at: number) => boolean) | null,
+    private readonly extglob = false,
   ) {
     this.n = text.length
     this.quotedEnd = endsEscaped(text)
@@ -443,6 +460,35 @@ class LineReader {
     if (c === '`') return this.escapedQuote(j, '`')
     if (c === '$') return this.dollar(j, false)
     return j + 1
+  }
+
+  /** Read a pattern group, shielding only its literal syntax. */
+  extendedPattern(i: number): number {
+    this.patterns.push([i, i + 2])
+    let j = i + 2
+    let depth = 1
+    while (j < this.n) {
+      const c = this.text.charAt(j)
+      if ('\'"`$\\'.includes(c)) {
+        j = this.wordChar(j)
+        continue
+      }
+      if ((c === '<' || c === '>') && this.text.charAt(j + 1) === '(') {
+        this.patterns.push([j, j + 1])
+        j = this.processSubstitution(j)
+        continue
+      }
+      if (c === '(') depth += 1
+      else if (c === ')') depth -= 1
+      if (
+        '()| \t\n;&<>'.includes(c) ||
+        (constants.EXTGLOB_OPENERS.has(c) && this.text.charAt(j + 1) === '(')
+      )
+        this.patterns.push([j, j + 1])
+      j += 1
+      if (depth === 0) return j
+    }
+    this.failMatch(')', i + 1)
   }
 
   /** Skip `<(` or `>(`: parsed, unless `((` follows, which bash matches as
@@ -799,6 +845,12 @@ class LineReader {
         plain = false
         state = 'none'
         i += 2
+        continue
+      }
+      if (this.extglob && constants.EXTGLOB_OPENERS.has(c) && text.charAt(i + 1) === '(') {
+        i = this.extendedPattern(i)
+        plain = false
+        state = 'none'
         continue
       }
       if (constants.WORD_BREAKS.has(c)) {
@@ -1311,6 +1363,7 @@ class LineReader {
         )
           this.failToken(next)
         afterIn = false
+        this.patternBrackets(next.start, next.end)
         this.take(next)
         next = this.peek()
         if (next.kind === 'op' && next.text === ')') {
@@ -1516,6 +1569,17 @@ class LineReader {
     }
   }
 
+  /** Keep a bracket pattern containing quotes or expansions one word. */
+  patternBrackets(start: number, end: number): void {
+    const word = this.text.slice(start, end)
+    if (!word.includes('[') || !/["'`$\\]/.test(word)) return
+    let j = start
+    while (j < end) {
+      if ('[]'.includes(this.text.charAt(j))) this.patterns.push([j, j + 1])
+      j = this.wordChar(j)
+    }
+  }
+
   /** The right side of `==`, `=` or `!=`, read with extglob on. */
   patternWord(): ReaderToken {
     const i = this.blankEnd(this.pos)
@@ -1531,13 +1595,14 @@ class LineReader {
     while (j < this.n) {
       const c = text.charAt(j)
       if (constants.EXTGLOB_OPENERS.has(c) && text.charAt(j + 1) === '(') {
-        j = this.matched(j + 2, j + 1) + 1
+        j = this.extendedPattern(j)
         extended = true
         continue
       }
       if (constants.WORD_BREAKS.has(c)) break
       j = this.wordChar(j)
     }
+    this.patternBrackets(i, j)
     if (!extended) return tok
     return token('word', text.slice(i, j).replaceAll('\\\n', ''), i, j)
   }

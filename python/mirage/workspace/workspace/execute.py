@@ -710,7 +710,9 @@ async def run_prepared_line(
         found = None
         if argv is None:
             found = check_syntax(
-                command, expanding_aliases(effective_session)
+                command,
+                expanding_aliases(effective_session),
+                extglob=effective_session.shopts.get("extglob", False),
             ) or find_syntax_issue(ast)
         if found is not None:
             io = syntax_error_result(found)

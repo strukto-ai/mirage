@@ -23,8 +23,10 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.shell.escapes import unescape_unquoted
 from mirage.types import FileStat, FileType, HiddenPaths, PathSpec, Visibility
 from mirage.utils import glob_walk
+from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import (
     DEFAULT_MAX_GLOB_MATCHES,
+    escape_glob,
     expand_pattern,
     glob_pattern,
     glob_prefix,
@@ -637,3 +639,19 @@ async def test_trailing_slash_keeps_an_owed_name_it_cannot_ask_about():
         "inner/",
         "lnk/",
     ]
+
+
+@pytest.mark.parametrize("text", ["!", "a!b", "!(a|b)", "*?[@+!()|"])
+@pytest.mark.parametrize("extglob", [False, True])
+def test_quoted_operators_match_only_their_literal_spelling(text, extglob):
+    pattern = escape_glob(text)
+    assert pattern == glob_pattern(mark_globs(text))
+    assert fnmatch(text, pattern, extglob=extglob)
+    assert not fnmatch("different", pattern, extglob=extglob)
+
+
+def test_quoted_bang_cannot_become_an_operator_after_expansion():
+    pattern = "@(a" + escape_glob("!") + "(b|c)|d)"
+    assert fnmatch("a!(b|c)", pattern, extglob=True)
+    assert fnmatch("d", pattern, extglob=True)
+    assert not fnmatch("ax", pattern, extglob=True)

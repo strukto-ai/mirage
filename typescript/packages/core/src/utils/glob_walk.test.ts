@@ -19,6 +19,7 @@ import { FileStat, FileType, PathSpec } from '../types.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { enoent } from '../errors/fs.ts'
 import {
+  escapeGlob,
   expandPattern,
   globPattern,
   globPrefix,
@@ -36,6 +37,7 @@ import {
 } from './glob_walk.ts'
 import { unescapeUnquoted } from '../shell/escapes.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
+import { fnmatch } from './fnmatch.ts'
 
 const TREE: Record<string, string[]> = {
   '/notion': ['/notion/pages', '/notion/databases'],
@@ -501,4 +503,23 @@ describe('resolveGlobWith trailing slash', () => {
     )
     expect(out.map((m) => [m.rawPath, m.pattern])).toEqual([['zz*/', null]])
   })
+})
+
+it.each(['!', 'a!b', '!(a|b)', '*?[@+!()|'])(
+  'quoted operators match only their literal spelling: %s',
+  (text) => {
+    const pattern = escapeGlob(text)
+    expect(pattern).toBe(globPattern(markGlobs(text)))
+    for (const extglob of [false, true]) {
+      expect(fnmatch(text, pattern, extglob)).toBe(true)
+      expect(fnmatch('different', pattern, extglob)).toBe(false)
+    }
+  },
+)
+
+it('a quoted bang cannot become an operator after expansion', () => {
+  const pattern = '@(a' + escapeGlob('!') + '(b|c)|d)'
+  expect(fnmatch('a!(b|c)', pattern, true)).toBe(true)
+  expect(fnmatch('d', pattern, true)).toBe(true)
+  expect(fnmatch('ax', pattern, true)).toBe(false)
 })

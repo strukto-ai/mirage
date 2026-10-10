@@ -30,7 +30,7 @@ import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
-import { type ByteSource, IOResult } from '../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
@@ -55,10 +55,18 @@ import {
   getParts,
   getUnsetArgs,
   getWhileParts,
+  getProcessSubBody,
+  getProcessSubDirection,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
-import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
+import {
+  NodeType as NT,
+  type PipelineStages,
+  ProcessSubDirection,
+  Redirect,
+  RedirectKind,
+} from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import {
   runWithRedirectPaths,
@@ -92,6 +100,7 @@ import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { DevVFS } from '../../vfs/dev/dev.ts'
 
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
@@ -904,62 +913,118 @@ export async function executeNode(
   }
   const executionScope = deps.executionScope ?? new ExecutionScope()
   await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
-  if (!ownDiagnostics) {
-    const result = await executeNodeBody(
-      deps,
-      node,
-      context,
-      stdin,
-      callStack,
-      executionScope,
-      false,
-    )
-    if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
-      throw makeAbortError(
-        deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
-      )
-    }
-    return result
-  }
-  const outer = context.frame.diagnostics
-  context.frame.diagnostics = []
+  // The node's own `<(...)` files go when it ends, so a command still
+  // reading one is read out first.
+  const held: (readonly [DevVFS, string, number])[] = []
+  const previous = context.frame.processSub
+  context.frame.processSub = processInput(context, deps.registry, held)
   try {
-    const [stdout, io, execNode] = await executeNodeBody(
-      deps,
-      node,
-      context,
-      stdin,
-      callStack,
-      executionScope,
-    )
-    // A statement that settles after the caller aborted is an orphan: its
-    // status must not reach the shell the caller was already released from.
-    if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
-      throw makeAbortError(
-        deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
+    if (!ownDiagnostics) {
+      const [stdout, io, execNode] = await executeNodeBody(
+        deps,
+        node,
+        context,
+        stdin,
+        callStack,
+        executionScope,
+        false,
       )
+      if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
+        throw makeAbortError(
+          deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
+        )
+      }
+      return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
     }
-    if (context.frame.diagnostics.length > 0) {
-      const err = diagnosticStderr(node, context)
-      const existing = await io.materializeStderr()
-      const merged = new Uint8Array(err.length + existing.length)
-      merged.set(err)
-      merged.set(existing, err.length)
-      io.stderr = merged
-      execNode.stderr = merged
+    const outer = context.frame.diagnostics
+    context.frame.diagnostics = []
+    try {
+      const [stdout, io, execNode] = await executeNodeBody(
+        deps,
+        node,
+        context,
+        stdin,
+        callStack,
+        executionScope,
+      )
+      // A statement that settles after the caller aborted is an orphan: its
+      // status must not reach the shell the caller was already released from.
+      if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
+        throw makeAbortError(
+          deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
+        )
+      }
+      if (context.frame.diagnostics.length > 0) {
+        const err = diagnosticStderr(node, context)
+        const existing = await io.materializeStderr()
+        const merged = new Uint8Array(err.length + existing.length)
+        merged.set(err)
+        merged.set(existing, err.length)
+        io.stderr = merged
+        execNode.stderr = merged
+      }
+      return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
+    } catch (err) {
+      if (err instanceof ExitSignal) {
+        const extra = diagnosticStderr(node, context)
+        const merged = new Uint8Array(extra.length + err.stderr.length)
+        merged.set(extra)
+        merged.set(err.stderr, extra.length)
+        err.stderr = merged
+      }
+      throw err
+    } finally {
+      context.frame.diagnostics = outer
     }
-    return [stdout, io, execNode]
   } catch (err) {
-    if (err instanceof ExitSignal) {
-      const extra = diagnosticStderr(node, context)
-      const merged = new Uint8Array(extra.length + err.stderr.length)
-      merged.set(extra)
-      merged.set(err.stderr, extra.length)
-      err.stderr = merged
-    }
-    throw err
+    if (!(err instanceof ProcessSubError)) throw err
+    // The node fails, as an unsupported command does; the line goes on.
+    const stderr = err.stderr
+    return [
+      err.stdout,
+      new IOResult({ exitCode: 2, stderr }),
+      new ExecutionNode({ command: 'process_sub', exitCode: 2, stderr }),
+    ]
   } finally {
-    context.frame.diagnostics = outer
+    context.frame.processSub = previous
+    for (const [dev, path, allocation] of held) dev.releaseInput(path, allocation)
+  }
+}
+
+/** A node-local refusal; carry earlier output until executeNode catches it. */
+class ProcessSubError extends ExitSignal {
+  constructor() {
+    super(2, encodeText('mirage: unsupported: process substitution >(...)\n'))
+  }
+}
+
+/**
+ * The hook that opens a node's input process substitutions. Each `<(...)`
+ * runs as its word expands, in order with the word's other expansions and
+ * through the evaluator a `$(...)` there uses, and reads back as a buffered
+ * device file rather than a host pipe, held until the node ends; a nested
+ * node opens its own, so each lasts as long as the command naming it. An
+ * output `>(...)` is refused: the node naming it fails with status 2.
+ * Mirrors Python's `_process_input`.
+ */
+function processInput(
+  context: EvaluationContext,
+  registry: MountRegistry,
+  held: (readonly [DevVFS, string, number])[],
+): NonNullable<EvaluationContext['frame']['processSub']> {
+  return async (node, executeLine) => {
+    if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
+    const [dev] = registry.resolve('/dev/null')
+    if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
+    const [path, allocation] = dev.allocateInput()
+    held.push([dev, path, allocation])
+    const inner = getProcessSubBody(node)
+    if (inner !== '') {
+      const io = await executeLine(inner)
+      dev.setInput(path, allocation, await materialize(io.stdout))
+      context.frame.diagnostics.push(await materialize(io.stderr))
+    }
+    return path
   }
 }
 
@@ -1447,15 +1512,9 @@ async function executeNodeBody(
 
   if (kind === NodeKind.CASE) {
     const word = await expandNode(getCaseWord(node), context, executeFn, callStack, view)
-    const items: [string[], TSNodeLike[], string][] = []
-    for (const [patternNodes, body, terminator] of getCaseItems(node)) {
-      const patterns: string[] = []
-      for (const patternNode of patternNodes) {
-        patterns.push(await expandPattern(patternNode, context, executeFn, callStack, view))
-      }
-      items.push([patterns, body, terminator])
-    }
-    return handleCase(run, word, items, session)
+    return handleCase(run, word, getCaseItems(node), session, (pattern) =>
+      expandPattern(pattern, context, executeFn, callStack, view),
+    )
   }
 
   if (kind === NodeKind.FUNCTION_DEF) {

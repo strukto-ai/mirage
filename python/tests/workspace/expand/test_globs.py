@@ -723,29 +723,33 @@ def test_glob_op_is_handed_keys_below_a_non_root_prefix():
     # The ``glob`` op never sees the mount prefix: the mount stamps each
     # spec's ``vfs_path`` with ``mount_key(virtual, prefix)`` before the
     # op runs, on every entry point that expands a word (the workspace
-    # expander, its mid-path and globstar walks, and the builtins' operands).
+    # expander, its mid-path and globstar walks, and the builtins' operands),
+    # a quoted prefix read by its literal spelling.
     # Pinned the same way in typescript's globs.test.ts.
-    ws = Workspace({"/mnt/x/": RAMVFS()}, mode=MountMode.WRITE)
-    seen = _recording_keys(ws.mount("/mnt/x/"))
+    ws = Workspace({"/mnt/x+/": RAMVFS()}, mode=MountMode.WRITE)
+    seen = _recording_keys(ws.mount("/mnt/x+/"))
     ws.create_session("s")
     for line in (
-        "mkdir -p /mnt/x/team/sub",
-        "printf 1 > /mnt/x/team/f1",
-        "printf 2 > /mnt/x/tea.txt",
-        "printf 3 > /mnt/x/other",
+        "mkdir -p /mnt/x+/team/sub",
+        "printf 1 > /mnt/x+/team/f1",
+        "printf 2 > /mnt/x+/tea.txt",
+        "printf 3 > /mnt/x+/other",
     ):
         _run(ws.shell(line, session_id="s"))
     cases = [
-        ("echo /mnt/x/*", "/mnt/x/other /mnt/x/tea.txt /mnt/x/team"),
-        ("echo /mnt/x/*/f*", "/mnt/x/team/f1"),
-        ("cd /mnt/x && echo tea*", "tea.txt team"),
-        ("shopt -s globstar; echo /mnt/x/**/f1", "/mnt/x/team/f1"),
-        ("touch /mnt/x/tea* && echo touched", "touched"),
+        ("echo /mnt/x+/*", "/mnt/x+/other /mnt/x+/tea.txt /mnt/x+/team"),
+        ("echo /mnt/x+/*/f*", "/mnt/x+/team/f1"),
+        ("cd /mnt/x+ && echo tea*", "tea.txt team"),
+        ("shopt -s globstar; echo /mnt/x+/**/f1", "/mnt/x+/team/f1"),
+        ("touch /mnt/x+/tea* && echo touched", "touched"),
+        ("echo '/mnt/x+'/t*", "/mnt/x+/tea.txt /mnt/x+/team"),
     ]
     for line, want in cases:
         assert _out(ws, line).strip() == want, line
     assert seen
-    assert [(v, key) for v, key in seen if key != mount_key(v, "/mnt/x")] == []
+    assert [
+        (v, key) for v, key in seen if key != mount_key(v, "/mnt/x+")
+    ] == []
 
 
 class NoStatRAM(RAMVFS):

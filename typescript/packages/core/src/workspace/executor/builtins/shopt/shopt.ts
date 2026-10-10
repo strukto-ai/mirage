@@ -17,7 +17,6 @@ import {
   SET_OPTION_DEFAULTS,
   SET_OPTION_NAMES,
   SHOPT_DEFAULTS,
-  SHOPT_UNSUPPORTED,
 } from '../../../../shell/constants.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { type AliasMark, aliasMark, noteExpanding } from '../alias/index.ts'
@@ -44,8 +43,7 @@ function row(name: string, on: boolean, reusable: boolean, setO: boolean): strin
  * answers 0 only when every named option is on, and `-o` moves all of
  * that onto the `set -o` vocabulary. An unknown name is `invalid shell
  * option name` (or `invalid option name` under `-o`), exit 1; `-s` with
- * `-u` is refused; an unknown letter is exit 2. `shopt -s extglob` is
- * refused: the parser has no such mode. `mark` is the read running it,
+ * `-u` is refused; an unknown letter is exit 2. `mark` is the read running it,
  * whose commands keep `expand_aliases` as that read began.
  */
 export function handleShopt(
@@ -89,11 +87,6 @@ export function handleShopt(
       const on = store[name] ?? table.get(name) ?? false
       if (!on) status = 1
       if (!quiet) lines.push(row(name, on, reusable, setO))
-      continue
-    }
-    if (setting && !setO && SHOPT_UNSUPPORTED.has(name)) {
-      errors.push(`mirage: shopt: ${name}: not supported`)
-      status = 1
       continue
     }
     if (name === 'expand_aliases' && !setO && mark !== null) noteExpanding(session, mark)

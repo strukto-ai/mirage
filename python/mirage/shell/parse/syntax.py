@@ -42,6 +42,7 @@ def check_syntax(
     command: str,
     aliases: frozenset[str] = frozenset(),
     own: Callable[[str, int], bool] | None = None,
+    extglob: bool = False,
 ) -> SyntaxDiagnostic | None:
     """Read a line as bash 5.2 does and report what it refuses.
 
@@ -67,7 +68,7 @@ def check_syntax(
         SyntaxDiagnostic | None: the text bash names, what it prints and
         its status; None when bash reads the line.
     """
-    found = _LineReader(command, aliases, own).refusals()
+    found = _LineReader(command, aliases, own, extglob).refusals()
     if not found:
         return None
     message = "".join(
@@ -76,6 +77,38 @@ def check_syntax(
         for line in refusal.lines
     )
     return SyntaxDiagnostic(found[0].offending, message, found[-1].status)
+
+
+def pattern_source(data: bytes) -> bytes:
+    """Shield pattern operators while preserving expansions and byte spans.
+
+    The syntax gate separately decides whether extglob is enabled. The
+    structural parser always recognizes it, including the implicit mode
+    on the right of a conditional comparison. Process substitutions borrow
+    the command-substitution grammar to remain inside one word; SourceNode
+    restores their original types and text.
+
+    Args:
+        data (bytes): encoded shell source.
+    """
+    command = data.decode("utf-8", errors="surrogateescape")
+    if "[" not in command and not any(
+        c + "(" in command for c in constants.EXTGLOB_OPENERS
+    ):
+        return data
+    reader = _LineReader(command, frozenset(), None, True)
+    reader.refusals()
+    out = list(command)
+    for start, end in reader.patterns:
+        if (
+            end == start + 1
+            and command[start] in "<>"
+            and command[start + 1 : start + 2] == "("
+        ):
+            out[start] = "$"
+        else:
+            out[start:end] = ":" * (end - start)
+    return encode_text("".join(out))
 
 
 def heredoc_plan(command: str) -> HeredocPlan | None:
@@ -91,7 +124,7 @@ def heredoc_plan(command: str) -> HeredocPlan | None:
         HeredocPlan | None: offsets in UTF-8 bytes; None when bash refuses
         the line, whose heredocs nothing reads.
     """
-    reader = _LineReader(command, frozenset(), None)
+    reader = _LineReader(command, frozenset(), None, True)
     if reader.refusals():
         return None
 
@@ -316,12 +349,15 @@ class _LineReader:
         text: str,
         aliases: frozenset[str],
         own: Callable[[str, int], bool] | None,
+        extglob: bool = False,
     ) -> None:
         self.text = text
         self.n = len(text)
         self.quoted_end = ends_escaped(text)
         self.aliases = aliases
         self.own = own
+        self.extglob = extglob
+        self.patterns: list[tuple[int, int]] = []
         self.subs: dict[
             tuple[int, int | None], tuple[int, tuple[ReaderHeredoc, ...]]
         ] = {}
@@ -595,6 +631,37 @@ class _LineReader:
             return self.matched(at + 1, i) + 1
         return self.substitution(i, at + 1)
 
+    def extended_pattern(self, i: int) -> int:
+        """Read a pattern group, shielding only its literal syntax.
+
+        Args:
+            i (int): the extended pattern's operator.
+        """
+        self.patterns.append((i, i + 2))
+        j, depth = i + 2, 1
+        while j < self.n:
+            c = self.text[j]
+            if c in "'\"`$\\":
+                j = self.word_char(j)
+                continue
+            if c in "<>" and self.char_at(j + 1) == "(":
+                self.patterns.append((j, j + 1))
+                j = self.process_substitution(j)
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            if c in "()| \t\n;&<>" or (
+                c in constants.EXTGLOB_OPENERS
+                and self.text[j + 1 : j + 2] == "("
+            ):
+                self.patterns.append((j, j + 1))
+            j += 1
+            if depth == 0:
+                return j
+        self.fail_match(")", i + 1)
+
     def brace(self, j: int, opened: int) -> int:
         """Skip an expansion's ``${...}``: the first unquoted ``}`` closes it.
 
@@ -608,6 +675,7 @@ class _LineReader:
             if c == "}":
                 return j + 1
             if c in "<>" and self.char_at(j + 1) == "(":
+                self.patterns.append((j, j + 1))
                 j = self.process_substitution(j)
                 continue
             j = self.word_char(j)
@@ -993,6 +1061,15 @@ class _LineReader:
                 plain = False
                 state = "none"
                 i += 2
+                continue
+            if (
+                self.extglob
+                and c in constants.EXTGLOB_OPENERS
+                and text[i + 1 : i + 2] == "("
+            ):
+                i = self.extended_pattern(i)
+                plain = False
+                state = "none"
                 continue
             if c in constants.WORD_BREAKS:
                 if c in "<>" and self.char_at(i + 1) == "(":
@@ -1610,6 +1687,7 @@ class _LineReader:
                 ):
                     self.fail_token(tok)
                 after_in = False
+                self.pattern_brackets(tok.start, tok.end)
                 self.take(tok)
                 tok = self.peek()
                 if tok.kind == "op" and tok.text == ")":
@@ -1842,6 +1920,22 @@ class _LineReader:
                 refusal.lines.append(line)
             raise
 
+    def pattern_brackets(self, start: int, end: int) -> None:
+        """Keep a bracket pattern containing quotes or expansions one word.
+
+        Args:
+            start (int): the pattern's first character.
+            end (int): the position after the pattern.
+        """
+        word = self.text[start:end]
+        if "[" not in word or not any(c in word for c in "'\"`$\\"):
+            return
+        j = start
+        while j < end:
+            if self.text[j] in "[]":
+                self.patterns.append((j, j + 1))
+            j = self.word_char(j)
+
     def pattern_word(self) -> ReaderToken:
         """The right side of ``==``, ``=`` or ``!=``, read with extglob on."""
         i = self.blank_end(self.pos)
@@ -1857,12 +1951,13 @@ class _LineReader:
         while j < n:
             c = text[j]
             if c in constants.EXTGLOB_OPENERS and text[j + 1 : j + 2] == "(":
-                j = self.matched(j + 2, j + 1) + 1
+                j = self.extended_pattern(j)
                 extended = True
                 continue
             if c in constants.WORD_BREAKS:
                 break
             j = self.word_char(j)
+        self.pattern_brackets(i, j)
         if not extended:
             return tok
         return ReaderToken("word", text[i:j].replace("\\\n", ""), i, j)

@@ -24,10 +24,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo <(true)",
+      "command": "echo <(true); [[ -n <(true) ]] && echo test; for f in <(echo loop); do cat \"$f\"; done; case <(true) in /dev/fd/*) echo word;; esac",
       "expect": {
         "exit": 0,
-        "stdout": "/dev/fd/63\n",
+        "stdout": "/dev/fd/63\ntest\nloop\nword\n",
         "stderr": ""
       }
     },
