@@ -1904,6 +1904,19 @@ async def test_a_streamed_read_arrives_as_pulled_and_fills_the_cache():
 
 
 @pytest.mark.asyncio
+async def test_the_report_names_the_path_the_op_ran_on():
+    # A record names the file a link led to, read off the report rather
+    # than from a second follow of the link.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo body > /ram/a.txt; ln -s a.txt /ram/lk")
+        report = OpReport()
+        await ws.dispatch(
+            "read", PathSpec.from_str_path("/ram/lk"), report=report
+        )
+        assert report.path == "/ram/a.txt"
+
+
+@pytest.mark.asyncio
 async def test_a_streamed_read_fails_at_the_call():
     with Workspace({"/tape/": Tape()}, mode=MountMode.WRITE) as ws:
         report = OpReport()

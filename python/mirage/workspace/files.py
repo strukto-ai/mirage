@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import Any
 
-from mirage.context import get_current_session, session_visibility
+from mirage.context import get_current_session
 from mirage.errors.types import NoMountError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
@@ -25,10 +25,8 @@ from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.hidden import path_visible
 from mirage.utils.path import dotted_spelling, owner_prefix
 from mirage.view.types import NamespaceLinks, SessionBind
-from mirage.workspace.dispatcher.constants import NO_FOLLOW_OPS
 from mirage.workspace.types import MountRow
 
 
@@ -300,17 +298,9 @@ class Files:
         """Run one op through the workspace dispatcher and record it.
 
         The dispatcher owns the whole pipeline (follow, grants, gates, cache,
-        structure, invalidation); the facade's own share is the record.
-        The path is link-followed here first so the record carries the
-        resolved path; the dispatcher's second follow of an already-resolved
-        path is a no-op. That follow runs inside the session binding
-        and only from a path the session can see: a link the session
-        cannot see stays the typed path, so the dispatcher refuses it as
-        absent instead of serving the visible target it points at.
-        ``nofollow`` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
-        both follows, so an op meant for a link entry itself
-        (``chmod -h``, a guest's ``lchown``) still records the link's
-        own path.
+        structure, invalidation); the facade's own share is the record,
+        which names the path the dispatcher's report says the op ran on,
+        its links followed.
 
         Whether the op is a write is the dispatcher's call too: it reads that
         off the op name, so there is nothing for a caller here to
@@ -324,26 +314,14 @@ class Files:
             **kwargs: op arguments, by the op function's names.
         """
         timer = start_op()
-        follow = (
-            self._links is not None
-            and op not in NO_FOLLOW_OPS
-            and not kwargs.get("nofollow")
-        )
         report = OpReport()
         seen: list[str] = []
-        resolved = [path]
 
         async def run() -> tuple[Any, Any]:
             sess = get_current_session()
             if sess is not None:
                 seen.append(sess.session_id)
-            if (
-                follow
-                and self._links is not None
-                and path_visible(session_visibility(), path)
-            ):
-                resolved[0] = self._links.follow(path)
-            spec = PathSpec.from_str_path(resolved[0])
+            spec = PathSpec.from_str_path(path)
             return await self._dispatch(
                 op,
                 replace(spec, dotted=dotted_spelling(path)),
@@ -363,11 +341,12 @@ class Files:
             # the error propagates. The dispatcher stamps the report at the
             # moment of completion, so even a foreign error the dispatcher
             # never defined leaves the transfer on the books.
-            owner = self._owner(resolved[0])
+            ran = report.path or path
+            owner = self._owner(ran)
             if report.completed and owner is not None:
                 self._record_op(
                     op,
-                    resolved[0],
+                    ran,
                     owner,
                     report.source,
                     report.bytes,
@@ -377,14 +356,15 @@ class Files:
                     self._session_for(seen),
                 )
             raise
-        owner = self._owner(resolved[0])
+        ran = report.path or path
+        owner = self._owner(ran)
         if owner is None:
             return result
 
         def record(answer: Any) -> None:
             self._record_op(
                 op,
-                resolved[0],
+                ran,
                 owner,
                 report.source,
                 report.bytes,

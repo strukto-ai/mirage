@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { materialize } from '../../io/types.ts'
+import { materialize, OpReport } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
@@ -26,6 +26,7 @@ import { enoent, erofs } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { LimitExceededError } from '../../commands/errors.ts'
 import type { Policy } from '../../policy/base.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
@@ -150,6 +151,25 @@ describe('dispatch resolves a rendered filetype by path extension', () => {
       await ws.close()
     }
   }, 30_000)
+})
+
+it('names the path the op ran on in its report', async () => {
+  // A record names the file a link led to, read off the report rather than
+  // from a second follow of the link.
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+  )
+  try {
+    await ws.shell('echo body > /ram/a.txt; ln -s a.txt /ram/lk')
+    const report = new OpReport()
+    const { dispatcher } = ws as unknown as { dispatcher: { dispatch: DispatchFn } }
+    await dispatcher.dispatch('read', PathSpec.fromStrPath('/ram/lk'), [], {}, report)
+    expect(report.path).toBe('/ram/a.txt')
+  } finally {
+    await ws.close()
+  }
 })
 
 describe('unlink of a namespace link', () => {

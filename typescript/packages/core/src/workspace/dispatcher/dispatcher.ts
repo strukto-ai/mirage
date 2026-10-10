@@ -517,6 +517,7 @@ export class Dispatcher {
     call.stream = name === 'read' && stream === true
     call.direct = name === 'read' && direct === true
     await this.refuseRename(call)
+    if (report) report.path = call.path.virtual
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
         await this.tableCall(name, call.path, call.args ?? [], call.kwargs ?? {}, report, issuer),
@@ -524,6 +525,7 @@ export class Dispatcher {
       ]
     }
     this.follow(call)
+    if (report) report.path = call.path.virtual
     await this.walkOperands(call)
     if (XATTR_OPS.has(name)) {
       return [
