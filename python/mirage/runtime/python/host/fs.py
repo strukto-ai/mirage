@@ -819,6 +819,9 @@ class HostFs:
             access, stamp = (float(value) for value in times)
         else:
             access = stamp = time.time()
+        # Writes a descriptor still owes land first, or landing them at
+        # its close would stamp over the times set here.
+        self._descriptors.land_path(virtual)
         self._adapter.setattr(
             virtual,
             atime=timestamp_iso(access),
@@ -925,7 +928,9 @@ class HostFs:
         if virtual is None:
             self._host.remove(path, dir_fd=dir_fd)
             return
+        held = self._descriptors.hold(virtual)
         self._adapter.unlink(virtual)
+        self._descriptors.keep(held)
 
     def unlink(self, path: Any, *, dir_fd: int | None = None) -> None:
         self.remove(path, dir_fd=dir_fd)
@@ -988,7 +993,10 @@ class HostFs:
                 None,
                 _spelled(dst),
             )
+        held = self._descriptors.hold(dest)
         self._adapter.rename(source, dest)
+        self._descriptors.keep(held)
+        self._descriptors.moved(source, dest)
 
     def renames(self, old: Any, new: Any) -> None:
         """Rename, creating the destination's parents and pruning the
@@ -1196,7 +1204,7 @@ class HostFs:
         """
         if self._descriptors.get(fd) is None:
             return self._host.fdopen(fd, mode, buffering, *args, **kwargs)
-        return self._descriptors.stream(fd, mode, *args, **kwargs)
+        return self._descriptors.stream(fd, mode, buffering, *args, **kwargs)
 
 
 def _refusal(

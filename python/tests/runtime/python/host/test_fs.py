@@ -577,6 +577,45 @@ class TestDescriptors:
         assert int(patched.stat(fd).st_mtime) == 981173107
         patched.close(fd)
 
+    def test_a_descriptor_follows_its_file_through_a_rename(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR)
+        patched.rename("/data/dir/a.txt", "/data/dir/b.txt")
+        run(ops.write("/data/dir/a.txt", b"new file"))
+        patched.write(fd, b"HE")
+        patched.close(fd)
+        assert run(ops.read("/data/dir/b.txt")) == b"HEllo"
+        assert run(ops.read("/data/dir/a.txt")) == b"new file"
+
+    def test_a_removed_name_leaves_the_descriptor_its_bytes(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR)
+        patched.unlink("/data/dir/a.txt")
+        run(ops.write("/data/dir/a.txt", b"other"))
+        assert patched.read(fd, 10) == b"hello"
+        patched.write(fd, b"!")
+        patched.close(fd)
+        assert run(ops.read("/data/dir/a.txt")) == b"other"
+
+    def test_times_set_through_a_descriptor_come_after_its_writes(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR)
+        patched.write(fd, b"J")
+        patched.utime(fd, (981173106, 981173107))
+        patched.close(fd)
+        assert run(ops.read("/data/dir/a.txt")) == b"Jello"
+        assert int(patched.stat("/data/dir/a.txt").st_mtime) == 981173107
+
+    def test_fdopen_answers_its_fileno_and_honors_unbuffered(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/raw.bin", os.O_RDWR | os.O_CREAT)
+        f = patched.fdopen(fd, "wb", 0)
+        assert f.fileno() == fd
+        f.write(b"raw")
+        patched.fsync(fd)
+        assert run(ops.read("/data/dir/raw.bin")) == b"raw"
+        f.close()
+
     def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
         _, patched = seeded()
         target = tmp_path / "a.txt"

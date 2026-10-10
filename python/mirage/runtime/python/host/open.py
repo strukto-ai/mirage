@@ -20,7 +20,7 @@ from typing import IO, TypeAlias, cast
 
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.python.host.descriptors import open_flags
-from mirage.runtime.python.host.file import open_file
+from mirage.runtime.python.host.file import open_file, text_encoding
 from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.host_io import in_host_io
 from mirage.runtime.python.host.syscall import syscall
@@ -61,10 +61,14 @@ class MountedOpen:
     ) -> OpenResult:
         path = os.fspath(file) if isinstance(file, os.PathLike) else file
         if self._descriptors.get(path) is not None:
-            if buffering < -1:
-                raise ValueError("invalid buffering size")
             return syscall(self._descriptors.stream)(
-                cast(int, path), mode, encoding, errors, newline, closefd
+                cast(int, path),
+                mode,
+                buffering,
+                encoding,
+                errors,
+                newline,
+                closefd,
             )
         # A backend serving an op is reaching for a physical file, which
         # on a disk mount rooted at its own prefix is spelled exactly
@@ -77,23 +81,9 @@ class MountedOpen:
         ):
             if not closefd:
                 raise ValueError("Cannot use closefd=False with file name")
-            if buffering < -1:
-                raise ValueError("invalid buffering size")
-            if buffering == 0 and "b" not in mode:
-                raise ValueError("can't have unbuffered text I/O")
             if opener is not None:
-                # The opener names the descriptor (tempfile's makes the
-                # file it opens), as it does for io.FileIO.
-                fd = opener(path, open_flags(parse_mode(mode)))
-                if self._descriptors.get(fd) is None:
-                    return cast(
-                        IO[str] | IO[bytes],
-                        self._original(
-                            fd, mode, buffering, encoding, errors, newline
-                        ),
-                    )
-                return syscall(self._descriptors.stream)(
-                    fd, mode, encoding, errors, newline
+                return self._opened(
+                    path, mode, buffering, encoding, errors, newline, opener
                 )
             return syscall(open_file)(
                 self._files,
@@ -103,6 +93,7 @@ class MountedOpen:
                 encoding=encoding,
                 errors=errors,
                 newline=newline,
+                buffering=buffering,
             )
         return cast(
             IO[str] | IO[bytes],
@@ -117,6 +108,46 @@ class MountedOpen:
                 opener,
             ),
         )
+
+    def _opened(
+        self,
+        path: str,
+        mode: str,
+        buffering: int,
+        encoding: str | None,
+        errors: str | None,
+        newline: str | None,
+        opener: Callable[[str, int], int],
+    ) -> OpenResult:
+        """``open`` through an opener, which names the descriptor
+        (tempfile's makes the file it opens), as it does for io.FileIO.
+        The arguments are checked before the opener runs, so a bad one
+        refuses the open before a truncating mode touches the file.
+
+        Args:
+            path (str): the mounted path.
+            mode (str): the open mode.
+            buffering (int): ``io.open``'s buffering.
+            encoding (str | None): the text encoding.
+            errors (str | None): the text error policy.
+            newline (str | None): the newline translation.
+            opener (Callable[[str, int], int]): the caller's opener.
+        """
+        facts = parse_mode(mode)
+        text_encoding(facts, encoding, errors, newline, buffering)
+        fd = opener(path, open_flags(facts))
+        if self._descriptors.get(fd) is None:
+            return cast(
+                IO[str] | IO[bytes],
+                self._original(fd, mode, buffering, encoding, errors, newline),
+            )
+        try:
+            return syscall(self._descriptors.stream)(
+                fd, mode, buffering, encoding, errors, newline
+            )
+        except BaseException:
+            self._descriptors.close(fd)
+            raise
 
 
 def make_open(

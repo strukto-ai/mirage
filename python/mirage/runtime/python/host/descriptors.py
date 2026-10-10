@@ -82,15 +82,20 @@ class Descriptor:
     """One descriptor ``os.open`` handed out for a mounted path.
 
     Args:
-        path (str): the mounted path it opened.
+        path (str): the mounted path it names now; a rename through the
+            same entry point moves it.
         facts (OpenMode): what its flags asked for.
         handle (FileHandle | None): the file it reads and writes; None
             for a directory, which a descriptor may name but not read.
+        kept (bytes | None): the bytes its file had when its name was
+            removed or replaced, which it reads from then on and never
+            lands on; None while it has a name.
     """
 
     path: str
     facts: OpenMode
-    handle: FileHandle | None
+    handle: FileHandle | None = None
+    kept: bytes | None = None
 
 
 class Descriptors:
@@ -101,7 +106,10 @@ class Descriptors:
     never collides with a file the host opens meanwhile, and a call that
     still reaches the host with it (a C extension) meets an empty stream,
     never another file or a shared device. Writes stay in the handle
-    until a ``close`` or an ``fsync``.
+    until a ``close`` or an ``fsync``. A descriptor follows its file
+    through a rename made through this entry point, and keeps the bytes
+    it had once one removes or replaces its name, as POSIX keeps an open
+    descriptor on its inode.
 
     Args:
         adapter (RuntimeFiles): the file adapter files land through.
@@ -123,6 +131,23 @@ class Descriptors:
             return None
         return self._open.get(fd)
 
+    def _fetch(
+        self, desc: Descriptor, raw: bool, offset: int, size: int | None
+    ) -> bytes:
+        """A range of a descriptor's file: what it kept once its name went,
+        else what is at its path now.
+
+        Args:
+            desc (Descriptor): the descriptor.
+            raw (bool): read the stored bytes rather than the rendering.
+            offset (int): where the range starts.
+            size (int | None): how many bytes; None reads to the end.
+        """
+        if desc.kept is not None:
+            end = None if size is None else offset + size
+            return desc.kept[offset:end]
+        return read_range(self._adapter, desc.path, raw, offset, size)
+
     def open(self, path: str, flags: int) -> int:
         """Open a mounted path by open(2) flags and number the result.
 
@@ -142,50 +167,98 @@ class Descriptors:
                 path,
                 FsCondition.ENOENT if row is None else FsCondition.ENOTDIR,
             )
-        handle: FileHandle | None = None
-        if (
+        desc = Descriptor(path, facts)
+        if not (
             row is not None
             and row.is_dir
             and not (facts.writable or facts.create)
         ):
-            handle = None
-        else:
             opened = apply_open(self._adapter, path, facts)
-            fetch = (
+            desc.handle = FileHandle.opened(
+                path,
                 None
                 if opened is None
-                else functools.partial(
-                    read_range, self._adapter, path, facts.writable
-                )
-            )
-            handle = FileHandle.opened(
-                path,
-                fetch,
+                else functools.partial(self._fetch, desc, facts.writable),
                 size=0 if opened is None else opened.size,
                 writable=facts.writable,
                 append=facts.append,
             )
         fd, write_end = cast(tuple[int, int], self._host.pipe())
         self._host.close(write_end)
-        self._open[fd] = Descriptor(path, facts, handle)
+        self._open[fd] = desc
         return fd
 
     def land(self, desc: Descriptor) -> None:
-        """Land a descriptor's writes on the mount.
+        """Land a descriptor's writes on the mount; one whose name went
+        keeps them, as writes to an unlinked file stay with it.
 
         Args:
             desc (Descriptor): the descriptor.
         """
         handle = desc.handle
-        if handle is None:
+        if handle is None or desc.kept is not None:
             return
         steps = handle.flush_plan()
         if not steps:
             return
         syscall(self._adapter.flush)(desc.path, steps)
-        handle.settle(
-            functools.partial(read_range, self._adapter, desc.path, True)
-        )
+        handle.settle(functools.partial(self._fetch, desc, True))
+
+    def land_path(self, path: str) -> None:
+        """Land the writes of every descriptor open on ``path``, which a
+        change of its times must come after.
+
+        Args:
+            path (str): the mounted path.
+        """
+        for desc in list(self._open.values()):
+            if desc.path == path:
+                self.land(desc)
+
+    def moved(self, old: str, new: str) -> None:
+        """Follow a rename: a descriptor on ``old`` or under it names the
+        same file at ``new`` now.
+
+        Args:
+            old (str): the path the rename took.
+            new (str): the path it gave.
+        """
+        under = old.rstrip("/") + "/"
+        for desc in self._open.values():
+            if desc.kept is None and (
+                desc.path == old or desc.path.startswith(under)
+            ):
+                desc.path = new + desc.path[len(old) :]
+
+    def hold(self, path: str) -> list[tuple[Descriptor, bytes]]:
+        """Read what the descriptors open on ``path`` need before its name
+        is removed or replaced; ``keep`` them once it has gone.
+
+        Args:
+            path (str): the path about to go.
+        """
+        held: list[tuple[Descriptor, bytes]] = []
+        views: dict[bool, bytes] = {}
+        for desc in self._open.values():
+            if desc.path != path or desc.kept is not None:
+                continue
+            if desc.handle is None:
+                continue
+            raw = desc.facts.writable
+            if raw not in views:
+                views[raw] = read_range(self._adapter, path, raw, 0, None)
+            held.append((desc, views[raw]))
+        return held
+
+    @staticmethod
+    def keep(held: list[tuple[Descriptor, bytes]]) -> None:
+        """Detach the descriptors ``hold`` read for, now their name went.
+
+        Args:
+            held (list[tuple[Descriptor, bytes]]): what ``hold`` returned.
+        """
+        for desc, data in held:
+            desc.kept = data
 
     def close(self, fd: int) -> None:
         """Land a descriptor's writes and give its number back.
@@ -205,18 +278,20 @@ class Descriptors:
         self,
         fd: int,
         mode: str = "r",
+        buffering: int = -1,
         encoding: str | None = None,
         errors: str | None = None,
         newline: str | None = None,
         closefd: bool = True,
     ) -> IO[bytes] | IO[str]:
         """A file object over a descriptor, as ``os.fdopen`` makes one: no
-        open effect lands again, and its close closes the descriptor
-        unless ``closefd`` says otherwise.
+        open effect lands again, ``fileno`` answers the descriptor, and its
+        close closes the descriptor unless ``closefd`` says otherwise.
 
         Args:
             fd (int): a mounted descriptor.
             mode (str): the file object's mode.
+            buffering (int): ``io.open``'s buffering; 0 is unbuffered.
             encoding (str | None): the text encoding.
             errors (str | None): the text error policy.
             newline (str | None): the newline translation.
@@ -226,17 +301,18 @@ class Descriptors:
         if desc.handle is None:
             raise fs_error(desc.path, FsCondition.EISDIR)
         facts = parse_mode(mode)
-        encoding = text_encoding(facts, encoding, errors, newline)
+        encoding = text_encoding(facts, encoding, errors, newline, buffering)
         raw = HandleRaw(
             self._adapter,
             desc.handle,
             facts.readable and desc.facts.readable,
             raw_mode(facts),
             functools.partial(self.close, fd) if closefd else None,
+            fd,
         )
         if facts.binary:
-            return layered(raw, facts, mode)
-        return layered(raw, facts, mode, encoding, errors, newline)
+            return layered(raw, facts, mode, buffering=buffering)
+        return layered(raw, facts, mode, encoding, errors, newline, buffering)
 
     def file(self, fd: int, want_read: bool, want_write: bool) -> FileHandle:
         """The handle a read or a write through ``fd`` uses.

@@ -190,3 +190,18 @@ def test_fd_filestat_set_times_stamps_after_the_writes_land():
     assert wasi_fs.fd_close(None, fd) == 0
     assert asyncio.run(ws.vfs.read("/data/f.txt")) == b"body"
     assert mtime_ns(asyncio.run(ws.vfs.stat("/data/f.txt"))) == stamp
+
+
+def test_set_times_lands_every_fd_on_the_file_first():
+    ws, wasi_fs, fd, handle = _wasi_over_ram()
+    other = FileHandle.opened(
+        "/data/f.txt", None, size=0, writable=True, append=False
+    )
+    other.write(b"other")
+    other_fd = wasi_fs._fds.add(
+        FdEntry(kind="file", handle=other, path="/data/f.txt")
+    )
+    stamp = 981173107 * 1_000_000_000
+    assert wasi_fs.fd_filestat_set_times(None, fd, 0, stamp, FST_MTIM) == 0
+    assert wasi_fs.fd_close(None, other_fd) == 0
+    assert mtime_ns(asyncio.run(ws.vfs.stat("/data/f.txt"))) == stamp

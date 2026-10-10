@@ -93,6 +93,8 @@ class HandleRaw(io.RawIOBase):
         release (Callable[[], None] | None): what a close gives back
             once its writes landed, the descriptor a stream over one
             owns; None for a plain open.
+        fd (int | None): the descriptor a stream over one answers
+            ``fileno`` with; None for a plain open, which has none.
     """
 
     def __init__(
@@ -102,12 +104,14 @@ class HandleRaw(io.RawIOBase):
         readable: bool,
         mode: str,
         release: Callable[[], None] | None = None,
+        fd: int | None = None,
     ) -> None:
         super().__init__()
         self._adapter = adapter
         self._handle = handle
         self._readable = readable
         self._release = release
+        self._fd = fd
         self.name = handle.path
         self.mode = mode
 
@@ -119,6 +123,13 @@ class HandleRaw(io.RawIOBase):
 
     def seekable(self) -> bool:
         return True
+
+    def fileno(self) -> int:
+        if self._fd is None:
+            return super().fileno()
+        if self.closed:
+            raise ValueError("I/O operation on closed file")
+        return self._fd
 
     def readinto(self, buffer: "WriteableBuffer") -> int:
         chunk = self._handle.read(len(memoryview(buffer)))
@@ -189,16 +200,22 @@ def text_encoding(
     encoding: str | None,
     errors: str | None,
     newline: str | None,
+    buffering: int = -1,
 ) -> str:
-    """Check a mode's text arguments as ``io.open`` does, and the
-    encoding a text stream uses.
+    """Check a mode's text arguments as ``io.open`` does, before anything
+    is opened, and the encoding a text stream uses.
 
     Args:
         facts (OpenMode): what the mode string said.
         encoding (str | None): the encoding asked for.
         errors (str | None): the error policy asked for.
         newline (str | None): the newline translation asked for.
+        buffering (int): ``io.open``'s buffering.
     """
+    if buffering < -1:
+        raise ValueError("invalid buffering size")
+    if buffering == 0 and not facts.binary:
+        raise ValueError("can't have unbuffered text I/O")
     if facts.binary:
         if encoding is not None:
             raise ValueError("binary mode doesn't take an encoding argument")
@@ -225,9 +242,11 @@ def layered(
     encoding: str | None = None,
     errors: str | None = None,
     newline: str | None = None,
+    buffering: int = -1,
 ) -> IO[bytes] | IO[str]:
     """The buffered stream CPython picks for the mode over ``raw``, and a
-    text stream over it for a text mode, as ``io.open`` builds them.
+    text stream over it for a text mode, as ``io.open`` builds them: no
+    buffer at all for ``buffering`` 0, line buffering for 1 in text.
 
     Args:
         raw (HandleRaw): the raw stream.
@@ -236,14 +255,18 @@ def layered(
         encoding (str | None): the text encoding.
         errors (str | None): the text error policy.
         newline (str | None): the newline translation.
+        buffering (int): ``io.open``'s buffering.
     """
+    if buffering == 0:
+        return cast(IO[bytes], raw)
+    size = buffering if buffering > 1 else io.DEFAULT_BUFFER_SIZE
     buffered: io.BufferedIOBase
     if facts.readable and facts.writable:
-        buffered = _LandingRandom(raw)
+        buffered = _LandingRandom(raw, size)
     elif facts.writable:
-        buffered = _LandingWriter(raw)
+        buffered = _LandingWriter(raw, size)
     else:
-        buffered = io.BufferedReader(raw)
+        buffered = io.BufferedReader(raw, size)
     if facts.binary:
         return buffered
     text = io.TextIOWrapper(
@@ -251,6 +274,7 @@ def layered(
         encoding=encoding,
         errors=errors if errors is not None else "strict",
         newline=newline,
+        line_buffering=buffering == 1,
     )
     cast(Any, text).mode = mode
     return text
@@ -264,6 +288,7 @@ def open_file(
     encoding: str | None = None,
     errors: str | None = None,
     newline: str | None = None,
+    buffering: int = -1,
 ) -> IO[bytes] | IO[str]:
     """Open a mounted file as ``open`` does a real one.
 
@@ -281,10 +306,11 @@ def open_file(
             sentinel and None take utf-8.
         errors (str | None): the text error policy.
         newline (str | None): the newline translation.
+        buffering (int): ``io.open``'s buffering; 0 is unbuffered.
     """
     adapter = host_files(files, loop)
     facts = parse_mode(mode)
-    encoding = text_encoding(facts, encoding, errors, newline)
+    encoding = text_encoding(facts, encoding, errors, newline, buffering)
     # The open's effect lands now, by the rule every entry point shares; a
     # refusal leaves nothing open, so nothing flushes behind it.
     row = apply_open(adapter, path, facts)
@@ -301,5 +327,5 @@ def open_file(
     )
     raw = HandleRaw(adapter, handle, facts.readable, raw_mode(facts))
     if facts.binary:
-        return layered(raw, facts, mode)
-    return layered(raw, facts, mode, encoding, errors, newline)
+        return layered(raw, facts, mode, buffering=buffering)
+    return layered(raw, facts, mode, encoding, errors, newline, buffering)

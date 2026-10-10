@@ -688,6 +688,17 @@ class WasiFs:
         h.settle(functools.partial(self._stored, h.path))
         entry.stat = self._fs.stat(h.path)
 
+    def _land_path(self, path: str) -> None:
+        """Land the writes of every file fd open on ``path``, which a
+        change of its times must come after.
+
+        Args:
+            path (str): guest-absolute path.
+        """
+        for entry in list(self._fds.values()):
+            if entry.path == path:
+                self._land(entry)
+
     def fd_datasync(self, caller: "wasmtime.Caller", fd: int) -> int:
         return self.fd_sync(caller, fd)
 
@@ -735,9 +746,9 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None or entry.kind not in ("file", "dir"):
             return EBADF
-        # Writes the file still owes land first, or landing them at the
-        # close would stamp over the times set here (cp -p).
-        self._land(entry)
+        # Writes any fd on the file still owes land first, or landing them
+        # at a close would stamp over the times set here (cp -p).
+        self._land_path(entry.path)
         self._set_times(entry.path, atim, mtim, flags, nofollow=False)
         if entry.kind == "file":
             entry.stat = self._fs.stat(entry.path)
@@ -757,6 +768,7 @@ class WasiFs:
         path = self._path_arg(caller, dirfd, ptr, length)
         if path is None:
             return EBADF
+        self._land_path(path)
         self._set_times(
             path,
             atim,
