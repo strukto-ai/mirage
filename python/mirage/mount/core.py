@@ -13,15 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import functools
 import logging
 import os
 import posixpath
-import threading
 import time
-from typing import Any, Coroutine
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
-from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent, erofs
 from mirage.mount.platform.macos import is_macos_metadata
@@ -51,9 +49,17 @@ from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
+
 
 class MountCore:
     """Protocol-neutral mount logic shared by every kernel adapter.
+
+    Async-native, like the TypeScript core: every op awaits ``ws.vfs``.
+    An adapter whose kernel interface is synchronous (libfuse's callbacks
+    are) owns the bridge and the loop it runs on, because that is the
+    adapter's constraint rather than this layer's; one that is already
+    async (SFTP, codex-exec) awaits the core on the workspace's loop.
 
     Everything here is expressed in POSIX terms (``st_*`` attribute dicts,
     ordinary Python exceptions) and imports nothing from mfusepy, so it is
@@ -65,17 +71,18 @@ class MountCore:
     interface. Adapters translate the exceptions raised here into their own
     error codes with ``mirage.mount.errors.classify_error``.
 
+    Ops on one file can interleave at their awaits when the caller runs
+    several at once, so the mutations of one file identity run one at a
+    time (``_mutate``), an open waits out a removal of its file
+    (``_removing``), and a read through a handle waits for a flush still
+    landing. Mirrors ``core.ts``.
+
     Args:
         files (Files): the workspace's ``ws.vfs`` every filesystem call routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
         session (SessionState | None): bind every op to this session's mount
             grants, exactly as a shell command in that session would run.
             None means unrestricted.
-        loop (asyncio.AbstractEventLoop | None): a running loop to run ops
-            on, such as the daemon's per-workspace runner loop, so an
-            adapter serving a hosted workspace touches it only from the
-            loop that owns it. None starts a private loop thread, which is
-            what a kernel mount wants.
     """
 
     def __init__(
@@ -83,7 +90,6 @@ class MountCore:
         files: Files,
         root_prefix: str = "",
         session: SessionState | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         self._files = files
         self._session = session
@@ -105,15 +111,26 @@ class MountCore:
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()
+        # One hydration read per file identity at a time: opens of the
+        # same size-unknown file while one is out share it.
+        self._hydrations: dict[str, asyncio.Future[bytes | None]] = {}
+        # Bumped whenever the file changes underneath a hydration in
+        # flight, so a read that started before a truncate or write cannot
+        # hand a handle the bytes it fetched as the file's current
+        # content. An entry exists only while that file's hydration is out.
+        self._hydration_gen: dict[str, int] = {}
+        # One chain per file identity that persists and truncations join
+        # in order, so a truncate cannot slip in between a flush detaching
+        # its buffer and that buffer landing.
+        self._pending: dict[str, asyncio.Future[None]] = {}
+        # One chain per file identity that its removals (an unlink, a
+        # rename onto it) join, which an open of the file waits out.
+        self._removals: dict[str, asyncio.Future[None]] = {}
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
-        # as owned by the mounting user (see mount.py). Mirrors core.ts.
+        # as owned by the mounting user (see fuse/mount.py). Mirrors core.ts.
         self._uid = os.getuid() if hasattr(os, "getuid") else 0
         self._gid = os.getgid() if hasattr(os, "getgid") else 0
-        if loop is None:
-            loop = asyncio.new_event_loop()
-            threading.Thread(target=loop.run_forever, daemon=True).start()
-        self._loop = loop
 
     @property
     def files(self) -> Files:
@@ -123,38 +140,100 @@ class MountCore:
     def handles(self) -> FileTable[Handle]:
         return self._handles
 
-    def _ctx(self, fh: int | None) -> Handle | None:
-        """The open handle under `fh`, or None for a path-based op.
-
-        Args:
-            fh (int | None): handle id; the adapter passes None when the
-                kernel op arrived without one.
-        """
-        return self._handles.get(fh) if fh is not None else None
-
-    def _run(self, coro: Coroutine[Any, Any, Any]) -> Any:
-        if self._session is not None:
-            coro = self._bind_session(coro)
-        return run_async_from_sync(coro, self._loop)
-
-    async def _bind_session(self, coro: Coroutine[Any, Any, Any]) -> Any:
+    async def _op(self, call: Awaitable[T]) -> T:
         """Run one op under the bound session's mount grants.
 
-        The session context is set inside the coroutine so it lands on
-        the event-loop task that executes the op, mirroring how
-        ``shell`` brackets a command with the session token.
+        The session context is set around the await, so it is what the
+        dispatcher reads while the op runs, mirroring how ``shell``
+        brackets a command with the session token.
 
         Args:
-            coro (Coroutine): the op coroutine to run under the session.
-
-        Returns:
-            Any: whatever the wrapped coroutine returns.
+            call (Awaitable[T]): the op to run under the session.
         """
+        if self._session is None:
+            return await call
         token = set_current_session(self._session)
         try:
-            return await coro
+            return await call
         finally:
             reset_current_session(token)
+
+    async def _queue(
+        self,
+        queues: dict[str, asyncio.Future[None]],
+        key: str,
+        fn: Callable[[], Awaitable[T]],
+    ) -> T:
+        """Run ``fn`` after every call already queued under ``key``, and
+        let the next one wait for it, whether it returns or raises.
+
+        Args:
+            queues (dict[str, asyncio.Future[None]]): the chains to join.
+            key (str): the file identity the chain is for.
+            fn (Callable[[], Awaitable[T]]): the work to run in turn.
+        """
+        prev = queues.get(key)
+        done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        queues[key] = done
+
+        def settle(_: object = None) -> None:
+            if not done.done():
+                done.set_result(None)
+            if queues.get(key) is done:
+                del queues[key]
+
+        try:
+            if prev is not None:
+                await asyncio.shield(prev)
+            return await fn()
+        finally:
+            if prev is None or prev.done():
+                settle()
+            else:
+                # Cancelled while waiting its turn: the next in line still
+                # waits for the one ahead of this.
+                prev.add_done_callback(settle)
+
+    def _mutate(
+        self, key: str, fn: Callable[[], Awaitable[T]]
+    ) -> Awaitable[T]:
+        """Run one mutation of a file after every mutation already queued
+        for it. Serialization is per identity, so a flush through a link
+        and a truncate through its target queue behind each other.
+
+        Args:
+            key (str): the file identity.
+            fn (Callable[[], Awaitable[T]]): the mutation.
+        """
+        return self._queue(self._pending, key, fn)
+
+    def _removing(
+        self, path: str, fn: Callable[[], Awaitable[None]]
+    ) -> Awaitable[None]:
+        """Run ``fn``, which removes or replaces the file at ``path``, with
+        opens of that file held back until it is done, as the kernel orders
+        an open and an unlink of one name. A chain of its own rather than
+        ``_pending``, which a rename holds for its source: holding the
+        target's there too would let two renames that cross wait on each
+        other.
+
+        Args:
+            path (str): mount path being removed or replaced.
+            fn (Callable[[], Awaitable[None]]): the removal.
+        """
+        if self._names_link(path):
+            return fn()
+        return self._queue(self._removals, self.identity(path), fn)
+
+    def _names_link(self, path: str) -> bool:
+        links = self._files.links
+        return links is not None and links.is_link(self.resolve(path))
+
+    async def _settled(self, key: str) -> None:
+        """Wait for a flush or truncation of ``key`` still landing."""
+        tail = self._pending.get(key)
+        if tail is not None:
+            await asyncio.shield(tail)
 
     def resolve(self, path: str) -> str:
         """Map a mount path onto the workspace, honoring the mount root.
@@ -178,6 +257,7 @@ class MountCore:
             "st_uid": self._uid,
             "st_gid": self._gid,
             "st_size": DIR_SIZE,
+            "st_rdev": 0,
             "st_atime": self._now,
             "st_mtime": self._now,
             "st_ctime": self._now,
@@ -215,13 +295,13 @@ class MountCore:
             "st_ctime": when,
         }
 
-    def root_attrs(self) -> dict[str, Any]:
+    async def root_attrs(self) -> dict[str, Any]:
         """The mount root's attrs: its own row through the dispatcher, so a
         chmod made on it shows, or a plain directory when nothing answers
         for it (a workspace with no mount at ``/``).
         """
         try:
-            s = self._run(self._files.stat(self.resolve("/")))
+            s = await self._op(self._files.stat(self.resolve("/")))
         except FileNotFoundError as err:
             logger.debug("fuse: the mount root has no row of its own: %r", err)
             return self.dir_stat()
@@ -276,10 +356,10 @@ class MountCore:
                 return len(ctx.data)
         return None
 
-    def getattr(
-        self, path: str, fh: int | None = None, follow: bool = False
+    async def getattr(
+        self, path: str, follow: bool = False, ctx: Handle | None = None
     ) -> dict[str, Any]:
-        """POSIX attributes for a path, optionally through an open handle.
+        """POSIX attributes for a path.
 
         One stat through the dispatcher answers: a link the session cannot
         see is absent, as it is to the shell, and a visible one reports
@@ -287,9 +367,10 @@ class MountCore:
 
         Args:
             path (str): mount path to stat.
-            fh (int | None): open handle, when the caller is fstat-ing.
             follow (bool): report a trailing link's target rather than
                 the link (stat rather than lstat).
+            ctx (Handle | None): the open handle a fstat reads through;
+                what it holds and has not flushed counts.
 
         Returns:
             dict: ``st_*`` attribute dict.
@@ -297,22 +378,9 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        # fstat(fd) after open: the hydrated handle knows the real byte
-        # length, and what the handle wrote and has not flushed counts.
-        # attr_timeout=0 on FUSE mounts makes the kernel actually ask here
-        # instead of trusting the cached pre-open size, which is what keeps
-        # wc -c, BSD cp, and tail -c correct for size-unknown files.
-        ctx = self._handles.get(fh) if fh is not None else None
-        size = None
-        if ctx is not None:
-            path = ctx.path
-            # The handle is open on the file a link led to, so its stat
-            # is the target's.
-            follow = True
-            if ctx.data is not None:
-                size = len(ctx.data)
+        size = None if ctx is None or ctx.data is None else len(ctx.data)
         if path == "/":
-            return self.root_attrs()
+            return await self.root_attrs()
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
         # Reject early to avoid hitting the ops layer.
         name = path.rsplit("/", 1)[-1]
@@ -320,22 +388,22 @@ class MountCore:
             raise enoent(path)
         virtual = self.resolve(path)
         try:
-            s = self._run(self._files.stat(virtual, nofollow=not follow))
+            s = await self._op(self._files.stat(virtual, nofollow=not follow))
         except FileNotFoundError:
             if size is None:
                 raise
             # An open descriptor keeps the bytes it had after an unlink.
-            s = FileStat(name=name, type=FileType.FILE)
+            return self.attrs(FileStat(name=name, type=FileType.FILE), size)
         if is_link(s):
-            target = self._run(self._files.readlink(virtual))
+            target = await self._op(self._files.readlink(virtual))
             return self.attrs(s, len(self.shown_target(path, target).encode()))
         if is_dir(s):
             return self.attrs(s)
         if size is None and s.size is None:
             # A size-unknown file the cache has not seen stats as 0,
             # matching mirage's own find semantics. Reads stay correct
-            # anyway: direct_io makes the kernel ignore st_size, and the fh
-            # branch above serves the real size to fstat-based tools after
+            # anyway: direct_io makes the kernel ignore st_size, and
+            # fgetattr serves the real size to fstat-based tools after
             # open. Never report a fake size and never fetch content here:
             # getattr runs once per entry on every ls -l.
             size = self.held_size(path)
@@ -344,7 +412,30 @@ class MountCore:
             size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
         return self.attrs(s, size)
 
-    def readdir(self, path: str) -> list[str]:
+    async def fgetattr(self, path: str, fh: int | None) -> dict[str, Any]:
+        """Attributes through an open handle: the path's row, with the
+        size the handle holds, what it wrote and has not flushed included.
+
+        Args:
+            path (str): mount path the kernel named.
+            fh (int | None): the open handle; None stats by path.
+        """
+        # fstat(fd) after open: the hydrated handle knows the real byte
+        # length. attr_timeout=0 on FUSE mounts makes the kernel actually
+        # ask here instead of trusting the cached pre-open size, which is
+        # what keeps wc -c, BSD cp, and tail -c correct for size-unknown
+        # files.
+        ctx = self._handles.get(fh) if fh is not None else None
+        if ctx is None:
+            return await self.getattr(path)
+        # A flush still landing has taken the handle's buffer: wait for it,
+        # so the size counts what it wrote.
+        await self._settled(ctx.key)
+        # The handle is open on the file a link led to, so its stat is the
+        # target's.
+        return await self.getattr(ctx.path, True, ctx)
+
+    async def readdir(self, path: str) -> list[str]:
         """Entry names under a directory, including "." and "..".
 
         Args:
@@ -361,14 +452,16 @@ class MountCore:
         # itself, so the core only normalizes entry shapes and drops
         # macOS metadata names.
         names = set()
-        entries = self._run(self._files.readdir(self.resolve(path)))
+        entries = await self._op(self._files.readdir(self.resolve(path)))
         for e in entries:
             part = e.rstrip("/").rsplit("/", 1)[-1]
             if part and not is_macos_metadata(part):
                 names.add(part)
         return [".", ".."] + sorted(names)
 
-    def read(self, path: str, size: int, offset: int, fh: int | None) -> bytes:
+    async def read(
+        self, path: str, size: int, offset: int, fh: int | None
+    ) -> bytes:
         """Read a slice of a file.
 
         Args:
@@ -380,32 +473,38 @@ class MountCore:
         Returns:
             bytes: the requested slice, possibly short at EOF.
         """
-        ctx = self._ctx(fh)
+        ctx = self._handles.get(fh) if fh is not None else None
         if ctx is None:
             # Whole, as a handle's first read is: the read that fills the
             # cache and records the version a conditional write sends.
-            data = self._run(self._files.read(self.resolve(path)))
+            data = await self._op(self._files.read(self.resolve(path)))
             return data[offset : offset + size]
+        # A flush still landing has taken the handle's buffer and not yet
+        # refreshed its bytes: wait for it, so the read sees what was
+        # written.
+        await self._settled(ctx.key)
         if ctx.live:
-            stored = self._run(
+            stored = await self._op(
                 self._files.read(self.resolve(ctx.path), offset, size)
             )
-        elif ctx.chunked is not None:
-            stored = ctx.chunked.pread(offset, size)
+        elif ctx.chunked is not None and ctx.data is None:
+            stored = await self._read_chunk(ctx, ctx.chunked, offset, size)
         else:
             if ctx.data is None:
-                ctx.data = self._run(self._files.read(self.resolve(ctx.path)))
+                ctx.data = await self._op(
+                    self._files.read(self.resolve(ctx.path))
+                )
             stored = ctx.data[offset : offset + size]
         if not ctx.write_buf:
             return stored
         return overlaid(stored, offset, size, ctx.write_buf)
 
-    def _apply_writes(self, path: str, runs: WriteBuf) -> None:
+    async def _apply_writes(self, path: str, runs: WriteBuf) -> None:
         """Land write runs on the mount, one pwrite each, in order.
 
         A pwrite keeps every stored byte the handle did not write, so
-        nothing is read through the dispatcher first: a session that may write
-        a file and not read it writes through FUSE, as through a
+        nothing is read through the dispatcher first: a session that may
+        write a file and not read it writes through FUSE, as through a
         write-only descriptor. The runs that landed leave ``runs`` in one
         step, so after a failure ``runs`` holds only what did not land
         and a retry never replays a run over bytes another writer has
@@ -421,13 +520,13 @@ class MountCore:
         landed = 0
         try:
             for offset, data in runs:
-                self._run(self._files.pwrite(target, data, offset))
+                await self._op(self._files.pwrite(target, data, offset))
                 landed += 1
         finally:
             del runs[:landed]
-            self._changed(path)
+            await self._changed(path)
 
-    def write(
+    async def write(
         self, path: str, data: bytes, offset: int, fh: int | None
     ) -> int:
         """Write bytes at an offset, buffering when a handle is open.
@@ -441,14 +540,14 @@ class MountCore:
         Returns:
             int: number of bytes accepted.
         """
-        ctx = self._ctx(fh)
+        ctx = self._handles.get(fh) if fh is not None else None
         if ctx is not None:
             ctx.write_buf.append((offset, data))
             return len(data)
-        self._apply_writes(path, [(offset, data)])
+        await self._apply_writes(path, [(offset, data)])
         return len(data)
 
-    def create(self, path: str) -> int:
+    async def create(self, path: str) -> int:
         """Create an empty file and return a fresh handle.
 
         Args:
@@ -457,14 +556,19 @@ class MountCore:
         Returns:
             int: the new handle id.
         """
-        self._run(self._files.create(self.resolve(path)))
-        self._changed(path)
-        return self._handles.add(Handle(path=path, key=self.identity(path)))
+        key = self.identity(path)
 
-    def mkdir(self, path: str) -> None:
-        self._run(self._files.mkdir(self.resolve(path)))
+        async def make() -> None:
+            await self._op(self._files.create(self.resolve(path)))
+            await self._changed(path)
 
-    def readlink(self, path: str) -> str:
+        await self._mutate(key, make)
+        return self._handles.add(Handle(path=path, key=key))
+
+    async def mkdir(self, path: str) -> None:
+        await self._op(self._files.mkdir(self.resolve(path)))
+
+    async def readlink(self, path: str) -> str:
         """The target of a namespace link, read through the dispatcher.
 
         Args:
@@ -476,10 +580,10 @@ class MountCore:
         Raises:
             OSError: EINVAL when the path is not a link.
         """
-        target = self._run(self._files.readlink(self.resolve(path)))
+        target = await self._op(self._files.readlink(self.resolve(path)))
         return self.shown_target(path, target)
 
-    def symlink(self, target: str, source: str) -> None:
+    async def symlink(self, target: str, source: str) -> None:
         """Create namespace link ``target -> source`` (ln -s source target).
 
         Relative sources are stored verbatim (resolved at follow time,
@@ -499,9 +603,9 @@ class MountCore:
         if self._files.links is None:
             raise erofs(target)
         stored = self.resolve(source) if source.startswith("/") else source
-        self._run(self._files.symlink(self.resolve(target), stored))
+        await self._op(self._files.symlink(self.resolve(target), stored))
 
-    def unlink(self, path: str) -> None:
+    async def unlink(self, path: str) -> None:
         """Remove the entry at ``path``, a link entry like any other.
 
         A link routes through the dispatcher rather than straight to the
@@ -514,20 +618,47 @@ class MountCore:
         Args:
             path (str): mount path of the entry to remove.
         """
-        self._hold(path)
-        self._run(self._files.unlink(self.resolve(path)))
 
-    def rename(self, old: str, new: str) -> None:
+        async def remove() -> None:
+            await self._hold(path)
+            await self._op(self._files.unlink(self.resolve(path)))
+
+        async def run() -> None:
+            await self._removing(path, remove)
+            await self._changed(path, rehydrate=False)
+
+        await self._mutate(self.identity(path), run)
+
+    async def rename(self, old: str, new: str) -> None:
+        """Rename an entry, carrying the handles open under it along.
+
+        The facade is where a cross-mount pair is refused with EXDEV,
+        which is what makes ``mv`` between two backends fall back to
+        copy+unlink.
+
+        Args:
+            old (str): mount path of the entry.
+            new (str): mount path it moves to.
+        """
         source, target = self.resolve(old), self.resolve(new)
-        self._hold(new)
-        self._run(self._files.rename(source, target))
-        for ctx in self._handles.values():
-            if ctx.key == source or ctx.key.startswith(source + "/"):
-                ctx.key = target + ctx.key[len(source) :]
-                ctx.path = ctx.key[len(self._root) :]
 
-    def rmdir(self, path: str) -> None:
-        self._run(self._files.rmdir(self.resolve(path)))
+        async def replace() -> None:
+            await self._hold(new)
+            await self._op(self._files.rename(source, target))
+
+        async def run() -> None:
+            await self._removing(new, replace)
+            for ctx in self._handles.values():
+                if ctx.key == source or ctx.key.startswith(source + "/"):
+                    ctx.key = target + ctx.key[len(source) :]
+                    ctx.path = ctx.key[len(self._root) :]
+            await self._changed(old, rehydrate=False)
+            await self._changed(new, rehydrate=False)
+
+        await self._mutate(self.identity(old), run)
+
+    async def rmdir(self, path: str) -> None:
+        await self._op(self._files.rmdir(self.resolve(path)))
 
     def statfs(self) -> dict[str, Any]:
         return {
@@ -542,7 +673,7 @@ class MountCore:
             "f_namemax": 255,
         }
 
-    def setattr(
+    async def setattr(
         self,
         path: str,
         mode: int | None = None,
@@ -563,7 +694,7 @@ class MountCore:
             uid (int | None): owner id; None leaves it.
             gid (int | None): group id; None leaves it.
         """
-        self._run(
+        await self._op(
             self._files.setattr(
                 self.resolve(path),
                 mode=None if mode is None else mode & 0o7777,
@@ -573,7 +704,7 @@ class MountCore:
             )
         )
 
-    def setxattr(
+    async def setxattr(
         self,
         path: str,
         name: str,
@@ -597,7 +728,7 @@ class MountCore:
             create (bool): refuse with EEXIST when it is already set.
             replace (bool): refuse when it is not set yet.
         """
-        self._run(
+        await self._op(
             self._files.setxattr(
                 self.resolve(path),
                 name,
@@ -607,7 +738,7 @@ class MountCore:
             )
         )
 
-    def getxattr(self, path: str, name: str) -> bytes:
+    async def getxattr(self, path: str, name: str) -> bytes:
         """Read an extended attribute, the backend's own facts included.
 
         Args:
@@ -620,28 +751,50 @@ class MountCore:
         Raises:
             OSError: ENOATTR/ENODATA when the attribute is not set.
         """
-        return bytes(self._run(self._files.getxattr(self.resolve(path), name)))
+        return bytes(
+            await self._op(self._files.getxattr(self.resolve(path), name))
+        )
 
-    def listxattr(self, path: str) -> list[str]:
-        return list(self._run(self._files.listxattr(self.resolve(path))))
+    async def listxattr(self, path: str) -> list[str]:
+        return list(await self._op(self._files.listxattr(self.resolve(path))))
 
-    def removexattr(self, path: str, name: str) -> None:
-        self._run(self._files.removexattr(self.resolve(path), name))
+    async def removexattr(self, path: str, name: str) -> None:
+        await self._op(self._files.removexattr(self.resolve(path), name))
 
-    def flush(self, path: str, fh: int | None) -> None:
+    async def _persist_buffered(self, ctx: Handle) -> None:
+        """Persist a handle's buffered writes.
+
+        The buffer is detached before the await so a write arriving
+        meanwhile is not lost to the clear, and the runs that did not land
+        are restored ahead of those later writes when persistence fails,
+        so the acknowledged bytes stay for the handle's own flush to retry.
+
+        Args:
+            ctx (Handle): the handle whose buffer to land.
+        """
+        if not ctx.write_buf:
+            return
+        runs = write_runs(ctx.write_buf)
+        ctx.write_buf = []
+        try:
+            await self._apply_writes(ctx.path, runs)
+        except BaseException:
+            ctx.write_buf = [*runs, *ctx.write_buf]
+            raise
+
+    async def flush(self, path: str, fh: int | None) -> None:
         """Merge a handle's buffered writes and persist them.
 
         Args:
             path (str): mount path being flushed.
             fh (int | None): the handle whose buffer to drain.
         """
-        ctx = self._ctx(fh)
+        ctx = self._handles.get(fh) if fh is not None else None
         if ctx is None or not ctx.write_buf:
             return
-        ctx.write_buf = write_runs(ctx.write_buf)
-        self._apply_writes(ctx.path, ctx.write_buf)
+        await self._mutate(ctx.key, lambda: self._persist_buffered(ctx))
 
-    def open(self, path: str, flags: int = 0) -> int:
+    async def open(self, path: str, flags: int = 0) -> int:
         """Open a path, hydrating it when its size is unknown.
 
         Args:
@@ -655,7 +808,10 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        s = self._run(self._files.stat(self.resolve(path)))
+        removal = self._removals.get(self.identity(path))
+        if removal is not None:
+            await asyncio.shield(removal)
+        s = await self._op(self._files.stat(self.resolve(path)))
         ctx = Handle(
             path=path,
             key=self.identity(path),
@@ -670,75 +826,112 @@ class MountCore:
             # libfuse2 CI installs) strips the flag and truncates through
             # setattr first, which is why dropping it here only showed on a
             # fuse3-only host, where a shorter overwrite kept the old tail.
-            self.truncate(path, 0)
+            await self.truncate(path, 0)
         if ctx.live:
             return self._handles.add(ctx)
         if s.size is None:
             # API-backed mounts cannot size a file without fetching it, so
-            # hydrate now: getattr(fh) and read() then serve real bytes, and
-            # the TTL cache keeps release-then-stat bursts from refetching.
-            # This holds after an O_TRUNC too: the read follows the rendered
-            # path, so an extension whose renderer gives an empty file a body
-            # is honored rather than shadowed by literal raw emptiness. The
-            # read goes through the dispatcher, so a caching mount keeps the
-            # bytes for the next open and for a stat once this one closes.
-            ctx.data = self._hydrate(path)
+            # hydrate now: fgetattr and read() then serve real bytes. This
+            # holds after an O_TRUNC too: the read follows the rendered
+            # path, so an extension whose renderer gives an empty file a
+            # body is honored rather than shadowed by literal raw
+            # emptiness. The read goes through the dispatcher, so a caching
+            # mount keeps the bytes for the next open and for a stat once
+            # this one closes.
+            ctx.data = await self._hydrate(path)
         elif s.size > READ_CHUNK and not flags & os.O_TRUNC:
             # A file larger than a chunk is read a chunk at a time: the
             # kernel asks in small pieces, and fetching the whole file on
             # the first one moved all of it to answer a `head`.
-            ctx.chunked = ChunkedHandle(
-                path=path,
-                size=s.size,
-                fetch=functools.partial(self._read_chunk, ctx),
-            )
+            ctx.chunked = ChunkedHandle(path=path, size=s.size)
         return self._handles.add(ctx)
 
-    def _hydrate(self, path: str) -> bytes | None:
+    async def _read_chunk(
+        self, ctx: Handle, chunked: ChunkedHandle, offset: int, size: int
+    ) -> bytes:
+        """Read through a chunked handle, fetching the chunk it lacks.
+
+        The fetch reads the handle's path as it is then (a rename moves
+        it). A file changed while the fetch was out keeps nothing, so the
+        next read fetches the new bytes.
+
+        Args:
+            ctx (Handle): the handle being read.
+            chunked (ChunkedHandle): its chunk window.
+            offset (int): byte offset to read at.
+            size (int): byte budget.
+        """
+        asked = chunked.missing(offset, size)
+        if asked is None:
+            return chunked.peek(offset, size)
+        generation = chunked.generation
+        data = await self._op(
+            self._files.read(self.resolve(ctx.path), offset, asked)
+        )
+        if chunked.generation != generation:
+            return data[:size]
+        chunked.keep(offset, data, asked)
+        return chunked.peek(offset, size)
+
+    def _hydrate(self, path: str) -> asyncio.Future[bytes | None]:
         """Read a size-unknown file whole for the handle opening it.
 
-        Returns None when the read fails for any reason: open() stays
-        permissive, as the TypeScript core does, and the read() that
-        follows surfaces the error. This matters most after an O_TRUNC,
-        whose truncation has already committed by the time this runs:
-        failing the open then would erase the old body and refuse the
-        replacement.
+        Resolves to None when the read fails for any reason: open() stays
+        permissive and the read() that follows surfaces the error. This
+        matters most after an O_TRUNC, whose truncation has already
+        committed by the time this runs: failing the open then would erase
+        the old body and refuse the replacement. Opens of one file while
+        a read is out share it.
 
         Args:
             path (str): mount path being opened.
         """
-        try:
-            return self._run(self._files.read(self.resolve(path)))
-        except Exception as err:
-            logger.debug(
-                "fuse: hydration read of %s failed, deferring to read(): %r",
-                path,
-                err,
-            )
-            return None
+        key = self.identity(path)
+        inflight = self._hydrations.get(key)
+        if inflight is not None:
+            return inflight
 
-    def _read_chunk(self, ctx: Handle, offset: int, size: int) -> bytes:
-        # The handle's path as it is now: a rename moves it.
-        return self._run(
-            self._files.read(self.resolve(ctx.path), offset, size)
-        )
+        async def fetch() -> bytes | None:
+            try:
+                while True:
+                    gen = self._hydration_gen.get(key, 0)
+                    data = await self._op(self._files.read(self.resolve(path)))
+                    # The file changed while this read was out: what came
+                    # back is stale, so read again rather than hand it over.
+                    if self._hydration_gen.get(key, 0) != gen:
+                        continue
+                    return data
+            except Exception as err:
+                logger.debug(
+                    "fuse: hydration read of %s failed, deferring to "
+                    "read(): %r",
+                    path,
+                    err,
+                )
+                return None
+            finally:
+                self._hydrations.pop(key, None)
+                self._hydration_gen.pop(key, None)
 
-    def _hold(self, path: str) -> None:
+        task = asyncio.ensure_future(fetch())
+        self._hydrations[key] = task
+        return task
+
+    async def _hold(self, path: str) -> None:
         """Read the rest of the chunked handles on ``path`` before it goes.
 
         POSIX keeps an open descriptor on the bytes it had, and a chunked
         handle holds one chunk of them, so an unlink or a rename onto the
         file would leave the rest unreadable. One read serves every such
-        handle; FUSE runs single-threaded here, so none opens meanwhile. A
-        read that fails (a policy may allow the removal and refuse the
-        read) leaves them chunked rather than refusing a mutation the
-        caller is allowed.
+        handle; it runs under ``_removing``, so no handle opens on the file
+        meanwhile. A read that fails (a policy may allow the removal and
+        refuse the read) leaves them chunked rather than refusing a
+        mutation the caller is allowed.
 
         Args:
             path (str): mount path about to be removed or replaced.
         """
-        links = self._files.links
-        if links is not None and links.is_link(self.resolve(path)):
+        if self._names_link(path):
             # Removing a link entry takes the link, never its target's
             # bytes.
             return
@@ -751,9 +944,9 @@ class MountCore:
         if not held:
             return
         try:
-            data = self._run(self._files.read(self.resolve(path)))
+            data = await self._op(self._files.read(self.resolve(path)))
         except Exception as err:
-            logger.debug(
+            logger.warning(
                 "fuse: holding %s before it goes failed: %r", path, err
             )
             return
@@ -761,14 +954,14 @@ class MountCore:
             ctx.data = data
             ctx.chunked = None
 
-    def release(self, fh: int) -> None:
+    async def release(self, fh: int) -> None:
         ctx = self._handles.get(fh)
         if ctx is not None and ctx.write_buf:
             # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH
             # in between (the kext always flushes on close), so a handle can
             # still hold buffered writes here. Dropping them would silently
             # lose data written through an fskit mount.
-            self.flush(ctx.path, fh)
+            await self.flush(ctx.path, fh)
         self._handles.pop(fh)
 
     def identity(self, path: str) -> str:
@@ -783,7 +976,7 @@ class MountCore:
         links = self._files.links
         return virtual if links is None else links.follow(virtual)
 
-    def truncate(self, path: str, length: int) -> None:
+    async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.
 
         A write the kernel already acknowledged on another handle precedes
@@ -791,7 +984,7 @@ class MountCore:
         left queued to land over the shortened file at that handle's
         release. Handles are matched by identity, not by the path they
         were opened through, so a link alias is settled too. Hydrated
-        handles are then rehydrated from the resized file, so fstat and
+        handles are then refreshed from the resized file, so fstat and
         read through them see the settled writes and the new length
         rather than the bytes they opened on.
 
@@ -800,31 +993,41 @@ class MountCore:
             length (int): the new byte length.
         """
         key = self.identity(path)
-        for ctx in self._handles.values():
-            if ctx.key == key and ctx.write_buf:
-                ctx.write_buf = write_runs(ctx.write_buf)
-                self._apply_writes(ctx.path, ctx.write_buf)
-        self._run(self._files.truncate(self.resolve(path), length))
-        self._changed(path)
 
-    def _changed(self, path: str) -> None:
+        async def run() -> None:
+            for ctx in self._handles.values():
+                if ctx.key == key:
+                    await self._persist_buffered(ctx)
+            await self._op(self._files.truncate(self.resolve(path), length))
+            await self._changed(path)
+
+        await self._mutate(key, run)
+
+    async def _changed(self, path: str, rehydrate: bool = True) -> None:
         """The one function every mutation of a file's bytes goes through.
 
         The open handles on a file are matched by its identity (the
         mount path with namespace links followed), and this is the only
         place their bytes are refreshed, so a new mutating op cannot
-        forget one of them and a link alias cannot slip past. Hydrated
-        handles on the file are refreshed in one read through the
-        dispatcher, so fstat and read through any of them, including the
-        handle that wrote, see the new bytes. A refresh that fails is
-        logged and leaves the handles unhydrated rather than failing the
-        committed mutation. A removal or rename refreshes nothing: POSIX
-        keeps an open descriptor on the bytes it had.
+        forget one of them and a link alias cannot slip past. A hydration
+        still in flight is outdated so it re-reads instead of handing over
+        what it fetched, and hydrated handles on the file are refreshed in
+        one read through the dispatcher, so fstat and read through any of
+        them, including the handle that wrote, see the new bytes. A
+        removal or rename passes ``rehydrate=False``: POSIX keeps an open
+        descriptor on the bytes it had. A refresh that fails is logged and
+        leaves the handles unhydrated rather than failing the committed
+        mutation.
 
         Args:
             path (str): mount path whose bytes changed.
+            rehydrate (bool): refresh the handles open on the file.
         """
         key = self.identity(path)
+        if key in self._hydrations:
+            self._hydration_gen[key] = self._hydration_gen.get(key, 0) + 1
+        if not rehydrate:
+            return
         for ctx in self._handles.values():
             if ctx.key == key and ctx.chunked is not None:
                 ctx.chunked.drop()
@@ -836,7 +1039,7 @@ class MountCore:
         if not hydrated:
             return
         try:
-            data = self._run(self._files.read(self.resolve(path)))
+            data = await self._op(self._files.read(self.resolve(path)))
         except Exception as err:
             # The mutation has already landed, so a refresh that fails must
             # not report it as failed: an O_TRUNC open would fail after the

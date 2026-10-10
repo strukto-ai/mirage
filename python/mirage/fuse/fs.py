@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
+import inspect
 import logging
 import os
+import threading
 from typing import Any, Callable
 
+from mirage.bridge.sync import run_async_from_sync
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.darwin import rename_flags_check
 from mirage.mount.core import MountCore
@@ -32,9 +36,11 @@ class MirageFS:
     """libfuse adapter over MountCore.
 
     Owns exactly the FUSE-specific concerns: the mfusepy callback method
-    signatures and the translation of mirage-native exceptions into
-    ``OSError``. All filesystem semantics live in MountCore, so an FSKit or
-    File Provider adapter can reuse them unchanged.
+    signatures, the sync bridge libfuse's callbacks force (a loop thread
+    of its own that every core op runs on), and the translation of
+    mirage-native exceptions into ``OSError``. All filesystem semantics
+    live in MountCore, so an FSKit or File Provider adapter can reuse them
+    unchanged.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every callback routes to.
@@ -52,6 +58,8 @@ class MirageFS:
         session: SessionState | None = None,
     ) -> None:
         self.core = MountCore(files, root_prefix=root_prefix, session=session)
+        self._loop = asyncio.new_event_loop()
+        threading.Thread(target=self._loop.run_forever, daemon=True).start()
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run a core call, translating failures into FUSE error codes.
@@ -70,7 +78,10 @@ class MirageFS:
             Any: whatever the core method returns.
         """
         try:
-            return fn(*args)
+            result = fn(*args)
+            if inspect.isawaitable(result):
+                return run_async_from_sync(result, self._loop)
+            return result
         except Exception as err:
             code = classify_error(err)
             if code == errno.EIO and not isinstance(
@@ -85,7 +96,7 @@ class MirageFS:
         return self.core.drain_ops()
 
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
-        return self._call(self.core.getattr, path, fh)
+        return self._call(self.core.fgetattr, path, fh)
 
     def readdir(self, path: str, fh: int) -> list[Any]:
         return self._call(self.core.readdir, path)
@@ -120,7 +131,7 @@ class MirageFS:
         # RENAME op, so without this method mv fails with ENOSYS before
         # reaching userspace.
         try:
-            self.core.getattr(new)
+            run_async_from_sync(self.core.getattr(new), self._loop)
             new_exists = True
         except (FileNotFoundError, ValueError):
             new_exists = False

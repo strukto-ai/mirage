@@ -15,7 +15,6 @@
 import asyncio
 import inspect
 import stat
-import threading
 
 import asyncssh
 import pytest
@@ -348,32 +347,30 @@ async def test_a_stat_does_not_follow_a_hidden_link(tmp_path):
 
 
 class ListingCore:
-    """MountCore double: hold the first batch until the stat pool is full."""
+    """MountCore double: hold the first batch until the cap is full."""
 
     def __init__(self, names, refuse=None):
         self.names = names
         self.refuse = refuse
-        self.lock = threading.Lock()
-        self.started = threading.Barrier(LISTING_CONCURRENCY, timeout=5)
+        self.started = asyncio.Barrier(LISTING_CONCURRENCY)
         self.now = 0
         self.peak = 0
         self.calls = 0
 
-    def readdir(self, path):
+    async def readdir(self, path):
         return [".", ".."] + self.names
 
-    def getattr(self, path):
-        with self.lock:
-            self.calls += 1
-            self.now += 1
-            self.peak = max(self.peak, self.now)
-            first_batch = self.calls <= LISTING_CONCURRENCY
+    async def getattr(self, path):
+        self.calls += 1
+        self.now += 1
+        self.peak = max(self.peak, self.now)
         try:
-            if first_batch:
-                self.started.wait()
+            if self.calls <= LISTING_CONCURRENCY:
+                await asyncio.wait_for(self.started.wait(), 5)
+            else:
+                await asyncio.sleep(0)
         finally:
-            with self.lock:
-                self.now -= 1
+            self.now -= 1
         if path.endswith("gone"):
             raise FileNotFoundError(path)
         if self.refuse is not None and path.endswith(self.refuse):
@@ -381,35 +378,32 @@ class ListingCore:
         return {"st_size": len(path)}
 
 
-def test_listing_stats_entries_together_under_the_cap():
-    # Each stat is a hop to the workspace loop and, on an unindexed
-    # mount, a backend request: a wide directory must not pay them one
-    # after another, nor put them all on the wire at once.
+@pytest.mark.asyncio
+async def test_listing_stats_entries_together_under_the_cap():
+    # Each stat is, on an unindexed mount, a backend request: a wide
+    # directory must not pay them one after another, nor put them all on
+    # the wire at once.
     names = [f"f{i}" for i in range(40)] + ["gone"]
     core = ListingCore(names)
-    rows = listing(core, "/d")
+    rows = await listing(core, "/d")
     assert [name for name, _ in rows] == [".", ".."] + names[:-1]
     assert rows[2] == ("f0", {"st_size": len("/d/f0")})
     assert core.peak == LISTING_CONCURRENCY
 
 
-def test_listings_at_once_share_one_cap():
-    # Two channels listing together share the pool: their stats stay
-    # under one cap rather than each bringing threads of its own.
+@pytest.mark.asyncio
+async def test_listings_at_once_share_one_cap():
+    # Two channels listing together on one workspace share the cap rather
+    # than each bringing one of its own.
     core = ListingCore([f"f{i}" for i in range(40)])
-    threads = [
-        threading.Thread(target=listing, args=(core, "/d")) for _ in range(2)
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    await asyncio.gather(listing(core, "/d"), listing(core, "/d"))
     assert core.peak == LISTING_CONCURRENCY
 
 
-def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
+@pytest.mark.asyncio
+async def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
     core = ListingCore([f"f{i}" for i in range(100)], refuse="/d/f2")
     with pytest.raises(PermissionError):
-        listing(core, "/d")
+        await listing(core, "/d")
     assert core.now == 0
-    assert core.calls <= LISTING_CONCURRENCY + 5
+    assert core.calls < 2 * LISTING_CONCURRENCY

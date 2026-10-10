@@ -197,9 +197,9 @@ async def test_fuse_readdir_merges_child_mount_and_link():
     try:
         assert (await _sh(ws, "ln -s /base/inner /base/lnk"))[0] == 0
         core = MountCore(ws.vfs)
-        names = core.readdir("/base")
+        names = await core.readdir("/base")
         assert "a.txt" in names and "inner" in names and "lnk" in names
-        assert core.getattr("/base/inner")["st_mode"] & 0o040000
+        assert (await core.getattr("/base/inner"))["st_mode"] & 0o040000
     finally:
         await ws.close()
 
@@ -313,10 +313,10 @@ async def test_fuse_core_confines_a_hidden_mount():
         sess = ws.get_session("agent")
         core = MountCore(ws.vfs, session=sess)
         with pytest.raises(FileNotFoundError):
-            core.readdir("/closed")
+            await core.readdir("/closed")
         with pytest.raises(FileNotFoundError):
-            fh = core.open("/closed/sec.txt")
-            core.read("/closed/sec.txt", 4096, 0, fh)
+            fh = await core.open("/closed/sec.txt")
+            await core.read("/closed/sec.txt", 4096, 0, fh)
     finally:
         await ws.close()
 
@@ -387,13 +387,13 @@ async def test_scoped_walk_reaches_a_child_below_hidden_content():
     try:
         sess = ws.get_session("agent")
         core = MountCore(ws.vfs, session=sess)
-        names = core.readdir("/base")
+        names = await core.readdir("/base")
         assert "inner" in names
         assert "a.txt" not in names
-        assert core.getattr("/base")["st_mode"] & 0o040000
-        assert "deep.txt" in core.readdir("/base/inner")
+        assert (await core.getattr("/base"))["st_mode"] & 0o040000
+        assert "deep.txt" in await core.readdir("/base/inner")
         with pytest.raises(FileNotFoundError):
-            core.getattr("/base/a.txt")
+            await core.getattr("/base/a.txt")
     finally:
         await ws.close()
 

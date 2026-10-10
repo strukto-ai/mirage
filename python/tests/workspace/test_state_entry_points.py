@@ -72,7 +72,8 @@ def _two_mounts(policies=None) -> Workspace:
     )
 
 
-def test_fuse_symlink_on_hidden_turf_is_refused():
+@pytest.mark.asyncio
+async def test_fuse_symlink_on_hidden_turf_is_refused():
     # The R8 hole: a session-scoped kernel mount could create a link on
     # a mount the profile hides, because the FUSE symlink path wrote the
     # namespace table directly, at a layer no session view covers.
@@ -80,15 +81,16 @@ def test_fuse_symlink_on_hidden_turf_is_refused():
     sess = ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
     core = MountCore(ws.vfs, session=sess)
     with pytest.raises(FileNotFoundError):
-        core.symlink("/b/lk", "/a/x.txt")
+        await core.symlink("/b/lk", "/a/x.txt")
     assert not ws.namespace.is_link("/b/lk")
 
 
-def test_fuse_symlink_on_visible_turf_still_works():
+@pytest.mark.asyncio
+async def test_fuse_symlink_on_visible_turf_still_works():
     ws = _two_mounts()
     sess = ws.create_session("agent")
     core = MountCore(ws.vfs, session=sess)
-    core.symlink("/a/lk", "x.txt")
+    await core.symlink("/a/lk", "x.txt")
     assert ws.namespace.readlink("/a/lk") == "x.txt"
 
 
@@ -1319,15 +1321,16 @@ def test_unscoped_session_sees_everything():
     assert body == b"s3cr3t\n"
 
 
-def test_fuse_hides_hidden_paths():
+@pytest.mark.asyncio
+async def test_fuse_hides_hidden_paths():
     # FUSE rides the same dispatcher, so a scoped kernel mount agrees with a
     # scoped shell about what exists.
     ws = _hidden_paths_ws()
     sess = ws.get_session("agent")
     core = MountCore(ws.vfs, session=sess)
     with pytest.raises(FileNotFoundError):
-        core.getattr("/a/secrets/token.txt")
-    names = core.readdir("/a")
+        await core.getattr("/a/secrets/token.txt")
+    names = await core.readdir("/a")
     assert "secrets" not in names
     assert "note.key" not in names
 

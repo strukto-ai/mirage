@@ -23,7 +23,7 @@ import posixpath
 import shlex
 import stat
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, TypeVar
 from urllib.parse import quote, unquote, urlsplit
 
@@ -202,18 +202,18 @@ def not_a_file(path: str) -> CodexRPCError:
     return CodexRPCError(RPC_INVALID_REQUEST, f"path `{path}` is not a file")
 
 
-def lookup(core: MountCore, path: str) -> dict[str, Any] | None:
+async def lookup(core: MountCore, path: str) -> dict[str, Any] | None:
     try:
-        return core.getattr(path)
+        return await core.getattr(path)
     except MISSING:
         return None
 
 
-def followed(core: MountCore, path: str) -> dict[str, Any]:
-    return core.getattr(path, follow=True)
+async def followed(core: MountCore, path: str) -> dict[str, Any]:
+    return await core.getattr(path, follow=True)
 
 
-def metadata(core: MountCore, path: str) -> Message:
+async def metadata(core: MountCore, path: str) -> Message:
     """``fs/getMetadata``: what the path points at, and whether it is a
     link.
 
@@ -221,9 +221,9 @@ def metadata(core: MountCore, path: str) -> Message:
         core (MountCore): the channel's mount core.
         path (str): the path.
     """
-    own = core.getattr(path)
+    own = await core.getattr(path)
     link = stat.S_ISLNK(own["st_mode"])
-    st = followed(core, path) if link else own
+    st = await followed(core, path) if link else own
     return {
         "isDirectory": stat.S_ISDIR(st["st_mode"]),
         "isFile": stat.S_ISREG(st["st_mode"]),
@@ -234,26 +234,28 @@ def metadata(core: MountCore, path: str) -> Message:
     }
 
 
-def open_file(core: MountCore, path: str) -> int:
-    if stat.S_ISDIR(followed(core, path)["st_mode"]):
+async def open_file(core: MountCore, path: str) -> int:
+    if stat.S_ISDIR((await followed(core, path))["st_mode"]):
         raise not_a_file(path)
-    return core.open(path)
+    return await core.open(path)
 
 
-def read_file(core: MountCore, path: str) -> bytes:
-    fh = open_file(core, path)
+async def read_file(core: MountCore, path: str) -> bytes:
+    fh = await open_file(core, path)
     try:
         parts = []
         offset = 0
-        while chunk := core.read(path, constants.CODEX_READ_SIZE, offset, fh):
+        while chunk := await core.read(
+            path, constants.CODEX_READ_SIZE, offset, fh
+        ):
             parts.append(chunk)
             offset += len(chunk)
         return b"".join(parts)
     finally:
-        core.release(fh)
+        await core.release(fh)
 
 
-def write_file(core: MountCore, path: str, data: bytes) -> None:
+async def write_file(core: MountCore, path: str, data: bytes) -> None:
     """``fs/writeFile``: create or replace the file; its directory must
     exist.
 
@@ -262,35 +264,35 @@ def write_file(core: MountCore, path: str, data: bytes) -> None:
         path (str): the file.
         data (bytes): its new content.
     """
-    parent = lookup(core, posixpath.dirname(path))
+    parent = await lookup(core, posixpath.dirname(path))
     if parent is None:
         raise enoent(path)
     fh = (
-        core.open(path, os.O_TRUNC)
-        if lookup(core, path)
-        else core.create(path)
+        await core.open(path, os.O_TRUNC)
+        if await lookup(core, path)
+        else await core.create(path)
     )
     try:
         if data:
-            core.write(path, data, 0, fh)
-        core.flush(path, fh)
+            await core.write(path, data, 0, fh)
+        await core.flush(path, fh)
     finally:
-        core.release(fh)
+        await core.release(fh)
 
 
-def make_directory(core: MountCore, path: str) -> None:
-    if lookup(core, path) is not None:
+async def make_directory(core: MountCore, path: str) -> None:
+    if await lookup(core, path) is not None:
         raise eexist(path)
-    if lookup(core, posixpath.dirname(path)) is None:
+    if await lookup(core, posixpath.dirname(path)) is None:
         raise enoent(path)
-    core.mkdir(path)
+    await core.mkdir(path)
 
 
-def children(core: MountCore, path: str) -> list[str]:
-    return [n for n in core.readdir(path) if n not in (".", "..")]
+async def children(core: MountCore, path: str) -> list[str]:
+    return [n for n in await core.readdir(path) if n not in (".", "..")]
 
 
-def directory(core: MountCore, path: str) -> list[JsonValue]:
+async def directory(core: MountCore, path: str) -> list[JsonValue]:
     """``fs/readDirectory``: each entry with the kind it points at.
 
     An entry that vanishes between the listing and its stat is left
@@ -301,10 +303,10 @@ def directory(core: MountCore, path: str) -> list[JsonValue]:
         path (str): the directory.
     """
     entries: list[JsonValue] = []
-    for name in children(core, path):
+    for name in await children(core, path):
         child = posixpath.join(path, name)
         try:
-            st = followed(core, child)
+            st = await followed(core, child)
         except MISSING as exc:
             logger.debug("codex: %s vanished while listing: %r", child, exc)
             continue
@@ -318,7 +320,7 @@ def directory(core: MountCore, path: str) -> list[JsonValue]:
     return entries
 
 
-def walk_kind(core: MountCore, path: str, follow: bool) -> str | None:
+async def walk_kind(core: MountCore, path: str, follow: bool) -> str | None:
     """What a walk reports an entry as, or None to leave it out: a
     link counts only when followed, and only as a directory.
 
@@ -327,15 +329,17 @@ def walk_kind(core: MountCore, path: str, follow: bool) -> str | None:
         path (str): the entry.
         follow (bool): ``followDirectorySymlinks``.
     """
-    mode = core.getattr(path)["st_mode"]
+    mode = (await core.getattr(path))["st_mode"]
     if stat.S_ISLNK(mode):
-        if not follow or not stat.S_ISDIR(followed(core, path)["st_mode"]):
+        if not follow or not stat.S_ISDIR(
+            (await followed(core, path))["st_mode"]
+        ):
             return None
         return "directory"
     return "directory" if stat.S_ISDIR(mode) else "file"
 
 
-def walk(core: MountCore, root: str, options: Message) -> Message:
+async def walk(core: MountCore, root: str, options: Message) -> Message:
     """``fs/walk``: the tree breadth first, each directory's entries in
     name order, within the request's limits.
 
@@ -360,7 +364,7 @@ def walk(core: MountCore, root: str, options: Message) -> Message:
     entries: list[JsonValue] = []
     errors: list[JsonValue] = []
     result: Message = {"entries": entries, "errors": errors}
-    if not stat.S_ISDIR(followed(core, root)["st_mode"]):
+    if not stat.S_ISDIR((await followed(core, root))["st_mode"]):
         return {**result, "truncated": False}
     pending = deque([(root, 0)])
     read = 0
@@ -370,7 +374,7 @@ def walk(core: MountCore, root: str, options: Message) -> Message:
         path, depth = pending.popleft()
         read += 1
         try:
-            names = sorted(children(core, path))
+            names = sorted(await children(core, path))
         except Exception as err:
             errors.append(
                 {"path": to_uri(path), "message": str(rpc_error(err))}
@@ -378,7 +382,7 @@ def walk(core: MountCore, root: str, options: Message) -> Message:
             continue
         for name in names:
             child = posixpath.join(path, name)
-            kind = walk_kind(core, child, follow)
+            kind = await walk_kind(core, child, follow)
             if kind is None:
                 continue
             if len(entries) >= max_entries:
@@ -582,9 +586,7 @@ class CodexChannel:
         self._input = ChannelInput(
             process, max_line=constants.CODEX_MAX_MESSAGE
         )
-        self._core = MountCore(
-            ws.vfs, session=ws.get_session(session_id), loop=entry.runner.loop
-        )
+        self._core = MountCore(ws.vfs, session=ws.get_session(session_id))
         self._processes: dict[str, CodexProcess] = {}
         self._handles: dict[str, tuple[str, int]] = {}
         self._starts: list[tuple[CodexProcess, str, str, dict[str, str]]] = []
@@ -738,8 +740,10 @@ class CodexChannel:
         except Exception as err:
             raise rpc_error(err) from err
 
-    async def _fs(self, op: Callable[[MountCore], T]) -> T:
-        return await asyncio.to_thread(op, self._core)
+    async def _fs(
+        self, op: Callable[[MountCore], Coroutine[Any, Any, T]]
+    ) -> T:
+        return await self._entry.runner.call(op(self._core))
 
     async def _release(self, fh: int) -> None:
         await self._fs(lambda core: core.release(fh))
@@ -972,10 +976,10 @@ class CodexChannel:
     async def _canonicalize(self, params: Message) -> JsonValue:
         path = to_path(arg(params, "path", str))
 
-        def canonical(core: MountCore) -> str:
+        async def canonical(core: MountCore) -> str:
             # The stat goes first: it refuses a link the session cannot
             # see before its target is named.
-            core.getattr(path, follow=True)
+            await core.getattr(path, follow=True)
             return core.identity(path)
 
         return {"path": to_uri(await self._fs(canonical))}

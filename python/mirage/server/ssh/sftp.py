@@ -18,12 +18,10 @@ import logging
 import os
 import posixpath
 import stat
-from collections import deque
-from collections.abc import AsyncIterator, Callable
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, TypeVar
+from weakref import WeakKeyDictionary
 
 import asyncssh
 from asyncssh.constants import (
@@ -130,31 +128,32 @@ def to_attrs(st: dict[str, Any]) -> asyncssh.SFTPAttrs:
     )
 
 
-def exists(core: MountCore, path: str) -> bool:
+async def exists(core: MountCore, path: str) -> bool:
     try:
-        core.getattr(path)
+        await core.getattr(path)
     except (FileNotFoundError, NotADirectoryError, NoMountError):
         return False
     return True
 
 
-# One pool for every listing in the process, so channels that list at
-# once share its threads rather than each bringing a pool of its own.
-_STATS = ThreadPoolExecutor(
-    LISTING_CONCURRENCY, thread_name_prefix="sftp-stat"
+# One cap per workspace loop, so channels that list at once on one
+# workspace share it rather than each bringing a cap of its own.
+_STATS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    WeakKeyDictionary()
 )
 
 
-def listing(core: MountCore, path: str) -> list[tuple[str, dict[str, Any]]]:
+async def listing(
+    core: MountCore, path: str
+) -> list[tuple[str, dict[str, Any]]]:
     """A directory's entries with their attributes, in one pass.
 
-    The entries are stat'd together on the shared pool rather than one
-    after another, with at most ``LISTING_CONCURRENCY`` of this listing's
-    queued at once, so a wide directory is never queued whole. A stat that
-    fails ends the listing once the ones already running finish: the core
-    takes one caller at a time, so the next op must not overlap them. An
-    entry that vanishes between the listing and its stat is left out, as
-    ``ls`` leaves out a file deleted mid-listing.
+    The entries are stat'd together rather than one after another, with
+    at most ``LISTING_CONCURRENCY`` out at once across every listing on
+    the workspace's loop. A stat that fails ends the listing and cancels
+    the ones still waiting. An entry that vanishes between the listing
+    and its stat is left out, as ``ls`` leaves out a file deleted
+    mid-listing.
 
     Args:
         core (MountCore): the mount core.
@@ -164,38 +163,37 @@ def listing(core: MountCore, path: str) -> list[tuple[str, dict[str, Any]]]:
         list[tuple[str, dict[str, Any]]]: (name, ``st_*`` dict) pairs,
             ``.`` and ``..`` first.
     """
-    stat = partial(_entry, core, path)
-    window: deque[Future[tuple[str, dict[str, Any]] | None]] = deque()
-    rows = []
+    loop = asyncio.get_running_loop()
+    slots = _STATS.get(loop)
+    if slots is None:
+        slots = _STATS[loop] = asyncio.Semaphore(LISTING_CONCURRENCY)
+
+    async def entry(name: str) -> tuple[str, dict[str, Any]] | None:
+        if name == ".":
+            child = path
+        elif name == "..":
+            child = posixpath.dirname(path)
+        else:
+            child = posixpath.join(path, name)
+        async with slots:
+            try:
+                return name, await core.getattr(child)
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                logger.debug("sftp: %s vanished while listing: %r", child, exc)
+                return None
+
+    names = await core.readdir(path)
     try:
-        for name in core.readdir(path):
-            if len(window) == LISTING_CONCURRENCY:
-                rows.append(window.popleft().result())
-            window.append(_STATS.submit(stat, name))
-        while window:
-            rows.append(window.popleft().result())
-    finally:
-        wait(window)
-    return [row for row in rows if row is not None]
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(entry(name)) for name in names]
+    except BaseExceptionGroup as failed:
+        # The first refusal is the listing's answer, as it was before the
+        # rest were cancelled.
+        raise failed.exceptions[0]
+    return [row for task in tasks if (row := task.result()) is not None]
 
 
-def _entry(
-    core: MountCore, path: str, name: str
-) -> tuple[str, dict[str, Any]] | None:
-    if name == ".":
-        child = path
-    elif name == "..":
-        child = posixpath.dirname(path)
-    else:
-        child = posixpath.join(path, name)
-    try:
-        return name, core.getattr(child)
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        logger.debug("sftp: %s vanished while listing: %r", child, exc)
-        return None
-
-
-def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
+async def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
     """Open or create a file the way an SFTP ``open`` asks.
 
     Args:
@@ -211,24 +209,24 @@ def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
         FileNotFoundError: no such file and no CREAT.
         IsADirectoryError: the path is a directory.
     """
-    found = exists(core, path)
+    found = await exists(core, path)
     if found and pflags & FXF_CREAT and pflags & FXF_EXCL:
         raise eexist(path)
     if not found:
         if not pflags & FXF_CREAT:
             raise enoent(path)
-        fh = core.create(path)
+        fh = await core.create(path)
     else:
-        if stat.S_ISDIR(core.getattr(path)["st_mode"]):
+        if stat.S_ISDIR((await core.getattr(path))["st_mode"]):
             raise eisdir(path)
-        fh = core.open(path, os.O_TRUNC if pflags & FXF_TRUNC else 0)
+        fh = await core.open(path, os.O_TRUNC if pflags & FXF_TRUNC else 0)
     append_at = None
     if pflags & FXF_APPEND:
-        append_at = core.getattr(path, fh)["st_size"]
+        append_at = (await core.fgetattr(path, fh))["st_size"]
     return OpenFile(path, fh, append_at)
 
 
-def set_size(core: MountCore, path: str, size: int | None) -> None:
+async def set_size(core: MountCore, path: str, size: int | None) -> None:
     """Apply an SFTP setstat: a size truncates, anything else is accepted
     once the path is known to exist, as the FUSE adapter treats chmod,
     chown and utimens.
@@ -239,12 +237,12 @@ def set_size(core: MountCore, path: str, size: int | None) -> None:
         size (int | None): the requested size, if any.
     """
     if size is not None:
-        core.truncate(path, size)
+        await core.truncate(path, size)
     else:
-        core.getattr(path)
+        await core.getattr(path)
 
 
-def rename_new(core: MountCore, old: str, new: str) -> None:
+async def rename_new(core: MountCore, old: str, new: str) -> None:
     """SFTP v3 rename, which refuses to replace an existing target.
 
     Args:
@@ -252,12 +250,12 @@ def rename_new(core: MountCore, old: str, new: str) -> None:
         old (str): the current path.
         new (str): the new path.
     """
-    if exists(core, new):
+    if await exists(core, new):
         raise eexist(new)
-    core.rename(old, new)
+    await core.rename(old, new)
 
 
-def vfs_attrs(core: MountCore) -> asyncssh.SFTPVFSAttrs:
+async def vfs_attrs(core: MountCore) -> asyncssh.SFTPVFSAttrs:
     st = core.statfs()
     return asyncssh.SFTPVFSAttrs(
         bsize=st["f_bsize"],
@@ -298,9 +296,8 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     Every request lands on one MountCore bound to a session of its own,
     under the login key's profile, so SFTP sees exactly the tree, modes
-    and policies a shell in that session sees. The core is synchronous
-    (FUSE calls it from a single thread), so calls run one at a time in a
-    worker thread, and the core runs each op on the workspace's own loop.
+    and policies a shell in that session sees. Requests run one at a
+    time, in the order they arrive, on the workspace's own loop.
 
     asyncssh's base class serves the host's real filesystem from every
     method a subclass leaves alone, so this class overrides all of them
@@ -327,9 +324,9 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         self._core: MountCore | None = None
         self._lock = asyncio.Lock()
 
-    async def _mount(self) -> MountCore:
-        if self._core is not None:
-            return self._core
+    async def _mount(self) -> tuple[WorkspaceEntry, MountCore]:
+        if self._entry is not None and self._core is not None:
+            return self._entry, self._core
         entry = login_entry(self._registry, self._conn, self._workspace_id)
         if entry is None:
             raise asyncssh.SFTPNoSuchFile(
@@ -342,17 +339,17 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         )
         self._entry = entry
         self._core = MountCore(
-            ws.vfs,
-            session=ws.get_session(self._session_id),
-            loop=entry.runner.loop,
+            ws.vfs, session=ws.get_session(self._session_id)
         )
-        return self._core
+        return entry, self._core
 
-    async def _call(self, op: Callable[[MountCore], T]) -> T:
+    async def _call(
+        self, op: Callable[[MountCore], Coroutine[Any, Any, T]]
+    ) -> T:
         async with self._lock:
-            core = await self._mount()
+            entry, core = await self._mount()
             try:
-                return await asyncio.to_thread(op, core)
+                return await entry.runner.call(op(core))
             except Exception as err:
                 raise as_os_error(err) from err
 
@@ -385,7 +382,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     async def fstat(self, file_obj: Any) -> asyncssh.SFTPAttrs:
         f = opened(file_obj)
         return to_attrs(
-            await self._call(lambda core: core.getattr(f.path, f.fh))
+            await self._call(lambda core: core.fgetattr(f.path, f.fh))
         )
 
     async def setstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
@@ -398,11 +395,11 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     async def fsetstat(self, file_obj: Any, attrs: asyncssh.SFTPAttrs) -> None:
         f = opened(file_obj)
 
-        def resize(core: MountCore) -> None:
+        async def resize(core: MountCore) -> None:
             ctx = core.handles.get(f.fh)
             if ctx is None:
                 raise asyncssh.SFTPFailure("invalid handle")
-            set_size(core, ctx.path, attrs.size)
+            await set_size(core, ctx.path, attrs.size)
 
         await self._call(resize)
 

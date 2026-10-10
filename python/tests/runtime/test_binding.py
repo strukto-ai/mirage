@@ -175,11 +175,9 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
         assert context.resolver.owner_of("/data/nested/a") == "/data/nested/"
         vfs = RuntimeFiles.of(context)
         mount = MountCore(ws.vfs)
-        # Call both sync adapters on a worker to keep their serving loop free.
+        # Call the sync adapter on a worker to keep its serving loop free.
         guest = await asyncio.to_thread(vfs.read, "/data/link")
-        native = await asyncio.to_thread(
-            mount.read, "/data/link", 100, 0, None
-        )
+        native = await mount.read("/data/link", 100, 0, None)
         assert guest == native == b"shared\n"
         assert (
             await asyncio.to_thread(vfs.stat, "/data/a")

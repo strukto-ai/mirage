@@ -34,15 +34,20 @@ class ChunkedHandle:
     Args:
         path (str): guest-absolute virtual path the handle is over.
         size (int): the file's length as the open saw it.
-        fetch (Callable[[int, int], bytes]): the file adapter's ranged read,
-            ``(offset, size)`` to the bytes there.
+        fetch (Callable[[int, int], bytes] | None): the file adapter's
+            ranged read, ``(offset, size)`` to the bytes there. None for an
+            async owner (the mount core), which asks ``missing``, fetches
+            itself and hands the bytes to ``keep``.
         pos (int): the read position.
+        generation (int): bumped by ``drop``, so an async owner can tell
+            the file changed while its fetch was out.
     """
 
     path: str
     size: int
-    fetch: Callable[[int, int], bytes]
+    fetch: Callable[[int, int], bytes] | None = None
     pos: int = 0
+    generation: int = 0
     _start: int = 0
     _kept: bytes = b""
     _end: int | None = None
@@ -54,20 +59,58 @@ class ChunkedHandle:
             offset (int): byte offset to read from.
             size (int): byte budget.
         """
+        asked = self.missing(offset, size)
+        if asked is not None:
+            if self.fetch is None:
+                raise RuntimeError(
+                    f"{self.path}: no ranged read to fetch with"
+                )
+            self.keep(offset, self.fetch(offset, asked), asked)
+        return self.peek(offset, size)
+
+    def missing(self, offset: int, size: int) -> int | None:
+        """How many bytes a read at ``offset`` must fetch from there.
+
+        Args:
+            offset (int): byte offset the read starts at.
+            size (int): byte budget.
+
+        Returns:
+            int | None: the fetch size, or None when the kept chunk (or
+            the end of the file) already answers the read.
+        """
         if size <= 0 or (self._end is not None and offset >= self._end):
-            return b""
+            return None
         kept_end = self._start + len(self._kept)
         inside = self._start <= offset < kept_end and (
             offset + size <= kept_end or kept_end == self._end
         )
-        if not inside:
-            asked = max(size, READ_CHUNK)
-            self._start = offset
-            self._kept = self.fetch(offset, asked)
-            if len(self._kept) < asked:
-                self._end = offset + len(self._kept)
-                self.size = self._end
+        return None if inside else max(size, READ_CHUNK)
+
+    def keep(self, offset: int, data: bytes, asked: int) -> None:
+        """Keep a fetched chunk; a short one marks the end of the file.
+
+        Args:
+            offset (int): where the chunk starts.
+            data (bytes): the fetched bytes.
+            asked (int): how many were asked for.
+        """
+        self._start = offset
+        self._kept = data
+        if len(data) < asked:
+            self._end = offset + len(data)
+            self.size = self._end
+
+    def peek(self, offset: int, size: int) -> bytes:
+        """The kept bytes at ``offset``, without fetching.
+
+        Args:
+            offset (int): byte offset to read from.
+            size (int): byte budget.
+        """
         low = offset - self._start
+        if size <= 0 or low < 0:
+            return b""
         return self._kept[low : low + size]
 
     def read(self, size: int) -> bytes:
@@ -100,4 +143,5 @@ class ChunkedHandle:
 
     def drop(self) -> None:
         """Forget the kept chunk: the next read fetches the file anew."""
+        self.generation += 1
         self._kept, self._end = b"", None
