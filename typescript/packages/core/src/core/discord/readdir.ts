@@ -24,7 +24,7 @@ import { fileBlobName } from './files.ts'
 import { listGuilds } from './guilds.ts'
 import { listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
-import { historyJsonlBytes, memberJsonBytes } from './render.ts'
+import { compactJsonBytes, jsonlBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 import { snowflakeToDate } from './entry.ts'
@@ -136,7 +136,7 @@ async function listMembersDir(
     // so the exact size is free here.
     const entry = DiscordIndexEntry.member(
       { id: user.id, name: user.username ?? '' },
-      memberJsonBytes(m).byteLength,
+      compactJsonBytes(m).byteLength,
     )
     entries.push([entry.vfsName, entry])
   }
@@ -185,7 +185,7 @@ async function dayListing(
     name: 'chat.jsonl',
     resourceType: DiscordResourceType.CHAT_JSONL,
     vfsName: 'chat.jsonl',
-    size: historyJsonlBytes(messages).byteLength,
+    size: jsonlBytes(messages).byteLength,
   })
   const filesEntry = new IndexEntry({
     id: `${channelId}:${dateStr}:files`,

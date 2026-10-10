@@ -230,13 +230,6 @@ export class Namespace {
     return out
   }
 
-  hasLinks(): boolean {
-    for (const meta of this.nodeTable.values()) {
-      if (meta.target !== undefined) return true
-    }
-    return false
-  }
-
   isLink(path: string): boolean {
     return this.nodeTable.get(path)?.target !== undefined
   }

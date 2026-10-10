@@ -1,8 +1,3 @@
-import { CLI, CLIHandler } from '../commands/cli/types.ts'
-import { command } from '../commands/config.ts'
-import { CommandSpec } from '../commands/spec/types.ts'
-import { IOResult } from '../io/types.ts'
-import type { Stdio } from '../io/stdio.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +14,11 @@ import type { Stdio } from '../io/stdio.ts'
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import { command } from '../commands/config.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
+import { IOResult, type ByteSource } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
@@ -395,74 +394,112 @@ describe('Object.prototype-colliding names', () => {
   })
 })
 
-describe('native writer handlers', () => {
-  it.each(['cli', 'mount'])('routes %s channels in order and settles status', async (kind) => {
+async function* warning(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new TextEncoder().encode('warn\n'))
+}
+
+function warns(): [Uint8Array, IOResult] {
+  return [new TextEncoder().encode('out\n'), new IOResult({ stderr: warning() })]
+}
+
+describe('native output', () => {
+  it('releases a canceled mount handler that ignores the abort', async () => {
     const { ws } = buildWorkspace()
-    const write = async (stdio: Stdio | undefined): Promise<IOResult> => {
-      if (stdio === undefined) throw new Error('expected handler stdio')
-      await stdio.stdout.write(new Uint8Array(100000).fill(97))
-      await stdio.stderr.write(new Uint8Array(100000).fill(101))
-      await stdio.stdout.write(new TextEncoder().encode('z'))
-      return new IOResult({ exitCode: 7 })
-    }
+    ws.mount('/ram').registerCommands(
+      command({
+        name: 'hang',
+        vfs: 'ram',
+        spec: new CommandSpec(),
+        fn: () => new Promise<never>(() => undefined),
+      }),
+    )
+    await ws.shell('cd /ram')
+    await expect(ws.shell('hang', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await ws.unmount('/ram')
+    await ws.close()
+  }, 3000)
+
+  it.each(['mount', 'cli'])(
+    'closes output a canceled %s handler returns late',
+    async (kind) => {
+      const { ws } = buildWorkspace()
+      let closed = false
+      const source: AsyncIterableIterator<Uint8Array> = {
+        [Symbol.asyncIterator]() {
+          return this
+        },
+        next: () => Promise.resolve({ done: true, value: undefined }),
+        return: () => {
+          closed = true
+          return Promise.resolve({ done: true, value: undefined })
+        },
+      }
+      const late = async (): Promise<[ByteSource, IOResult]> => {
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        return [source, new IOResult()]
+      }
+      if (kind === 'cli')
+        ws.registerCli(
+          'late',
+          new CLI({
+            spec: new CommandSpec({ name: 'late' }),
+            handlers: { '': new CLIHandler({ fn: late }) },
+          }),
+        )
+      else
+        ws.mount('/ram').registerCommands(
+          command({ name: 'late', vfs: 'ram', spec: new CommandSpec(), fn: late }),
+        )
+      await ws.shell('cd /ram')
+      await expect(ws.shell('late', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+      await vi.waitFor(() => {
+        expect(closed).toBe(true)
+      })
+      await ws.close()
+    },
+    3000,
+  )
+
+  it.each(['mount', 'cli'])('keeps the streamed stderr of a %s handler', async (kind) => {
+    const { ws } = buildWorkspace()
     if (kind === 'cli')
       ws.registerCli(
-        'writer',
+        'warns',
         new CLI({
-          spec: new CommandSpec({ name: 'writer' }),
-          handlers: { '': new CLIHandler({ fn: (inv) => write(inv.stdio) }) },
+          spec: new CommandSpec({ name: 'warns' }),
+          handlers: { '': new CLIHandler({ fn: warns }) },
         }),
       )
     else
       ws.mount('/ram').registerCommands(
-        command({
-          name: 'writer',
-          vfs: 'ram',
-          spec: new CommandSpec(),
-          fn: (_accessor, _paths, _texts, opts) => write(opts.stdio),
-        }),
+        command({ name: 'warns', vfs: 'ram', spec: new CommandSpec(), fn: warns }),
       )
-    try {
-      await ws.shell('cd /ram')
-      let result = await ws.shell('writer')
-      expect(new TextDecoder().decode(result.stdout)).toBe('a'.repeat(100000) + 'z')
-      expect(new TextDecoder().decode(result.stderr)).toBe('e'.repeat(100000))
-      expect(result.exitCode).toBe(7)
-      result = await ws.shell('writer 2>&1')
-      expect(new TextDecoder().decode(result.stdout)).toBe(
-        'a'.repeat(100000) + 'e'.repeat(100000) + 'z',
-      )
-      expect(new TextDecoder().decode(result.stderr)).toBe('')
-      expect(result.exitCode).toBe(7)
-      await ws.shell('writer > /ram/log 2>&1')
-      result = await ws.shell('cat /ram/log')
-      expect(new TextDecoder().decode(result.stdout)).toBe(
-        'a'.repeat(100000) + 'e'.repeat(100000) + 'z',
-      )
-    } finally {
-      await ws.close()
-    }
+    await ws.shell('cd /ram')
+    const result = await ws.shell('warns')
+    expect(new TextDecoder().decode(result.stdout)).toBe('out\n')
+    expect(new TextDecoder().decode(result.stderr)).toBe('warn\n')
+    await ws.close()
   })
 
-  it('joins a writer when a downstream reader exits early', async () => {
+  it('closes a producer when a downstream reader exits early', async () => {
     const { ws } = buildWorkspace()
     let closed = false
+    async function* source(): AsyncGenerator<Uint8Array> {
+      try {
+        for (;;) yield await Promise.resolve(new Uint8Array(16384).fill(120))
+      } finally {
+        closed = true
+      }
+    }
     ws.registerCli(
       'writer',
       new CLI({
         spec: new CommandSpec({ name: 'writer' }),
-        handlers: {
-          '': new CLIHandler({
-            fn: async (inv) => {
-              try {
-                if (inv.stdio === undefined) throw new Error('expected handler stdio')
-                for (;;) await inv.stdio.stdout.write(new Uint8Array(16384).fill(120))
-              } finally {
-                closed = true
-              }
-            },
-          }),
-        },
+        handlers: { '': new CLIHandler({ fn: () => [source(), new IOResult()] }) },
       }),
     )
     try {

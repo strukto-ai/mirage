@@ -20,6 +20,7 @@ from mirage.cache.index import IndexEntry
 from mirage.core.api.client import SessionArg
 from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.channels import list_channels, list_dms
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.formatters import (
@@ -28,7 +29,7 @@ from mirage.core.slack.formatters import (
     file_blob_name,
     user_filename,
 )
-from mirage.core.slack.history import fetch_messages_for_day, messages_to_jsonl
+from mirage.core.slack.history import fetch_messages_for_day
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import list_users, user_json_bytes
@@ -296,7 +297,7 @@ async def _day_listing(
         name="chat.jsonl",
         resource_type="slack/chat_jsonl",
         vfs_name="chat.jsonl",
-        size=len(messages_to_jsonl(messages)),
+        size=len(jsonl_bytes(messages)),
     )
     files_entry = IndexEntry(
         id=f"{channel_id}:{date_str}:files",

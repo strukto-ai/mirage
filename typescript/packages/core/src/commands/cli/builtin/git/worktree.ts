@@ -16,7 +16,8 @@ import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import type { LinkView, StatPath } from '../../../../view/types.ts'
 import { GIT_DIR } from './constants.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
-import { basename, readNames, readOptional } from './io.ts'
+import { readNames, readOptional } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 
 import type { Dispatch, RepoLocation, WorkTree } from './types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -107,7 +108,7 @@ class Scanner {
   ): Promise<boolean> {
     const rules = await this.descend(relative, ignores)
     for (const entry of await readNames(this.dispatch, this.absolute(relative))) {
-      const name = basename(entry)
+      const name = entryName(entry)
       if (name === '') continue
       const child = relative === '' ? name : `${relative}/${name}`
       const info = await this.entryStat(child)
@@ -185,7 +186,7 @@ class Scanner {
       compareCodePoints,
     )
     for (const entry of entries) {
-      const name = basename(entry)
+      const name = entryName(entry)
       if (name === '' || (relative === '' && name === GIT_DIR)) continue
       const child = relative === '' ? name : `${relative}/${name}`
       const info = await this.entryStat(child)

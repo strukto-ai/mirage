@@ -14,10 +14,8 @@
 
 from typing import Any
 
-from mirage.utils.naming import fit_id_name, parse_id_name
+from mirage.utils.naming import fit_id_name
 from mirage.utils.sanitize import sanitize_name
-
-split_suffix_id = parse_id_name
 
 
 def workspace_dirname(workspace: dict[str, Any]) -> str:

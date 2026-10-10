@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SessionStore } from '@struktoai/mirage-core/workspace/session/store'
-import type { SessionFields } from '@struktoai/mirage-core/workspace/session/store'
+import { RecordSessionStore } from '@struktoai/mirage-core/workspace/session/store'
 
 import { DiskRecordClient } from '../record/disk.ts'
 
@@ -25,45 +24,8 @@ import { DiskRecordClient } from '../record/disk.ts'
  * with the same generation contract as the Redis Lua script, with zero
  * infrastructure. Mirrors the Python DiskSessionStore.
  */
-export class DiskSessionStore extends SessionStore {
-  private readonly records: DiskRecordClient
-
+export class DiskSessionStore extends RecordSessionStore {
   constructor(root: string) {
-    super()
-    this.records = new DiskRecordClient(root, 'sessions/')
-  }
-
-  async load(): Promise<Map<string, SessionFields>> {
-    return await this.records.loadAll()
-  }
-
-  async set(sessionId: string, fields: SessionFields): Promise<void> {
-    await this.records.put(sessionId, fields)
-  }
-
-  async casSet(
-    sessionId: string,
-    fields: SessionFields,
-    expectedGeneration: number,
-  ): Promise<boolean> {
-    return await this.records.casPut(sessionId, fields, expectedGeneration)
-  }
-
-  async delete(sessionIds: readonly string[]): Promise<void> {
-    await this.records.delete(sessionIds)
-  }
-
-  async replaceAll(entries: Map<string, SessionFields>): Promise<void> {
-    const stale = (await this.records.listNames()).filter((n) => !entries.has(n))
-    await this.records.delete(stale)
-    await Promise.all([...entries].map(([sid, fields]) => this.records.put(sid, fields)))
-  }
-
-  async clear(): Promise<void> {
-    await this.records.clear()
-  }
-
-  async close(): Promise<void> {
-    await this.records.close()
+    super(new DiskRecordClient(root, 'sessions/'))
   }
 }

@@ -482,7 +482,7 @@ async function negated(
   inner: TSNodeLike,
 ): Promise<Result> {
   const session = context.session
-  // Lazy exit codes (exitOnEmpty in grep) must be final before
+  // Lazy exit codes (grep's) must be final before
   // inverting, or `! grep miss f` negates the provisional 0.
   const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
   // bash reports the negated pipeline's own statuses in PIPESTATUS

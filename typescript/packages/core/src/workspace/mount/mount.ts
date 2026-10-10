@@ -1,5 +1,3 @@
-import { OutputStream, invoke } from '../../io/stdio.ts'
-import { closeQuietly } from '../../io/stream.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,6 +64,7 @@ import { UsageError } from '../../commands/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
+import { OutputStream, closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
@@ -509,16 +508,6 @@ export class MountEntry {
 
   specFor(cmdName: string): CommandSpec | null {
     return this.cmdSpecs.get(cmdName) ?? null
-  }
-
-  unregister(names: string[]): void {
-    for (const name of names) {
-      for (const [key, rc] of this.cmds) {
-        if (rc.name === name) this.cmds.delete(key)
-      }
-      this.generalCmds.delete(name)
-      this.cmdSpecs.delete(name)
-    }
   }
 
   commands(): Record<string, (string | null)[]> {
@@ -1009,7 +998,6 @@ export class MountEntry {
   ): CommandOpts {
     return {
       stdin: context.stdin ?? null,
-      ...(context.bufferBytes !== undefined ? { bufferBytes: context.bufferBytes } : {}),
       flags,
       mountPrefix: rstripSlash(this.prefix),
       command: cmdName,
@@ -1131,42 +1119,24 @@ export class MountEntry {
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
         : cmdOpts
-    const scope = new ContextScope([
-      ...captureSessionContext(),
-      ...captureOpPolicies(),
-      ...captureRecordingContext(),
-      captureCacheContext(),
-      captureCommandScope(),
-    ])
+    const running = Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts))
     try {
-      return await invoke(
-        (stdio) =>
-          scope.run(() =>
-            this.inCommandScope(context, async () => {
-              const running = Promise.resolve(
-                cmd.fn(this.vfs.accessor, paths, texts, {
-                  ...runOpts,
-                  stdio,
-                  signal: stdio.signal,
-                }),
-              )
-              try {
-                return await runWithTimeout(running, cmdTimeout, cmdName)
-              } catch (error) {
-                if (error instanceof CommandTimeoutError) {
-                  stdio.cancel()
-                  if (stdio.writing) await joinOrAbort(running, stdio.signal).catch(() => undefined)
-                }
-                throw error
-              }
-            }),
-          ),
-        cmdOpts.stdin,
-        runSignal,
-        context.bufferBytes,
-      )
+      return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
     } catch (err) {
       if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
+      // The caller has gone, so output the handler hands back later has no
+      // reader: close it, and log a failure no caller is left to see.
+      void running.then(
+        async (late) => {
+          if (late === null) return
+          await closeQuietly(late[0])
+          await closeQuietly(late[1].stderr)
+        },
+        (late: unknown) => {
+          if (late !== err && !(late instanceof Error && late.name === 'AbortError'))
+            console.error(`${cmdName}: failed after its caller left: ${String(late)}`)
+        },
+      )
       throw err
     }
   }

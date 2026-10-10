@@ -96,7 +96,9 @@ describe('hf_buckets under read: fresh', () => {
     const w = ws(await vfsOf(b))
     try {
       await out(w, 'tee /m/w.txt', ENC.encode('hi\n'))
-      const writes = w.networkRecords.filter((r) => r.op === 'write').map((r) => r.fingerprint)
+      const writes = w.records
+        .filter((r) => !r.isCache && r.op === 'write')
+        .map((r) => r.fingerprint)
       expect(writes).toEqual([null])
       // Absent, not merely different: an invented token would pass a check
       // that only compared it with the xet hash.

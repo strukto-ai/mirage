@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from functools import partial
 
 from mirage.accessor.hf_hub import HfHubAccessor
@@ -27,8 +26,6 @@ from mirage.core.hf_hub.lookup import (
 from mirage.errors.fs import listing_error
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-
-log = logging.getLogger(__name__)
 
 
 async def readdir(

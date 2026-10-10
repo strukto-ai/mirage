@@ -16,23 +16,11 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { PathSpec } from '../../types.ts'
 import { respellRaw } from '../../utils/path.ts'
+import { compareComponents } from '../../utils/sort.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchFiles } from './api.ts'
 import { DropboxApiError } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
-
-function compareComponents(a: string, b: string): number {
-  const ca = a.split('/')
-  const cb = b.split('/')
-  const n = Math.min(ca.length, cb.length)
-  for (let i = 0; i < n; i += 1) {
-    const x = ca[i] ?? ''
-    const y = cb[i] ?? ''
-    if (x < y) return -1
-    if (x > y) return 1
-  }
-  return ca.length - cb.length
-}
 
 /**
  * Use Dropbox file search to narrow grep/rg scopes to candidate files.

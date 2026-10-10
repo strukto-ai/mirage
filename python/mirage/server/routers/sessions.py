@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from mirage.policy.errors import PolicyError
+from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import CancelLinesResponse, KillJobsResponse
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/sessions")
@@ -50,20 +51,11 @@ async def _require_session(entry, session_id: str) -> None:
         raise HTTPException(status_code=404, detail="session not found")
 
 
-def _require_entry(request: Request, workspace_id: str):
-    entry = request.app.state.registry.visible(
-        workspace_id, request.state.account
-    )
-    if entry is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return entry
-
-
 @router.post("", response_model=SessionResponse, status_code=201)
 async def create_session(
     workspace_id: str, req: CreateSessionRequest, request: Request
 ) -> SessionResponse:
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     sid = req.session_id or f"sess_{secrets.token_hex(6)}"
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     if any(s.session_id == sid for s in entry.runner.ws.list_sessions()):
@@ -88,7 +80,7 @@ async def create_session(
 async def list_sessions(
     workspace_id: str, request: Request
 ) -> list[SessionResponse]:
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     return [
         SessionResponse(session_id=s.session_id, cwd=s.cwd)
@@ -100,7 +92,7 @@ async def list_sessions(
 async def delete_session(
     workspace_id: str, session_id: str, request: Request
 ) -> DeleteSessionResponse:
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await _require_session(entry, session_id)
     await entry.runner.call(entry.runner.ws.close_session(session_id))
     return DeleteSessionResponse(session_id=session_id)
@@ -114,7 +106,7 @@ async def cancel_session_lines(
 
     The session stays open; returns once those lines have ended.
     """
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await _require_session(entry, session_id)
     canceled = await entry.runner.call(entry.runner.ws.cancel(session_id))
     return CancelLinesResponse(canceled=canceled)
@@ -125,7 +117,7 @@ async def kill_session_jobs(
     workspace_id: str, session_id: str, request: Request
 ) -> KillJobsResponse:
     """Kill the session's background jobs and runners; it stays open."""
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await _require_session(entry, session_id)
     killed = await entry.runner.call(entry.runner.ws.kill(session_id))
     return KillJobsResponse(killed=killed)
@@ -145,7 +137,7 @@ async def update_session(
     request: Request,
 ) -> SessionResponse:
     """Replace the session's profile; its cwd, env and history stay."""
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     try:
         sess = await entry.runner.call(

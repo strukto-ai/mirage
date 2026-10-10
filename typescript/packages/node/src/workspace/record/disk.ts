@@ -123,18 +123,6 @@ export class DiskRecordClient {
       .map((n) => decodeURIComponent(n.slice(0, -'.json'.length)))
   }
 
-  async loadAll(): Promise<Map<string, Record<string, unknown>>> {
-    const names = await this.listNames()
-    const records = await Promise.all(names.map((name) => this.get(name)))
-    const out = new Map<string, Record<string, unknown>>()
-    for (let i = 0; i < names.length; i++) {
-      const name = names[i]
-      const fields = records[i]?.[0]
-      if (name !== undefined && fields != null) out.set(name, fields)
-    }
-    return out
-  }
-
   async delete(names: Iterable<string>): Promise<void> {
     for (const name of names) {
       try {

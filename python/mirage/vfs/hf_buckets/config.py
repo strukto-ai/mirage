@@ -41,14 +41,6 @@ class HfBucketsConfig(BaseModel):
     def _normalize_key_prefix(cls, v: str | None) -> str | None:
         return kp.normalize(v) or None
 
-    @property
-    def namespace(self) -> str:
-        return self.bucket.split("/", 1)[0]
-
-    @property
-    def bucket_name(self) -> str:
-        return self.bucket.split("/", 1)[1]
-
 
 class HfRepoConfig(BaseModel):
     """What a Hub repository mount is configured with.
@@ -101,14 +93,3 @@ class HfRepoConfig(BaseModel):
     @classmethod
     def _normalize_key_prefix(cls, v: str | None) -> str | None:
         return kp.normalize(v) or None
-
-    @property
-    def namespace(self) -> str:
-        """The owner half, "" when the id leaves it to the token."""
-        parts = self.repo_id.split("/", 1)
-        return parts[0] if len(parts) == 2 else ""
-
-    @property
-    def repo_name(self) -> str:
-        parts = self.repo_id.split("/", 1)
-        return parts[1] if len(parts) == 2 else parts[0]

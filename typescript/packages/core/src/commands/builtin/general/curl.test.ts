@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -99,17 +98,15 @@ async function runCurl(
   if (cmd === undefined) throw new Error('curl not registered')
   // What each write sent through the dispatcher, by path.
   const writes: Record<string, Uint8Array> = {}
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-      stdin: null,
-      flags,
-      cwd: '/',
-      dispatch: (_op, path, args) => {
-        writes[path.virtual] = args?.[0] as Uint8Array
-        return Promise.resolve([null, new IOResult()])
-      },
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+    stdin: null,
+    flags,
+    cwd: '/',
+    dispatch: (_op, path, args) => {
+      writes[path.virtual] = args?.[0] as Uint8Array
+      return Promise.resolve([null, new IOResult()])
+    },
+  })
   if (result === null) return { out: '', err: '', exitCode: -1, writes }
   const [out, ioResult] = result
   const buf =

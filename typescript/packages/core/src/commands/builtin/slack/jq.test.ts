@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
@@ -36,15 +35,13 @@ async function runJq(
   if (cmd === undefined) throw new Error('jq not registered')
   const transport = options.transport ?? new FakeSlackTransport()
   const vfs = makeFakeVfs(transport)
-  const result = await invoke(() =>
-    cmd.fn(vfs.accessor, paths, texts, {
-      stdin: null,
-      flags,
-      io: commandIo(vfs),
-      cwd: '/',
-      ...(options.index !== undefined ? { index: options.index } : {}),
-    }),
-  )
+  const result = await cmd.fn(vfs.accessor, paths, texts, {
+    stdin: null,
+    flags,
+    io: commandIo(vfs),
+    cwd: '/',
+    ...(options.index !== undefined ? { index: options.index } : {}),
+  })
   if (result === null) return { stdout: '', exitCode: 0 }
   const [out, io] = result
   const buf =

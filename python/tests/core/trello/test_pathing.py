@@ -20,27 +20,10 @@ from mirage.core.trello.pathing import (
     label_filename,
     list_dirname,
     member_filename,
-    split_suffix_id,
     workspace_dirname,
 )
+from mirage.utils.naming import parse_id_name
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
-
-
-def test_split_suffix_id():
-    label, obj_id = split_suffix_id("my-board__abc123")
-    assert label == "my-board"
-    assert obj_id == "abc123"
-
-
-def test_split_suffix_id_with_suffix():
-    label, obj_id = split_suffix_id("alice__user1.json", suffix=".json")
-    assert label == "alice"
-    assert obj_id == "user1"
-
-
-def test_split_suffix_id_no_separator():
-    with pytest.raises(FileNotFoundError):
-        split_suffix_id("no-separator")
 
 
 def test_workspace_dirname():
@@ -106,4 +89,4 @@ def test_a_cjk_label_fits_name_max_and_still_addresses_the_id(
     name = build(record)
     assert byte_length(name) <= NAME_MAX_BYTES
     assert "\ufffd" not in name
-    assert split_suffix_id(name, suffix=suffix)[1] == HEX24
+    assert parse_id_name(name, suffix=suffix)[1] == HEX24

@@ -70,8 +70,7 @@ from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stdio import OutputStream, invoke
-from mirage.io.stream import close_quietly
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     push_mount_context,
@@ -156,8 +155,8 @@ def _wrap_mount_streams(
     ``revision_for`` calls inside the lazy backend body see the right
     context when consumed after this frame exits.
 
-    Mirrors the ``exit_on_empty`` pattern: thin async-gen wrapper that
-    side-effects the recorder state as bytes flow through. Same object
+    A thin async-gen wrapper that side-effects the recorder state as
+    bytes flow through. Same object
     appearing in both the primary stream and IOResult.reads/writes is
     wrapped once (dedup by identity).
 
@@ -657,19 +656,6 @@ class MountEntry:
             for rc in keep:
                 self.register(rc)
 
-    def unregister(self, names: list[str]) -> None:
-        """Remove all commands with the given names.
-
-        Args:
-            names (list[str]): Command names to remove.
-        """
-        for name in names:
-            keys = [k for k in self._cmds if k[0] == name]
-            for k in keys:
-                del self._cmds[k]
-            self._general_cmds.pop(name, None)
-            self._cmd_specs.pop(name, None)
-
     def commands(self) -> dict[str, list[str | None]]:
         """List registered commands grouped by filetype variants.
 
@@ -979,7 +965,6 @@ class MountEntry:
         return CommandOpts(
             command=cmd_name,
             stdin=context.stdin,
-            buffer_bytes=context.buffer_bytes,
             flags=flags,
             cwd=PathSpec(
                 virtual=cwd,
@@ -1126,19 +1111,10 @@ class MountEntry:
             else None
         )
         with host_io():
-            return await invoke(
-                lambda stdio: run_with_timeout(
-                    cmd.fn(
-                        self.vfs.accessor,
-                        paths,
-                        texts,
-                        dataclasses.replace(opts, stdio=stdio),
-                    ),
-                    cmd_timeout,
-                    cmd_name,
-                ),
-                opts.stdin,
-                buffer_bytes=context.buffer_bytes,
+            return await run_with_timeout(
+                cmd.fn(self.vfs.accessor, paths, texts, opts),
+                cmd_timeout,
+                cmd_name,
             )
 
     def _wrap_output(

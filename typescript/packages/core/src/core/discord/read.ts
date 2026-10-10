@@ -25,7 +25,7 @@ import { downloadFile, downloadFileStream } from './files.ts'
 import { getHistoryJsonl } from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir } from './readdir.ts'
-import { memberJsonBytes } from './render.ts'
+import { compactJsonBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
 
 async function readChat(
@@ -49,7 +49,7 @@ async function readMember(
   if (entry === null) throw enoent(path)
   const members = await listMembers(accessor, match.slots.guild_id ?? '')
   for (const m of members) {
-    if (m.user?.id === entry.id) return memberJsonBytes(m)
+    if (m.user?.id === entry.id) return compactJsonBytes(m)
   }
   throw enoent(path)
 }

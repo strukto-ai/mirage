@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
-import type { RedisClientType } from 'redis'
 import { SessionStore } from '@struktoai/mirage-core/workspace/session/store'
 import type { SessionFields } from '@struktoai/mirage-core/workspace/session/store'
-import { connectRedis } from '../../optional_peer.ts'
+import { RedisConnection } from '../../optional_peer.ts'
 
 // Shipped next to this module in src and copied beside the bundle in
 // dist (scripts/copy-assets.mjs); byte-identical to the Python cas.lua. Generic
@@ -41,23 +40,14 @@ export interface RedisSessionStoreOptions {
 export class RedisSessionStore extends SessionStore {
   readonly url: string
   private readonly key: string
-  private clientPromise: Promise<RedisClientType> | null = null
+  private readonly redis: RedisConnection
 
   constructor(options: RedisSessionStoreOptions = {}) {
     super()
     this.url = options.url ?? 'redis://localhost:6379/0'
     const prefix = options.keyPrefix ?? 'mirage:session:'
     this.key = `${prefix}sessions`
-  }
-
-  private async client(): Promise<RedisClientType> {
-    if (this.clientPromise === null) {
-      const pending = connectRedis(this.url, 'RedisSessionStore', () => {
-        if (this.clientPromise === pending) this.clientPromise = null
-      })
-      this.clientPromise = pending
-    }
-    return this.clientPromise
+    this.redis = new RedisConnection(this.url, 'RedisSessionStore')
   }
 
   // One atomic server-side compare-and-set: Lua reads the stored
@@ -67,7 +57,7 @@ export class RedisSessionStore extends SessionStore {
     fields: SessionFields,
     expectedGeneration: number,
   ): Promise<boolean> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const result = await c.eval(CAS_SCRIPT, {
       keys: [this.key],
       arguments: [sessionId, JSON.stringify(fields), String(expectedGeneration)],
@@ -76,7 +66,7 @@ export class RedisSessionStore extends SessionStore {
   }
 
   async load(): Promise<Map<string, SessionFields>> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const raw = await c.hGetAll(this.key)
     const out = new Map<string, SessionFields>()
     for (const [sid, value] of Object.entries(raw)) {
@@ -86,18 +76,18 @@ export class RedisSessionStore extends SessionStore {
   }
 
   async set(sessionId: string, fields: SessionFields): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.hSet(this.key, sessionId, JSON.stringify(fields))
   }
 
   async delete(sessionIds: readonly string[]): Promise<void> {
     if (sessionIds.length === 0) return
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.hDel(this.key, [...sessionIds])
   }
 
   async replaceAll(entries: Map<string, SessionFields>): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const multi = c.multi().del(this.key)
     for (const [sid, fields] of entries) {
       multi.hSet(this.key, sid, JSON.stringify(fields))
@@ -106,18 +96,11 @@ export class RedisSessionStore extends SessionStore {
   }
 
   async clear(): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.del(this.key)
   }
 
   async close(): Promise<void> {
-    // Idempotent: the workspace closes the plane store it consumed and the
-    // owning WorkspaceStateStore closes every plane it built; the second
-    // close must be a no-op, not a crash on an already-quit client.
-    if (this.clientPromise === null) return
-    const pending = this.clientPromise
-    this.clientPromise = null
-    const c = await pending
-    await c.quit()
+    await this.redis.close()
   }
 }

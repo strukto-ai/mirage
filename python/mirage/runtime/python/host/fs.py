@@ -43,13 +43,13 @@ from mirage.runtime.python.host.list import (
     MountScandir,
     entry_is_dir,
     entry_is_link,
-    leaf,
 )
 from mirage.runtime.python.host.stat import stat_result
 from mirage.runtime.types import VFSStat
 from mirage.types import PathSpec
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
+from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import LINK_MODE
 from mirage.workspace.files import Files
 
@@ -505,7 +505,7 @@ class HostFs:
         if virtual is None:
             return cast(list[str] | list[bytes], self._host.listdir(path))
         return [
-            leaf(row.path)
+            entry_name(row.path)
             for row in self._adapter.readdir(virtual, classify=False)
         ]
 
@@ -1200,12 +1200,12 @@ def os_routing(
 ) -> dict[str, Callable[..., Any]]:
     """Every `os` name that must not answer from the host, and what does.
 
-    Built from the three tables in ``host/constants``: a routed name gets
+    Built from the two tables in ``host/constants``: a routed name gets
     the workspace entry point, a refused name gets that table's errno on a
-    mounted path, and a passthrough name is absent here because it is a
-    program or a string, never a file. A name the host python does not
-    have (``lchmod`` off macOS) is absent too, so ``hasattr`` still
-    reports what it did before.
+    mounted path, and every other name is absent here, which the coverage
+    test keeps to names that take a program or a string, never a file. A
+    name the host python does not have (``lchmod`` off macOS) is absent
+    too, so ``hasattr`` still reports what it did before.
 
     The table is what makes the fix complete rather than a list someone
     maintains: ``os.walk`` reads ``os.scandir`` and ``os.path.exists``

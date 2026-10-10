@@ -21,9 +21,9 @@ DEFAULT_PROFILE = "default"
 # What a fork of a session carries over. Written down once because
 # `SessionState.fork` builds a copy from it and
 # `tests/workspace/session/test_session.py` asserts that every dataclass
-# field is either here or in TRANSIENT_FIELDS, so a field added later
-# cannot be silently dropped by a hand-written literal the way
-# `script_name` was.
+# field is either here or in its list of line-scoped fields, so a field
+# added later cannot be silently dropped by a hand-written literal the
+# way `script_name` was.
 INHERITED_FIELDS: tuple[str, ...] = (
     "session_id",
     "cwd",
@@ -94,28 +94,3 @@ STARTUP_VALUES: dict[str, ShellVar] = {
     "OPTIND": ShellVar("1", frozenset({VarAttr.INTEGER})),
     "OPTERR": ShellVar("1"),
 }
-
-# State that belongs to the line being executed, not to the shell, so a
-# fork starts it fresh: the errexit marker and the running function's
-# locals.
-TRANSIENT_FIELDS: tuple[str, ...] = (
-    "errexit_immune",
-    "errexit_exiting",
-    "err_trap_running",
-    "return_trap_running",
-    "_local_vars",
-    "_local_frames",
-    "_local_random",
-    "_reached",
-    "_trap_status",
-    "_pipe_status_pending",
-    "_random_state",
-    "_random_seed",
-    "_random_last",
-    "_parse_current",
-    "_parse_row",
-    "_line_open",
-    "terminal",
-    "_alias_expansion",
-    "status_writer",
-)

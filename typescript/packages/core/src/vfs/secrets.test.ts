@@ -14,7 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { errorSummary } from '../secrets/summary.ts'
-import { parseConfigWithSchema, refuseRepeatedFields, refuseUnknownKeys, z } from './secrets.ts'
+import {
+  normalizeNonEmpty,
+  parseConfigWithSchema,
+  refuseRepeatedFields,
+  refuseUnknownKeys,
+  z,
+} from './secrets.ts'
 
 const Schema = z.object({ apiKey: z.string(), teamIds: z.array(z.string()).optional() })
 
@@ -120,5 +126,12 @@ describe('refuseRepeatedFields', () => {
         })
       }),
     ).toBe('keyPrefix: unrecognized_keys; maxDrainBytes: unrecognized_keys')
+  })
+})
+
+describe('normalizeNonEmpty', () => {
+  it('trims a value and refuses a blank one by field', () => {
+    expect(normalizeNonEmpty('  docs ', 'collectionName')).toBe('docs')
+    expect(() => normalizeNonEmpty('   ', 'datasetId')).toThrow('datasetId cannot be empty')
   })
 })

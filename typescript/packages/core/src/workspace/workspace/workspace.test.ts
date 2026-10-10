@@ -178,16 +178,6 @@ describe('session tools', () => {
     expect(refused.isError).toBe(true)
   })
 
-  it('drops the tables of every session closed at once', async () => {
-    const ws = await plain()
-    const agent = await ws.session('agent')
-    await agent.tools.call('read', { path: '/a.txt' })
-    await ws.closeAllSessions()
-    const again = await ws.session('agent')
-    const refused = await again.tools.call('write', { path: '/a.txt', content: 'two\n' })
-    expect(refused.isError).toBe(true)
-  })
-
   it('follows the default session a snapshot restores', async () => {
     const source = await plain()
     const state = await toStateDict(source)

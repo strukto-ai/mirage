@@ -1,3 +1,6 @@
+import asyncio
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -111,3 +114,71 @@ async def test_a_body_over_the_limit_is_refused():
             content=b" " * (4 * 1024 * 1024 + 1),
         )
         assert r.status_code == 413
+
+
+async def _ignore_sent(message):
+    return None
+
+
+async def _start_shell(app, wid: str):
+    body = json.dumps({"command": "sleep 60"}).encode()
+    path = f"/v1/workspaces/{wid}/tools/shell"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"test"),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+        "client": ("127.0.0.1", 1),
+        "server": ("test", 80),
+    }
+    incoming: asyncio.Queue[dict] = asyncio.Queue()
+    await incoming.put(
+        {"type": "http.request", "body": body, "more_body": False}
+    )
+    calling = asyncio.create_task(app(scope, incoming.get, _ignore_sent))
+    for _ in range(500):
+        running = [
+            j for j in app.state.jobs.list(wid) if j.status == "running"
+        ]
+        if running:
+            return calling, incoming, running[0].id
+        await asyncio.sleep(0.01)
+    raise AssertionError("the shell never started")
+
+
+async def _shell_app():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+    return app, wid
+
+
+@pytest.mark.asyncio
+async def test_a_caller_that_disconnects_cancels_the_shell():
+    app, wid = await _shell_app()
+    calling, incoming, job_id = await _start_shell(app, wid)
+    await incoming.put({"type": "http.disconnect"})
+    await asyncio.wait_for(calling, 5)
+    assert app.state.jobs.get(job_id).status == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_a_canceled_request_cancels_the_shell():
+    app, wid = await _shell_app()
+    calling, _, job_id = await _start_shell(app, wid)
+    calling.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(calling, 5)
+    assert app.state.jobs.get(job_id).status == "canceled"

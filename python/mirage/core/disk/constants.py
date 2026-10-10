@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-SCOPE_WARN = 5000
 SCOPE_ERROR = 50000
 
 # A folder changed this recently is not versioned: a timestamp is coarser

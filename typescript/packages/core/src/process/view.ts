@@ -17,15 +17,13 @@ import type { ProcessInfo, SpawnRequest } from './types.ts'
 
 /**
  * Profile-scoped operations. Seeing a process grants no streams; invisible
- * PIDs return null. Stopping one the view sees but may not stop throws EPERM.
+ * PIDs are not found. Stopping one the view sees but may not stop throws EPERM.
  */
 export interface ProcessView {
   readonly list: () => readonly ProcessInfo[]
-  readonly get: (pid: number) => ProcessInfo | null
   readonly checkSpawn: () => void
   readonly probe: (pid: number) => boolean
   readonly terminate: (pid: number) => boolean
-  readonly wait: (pid: number) => Promise<ProcessInfo | null>
   readonly depth?: number
   readonly spawn?: (request: SpawnRequest) => ChildProcess
 }

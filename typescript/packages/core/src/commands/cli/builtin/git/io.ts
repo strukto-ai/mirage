@@ -20,6 +20,7 @@ import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
 import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'
 import { MountInWayError } from './errors.ts'
 import type { Dispatch } from './types.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 /** Read one virtual path through the workspace dispatcher. */
@@ -216,20 +217,6 @@ export async function readNames(dispatch: Dispatch, path: PathSpec): Promise<str
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return []
     throw err
   }
-}
-
-/**
- * The final segment of a readdir entry, directory marker stripped.
- *
- * A backend may report a bare name or a whole path, and may or may not mark a
- * directory with a trailing slash; every caller here wants the name.
- *
- * @param entry one entry as the backend reported it
- */
-export function basename(entry: string): string {
-  const trimmed = rstripSlash(entry)
-  const cut = trimmed.lastIndexOf('/')
-  return cut === -1 ? trimmed : trimmed.slice(cut + 1)
 }
 
 /**
@@ -501,7 +488,7 @@ export async function removeTree(
   for (const entry of entries) {
     // A listing answers in whole paths, so the child is rebuilt from the
     // basename the way every other walk here does.
-    const name = basename(entry)
+    const name = entryName(entry)
     if (name === '') continue
     const child = path.join(name)
     if ((links?.statAt(child.virtual) ?? null) !== null) {

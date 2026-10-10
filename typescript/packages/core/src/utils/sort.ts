@@ -41,3 +41,19 @@ export function compareCodePoints(a: string, b: string): number {
   }
   return a.length - i - (b.length - j)
 }
+
+/**
+ * Order two `/`-separated paths component by component, each compared by
+ * code point, so a path sorts right after its parent the way Python's
+ * `sorted(key=lambda p: p.split("/"))` and a sorted readdir walk put it.
+ */
+export function compareComponents(a: string, b: string): number {
+  const ca = a.split('/')
+  const cb = b.split('/')
+  const n = Math.min(ca.length, cb.length)
+  for (let i = 0; i < n; i += 1) {
+    const order = compareCodePoints(ca[i] ?? '', cb[i] ?? '')
+    if (order !== 0) return order
+  }
+  return ca.length - cb.length
+}

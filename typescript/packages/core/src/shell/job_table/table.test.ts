@@ -239,7 +239,6 @@ describe('JobTable.wait', () => {
     expect(result.exitCode).toBe(2)
     expect(dec(await result.console.snapshot(Channel.STDOUT))).toBe('hi')
     expect(dec(await result.console.snapshot(Channel.STDERR))).toBe('oops')
-    expect(result.executionNode).toBe(execNode)
   })
 
   it('returns an already-completed job without re-awaiting', async () => {
@@ -520,10 +519,10 @@ it('keeps a disowned process visible until its cancelled runner really exits', a
   const view = table.processes.view('a')
   expect(table.disown(job.id, 'a')).toBe(true)
   expect(table.listJobs('a')).toEqual([])
-  expect(view.get(process.info.pid)).not.toBeNull()
+  expect(view.list().map((info) => info.pid)).toEqual([process.info.pid])
   await table.killAll()
   expect(job.status).toBe(JobStatus.KILLED)
-  expect(view.get(process.info.pid)?.state).toBe('stopping')
+  expect(view.list().map((info) => info.state)).toEqual(['stopping'])
   if (release.fire === undefined) throw new Error('runner did not start')
   release.fire()
   expect(await process.join()).toMatchObject({ exitCode: 0, cancellationRequested: true })

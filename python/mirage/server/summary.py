@@ -22,14 +22,14 @@ from mirage.server.schemas import (
     WorkspaceInternals,
 )
 from mirage.shell.constants import BIN_PREFIX
+from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
-from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 _AUTO_PREFIXES = {
     "/dev/",
-    norm_mount_prefix(HISTORY_PREFIX),
-    norm_mount_prefix(BIN_PREFIX),
+    norm_dir(HISTORY_PREFIX),
+    norm_dir(BIN_PREFIX),
 }
 _DESCRIPTION_MAX = 120
 

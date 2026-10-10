@@ -19,7 +19,7 @@ import type {
   ConsoleStore,
   ReadResult,
 } from '@struktoai/mirage-core/shell/console/index'
-import { connectRedis } from '../../../optional_peer.ts'
+import { RedisConnection } from '../../../optional_peer.ts'
 import { APPEND_LUA, POLL_MS } from './constants.ts'
 
 interface StreamEntry {
@@ -76,7 +76,7 @@ export class RedisConsoleStore implements ConsoleStore {
   private readonly counterKey: string
   private readonly endedKey: string
   private readonly ttlSeconds: number
-  private clientPromise: Promise<RedisClientType> | null = null
+  private readonly redis: RedisConnection
   private isClosed = false
 
   constructor(options: RedisConsoleStoreOptions = {}) {
@@ -86,6 +86,7 @@ export class RedisConsoleStore implements ConsoleStore {
     this.counterKey = `${this.keyPrefix}seq`
     this.endedKey = `${this.keyPrefix}ended`
     this.ttlSeconds = options.ttlSeconds ?? 0
+    this.redis = new RedisConnection(this.url, 'RedisConsoleStore')
   }
 
   get closed(): boolean {
@@ -96,13 +97,7 @@ export class RedisConsoleStore implements ConsoleStore {
     // close() nulls the promise; building a new one here would open a
     // client that nothing quits, and in Node it holds the process alive.
     if (this.isClosed) throw new Error('RedisConsoleStore is closed')
-    if (this.clientPromise === null) {
-      const pending = connectRedis(this.url, 'RedisConsoleStore', () => {
-        if (this.clientPromise === pending) this.clientPromise = null
-      })
-      this.clientPromise = pending
-    }
-    return this.clientPromise
+    return this.redis.client()
   }
 
   /**
@@ -192,11 +187,7 @@ export class RedisConsoleStore implements ConsoleStore {
     // Idempotent, and the flag flips before the quit so a parked wait
     // that wakes mid-teardown returns instead of re-polling.
     this.isClosed = true
-    if (this.clientPromise === null) return
-    const pending = this.clientPromise
-    this.clientPromise = null
-    const c = await pending
-    await c.quit()
+    await this.redis.close()
   }
 
   /** Delete the console's keys (test and integ teardown only). */

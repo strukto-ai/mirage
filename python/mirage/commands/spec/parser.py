@@ -183,9 +183,6 @@ class ParsedArgs:
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == "path"]
 
-    def routing_paths(self) -> list[str]:
-        return self.paths() + self.path_flag_values
-
     def texts(self) -> list[str]:
         return [v for v, k in self.args if k != "path"]
 

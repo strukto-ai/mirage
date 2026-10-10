@@ -23,31 +23,9 @@ from mirage.core.notion.normalize import (
     page_segment_name,
     to_json_bytes,
 )
-from mirage.core.notion.pathing import (
-    format_segment,
-    split_suffix_id,
-)
+from mirage.core.notion.pathing import format_segment
+from mirage.utils.naming import parse_id_name
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
-
-
-class TestSplitSuffixId:
-    def test_basic(self):
-        label, oid = split_suffix_id("my-page__abc123")
-        assert label == "my-page"
-        assert oid == "abc123"
-
-    def test_with_suffix(self):
-        label, oid = split_suffix_id("my-page__abc123.json", suffix=".json")
-        assert label == "my-page"
-        assert oid == "abc123"
-
-    def test_no_separator_raises(self):
-        with pytest.raises(FileNotFoundError):
-            split_suffix_id("noid")
-
-    def test_wrong_suffix_raises(self):
-        with pytest.raises(FileNotFoundError):
-            split_suffix_id("my-page__abc.json", suffix=".md")
 
 
 class TestPageDirname:
@@ -155,7 +133,7 @@ def test_a_long_title_fits_name_max_and_still_addresses_the_id():
     name = format_segment(CJK_TITLE, OBJ_ID)
 
     assert byte_length(name) <= NAME_MAX_BYTES
-    assert split_suffix_id(name)[1] == OBJ_ID
+    assert parse_id_name(name)[1] == OBJ_ID
     assert "\ufffd" not in name
 
 

@@ -18,6 +18,7 @@ import {
   apiRequest,
   apiStream,
   bodyDelay,
+  buildUrl,
   flooredDelay,
   headerDelay,
   type RetryPolicy,
@@ -493,4 +494,13 @@ it('releases a stalled streamed response when its fetch signal is aborted', asyn
   abort.abort()
   await expect(pulling).rejects.toMatchObject({ name: 'AbortError' })
   expect(body.locked).toBe(false)
+})
+
+describe('buildUrl', () => {
+  it('joins with one slash and encodes the defined query entries', () => {
+    expect(buildUrl('http://h/', 'api/x', { a: 'b c', n: 2, skip: undefined })).toBe(
+      'http://h/api/x?a=b%20c&n=2',
+    )
+    expect(buildUrl('http://h', '/api/x', {})).toBe('http://h/api/x')
+  })
 })

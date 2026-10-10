@@ -1955,10 +1955,6 @@ class Workspace:
         one to the agent tools, so none keeps what was read before."""
         self._reads.clear()
 
-    async def workspace_meta(self) -> dict[str, Any]:
-        """This workspace's metadata record (discovery surface)."""
-        return await self._meta.load()
-
     async def flush_sessions(self) -> None:
         """Persist every session's durable fields to the session store."""
         await self._session_mgr.flush()
@@ -2118,19 +2114,6 @@ class Workspace:
         await self.job_table.close_session(session_id)
         self._tools.pop(session_id, None)
         self._reads.pop(session_id, None)
-
-    async def close_all_sessions(self) -> None:
-        closed = [
-            s.session_id
-            for s in self.list_sessions()
-            if s.session_id != self.default_session_id
-        ]
-        await self._session_mgr.close_all()
-        for session_id in closed:
-            await self._documents.release_session(session_id)
-            await self.job_table.close_session(session_id)
-            self._tools.pop(session_id, None)
-            self._reads.pop(session_id, None)
 
     # ── mount management ────────────────────────────────────────────────────
 
@@ -2567,40 +2550,39 @@ class Workspace:
             stop = asyncio.Event()
             self._lines[stop] = (session_id, ended)
             token = LINE_STOP.set(stop)
+
+        async def line() -> IOResult:
+            result = await self._serialize_line(
+                session_id,
+                partial(
+                    execute_line,
+                    self._execute_env(),
+                    command,
+                    session_id,
+                    stdin,
+                    agent_id,
+                    cwd,
+                    env,
+                    cancel,
+                    record,
+                    runtime,
+                    routing_decision,
+                    handed,
+                    frame,
+                    sink=sink,
+                    call_stack=call_stack,
+                    execution_scope=execution_scope,
+                    job_table=job_table,
+                ),
+            )
+            if sink is not None and isinstance(result, IOResult):
+                await drain_to_sink(sink, result)
+            return result
+
         try:
             if stop is not None:
                 await self._admit_line(stop, cancel)
-            result = await run_cancellable(
-                self._serialize_line(
-                    session_id,
-                    partial(
-                        execute_line,
-                        self._execute_env(),
-                        command,
-                        session_id,
-                        stdin,
-                        agent_id,
-                        cwd,
-                        env,
-                        cancel,
-                        record,
-                        runtime,
-                        routing_decision,
-                        handed,
-                        frame,
-                        sink=sink,
-                        call_stack=call_stack,
-                        execution_scope=execution_scope,
-                        job_table=job_table,
-                    ),
-                ),
-                cancel,
-                stop,
-            )
-            if sink is not None and isinstance(result, IOResult):
-                await run_cancellable(
-                    drain_to_sink(sink, result), cancel, stop
-                )
+            result = await run_cancellable(line(), cancel, stop)
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the
             # shell's, whether it arrived on the event or as a cancel

@@ -78,18 +78,6 @@ export function wrapCachableStreams(
   return [stdout, io]
 }
 
-export async function* exitOnEmpty(
-  stream: AsyncIterable<Uint8Array>,
-  io: IOResult,
-): AsyncIterable<Uint8Array> {
-  let yielded = false
-  for await (const chunk of stream) {
-    yielded = true
-    yield chunk
-  }
-  if (!yielded) io.exitCode = 1
-}
-
 export async function drain(stream: ByteSource | null): Promise<void> {
   if (stream === null || stream instanceof Uint8Array) return
   if (stream instanceof CachableAsyncIterator) {
@@ -109,6 +97,25 @@ export async function closeQuietly(stream: ByteSource | null): Promise<void> {
     await closer.call(stream)
   } catch {
     // best-effort
+  }
+}
+
+/** Own producer cleanup even when its byte iterator was never started. */
+export class OutputStream implements AsyncIterableIterator<Uint8Array> {
+  constructor(
+    private readonly source: AsyncIterator<Uint8Array>,
+    private readonly close: () => Promise<void>,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+  next(): Promise<IteratorResult<Uint8Array>> {
+    return this.source.next()
+  }
+  async return(): Promise<IteratorResult<Uint8Array>> {
+    await this.close()
+    return (await this.source.return?.()) ?? { done: true, value: undefined }
   }
 }
 

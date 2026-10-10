@@ -21,8 +21,8 @@ import asyncssh
 import pytest
 
 from mirage.io.types import IOResult
+from mirage.policy.constants import REFUSAL_WINDOW
 from mirage.server.ssh import stream
-from mirage.server.ssh.constants import REFUSAL_WINDOW
 from mirage.server.ssh.stream import (
     ChannelInput,
     ChannelOutput,

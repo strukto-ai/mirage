@@ -30,23 +30,19 @@ function record(source: string, bytes: number): OpRecord {
 }
 
 describe('Workspace record accounting', () => {
-  it('splits records and bytes by network vs cache', () => {
+  it('splits bytes by network vs cache', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     ws.records.push(record(VFSName.S3, 100))
     ws.records.push(record(VFSName.RAM, 30))
     ws.records.push(record(VFSName.S3, 7))
     expect(ws.networkBytes).toBe(107)
     expect(ws.cacheBytes).toBe(30)
-    expect(ws.networkRecords.map((r) => r.bytes)).toEqual([100, 7])
-    expect(ws.cacheRecords.map((r) => r.bytes)).toEqual([30])
   })
 
   it('returns zeros on a fresh workspace', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     expect(ws.networkBytes).toBe(0)
     expect(ws.cacheBytes).toBe(0)
-    expect(ws.networkRecords).toEqual([])
-    expect(ws.cacheRecords).toEqual([])
   })
 
   it('Files facade ops land in ws.records', async () => {

@@ -341,7 +341,6 @@ it('does not share process views by profile or follow reused session IDs', async
     })
     expect(one.list()).toEqual([process.info])
     expect(two.list()).toEqual([])
-    expect(two.get(process.info.pid)).toBeNull()
     await ws.closeSession('one')
     ws.createSession('one', { profile: 'agent' })
     expect(one.list()).toEqual([])

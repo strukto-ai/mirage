@@ -406,7 +406,3 @@ BUILTIN_GROUP: Mapping[ShellBuiltin, BuiltinGroup] = {
 GRAMMAR_BUILTINS: frozenset[ShellBuiltin] = frozenset(
     b for b, g in BUILTIN_GROUP.items() if GROUP_TIER[g] is BuiltinTier.GRAMMAR
 )
-
-TOOL_BUILTINS: frozenset[ShellBuiltin] = frozenset(
-    b for b, g in BUILTIN_GROUP.items() if GROUP_TIER[g] is BuiltinTier.TOOL
-)

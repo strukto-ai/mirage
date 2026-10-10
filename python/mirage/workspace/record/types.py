@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, Protocol
 
 RecordFields = dict[str, Any]
 
@@ -20,6 +21,28 @@ RecordFields = dict[str, Any]
 # workspace meta): losing this many times in a row on a rarely written
 # record is a bug to surface, not contention to absorb.
 CAS_MAX_RETRIES = 3
+
+
+class RecordClient(Protocol):
+    """A keyed-record client: one JSON record per name, written with a
+    generation-CAS. ``DiskRecordClient`` and ``S3RecordClient`` are the
+    two."""
+
+    async def get(self, name: str) -> tuple[RecordFields | None, str]: ...
+
+    async def put(self, name: str, fields: RecordFields) -> None: ...
+
+    async def cas_put(
+        self, name: str, fields: RecordFields, expected_generation: int
+    ) -> bool: ...
+
+    async def list_names(self) -> list[str]: ...
+
+    async def delete(self, names: Iterable[str]) -> None: ...
+
+    async def clear(self) -> None: ...
+
+    async def close(self) -> None: ...
 
 
 def generation_of(fields: RecordFields | None) -> int:

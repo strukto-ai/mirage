@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.utils.naming import fit_id_name, parse_id_name
+from mirage.utils.naming import fit_id_name
 from mirage.utils.sanitize import sanitize_name
-
-split_suffix_id = parse_id_name
 
 
 def format_segment(title: str, object_id: str) -> str:

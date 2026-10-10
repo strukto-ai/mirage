@@ -39,7 +39,8 @@ from mirage.server.multipart import (
     PartEvent,
     part_events,
 )
-from mirage.server.registry import Claim, WorkspaceEntry, WorkspaceRegistry
+from mirage.server.registry import Claim, WorkspaceEntry
+from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import (
     CancelLinesResponse,
     CloneWorkspaceRequest,
@@ -65,14 +66,6 @@ router = APIRouter(prefix="/v1/workspaces")
 ACCOUNTS_DIR = "accounts"
 
 T = TypeVar("T")
-
-
-def _require_entry(request: Request, workspace_id: str) -> WorkspaceEntry:
-    registry: WorkspaceRegistry = request.app.state.registry
-    entry = registry.visible(workspace_id, request.state.account)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return entry
 
 
 async def _has_state(request: Request, workspace_id: str) -> bool:
@@ -338,7 +331,7 @@ async def get_workspace(
     workspace_id: str, request: Request, verbose: bool = Query(False)
 ) -> WorkspaceDetail:
     return await make_detail(
-        _require_entry(request, workspace_id), verbose=verbose
+        require_entry(request, workspace_id), verbose=verbose
     )
 
 
@@ -347,7 +340,7 @@ async def delete_workspace(
     workspace_id: str, request: Request
 ) -> DeleteWorkspaceResponse:
     registry = request.app.state.registry
-    _require_entry(request, workspace_id)
+    require_entry(request, workspace_id)
     try:
         await registry.remove(workspace_id)
     except Exception as exc:
@@ -362,7 +355,7 @@ async def close_workspace(
     workspace_id: str, request: Request
 ) -> DeleteWorkspaceResponse:
     """Close the workspace and keep its state for the owner to reopen."""
-    _require_entry(request, workspace_id)
+    require_entry(request, workspace_id)
     try:
         await request.app.state.registry.close(workspace_id)
     except KeyError:
@@ -375,7 +368,7 @@ async def cancel_workspace_lines(
     workspace_id: str, request: Request
 ) -> CancelLinesResponse:
     """Cancel every session's running and queued lines; all stay open."""
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     canceled = await entry.runner.call(entry.runner.ws.cancel())
     return CancelLinesResponse(canceled=canceled)
 
@@ -385,7 +378,7 @@ async def kill_workspace_jobs(
     workspace_id: str, request: Request
 ) -> KillJobsResponse:
     """Kill every session's background jobs and runners."""
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     killed = await entry.runner.call(entry.runner.ws.kill())
     return KillJobsResponse(killed=killed)
 
@@ -397,7 +390,7 @@ async def clone_workspace(
     workspace_id: str, req: CloneWorkspaceRequest, request: Request
 ) -> WorkspaceDetail:
     registry = request.app.state.registry
-    src_entry = _require_entry(request, workspace_id)
+    src_entry = require_entry(request, workspace_id)
     _refuse_dot_id(req.id)
     if req.id is not None and req.id in registry:
         raise HTTPException(
@@ -429,7 +422,7 @@ async def clone_workspace(
 
 @router.get("/{workspace_id}/snapshot")
 async def download_snapshot(workspace_id: str, request: Request) -> Response:
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     buffer = io.BytesIO()
     await run_capture(entry, entry.runner.ws.snapshot(buffer))
     return Response(content=buffer.getbuffer(), media_type="application/x-tar")
@@ -441,7 +434,7 @@ async def download_snapshot(workspace_id: str, request: Request) -> Response:
 async def snapshot_workspace(
     workspace_id: str, req: SnapshotWorkspaceRequest, request: Request
 ) -> SnapshotWorkspaceResponse:
-    entry = _require_entry(request, workspace_id)
+    entry = require_entry(request, workspace_id)
     store = _snapshot_store(request)
     size = await run_capture(
         entry, entry.runner.ws.snapshot(store_key(request, req.key), s3=store)

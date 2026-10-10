@@ -12,15 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from collections.abc import Iterable
-
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.record.s3 import S3RecordClient
-from mirage.workspace.session.store import SessionFields, SessionStore
+from mirage.workspace.session.store import RecordSessionStore
 
 
-class S3SessionStore(SessionStore):
+class S3SessionStore(RecordSessionStore):
     """SessionStore backed by per-session S3 objects.
 
     One object per session at ``{key_prefix}sessions/{session_id}.json``
@@ -33,38 +30,6 @@ class S3SessionStore(SessionStore):
     """
 
     def __init__(self, config: S3Config) -> None:
-        self._records = S3RecordClient(
-            config, f"{config.key_prefix or ''}sessions/"
+        super().__init__(
+            S3RecordClient(config, f"{config.key_prefix or ''}sessions/")
         )
-
-    async def load(self) -> dict[str, SessionFields]:
-        return await self._records.load_all()
-
-    async def set(self, session_id: str, fields: SessionFields) -> None:
-        await self._records.put(session_id, fields)
-
-    async def cas_set(
-        self, session_id: str, fields: SessionFields, expected_generation: int
-    ) -> bool:
-        return await self._records.cas_put(
-            session_id, fields, expected_generation
-        )
-
-    async def delete(self, session_ids: Iterable[str]) -> None:
-        await self._records.delete(session_ids)
-
-    async def replace_all(self, entries: dict[str, SessionFields]) -> None:
-        stale = set(await self._records.list_names()) - set(entries)
-        await self._records.delete(stale)
-        await asyncio.gather(
-            *(
-                self._records.put(sid, fields)
-                for sid, fields in entries.items()
-            )
-        )
-
-    async def clear(self) -> None:
-        await self._records.clear()
-
-    async def close(self) -> None:
-        await self._records.close()

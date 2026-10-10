@@ -8,8 +8,6 @@ import {
   secretStr,
 } from '../secrets.ts'
 
-type Mem0ScopeKind = 'user' | 'agent' | 'run'
-
 export interface Mem0ConfigResolved {
   apiKey: string
   host: string
@@ -18,7 +16,6 @@ export interface Mem0ConfigResolved {
   runId: string | null
   defaultPageSize: number
   defaultSearchLimit: number
-  scopeKind: Mem0ScopeKind
   scopeFilter: Record<string, string>
 }
 
@@ -52,15 +49,15 @@ function positive(value: number | undefined, fallback: number, name: string): nu
 
 export function resolveMem0Config(config: Mem0Config): Mem0ConfigResolved {
   const scopes = [
-    ['user', 'user_id', config.userId] as const,
-    ['agent', 'agent_id', config.agentId] as const,
-    ['run', 'run_id', config.runId] as const,
-  ].filter((scope) => scope[2] !== undefined)
+    ['user_id', config.userId] as const,
+    ['agent_id', config.agentId] as const,
+    ['run_id', config.runId] as const,
+  ].filter((scope) => scope[1] !== undefined)
   if (scopes.length !== 1) {
     throw new Error('Mem0Config requires exactly one of userId, agentId, runId')
   }
   const scope = scopes[0]
-  if (scope?.[2]?.trim() === '' || scope?.[2] === undefined) {
+  if (scope?.[1]?.trim() === '' || scope?.[1] === undefined) {
     throw new Error('Mem0 scope id cannot be empty')
   }
   return {
@@ -71,7 +68,6 @@ export function resolveMem0Config(config: Mem0Config): Mem0ConfigResolved {
     runId: config.runId ?? null,
     defaultPageSize: positive(config.defaultPageSize, 100, 'defaultPageSize'),
     defaultSearchLimit: positive(config.defaultSearchLimit, 10, 'defaultSearchLimit'),
-    scopeKind: scope[0],
-    scopeFilter: { [scope[1]]: scope[2] },
+    scopeFilter: { [scope[0]]: scope[1] },
   }
 }

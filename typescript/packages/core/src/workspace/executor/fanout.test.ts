@@ -20,6 +20,10 @@ import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { shouldFanOut } from './fanout.ts'
 
+class NoWalkRAM extends RAMVFS {
+  override readonly overrides: ReadonlySet<string> = new Set(['find', 'du'])
+}
+
 async function nested(): Promise<Workspace> {
   return new Workspace(
     { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/other': new RAMVFS() },
@@ -86,12 +90,11 @@ it.each([
   ['du -s /base/inner /other', '3\t/base/inner\n1\t/other\n'],
 ])('walks a mount without its own walk through the ops: %s', async (line, expected) => {
   const ws = new Workspace(
-    { '/base': new RAMVFS(), '/base/inner': new RAMVFS(), '/other': new RAMVFS() },
+    { '/base': new RAMVFS(), '/base/inner': new NoWalkRAM(), '/other': new RAMVFS() },
     { mode: MountMode.WRITE, shellParser: await getTestParser() },
   )
   try {
     await ws.shell('printf ab > /base/top; printf abc > /base/inner/g; printf a > /other/h')
-    ws.registry.mountFor('/base/inner/').unregister(['find', 'du'])
     const result = await ws.shell(line)
     expect(new TextDecoder().decode(result.stdout)).toBe(expected)
     expect(result.exitCode).toBe(0)

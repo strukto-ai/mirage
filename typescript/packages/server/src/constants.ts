@@ -12,12 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SCOPE_ERROR, SCOPE_WARN } from './constants.ts'
-
-describe('Redis scope constants', () => {
-  it('keeps the warning threshold below the error threshold', () => {
-    expect(SCOPE_WARN).toBe(5000)
-    expect(SCOPE_ERROR).toBe(50000)
-  })
-})
+export const MAX_FINISHED_JOBS = 1024
+export const FINISHED_JOB_RETENTION_SECONDS = 3600

@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FastifyInstance } from 'fastify'
-import { toBriefDict, type JobBriefDict, type JobEntry, type JobTable } from '../jobs.ts'
+import { toBriefDict, type JobBriefDict, type ExecutionTable } from '../jobs.ts'
+import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
 
 export interface JobsRoutesDeps {
-  jobs: JobTable
+  jobs: ExecutionTable
   registry: WorkspaceRegistry
 }
 
@@ -39,7 +40,7 @@ interface JobDetailDict extends JobBriefDict {
   error: string | null
 }
 
-function toDetailDict(entry: JobEntry): JobDetailDict {
+function toDetailDict(entry: ExecutionRecord): JobDetailDict {
   const brief = toBriefDict(entry)
   return { ...brief, result: entry.result, error: entry.error }
 }
@@ -49,8 +50,8 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
    * The job, when its workspace is the caller's to reach; a job of
    * another account's workspace answers null like a missing one.
    */
-  const reachable = async (id: string, account: string | null): Promise<JobEntry | null> => {
-    const entry = await deps.jobs.store.get(id)
+  const reachable = async (id: string, account: string | null): Promise<ExecutionRecord | null> => {
+    const entry = deps.jobs.get(id)
     if (entry === null) return null
     return (await deps.registry.allows(entry.workspaceId, account, entry.submittedAt))
       ? entry
@@ -58,8 +59,8 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
   }
 
   app.get<{ Querystring: JobsListQuery }>('/v1/jobs', async (req) => {
-    const jobs: JobEntry[] = []
-    for (const job of await deps.jobs.list(req.query.workspace_id)) {
+    const jobs: ExecutionRecord[] = []
+    for (const job of deps.jobs.list(req.query.workspace_id)) {
       if (await deps.registry.allows(job.workspaceId, req.account, job.submittedAt)) jobs.push(job)
     }
     return jobs.map(toBriefDict)
@@ -86,6 +87,6 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
     const { id } = req.params
     if ((await reachable(id, req.account)) === null)
       return reply.status(404).send({ detail: 'job not found' })
-    return { job_id: id, canceled: await deps.jobs.cancel(id) }
+    return { job_id: id, canceled: deps.jobs.cancel(id) }
   })
 }

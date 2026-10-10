@@ -12,24 +12,5 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
-from mirage.core.render.json import compact_json_bytes, jsonl_bytes
-
-
-def history_jsonl_bytes(messages: list[dict[str, Any]]) -> bytes:
-    """Render a channel-day's messages as JSONL.
-
-    Args:
-        messages (list[dict]): message dicts, oldest first.
-    """
-    return jsonl_bytes(messages)
-
-
-def member_json_bytes(member: dict[str, Any]) -> bytes:
-    """Render one guild member as JSON.
-
-    Args:
-        member (dict): guild member dict as returned by the members API.
-    """
-    return compact_json_bytes(member)
+MAX_FINISHED_JOBS = 1024
+FINISHED_JOB_RETENTION_SECONDS = 3600.0

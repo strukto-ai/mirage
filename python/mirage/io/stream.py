@@ -14,8 +14,9 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 
+from mirage.concurrency.limiter import settle
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize  # noqa: F401
@@ -79,18 +80,6 @@ def wrap_cachable_streams(
     return stdout, io
 
 
-async def exit_on_empty(
-    stream: AsyncIterator[bytes],
-    io: IOResult,
-) -> AsyncIterator[bytes]:
-    yielded = False
-    async for chunk in stream:
-        yielded = True
-        yield chunk
-    if not yielded:
-        io.exit_code = 1
-
-
 async def drain(stream: ByteSource | None) -> None:
     if stream is None or isinstance(stream, bytes):
         return
@@ -119,6 +108,58 @@ async def close_quietly(stream: ByteSource | None) -> None:
         # closing a drained stream is cleanup; failures must not mask the
         # consumer's own result
         logger.debug("stream closer failed: %s", exc)
+
+
+class OutputStream:
+    """Own producer cleanup even when its byte iterator was never started."""
+
+    def __init__(
+        self,
+        source: AsyncIterator[bytes],
+        close: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._source = source
+        self._close = close
+        self._pull: asyncio.Future[bytes] | None = None
+        self._closing: asyncio.Task[None] | None = None
+
+    def __aiter__(self) -> "OutputStream":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._closing is not None:
+            raise StopAsyncIteration
+        pull = asyncio.ensure_future(anext(self._source))
+        self._pull = pull
+        try:
+            return await pull
+        finally:
+            if self._pull is pull:
+                self._pull = None
+
+    async def _finish(self) -> None:
+        pull = self._pull
+        if pull is not None and not pull.done():
+            pull.cancel()
+            try:
+                await settle(pull)
+            except asyncio.CancelledError:
+                logger.debug("closing an active handler output pull")
+            except Exception:
+                logger.debug(
+                    "handler output pull failed during close", exc_info=True
+                )
+        close = getattr(self._source, "aclose", None)
+        try:
+            if close is not None:
+                await close()
+        finally:
+            await self._close()
+
+    async def aclose(self) -> None:
+        if self._closing is None:
+            self._closing = asyncio.create_task(self._finish())
+        await settle(self._closing)
 
 
 async def discard_streams(*streams: ByteSource | None) -> None:

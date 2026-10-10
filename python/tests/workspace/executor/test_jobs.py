@@ -948,7 +948,7 @@ async def test_closing_a_session_purges_its_jobs():
 
 
 @pytest.mark.asyncio
-async def test_closing_every_session_keeps_the_default_ones_jobs():
+async def test_closing_the_other_sessions_keeps_the_default_ones_jobs():
     ws = _workspace()
     ws.create_session("a")
     ws.create_session("b")
@@ -956,7 +956,8 @@ async def test_closing_every_session_keeps_the_default_ones_jobs():
         await ws.shell("sleep 30 &")
         await ws.shell("sleep 30 &", session_id="a")
         await ws.shell("sleep 30 &", session_id="b")
-        await ws.close_all_sessions()
+        await ws.close_session("a")
+        await ws.close_session("b")
         assert ws.job_table.list_jobs("a") == []
         assert ws.job_table.list_jobs("b") == []
         kept = ws.job_table.get(1, ws.default_session_id)
@@ -1124,9 +1125,8 @@ async def test_kill_zero_respects_signal_permissions_without_cancelling():
         assert (
             await ws.shell(f"kill -0 {pid}", session_id="owner")
         ).exit_code == 0
-        assert (
-            ws.processes.view("owner").get(pid).cancellation_requested is False
-        )
+        [info] = [i for i in ws.processes.view("owner").list() if i.pid == pid]
+        assert info.cancellation_requested is False
     finally:
         await ws.close()
 

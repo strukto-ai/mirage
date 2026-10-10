@@ -281,6 +281,11 @@ export function readonlyRefusal(cmd: string, name: string): Result {
   ]
 }
 
+/** A count option's value (`read -n`/`-N`, `mapfile -n`/`-s` and the rest): a run of ASCII digits, else null. */
+export function countOperand(text: string): number | null {
+  return /^[0-9]+$/.test(text) ? parseInt(text, 10) : null
+}
+
 /** Whether the word is a shell identifier. */
 export function isValidName(name: string): boolean {
   return IDENTIFIER_RE.test(name)

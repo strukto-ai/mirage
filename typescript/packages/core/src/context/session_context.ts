@@ -23,7 +23,7 @@ import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
-import { parent } from '../utils/path.ts'
+import { norm, parent } from '../utils/path.ts'
 import type { DryRun, VfsExplanation, EntryGate } from '../policy/types.ts'
 import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
@@ -158,11 +158,6 @@ export function getCurrentSessionUnlessForeign(owner: SessionOwner): SessionStat
   return binding.session
 }
 
-function normPrefix(mountPrefix: string): string {
-  const stripped = stripSlash(mountPrefix)
-  return stripped === '' ? '/' : '/' + stripped
-}
-
 /**
  * The current session's mode for this mount.
  *
@@ -176,7 +171,7 @@ function normPrefix(mountPrefix: string): string {
  */
 function sessionModeOf(sess: SessionState, mountPrefix: string): MountMode {
   if (sess.mountModes == null) return MountMode.EXEC
-  return sess.mountModes.get(normPrefix(mountPrefix)) ?? MountMode.EXEC
+  return sess.mountModes.get(norm(mountPrefix)) ?? MountMode.EXEC
 }
 
 function sessionMode(mountPrefix: string): MountMode {
@@ -379,12 +374,12 @@ export function runWithMountGate<T>(
  * same inert reading an unbound context gives.
  */
 export function mountGateFor(virtual: string): readonly [string, MountMode] | null {
-  const v = normPrefix(virtual)
+  const v = norm(virtual)
   let bestLen = -1
   let bestPrefix: string | null = null
   let bestMode: MountMode | null = null
   for (const [rawPrefix, mode] of mountGateStorage.liveStores()) {
-    const prefix = normPrefix(rawPrefix)
+    const prefix = norm(rawPrefix)
     if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
     if (prefix.length > bestLen) {
       bestLen = prefix.length
@@ -488,11 +483,11 @@ export function runWithWalkProbe<T>(
  * probe to this one. Mirrors Python's get_walk_probe.
  */
 export function walkProbeFor(virtual: string): WalkProbe | null {
-  const v = normPrefix(virtual)
+  const v = norm(virtual)
   let bestLen = -1
   let best: WalkProbe | null = null
   for (const [rawPrefix, probe] of walkProbeStorage.liveStores()) {
-    const prefix = normPrefix(rawPrefix)
+    const prefix = norm(rawPrefix)
     if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
     if (prefix.length > bestLen) {
       bestLen = prefix.length
@@ -695,7 +690,7 @@ function pathModeUnder(
   mountPrefix: string,
   mountMode: MountMode,
 ): MountMode {
-  const prefix = normPrefix(mountPrefix)
+  const prefix = norm(mountPrefix)
   const cap = sess.mountModes?.get(prefix) ?? null
   let bestDepth = cap != null ? anchorDepth(prefix) : null
   let bestMode: MountMode | null = cap
@@ -753,7 +748,7 @@ export function strongestUnderSession(
   let best = weakerMode(mountMode, sessionModeOf(sess, mountPrefix))
   const shown = sess.visibility.shown
   if (shown == null) return best
-  const prefix = normPrefix(mountPrefix)
+  const prefix = norm(mountPrefix)
   for (const entry of shown.entries) {
     if (entry.mode == null) continue
     if (reachesUnder(showHead(entry.path), prefix)) {

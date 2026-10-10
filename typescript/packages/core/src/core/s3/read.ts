@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rawPathOf } from '../../utils/key_prefix.ts'
 import { publishRead } from '../../cache/context.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
@@ -51,9 +51,7 @@ export async function read(
   options: S3ReadOptions = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const rawPath =
-    prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual
+  const rawPath = rawPathOf(path)
   // `virtual` retains the mount prefix (e.g. /s3/foo) for snapshot records;
   // `rawPath` is the backend-relative key used for the actual S3 call.
   const { config } = accessor

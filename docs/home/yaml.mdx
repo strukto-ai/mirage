@@ -22,7 +22,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `runtimes` | list | — | The workspace's ordered runtime world. |
 | `profiles` / `profile` | map / string | — | Permission documents, and the default one. |
 | `route_policy` | path | — | A `.py` whose last expression names the runtime for a line. |
-| `cache` / `index` / `store` / `console` | block | — | Where bytes, listings, workspace state and job output live. |
+| `cache` / `index` / `store` / `console` | block | — | Where bytes, listings, workspace state and job output live. See [cache stores](/home/cache#stores) for the `cache` and `index` keys. |
 | `env` / `secrets` | map | — | The environment plane and the source table. |
 | `default_session_id` / `default_agent_id` / `workspace_id` | string | — | Identity. |
 
@@ -36,7 +36,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `read` | `fresh` \| `bounded` | top-level `read` | How this mount's cached bytes are served. |
 | `write` | `unconditional` \| `conditional` | top-level `write` | Whether this mount's writes carry the version they were based on. An empty `write: ""` means `unconditional`; `null` or no key takes the top-level `write`. |
 | `ttl` | integer (seconds) | `600` | The staleness bound for this mount's cached bytes and cached listings, under both `bounded` and `fresh`. |
-| `index` | block | top-level `index` | This mount's own listing store, the top-level `index:` keys (`type`, `ttl`, `url`, `key_prefix`). It replaces the top-level block whole; see [a mount's own index](#a-mounts-own-index). |
+| `index` | block | top-level `index` | This mount's own listing store, the top-level `index:` keys (`type`, `ttl`, `url`, `key_prefix`). It replaces the top-level block whole; see [per-mount index](#per-mount-index). |
 | `command_limits` | map | `{}` | Per-command caps for this mount. |
 | `backend` | `workspace` \| `fuse` \| `fskit` | `workspace` | Whether the mount also registers a real mountpoint. |
 | `mountpoint` | path | — | Where, for the kernel backends. |
@@ -75,10 +75,10 @@ through 9007199254740991. Unknown keys are rejected. Chunks remain at most
 A larger value, such as 256 KiB or 1 MiB, absorbs longer bursts at the cost
 of more memory per active queue. It does not guarantee faster execution.
 
-The immutable workspace setting applies to shell pipes, command output,
-process stdin/stdout/stderr, SDK events and HTTP upload/output queues.
+The immutable workspace setting applies to shell pipes, process
+stdin/stdout/stderr, SDK events and HTTP upload/output queues.
 HTTP output counts encoded NDJSON bytes, including base64 overhead; its
-raw payload records remain at most 8 KiB. SDK and handler queues count raw bytes.
+raw payload records remain at most 8 KiB. SDK queues count raw bytes.
 CLI and MCP calls use their workspace's setting, including MCP over SSE
 and stdio. Configure it when creating the workspace; shell calls and MCP
 tool arguments do not override it. Snapshots and copies preserve it.
@@ -147,27 +147,11 @@ line. See [Output Limits](/python/quickstart#output-limits) for the SDK form.
 
 A bare `ttl:` lives only in a mount block. At the top level it would sit beside `index: {ttl: ...}` and mean a different thing, so the workspace-level default is `read:` alone and a workspace-level `bounded` takes 600 seconds. Inside a mount the two are told apart by nesting: `ttl:` is the bound, and a mount's own `index: {ttl: ...}` is how long its listing store keeps a listing, never longer than that bound.
 
-Each listing write is capped by the mount's `ttl`, under both policies. Backends may expire listings sooner, and mounts without a listing cache still keep none. `fresh` also checks listings, so a file added or removed outside mirage shows in the next `ls`, `find` or glob. A cached listing is served when:
-
-1. the running command wrote it;
-2. the mount is a GitHub mount pinned to a full commit sha and the listing was fetched at it, with no request (a Hugging Face Hub mount never pins);
-3. its stored version still matches the backend's: one check per command for a GitHub or Hub mount, one local stat per folder on disk.
-
-Otherwise the folder is listed again, and that re-list is trusted for the rest of the command. A read that belongs to no command (FUSE, a programmatic op such as `ws.vfs`, an agent's file tools) trusts a listing written, or a version check sent, in the last second, so calls in a short `ls -l` burst over FUSE can share one re-list or one check; a burst lasting beyond the window can re-list again, and an outside change can stay hidden from those reads for up to that second.
-
-Disk versions each folder by its change time, which assumes a local POSIX filesystem. For a network or FUSE root (NFS, SMB, rclone, s3fs, mirage's own FUSE), whose folder change time may not move when its entries do, turn the versions off in the mount's `config:`; that mount then re-lists once per command:
-
-```yaml
-mounts:
-  /share:
-    vfs: disk
-    config: {root: /mnt/nfs/share, folder_versions: false}
-    read: fresh
-```
+Each listing write is capped by the mount's `ttl`, under both policies. Backends may expire listings sooner, and mounts without a listing cache still keep none. `fresh` also checks listings, so a file added or removed outside mirage shows in the next `ls`, `find` or glob. A cached listing is served without a re-list only when the running command fetched it, a GitHub mount is pinned to a full commit sha and the listing was fetched at it, or the backend's listing version still matches; otherwise the folder is listed again once per command (a read outside a command trusts a listing from the last second). [Listings under `fresh`](/home/cache#listings-under-fresh) has the cost per backend, including Disk's `folder_versions: false` for a network or FUSE root.
 
 Existing listings in a persisted Redis index retain their stored expiry until rewritten.
 
-### A mount's own index
+### Per-mount index
 
 A mount's `index:` block takes the top-level `index:` keys and replaces that block for this mount, whole: nothing is inherited from it, so `type:` is required, a missing `ttl:` is 600 seconds, and a Redis store's `url:` and `key_prefix:` take the block's own defaults, not the top-level ones. A mount without one takes the top-level `index:`, and with neither, the backend's own listing lifetime ([Index TTL](/home/cache#index-ttl)). `index: null` is the same as leaving it out. The file cache has no per-mount block; a mount's `cache:` is refused.
 
@@ -199,7 +183,8 @@ An unset `read:` is a different thing and is fine: it takes the default.
 
 A snapshot records each mount's policy and bound, and a restore keeps them --
 but only for a mount the loader rebuilds from the saved state itself. A mount
-handed back through `mounts=` takes the default (`bounded`, 600s) instead.
+handed back through `mounts=` takes the default (`bounded`, 600s) instead,
+unless the override is a `Mount` that declares its own `read:`.
 
 That is deliberate: a mount saved with redacted credentials *has* to be handed
 back, and what comes back may be a different backend entirely. Replaying a saved
@@ -267,7 +252,7 @@ A command that moves or deletes several files is refused one file at a time, so 
 **Which version a write sends.** A `>>` append, a resize to a nonzero length, and a write at an offset read the file themselves first, so they send the version of the bytes they just read. Finding the file gone, they are refused when the mount holds a version of it (it was removed since it was read) and write it plain otherwise. Any other write sends, in order:
 
 1. what the same line last read or wrote at that path (`cat f; echo x > f`, or two redirects in a row);
-2. the version the mount kept from an earlier line: the cached copy's, or, where the bytes were not kept (a `grep` or `head` of the file, the agent's own redirect or append, a file bigger than the cache), the version alone.
+2. the version the mount kept from an earlier line: the cached copy's, or, where the bytes were not kept (a `grep` or `head` of the file, the agent's own append, a file bigger than the cache), the version alone.
 
 With neither, mirage holds no version, so there is nothing to compare: the write goes out plain, as on an unconditional mount. Only a file mirage holds a version of is protected, so read a file before overwriting it when another writer may have changed it.
 
@@ -305,11 +290,11 @@ A kernel mount (`backend: fuse` or `fskit`) and an SFTP or `scp` session write t
 
 ### Known limits
 
-- **Versions belong to the mount, not the session.** Two sessions of one workspace, or two workspaces sharing a Redis cache, share versions, so one session's read lets the other's write through.
+- **Versions belong to the cache, not the session.** Two sessions of one workspace, or two workspaces sharing a Redis cache, share versions, so one session's read lets the other's write through.
 - **A write with no version is not conditioned.** A file mirage never read, whose version the cache dropped, or that a `cp` or `mv` within the mount just made, is written plain, as on an unconditional mount. Read a file first when another writer may have changed it.
 - **Writes outside a shell line keep no version.** A write made outside any shell line (host code calling `ws.vfs` directly) leaves no version for the next one, except through the cache.
 - **Some events clear versions:**
-  - After an external program or a remote runtime line, the mount's cache is cleared ([cache](/home/cache)), so the next write has no version.
+  - After a host program, a remote runtime line or an account or script CLI write, cached bytes are dropped ([when the cache is cleared](/home/cache#when-the-cache-is-cleared)), so the next write has no version.
   - A version kept without its bytes lives in the cache like an entry, so a RAM cache's LRU or a Redis server's eviction can drop it. The next write then goes out plain.
   - Otherwise a version a shell line saw outlives the cache's `ttl`. On RAM it lives until the LRU drops it; on Redis it lives 24 hours from the line that last saw it, or as long as its bytes when they live longer, so a server under a `volatile-*` or `noeviction` policy still sheds it. A version from a read outside a shell line (a kernel mount, `ws.vfs`) lives as long as its cached bytes on Redis, the cache's `ttl`.
   - On Redis a version kept without its bytes is not counted against the cache's `limit`: each is a small key of its own, one per file a line read, for 24 hours. On RAM it counts, so the LRU can drop it.
@@ -322,7 +307,7 @@ A kernel mount (`backend: fuse` or `fskit`) and an SFTP or `scp` session write t
 
 A snapshot records each mount's write policy and the workspace's default, and a restore or `copy()` keeps them, also for a mount handed back through `mounts=`. Unlike `read:`, a saved `conditional` is not dropped there: a stand-in that cannot refuse a stale write is refused at load, rather than restored writing blind, and an override `Mount` that names a different `write:` is refused rather than ignored, as is (in TypeScript, whose `fromState` takes options) a `write` option naming a different workspace default.
 
-A restore that pins a file to its saved revision (a versioned bucket) reads that revision, so a write sends the saved version; if the live file has changed since, every write to it is refused, even after a read, for as long as the workspace runs: nothing lifts a pin.
+Under `write: conditional`, a restore that pins a file to its saved revision (a versioned bucket) reads that revision, so a write sends the saved version and is refused if the live file has changed since.
 
 A snapshot keeps the versions of the cached copies it holds, but not a version kept without its bytes: after a restore such a file has no version, so its next write goes out plain until it is read again.
 

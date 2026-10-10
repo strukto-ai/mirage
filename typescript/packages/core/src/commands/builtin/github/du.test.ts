@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { afterEach, expect, it, vi } from 'vitest'
 import { GitHubAccessor } from '../../../accessor/github.ts'
 import type { GitHubTransport } from '../../../core/github/client.ts'
@@ -60,14 +59,12 @@ async function runDu(
       )
     },
   }
-  const result = await invoke(() =>
-    cmd.fn(accessor, [PathSpec.fromStrPath(operand)], [], {
-      stdin: null,
-      flags,
-      cwd: '/',
-      io: table,
-    }),
-  )
+  const result = await cmd.fn(accessor, [PathSpec.fromStrPath(operand)], [], {
+    stdin: null,
+    flags,
+    cwd: '/',
+    io: table,
+  })
   if (result === null) throw new Error('du returned nothing')
   const [out, io] = result
   const bytes =

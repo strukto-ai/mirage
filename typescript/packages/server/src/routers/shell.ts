@@ -17,7 +17,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { JobStatus, type JobEntry, type JobTable } from '../jobs.ts'
+import type { ExecutionTable } from '../jobs.ts'
+import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
 import { UploadStdin } from '../stdin.ts'
@@ -26,7 +27,7 @@ import { RouteError, failure, queryFlag, requireEntry, sessionOf } from './vfs.t
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
-  jobs: JobTable
+  jobs: ExecutionTable
 }
 
 interface ShellParams {
@@ -179,13 +180,13 @@ async function readShellBody(
  * fails, the caller gone or the body bad, cancels the job the same way.
  */
 async function waitAttended(
-  jobs: JobTable,
+  jobs: ExecutionTable,
   jobId: string,
   reply: FastifyReply,
   upload: Promise<unknown>,
-): Promise<JobEntry> {
+): Promise<ExecutionRecord> {
   const gone = (): void => {
-    if (!reply.raw.writableFinished) void jobs.cancel(jobId)
+    if (!reply.raw.writableFinished) jobs.cancel(jobId)
   }
   void upload.then((error) => {
     if (error !== undefined) gone()
@@ -290,11 +291,10 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
       const output = streaming ? new ShellOutput(entry.runner.ws.io.bufferBytes) : undefined
-      let job = await deps.jobs.submit(
+      let job = deps.jobs.submit(
         wsId,
         body.command,
         async (signal, executionScope) => {
-          output?.bindExecution(executionScope.id)
           const options = {
             sessionId,
             executionScope,
@@ -334,10 +334,10 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       } catch (error) {
         return refuse(req, reply, error)
       }
-      if (job.status === JobStatus.CANCELED) {
+      if (job.status === ExecutionStatus.CANCELED) {
         return reply.status(499).send({ detail: 'job canceled' })
       }
-      if (job.status === JobStatus.FAILED) {
+      if (job.status === ExecutionStatus.FAILED) {
         return reply.status(500).send({ detail: job.error ?? 'shell failed' })
       }
       return job.result

@@ -25,11 +25,9 @@ export interface OutputEvent {
 }
 
 export type CommandOutput = [ByteSource | null, IOResult]
-export type HandlerResult = CommandOutput | IOResult | null
 
-/** Routing and settlement shared by a live handler's result and drain. */
+/** Settlement of a result whose fields fill in as its output drains. */
 export class OutputState {
-  stderr: ((data: Uint8Array) => Promise<void>) | null = null
   settled = false
   readonly callbacks: (() => void)[] = []
 
@@ -190,9 +188,9 @@ export class IOResult {
   }
 
   // A delegating read: a streaming command's status can depend on its
-  // content (grep's exitOnEmpty settles the origin only when the stream
-  // drains), so a merged result follows the link instead of holding a
-  // copy, and the value is as fresh as the origin whenever it is read.
+  // content (grep settles the origin only when its stream drains), so a
+  // merged result follows the link instead of holding a copy, and the
+  // value is as fresh as the origin whenever it is read.
   get exitCode(): number {
     if (this.streamSource !== null) return this.streamSource.exitCode
     return this._exitCode
@@ -234,8 +232,8 @@ export class IOResult {
       mergedStderr = concat([leftStderr, rightStderr])
     }
     // The exit code is not copied: the merged result reads it through
-    // the link, so a lazy status settling after this merge (exitOnEmpty
-    // firing at drain time) is still visible.
+    // the link, so a lazy status settling after this merge (grep's, at
+    // drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
       matchedRuns: other.matchedRuns,

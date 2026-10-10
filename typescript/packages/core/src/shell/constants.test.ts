@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { BUILTIN_GROUP, GRAMMAR_BUILTINS, GROUP_TIER, TOOL_BUILTINS } from './constants.ts'
+import { BUILTIN_GROUP, GRAMMAR_BUILTINS, GROUP_TIER } from './constants.ts'
 import { BuiltinGroup, BuiltinTier, ShellBuiltin } from './types.ts'
 
 describe('BuiltinTier', () => {
@@ -22,13 +22,7 @@ describe('BuiltinTier', () => {
     expect(BuiltinTier.GRAMMAR).toBe('grammar')
     expect(BuiltinTier.TOOL).toBe('tool')
     expect(GRAMMAR_BUILTINS.has(ShellBuiltin.CD)).toBe(true)
-    expect(TOOL_BUILTINS.has(ShellBuiltin.PYTHON3)).toBe(true)
-  })
-
-  it('partitions ShellBuiltin', () => {
-    for (const b of GRAMMAR_BUILTINS) expect(TOOL_BUILTINS.has(b)).toBe(false)
-    const union = new Set<string>([...GRAMMAR_BUILTINS, ...TOOL_BUILTINS])
-    expect(union).toEqual(new Set<string>(Object.values(ShellBuiltin)))
+    expect(GRAMMAR_BUILTINS.has(ShellBuiltin.PYTHON3)).toBe(false)
   })
 })
 
@@ -48,7 +42,6 @@ describe('BuiltinGroup', () => {
     for (const [b, g] of BUILTIN_GROUP) {
       const tier = GROUP_TIER.get(g)
       expect(GRAMMAR_BUILTINS.has(b)).toBe(tier === BuiltinTier.GRAMMAR)
-      expect(TOOL_BUILTINS.has(b)).toBe(tier === BuiltinTier.TOOL)
     }
   })
 

@@ -22,6 +22,7 @@ import { PartialOutputError } from '../../../commands/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
+import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
 import { Limit, PathSpec } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
@@ -1031,6 +1032,33 @@ it.each([
   }
 })
 
+async function* body(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new TextEncoder().encode('body'))
+}
+
+it('keeps a cached read whole after the output reads it', async () => {
+  const cli = new CLI({
+    spec: new CommandSpec({ name: 'reader' }),
+    handlers: {
+      '': new CLIHandler({
+        fn: () => {
+          const stream = body()
+          return [stream, new IOResult({ reads: { '/f': stream }, cache: ['/f'] })]
+        },
+      }),
+    },
+  })
+  const [stdout, io] = await handleCli(
+    { name: 'reader', cli, config: null },
+    ['reader'],
+    new SessionState({ sessionId: 'test' }),
+  )
+  expect(new TextDecoder().decode(await materialize(stdout))).toBe('body')
+  const cached = io.reads['/f']
+  expect(cached).toBeInstanceOf(CachableAsyncIterator)
+  expect(new TextDecoder().decode(await (cached as CachableAsyncIterator).drain())).toBe('body')
+})
+
 it.each([null, 1])(
   'joins native producer when unstarted output closes (timeout=%s)',
   async (timeout) => {
@@ -1040,16 +1068,12 @@ it.each([null, 1])(
       handlers: {
         '': new CLIHandler({
           limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-          fn: async (inv) => {
-            if (inv.stdio === undefined) throw new Error('missing stdio')
-            try {
-              await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
-              await inv.stdio.waitCancelled()
-              return new IOResult()
-            } finally {
+          fn: () => [
+            new HeldSource(new TextEncoder().encode('prefix'), () => {
               closed = true
-            }
-          },
+            }),
+            new IOResult(),
+          ],
         }),
       },
     })
@@ -1063,31 +1087,40 @@ it.each([null, 1])(
   },
 )
 
-it.each([0.05, null])(
-  'releases a native writer that ignores cancellation (timeout=%s)',
-  async (timeout) => {
-    const cli = new CLI({
-      spec: new CommandSpec({ name: 'writer' }),
-      handlers: {
-        '': new CLIHandler({
-          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-          fn: async (inv) => {
-            if (inv.stdio === undefined) throw new Error('missing stdio')
-            await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
-            return new Promise<never>(() => undefined)
-          },
-        }),
-      },
-    })
-    const [output] = await handleCli(
-      { name: 'writer', cli, config: null },
-      ['writer'],
-      new SessionState({ sessionId: 'test' }),
-    )
-    const iterator = output as AsyncIterableIterator<Uint8Array>
-    expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
-    if (timeout === null) await iterator.return?.()
-    else await expect(iterator.next()).rejects.toThrow(/writer: timed out after 0.05s/)
-  },
-  2000,
-)
+/** Yields its bytes once, then waits until it is closed, once. */
+class HeldSource implements AsyncIterableIterator<Uint8Array> {
+  private sent = false
+  private closed = false
+  private release: (() => void) | null = null
+
+  constructor(
+    private readonly data: Uint8Array,
+    private readonly onClose: () => void,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+
+  async next(): Promise<IteratorResult<Uint8Array>> {
+    if (!this.sent) {
+      this.sent = true
+      return { done: false, value: this.data }
+    }
+    if (!this.closed) {
+      await new Promise<void>((resolve) => {
+        this.release = resolve
+      })
+    }
+    return { done: true, value: undefined }
+  }
+
+  return(): Promise<IteratorResult<Uint8Array>> {
+    if (!this.closed) {
+      this.closed = true
+      this.onClose()
+    }
+    this.release?.()
+    return Promise.resolve({ done: true, value: undefined })
+  }
+}

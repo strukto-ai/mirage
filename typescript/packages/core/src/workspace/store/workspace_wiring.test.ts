@@ -200,16 +200,20 @@ describe('Workspace on a WorkspaceStateStore', () => {
 
   it('an existing discovery record wins', async () => {
     const store = new RAMWorkspaceStateStore()
-    await store.setMeta('ws-a', {
-      workspace_id: 'ws-a',
-      default_session_id: 'sess_x',
-      created_at: 1,
-    })
+    await store.casSetMeta(
+      'ws-a',
+      {
+        workspace_id: 'ws-a',
+        default_session_id: 'sess_x',
+        created_at: 1,
+      },
+      0,
+    )
     const ws = await mkWs(store, 'ws-a')
     await ws.shell('echo hi')
-    const meta = await ws.workspaceMeta()
-    expect(meta.default_session_id).toBe('sess_x')
-    expect(meta.created_at).toBe(1)
+    const meta = await store.loadMeta('ws-a')
+    expect(meta?.default_session_id).toBe('sess_x')
+    expect(meta?.created_at).toBe(1)
   })
 
   it('concurrent attach admits a single discovery record', async () => {

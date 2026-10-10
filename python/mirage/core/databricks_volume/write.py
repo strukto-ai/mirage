@@ -51,11 +51,18 @@ def _ensure_parent_directory_sync(
         raise enotdir(virtual_target)
 
 
-def _upload_bytes_sync(
+def upload_bytes_sync(
     accessor: DatabricksVolumeAccessor,
     remote_path: str,
     data: bytes,
 ) -> None:
+    """Upload bytes over a volume file, blocking; callers run it in a thread.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): Databricks accessor.
+        remote_path (str): path inside the volume.
+        data (bytes): the file's whole content.
+    """
     accessor.files.upload(remote_path, BytesIO(data), overwrite=True)
 
 
@@ -77,9 +84,7 @@ async def write(
         path.virtual,
     )
     try:
-        await asyncio.to_thread(
-            _upload_bytes_sync, accessor, remote_path, data
-        )
+        await asyncio.to_thread(upload_bytes_sync, accessor, remote_path, data)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

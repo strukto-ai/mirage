@@ -18,7 +18,8 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { InFlight } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
-import { JobStatus, type JobTable } from '../jobs.ts'
+import type { ExecutionTable } from '../jobs.ts'
+import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { McpEndpoint } from '../mcp/http.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { RPC_INTERNAL_ERROR, RPC_INVALID_REQUEST, RPC_PARSE_ERROR } from './constants.ts'
@@ -40,7 +41,7 @@ const RPC_PATH = '/v1/workspaces/:workspaceId/rpc'
 class DaemonRpcServer extends MirageRpcServer {
   constructor(
     private readonly entry: WorkspaceEntry,
-    private readonly jobs: JobTable,
+    private readonly jobs: ExecutionTable,
     sessionId: string,
     operations: MirageToolOperations,
   ) {
@@ -54,7 +55,7 @@ class DaemonRpcServer extends MirageRpcServer {
   ): Promise<JsonValue> {
     const ws = this.entry.runner.ws
     const sessionId = this.sessionId
-    let job = await this.jobs.submit(
+    const submitted = this.jobs.submit(
       this.entry.id,
       command,
       async (jobSignal, executionScope) =>
@@ -63,17 +64,10 @@ class DaemonRpcServer extends MirageRpcServer {
         ),
       sessionId,
     )
-    const jobId = job.id
-    const cancel = (): void => void this.jobs.cancel(jobId)
-    signal?.addEventListener('abort', cancel, { once: true })
-    if (signal?.aborted === true) cancel()
-    try {
-      job = await this.jobs.wait(jobId)
-    } finally {
-      signal?.removeEventListener('abort', cancel)
-    }
-    if (job.status === JobStatus.CANCELED) throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
-    if (job.status === JobStatus.FAILED) {
+    const job = await this.jobs.join(submitted.id, signal)
+    if (job.status === ExecutionStatus.CANCELED)
+      throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
+    if (job.status === ExecutionStatus.FAILED) {
       throw new RpcError(RPC_INTERNAL_ERROR, job.error ?? 'shell failed')
     }
     return job.result
@@ -94,7 +88,7 @@ class RpcEndpoint {
 
   constructor(
     private readonly registry: WorkspaceRegistry,
-    private readonly jobs: JobTable,
+    private readonly jobs: ExecutionTable,
     private readonly mcp: McpEndpoint,
   ) {}
 
@@ -175,7 +169,7 @@ class RpcEndpoint {
 export function registerRpcRoutes(
   app: FastifyInstance,
   registry: WorkspaceRegistry,
-  jobs: JobTable,
+  jobs: ExecutionTable,
   mcp: McpEndpoint,
 ): void {
   const endpoint = new RpcEndpoint(registry, jobs, mcp)

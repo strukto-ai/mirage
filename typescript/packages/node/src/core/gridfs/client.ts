@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Collection, Db, Document, GridFSBucket, ObjectId } from 'mongodb'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { loadOptionalPeer } from '../../optional_peer.ts'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
@@ -60,13 +59,6 @@ export function gridfsPrefix(path: string, config: GridFSConfig): string {
 
 export function stripKeyPrefix(key: string, config: GridFSConfig): string {
   return kp.strip(config.keyPrefix ?? '', key)
-}
-
-export function rawPathOf(path: PathSpec): string {
-  const prefix = kp.mountPrefixOf(path.virtual, path.vfsPath)
-  return prefix !== '' && path.virtual.startsWith(prefix)
-    ? path.virtual.slice(prefix.length) || '/'
-    : path.virtual
 }
 
 function bucketName(config: GridFSConfig): string {

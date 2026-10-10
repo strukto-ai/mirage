@@ -14,7 +14,7 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { afterIdPages } from './paginate.ts'
-import { historyJsonlBytes } from './render.ts'
+import { jsonlBytes } from '../render/json.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 
@@ -76,7 +76,7 @@ export async function getHistoryJsonl(
   dateStr: string,
 ): Promise<Uint8Array> {
   const messages = await listMessagesForDay(accessor, channelId, dateStr)
-  return historyJsonlBytes(messages)
+  return jsonlBytes(messages)
 }
 
 export async function fetchRecentMessages(

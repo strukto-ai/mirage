@@ -19,12 +19,7 @@ from typing import Any
 
 from mirage.context.session_context import SessionOwner
 from mirage.policy.profile import CompiledProfile
-from mirage.policy.types import (
-    AdmissionRules,
-    Decision,
-    HideReason,
-    ProfileScript,
-)
+from mirage.policy.types import AdmissionRules, Decision, ProfileScript
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
@@ -213,27 +208,6 @@ class SessionManager(SessionOwner):
                 else None
             )
         return session.script
-
-    def hide_reasons_of(self, session_id: str) -> tuple[HideReason, ...]:
-        """The operator's hide reasons for one session's profile.
-
-        The default profile's for an id this manager does not know, the
-        same fallback ``commands_of`` makes and for the same reason.
-        Host-side only: nothing on the command surface renders these,
-        because a reason on a nonexistent path would confirm the path
-        exists.
-
-        Args:
-            session_id (str): the session, empty when none is bound.
-        """
-        session = self._sessions.get(session_id)
-        if session is None:
-            return (
-                self._default_profile.hide_reasons
-                if self._default_profile is not None
-                else ()
-            )
-        return session.hide_reasons
 
     def decision_sessions(self) -> tuple[str, ...]:
         """Every session id holding ledger records
@@ -538,16 +512,6 @@ class SessionManager(SessionOwner):
         self._line_locks.pop(session_id, None)
         self._persisted.pop(session_id, None)
         await self._store.delete([session_id])
-
-    async def close_all(self) -> None:
-        session_ids = [
-            sid for sid in self._sessions if sid != self._default_id
-        ]
-        for sid in session_ids:
-            await self.close(sid)
-
-    async def close_store(self) -> None:
-        await self._store.close()
 
     def lock_for(self, session_id: str) -> asyncio.Lock:
         return self._locks[session_id]

@@ -120,7 +120,6 @@ type Step = (
       name: string
       exit_code?: number
       stderr?: string
-      writer?: boolean
     }
   | {
       op: 'register_policy'
@@ -262,23 +261,9 @@ class TrackedStreamCLI {
   constructor(
     readonly exitCode: number,
     readonly stderr: string,
-    readonly writer: boolean,
   ) {}
 
-  async invoke(inv: CLIInvocation): Promise<CommandFnResult | IOResult> {
-    if (this.writer) {
-      if (inv.stdio === undefined) throw new Error('expected handler stdio')
-      try {
-        for await (const chunk of inv.stdio.stdin) {
-          this.pulls++
-          await inv.stdio.stdout.write(chunk)
-        }
-        await inv.stdio.stderr.write(ENC.encode(this.stderr))
-        return new IOResult({ exitCode: this.exitCode })
-      } finally {
-        this.closed++
-      }
-    }
+  invoke(inv: CLIInvocation): CommandFnResult {
     const result = new IOResult({ stderr: ENC.encode(this.stderr) })
     return [this.output(inv, result), result]
   }
@@ -401,7 +386,7 @@ async function action(
   }
   switch (step.op) {
     case 'register_stream_cli': {
-      const cli = new TrackedStreamCLI(step.exit_code ?? 0, step.stderr ?? '', step.writer ?? false)
+      const cli = new TrackedStreamCLI(step.exit_code ?? 0, step.stderr ?? '')
       held.streamClis ??= new Map()
       held.streamClis.set(step.name, cli)
       ws.registerCli(
@@ -560,7 +545,6 @@ async function action(
         await completion
       }
       return {
-        has_id: execution.id.length > 0,
         events,
         bounded: events.every((event) => event.data.length <= 16384),
         stdout_bytes: events.reduce(

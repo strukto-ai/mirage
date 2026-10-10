@@ -3,7 +3,8 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { lstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { NextcloudAccessor } from '../../../accessor/nextcloud.ts'
-import { isNotFound, rawPathOf } from '../util.ts'
+import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { isNotFound } from '../util.ts'
 import { statOrNull } from './walk.ts'
 
 export async function entries(

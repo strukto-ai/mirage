@@ -27,6 +27,7 @@ from mirage.workspace.executor.builtins.read.constants import (
     READ_VALUE_LETTERS,
 )
 from mirage.workspace.executor.builtins.shared import (
+    count_operand,
     is_valid_name,
     readonly_refusal,
     record_delimiter,
@@ -105,15 +106,6 @@ def _read_refusal(
         IOResult(exit_code=1, stderr=err),
         ExecutionNode(command="read", exit_code=1, stderr=err),
     )
-
-
-def _read_count(text: str) -> int | None:
-    """A `-n`/`-N` operand: a non-negative integer, else None.
-
-    Args:
-        text (str): the option's value as typed.
-    """
-    return int(text) if text.isdigit() else None
 
 
 def _last_count_flag(args: list[str]) -> str | None:
@@ -329,14 +321,14 @@ async def handle_read(
     for key in ("n", "N"):
         if key not in flags:
             continue
-        count = _read_count(str(flags[key]))
+        count = count_operand(str(flags[key]))
         if count is None:
             return _read_refusal(f"bash: read: {flags[key]}: invalid number\n")
     which = _last_count_flag(args)
     if which == "N":
-        exact = _read_count(str(flags["N"]))
+        exact = count_operand(str(flags["N"]))
     elif which == "n":
-        nchars = _read_count(str(flags["n"]))
+        nchars = count_operand(str(flags["n"]))
     timeout: float | None = None
     if "t" in flags:
         timeout = _read_timeout(str(flags["t"]))

@@ -15,7 +15,6 @@
 import { sanitizeName } from '../../utils/sanitize.ts'
 
 export { sanitizeName } from '../../utils/sanitize.ts'
-export { parseIdName as splitSuffixId } from '../../utils/naming.ts'
 import { SEPARATOR, fitIdName } from '../../utils/naming.ts'
 
 function pickString(record: Record<string, unknown>, ...keys: readonly string[]): string {

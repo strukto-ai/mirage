@@ -12,7 +12,8 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { basename, readFile, readNames, readOptional, readRange } from './io.ts'
+import { readFile, readNames, readOptional, readRange } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 
 import { loadRefs } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
@@ -67,15 +68,15 @@ async function objectIds(repo: Repo): Promise<Set<string>> {
   const root = repo.location.commondir.join('objects')
   const ids = new Set<string>()
   for (const entry of await readNames(repo.dispatch, root)) {
-    const fanout = basename(entry)
+    const fanout = entryName(entry)
     if (!/^[0-9a-f]{2}$/.test(fanout)) continue
     for (const name of await readNames(repo.dispatch, root.join(fanout))) {
-      const oid = fanout + basename(name)
+      const oid = fanout + entryName(name)
       if (/^[0-9a-f]{40}$/.test(oid)) ids.add(oid)
     }
   }
   for (const entry of await readNames(repo.dispatch, root.join('pack'))) {
-    const name = basename(entry)
+    const name = entryName(entry)
     if (!name.endsWith('.idx')) continue
     const data = await readFile(repo.dispatch, root.join(`pack/${name}`))
     if (data.length < 1064) throw new GitError(`truncated pack index: ${name}`)
@@ -103,7 +104,7 @@ async function logRoots(
 ): Promise<Set<string>> {
   const found = new Set<string>()
   for (const entry of await readNames(dispatch, path)) {
-    const target = path.join(basename(entry))
+    const target = path.join(entryName(entry))
     if ((await statPath(target))?.type === FileType.DIRECTORY) {
       for (const oid of await logRoots(dispatch, statPath, target)) found.add(oid)
     } else {

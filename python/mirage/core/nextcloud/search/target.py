@@ -2,8 +2,8 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from mirage.core.nextcloud.search.constants import SEARCH_ENDPOINT_PATH
 from mirage.core.nextcloud.search.types import SearchTarget
-from mirage.core.nextcloud.util import raw_path_of
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import raw_path_of
 
 
 def search_target(url: str) -> SearchTarget | None:

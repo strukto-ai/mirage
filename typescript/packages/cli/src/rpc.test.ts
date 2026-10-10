@@ -13,35 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
-import { RPC_ENV_NAMES, resolveRpcConfig } from './rpc.ts'
+import { describe, expect, it } from 'vitest'
+import { RPC_ENV_NAMES } from './rpc.ts'
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'bin', 'mirage.js')
-const MINIMAL = 'mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n'
-const tempDirs: string[] = []
-
-function mkTempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mirage-rpc-'))
-  tempDirs.push(dir)
-  return dir
-}
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
 
 describe('mirage rpc', () => {
   it('reads the rpc config names first', () => {
     expect(RPC_ENV_NAMES).toEqual(['MIRAGE_RPC_CONFIG', 'MIRAGE_CONFIG'])
-    const dir = mkTempDir()
-    writeFileSync(join(dir, 'w.yaml'), MINIMAL)
-    expect(resolveRpcConfig(undefined, { env: { MIRAGE_RPC_CONFIG: join(dir, 'w.yaml') } })).toBe(
-      join(dir, 'w.yaml'),
-    )
   })
 
   it('takes a config or a workspace, not both', async () => {

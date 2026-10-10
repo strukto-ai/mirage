@@ -31,10 +31,10 @@ from mirage.core.discord.files import file_blob_name
 from mirage.core.discord.guilds import list_guilds
 from mirage.core.discord.history import list_messages_for_day
 from mirage.core.discord.members import list_members
-from mirage.core.discord.render import history_jsonl_bytes
 from mirage.core.discord.scope import detect_scope
 from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import guard_day
 from mirage.utils.glob_walk import glob_span, has_glob_span
 
@@ -189,7 +189,7 @@ async def _day_listing(
         name="chat.jsonl",
         resource_type="discord/chat_jsonl",
         vfs_name="chat.jsonl",
-        size=len(history_jsonl_bytes(messages)),
+        size=len(jsonl_bytes(messages)),
     )
     files_entry = IndexEntry(
         id=f"{channel_id}:{date_str}:files",

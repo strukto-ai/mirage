@@ -62,11 +62,6 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
         fields = self._meta.get(workspace_id)
         return dict(fields) if fields is not None else None
 
-    async def _set_meta(
-        self, workspace_id: str, fields: WorkspaceFields
-    ) -> None:
-        self._meta[workspace_id] = dict(fields)
-
     async def _cas_set_meta(
         self,
         workspace_id: str,

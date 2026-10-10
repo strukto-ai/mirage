@@ -148,3 +148,4 @@ def test_entry_name_takes_the_last_component():
     assert entry_name("sub/") == "sub"
     assert entry_name("/a/b/c") == "c"
     assert entry_name("plain") == "plain"
+    assert entry_name("objects/pack//") == "pack"

@@ -340,7 +340,7 @@ EOF
     The shell only sees your mounts: no arbitrary host filesystem, no shelling out to host binaries. For untrusted code you'd still want a real sandbox (Daytona, E2B, Modal); Mirage embeds inside those rather than replacing them.
   </Accordion>
   <Accordion title="What about latency and cost?">
-    Backend-bound. <code>cat /s3/...</code> is one GetObject; <code>find /postgres/...</code> is a SQL query. Reads go through the workspace <a href="/home/cache">cache</a>: under the default <code>read: bounded</code> a repeat read within the mount's <code>ttl</code> makes no backend call, and under <code>read: fresh</code> it costs one stat to revalidate.
+    Backend-bound. <code>cat /s3/...</code> is one GetObject; <code>find /postgres/...</code> is a SQL query. Reads go through the workspace <a href="/home/cache">cache</a>: under the default <code>read: bounded</code> a repeat read within the mount's <code>ttl</code> makes no backend call, and under <code>read: fresh</code> it costs one metadata check (and a download if the file changed).
   </Accordion>
   <Accordion title="Hosted or self-hosted?">
     Self-hosted. Mirage is a library plus a thin local daemon. The daemon lives in your process or sandbox; data only leaves your network if a mount you configured already does (e.g. an S3 read).

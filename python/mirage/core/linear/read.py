@@ -37,6 +37,7 @@ from mirage.core.linear.normalize import (
     project_issue_rows,
     to_json_bytes,
 )
+from mirage.core.linear.readdir import filtered_teams
 from mirage.core.linear.scope import detect_scope
 from mirage.core.linear.stat import stat
 from mirage.core.render.json import jsonl_bytes_by_created_at
@@ -51,14 +52,7 @@ async def _read_team_json(
     index: IndexCacheStore,
 ) -> bytes:
     team_id = match.slots["team_id"]
-    teams = await list_teams(accessor.config, session=accessor.pool)
-    if accessor.config.team_ids:
-        teams = [
-            team
-            for team in teams
-            if team.get("id") in accessor.config.team_ids
-        ]
-    for team in teams:
+    for team in await filtered_teams(accessor):
         if team.get("id") == team_id:
             return to_json_bytes(normalize_team(team))
     raise enoent(path.virtual)

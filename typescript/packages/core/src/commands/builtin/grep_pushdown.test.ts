@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
@@ -467,14 +466,12 @@ describe('an empty search answer', () => {
       resolved: false,
       vfsPath: mountKey(virtual, prefix),
     })
-    const result = await invoke(() =>
-      cmd.fn(accessor, [spec], ['missing'], {
-        stdin: null,
-        flags,
-        io,
-        cwd: '/',
-      }),
-    )
+    const result = await cmd.fn(accessor, [spec], ['missing'], {
+      stdin: null,
+      flags,
+      io,
+      cwd: '/',
+    })
     if (result === null) throw new Error('no result')
     const [out, ioResult] = result
     expect(calls.map((c) => c.endpoint)).toEqual(searches)
