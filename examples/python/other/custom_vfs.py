@@ -125,7 +125,6 @@ class PagesVFS(BaseVFS):
             fingerprint=hashlib.sha256(data).hexdigest()[:16],
         )
 
-
     # Optional: say which pages may hold a text, and grep and rg read
     # only those. What they print is unchanged; None reads every page.
     async def files_containing(

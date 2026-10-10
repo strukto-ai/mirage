@@ -270,7 +270,10 @@ def candidate_reads(
 
 
 async def _directories(
-    io: CommandIO, accessor: Accessor, index: IndexCacheStore, paths: list[PathSpec]
+    io: CommandIO,
+    accessor: Accessor,
+    index: IndexCacheStore,
+    paths: list[PathSpec],
 ) -> list[PathSpec]:
     """The operands that stat as directories, the scopes a walk covers.
 
@@ -395,7 +398,11 @@ async def search_reads(
             )
         for text in terms.texts:
             found = await lines(
-                accessor, path, text, ignore_case=terms.ignore_case, index=index
+                accessor,
+                path,
+                text,
+                ignore_case=terms.ignore_case,
+                index=index,
             )
             if found is None or found:
                 return None

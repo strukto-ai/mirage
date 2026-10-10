@@ -20,12 +20,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.search import make_search_op
 from mirage.errors.fs import efbig, enoent
@@ -506,7 +503,9 @@ def test_a_walk_that_reads_every_file_says_why(line, reason):
 
 def test_a_mount_may_refuse_a_full_scan():
     class Refusing(SearchRAM):
-        async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
+        async def before_full_scan(
+            self, command, under, reason, index=NULL_INDEX
+        ):
             raise ValueError(f"{reason}; narrow the path")
 
     assert asyncio.run(_run(Refusing(), "grep -rv ada /d")) == (

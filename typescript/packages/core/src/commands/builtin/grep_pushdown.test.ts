@@ -440,7 +440,7 @@ describe('searchTerms', () => {
     // match holds, never shorter than three characters. Under -i a needle
     // with s, k or i is dropped (Unicode folds the long s to s), and a
     // mount's folding of a non-ASCII literal is not trusted.
-    const matcher = new RegExp(pattern.replace('\n', '|'), flags)
+    const matcher = new RegExp(pattern.replaceAll('\n', '|'), flags)
     expect(searchTerms(pattern, matcher, false, w, false, i)).toEqual(expected)
   })
 })
