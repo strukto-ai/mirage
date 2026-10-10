@@ -31,6 +31,7 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import {
   DIR_MODE,
   DIR_SIZE,
+  FILE_MODE,
   atimeMs,
   contentSize,
   deviceRdev,
@@ -469,17 +470,34 @@ export class MountCore {
     await this.applyWrites(path, [[pos, data]])
   }
 
-  async create(path: string): Promise<number> {
+  /**
+   * Create an empty file and return a fresh handle. `mode` is what the
+   * creator asked for, umask applied; null takes the mount's default.
+   */
+  async create(path: string, mode: number | null = null): Promise<number> {
     const key = this.identity(path)
     await this.mutate(key, async () => {
       await this.op(() => this.files.create(this.resolve(path)))
+      await this.keepMode(path, mode, FILE_MODE)
       await this.changed(path)
     })
     return this.handles.add({ path, key })
   }
 
-  async mkdir(path: string): Promise<void> {
+  /** Create a directory, keeping the mode it was asked for. */
+  async mkdir(path: string, mode: number | null = null): Promise<void> {
     await this.op(() => this.files.mkdir(this.resolve(path)))
+    await this.keepMode(path, mode, DIR_MODE)
+  }
+
+  /**
+   * Store the mode a create asked for, when it is not the one the mount
+   * reports anyway, so `open(O_CREAT, 0600)` and `mkdir -m` read back as
+   * asked without a write per ordinary create. Mirrors Python's
+   * `_keep_mode`.
+   */
+  private async keepMode(path: string, mode: number | null, fallback: number): Promise<void> {
+    if (mode !== null && (mode & 0o7777) !== (fallback & 0o7777)) await this.setattr(path, mode)
   }
 
   /** The target of a namespace link, read through the dispatcher; EINVAL when not a link. */
@@ -667,16 +685,18 @@ export class MountCore {
 
   /**
    * Store metadata through the dispatcher. The backend keeps what it can and
-   * the namespace overlay the rest, so a chmod or chown through the mount is
-   * what `stat` in a shell reads back, on a backend with no permission bits
-   * of its own too. A null field is left as it is. Mirrors Python's
-   * `MountCore.setattr`.
+   * the namespace overlay the rest, so a chmod, chown or `touch -d` through
+   * the mount is what `stat` in a shell reads back, on a backend with no
+   * permission bits or settable times of its own too. A null field is left
+   * as it is. Mirrors Python's `MountCore.setattr`.
    */
   async setattr(
     path: string,
     mode: number | null,
     uid: number | null = null,
     gid: number | null = null,
+    atime: Date | null = null,
+    mtime: Date | null = null,
   ): Promise<void> {
     // The kernel has already resolved any link the call follows, so the
     // path names the entry to change, a link itself for `chown -h`.
@@ -684,7 +704,24 @@ export class MountCore {
     if (mode !== null) fields.mode = mode & 0o7777
     if (uid !== null) fields.uid = uid
     if (gid !== null) fields.gid = gid
-    await this.op(() => this.files.setattr(this.resolve(path), fields))
+    if (atime !== null) fields.atime = atime.toISOString()
+    if (mtime !== null) fields.mtime = mtime.toISOString()
+    const store = (): Promise<unknown> =>
+      this.op(() => this.files.setattr(this.resolve(path), fields))
+    if (atime === null && mtime === null) {
+      await store()
+      return
+    }
+    const key = this.identity(path)
+    await this.mutate(key, async () => {
+      // Writes the kernel acknowledged before the times were set precede
+      // them in POSIX order; landed later, they would stamp over them (cp -p
+      // sets the times on the file it still holds open). Mirrors Python.
+      for (const ctx of this.handles.values()) {
+        if (ctx.key === key) await this.persistBuffered(ctx)
+      }
+      await store()
+    })
   }
 
   /**

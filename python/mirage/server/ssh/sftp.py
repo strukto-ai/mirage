@@ -191,13 +191,16 @@ async def listing(core: MountCore, path: str) -> list[tuple[str, MountAttrs]]:
     return [row for task in tasks if (row := task.result()) is not None]
 
 
-async def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
+async def open_file(
+    core: MountCore, path: str, pflags: int, mode: int | None = None
+) -> OpenFile:
     """Open or create a file the way an SFTP ``open`` asks.
 
     Args:
         core (MountCore): the mount core.
         path (str): the file.
         pflags (int): SFTP v3 open flags.
+        mode (int | None): the permissions a create asks for.
 
     Returns:
         OpenFile: the new handle.
@@ -213,7 +216,7 @@ async def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
     if not found:
         if not pflags & FXF_CREAT:
             raise enoent(path)
-        fh = await core.create(path)
+        fh = await core.create(path, mode)
     else:
         if stat.S_ISDIR((await core.getattr(path)).mode):
             raise eisdir(path)
@@ -224,19 +227,40 @@ async def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
     return OpenFile(path, fh, append_at)
 
 
-async def set_size(core: MountCore, path: str, size: int | None) -> None:
-    """Apply an SFTP setstat: a size truncates, anything else is accepted
-    once the path is known to exist, as the FUSE adapter treats chmod,
-    chown and utimens.
+def epoch_ns(seconds: int | None, ns: int | None) -> int | None:
+    """An SFTP time (whole seconds plus a nanosecond part) in epoch ns.
+
+    Args:
+        seconds (int | None): the whole seconds, None when not sent.
+        ns (int | None): the nanosecond part, when sent.
+    """
+    return None if seconds is None else seconds * NS_PER_SECOND + (ns or 0)
+
+
+async def set_attrs(
+    core: MountCore, path: str, attrs: asyncssh.SFTPAttrs
+) -> None:
+    """Apply an SFTP setstat: a size truncates, and permissions, owner
+    and times are stored as chmod, chown and utimens through a kernel
+    mount store them. One with nothing to change still needs the path.
 
     Args:
         core (MountCore): the mount core.
         path (str): the path.
-        size (int | None): the requested size, if any.
+        attrs (asyncssh.SFTPAttrs): what the client asked to change.
     """
-    if size is not None:
-        await core.truncate(path, size)
-    else:
+    if attrs.size is not None:
+        await core.truncate(path, attrs.size)
+    fields = (
+        attrs.permissions,
+        attrs.uid,
+        attrs.gid,
+        epoch_ns(attrs.atime, attrs.atime_ns),
+        epoch_ns(attrs.mtime, attrs.mtime_ns),
+    )
+    if any(field is not None for field in fields):
+        await core.setattr(path, *fields)
+    elif attrs.size is None:
         await core.getattr(path)
 
 
@@ -385,7 +409,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     async def setstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
         p = self._path(path)
-        await self._call(lambda core: set_size(core, p, attrs.size))
+        await self._call(lambda core: set_attrs(core, p, attrs))
 
     async def lsetstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
         await self.setstat(path, attrs)
@@ -397,7 +421,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
             ctx = core.handles.get(f.fh)
             if ctx is None:
                 raise asyncssh.SFTPFailure("invalid handle")
-            await set_size(core, ctx.path, attrs.size)
+            await set_attrs(core, ctx.path, attrs)
 
         await self._call(resize)
 
@@ -410,7 +434,9 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs
     ) -> OpenFile:
         p = self._path(path)
-        return await self._call(lambda core: open_file(core, p, pflags))
+        return await self._call(
+            lambda core: open_file(core, p, pflags, attrs.permissions)
+        )
 
     async def open56(
         self,
@@ -450,7 +476,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     async def mkdir(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
         p = self._path(path)
-        await self._call(lambda core: core.mkdir(p))
+        await self._call(lambda core: core.mkdir(p, attrs.permissions))
 
     async def rmdir(self, path: bytes) -> None:
         p = self._path(path)

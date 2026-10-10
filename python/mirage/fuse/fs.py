@@ -18,6 +18,7 @@ import inspect
 import logging
 import os
 import threading
+import time
 from typing import Any, Callable
 
 from mirage.bridge.sync import run_async_from_sync
@@ -128,10 +129,10 @@ class MirageFS:
         return self._call(self.core.write, path, data, offset, fh)
 
     def create(self, path: str, mode: int, fi: Any = None) -> int:
-        return self._call(self.core.create, path)
+        return self._call(self.core.create, path, mode)
 
     def mkdir(self, path: str, mode: int) -> None:
-        self._call(self.core.mkdir, path)
+        self._call(self.core.mkdir, path, mode)
 
     def readlink(self, path: str) -> str:
         return self._call(self.core.readlink, path)
@@ -167,18 +168,17 @@ class MirageFS:
         # depends on it: createItem/createDirectory finalize the new item
         # with a SETATTR (mode|uid|gid|crtime|flags), which used to hit a
         # NULL slot and fail the whole create with ENOSYS after the file
-        # had already landed. Size changes route to truncate, mode and
-        # owner to setattr as chmod/chown do; times are accepted if the
-        # path exists, as utimens does.
+        # had already landed. Size changes route to truncate, mode, owner
+        # and times to setattr as chmod, chown and utimens do.
         size = changes.get("size")
         if isinstance(size, int):
             self._call(self.core.truncate, path, size)
-        mode, uid, gid = (
+        fields = [
             value if isinstance(value := changes.get(key), int) else None
-            for key in ("mode", "uid", "gid")
-        )
-        if (mode, uid, gid) != (None, None, None):
-            self._call(self.core.setattr, path, mode, uid, gid)
+            for key in ("mode", "uid", "gid", "acctime", "modtime")
+        ]
+        if any(field is not None for field in fields):
+            self._call(self.core.setattr, path, *fields)
         elif not isinstance(size, int):
             self._call(self.core.getattr, path)
         return 0
@@ -207,11 +207,20 @@ class MirageFS:
             None if gid == -1 else gid,
         )
 
-    def utimens(self, path: str, times: Any = None) -> None:
-        # Accepted, not stored: libfuse marks "now" and "leave it" in the
-        # nanosecond field, and the binding folds that into one number,
-        # so the two cannot be told from a real time.
-        self._call(self.core.getattr, path)
+    def utimens(
+        self, path: str, times: tuple[int | None, int | None] | None = None
+    ) -> None:
+        # (atime, mtime) in epoch nanoseconds, None for one left as it is
+        # (load_fuse's marshaller reads utimensat's markers); no times at
+        # all is utimes(path, NULL), both now.
+        if times is None:
+            now = time.time_ns()
+            times = (now, now)
+        atime, mtime = times
+        if atime is None and mtime is None:
+            self._call(self.core.getattr, path)
+            return
+        self._call(self.core.setattr, path, None, None, None, atime, mtime)
 
     def access(self, path: str, amode: int) -> None:
         self._call(self.core.getattr, path)

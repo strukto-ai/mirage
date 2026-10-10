@@ -22,9 +22,11 @@ from unittest.mock import Mock
 import pytest
 
 from mirage.fuse.backend import MountBackend
+from mirage.fuse.constants import UTIME_NOW, UTIME_OMIT
 from mirage.fuse.fs import MirageFS
 from mirage.fuse.mount import (
     _await_ready,
+    _marshal_utimens,
     _prepare_mountpoint,
     _run_fuse,
     canonical_mountpoint,
@@ -200,8 +202,9 @@ def test_load_fuse_reports_missing_driver(monkeypatch, err):
 def test_load_fuse_installs_macfuse_extensions(monkeypatch):
     # The FSKit write surface rides on the Darwin-only callbacks being
     # declared before the operations struct is built (CLAUDE.md, FUSE), and
-    # the loader is the only place left that declares them.
-    module = SimpleNamespace()
+    # the loader is the only place left that declares them. It also swaps
+    # in the utimens marshalling that keeps utimensat's markers.
+    module = SimpleNamespace(FUSE=type("FUSE", (), {}))
     install = Mock()
     monkeypatch.setattr(
         "mirage.fuse.mount.importlib.import_module", Mock(return_value=module)
@@ -211,6 +214,7 @@ def test_load_fuse_installs_macfuse_extensions(monkeypatch):
     )
     assert load_fuse() is module
     install.assert_called_once_with(module)
+    assert module.FUSE.utimens_fuse_2 is _marshal_utimens
 
 
 def test_resolve_fusermount_binary_prefers_legacy(monkeypatch):
@@ -314,3 +318,33 @@ def test_unmount_with_fusermount_skips_a_helper_failure_once_gone(
     )
     monkeypatch.setattr("mirage.fuse.mount.is_mounted", lambda _path: False)
     unmount_with_fusermount("/mnt/m")
+
+
+def _utimbuf(
+    atime: tuple[int, int], mtime: tuple[int, int]
+) -> SimpleNamespace:
+    def spec(sec: int, nsec: int) -> SimpleNamespace:
+        return SimpleNamespace(tv_sec=sec, tv_nsec=nsec)
+
+    return SimpleNamespace(
+        contents=SimpleNamespace(actime=spec(*atime), modtime=spec(*mtime))
+    )
+
+
+def test_utimens_marshalling_reads_the_utimensat_markers():
+    # mfusepy folds a timespec into one number, so `touch -m` would store
+    # its UTIME_OMIT access time as a date in 1970.
+    seen = []
+    fuse = SimpleNamespace(
+        encoding="utf-8",
+        errors="surrogateescape",
+        operations=SimpleNamespace(
+            utimens=lambda path, times: seen.append((path, times)) or 0
+        ),
+    )
+    _marshal_utimens(fuse, b"/f", _utimbuf((0, UTIME_OMIT), (5, 7)))
+    _marshal_utimens(fuse, b"/f", _utimbuf((0, UTIME_NOW), (0, UTIME_OMIT)))
+    _marshal_utimens(fuse, b"/f", None)
+    assert seen[0] == ("/f", (None, 5_000_000_007))
+    assert seen[1][1][0] > 5_000_000_007 and seen[1][1][1] is None
+    assert seen[2] == ("/f", None)

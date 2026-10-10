@@ -496,6 +496,21 @@ describe('MountCore', () => {
     expect((await new MountCore(ws.vfs).getattr('/')).mode & 0o170000).toBe(0o040000)
   })
 
+  it('keeps times set on an open file over its buffered writes', async () => {
+    // cp -p writes the copy, sets its times on the file it still holds
+    // open, then closes it: the writes precede the times in POSIX order.
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("echo 'hello world' > /data/f")
+    const core = new MountCore(ws.vfs)
+    const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+    await core.write('/data/f', fd, new TextEncoder().encode('copied'), 0)
+    const when = new Date('2001-09-09T01:46:40.000Z')
+    await core.setattr('/data/f', null, null, null, null, when)
+    await core.release(fd)
+    expect((await core.getattr('/data/f')).mtime.getTime()).toBe(when.getTime())
+    expect(new TextDecoder().decode(await core.read('/data/f', -1, 0, 100))).toBe('copiedworld\n')
+  })
+
   it('reads what a handle wrote while its flush is still landing', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'hello world' > /data/f")

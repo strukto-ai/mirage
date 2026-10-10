@@ -33,9 +33,11 @@ from mirage.runtime.handles import (
 )
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import LIVE_KEY, FileStat, FileType
+from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
     DIR_MODE,
     DIR_SIZE,
+    FILE_MODE,
     atime_ns,
     content_size,
     device_rdev,
@@ -547,11 +549,13 @@ class MountCore:
         await self._apply_writes(path, [(offset, data)])
         return len(data)
 
-    async def create(self, path: str) -> int:
+    async def create(self, path: str, mode: int | None = None) -> int:
         """Create an empty file and return a fresh handle.
 
         Args:
             path (str): mount path to create.
+            mode (int | None): the mode the creator asked for, umask
+                applied; None takes the mount's default.
 
         Returns:
             int: the new handle id.
@@ -560,13 +564,37 @@ class MountCore:
 
         async def make() -> None:
             await self._op(self._files.create(self.resolve(path)))
+            await self._keep_mode(path, mode, FILE_MODE)
             await self._changed(path)
 
         await self._mutate(key, make)
         return self._handles.add(Handle(path=path, key=key))
 
-    async def mkdir(self, path: str) -> None:
+    async def mkdir(self, path: str, mode: int | None = None) -> None:
+        """Create a directory.
+
+        Args:
+            path (str): mount path to create.
+            mode (int | None): the mode the creator asked for, umask
+                applied; None takes the mount's default.
+        """
         await self._op(self._files.mkdir(self.resolve(path)))
+        await self._keep_mode(path, mode, DIR_MODE)
+
+    async def _keep_mode(
+        self, path: str, mode: int | None, default: int
+    ) -> None:
+        """Store the mode a create asked for, when it is not the one the
+        mount reports anyway, so ``open(O_CREAT, 0600)`` and ``mkdir -m``
+        read back as asked without a write per ordinary create.
+
+        Args:
+            path (str): mount path just created.
+            mode (int | None): the requested mode, or None.
+            default (int): what the mount reports for a new entry.
+        """
+        if mode is not None and mode & 0o7777 != default & 0o7777:
+            await self.setattr(path, mode=mode)
 
     async def readlink(self, path: str) -> str:
         """The target of a namespace link, read through the dispatcher.
@@ -679,30 +707,58 @@ class MountCore:
         mode: int | None = None,
         uid: int | None = None,
         gid: int | None = None,
+        atime: int | None = None,
+        mtime: int | None = None,
     ) -> None:
         """Store metadata through the dispatcher.
 
         The backend keeps what it can and the namespace overlay the rest,
-        so a chmod or chown through the mount is what ``stat`` in a shell
-        reads back, on a backend with no permission bits of its own too.
-        The kernel has already resolved any link the call follows, so the
-        path names the entry to change, a link itself for ``chown -h``.
+        so a chmod, chown or ``touch -d`` through the mount is what
+        ``stat`` in a shell reads back, on a backend with no permission
+        bits or settable times of its own too. The kernel has already
+        resolved any link the call follows, so the path names the entry to
+        change, a link itself for ``chown -h``.
 
         Args:
             path (str): mount path to change.
             mode (int | None): permission bits; None leaves them.
             uid (int | None): owner id; None leaves it.
             gid (int | None): group id; None leaves it.
+            atime (int | None): access time, epoch nanoseconds; None
+                leaves it.
+            mtime (int | None): modification time, epoch nanoseconds;
+                None leaves it.
         """
-        await self._op(
-            self._files.setattr(
-                self.resolve(path),
-                mode=None if mode is None else mode & 0o7777,
-                uid=uid,
-                gid=gid,
-                nofollow=True,
+
+        async def store() -> None:
+            await self._op(
+                self._files.setattr(
+                    self.resolve(path),
+                    mode=None if mode is None else mode & 0o7777,
+                    uid=uid,
+                    gid=gid,
+                    atime=None if atime is None else ns_to_iso(atime),
+                    mtime=None if mtime is None else ns_to_iso(mtime),
+                    nofollow=True,
+                )
             )
-        )
+
+        if atime is None and mtime is None:
+            await store()
+            return
+        key = self.identity(path)
+
+        async def run() -> None:
+            # Writes the kernel acknowledged before the times were set
+            # precede them in POSIX order; landed later, they would stamp
+            # over them (cp -p sets the times on the file it still holds
+            # open).
+            for ctx in self._handles.values():
+                if ctx.key == key:
+                    await self._persist_buffered(ctx)
+            await store()
+
+        await self._mutate(key, run)
 
     async def setxattr(
         self,

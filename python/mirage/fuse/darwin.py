@@ -16,9 +16,11 @@ import ctypes
 import errno
 import logging
 import sys
+import time
 from ctypes import CFUNCTYPE, POINTER, c_char_p, c_int, c_uint
 from typing import Any
 
+from mirage.fuse.constants import UTIME_NOW, UTIME_OMIT
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
@@ -89,16 +91,22 @@ class SetattrX(ctypes.Structure):
     ]
 
 
-def timespec_to_float(ts: Timespec) -> float:
-    """Convert a C timespec to seconds.
+def timespec_ns(ts: Any, now: int) -> int | None:
+    """A C timespec as epoch nanoseconds, its utimensat markers read.
 
     Args:
-        ts (Timespec): the C timespec value.
+        ts (Any): a ctypes timespec (``tv_sec``, ``tv_nsec``).
+        now (int): what UTIME_NOW stands for, epoch nanoseconds.
 
     Returns:
-        float: seconds with nanosecond fraction.
+        int | None: the time, ``now`` for UTIME_NOW, or None for
+            UTIME_OMIT (leave it as it is).
     """
-    return ts.tv_sec + ts.tv_nsec / 1e9
+    if ts.tv_nsec == UTIME_OMIT:
+        return None
+    if ts.tv_nsec == UTIME_NOW:
+        return now
+    return ts.tv_sec * 1_000_000_000 + ts.tv_nsec
 
 
 def changes_from_setattr(attr: SetattrX) -> dict[str, JsonValue]:
@@ -124,10 +132,11 @@ def changes_from_setattr(attr: SetattrX) -> dict[str, JsonValue]:
         changes["gid"] = attr.gid
     if valid & SETATTR_SIZE:
         changes["size"] = attr.size
+    now = time.time_ns()
     if valid & SETATTR_ACCTIME:
-        changes["acctime"] = timespec_to_float(attr.acctime)
+        changes["acctime"] = timespec_ns(attr.acctime, now)
     if valid & SETATTR_MODTIME:
-        changes["modtime"] = timespec_to_float(attr.modtime)
+        changes["modtime"] = timespec_ns(attr.modtime, now)
     return changes
 
 

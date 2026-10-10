@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -270,9 +271,65 @@ async def test_chown_is_what_the_shell_stat_reads(seed_ws):
 
 
 @pytest.mark.asyncio
-async def test_utimens_does_not_raise(seed_ws):
+async def test_utimens_stores_the_times_touch_sets(seed_ws):
+    # `touch -d` and `cp -p` through the mount land what a shell stat reads.
     fs = MirageFS(seed_ws.vfs)
+    fs.utimens("/a.txt", (981173106_500_000_000, 981173107_000_000_000))
+    result = await seed_ws.shell("stat -c '%X %Y' /a.txt")
+    assert result.stdout == b"981173106 981173107\n"
+
+
+@pytest.mark.asyncio
+async def test_utimens_leaves_an_omitted_time(seed_ws):
+    # `touch -m` marks the access time UTIME_OMIT.
+    fs = MirageFS(seed_ws.vfs)
+    fs.utimens(
+        "/a.txt", (1_000_000_000_000_000_000, 1_000_000_000_000_000_000)
+    )
+    fs.utimens("/a.txt", (None, 1_100_000_000_000_000_000))
+    result = await seed_ws.shell("stat -c '%X %Y' /a.txt")
+    assert result.stdout == b"1000000000 1100000000\n"
+
+
+@pytest.mark.asyncio
+async def test_utimens_with_no_times_is_now(seed_ws):
+    fs = MirageFS(seed_ws.vfs)
+    before = time.time()
+    fs.utimens(
+        "/a.txt", (1_000_000_000_000_000_000, 1_000_000_000_000_000_000)
+    )
     fs.utimens("/a.txt", None)
+    result = await seed_ws.shell("stat -c '%Y' /a.txt")
+    assert int(result.stdout) >= int(before)
+
+
+@pytest.mark.asyncio
+async def test_setattr_x_stores_times(seed_ws):
+    fs = MirageFS(seed_ws.vfs)
+    assert fs.setattr_x("/a.txt", {"modtime": 1_200_000_000_000_000_000}) == 0
+    result = await seed_ws.shell("stat -c '%Y' /a.txt")
+    assert result.stdout == b"1200000000\n"
+
+
+@pytest.mark.asyncio
+async def test_create_and_mkdir_keep_the_mode_asked_for(rw_ws):
+    # open(O_CREAT, 0600) and mkdir(0700) arrive with the mode, umask
+    # applied; a shell stat reads it back.
+    fs = MirageFS(rw_ws.vfs)
+    fh = fs.create("/secret", stat.S_IFREG | 0o600)
+    fs.release("/secret", fh)
+    fs.mkdir("/private", 0o700)
+    result = await rw_ws.shell("stat -c '%a %n' /secret /private")
+    assert result.stdout == b"600 /secret\n700 /private\n"
+
+
+@pytest.mark.asyncio
+async def test_a_create_with_the_default_mode_stores_nothing(rw_ws):
+    fs = MirageFS(rw_ws.vfs)
+    fh = fs.create("/plain", stat.S_IFREG | 0o644)
+    fs.release("/plain", fh)
+    fs.mkdir("/dir", 0o755)
+    assert [r.op for r in rw_ws.vfs.records if r.op == "setattr"] == []
 
 
 @pytest.mark.asyncio

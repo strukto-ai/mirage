@@ -875,3 +875,33 @@ async def test_an_open_waits_out_the_removal_it_raced():
         await late[0]
     far = 2 * READ_CHUNK + 5
     assert await core.read("/data/a.bin", 4, far, early) == body[far : far + 4]
+
+
+@pytest.mark.asyncio
+async def test_setattr_stores_times_a_stat_reads_back(seeded):
+    await seeded.setattr("/a.txt", atime=981173106_500_000_000, mtime=10**18)
+    attrs = await seeded.getattr("/a.txt")
+    assert (attrs.atime, attrs.mtime) == (981173106_500_000_000, 10**18)
+
+
+@pytest.mark.asyncio
+async def test_create_and_mkdir_store_a_mode_that_is_not_the_default(seeded):
+    fh = await seeded.create("/secret", stat.S_IFREG | 0o600)
+    await seeded.release(fh)
+    await seeded.mkdir("/private", 0o700)
+    await seeded.mkdir("/plain", 0o755)
+    assert stat.S_IMODE((await seeded.getattr("/secret")).mode) == 0o600
+    assert stat.S_IMODE((await seeded.getattr("/private")).mode) == 0o700
+    assert stat.S_IMODE((await seeded.getattr("/plain")).mode) == 0o755
+
+
+@pytest.mark.asyncio
+async def test_times_set_on_an_open_file_outlast_its_buffered_writes(seeded):
+    # cp -p writes the copy, sets its times on the file it still holds
+    # open, then closes it: the writes precede the times in POSIX order.
+    fh = await seeded.open("/a.txt", os.O_WRONLY)
+    await seeded.write("/a.txt", b"copied", 0, fh)
+    await seeded.setattr("/a.txt", mtime=10**18)
+    await seeded.release(fh)
+    assert (await seeded.getattr("/a.txt")).mtime == 10**18
+    assert await seeded.read("/a.txt", 100, 0, None) == b"copiedworld"

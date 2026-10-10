@@ -117,6 +117,11 @@ async function exists(core: MountCore, path: string): Promise<boolean> {
   }
 }
 
+/** The permissions an SFTP request carries, or null when it sent none. */
+function modeOf(attrs: Partial<Attributes>): number | null {
+  return typeof attrs.mode === 'number' ? attrs.mode : null
+}
+
 const DENIED = new Set([EACCES, EROFS, osConstants.errno.EPERM])
 
 /** The SFTP status and message for a failure, through the shared errno table. */
@@ -184,10 +189,10 @@ class MirageSFTPServer {
       this.serve(id, () => this.fstat(id, handle))
     })
     s.on('SETSTAT', (id, path, attrs) => {
-      this.serve(id, () => this.setSize(id, workspacePath(path), attrs))
+      this.serve(id, () => this.setAttrs(id, workspacePath(path), attrs))
     })
     s.on('FSETSTAT', (id, handle, attrs) => {
-      this.serve(id, () => this.setSize(id, this.file(handle).path, attrs))
+      this.serve(id, () => this.setAttrs(id, this.file(handle).path, attrs))
     })
     s.on('OPENDIR', (id, path) => {
       this.serve(id, () => this.opendir(id, path))
@@ -195,8 +200,8 @@ class MirageSFTPServer {
     s.on('READDIR', (id, handle) => {
       this.serve(id, () => this.readdir(id, handle))
     })
-    s.on('OPEN', (id, filename, flags) => {
-      this.serve(id, () => this.open(id, filename, flags))
+    s.on('OPEN', (id, filename, flags, attrs) => {
+      this.serve(id, () => this.open(id, filename, flags, attrs))
     })
     s.on('READ', (id, handle, offset, len) => {
       this.serve(id, () => this.read(id, handle, offset, len))
@@ -210,8 +215,10 @@ class MirageSFTPServer {
     s.on('REMOVE', (id, path) => {
       this.serve(id, () => this.simple(id, (core) => core.unlink(workspacePath(path))))
     })
-    s.on('MKDIR', (id, path) => {
-      this.serve(id, () => this.simple(id, (core) => core.mkdir(workspacePath(path))))
+    s.on('MKDIR', (id, path, attrs) => {
+      this.serve(id, () =>
+        this.simple(id, (core) => core.mkdir(workspacePath(path), modeOf(attrs))),
+      )
     })
     s.on('RMDIR', (id, path) => {
       this.serve(id, () => this.simple(id, (core) => core.rmdir(workspacePath(path))))
@@ -308,12 +315,21 @@ class MirageSFTPServer {
     this.sftp.attrs(id, toAttrs(await core.fgetattr(f.path, f.fd)))
   }
 
-  // A size truncates; any other attribute is accepted once the path is
-  // known to exist, as the FUSE adapter treats chmod, chown and utimens.
-  private async setSize(id: number, path: string, attrs: Partial<Attributes>): Promise<void> {
+  // A size truncates, and permissions, owner and times are stored as
+  // chmod, chown and utimens through a kernel mount store them. One with
+  // nothing to change still needs the path. Mirrors Python's `set_attrs`.
+  private async setAttrs(id: number, path: string, attrs: Partial<Attributes>): Promise<void> {
     const core = await this.mount()
     if (typeof attrs.size === 'number') await core.truncate(path, attrs.size)
-    else await core.getattr(path)
+    const fields = [
+      modeOf(attrs),
+      attrs.uid ?? null,
+      attrs.gid ?? null,
+      typeof attrs.atime === 'number' ? new Date(attrs.atime * 1000) : null,
+      typeof attrs.mtime === 'number' ? new Date(attrs.mtime * 1000) : null,
+    ] as const
+    if (fields.some((field) => field !== null)) await core.setattr(path, ...fields)
+    else if (typeof attrs.size !== 'number') await core.getattr(path)
     this.sftp.status(id, STATUS.OK)
   }
 
@@ -356,7 +372,12 @@ class MirageSFTPServer {
     this.sftp.name(id, entries)
   }
 
-  private async open(id: number, filename: string, flags: number): Promise<void> {
+  private async open(
+    id: number,
+    filename: string,
+    flags: number,
+    attrs: Partial<Attributes>,
+  ): Promise<void> {
     const core = await this.mount()
     const path = workspacePath(filename)
     const found = await exists(core, path)
@@ -366,7 +387,7 @@ class MirageSFTPServer {
     let fd: number
     if (!found) {
       if ((flags & OPEN.CREAT) === 0) throw enoent(path)
-      fd = await core.create(path)
+      fd = await core.create(path, modeOf(attrs))
     } else {
       if (isDir((await core.getattr(path)).mode)) throw eisdir(path)
       fd = await core.open(path, (flags & OPEN.TRUNC) !== 0 ? fsConstants.O_TRUNC : 0)

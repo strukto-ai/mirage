@@ -136,6 +136,32 @@ async def test_the_host_filesystem_is_not_reachable(ssh):
 
 
 @pytest.mark.asyncio
+async def test_setstat_stores_permissions_owner_and_times(ssh):
+    # sftp chmod, chown and `put -p`'s times land where a shell stat reads.
+    async with ssh.connect() as conn:
+        async with conn.start_sftp_client() as sftp:
+            async with sftp.open("/f", "w") as f:
+                await f.write("x")
+            await sftp.chmod("/f", 0o640)
+            await sftp.chown("/f", 1234, 5678)
+            await sftp.utime("/f", (1_000_000_000, 1_100_000_000))
+        result = await conn.run("stat -c '%a %u %g %X %Y' /f")
+        assert result.stdout == "640 1234 5678 1000000000 1100000000\n"
+
+
+@pytest.mark.asyncio
+async def test_create_and_mkdir_keep_the_permissions_asked_for(ssh):
+    async with ssh.connect() as conn:
+        async with conn.start_sftp_client() as sftp:
+            secret = asyncssh.SFTPAttrs(permissions=0o600)
+            async with sftp.open("/secret", "w", attrs=secret) as f:
+                await f.write("x")
+            await sftp.mkdir("/private", asyncssh.SFTPAttrs(permissions=0o700))
+        result = await conn.run("stat -c '%a %n' /secret /private")
+        assert result.stdout == "600 /secret\n700 /private\n"
+
+
+@pytest.mark.asyncio
 async def test_mkdir_rename_remove_rmdir(ssh):
     async with ssh.connect() as conn, conn.start_sftp_client() as sftp:
         await sftp.mkdir("/box")

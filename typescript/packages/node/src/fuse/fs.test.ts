@@ -155,6 +155,38 @@ describe('MirageFS — metadata through the dispatcher', () => {
     expect(attr.mode & 0o7777).toBe(0o600)
   })
 
+  it('stores the times touch -d and cp -p set', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    expect(
+      await callOp<[number]>(mfs, 'utimens', '/data/greeting.txt', 981173106_500, 981173107_000),
+    ).toEqual([0])
+    const out = await ws.shell("stat -c '%X %Y' /data/greeting.txt")
+    expect(new TextDecoder().decode(out.stdout)).toBe('981173106 981173107\n')
+  })
+
+  it('keeps the mode a create and a mkdir ask for', async () => {
+    // open(O_CREAT, 0600) and mkdir(0700) arrive with the mode, umask
+    // applied; a shell stat reads it back.
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    const [code, fd] = await callOp<[number, number]>(mfs, 'create', '/data/secret', 0o100600)
+    expect(code).toBe(0)
+    await callOp(mfs, 'release', '/data/secret', fd)
+    expect(await callOp<[number]>(mfs, 'mkdir', '/data/private', 0o700)).toEqual([0])
+    const out = await ws.shell("stat -c '%a %n' /data/secret /data/private")
+    expect(new TextDecoder().decode(out.stdout)).toBe('600 /data/secret\n700 /data/private\n')
+  })
+
+  it('stores nothing for a create with the default mode', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    const [, fd] = await callOp<[number, number]>(mfs, 'create', '/data/plain', 0o100644)
+    await callOp(mfs, 'release', '/data/plain', fd)
+    await callOp(mfs, 'mkdir', '/data/dir', 0o755)
+    expect(ws.vfs.records.filter((r) => r.op === 'setattr')).toEqual([])
+  })
+
   it('stores a chown the shell stat reads back, -1 leaving an id', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)

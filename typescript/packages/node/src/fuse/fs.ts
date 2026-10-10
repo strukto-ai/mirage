@@ -143,12 +143,12 @@ export class MirageFS {
     })
   }
 
-  private create(path: string, _mode: number, cb: Cb<number>): void {
-    this.respond(this.core.create(path), cb)
+  private create(path: string, mode: number, cb: Cb<number>): void {
+    this.respond(this.core.create(path, mode), cb)
   }
 
-  private mkdir(path: string, _mode: number, cb: (code: number) => void): void {
-    this.respond(this.core.mkdir(path), cb)
+  private mkdir(path: string, mode: number, cb: (code: number) => void): void {
+    this.respond(this.core.mkdir(path, mode), cb)
   }
 
   private readlink(path: string, cb: Cb<string>): void {
@@ -190,12 +190,11 @@ export class MirageFS {
     this.respond(this.core.setattr(path, null, keptUid, keptGid), cb)
   }
 
-  // Accepted, not stored: libfuse marks "now" and "leave it" in the
-  // nanosecond field, which fuse-native folds into milliseconds, and it
-  // passes the access time in both slots. utimens and access only check
-  // that the path is there.
-  private utimens(path: string, _atime: number, _mtime: number, cb: (code: number) => void): void {
-    this.validate(path, cb)
+  // Epoch milliseconds. libfuse 2, which fuse-native speaks, calls this only
+  // when both times change; patches/@zkochan__fuse-native@0.1.0.patch fixes
+  // the binding passing the access time in both slots.
+  private utimens(path: string, atime: number, mtime: number, cb: (code: number) => void): void {
+    this.respond(this.core.setattr(path, null, null, null, new Date(atime), new Date(mtime)), cb)
   }
 
   private access(path: string, _amode: number, cb: (code: number) => void): void {
