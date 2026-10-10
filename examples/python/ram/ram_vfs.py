@@ -148,13 +148,16 @@ async def main():
         except OSError as exc:
             print(f"  os.link: {label(exc)}")
         try:
-            os.open("/data/hello.txt", os.O_RDONLY)
-        except OSError as exc:
-            print(f"  os.open: {label(exc)}")
-        try:
             os.statvfs("/data")
         except OSError as exc:
             print(f"  os.statvfs: {label(exc)}")
+
+        print("\n--- descriptors ---")
+        # os.open hands a mounted file a descriptor of the block's own;
+        # os.read and os.close answer for it, and a write lands at close.
+        fd = os.open("/data/hello.txt", os.O_RDONLY)
+        print(f"  os.read: {os.read(fd, 5)!r}")
+        os.close(fd)
 
         print("\n--- one end off the mount ---")
         host = tempfile.mkdtemp()
