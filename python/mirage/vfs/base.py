@@ -620,10 +620,11 @@ class BaseVFS:
         grep and rg still walk, filter, order and label every file, and
         of the files ``searchable`` names read only the ones answered
         here, matched on ``vfs_path`` without case, so an extra file
-        costs a read and a missing one is a wrong answer. A search that holds only keys names each one with
-        ``mounted_path(under[0], "/" + key)``. Return None when the answer
-        may be incomplete (an error, a truncated result, an index that
-        lags writes), and every file is read; raise to refuse the
+        costs a read and a missing one is a wrong answer. A search that
+        holds only keys names each one with
+        ``mounted_path(under[0], "/" + key)``. Return None when the
+        answer may be incomplete (an error, a truncated result, an index
+        that lags writes), and every file is read; raise to refuse the
         command, and the error's message is what it prints.
 
         Args:

@@ -93,11 +93,11 @@ def whole_word_literals(
     """The terms a whole-word search index may narrow a scan on, or None.
 
     A newline-joined pattern list (several -e, or the lines of -f)
-    matches a line when any one alternative does, so one search per alternative, unioned, is complete
-    when every alternative is itself a whole-word literal. -x narrows as
-    -w does: a line that is the literal entire is a word match of it. An
-    empty alternative matches every line, which no search can stand in
-    for.
+    matches a line when any one alternative does, so one search per
+    alternative, unioned, is complete when every alternative is itself a
+    whole-word literal. -x narrows as -w does: a line that is the literal
+    entire is a word match of it. An empty alternative matches every
+    line, which no search can stand in for.
 
     Args:
         pattern (str | None): the newline-joined patterns, or None.
