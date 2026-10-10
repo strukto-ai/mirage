@@ -21,7 +21,7 @@ import { Workspace } from '../workspace.ts'
 import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from '../mount/errors.ts'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
 import { MirageFS } from './fs.ts'
-import type { FuseAttr } from '../mount/types.ts'
+import type { MountAttrs } from '../mount/types.ts'
 
 const ENOENT = -2
 const ENOTEMPTY = -POSITIVE_ENOTEMPTY
@@ -59,7 +59,7 @@ describe('MirageFS — getattr', () => {
   it('reports root as a directory', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o040000)
   })
@@ -67,7 +67,7 @@ describe('MirageFS — getattr', () => {
   it('reports a mount-prefix path as a virtual directory', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o040000)
   })
@@ -75,7 +75,7 @@ describe('MirageFS — getattr', () => {
   it('reports a file under a mount with correct size', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o100000)
     expect(attr.size).toBe('hello world\n'.length)
@@ -151,7 +151,7 @@ describe('MirageFS — metadata through the dispatcher', () => {
     expect(await callOp<[number]>(mfs, 'chmod', '/data/greeting.txt', 0o100600)).toEqual([0])
     const out = await ws.shell('stat -c %a /data/greeting.txt')
     expect(new TextDecoder().decode(out.stdout)).toBe('600\n')
-    const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(attr.mode & 0o7777).toBe(0o600)
   })
 
@@ -172,7 +172,12 @@ describe('MirageFS — metadata through the dispatcher', () => {
     const mfs = new MirageFS(ws.vfs)
     const [, fd] = await callOp<[number, number]>(mfs, 'open', '/data/greeting.txt', 0)
     await callOp(mfs, 'read', '/data/greeting.txt', fd, Buffer.alloc(64), 64, 0)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/greeting.txt', fd)
+    const [code, attr] = await callOp<[number, MountAttrs]>(
+      mfs,
+      'fgetattr',
+      '/data/greeting.txt',
+      fd,
+    )
     expect(code).toBe(0)
     expect(attr.mode & 0o7777).toBe(0o600)
     expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0))
@@ -181,7 +186,7 @@ describe('MirageFS — metadata through the dispatcher', () => {
 
   it('reports a device as our row', async () => {
     const ws = await mkWs()
-    const [code, attr] = await callOp<[number, FuseAttr]>(
+    const [code, attr] = await callOp<[number, MountAttrs]>(
       new MirageFS(ws.vfs),
       'getattr',
       '/dev/null',
@@ -323,7 +328,7 @@ describe('MirageFS — size=null mounts (API-backed)', () => {
     )
     const readSpy = vi.spyOn(ws.vfs, 'read')
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/api.json')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/api.json')
     expect(code).toBe(0)
     expect(attr.size).toBe(0)
     // The point of reporting 0: getattr stays cheap.
@@ -378,7 +383,7 @@ describe('MirageFS — size=null mounts (API-backed)', () => {
     )
     const mfs = new MirageFS(ws.vfs)
     await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
-    const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/api.json')
+    const [, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/api.json')
     expect(attr.size).toBe(bytes.byteLength)
   })
 
@@ -391,7 +396,7 @@ describe('MirageFS — size=null mounts (API-backed)', () => {
     )
     const mfs = new MirageFS(ws.vfs)
     const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', fh)
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'fgetattr', '/data/api.json', fh)
     expect(code).toBe(0)
     expect(attr.size).toBe(bytes.byteLength)
   })
@@ -413,7 +418,12 @@ describe('MirageFS — size=null mounts (API-backed)', () => {
       '/data/api.json',
       fsConstants.O_WRONLY | fsConstants.O_TRUNC,
     )
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', reader)
+    const [code, attr] = await callOp<[number, MountAttrs]>(
+      mfs,
+      'fgetattr',
+      '/data/api.json',
+      reader,
+    )
     expect(code).toBe(0)
     expect(attr.size).toBe(0)
     const [readCode] = await callOp<[number]>(
@@ -497,7 +507,7 @@ describe('MirageFS — size=null mounts (API-backed)', () => {
     await callOp(mfs, 'write', '/data/api.json', writer, j, j.byteLength, 0)
     const [truncCode] = await callOp<[number]>(mfs, 'truncate', '/data/api.json', 5)
     expect(truncCode).toBe(0)
-    const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', reader)
+    const [, attr] = await callOp<[number, MountAttrs]>(mfs, 'fgetattr', '/data/api.json', reader)
     expect(attr.size).toBe(5)
     const out = Buffer.alloc(100)
     const [n] = await callOp<[number]>(mfs, 'read', '/data/api.json', reader, out, 100, 0)
@@ -669,7 +679,7 @@ describe('MirageFS — namespace links', () => {
     const ws = await mkWs()
     await ws.shell('ln -s /data/greeting.txt /data/lnk')
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/lnk')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/lnk')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o120000)
     expect(attr.size).toBe('greeting.txt'.length)
@@ -747,7 +757,7 @@ describe('MirageFS — stat attr overlay', () => {
     const ws = await mkWs()
     await ws.shell('chmod 640 /data/greeting.txt')
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o100000)
     expect(attr.mode & 0o7777).toBe(0o640)
@@ -757,7 +767,7 @@ describe('MirageFS — stat attr overlay', () => {
     const ws = await mkWs()
     await ws.shell('touch -t 202603041200 /data/greeting.txt')
     const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(code).toBe(0)
     expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0, 0))
   })
@@ -770,14 +780,18 @@ describe('MirageFS — session binding', () => {
     const session = ws.createSession('narrow', { profile: { paths: { hide: ['/extra'] } } })
 
     const bound = new MirageFS(ws.vfs, { session })
-    const [okCode, attr] = await callOp<[number, FuseAttr]>(bound, 'getattr', '/data/greeting.txt')
+    const [okCode, attr] = await callOp<[number, MountAttrs]>(
+      bound,
+      'getattr',
+      '/data/greeting.txt',
+    )
     expect(okCode).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o100000)
     const [deniedCode] = await callOp<[number]>(bound, 'getattr', '/extra/secret.txt')
     expect(deniedCode).toBeLessThan(0)
 
     const unbound = new MirageFS(ws.vfs)
-    const [plainCode] = await callOp<[number, FuseAttr]>(unbound, 'getattr', '/extra/secret.txt')
+    const [plainCode] = await callOp<[number, MountAttrs]>(unbound, 'getattr', '/extra/secret.txt')
     expect(plainCode).toBe(0)
   })
 

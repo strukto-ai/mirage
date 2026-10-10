@@ -37,6 +37,7 @@ from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import NoMountError
 from mirage.io.types import ByteSource
 from mirage.mount.core import MountCore
+from mirage.mount.types import MountAttrs
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -202,14 +203,14 @@ def not_a_file(path: str) -> CodexRPCError:
     return CodexRPCError(RPC_INVALID_REQUEST, f"path `{path}` is not a file")
 
 
-async def lookup(core: MountCore, path: str) -> dict[str, Any] | None:
+async def lookup(core: MountCore, path: str) -> MountAttrs | None:
     try:
         return await core.getattr(path)
     except MISSING:
         return None
 
 
-async def followed(core: MountCore, path: str) -> dict[str, Any]:
+async def followed(core: MountCore, path: str) -> MountAttrs:
     return await core.getattr(path, follow=True)
 
 
@@ -222,20 +223,20 @@ async def metadata(core: MountCore, path: str) -> Message:
         path (str): the path.
     """
     own = await core.getattr(path)
-    link = stat.S_ISLNK(own["st_mode"])
+    link = stat.S_ISLNK(own.mode)
     st = await followed(core, path) if link else own
     return {
-        "isDirectory": stat.S_ISDIR(st["st_mode"]),
-        "isFile": stat.S_ISREG(st["st_mode"]),
+        "isDirectory": stat.S_ISDIR(st.mode),
+        "isFile": stat.S_ISREG(st.mode),
         "isSymlink": link,
-        "size": st["st_size"],
-        "createdAtMs": st["st_ctime"] // NS_PER_MS,
-        "modifiedAtMs": st["st_mtime"] // NS_PER_MS,
+        "size": st.size,
+        "createdAtMs": st.ctime // NS_PER_MS,
+        "modifiedAtMs": st.mtime // NS_PER_MS,
     }
 
 
 async def open_file(core: MountCore, path: str) -> int:
-    if stat.S_ISDIR((await followed(core, path))["st_mode"]):
+    if stat.S_ISDIR((await followed(core, path)).mode):
         raise not_a_file(path)
     return await core.open(path)
 
@@ -313,8 +314,8 @@ async def directory(core: MountCore, path: str) -> list[JsonValue]:
         entries.append(
             {
                 "fileName": name,
-                "isDirectory": stat.S_ISDIR(st["st_mode"]),
-                "isFile": stat.S_ISREG(st["st_mode"]),
+                "isDirectory": stat.S_ISDIR(st.mode),
+                "isFile": stat.S_ISREG(st.mode),
             }
         )
     return entries
@@ -329,11 +330,9 @@ async def walk_kind(core: MountCore, path: str, follow: bool) -> str | None:
         path (str): the entry.
         follow (bool): ``followDirectorySymlinks``.
     """
-    mode = (await core.getattr(path))["st_mode"]
+    mode = (await core.getattr(path)).mode
     if stat.S_ISLNK(mode):
-        if not follow or not stat.S_ISDIR(
-            (await followed(core, path))["st_mode"]
-        ):
+        if not follow or not stat.S_ISDIR((await followed(core, path)).mode):
             return None
         return "directory"
     return "directory" if stat.S_ISDIR(mode) else "file"
@@ -364,7 +363,7 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
     entries: list[JsonValue] = []
     errors: list[JsonValue] = []
     result: Message = {"entries": entries, "errors": errors}
-    if not stat.S_ISDIR((await followed(core, root))["st_mode"]):
+    if not stat.S_ISDIR((await followed(core, root)).mode):
         return {**result, "truncated": False}
     pending = deque([(root, 0)])
     read = 0
@@ -1029,7 +1028,7 @@ class CodexChannel:
                     posix_phrase(FsCondition.ENOENT),
                 )
             )
-        if not stat.S_ISDIR(st["st_mode"]):
+        if not stat.S_ISDIR(st.mode):
             await self._fs(lambda core: core.unlink(path))
         elif recursive:
             await self._line(f"rm -r -- {shlex.quote(path)}")
@@ -1041,7 +1040,7 @@ class CodexChannel:
         source = to_path(arg(params, "sourcePath", str))
         destination = to_path(arg(params, "destinationPath", str))
         st = await self._fs(lambda core: followed(core, source))
-        tree = stat.S_ISDIR(st["st_mode"])
+        tree = stat.S_ISDIR(st.mode)
         if tree and not arg(params, "recursive", bool, False):
             raise CodexRPCError(
                 RPC_INVALID_REQUEST,

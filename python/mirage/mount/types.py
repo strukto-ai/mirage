@@ -19,6 +19,37 @@ from mirage.runtime.handles import ChunkedHandle
 WriteBuf = list[tuple[int, bytes]]
 
 
+@dataclass(frozen=True, slots=True)
+class MountAttrs:
+    """One entry's POSIX attributes, as every adapter over the core needs
+    them.
+
+    Neutral rather than libfuse's ``st_*`` dict: SFTP and codex-exec read
+    the fields, and the libfuse adapter spells them as ``st_*``.
+
+    Args:
+        mode (int): type bits plus permissions.
+        size (int): byte length the client should see.
+        nlink (int): link count; 2 for a directory, 1 otherwise.
+        uid (int): owning user id.
+        gid (int): owning group id.
+        rdev (int): device number, for a device node.
+        atime (int): access time, nanoseconds since the epoch.
+        mtime (int): modification time, nanoseconds since the epoch.
+        ctime (int): change time, nanoseconds since the epoch.
+    """
+
+    mode: int
+    size: int
+    nlink: int
+    uid: int
+    gid: int
+    rdev: int
+    atime: int
+    mtime: int
+    ctime: int
+
+
 @dataclass(slots=True)
 class Handle:
     """One open file of a kernel mount."""

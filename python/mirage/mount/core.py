@@ -23,7 +23,7 @@ from typing import Any, TypeVar
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent, erofs
 from mirage.mount.platform.macos import is_macos_metadata
-from mirage.mount.types import Handle, WriteBuf
+from mirage.mount.types import Handle, MountAttrs, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
 from mirage.runtime.handles import (
     ChunkedHandle,
@@ -61,7 +61,7 @@ class MountCore:
     adapter's constraint rather than this layer's; one that is already
     async (SFTP, codex-exec) awaits the core on the workspace's loop.
 
-    Everything here is expressed in POSIX terms (``st_*`` attribute dicts,
+    Everything here is expressed in POSIX terms (``MountAttrs`` rows,
     ordinary Python exceptions) and imports nothing from mfusepy, so it is
     reusable by a non-FUSE adapter (FSKit, File Provider) and unit-testable
     without a kernel or the ``[fuse]`` extra installed.
@@ -250,20 +250,20 @@ class MountCore:
             return self._root
         return self._root + path
 
-    def dir_stat(self) -> dict[str, Any]:
-        return {
-            "st_mode": DIR_MODE,
-            "st_nlink": 2,
-            "st_uid": self._uid,
-            "st_gid": self._gid,
-            "st_size": DIR_SIZE,
-            "st_rdev": 0,
-            "st_atime": self._now,
-            "st_mtime": self._now,
-            "st_ctime": self._now,
-        }
+    def dir_stat(self) -> MountAttrs:
+        return MountAttrs(
+            mode=DIR_MODE,
+            size=DIR_SIZE,
+            nlink=2,
+            uid=self._uid,
+            gid=self._gid,
+            rdev=0,
+            atime=self._now,
+            mtime=self._now,
+            ctime=self._now,
+        )
 
-    def attrs(self, s: FileStat, size: int | None = None) -> dict[str, Any]:
+    def attrs(self, s: FileStat, size: int | None = None) -> MountAttrs:
         """The POSIX attrs for one stat row, the way a guest's stat reads
         it (``runtime/files.py:stat_row``).
 
@@ -283,19 +283,19 @@ class MountCore:
         mtime = mtime_ns(s)
         when = self._now if mtime is None else mtime
         atime = atime_ns(s)
-        return {
-            "st_mode": posix_mode(s),
-            "st_nlink": 2 if is_dir(s) else 1,
-            "st_uid": s.uid if isinstance(s.uid, int) else self._uid,
-            "st_gid": s.gid if isinstance(s.gid, int) else self._gid,
-            "st_size": content_size(s) if size is None else size,
-            "st_rdev": device_rdev(s),
-            "st_atime": when if atime is None else atime,
-            "st_mtime": when,
-            "st_ctime": when,
-        }
+        return MountAttrs(
+            mode=posix_mode(s),
+            size=content_size(s) if size is None else size,
+            nlink=2 if is_dir(s) else 1,
+            uid=s.uid if isinstance(s.uid, int) else self._uid,
+            gid=s.gid if isinstance(s.gid, int) else self._gid,
+            rdev=device_rdev(s),
+            atime=when if atime is None else atime,
+            mtime=when,
+            ctime=when,
+        )
 
-    async def root_attrs(self) -> dict[str, Any]:
+    async def root_attrs(self) -> MountAttrs:
         """The mount root's attrs: its own row through the dispatcher, so a
         chmod made on it shows, or a plain directory when nothing answers
         for it (a workspace with no mount at ``/``).
@@ -358,7 +358,7 @@ class MountCore:
 
     async def getattr(
         self, path: str, follow: bool = False, ctx: Handle | None = None
-    ) -> dict[str, Any]:
+    ) -> MountAttrs:
         """POSIX attributes for a path.
 
         One stat through the dispatcher answers: a link the session cannot
@@ -373,7 +373,7 @@ class MountCore:
                 what it holds and has not flushed counts.
 
         Returns:
-            dict: ``st_*`` attribute dict.
+            MountAttrs: the entry's attributes.
 
         Raises:
             FileNotFoundError: no such entry.
@@ -412,7 +412,7 @@ class MountCore:
             size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
         return self.attrs(s, size)
 
-    async def fgetattr(self, path: str, fh: int | None) -> dict[str, Any]:
+    async def fgetattr(self, path: str, fh: int | None) -> MountAttrs:
         """Attributes through an open handle: the path's row, with the
         size the handle holds, what it wrote and has not flushed included.
 

@@ -56,15 +56,15 @@ def test_core_needs_no_fuse_module():
 @pytest.mark.asyncio
 async def test_getattr_file(seeded):
     attrs = await seeded.getattr("/a.txt")
-    assert attrs["st_mode"] & stat.S_IFREG
-    assert attrs["st_size"] == len(b"hello world")
+    assert attrs.mode & stat.S_IFREG
+    assert attrs.size == len(b"hello world")
 
 
 @pytest.mark.asyncio
 async def test_getattr_dir(seeded):
     attrs = await seeded.getattr("/sub")
-    assert attrs["st_mode"] & stat.S_IFDIR
-    assert attrs["st_size"] == DIR_SIZE
+    assert attrs.mode & stat.S_IFDIR
+    assert attrs.size == DIR_SIZE
 
 
 @pytest.mark.asyncio
@@ -117,7 +117,7 @@ async def test_open_with_o_trunc_drops_the_old_body(seeded):
     # to do it. Ignoring it left `printf BB > f` holding BB plus the tail
     # of the longer body it replaced (#1032).
     fh = await seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
-    assert (await seeded.fgetattr("/a.txt", fh))["st_size"] == 0
+    assert (await seeded.fgetattr("/a.txt", fh)).size == 0
     await seeded.write("/a.txt", b"BB\n", 0, fh)
     await seeded.release(fh)
     assert await seeded.read("/a.txt", 100, 0, None) == b"BB\n"
@@ -203,8 +203,8 @@ async def test_a_handle_opened_through_a_link_stats_its_target(seeded):
     await seeded.files.symlink("/lnk", "a.txt")
     fh = await seeded.open("/lnk", os.O_RDONLY)
     attrs = await seeded.fgetattr("/lnk", fh)
-    assert stat.S_ISREG(attrs["st_mode"])
-    assert attrs["st_size"] == len(b"hello world")
+    assert stat.S_ISREG(attrs.mode)
+    assert attrs.size == len(b"hello world")
 
 
 @pytest.mark.asyncio
@@ -213,9 +213,9 @@ async def test_metadata_through_a_link_path_lands_on_the_link(seeded):
     await seeded.files.symlink("/gone", "missing.txt")
     await seeded.setattr("/lnk", uid=1234)
     await seeded.setattr("/gone", uid=4321)
-    assert (await seeded.getattr("/lnk"))["st_uid"] == 1234
-    assert (await seeded.getattr("/gone"))["st_uid"] == 4321
-    assert (await seeded.getattr("/a.txt"))["st_uid"] != 1234
+    assert (await seeded.getattr("/lnk")).uid == 1234
+    assert (await seeded.getattr("/gone")).uid == 4321
+    assert (await seeded.getattr("/a.txt")).uid != 1234
 
 
 @pytest.mark.asyncio
@@ -223,8 +223,8 @@ async def test_a_scoped_mount_root_shows_its_own_mode():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     core = MountCore(ws.vfs, root_prefix="/data")
     await core.setattr("/", mode=0o700)
-    assert stat.S_IMODE((await core.getattr("/"))["st_mode"]) == 0o700
-    assert stat.S_ISDIR((await MountCore(ws.vfs).getattr("/"))["st_mode"])
+    assert stat.S_IMODE((await core.getattr("/")).mode) == 0o700
+    assert stat.S_ISDIR((await MountCore(ws.vfs).getattr("/")).mode)
 
 
 @pytest.mark.asyncio
@@ -234,7 +234,7 @@ async def test_a_handle_reads_its_own_unflushed_writes(seeded):
     await seeded.write("/a.txt", b"HELLO", 0, fh)
     await seeded.write("/a.txt", b"!", 13, fh)
     assert await seeded.read("/a.txt", 100, 0, fh) == b"HELLO world\x00\x00!"
-    assert (await seeded.fgetattr("/a.txt", fh))["st_size"] == 14
+    assert (await seeded.fgetattr("/a.txt", fh)).size == 14
     await seeded.release(fh)
     assert await seeded.read("/a.txt", 100, 0, None) == b"HELLO world\x00\x00!"
 
@@ -273,9 +273,9 @@ async def test_getattr_of_a_link_reports_the_nodes_own_row():
         nofollow=True,
     )
     attrs = await core.getattr("/link")
-    assert attrs["st_mode"] == stat.S_IFLNK | 0o777
-    assert attrs["st_size"] == len("a.txt")
-    assert attrs["st_mtime"] == mtime_ns(
+    assert attrs.mode == stat.S_IFLNK | 0o777
+    assert attrs.size == len("a.txt")
+    assert attrs.mtime == mtime_ns(
         FileStat(
             name="link", type=FileType.SYMLINK, modified="2020-01-02T03:04:05Z"
         )
@@ -392,9 +392,7 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
     fh = await core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
     assert await core._files.read("/data/books.tally", raw=True) == b""
     rendered = b"RENDERED-AND-MUCH-LONGER"
-    assert (await core.fgetattr("/data/books.tally", fh))["st_size"] == len(
-        rendered
-    )
+    assert (await core.fgetattr("/data/books.tally", fh)).size == len(rendered)
     assert await core.read("/data/books.tally", 100, 0, fh) == rendered
     await core.release(fh)
 
@@ -552,8 +550,8 @@ async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
     )
     got_naive = seeded.attrs(naive)
     got_aware = seeded.attrs(aware)
-    assert got_naive["st_mtime"] == got_aware["st_mtime"]
-    assert got_naive["st_mtime"] == mtime_ns(naive)
+    assert got_naive.mtime == got_aware.mtime
+    assert got_naive.mtime == mtime_ns(naive)
 
 
 @pytest.mark.asyncio
@@ -568,8 +566,8 @@ async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
         modified="1970-01-01T00:00:00Z",
     )
     got = seeded.attrs(epoch)
-    assert got["st_mtime"] == 0
-    assert got["st_ctime"] == 0
+    assert got.mtime == 0
+    assert got.ctime == 0
 
 
 def test_drain_ops_omits_internal_mount_identity():
@@ -741,7 +739,7 @@ async def test_generated_documents_refresh_even_on_an_open_handle():
     changed = await core.read("/VFS.md", 100000, 0, handle)
     assert b"/secret" not in changed
     assert changed == (await ws.vfs_md(session_id="reader")).encode()
-    assert (await core.fgetattr("/VFS.md", handle))["st_size"] == len(changed)
+    assert (await core.fgetattr("/VFS.md", handle)).size == len(changed)
     await ws.set_session_profile("reader", {"paths": {"hide": ["/VFS.md"]}})
     with pytest.raises(FileNotFoundError):
         await core.read("/VFS.md", 100000, 0, handle)
@@ -799,7 +797,7 @@ async def test_a_hydration_out_across_a_truncate_reads_again():
     files.go.set()
     writer = await truncating
     reader = await reading
-    assert (await core.fgetattr("/data/api.json", reader))["st_size"] == 0
+    assert (await core.fgetattr("/data/api.json", reader)).size == 0
     await core.release(writer)
     await core.release(reader)
 

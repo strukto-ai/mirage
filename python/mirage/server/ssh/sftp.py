@@ -39,6 +39,7 @@ from mirage.errors.fs import eexist, eisdir, enoent
 from mirage.errors.types import NoMountError
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
+from mirage.mount.types import MountAttrs
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
 from mirage.server.ssh.session import (
@@ -102,29 +103,28 @@ def filetype(mode: int) -> int:
     return FILEXFER_TYPE_UNKNOWN
 
 
-def to_attrs(st: dict[str, Any]) -> asyncssh.SFTPAttrs:
-    """SFTP attributes from a MountCore ``st_*`` dict (times in ns).
+def to_attrs(st: MountAttrs) -> asyncssh.SFTPAttrs:
+    """SFTP attributes from what the mount core answered.
 
     Args:
-        st (dict[str, Any]): what ``MountCore.getattr`` returned.
+        st (MountAttrs): what ``MountCore.getattr`` returned.
 
     Returns:
         asyncssh.SFTPAttrs: the same facts in SFTP's shape.
     """
-    mode = st["st_mode"]
-    atime, atime_ns = divmod(st["st_atime"], NS_PER_SECOND)
-    mtime, mtime_ns = divmod(st["st_mtime"], NS_PER_SECOND)
+    atime, atime_ns = divmod(st.atime, NS_PER_SECOND)
+    mtime, mtime_ns = divmod(st.mtime, NS_PER_SECOND)
     return asyncssh.SFTPAttrs(
-        type=filetype(mode),
-        size=st["st_size"],
-        uid=st["st_uid"],
-        gid=st["st_gid"],
-        permissions=mode,
+        type=filetype(st.mode),
+        size=st.size,
+        uid=st.uid,
+        gid=st.gid,
+        permissions=st.mode,
         atime=atime,
         atime_ns=atime_ns,
         mtime=mtime,
         mtime_ns=mtime_ns,
-        nlink=st["st_nlink"],
+        nlink=st.nlink,
     )
 
 
@@ -143,9 +143,7 @@ _STATS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
 )
 
 
-async def listing(
-    core: MountCore, path: str
-) -> list[tuple[str, dict[str, Any]]]:
+async def listing(core: MountCore, path: str) -> list[tuple[str, MountAttrs]]:
     """A directory's entries with their attributes, in one pass.
 
     The entries are stat'd together rather than one after another, with
@@ -160,7 +158,7 @@ async def listing(
         path (str): the directory.
 
     Returns:
-        list[tuple[str, dict[str, Any]]]: (name, ``st_*`` dict) pairs,
+        list[tuple[str, MountAttrs]]: (name, attributes) pairs,
             ``.`` and ``..`` first.
     """
     loop = asyncio.get_running_loop()
@@ -168,7 +166,7 @@ async def listing(
     if slots is None:
         slots = _STATS[loop] = asyncio.Semaphore(LISTING_CONCURRENCY)
 
-    async def entry(name: str) -> tuple[str, dict[str, Any]] | None:
+    async def entry(name: str) -> tuple[str, MountAttrs] | None:
         if name == ".":
             child = path
         elif name == "..":
@@ -217,12 +215,12 @@ async def open_file(core: MountCore, path: str, pflags: int) -> OpenFile:
             raise enoent(path)
         fh = await core.create(path)
     else:
-        if stat.S_ISDIR((await core.getattr(path))["st_mode"]):
+        if stat.S_ISDIR((await core.getattr(path)).mode):
             raise eisdir(path)
         fh = await core.open(path, os.O_TRUNC if pflags & FXF_TRUNC else 0)
     append_at = None
     if pflags & FXF_APPEND:
-        append_at = (await core.fgetattr(path, fh))["st_size"]
+        append_at = (await core.fgetattr(path, fh)).size
     return OpenFile(path, fh, append_at)
 
 

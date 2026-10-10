@@ -47,7 +47,7 @@ export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/file/redis.ts'
 export { FuseManager } from './workspace/fuse.ts'
 export { MirageFS, type MirageFSOptions } from './fuse/fs.ts'
-export type { FuseAttr } from './mount/types.ts'
+export type { MountAttrs } from './mount/types.ts'
 export { MountCore, type MountCoreOptions } from './mount/core.ts'
 export { classifyErrno, classifyError } from './mount/errors.ts'
 export {

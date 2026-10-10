@@ -20,6 +20,7 @@ import asyncssh
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.mount.types import MountAttrs
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
 from mirage.server.ssh.sftp import (
     MirageSFTPServer,
@@ -71,15 +72,17 @@ def test_every_host_reaching_method_is_overridden():
 
 
 def test_attrs_carry_type_mode_size_and_split_times():
-    st = {
-        "st_mode": stat.S_IFREG | 0o640,
-        "st_size": 12,
-        "st_uid": 501,
-        "st_gid": 20,
-        "st_nlink": 1,
-        "st_atime": 1_700_000_000_123_456_789,
-        "st_mtime": 1_700_000_001_000_000_005,
-    }
+    st = MountAttrs(
+        mode=stat.S_IFREG | 0o640,
+        size=12,
+        nlink=1,
+        uid=501,
+        gid=20,
+        rdev=0,
+        atime=1_700_000_000_123_456_789,
+        mtime=1_700_000_001_000_000_005,
+        ctime=1_700_000_001_000_000_005,
+    )
     attrs = to_attrs(st)
     assert attrs.type == filetype(stat.S_IFREG)
     assert (attrs.size, attrs.permissions) == (12, stat.S_IFREG | 0o640)

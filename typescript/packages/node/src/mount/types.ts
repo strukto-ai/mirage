@@ -14,8 +14,12 @@
 
 import type { ChunkedHandle } from '@struktoai/mirage-core/runtime/handles/index'
 
-/** The attributes a kernel mount reports for one path. */
-export interface FuseAttr {
+/**
+ * One entry's POSIX attributes, as every adapter over the core needs them:
+ * the libfuse adapter hands them to fuse-native, SFTP and codex-exec read
+ * the fields. Mirrors Python's `MountAttrs`.
+ */
+export interface MountAttrs {
   mtime: Date
   atime: Date
   ctime: Date

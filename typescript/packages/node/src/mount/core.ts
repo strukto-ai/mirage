@@ -44,7 +44,7 @@ import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { enoent, erofs } from '@struktoai/mirage-core/errors/fs'
 import { isMacosMetadata } from './platform/macos.ts'
-import type { FuseAttr, Handle } from './types.ts'
+import type { MountAttrs, Handle } from './types.ts'
 
 export interface MountCoreOptions {
   rootPrefix?: string
@@ -136,7 +136,7 @@ export class MountCore {
     return path === '/' ? this.root : this.root + path
   }
 
-  dirStat(): FuseAttr {
+  dirStat(): MountAttrs {
     return {
       mtime: this.now,
       atime: this.now,
@@ -160,7 +160,7 @@ export class MountCore {
    * zero is a real time and lands. `size` replaces the row's, from an open
    * handle or a link's shown target. Mirrors Python's `MountCore.attrs`.
    */
-  attrs(s: FileStat, size: number | null = null): FuseAttr {
+  attrs(s: FileStat, size: number | null = null): MountAttrs {
     const mtime = mtimeMs(s)
     const when = mtime === null ? this.now : new Date(mtime)
     const atime = atimeMs(s)
@@ -343,7 +343,7 @@ export class MountCore {
    * dispatcher too. `follow` reports a trailing link's target rather than
    * the link (stat rather than lstat).
    */
-  async getattr(path: string, follow = false, ctx: Handle | null = null): Promise<FuseAttr> {
+  async getattr(path: string, follow = false, ctx: Handle | null = null): Promise<MountAttrs> {
     let size = ctx?.data?.byteLength ?? null
     if (path === '/') return this.rootAttrs()
     // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
@@ -384,7 +384,7 @@ export class MountCore {
    * Attributes through an open handle: the path's row, with the size the
    * handle holds, what it wrote and has not flushed included.
    */
-  async fgetattr(path: string, fd: number): Promise<FuseAttr> {
+  async fgetattr(path: string, fd: number): Promise<MountAttrs> {
     // fstat(fd) after open: the open handler hydrated size-unknown files
     // into the handle, so answer with the real byte length instead of the
     // 0 that path-based getattr reported before open.
@@ -402,7 +402,7 @@ export class MountCore {
    * made on it shows, or a plain directory when nothing answers for it (a
    * workspace with no mount at `/`). Mirrors Python's `root_attrs`.
    */
-  async rootAttrs(): Promise<FuseAttr> {
+  async rootAttrs(): Promise<MountAttrs> {
     let s: FileStat
     try {
       s = await this.op(() => this.files.stat(this.resolve('/')))

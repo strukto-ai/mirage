@@ -15,7 +15,7 @@
 import { constants as fsConstants } from 'node:fs'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
-import { MountCore, classifyErrno, type FuseAttr } from '@struktoai/mirage-node'
+import { MountCore, classifyErrno, type MountAttrs } from '@struktoai/mirage-node'
 import { EACCES, ENOENT, EROFS } from '@struktoai/mirage-node/mount/errors'
 import { eexist, eisdir, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
@@ -71,7 +71,7 @@ function seconds(date: Date): number {
 }
 
 /** SFTP attributes from a MountCore attr record. */
-export function toAttrs(a: FuseAttr): Attributes {
+export function toAttrs(a: MountAttrs): Attributes {
   return {
     mode: a.mode,
     uid: a.uid,
@@ -341,7 +341,7 @@ class MirageSFTPServer {
           : name === '..'
             ? posix.dirname(dir.path)
             : posix.join(dir.path, name)
-      let attr: FuseAttr
+      let attr: MountAttrs
       try {
         attr = await core.getattr(child)
       } catch (err) {

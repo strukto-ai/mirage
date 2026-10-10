@@ -18,7 +18,7 @@ import { posix } from 'node:path'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { MountCore, type FuseAttr } from '@struktoai/mirage-node'
+import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
 import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
@@ -203,7 +203,7 @@ function missing(err: unknown): boolean {
   return condition === 'ENOENT' || condition === 'ENOTDIR'
 }
 
-async function lookup(core: MountCore, path: string): Promise<FuseAttr | null> {
+async function lookup(core: MountCore, path: string): Promise<MountAttrs | null> {
   try {
     return await core.getattr(path)
   } catch (err) {
@@ -212,7 +212,7 @@ async function lookup(core: MountCore, path: string): Promise<FuseAttr | null> {
   }
 }
 
-function followed(core: MountCore, path: string): Promise<FuseAttr> {
+function followed(core: MountCore, path: string): Promise<MountAttrs> {
   return core.getattr(path, true)
 }
 
@@ -282,7 +282,7 @@ async function children(core: MountCore, path: string): Promise<string[]> {
 async function directory(core: MountCore, path: string): Promise<JsonValue[]> {
   const entries: JsonValue[] = []
   for (const name of await children(core, path)) {
-    let st: FuseAttr
+    let st: MountAttrs
     try {
       st = await followed(core, posix.join(path, name))
     } catch (err) {
