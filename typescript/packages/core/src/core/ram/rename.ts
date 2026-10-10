@@ -69,6 +69,12 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
   const d = norm(dst.mountPath)
   const now = nowIso()
   checkDestParents(accessor, dst, d)
+  // rename(2) onto its own name succeeds and changes nothing; moving the
+  // key onto itself would delete it, and a directory's whole subtree.
+  if (s === d) {
+    if (accessor.store.files.has(s) || accessor.store.dirs.has(s)) return
+    throw lookupError(accessor, src, s)
+  }
   const srcFile = accessor.store.files.get(s)
   if (srcFile !== undefined) {
     accessor.store.files.set(d, srcFile)

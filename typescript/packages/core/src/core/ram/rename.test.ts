@@ -66,6 +66,15 @@ describe('core/ram rename', () => {
     expect(acc.store.files.has('/dir/f')).toBe(false)
   })
 
+  it('leaves a file or a directory renamed onto its own name as it was', async () => {
+    const acc = mkAccessor()
+    await rename(acc, mkPath('/a.txt'), mkPath('/a.txt'))
+    await rename(acc, mkPath('/dir'), mkPath('/dir'))
+    expect(new TextDecoder().decode(acc.store.files.get('/a.txt'))).toBe('hi')
+    expect(acc.store.dirs.has('/dir')).toBe(true)
+    expect(acc.store.files.has('/dir/f')).toBe(true)
+  })
+
   it('a missing source is ENOENT', async () => {
     const acc = mkAccessor()
     expect(await codeOf(() => rename(acc, mkPath('/nope'), mkPath('/d/x')))).toBe('ENOENT')

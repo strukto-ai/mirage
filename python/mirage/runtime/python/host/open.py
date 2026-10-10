@@ -18,20 +18,33 @@ import os
 from collections.abc import Callable
 from typing import IO, TypeAlias, cast
 
-from mirage.runtime.python.host.file import MirageFile
-from mirage.runtime.python.host.fs import syscall
+from mirage.runtime.handles.mode import parse_mode
+from mirage.runtime.python.host.descriptors import open_flags
+from mirage.runtime.python.host.file import open_file, text_encoding
+from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.host_io import in_host_io
+from mirage.runtime.python.host.syscall import syscall
 from mirage.workspace.files import Files
 
 OpenPath: TypeAlias = str | bytes | int | os.PathLike[str] | os.PathLike[bytes]
-OpenResult: TypeAlias = IO[str] | IO[bytes] | MirageFile
+OpenResult: TypeAlias = IO[str] | IO[bytes]
 
 
 class MountedOpen:
+    """``open`` routing a mounted path, or a descriptor the routed
+    ``os.open`` handed out, to the workspace, and the rest to the host.
+
+    Args:
+        router (HostFs): the entry point whose descriptors ``os.open``
+            hands out.
+        loop (asyncio.AbstractEventLoop | None): the block's loop.
+    """
+
     def __init__(
-        self, files: Files, loop: asyncio.AbstractEventLoop | None = None
+        self, router: HostFs, loop: asyncio.AbstractEventLoop | None = None
     ) -> None:
-        self._files = files
+        self._files = router.files
+        self._descriptors = router.descriptors
         self._loop = loop
         self._original = builtins.open
 
@@ -47,6 +60,16 @@ class MountedOpen:
         opener: Callable[[str, int], int] | None = None,
     ) -> OpenResult:
         path = os.fspath(file) if isinstance(file, os.PathLike) else file
+        if self._descriptors.get(path) is not None:
+            return syscall(self._descriptors.stream)(
+                cast(int, path),
+                mode,
+                buffering,
+                encoding,
+                errors,
+                newline,
+                closefd,
+            )
         # A backend serving an op is reaching for a physical file, which
         # on a disk mount rooted at its own prefix is spelled exactly
         # like the virtual one; routing it would hand the read back to
@@ -59,12 +82,10 @@ class MountedOpen:
             if not closefd:
                 raise ValueError("Cannot use closefd=False with file name")
             if opener is not None:
-                raise ValueError("opener is not supported for mounted paths")
-            if buffering < -1:
-                raise ValueError("invalid buffering size")
-            if buffering == 0 and "b" not in mode:
-                raise ValueError("can't have unbuffered text I/O")
-            return syscall(MirageFile)(
+                return self._opened(
+                    path, mode, buffering, encoding, errors, newline, opener
+                )
+            return syscall(open_file)(
                 self._files,
                 path,
                 mode,
@@ -72,6 +93,7 @@ class MountedOpen:
                 encoding=encoding,
                 errors=errors,
                 newline=newline,
+                buffering=buffering,
             )
         return cast(
             IO[str] | IO[bytes],
@@ -87,17 +109,61 @@ class MountedOpen:
             ),
         )
 
+    def _opened(
+        self,
+        path: str,
+        mode: str,
+        buffering: int,
+        encoding: str | None,
+        errors: str | None,
+        newline: str | None,
+        opener: Callable[[str, int], int],
+    ) -> OpenResult:
+        """``open`` through an opener, which names the descriptor
+        (tempfile's makes the file it opens), as it does for io.FileIO.
+        The arguments are checked before the opener runs, so a bad one
+        refuses the open before a truncating mode touches the file.
+
+        Args:
+            path (str): the mounted path.
+            mode (str): the open mode.
+            buffering (int): ``io.open``'s buffering.
+            encoding (str | None): the text encoding.
+            errors (str | None): the text error policy.
+            newline (str | None): the newline translation.
+            opener (Callable[[str, int], int]): the caller's opener.
+        """
+        facts = parse_mode(mode)
+        text_encoding(facts, encoding, errors, newline, buffering)
+        fd = opener(path, open_flags(facts))
+        if self._descriptors.get(fd) is None:
+            return cast(
+                IO[str] | IO[bytes],
+                self._original(fd, mode, buffering, encoding, errors, newline),
+            )
+        try:
+            return syscall(self._descriptors.stream)(
+                fd, mode, buffering, encoding, errors, newline
+            )
+        except BaseException:
+            self._descriptors.close(fd)
+            raise
+
 
 def make_open(
-    files: Files, loop: asyncio.AbstractEventLoop | None = None
+    files: Files,
+    loop: asyncio.AbstractEventLoop | None = None,
+    router: HostFs | None = None,
 ) -> MountedOpen:
     """Create a patched open() that routes mounted paths through ops.
 
     Args:
         files (Files): The facade with the mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
+        router (HostFs | None): the ``os`` entry point whose descriptors
+            ``open`` wraps; None makes one of its own.
 
     Returns:
         Callable: A patched open function.
     """
-    return MountedOpen(files, loop)
+    return MountedOpen(HostFs(files, loop) if router is None else router, loop)

@@ -80,24 +80,13 @@ export class MountCore {
   private readonly now: Date
   private readonly root: string
   readonly handles = new FileTable<Handle>()
-  // One hydration read per file identity at a time: opens of the same
-  // size-unknown file while one is out share it.
+  // Per file identity: the hydration read out (opens share it), a
+  // generation a change under it bumps, the chain of mutations, the chain of
+  // removals, and the opens out that a removal waits for.
   private readonly hydrations = new Map<string, Promise<Uint8Array | undefined>>()
-  // Bumped whenever the file changes underneath a hydration in flight, so a
-  // read that started before a truncate or write cannot hand a handle the
-  // bytes it fetched as the file's current content. An entry exists only
-  // while that file's hydration is out.
   private readonly hydrationGen = new Map<string, number>()
-  // One chain per file identity that persists and truncations join in
-  // order, so a truncate cannot slip in between a flush detaching its
-  // buffer and that buffer landing, which would let the flush restore the
-  // old body over a truncation that already succeeded.
   private readonly pending = new Map<string, Promise<void>>()
-  // One chain per file identity that its removals (an unlink, a rename
-  // onto it) join, which an open of the file waits out: see `removing`.
   private readonly removals = new Map<string, Promise<void>>()
-  // The opens out per name they opened, which a removal of that name waits
-  // for.
   private readonly opening = new Map<string, Set<Promise<void>>>()
   private readonly uid: number
   private readonly gid: number
@@ -264,30 +253,34 @@ export class MountCore {
   }
 
   /**
-   * Run one mutation that touches several files, holding each one's chain,
-   * taken in sorted order so two renames that cross never wait on each
-   * other. Mirrors Python's `_mutate_all`.
+   * Run `fn` holding the chain of every key, taken in sorted order so two
+   * callers that hold the same pair never wait on each other. Mirrors
+   * Python's `_queue_all`.
    */
-  private mutateAll<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
+  private queueAll<T>(
+    queues: Map<string, Promise<void>>,
+    keys: string[],
+    fn: () => Promise<T>,
+  ): Promise<T> {
     const [first = '', ...rest] = [...new Set(keys)].sort(compareCodePoints)
-    if (rest.length === 0) return this.mutate(first, fn)
-    return this.mutate(first, () => this.mutateAll(rest, fn))
+    if (rest.length === 0) return this.queue(queues, first, fn)
+    return this.queue(queues, first, () => this.queueAll(queues, rest, fn))
   }
 
   /**
-   * Run `fn`, which removes or replaces the file at `path`, after the opens
-   * of that name already out, with later ones held back until it is done,
-   * as the kernel orders an open and an unlink of one name. `hold` reads
-   * the rest for the handles open before; an open that slipped in while
-   * that read was out would get a chunked handle onto bytes about to go. A
-   * chain of its own, taken before any `pending` one, rather than `pending`
-   * itself: an open it waits for may be truncating there.
+   * Run `fn`, which removes, replaces or moves the files at `paths`, after
+   * the opens of those names already out, with later ones held back until
+   * it is done, as the kernel orders an open and an unlink or a rename of
+   * one name. `hold` reads the rest for the handles open before; an open
+   * that slipped in while that read was out would get a chunked handle onto
+   * bytes about to go. Chains of their own, taken before any `pending` one,
+   * rather than `pending` itself: an open they wait for may be truncating
+   * there.
    */
-  private removing(path: string, fn: () => Promise<void>): Promise<void> {
-    const key = this.identity(path, false)
-    return this.queue(this.removals, key, async () => {
-      const opening = this.opening.get(key)
-      if (opening !== undefined) await Promise.all(opening)
+  private removing(paths: string[], fn: () => Promise<void>): Promise<void> {
+    const keys = paths.map((path) => this.identity(path, false))
+    return this.queueAll(this.removals, keys, async () => {
+      await Promise.all(keys.flatMap((key) => [...(this.opening.get(key) ?? [])]))
       await fn()
     })
   }
@@ -375,11 +368,8 @@ export class MountCore {
       return this.attrs(s, new TextEncoder().encode(this.shownTarget(path, target)).byteLength)
     }
     if (isDir(s)) return this.attrs(s)
-    // A size-unknown file the cache has not seen stats as 0 (never a fake
-    // size): the mount's direct_io makes the kernel read to EOF regardless,
-    // and attrTimeout '0' routes the post-open fstat to fgetattr, which
-    // serves the real hydrated size. Mirrors Python's core.py; see the
-    // CLAUDE.md FUSE section.
+    // A size-unknown file stats as 0 rather than be fetched on every ls -l;
+    // direct_io keeps its reads whole regardless.
     if (size === null && s.size === null) size = this.heldSize(path)
     if (ctx?.writeBuf !== undefined && ctx.writeBuf.length > 0) {
       let end = size ?? contentSize(s)
@@ -394,15 +384,8 @@ export class MountCore {
    * handle holds, what it wrote and has not flushed included.
    */
   async fgetattr(path: string, fd: number): Promise<MountAttrs> {
-    // fstat(fd) after open: the open handler hydrated size-unknown files
-    // into the handle, so answer with the real byte length instead of the
-    // 0 that path-based getattr reported before open.
     const ctx = this.handles.get(fd) ?? null
-    // A flush still landing has taken the handle's buffer: wait for it, so
-    // the size counts what it wrote.
     if (ctx !== null) await this.settled(ctx)
-    // The handle is open on the file a link led to, so its stat is the
-    // target's.
     return this.getattr(ctx?.path ?? path, ctx !== null, ctx)
   }
 
@@ -424,10 +407,6 @@ export class MountCore {
   }
 
   async readdir(path: string): Promise<string[]> {
-    // The workspace dispatcher merges namespace structure (child mounts
-    // and symlinks) into readdir and answers structure-only directories
-    // itself, so the core only normalizes entry shapes and drops macOS
-    // metadata names.
     const names = new Set<string>()
     const entries = await this.op(() => this.files.readdir(this.resolve(path)))
     for (const e of entries) {
@@ -438,13 +417,8 @@ export class MountCore {
   }
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
-    // Filetype-aware read: no `raw: true`, so an extension with a
-    // registered renderer surfaces as rendered text. Mirage registers
-    // none by default, so this reads raw bytes until a mount adds one.
-    // Matches Python's MountCore.read, which also dispatches.
+    // A rendered read: a filetype registered on the mount shows as text.
     const ctx = this.handles.get(fd)
-    // A flush still landing has taken the handle's buffer and not yet
-    // refreshed its bytes: wait for it, so the read sees what was written.
     if (ctx !== undefined) await this.settled(ctx)
     if (ctx === undefined) {
       // Whole, as a handle's first read is: the read that fills the cache
@@ -556,7 +530,7 @@ export class MountCore {
    */
   async unlink(path: string): Promise<void> {
     const key = this.identity(path, false)
-    await this.removing(path, () =>
+    await this.removing([path], () =>
       this.mutate(key, async () => {
         const named = this.named(path)
         const row = await this.hold(path, named)
@@ -599,12 +573,8 @@ export class MountCore {
     try {
       data = await this.op(() => this.files.read(this.resolve(path)))
     } catch (err) {
-      // The mutation has already landed, so a refresh that fails must not
-      // report it as failed: an O_TRUNC open would fail after the old
-      // bytes were erased, and settled writes would be retried over
-      // content that already holds them. Drop the hydrated bytes instead,
-      // so the next read through those handles fetches and surfaces any
-      // error itself.
+      // The mutation landed, so a refresh that fails must not fail it; the
+      // next read through these handles fetches and reports.
       console.warn(`fuse: refresh of ${path} after a change failed: ${String(err)}`)
       for (const ctx of hydrated) delete ctx.data
       return
@@ -620,8 +590,8 @@ export class MountCore {
     const source = this.resolve(src)
     const target = this.resolve(dst)
     const moved = this.identity(src, false)
-    await this.removing(dst, () =>
-      this.mutateAll([moved, this.identity(dst, false)], async () => {
+    await this.removing([src, dst], () =>
+      this.queueAll(this.pending, [moved, this.identity(dst, false)], async () => {
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         const row = await this.hold(dst, replaced)
         await this.op(() => this.files.rename(source, target))
@@ -639,10 +609,8 @@ export class MountCore {
     )
   }
 
-  // No emptiness pre-check here, matching the python MountCore. Every
-  // backend's rmdir op refuses a non-empty directory itself, so a listing
-  // first was one extra round trip per call on an API-backed mount, and the
-  // catch that wrapped it swallowed whatever readdir raised.
+  // No emptiness pre-check: every backend's rmdir refuses a non-empty
+  // directory itself.
   async rmdir(path: string): Promise<void> {
     await this.op(() => this.files.rmdir(this.resolve(path)))
   }
@@ -774,20 +742,15 @@ export class MountCore {
     if (gid !== null) fields.gid = gid
     if (atime !== null) fields.atime = atime.toISOString()
     if (mtime !== null) fields.mtime = mtime.toISOString()
-    const store = (): Promise<unknown> =>
-      this.op(() => this.files.setattr(this.resolve(path), fields))
-    if (atime === null && mtime === null) {
-      await store()
-      return
-    }
     const key = this.identity(path, follow)
-    await this.mutate(key, async () => {
-      // Writes the kernel acknowledged before the times were set precede
-      // them in POSIX order; landed later, they would stamp over them (cp -p
-      // sets the times on the file it still holds open). Mirrors Python.
-      await this.landBuffered(key)
-      await store()
-    })
+    const timed = atime !== null || mtime !== null
+    const run = async (): Promise<void> => {
+      // cp -p sets times on a file it still holds open: its buffered
+      // writes land first, or they would stamp over them.
+      if (timed) await this.landBuffered(key)
+      await this.op(() => this.files.setattr(this.resolve(path), fields))
+    }
+    await (timed ? this.mutate(key, run) : run())
   }
 
   /**
@@ -853,13 +816,8 @@ export class MountCore {
     const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
     if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
-      // libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
-      // kernel sends no SETATTR ahead of an O_TRUNC open: the flag on the
-      // open is the whole truncation. libfuse 2 (what fuse-native and
-      // macFUSE speak) strips the flag and truncates through setattr
-      // first, so this branch is what keeps a shorter overwrite from
-      // holding the old tail once the kernel stops doing that for us
-      // (#1032). Mirrors Python's MountCore.open.
+      // libfuse 3 sends no SETATTR ahead of an O_TRUNC open (atomic
+      // O_TRUNC), so the flag is the whole truncation.
       await this.truncate(path, 0)
     }
     if (ctx.live === true) return this.handles.add(ctx)
@@ -870,10 +828,8 @@ export class MountCore {
       const data = await this.hydrate(path)
       if (data !== undefined) ctx.data = data
     } else if (s.size > READ_CHUNK && (flags & fsConstants.O_TRUNC) === 0) {
-      // A file larger than a chunk is read a chunk at a time: the kernel
-      // asks in small pieces, and fetching the whole file on the first one
-      // moved all of it to answer a `head`. Mirrors Python's MountCore.open.
-      // The fetch reads the handle's path as it is then: a rename moves it.
+      // Read a chunk at a time, at the handle's path then (a rename moves
+      // it): a `head` must not move the file.
       ctx.chunked = new ChunkedHandle(path, s.size, (offset, size) =>
         this.op(() => this.files.read(this.resolve(ctx.path), { offset, size })),
       )
@@ -945,10 +901,7 @@ export class MountCore {
   async release(fd: number): Promise<void> {
     const ctx = this.handles.get(fd)
     if (ctx !== undefined) {
-      // The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
-      // between (the kext always flushes on close), so a handle can still
-      // hold buffered writes here. Dropping them would silently lose data
-      // written through an fskit mount.
+      // The FSKit shim sends RELEASE with no FLUSH before it.
       await this.flush(ctx.path, fd)
     }
     this.handles.pop(fd)

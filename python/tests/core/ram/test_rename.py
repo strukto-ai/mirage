@@ -45,6 +45,15 @@ async def test_rename_file(accessor):
 
 
 @pytest.mark.asyncio
+async def test_rename_onto_its_own_name_leaves_it_as_it_was(accessor):
+    await rename(accessor, spec("/a.txt"), spec("/a.txt"))
+    await rename(accessor, spec("/dir"), spec("/dir"))
+    assert accessor.store.files["/a.txt"] == b"hi"
+    assert "/dir" in accessor.store.dirs
+    assert accessor.store.files["/dir/f"] == b"x"
+
+
+@pytest.mark.asyncio
 async def test_rename_dir_moves_children(accessor):
     await rename(accessor, spec("/dir"), spec("/d/moved"))
     assert "/d/moved" in accessor.store.dirs

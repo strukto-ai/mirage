@@ -128,11 +128,15 @@ class OpReport:
         bytes (int | None): bytes the answering store moved, when the
             delivered result no longer measures them. None means "the
             result is the measure".
+        path (str | None): the path the op ran on once the dispatcher
+            followed its links, which is what a record names. None until
+            the walk is done.
     """
 
     completed: bool = False
     source: str | None = None
     bytes: int | None = None
+    path: str | None = None
 
     def served(
         self, source: str | None = None, moved: int | None = None

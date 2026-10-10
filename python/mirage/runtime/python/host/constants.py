@@ -38,6 +38,7 @@ ROUTED_CALLS: Mapping[str, tuple[str, ...]] = {
     "lstat": ("readlink", "stat"),
     "makedirs": ("mkdir",),
     "mkdir": ("mkdir",),
+    "open": ("stat", "create", "truncate"),
     "readlink": ("readlink",),
     "remove": ("unlink",),
     "removedirs": ("rmdir",),
@@ -62,12 +63,9 @@ ROUTED_CALLS: Mapping[str, tuple[str, ...]] = {
 # filesystem-wide block count, so these cannot be faked without lying
 # to the guest.
 #
-# `open` is the fd tier rather than a missing fact: serving it means an
-# fd table with host-visible numbers, which `runtime/handles` builds for
-# the runtimes and this entry point has no equivalent of. `chdir` is refused
-# because a host process cwd cannot be a virtual path; a runtime whose
-# guest has its own cwd (Emscripten does) serves it inside that guest
-# and never reaches this table.
+# `chdir` is refused because a host process cwd cannot be a virtual
+# path; a runtime whose guest has its own cwd (Emscripten does) serves it
+# inside that guest and never reaches this table.
 # `link`, `mkfifo` and `mknod` refuse with EPERM instead, because that
 # is what link(2) and mknod(2) document for a filesystem that does not
 # support the requested node (vfat answers link() exactly this way), so
@@ -82,14 +80,30 @@ REFUSED_CALLS: Mapping[str, FsCondition] = {
     "link": HARD_LINK_REFUSAL,
     "mkfifo": FsCondition.EPERM,
     "mknod": FsCondition.EPERM,
-    "open": FsCondition.ENOTSUP,
     "statvfs": FsCondition.ENOTSUP,
 }
 
-# The block size every mirage stat translator reports; a backend has no
-# block size of its own, and 4 KiB is what the FUSE adapters already
-# answer.
-BLKSIZE = 4096
+# The calls that take a descriptor rather than a path. The routed `open`
+# hands a mounted file a number of its own (see host/descriptors.py), and
+# these answer for that number and leave every other one to the host;
+# `fdopen` wraps it, which `io.open` on the number does too.
+DESCRIPTOR_CALLS: frozenset[str] = frozenset(
+    {
+        "close",
+        "fchmod",
+        "fchown",
+        "fdatasync",
+        "fdopen",
+        "fstat",
+        "fsync",
+        "ftruncate",
+        "lseek",
+        "pread",
+        "pwrite",
+        "read",
+        "write",
+    }
+)
 
 # setxattr(2)'s flags as linux numbers them, the one platform whose os
 # module has the xattr family for this router to install.

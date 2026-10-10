@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { FS_CONDITIONS } from '../../../errors/index.ts'
-import { WASI } from './errors.ts'
+import { FS_CONDITIONS } from './types.ts'
+import { WASI } from './wasi.ts'
 
 describe('the preview1 wire table', () => {
   it('covers the whole vocabulary', () => {

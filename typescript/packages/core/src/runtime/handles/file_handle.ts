@@ -41,8 +41,8 @@ export class FileHandle {
   readonly writable: boolean
   readonly append: boolean
   pos = 0
-  readonly baseLen: number
-  private readonly base: ChunkedHandle | null
+  baseLen: number
+  private base: ChunkedHandle | null
   private runs: { start: number; buf: Uint8Array; length: number }[] = []
   private cut: number | null = null
   private extent = 0
@@ -277,6 +277,22 @@ export class FileHandle {
     }
     this.extent = size
     this.truncated = true
+  }
+
+  /**
+   * Take what was just flushed as the stored bytes, owing nothing. After a
+   * flush the mount holds what the handle held, so the handle reads it back
+   * from there and keeps writing over it; a second flush then owes only
+   * what came after the first. Mirrors Python's `FileHandle.settle`.
+   */
+  settle(fetch: FileFetch): void {
+    const size = this.size
+    this.base = new ChunkedHandle(this.path, size, (offset, asked) => fetch(offset, asked))
+    this.baseLen = size
+    this.runs = []
+    this.cut = null
+    this.extent = 0
+    this.truncated = false
   }
 
   /** The ops this handle owes the mount at close. */

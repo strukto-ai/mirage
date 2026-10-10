@@ -86,7 +86,8 @@
         "monty",
         "wasi",
         "pyodide",
-        "quickjs"
+        "quickjs",
+        "host"
       ],
       "backends": [
         "ram",
@@ -184,11 +185,6 @@
               "exit": 1,
               "stdout": "",
               "stderr_contains": "'module' object has no attribute 'O_RDONLY'"
-            },
-            "host": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "Operation not supported"
             }
           }
         }

@@ -56,27 +56,15 @@ T = TypeVar("T")
 class MountCore:
     """Protocol-neutral mount logic shared by every kernel adapter.
 
-    Async-native, like the TypeScript core: every op awaits ``ws.vfs``.
-    An adapter whose kernel interface is synchronous (libfuse's callbacks
-    are) owns the bridge and the loop it runs on, because that is the
-    adapter's constraint rather than this layer's; one that is already
-    async (SFTP, codex-exec) awaits the core on the workspace's loop.
+    Async, like ``core.ts``: a sync adapter (libfuse) owns the loop it
+    bridges to; SFTP and codex-exec await the core on the workspace's
+    loop. It decides what the filesystem holds, in POSIX terms
+    (``MountAttrs``, Python exceptions), and an adapter how to say it to
+    its kernel, its errnos from ``mirage.mount.errors.classify_error``.
 
-    Everything here is expressed in POSIX terms (``MountAttrs`` rows,
-    ordinary Python exceptions) and imports nothing from mfusepy, so it is
-    reusable by a non-FUSE adapter (FSKit, File Provider) and unit-testable
-    without a kernel or the ``[fuse]`` extra installed.
-
-    The division of labour: this class decides *what* the filesystem
-    contains, an adapter decides *how* to say it to a particular kernel
-    interface. Adapters translate the exceptions raised here into their own
-    error codes with ``mirage.mount.errors.classify_error``.
-
-    Ops on one file can interleave at their awaits when the caller runs
-    several at once, so the mutations of one file identity run one at a
-    time (``_mutate``), an open and a removal of one name wait for each
-    other (``_removing``), and a read through a handle waits for a flush
-    still landing. Mirrors ``core.ts``.
+    Ops on one file interleave at their awaits, so its mutations run one
+    at a time (``_mutate``), an open and a removal of one name wait for
+    each other (``_removing``), and a read waits for a flush landing.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every filesystem call routes to.
@@ -112,27 +100,15 @@ class MountCore:
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()
-        # One hydration read per file identity at a time: opens of the
-        # same size-unknown file while one is out share it.
+        # Per file identity: the hydration read out (opens share it), a
+        # generation a change under it bumps, the chain of mutations, the
+        # chain of removals, and the opens out that a removal waits for.
         self._hydrations: dict[str, asyncio.Future[bytes | None]] = {}
-        # Bumped whenever the file changes underneath a hydration in
-        # flight, so a read that started before a truncate or write cannot
-        # hand a handle the bytes it fetched as the file's current
-        # content. An entry exists only while that file's hydration is out.
         self._hydration_gen: dict[str, int] = {}
-        # One chain per file identity that persists and truncations join
-        # in order, so a truncate cannot slip in between a flush detaching
-        # its buffer and that buffer landing.
         self._pending: dict[str, asyncio.Future[None]] = {}
-        # One chain per file identity that its removals (an unlink, a
-        # rename onto it) join, which an open of the file waits out.
         self._removals: dict[str, asyncio.Future[None]] = {}
-        # The opens out per name they opened, which a removal of that
-        # name waits for.
         self._opening: dict[str, set[asyncio.Future[None]]] = {}
-        # Windows has no getuid/getgid; the values are irrelevant there
-        # because the mount passes uid=-1,gid=-1 and WinFsp presents files
-        # as owned by the mounting user (see fuse/mount.py). Mirrors core.ts.
+        # Windows has none; WinFsp presents files as the mounting user's.
         self._uid = os.getuid() if hasattr(os, "getuid") else 0
         self._gid = os.getgid() if hasattr(os, "getgid") else 0
 
@@ -145,11 +121,8 @@ class MountCore:
         return self._handles
 
     async def _op(self, call: Awaitable[T]) -> T:
-        """Run one op under the bound session's mount grants.
-
-        The session context is set around the await, so it is what the
-        dispatcher reads while the op runs, mirroring how ``shell``
-        brackets a command with the session token.
+        """Run one op under the bound session's mount grants, set around
+        the await as ``shell`` brackets a command.
 
         Args:
             call (Awaitable[T]): the op to run under the session.
@@ -211,44 +184,53 @@ class MountCore:
         """
         return self._queue(self._pending, key, fn)
 
-    def _mutate_all(
-        self, keys: list[str], fn: Callable[[], Awaitable[T]]
+    def _queue_all(
+        self,
+        queues: dict[str, asyncio.Future[None]],
+        keys: list[str],
+        fn: Callable[[], Awaitable[T]],
     ) -> Awaitable[T]:
-        """Run one mutation that touches several files, holding each one's
-        chain, taken in sorted order so two renames that cross never wait
-        on each other.
+        """Run ``fn`` holding the chain of every key, taken in sorted order
+        so two callers that hold the same pair never wait on each other.
 
         Args:
+            queues (dict[str, asyncio.Future[None]]): the chains to join.
             keys (list[str]): the file identities.
-            fn (Callable[[], Awaitable[T]]): the mutation.
+            fn (Callable[[], Awaitable[T]]): the work to run.
         """
         first, *rest = sorted(set(keys))
         if not rest:
-            return self._mutate(first, fn)
-        return self._mutate(first, lambda: self._mutate_all(rest, fn))
+            return self._queue(queues, first, fn)
+        return self._queue(
+            queues, first, lambda: self._queue_all(queues, rest, fn)
+        )
 
     def _removing(
-        self, path: str, fn: Callable[[], Awaitable[None]]
+        self, paths: list[str], fn: Callable[[], Awaitable[None]]
     ) -> Awaitable[None]:
-        """Run ``fn``, which removes or replaces the file at ``path``, after
-        the opens of that name already out, with later ones held back until
-        it is done, as the kernel orders an open and an unlink of one name.
-        A chain of its own, taken before any ``_pending`` one, rather than
-        ``_pending`` itself: an open it waits for may be truncating there.
+        """Run ``fn``, which removes, replaces or moves the files at
+        ``paths``, after the opens of those names already out, with later
+        ones held back until it is done, as the kernel orders an open and
+        an unlink or a rename of one name. Chains of their own, taken
+        before any ``_pending`` one, rather than ``_pending`` itself: an
+        open they wait for may be truncating there.
 
         Args:
-            path (str): mount path being removed or replaced.
+            paths (list[str]): mount paths being removed, replaced or
+                moved.
             fn (Callable[[], Awaitable[None]]): the removal.
         """
-        key = self.identity(path, follow=False)
+        keys = [self.identity(path, follow=False) for path in paths]
 
         async def run() -> None:
-            opening = self._opening.get(key)
+            opening = [
+                out for key in keys for out in self._opening.get(key, ())
+            ]
             if opening:
-                await asyncio.wait(list(opening))
+                await asyncio.wait(opening)
             await fn()
 
-        return self._queue(self._removals, key, run)
+        return self._queue_all(self._removals, keys, run)
 
     async def _settled(self, ctx: Handle) -> None:
         """Wait for a flush or truncation of the handle's file still
@@ -429,12 +411,8 @@ class MountCore:
         if is_dir(s):
             return self.attrs(s)
         if size is None and s.size is None:
-            # A size-unknown file the cache has not seen stats as 0,
-            # matching mirage's own find semantics. Reads stay correct
-            # anyway: direct_io makes the kernel ignore st_size, and
-            # fgetattr serves the real size to fstat-based tools after
-            # open. Never report a fake size and never fetch content here:
-            # getattr runs once per entry on every ls -l.
+            # A size-unknown file stats as 0 rather than be fetched on
+            # every ls -l; direct_io keeps its reads whole regardless.
             size = self.held_size(path)
         if ctx is not None and ctx.write_buf:
             stored = content_size(s) if size is None else size
@@ -449,19 +427,10 @@ class MountCore:
             path (str): mount path the kernel named.
             fh (int | None): the open handle; None stats by path.
         """
-        # fstat(fd) after open: the hydrated handle knows the real byte
-        # length. attr_timeout=0 on FUSE mounts makes the kernel actually
-        # ask here instead of trusting the cached pre-open size, which is
-        # what keeps wc -c, BSD cp, and tail -c correct for size-unknown
-        # files.
         ctx = self._handles.get(fh) if fh is not None else None
         if ctx is None:
             return await self.getattr(path)
-        # A flush still landing has taken the handle's buffer: wait for it,
-        # so the size counts what it wrote.
         await self._settled(ctx)
-        # The handle is open on the file a link led to, so its stat is the
-        # target's.
         return await self.getattr(ctx.path, True, ctx)
 
     async def readdir(self, path: str) -> list[str]:
@@ -476,10 +445,6 @@ class MountCore:
         Raises:
             FileNotFoundError: no such directory and nothing virtual there.
         """
-        # `ws.vfs` merges namespace structure (child mounts and
-        # symlinks) into readdir and answers structure-only directories
-        # itself, so the core only normalizes entry shapes and drops
-        # macOS metadata names.
         names = set()
         entries = await self._op(self._files.readdir(self.resolve(path)))
         for e in entries:
@@ -694,7 +659,7 @@ class MountCore:
                 ctx.detached = row
             await self._changed(path, rehydrate=False)
 
-        await self._removing(path, lambda: self._mutate(key, remove))
+        await self._removing([path], lambda: self._mutate(key, remove))
 
     async def rename(self, old: str, new: str) -> None:
         """Rename an entry, carrying the handles open under it along.
@@ -726,7 +691,10 @@ class MountCore:
             await self._changed(old, rehydrate=False)
             await self._changed(new, rehydrate=False)
 
-        await self._removing(new, lambda: self._mutate_all(keys, replace))
+        await self._removing(
+            [old, new],
+            lambda: self._queue_all(self._pending, keys, replace),
+        )
 
     async def rmdir(self, path: str) -> None:
         await self._op(self._files.rmdir(self.resolve(path)))
@@ -775,8 +743,14 @@ class MountCore:
                 None leaves it.
             follow (bool): change a trailing link's target, not the link.
         """
+        key = self.identity(path, follow=follow)
+        timed = atime is not None or mtime is not None
 
-        async def store() -> None:
+        async def run() -> None:
+            # cp -p sets times on a file it still holds open: its buffered
+            # writes land first, or they would stamp over them.
+            if timed:
+                await self._land_buffered(key)
             await self._op(
                 self._files.setattr(
                     self.resolve(path),
@@ -789,20 +763,7 @@ class MountCore:
                 )
             )
 
-        if atime is None and mtime is None:
-            await store()
-            return
-        key = self.identity(path, follow=follow)
-
-        async def run() -> None:
-            # Writes the kernel acknowledged before the times were set
-            # precede them in POSIX order; landed later, they would stamp
-            # over them (cp -p sets the times on the file it still holds
-            # open).
-            await self._land_buffered(key)
-            await store()
-
-        await self._mutate(key, run)
+        await (self._mutate(key, run) if timed else run())
 
     async def setxattr(
         self,
@@ -985,29 +946,18 @@ class MountCore:
         if s.type == FileType.DIRECTORY:
             return self._handles.add(ctx)
         if flags & os.O_TRUNC:
-            # libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
-            # kernel sends no SETATTR ahead of an O_TRUNC open: the flag on
-            # the open is the whole truncation. libfuse 2 (macFUSE, the
-            # libfuse2 CI installs) strips the flag and truncates through
-            # setattr first, which is why dropping it here only showed on a
-            # fuse3-only host, where a shorter overwrite kept the old tail.
+            # libfuse 3 sends no SETATTR ahead of an O_TRUNC open (atomic
+            # O_TRUNC), so the flag is the whole truncation.
             await self.truncate(path, 0)
         if ctx.live:
             return self._handles.add(ctx)
         if s.size is None:
-            # API-backed mounts cannot size a file without fetching it, so
-            # hydrate now: fgetattr and read() then serve real bytes. This
-            # holds after an O_TRUNC too: the read follows the rendered
-            # path, so an extension whose renderer gives an empty file a
-            # body is honored rather than shadowed by literal raw
-            # emptiness. The read goes through the dispatcher, so a caching
-            # mount keeps the bytes for the next open and for a stat once
-            # this one closes.
+            # A file an API mount cannot size is read whole now, after an
+            # O_TRUNC too, so a renderer that gives an empty file a body is
+            # honored; a caching mount keeps the bytes for the next stat.
             ctx.data = await asyncio.shield(self._hydrate(path))
         elif s.size > READ_CHUNK and not flags & os.O_TRUNC:
-            # A file larger than a chunk is read a chunk at a time: the
-            # kernel asks in small pieces, and fetching the whole file on
-            # the first one moved all of it to answer a `head`.
+            # Read a chunk at a time: a `head` must not move the file.
             ctx.chunked = ChunkedHandle(path=path, size=s.size)
         return self._handles.add(ctx)
 
@@ -1150,10 +1100,7 @@ class MountCore:
     async def release(self, fh: int) -> None:
         ctx = self._handles.get(fh)
         if ctx is not None:
-            # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH
-            # in between (the kext always flushes on close), so a handle can
-            # still hold buffered writes here. Dropping them would silently
-            # lose data written through an fskit mount.
+            # The FSKit shim sends RELEASE with no FLUSH before it.
             await self.flush(ctx.path, fh)
         self._handles.pop(fh)
 
@@ -1239,12 +1186,8 @@ class MountCore:
         try:
             data = await self._op(self._files.read(self.resolve(path)))
         except Exception as err:
-            # The mutation has already landed, so a refresh that fails must
-            # not report it as failed: an O_TRUNC open would fail after the
-            # old bytes were erased, and settled writes would be retried
-            # over content that already holds them. Drop the hydrated bytes
-            # instead, so the next read through those handles fetches and
-            # surfaces any error itself.
+            # The mutation landed, so a refresh that fails must not fail
+            # it; the next read through these handles fetches and reports.
             logger.warning(
                 "fuse: refresh of %s after a change failed: %r", path, err
             )

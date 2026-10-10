@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import functools
 import logging
 import posixpath
@@ -20,10 +21,12 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FileHandle, FileTable
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
+from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
 from mirage.runtime.wasm.constants import (
     FDFLAG_APPEND,
@@ -49,7 +52,6 @@ from mirage.runtime.wasm.errors import (
     ENOTDIR,
     LINK_REFUSAL,
     OK,
-    errno_for,
 )
 from mirage.runtime.wasm.list import pack_dirent
 from mirage.runtime.wasm.loader import Func, FuncType, ValType, wasmtime
@@ -62,6 +64,7 @@ from mirage.runtime.wasm.stat import (
 )
 from mirage.runtime.wasm.view import WasmView
 from mirage.utils.dates import timestamp_iso
+from mirage.utils.stat_view import CHAR_MODE, FILE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -239,10 +242,6 @@ class WasiFs:
         joined = rel if rel.startswith("/") else posixpath.join(base, rel)
         normed = posixpath.normpath(joined)
         return normed if normed.startswith("/") else "/" + normed
-
-    @staticmethod
-    def _ino(path: str) -> int:
-        return hash(path) & (2**63 - 1)
 
     # -- fd lookups -------------------------------------------------------
 
@@ -535,17 +534,24 @@ class WasiFs:
         if entry is None:
             return EBADF
         if entry.kind == "file" and entry.handle is not None:
-            mtime = (entry.stat.mtime_ns or 0) if entry.stat is not None else 0
+            # The size is the handle's, which counts what it wrote.
+            row = entry.stat or VFSStat(size=0, is_dir=False, mode=FILE_MODE)
             packed = pack_filestat(
-                entry.handle.size, mtime, FT_REG, self._ino(entry.path)
+                posix_stat(
+                    dataclasses.replace(row, size=entry.handle.size),
+                    entry.path,
+                    "/",
+                ),
+                FT_REG,
             )
         elif entry.kind == "dir":
             st = self._fs.stat(entry.path)
-            packed = pack_filestat(
-                st.size, st.mtime_ns or 0, FT_DIR, self._ino(entry.path)
-            )
+            packed = pack_filestat(posix_stat(st, entry.path, "/"), FT_DIR)
         else:
-            packed = pack_filestat(0, 0, FT_CHR, fd)
+            stream = VFSStat(size=0, is_dir=False, mode=CHAR_MODE)
+            packed = pack_filestat(
+                posix_stat(stream, f"/dev/fd/{fd}", "/"), FT_CHR
+            )
         self._store(caller, buf, packed)
         return OK
 
@@ -566,9 +572,7 @@ class WasiFs:
         # its target and os.path.islink was always False.
         follow = bool(flags & LOOKUP_SYMLINK_FOLLOW)
         st = self._fs.stat(path) if follow else self._fs.lstat(path)
-        packed = pack_filestat(
-            st.size, st.mtime_ns or 0, filetype_of(st), self._ino(path)
-        )
+        packed = pack_filestat(posix_stat(st, path, "/"), filetype_of(st))
         self._store(caller, buf, packed)
         return OK
 
@@ -666,16 +670,70 @@ class WasiFs:
     ) -> int:
         return OK
 
+    def _stored(self, path: str, offset: int, size: int | None) -> bytes:
+        return self._fs.read(path, offset=offset, size=size, raw=True)
+
+    def _land(self, entry: FdEntry) -> None:
+        """Land a file fd's writes now, as fsync(2) does: the mount and
+        every other fd on the path see them before the close, which then
+        owes only what came after.
+
+        Args:
+            entry (FdEntry): the fd's entry.
+        """
+        h = entry.handle
+        if entry.kind != "file" or h is None or not h.dirty:
+            return
+        self._fs.flush(h.path, h.flush_plan())
+        h.settle(functools.partial(self._stored, h.path))
+        entry.stat = self._fs.stat(h.path)
+
+    def _land_path(self, path: str) -> None:
+        """Land the writes of every file fd open on ``path``, which a
+        change of its times must come after.
+
+        Args:
+            path (str): guest-absolute path.
+        """
+        for entry in list(self._fds.values()):
+            if entry.path == path:
+                self._land(entry)
+
     def fd_datasync(self, caller: "wasmtime.Caller", fd: int) -> int:
-        return OK
+        return self.fd_sync(caller, fd)
 
     def fd_sync(self, caller: "wasmtime.Caller", fd: int) -> int:
+        entry = self._fds.get(fd)
+        if entry is None:
+            return EBADF
+        self._land(entry)
         return OK
 
     def fd_fdstat_set_flags(
         self, caller: "wasmtime.Caller", fd: int, flags: int
     ) -> int:
         return OK
+
+    def _set_times(
+        self, path: str, atim: int, mtim: int, fst_flags: int, nofollow: bool
+    ) -> None:
+        """Store the stamps a utimensat-shaped call selects.
+
+        Args:
+            path (str): guest-absolute path.
+            atim (int): the access time argument, epoch nanoseconds.
+            mtim (int): the modification time argument.
+            fst_flags (int): which stamps to write, and from where.
+            nofollow (bool): stamp a trailing link itself.
+        """
+        now = time.time()
+        atime = _stamp(fst_flags, FST_ATIM, FST_ATIM_NOW, atim, now)
+        mtime = _stamp(fst_flags, FST_MTIM, FST_MTIM_NOW, mtim, now)
+        if atime is None and mtime is None:
+            # No stamp selected is a no-op, not an error: utimensat(2)
+            # with two UTIME_OMIT values does nothing and succeeds.
+            return
+        self._fs.setattr(path, atime=atime, mtime=mtime, nofollow=nofollow)
 
     def fd_filestat_set_times(
         self,
@@ -685,6 +743,15 @@ class WasiFs:
         mtim: int,
         flags: int,
     ) -> int:
+        entry = self._fds.get(fd)
+        if entry is None or entry.kind not in ("file", "dir"):
+            return EBADF
+        # Writes any fd on the file still owes land first, or landing them
+        # at a close would stamp over the times set here (cp -p).
+        self._land_path(entry.path)
+        self._set_times(entry.path, atim, mtim, flags, nofollow=False)
+        if entry.kind == "file":
+            entry.stat = self._fs.stat(entry.path)
         return OK
 
     def path_filestat_set_times(
@@ -701,17 +768,12 @@ class WasiFs:
         path = self._path_arg(caller, dirfd, ptr, length)
         if path is None:
             return EBADF
-        now = time.time()
-        atime = _stamp(fst_flags, FST_ATIM, FST_ATIM_NOW, atim, now)
-        mtime = _stamp(fst_flags, FST_MTIM, FST_MTIM_NOW, mtim, now)
-        if atime is None and mtime is None:
-            # No stamp selected is a no-op, not an error: utimensat(2)
-            # with two UTIME_OMIT values does nothing and succeeds.
-            return OK
-        self._fs.setattr(
+        self._land_path(path)
+        self._set_times(
             path,
-            atime=atime,
-            mtime=mtime,
+            atim,
+            mtim,
+            fst_flags,
             nofollow=not (flags & LOOKUP_SYMLINK_FOLLOW),
         )
         return OK

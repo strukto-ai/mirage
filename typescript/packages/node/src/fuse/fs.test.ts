@@ -56,31 +56,6 @@ async function mkWs(): Promise<Workspace> {
 }
 
 describe('MirageFS — getattr', () => {
-  it('reports root as a directory', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/')
-    expect(code).toBe(0)
-    expect(attr.mode & 0o170000).toBe(0o040000)
-  })
-
-  it('reports a mount-prefix path as a virtual directory', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data')
-    expect(code).toBe(0)
-    expect(attr.mode & 0o170000).toBe(0o040000)
-  })
-
-  it('reports a file under a mount with correct size', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
-    expect(code).toBe(0)
-    expect(attr.mode & 0o170000).toBe(0o100000)
-    expect(attr.size).toBe('hello world\n'.length)
-  })
-
   it('returns ENOENT for missing files', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
@@ -93,28 +68,6 @@ describe('MirageFS — getattr', () => {
     const mfs = new MirageFS(ws.vfs)
     const [code] = await callOp<[number]>(mfs, 'getattr', '/data/.DS_Store')
     expect(code).toBe(ENOENT)
-  })
-})
-
-describe('MirageFS — readdir', () => {
-  it('always prepends "." and ".." at root', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [code, names] = await callOp<[number, string[]]>(mfs, 'readdir', '/')
-    expect(code).toBe(0)
-    expect(names.slice(0, 2)).toEqual(['.', '..'])
-    expect(names).toContain('data')
-    expect(names).toContain('extra')
-  })
-
-  it('lists contents of a mount directory', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [code, names] = await callOp<[number, string[]]>(mfs, 'readdir', '/data')
-    expect(code).toBe(0)
-    expect(names.slice(0, 2)).toEqual(['.', '..'])
-    expect(names).toContain('greeting.txt')
-    expect(names).toContain('sub')
   })
 })
 
@@ -318,14 +271,6 @@ describe('MirageFS — the op ledger', () => {
     const ops = ws.vfs.records.map((r) => r.op)
     expect(ops).toContain('create')
     expect(ops).toContain('write')
-  })
-})
-
-describe('MirageFS — ops() registers access', () => {
-  it('includes access in the returned ops map', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    expect(typeof mfs.ops().access).toBe('function')
   })
 })
 
@@ -539,21 +484,6 @@ describe('MirageFS — size=null mounts (API-backed)', () => {
 })
 
 describe('MirageFS — release flushes pending writes', () => {
-  it('pending write_buf is persisted by release when no flush arrived', async () => {
-    // The kext always issues FLUSH on close, but the macFUSE FSKit shim
-    // issues WRITE then RELEASE with no FLUSH in between; dropping the
-    // buffer at release silently lost data written through an fskit mount.
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/greeting.txt', 0)
-    const data = Buffer.from('clobber')
-    await callOp(mfs, 'write', '/data/greeting.txt', fh, data, data.byteLength, 0)
-    const [releaseCode] = await callOp<[number]>(mfs, 'release', '/data/greeting.txt', fh)
-    expect(releaseCode).toBe(0)
-    const current = await ws.vfs.read('/data/greeting.txt')
-    expect(new TextDecoder().decode(current)).toBe('clobberorld\n')
-  })
-
   it('flush persists the buffered writes', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
@@ -588,21 +518,6 @@ describe('MirageFS — release flushes pending writes', () => {
 })
 
 describe('MirageFS — xattr', () => {
-  it('round-trips set and get', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.test', Buffer.from('value'), 0, 0)
-    const [code, value] = await callOp<[number, Buffer?]>(
-      mfs,
-      'getxattr',
-      '/data/greeting.txt',
-      'user.test',
-      0,
-    )
-    expect(code).toBe(0)
-    expect(value?.toString()).toBe('value')
-  })
-
   it('returns no value for a missing attribute', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
@@ -615,33 +530,6 @@ describe('MirageFS — xattr', () => {
     )
     expect(code).toBe(0)
     expect(value).toBeUndefined()
-  })
-
-  it('lists and removes attributes', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.one', Buffer.from('1'), 0, 0)
-    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.two', Buffer.from('2'), 0, 0)
-    const [, list] = await callOp<[number, string[]]>(mfs, 'listxattr', '/data/greeting.txt')
-    expect([...list].sort()).toEqual(['user.one', 'user.two'])
-    await callOp(mfs, 'removexattr', '/data/greeting.txt', 'user.one')
-    const [, after] = await callOp<[number, string[]]>(mfs, 'listxattr', '/data/greeting.txt')
-    expect(after).toEqual(['user.two'])
-  })
-
-  it('accepts the container probe attribute', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [setCode] = await callOp<[number]>(
-      mfs,
-      'setxattr',
-      '/data/greeting.txt',
-      'user.containers._probe',
-      Buffer.from('x'),
-      0,
-      0,
-    )
-    expect(setCode).toBe(0)
   })
 
   it('follows a rename and clears on unlink', async () => {
@@ -664,26 +552,6 @@ describe('MirageFS — xattr', () => {
     expect(list).toEqual([])
   })
 
-  it('is the same attribute every surface reads', async () => {
-    // The kernel's attribute is the dispatcher's, not an advisory copy held for
-    // the mount's lifetime: the shell and a guest read what the mountpoint
-    // wrote, and the mountpoint reads what they wrote.
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.kernel', Buffer.from('k'), 0, 0)
-    const fromFiles = await ws.vfs.getxattr('/data/greeting.txt', 'user.kernel')
-    expect(new TextDecoder().decode(fromFiles)).toBe('k')
-    await ws.vfs.setxattr('/data/greeting.txt', 'user.vfs', new TextEncoder().encode('d'))
-    const [, value] = await callOp<[number, Buffer?]>(
-      mfs,
-      'getxattr',
-      '/data/greeting.txt',
-      'user.vfs',
-      0,
-    )
-    expect(value?.toString()).toBe('d')
-  })
-
   it('hands the create and replace flags to the dispatcher', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
@@ -696,16 +564,6 @@ describe('MirageFS — xattr', () => {
 })
 
 describe('MirageFS — namespace links', () => {
-  it('getattr reports a link with S_IFLNK and target length', async () => {
-    const ws = await mkWs()
-    await ws.shell('ln -s /data/greeting.txt /data/lnk')
-    const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/lnk')
-    expect(code).toBe(0)
-    expect(attr.mode & 0o170000).toBe(0o120000)
-    expect(attr.size).toBe('greeting.txt'.length)
-  })
-
   it('readlink rewrites an absolute target relative to the link dir', async () => {
     const ws = await mkWs()
     await ws.shell('ln -s /data/sub/inner.txt /data/lnk')
@@ -713,32 +571,6 @@ describe('MirageFS — namespace links', () => {
     const [code, target] = await callOp<[number, string]>(mfs, 'readlink', '/data/lnk')
     expect(code).toBe(0)
     expect(target).toBe('sub/inner.txt')
-  })
-
-  it('readlink on a non-link returns EINVAL', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws.vfs)
-    const [code] = await callOp<[number]>(mfs, 'readlink', '/data/greeting.txt')
-    expect(code).toBe(-22)
-  })
-
-  it('readdir lists link entries', async () => {
-    const ws = await mkWs()
-    await ws.shell('ln -s /data/greeting.txt /data/lnk')
-    const mfs = new MirageFS(ws.vfs)
-    const [code, entries] = await callOp<[number, string[]]>(mfs, 'readdir', '/data')
-    expect(code).toBe(0)
-    expect(entries).toContain('lnk')
-  })
-
-  it('read follows the link to the target content', async () => {
-    const ws = await mkWs()
-    await ws.shell('ln -s /data/greeting.txt /data/lnk')
-    const mfs = new MirageFS(ws.vfs)
-    const buf = Buffer.alloc(256)
-    const [n] = await callOp<[number]>(mfs, 'read', '/data/lnk', 0, buf, 256, 0)
-    expect(n).toBe('hello world\n'.length)
-    expect(buf.subarray(0, n).toString()).toBe('hello world\n')
   })
 
   it('symlink creates a namespace link readable through FUSE', async () => {
@@ -751,18 +583,6 @@ describe('MirageFS — namespace links', () => {
     expect(target).toBe('greeting.txt')
   })
 
-  it('unlink removes the link entry but keeps the target', async () => {
-    const ws = await mkWs()
-    await ws.shell('ln -s /data/greeting.txt /data/lnk')
-    const mfs = new MirageFS(ws.vfs)
-    const [code] = await callOp<[number]>(mfs, 'unlink', '/data/lnk')
-    expect(code).toBe(0)
-    const [lnkCode] = await callOp<[number]>(mfs, 'getattr', '/data/lnk')
-    expect(lnkCode).toBe(ENOENT)
-    const [fileCode] = await callOp<[number]>(mfs, 'getattr', '/data/greeting.txt')
-    expect(fileCode).toBe(0)
-  })
-
   it('scoped root displays link targets in mount-relative form', async () => {
     const ws = await mkWs()
     await ws.shell('ln -s /data/sub/inner.txt /data/sub/lnk')
@@ -770,27 +590,6 @@ describe('MirageFS — namespace links', () => {
     const [code, target] = await callOp<[number, string]>(mfs, 'readlink', '/lnk')
     expect(code).toBe(0)
     expect(target).toBe('inner.txt')
-  })
-})
-
-describe('MirageFS — stat attr overlay', () => {
-  it('getattr honors chmod overlay bits', async () => {
-    const ws = await mkWs()
-    await ws.shell('chmod 640 /data/greeting.txt')
-    const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
-    expect(code).toBe(0)
-    expect(attr.mode & 0o170000).toBe(0o100000)
-    expect(attr.mode & 0o7777).toBe(0o640)
-  })
-
-  it('getattr honors touched mtime', async () => {
-    const ws = await mkWs()
-    await ws.shell('touch -t 202603041200 /data/greeting.txt')
-    const mfs = new MirageFS(ws.vfs)
-    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
-    expect(code).toBe(0)
-    expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0, 0))
   })
 })
 

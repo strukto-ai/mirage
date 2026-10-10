@@ -32,6 +32,38 @@ LINK_MODE = S_IFLNK | 0o777
 # report this, so find -size agrees with what the listing shows.
 DIR_SIZE = 4096
 
+# The block size every stat translator reports: a backend has none of
+# its own, and 4 KiB is what the kernel adapters answer. st_blocks counts
+# in BLOCK_UNIT whatever the block size, as POSIX has it.
+BLKSIZE = 4096
+BLOCK_UNIT = 512
+
+# FNV-1a, 64-bit: the same arithmetic on both hosts and in every
+# runtime, so one path reports one inode whoever asks.
+_FNV_OFFSET = 0xCBF29CE484222325
+_FNV_PRIME = 0x100000001B3
+_FNV_MASK = 0xFFFFFFFFFFFFFFFF
+
+
+def ident(text: str) -> int:
+    """A stable, distinct id for one name, as a stat's ino and dev.
+
+    ``os.path.samefile`` compares (st_dev, st_ino) pairs and
+    ``os.path.ismount`` compares a path's pair with its parent's, so
+    reporting zero for both would make every mounted file the same file
+    and every mount root invisible. Derived from the name rather than
+    counted, so two processes reading the same workspace agree and a
+    repeated stat of one path does not move. The top 48 bits of the
+    hash, which a JS number holds exactly.
+
+    Args:
+        text (str): the virtual path or mount prefix to identify.
+    """
+    value = _FNV_OFFSET
+    for byte in text.encode():
+        value = ((value ^ byte) * _FNV_PRIME) & _FNV_MASK
+    return value >> 16
+
 
 def mtime_ns(st: FileStat) -> int | None:
     """A FileStat's mtime as epoch nanoseconds, None when unknown.

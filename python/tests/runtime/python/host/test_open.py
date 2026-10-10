@@ -60,10 +60,27 @@ class TestPatchedOpen:
         patched = make_open(ops)
         with pytest.raises(ValueError, match="closefd=False"):
             patched("/data/dir/f.txt", "r", closefd=False)
-        with pytest.raises(ValueError, match="opener is not supported"):
-            patched("/data/dir/f.txt", "r", opener=lambda _path, _flags: 0)
         with pytest.raises(ValueError, match="unbuffered text"):
             patched("/data/dir/f.txt", "r", 0)
+
+    def test_an_opener_never_runs_on_a_bad_text_argument(self):
+        # A truncating mode would have emptied the file before the bad
+        # encoding refused the open.
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.txt", b"keep")
+        patched = make_open(ops)
+        calls = []
+
+        def opener(path, flags):
+            calls.append(path)
+            raise AssertionError("opened")
+
+        with pytest.raises(LookupError):
+            patched(
+                "/data/dir/f.txt", "w", encoding="no-such-codec", opener=opener
+            )
+        assert calls == []
+        assert _read(ops, "/data/dir/f.txt") == b"keep"
 
     def test_fallthrough_real_file(self, tmp_path):
         ops, _ = make_ops_with_dir()

@@ -14,7 +14,7 @@
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 import type { RuntimeFiles } from '../../files.ts'
-import { WASI, errnoFor } from './errors.ts'
+import { WASI, errnoFor } from '../../../errors/wasi.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 export async function readdir(

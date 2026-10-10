@@ -197,6 +197,7 @@
   "runtime/js/host": {
    "typescript_only": {
     "constants": "The node entry point's call tables (routed, refused, passthrough), the twin of runtime/python/host/constants.py, which classifies os the same way. Paired by role for the reason the fs entry gives.",
+    "descriptors": "The descriptors the node entry point's open hands a mounted path, the twin of runtime/python/host/descriptors.py: open(2) flags onto the mode vocabulary and a table of numbers held on the null device. Paired by role for the reason the fs entry gives.",
     "fs": "patchNodeFs, the node twin of python's `with ws:` entry point: it swaps node's own fs and fs.promises functions onto a workspace, the way runtime/python/host patches the host interpreter's builtins.open, io.open and os functions (excused there as a directory), and both ride RuntimeFiles over ws.vfs. The two pair by role, not by path: python's entry point sits under runtime/python/host, node's under runtime/js/host, each beside the engines of its own language."
    }
   }

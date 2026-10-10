@@ -76,6 +76,27 @@ describe('RuntimeFiles transport', () => {
     ])
   })
 
+  it('carries the owner and access time a stat gave on a listing row', async () => {
+    // A guest placing a tree from one listing reads its owner and access
+    // time off the row, so a listed file must not stat as owned by root.
+    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
+      if (op === 'readdir') return Promise.resolve(['/ram/a.txt'])
+      return Promise.resolve(
+        new FileStat({
+          name: 'a.txt',
+          size: 4,
+          type: FileType.FILE,
+          content: ContentType.TEXT,
+          uid: 501,
+          gid: 20,
+          atime: '2001-02-03T04:05:06Z',
+        }),
+      )
+    })
+    const [row] = await new RuntimeFiles(dispatch).readdir('/ram/')
+    expect([row?.uid, row?.gid, row?.atimeMs]).toEqual([501, 20, 981173106000])
+  })
+
   // The projection is the file adapter's, so preview1, monty and Emscripten read
   // the same five facts instead of translating a FileStat three ways.
   it('projects one stat struct for every surface', async () => {

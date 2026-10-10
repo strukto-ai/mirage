@@ -165,3 +165,52 @@ describe('quickjs reads after a failed fetch', () => {
     }
   }, 120_000)
 })
+
+async function workspace(): Promise<Workspace> {
+  const parser = await getTestParser()
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+  )
+}
+
+describe('quickjs os.remove and seek', () => {
+  it('removes a link to a directory and leaves the directory', async () => {
+    const ws = await workspace()
+    try {
+      await ws.shell('mkdir /data/d; ln -s d /data/lk')
+      const result = await ws.shell(`node -e "console.log(os.remove('/data/lk'))"`)
+      expect(DEC.decode(result.stdout)).toBe('0\n')
+      expect((await ws.shell('ls -d /data/d')).exitCode).toBe(0)
+      expect((await ws.shell('ls /data/lk')).exitCode).not.toBe(0)
+    } finally {
+      await ws.close()
+    }
+  }, 120_000)
+
+  it('stats two files as two inodes, and one file as one', async () => {
+    const ws = await workspace()
+    try {
+      await ws.shell('echo a > /data/a; echo b > /data/b')
+      const result = await ws.shell(
+        `node -e "const a = os.stat('/data/a')[0]; const b = os.stat('/data/b')[0]; console.log(a.ino !== b.ino, a.ino === os.stat('/data/a')[0].ino)"`,
+      )
+      expect(DEC.decode(result.stdout)).toBe('true true\n')
+    } finally {
+      await ws.close()
+    }
+  }, 120_000)
+
+  it('refuses a seek before the start and keeps the position', async () => {
+    const ws = await workspace()
+    try {
+      await ws.shell('echo hello > /data/f.txt')
+      const result = await ws.shell(
+        `node -e "const f = std.open('/data/f.txt', 'r'); f.seek(2, std.SEEK_SET); console.log(f.seek(-5, std.SEEK_CUR), f.tell()); f.close()"`,
+      )
+      expect(DEC.decode(result.stdout)).toBe('-28 2\n')
+    } finally {
+      await ws.close()
+    }
+  }, 120_000)
+})

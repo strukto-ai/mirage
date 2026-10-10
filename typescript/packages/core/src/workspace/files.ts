@@ -16,14 +16,12 @@ import { type ByteSource, type IOResult, OpReport } from '../io/types.ts'
 import { ensureStream } from '../io/stream.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
-import { NO_FOLLOW_OPS } from './dispatcher/constants.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import { dottedSpelling } from '../utils/path.ts'
 import type { DispatchFn } from '../runtime/types.ts'
-import { getCurrentSession, sessionVisibility } from '../context/session_context.ts'
-import { pathVisible } from '../utils/hidden.ts'
+import { getCurrentSession } from '../context/session_context.ts'
 import type { NamespaceLinks, OpKwargs, SessionBind } from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
@@ -207,13 +205,9 @@ export class Files {
    * Run one op through the workspace dispatcher and record it.
    *
    * The dispatcher owns the whole pipeline (follow, grants, gates, cache,
-   * structure, invalidation); the facade's own share is the record. The
-   * path is link-followed here first so the record carries the resolved
-   * path; the dispatcher's second follow of an already-resolved path is a
-   * no-op. That follow runs inside the session binding and only from a
-   * path the session can see: a link the session cannot see stays the
-   * typed path, so the dispatcher refuses it as absent instead of serving the
-   * visible target it points at. Mirrors Python's Files._call.
+   * structure, invalidation); the facade's own share is the record, which
+   * names the path the dispatcher's report says the op ran on, its links
+   * followed. Mirrors Python's Files._call.
    */
   private async through(
     op: string,
@@ -223,11 +217,6 @@ export class Files {
     sessionId?: string,
   ): Promise<unknown> {
     const timer = startOp()
-    // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
-    // both follows, so an op meant for a link entry itself (chmod -h, a
-    // guest's lchown) still records the link's own path.
-    const links = NO_FOLLOW_OPS.has(op) || kwargs.nofollow === true ? null : this.links
-    let followed = path
     const report = new OpReport()
     // The record names the session the op ran as: noted inside the
     // bind, since the facade's own id may be null (the default) and a
@@ -235,8 +224,7 @@ export class Files {
     let seen: string | null = null
     const run = (): Promise<[unknown, IOResult]> => {
       seen = getCurrentSession()?.sessionId ?? null
-      if (links !== null && pathVisible(sessionVisibility(), path)) followed = links.follow(path)
-      const spec = PathSpec.fromStrPath(followed)
+      const spec = PathSpec.fromStrPath(path)
       const typed = new PathSpec({
         virtual: spec.virtual,
         directory: spec.directory,
@@ -251,9 +239,9 @@ export class Files {
       const bound = sessionId ?? this.sessionId
       const [value] = await (this.bind === null ? run() : this.bind(bound, run))
       result = value
-      owner = this.ownerOf(followed)
+      owner = this.ownerOf(report.path ?? path)
     } catch (err) {
-      owner = this.ownerOf(followed)
+      owner = this.ownerOf(report.path ?? path)
       // Anything thrown after the op ran (a postVfs deny, a hard
       // output cap, a bookkeeping failure) suppresses the result, not
       // the effect, so observation must reflect the op before the
@@ -263,7 +251,7 @@ export class Files {
       if (report.completed && owner !== null) {
         await this.recordOp(
           op,
-          followed,
+          report.path ?? path,
           owner,
           report.source,
           report.bytes,
@@ -279,7 +267,7 @@ export class Files {
     const record = (answer: unknown): Promise<void> =>
       this.recordOp(
         op,
-        followed,
+        report.path ?? path,
         owner,
         report.source,
         report.bytes,

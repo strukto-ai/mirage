@@ -717,12 +717,16 @@ class Dispatcher:
         call.stream = stream
         call.direct = direct
         await self._refuse_rename(call)
+        if report is not None:
+            report.path = call.path.virtual
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
                 await self._table_call(name, call.path, kwargs, report),
                 IOResult(),
             )
         self._follow(call)
+        if report is not None:
+            report.path = call.path.virtual
         await self._walk_operands(call)
         if name in XATTR_OPS:
             return (

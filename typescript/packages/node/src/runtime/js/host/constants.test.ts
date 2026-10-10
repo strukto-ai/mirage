@@ -14,30 +14,20 @@
 
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { LISTENED_CALLS, REFUSED_CALLS, ROUTED_CALLS } from './constants.ts'
+import {
+  DESCRIPTOR_CALLS,
+  LISTENED_CALLS,
+  OPENED_CALLS,
+  REFUSED_CALLS,
+  ROUTED_CALLS,
+} from './constants.ts'
 
 const fs = createRequire(import.meta.url)('node:fs') as Record<string, unknown> & {
   promises: Record<string, unknown>
 }
 
-// Descriptor calls take an fd, which a mounted path never opens, and
 // unwatchFile undoes a watch that could not have started on a mount.
-const PASSTHROUGH_CALLS: ReadonlySet<string> = new Set([
-  '_toUnixTimestamp',
-  'close',
-  'fchmod',
-  'fchown',
-  'fdatasync',
-  'fstat',
-  'fsync',
-  'ftruncate',
-  'futimes',
-  'read',
-  'readv',
-  'unwatchFile',
-  'write',
-  'writev',
-])
+const PASSTHROUGH_CALLS: ReadonlySet<string> = new Set(['_toUnixTimestamp', 'unwatchFile'])
 
 function functions(target: Record<string, unknown>): string[] {
   return Object.keys(target).filter(
@@ -51,6 +41,8 @@ describe('the call tables', () => {
   it('classify every fs function once, in all its spellings', () => {
     const tables = [
       new Set<string>(ROUTED_CALLS),
+      new Set<string>(OPENED_CALLS),
+      new Set<string>(DESCRIPTOR_CALLS),
       new Set(Object.keys(REFUSED_CALLS)),
       PASSTHROUGH_CALLS,
     ]

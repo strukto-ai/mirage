@@ -14,8 +14,9 @@
 
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 import type { RuntimeFiles } from '../../files.ts'
+import { posixStat } from '../../stat.ts'
 import type { VFSStat } from '../../types.ts'
-import { WASI, errnoFor } from './errors.ts'
+import { WASI, errnoFor } from '../../../errors/wasi.ts'
 
 export async function stat(
   ctx: QuickJSAsyncContext,
@@ -44,18 +45,21 @@ export async function stat(
       ctx.setProp(obj, key, h)
       h.dispose()
     }
-    setNum('dev', 0)
-    setNum('ino', 0)
-    setNum('mode', st.mode)
-    setNum('nlink', st.isDir ? 2 : 1)
-    setNum('uid', 0)
-    setNum('gid', 0)
-    setNum('rdev', st.rdev ?? 0)
-    setNum('size', st.size)
-    setNum('blocks', Math.ceil(st.size / 512))
-    setNum('atime', st.mtimeMs ?? 0)
-    setNum('mtime', st.mtimeMs ?? 0)
-    setNum('ctime', st.mtimeMs ?? 0)
+    // The stat every runtime shares; a sandbox owns nothing, so an owner
+    // the row lacks is 0.
+    const posix = posixStat(st, path, '/')
+    setNum('dev', posix.dev)
+    setNum('ino', posix.ino)
+    setNum('mode', posix.mode)
+    setNum('nlink', posix.nlink)
+    setNum('uid', posix.uid)
+    setNum('gid', posix.gid)
+    setNum('rdev', posix.rdev)
+    setNum('size', posix.size)
+    setNum('blocks', posix.blocks)
+    setNum('atime', posix.atimeMs)
+    setNum('mtime', posix.mtimeMs)
+    setNum('ctime', posix.ctimeMs)
     ctx.setProp(tuple, 0, obj)
     obj.dispose()
   }

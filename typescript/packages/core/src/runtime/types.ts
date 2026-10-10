@@ -335,6 +335,10 @@ export interface VFSEntry {
   // from one listing needs no second stat per file.
   mode?: number
   mtimeMs?: number
+  // The access time and owner a stat reported, on the same rows.
+  atimeMs?: number
+  uid?: number
+  gid?: number
   // Encoded logical major:minor; present only for a character device.
   rdev?: number
 }

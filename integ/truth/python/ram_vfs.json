@@ -68,14 +68,16 @@
     "",
     "--- refused on a mount ---",
     "  os.link: EPERM",
-    "  os.open: ENOTSUP",
     "  os.statvfs: ENOTSUP",
+    "",
+    "--- descriptors ---",
+    "  os.read: b'hello'",
     "",
     "--- one end off the mount ---",
     "  os.rename to the host: EXDEV",
     "  host path still reads: host bytes",
     "  host readlink(bytes): b'from_host.txt'",
     "",
-    "Stats: 38 ops, 38 bytes transferred"
+    "Stats: 41 ops, 50 bytes transferred"
   ]
 }

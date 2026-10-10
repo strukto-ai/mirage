@@ -15,7 +15,7 @@
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { PathSpec } from '../../../types.ts'
-import { WASI, errnoFor } from './errors.ts'
+import { WASI, errnoFor } from '../../../errors/wasi.ts'
 import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'
@@ -301,14 +301,13 @@ export function installQuickJsFs(
     return ctx.newNumber(bytes.length)
   })
 
+  // 0, or -errno as the real engine's FILE.seek answers: a target before
+  // the start or an unknown whence is EINVAL and leaves the position.
   defineSync('__mirage_seek', (fdH, offsetH, whenceH) => {
     const file = table.get(ctx.getNumber(fdH))
-    if (file === undefined) return ctx.undefined
-    const offset = ctx.getNumber(offsetH)
-    const whence = ctx.getNumber(whenceH)
-    const base = whence === 1 ? file.pos : whence === 2 ? file.size : 0
-    file.pos = Math.max(0, base + offset)
-    return ctx.undefined
+    if (file === undefined) return ctx.newNumber(-WASI.EBADF)
+    const moved = file.seek(ctx.getNumber(offsetH), ctx.getNumber(whenceH))
+    return ctx.newNumber(moved === null ? -WASI.EINVAL : 0)
   })
 
   defineSync('__mirage_tell', (fdH) => {
@@ -330,8 +329,10 @@ export function installQuickJsFs(
     const path = absolute(pathH)
     if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     try {
-      const st = await files.stat(path)
-      if (st.isDir) {
+      // A link goes as the name it is, never as what it points at: remove
+      // on a link to a directory drops the link and leaves the directory.
+      const st = await files.stat(path, true)
+      if (st.isDir && st.isLink !== true) {
         await files.rmdir(path)
       } else {
         await files.unlink(path)

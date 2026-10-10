@@ -73,6 +73,8 @@ export async function materialize(source: ByteSource | null | undefined): Promis
  * for a synthetic namespace answer; null means the owning mount).
  * `bytes` is what the answering store moved when the delivered result
  * no longer measures it; null means "the result is the measure".
+ * `path` is the path the op ran on once the dispatcher followed its
+ * links, which is what a record names; null until the walk is done.
  *
  * Mirrors Python's mirage.io.types.OpReport.
  */
@@ -80,6 +82,7 @@ export class OpReport {
   completed = false
   source: string | null = null
   bytes: number | null = null
+  path: string | null = null
 
   /** Stamp the report at the moment an op completes. */
   served(source: string | null = null, moved: number | null = null): void {

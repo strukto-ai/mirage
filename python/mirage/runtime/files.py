@@ -471,6 +471,9 @@ class RuntimeFiles:
             mode=st.mode,
             mtime_ns=st.mtime_ns or 0,
             rdev=st.rdev,
+            atime_ns=st.atime_ns,
+            uid=st.uid,
+            gid=st.gid,
         )
 
     def create(self, path: str) -> None:

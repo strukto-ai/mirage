@@ -468,6 +468,28 @@ def test_readdir_carries_the_metadata_only_where_it_stated():
     assert stated.mtime_ns is not None and stated.mtime_ns > 0
 
 
+def test_readdir_carries_the_owner_and_access_time_a_stat_gave():
+    # A guest placing a tree from one listing reads its owner and access
+    # time off the row, so a listed file must not stat as owned by root.
+    vfs = ListingVFS(
+        listing=["/data/a.txt"],
+        stats={
+            "/data/a.txt": FileStat(
+                name="a.txt",
+                size=4,
+                type=FileType.FILE,
+                content=ContentType.TEXT,
+                uid=501,
+                gid=20,
+                atime="2001-02-03T04:05:06Z",
+            ),
+        },
+    )
+    (row,) = vfs.readdir("/data/")
+    assert (row.uid, row.gid) == (501, 20)
+    assert row.atime_ns == 981173106 * 1_000_000_000
+
+
 def test_readdir_marks_a_link_whatever_shape_the_entry_arrived_in():
     # Backends answer with bare names, trailing-slash names and full
     # paths; the final segment is the part they agree on.
