@@ -649,9 +649,9 @@ async function wordChunks(
   return out
 }
 
-// Patterns read a value one character at a time, as Python's str does,
-// so every cut below falls between whole characters, never inside a
-// surrogate pair.
+// Patterns read a value one character at a time, as Python's str does, so
+// the strip and replace below cut only at the UTF-16 offset of a character
+// boundary, never inside a surrogate pair.
 function globStrip(
   value: string,
   pattern: string,
@@ -660,13 +660,12 @@ function globStrip(
   extglob = false,
 ): string {
   if (pattern === '') return value
-  const chars = Array.from(value)
-  const cuts = [...chars.keys(), chars.length]
+  const cuts = [0]
+  for (const char of value) cuts.push((cuts.at(-1) ?? 0) + char.length)
   if (greedy === prefix) cuts.reverse()
   for (const i of cuts) {
-    const head = chars.slice(0, i).join('')
-    const tail = chars.slice(i).join('')
-    if (fnmatch(prefix ? head : tail, pattern, extglob)) return prefix ? tail : head
+    const candidate = prefix ? value.slice(0, i) : value.slice(i)
+    if (fnmatch(candidate, pattern, extglob)) return prefix ? value.slice(i) : value.slice(0, i)
   }
   return value
 }
@@ -682,18 +681,17 @@ function globReplace(
   extglob = false,
 ): string {
   if (pattern === '') return value
-  const chars = Array.from(value)
-  const n = chars.length
-  const cut = (from: number, to = n): string => chars.slice(from, to).join('')
+  const cuts = [0]
+  for (const char of value) cuts.push((cuts.at(-1) ?? 0) + char.length)
   if (anchor === '#') {
-    for (let j = n; j >= 0; j--) {
-      if (fnmatch(cut(0, j), pattern, extglob)) return replacement + cut(j)
+    for (const j of [...cuts].reverse()) {
+      if (fnmatch(value.slice(0, j), pattern, extglob)) return replacement + value.slice(j)
     }
     return value
   }
   if (anchor === '%') {
-    for (let i = 0; i <= n; i++) {
-      if (fnmatch(cut(i), pattern, extglob)) return cut(0, i) + replacement
+    for (const i of cuts) {
+      if (fnmatch(value.slice(i), pattern, extglob)) return value.slice(0, i) + replacement
     }
     return value
   }
@@ -701,25 +699,27 @@ function globReplace(
     return fnmatch('', pattern, extglob) ? replacement : value
   }
   const out: string[] = []
-  let i = 0
-  while (i < n) {
+  let k = 0
+  const n = cuts.length - 1
+  while (k < n) {
+    const i = cuts[k] ?? 0
     let matchEnd = -1
-    for (let j = n; j >= i; j--) {
-      if (fnmatch(cut(i, j), pattern, extglob)) {
-        matchEnd = j
+    for (let m = n; m >= k; m--) {
+      if (fnmatch(value.slice(i, cuts[m]), pattern, extglob)) {
+        matchEnd = m
         break
       }
     }
-    if (matchEnd <= i) {
+    if (matchEnd <= k) {
       // No match here (or an empty one, which bash skips over).
-      out.push(chars[i] ?? '')
-      i += 1
+      out.push(value.slice(i, cuts[k + 1]))
+      k += 1
       continue
     }
     out.push(replacement)
-    i = matchEnd
+    k = matchEnd
     if (!replaceAll) {
-      out.push(cut(i))
+      out.push(value.slice(cuts[k]))
       return out.join('')
     }
   }
