@@ -1078,3 +1078,45 @@ async def test_unlink_and_rename_detach_the_handles_on_the_name(seeded):
     assert seeded.handles.get(gone).detached
     assert seeded.handles.get(replaced).detached
     assert not seeded.handles.get(linked).detached
+
+
+@pytest.mark.asyncio
+async def test_a_flush_a_rename_moved_queues_under_the_new_name():
+    # Queued under /a, the flush would write /b outside /b's queue, and a
+    # truncate of /b could finish under it and be undone.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf abc > /a")
+    writes = _Held(ws.vfs, "pwrite")
+    files = _Held(writes, "rename")
+    core = MountCore(files)
+    fh = await core.open("/a", os.O_WRONLY)
+    await core.write("/a", b"0123456789", 0, fh)
+    renaming = asyncio.create_task(core.rename("/a", "/b"))
+    await files.out.wait()
+    flushing = asyncio.create_task(core.flush("/a", fh))
+    await asyncio.sleep(0)
+    files.go.set()
+    await renaming
+    await writes.out.wait()
+    truncating = asyncio.create_task(core.truncate("/b", 0))
+    await asyncio.sleep(0.01)
+    writes.go.set()
+    await flushing
+    await truncating
+    assert await ws.vfs.read("/b") == b""
+
+
+@pytest.mark.asyncio
+async def test_a_detached_handle_never_touches_the_file_at_its_old_name():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf fresh > /a; printf stale-file > /b")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/b", os.O_RDWR)
+    await core.read("/b", 100, 0, fh)
+    await core.write("/b", b"STALE", 0, fh)
+    await core.rename("/a", "/b")
+    await core.setattr("/b", mtime=10**18)
+    assert (await core.fgetattr("/b", fh)).mtime != 10**18
+    assert await core.read("/b", 100, 0, fh) == b"STALE-file"
+    await core.release(fh)
+    assert await ws.vfs.read("/b") == b"fresh"

@@ -210,9 +210,8 @@ export class MountCore {
    * Mirrors Python's `held_size`.
    */
   heldSize(path: string): number | null {
-    const key = this.identity(path)
-    for (const ctx of this.handles.values()) {
-      if (ctx.key === key && ctx.data !== undefined) return ctx.data.byteLength
+    for (const ctx of this.openOn(this.identity(path))) {
+      if (ctx.data !== undefined) return ctx.data.byteLength
     }
     return null
   }
@@ -339,13 +338,16 @@ export class MountCore {
       throw enoent(path)
     }
     const virtual = this.resolve(path)
-    let s: FileStat
-    try {
-      s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
-    } catch (err) {
-      // An open descriptor keeps the bytes it had after an unlink.
-      if (size === null || classify(err) !== 'ENOENT') throw err
-      s = new FileStat({ name, type: FileType.FILE })
+    // An open descriptor keeps the bytes it had after its name goes; once
+    // the name is another file's, that file's row is not its.
+    const gone = new FileStat({ name, type: FileType.FILE })
+    let s: FileStat = gone
+    if (ctx?.detached !== true) {
+      try {
+        s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
+      } catch (err) {
+        if (size === null || classify(err) !== 'ENOENT') throw err
+      }
     }
     if (isLink(s)) {
       const target = await this.op(() => this.files.readlink(virtual))
@@ -564,14 +566,12 @@ export class MountCore {
       this.hydrationGen.set(key, (this.hydrationGen.get(key) ?? 0) + 1)
     }
     if (!rehydrate) return
-    for (const ctx of this.handles.values()) {
-      if (ctx.key !== key) continue
+    const handles = this.openOn(key)
+    for (const ctx of handles) {
       ctx.generation = (ctx.generation ?? 0) + 1
       ctx.chunked?.drop()
     }
-    const hydrated = [...this.handles.values()].filter(
-      (ctx) => ctx.key === key && ctx.data !== undefined,
-    )
+    const hydrated = handles.filter((ctx) => ctx.data !== undefined)
     if (hydrated.length === 0) return
     let data: Uint8Array
     try {
@@ -606,6 +606,7 @@ export class MountCore {
         for (const ctx of replaced) ctx.detached = true
       })
       for (const ctx of this.handles.values()) {
+        if (ctx.detached === true) continue
         if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
           ctx.key = target + ctx.key.slice(source.length)
           ctx.path = ctx.key.slice(this.root.length)
@@ -647,28 +648,45 @@ export class MountCore {
    * persistence fails, so the acknowledged bytes stay for the handle's own
    * flush to retry.
    */
-  private settle(ctx: Handle): Promise<void> {
+  private async settle(ctx: Handle): Promise<void> {
     // Queued with nothing buffered too: a flush still landing has taken the
     // buffer, and this one waits for it and retries what it puts back,
     // rather than reporting the file settled.
-    return this.mutate(ctx.key, () => this.persistBuffered(ctx))
+    for (;;) {
+      const key = ctx.key
+      const landed = await this.mutate(key, async () => {
+        // A rename that moved the handle while this waited put its file in
+        // another queue: it lands from that one instead.
+        if (ctx.key !== key) return false
+        await this.persistBuffered(ctx)
+        return true
+      })
+      if (landed) return
+    }
   }
 
   /** The handles open on the entry at `path` itself. */
   private named(path: string): Handle[] {
-    const key = this.identity(path, false)
-    return [...this.handles.values()].filter((ctx) => ctx.key === key)
+    return this.openOn(this.identity(path, false))
+  }
+
+  /**
+   * The handles open on the file `key` names. A detached handle is on a file
+   * with no name left, whatever its key says.
+   */
+  private openOn(key: string): Handle[] {
+    return [...this.handles.values()].filter((ctx) => ctx.key === key && ctx.detached !== true)
   }
 
   /** Land the buffered writes of every handle open on `key`. */
   private async landBuffered(key: string): Promise<void> {
-    for (const ctx of [...this.handles.values()].filter((c) => c.key === key)) {
-      await this.persistBuffered(ctx)
-    }
+    for (const ctx of this.openOn(key)) await this.persistBuffered(ctx)
   }
 
   private async persistBuffered(ctx: Handle): Promise<void> {
-    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return
+    // A detached handle keeps what it wrote, as writes to an unlinked file
+    // stay with it: there is no name to land them on.
+    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0 || ctx.detached === true) return
     const runs = writeRuns(ctx.writeBuf)
     ctx.writeBuf = []
     try {

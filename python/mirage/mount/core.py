@@ -342,9 +342,8 @@ class MountCore:
         Args:
             path (str): mount path to look up.
         """
-        key = self.identity(path)
-        for ctx in self._handles.values():
-            if ctx.key == key and ctx.data is not None:
+        for ctx in self._open_on(self.identity(path)):
+            if ctx.data is not None:
                 return len(ctx.data)
         return None
 
@@ -379,13 +378,20 @@ class MountCore:
         if is_macos_metadata(name):
             raise enoent(path)
         virtual = self.resolve(path)
-        try:
-            s = await self._op(self._files.stat(virtual, nofollow=not follow))
-        except FileNotFoundError:
-            if size is None:
-                raise
-            # An open descriptor keeps the bytes it had after an unlink.
-            s = FileStat(name=name, type=FileType.FILE)
+        # An open descriptor keeps the bytes it had after its name goes;
+        # once the name is another file's, that file's row is not its.
+        gone = FileStat(name=name, type=FileType.FILE)
+        if ctx is not None and ctx.detached:
+            s = gone
+        else:
+            try:
+                s = await self._op(
+                    self._files.stat(virtual, nofollow=not follow)
+                )
+            except FileNotFoundError:
+                if size is None:
+                    raise
+                s = gone
         if is_link(s):
             target = await self._op(self._files.readlink(virtual))
             return self.attrs(s, len(self.shown_target(path, target).encode()))
@@ -684,6 +690,8 @@ class MountCore:
         async def run() -> None:
             await self._removing(new, replace)
             for ctx in self._handles.values():
+                if ctx.detached:
+                    continue
                 if ctx.key == source or ctx.key.startswith(source + "/"):
                     ctx.key = target + ctx.key[len(source) :]
                     ctx.path = ctx.key[len(self._root) :]
@@ -836,7 +844,9 @@ class MountCore:
         Args:
             ctx (Handle): the handle whose buffer to land.
         """
-        if not ctx.write_buf:
+        if not ctx.write_buf or ctx.detached:
+            # A detached handle keeps what it wrote, as writes to an
+            # unlinked file stay with it: there is no name to land them on.
             return
         runs = write_runs(ctx.write_buf)
         ctx.write_buf = []
@@ -852,8 +862,20 @@ class MountCore:
         Args:
             path (str): mount path of the entry.
         """
-        key = self.identity(path, follow=False)
-        return [ctx for ctx in self._handles.values() if ctx.key == key]
+        return self._open_on(self.identity(path, follow=False))
+
+    def _open_on(self, key: str) -> list[Handle]:
+        """The handles open on the file ``key`` names. A detached handle is
+        on a file with no name left, whatever its key says.
+
+        Args:
+            key (str): the file identity.
+        """
+        return [
+            ctx
+            for ctx in self._handles.values()
+            if ctx.key == key and not ctx.detached
+        ]
 
     async def _land_buffered(self, key: str) -> None:
         """Land the buffered writes of every handle open on ``key``.
@@ -861,7 +883,7 @@ class MountCore:
         Args:
             key (str): the file identity.
         """
-        for ctx in [c for c in self._handles.values() if c.key == key]:
+        for ctx in self._open_on(key):
             await self._persist_buffered(ctx)
 
     async def flush(self, path: str, fh: int | None) -> None:
@@ -877,7 +899,18 @@ class MountCore:
         # Queued with nothing buffered too: a flush still landing has taken
         # the buffer, and this one waits for it and retries what it puts
         # back, rather than reporting the file settled.
-        await self._mutate(ctx.key, lambda: self._persist_buffered(ctx))
+        key = ctx.key
+
+        async def land() -> bool:
+            # A rename that moved the handle while this waited put its file
+            # in another queue: it lands from that one instead.
+            if ctx.key != key:
+                return False
+            await self._persist_buffered(ctx)
+            return True
+
+        while not await self._mutate(key, land):
+            key = ctx.key
 
     async def open(self, path: str, flags: int = 0) -> int:
         """Open a path, hydrating it when its size is unknown.
@@ -1116,16 +1149,12 @@ class MountCore:
             self._hydration_gen[key] = self._hydration_gen.get(key, 0) + 1
         if not rehydrate:
             return
-        for ctx in self._handles.values():
-            if ctx.key == key:
-                ctx.generation += 1
-                if ctx.chunked is not None:
-                    ctx.chunked.drop()
-        hydrated = [
-            ctx
-            for ctx in self._handles.values()
-            if ctx.key == key and ctx.data is not None
-        ]
+        handles = self._open_on(key)
+        for ctx in handles:
+            ctx.generation += 1
+            if ctx.chunked is not None:
+                ctx.chunked.drop()
+        hydrated = [ctx for ctx in handles if ctx.data is not None]
         if not hydrated:
             return
         try:

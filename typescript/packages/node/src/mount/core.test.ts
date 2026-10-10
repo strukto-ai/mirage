@@ -992,7 +992,7 @@ it("holds an open through a link back until the link's removal is done", async (
  */
 function holdFirst(
   ws: Workspace,
-  op: 'pwrite' | 'read',
+  op: 'pwrite' | 'read' | 'rename',
   answered = false,
 ): { out: Promise<void>; go: () => void } {
   let go = (): void => undefined
@@ -1079,4 +1079,45 @@ it('detaches the handles on a name an unlink or a rename takes', async () => {
   expect(core.handles.get(gone)?.detached).toBe(true)
   expect(core.handles.get(replaced)?.detached).toBe(true)
   expect(core.handles.get(linked)?.detached).toBeUndefined()
+})
+
+it('queues a flush a rename moved under the new name', async () => {
+  // Queued under /a, the flush would write /b outside /b's queue, and a
+  // truncate of /b could finish under it and be undone.
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('abc'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/a', fsConstants.O_WRONLY)
+  await core.write('/data/a', fd, new TextEncoder().encode('0123456789'), 0)
+  const writes = holdFirst(ws, 'pwrite')
+  const renames = holdFirst(ws, 'rename')
+  const renaming = core.rename('/data/a', '/data/b')
+  await renames.out
+  const flushing = core.flush('/data/a', fd)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  renames.go()
+  await renaming
+  await writes.out
+  const truncating = core.truncate('/data/b', 0)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  writes.go()
+  await flushing
+  await truncating
+  expect((await ws.vfs.read('/data/b')).byteLength).toBe(0)
+})
+
+it('never lets a detached handle touch the file at its old name', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('stale-file'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/b', fsConstants.O_RDWR)
+  await core.read('/data/b', fd, 0, 100)
+  await core.write('/data/b', fd, new TextEncoder().encode('STALE'), 0)
+  await core.rename('/data/a', '/data/b')
+  await core.setattr('/data/b', null, null, null, null, new Date(1e12))
+  expect((await core.fgetattr('/data/b', fd)).mtime.getTime()).not.toBe(1e12)
+  expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('STALE-file')
+  await core.release(fd)
+  expect(new TextDecoder().decode(await ws.vfs.read('/data/b'))).toBe('fresh')
 })
