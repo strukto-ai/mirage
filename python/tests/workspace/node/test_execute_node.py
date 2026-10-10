@@ -16,6 +16,8 @@ import asyncio
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from mirage.commands.config import ExecContext
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
@@ -1336,10 +1338,32 @@ def test_redirect_concat_target():
 
 
 def test_redirect_append():
-    """Open before echo runs, then append its output without a content read."""
+    """A ``>>`` target is opened before echo runs, with an empty append:
+    that open asks the backend whether the file is there, and a drive
+    whose read trusts a cached listing learns of a file another client
+    created from it, so the append that follows does not replace it."""
     _, _, _, _, _, dispatch = _exec("echo hello >> /data/out.txt")
     ops = [c[0][0] for c in dispatch.call_args_list]
     assert ops == ["append", "append"]
+
+
+@pytest.mark.parametrize(
+    "line, writes",
+    [
+        ("echo hi > /data/f", [("/data/f", b"hi\n")]),
+        (": > /data/f", [("/data/f", b"")]),
+    ],
+    ids=["one-target", "no-output"],
+)
+def test_an_output_only_target_opens_with_its_output(line, writes):
+    """A ``>`` on stdout of an output-only builtin opens with its output
+    in one write; a target nothing reaches still opens, empty."""
+    _, _, _, _, _, dispatch = _exec(line)
+    assert [
+        (c[0][1].virtual, c[1]["data"])
+        for c in dispatch.call_args_list
+        if c[0][0] == "write"
+    ] == writes
 
 
 def test_redirect_stdin():

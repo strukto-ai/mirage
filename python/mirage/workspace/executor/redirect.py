@@ -38,6 +38,7 @@ from mirage.shell.constants import (
     FD_STDIN,
     FD_STDOUT,
     OUTPUT_ONLY_BUILTINS,
+    STDERR_FREE_BUILTINS,
 )
 from mirage.shell.descriptors import (
     ENCLOSING,
@@ -297,7 +298,9 @@ async def handle_redirect(
 
     Each target expands, is admitted, and opens before the next target
     expands. Earlier opens therefore affect later globs and substitutions,
-    and a failure stops the remaining redirects. Descriptors alias shared
+    and a failure stops the remaining redirects. The one exception is the
+    last ``>`` on stdout of a ``STDERR_FREE_BUILTINS`` builtin, which the
+    write of its output opens (``_opened_by_output``). Descriptors alias shared
     file descriptions, including their read/write offsets. A stream the
     statement redirects is its own while it runs, in the lines it runs too
     (``eval``, ``exec CMD``, ``bash -c``): an earlier ``exec >`` binding
@@ -517,27 +520,32 @@ async def handle_redirect(
                     else SharedInput(data)
                 )
         else:
-            token = (
-                set_redirect_paths(command.id, targets)
-                if command is not None and guard is not None
-                else None
+            complete = len(expanded) == len(redirects) and _output_only(
+                name, args
             )
-            try:
-                await create_file(
-                    dispatch, session, scope, b"", append=r.append
+            deferred = complete and _opened_by_output(r, name)
+            if not deferred:
+                token = (
+                    set_redirect_paths(command.id, targets)
+                    if command is not None and guard is not None
+                    else None
                 )
-            except OSError as exc:
-                return await failed(_redirect_failure(scope, exc))
-            finally:
-                if token is not None:
-                    reset_redirect_paths(token)
+                try:
+                    await create_file(
+                        dispatch, session, scope, b"", append=r.append
+                    )
+                except OSError as exc:
+                    return await failed(_redirect_failure(scope, exc))
+                finally:
+                    if token is not None:
+                        reset_redirect_paths(token)
             if not r.append:
                 emptied = SharedInput(b"")
                 for fd, path in read_paths.items():
                     if path == scope.virtual:
                         inputs[fd] = emptied
-            file = FileDescription(scope, append=r.append, opened=True)
-            if len(expanded) == len(redirects) and _output_only(name, args):
+            file = FileDescription(scope, append=r.append, opened=not deferred)
+            if complete:
                 complete_output = file
             files.append(file)
             for fd in fds:
@@ -674,14 +682,19 @@ async def handle_redirect(
             else None
         )
 
+        output_reached = False
+
         async def write(
             file: FileDescription, data: bytes, *, replace: bool = False
         ) -> None:
+            nonlocal output_reached
+            output_reached = output_reached or file is complete_output
             try:
                 if replace and file.source is None and file.offset == 0:
                     await create_file(
                         dispatch, session, file.scope, data, append=file.append
                     )
+                    file.opened = True
                     file.offset += len(data)
                 else:
                     await write_description(dispatch, session, file, data)
@@ -723,6 +736,12 @@ async def handle_redirect(
                     routed.append((Channel.STDERR, data))
                 elif isinstance(target, Inherited):
                     routed.append((target, data))
+            if (
+                complete_output is not None
+                and not complete_output.opened
+                and not output_reached
+            ):
+                await write(complete_output, b"")
         finally:
             if write_token is not None:
                 reset_redirect_paths(write_token)
@@ -768,12 +787,9 @@ async def handle_redirect(
 def _output_only(name: str, args: tuple[str, ...]) -> bool:
     """Whether an admitted command reads and writes no file of its own.
 
-    Its final write target can be opened by the write of its output: no
-    read it makes can see a target emptied early, and a target that
-    cannot be opened fails that write with the error the open would have
-    met, the output dropped and the status 1, which is what bash shows
-    for a command it never ran. ``printf -v`` assigns a variable a
-    refused open must stop, so an option ahead of the format opens first.
+    Its final write target then receives the whole output in one write.
+    ``printf -v`` assigns a variable instead of writing, so a printf with
+    an option ahead of the format is not one.
 
     Args:
         name (str): the admitted command's name.
@@ -782,6 +798,24 @@ def _output_only(name: str, args: tuple[str, ...]) -> bool:
     if name not in OUTPUT_ONLY_BUILTINS:
         return False
     return name != "printf" or not args or not args[0].startswith("-")
+
+
+def _opened_by_output(r: Redirect, name: str) -> bool:
+    """Whether an output-only target can wait to be opened by its write.
+
+    Only a ``>`` on stdout of a builtin that never writes stderr: a target
+    that cannot be opened then fails that write with the error the open
+    would have met, the output dropped and the status 1, which is what
+    bash shows for a command it never ran. A ``>>`` opens first, because
+    that open asks the backend whether the file is there; a ``&>`` target
+    is where its own error would go; and printf's own error must not
+    reach anyone when bash would never have run it.
+
+    Args:
+        r (Redirect): the redirect.
+        name (str): the admitted command's name.
+    """
+    return not r.append and r.fd == FD_STDOUT and name in STDERR_FREE_BUILTINS
 
 
 def _descriptor_output(

@@ -598,7 +598,7 @@ async def test_a_dropbox_held_write_costs_one_lookup_more(drive, workspace):
         log = drive.dropbox.log[before:]
         counts.append([name for name, _ in log if name != "token"])
         drive.put("f", SEED["f"])
-    assert counts == [["upload", "upload"], ["get_metadata", "upload"] * 2]
+    assert counts == [["upload"], ["get_metadata", "upload"]]
 
 
 @pytest.mark.asyncio

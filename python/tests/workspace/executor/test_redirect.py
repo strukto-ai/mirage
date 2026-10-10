@@ -621,11 +621,14 @@ async def test_write_target_unwritable_keeps_earlier_target(redirect):
     [
         "echo x >> /nodir/f",
         "echo x 2> /nodir/f",
+        "echo x &> /nodir/f",
+        "printf '%d\\n' abc > /nodir/f",
         "> /nodir/f",
     ],
 )
 async def test_write_target_unwritable_same_line_for_every_form(line: str):
-    # GNU spells the append, stderr and command-less forms identically.
+    # GNU spells the append, stderr, both-streams and command-less forms
+    # identically, and never runs printf to report its bad argument.
     ws = await _workspace()
     io = await ws.shell(line)
     assert io.exit_code == 1

@@ -28,6 +28,7 @@ import {
   FD_STDIN,
   FD_STDOUT,
   OUTPUT_ONLY_BUILTINS,
+  STDERR_FREE_BUILTINS,
 } from '../../shell/constants.ts'
 import {
   ENCLOSING,
@@ -187,7 +188,9 @@ type Input = ByteSource | null | typeof UNREADABLE
 /** Ordered descriptor bindings for one command, restored after execution.
  * Each target expands, is admitted, and opens before the next target expands.
  * Earlier opens affect later globs and substitutions; a failure stops the
- * remaining redirects. Descriptors share file descriptions and offsets. A
+ * remaining redirects. The one exception is the last `>` on stdout of a
+ * `STDERR_FREE_BUILTINS` builtin, which the write of its output opens
+ * (`openedByOutput`). Descriptors share file descriptions and offsets. A
  * stream the statement redirects is its own while it runs, in the lines it
  * runs too (`eval`, `exec CMD`, `bash -c`): an earlier `exec >` binding of it
  * waits until the statement ends. What the command wrote on its way out goes
@@ -387,22 +390,26 @@ export async function handleRedirect(
         )
       }
     } else {
-      try {
-        const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
-        if (command !== null && guard !== undefined)
-          await runWithRedirectPaths(command, targets, open)
-        else await open()
-      } catch (error) {
-        if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
-        return failed(redirectFailure(scope, error))
+      const complete = expanded.length === redirects.length && outputOnly(name, args)
+      const deferred = complete && openedByOutput(r, name)
+      if (!deferred) {
+        try {
+          const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
+          if (command !== null && guard !== undefined)
+            await runWithRedirectPaths(command, targets, open)
+          else await open()
+        } catch (error) {
+          if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+          return failed(redirectFailure(scope, error))
+        }
       }
       if (!r.append) {
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
       const file = new FileDescription(scope, r.append)
-      file.opened = true
-      if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
+      file.opened = !deferred
+      if (complete) completeOutput = file
       files.push(file)
       for (const fd of fds) {
         closed.delete(fd)
@@ -525,10 +532,13 @@ export async function handleRedirect(
     }
     const routed: [Channel | Inherited, Uint8Array][] = []
     const writeFiles = async () => {
+      const output = { reached: false }
       const write = async (file: FileDescription, data: Uint8Array, replace = false) => {
+        output.reached ||= file === completeOutput
         try {
           if (replace && file.source === null && file.offset === 0) {
             await createFile(dispatch, session, file.scope, data, file.append)
+            file.opened = true
             file.offset += data.byteLength
           } else await writeDescription(dispatch, session, file, data)
         } catch (error) {
@@ -560,6 +570,9 @@ export async function handleRedirect(
         } else if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
         else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
         else if (target instanceof Inherited) routed.push([target, data])
+      }
+      if (completeOutput !== null && !completeOutput.opened && !output.reached) {
+        await write(completeOutput, new Uint8Array())
       }
     }
     if (command === null) await writeFiles()
@@ -594,6 +607,27 @@ export async function handleRedirect(
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
 }
 
+/**
+ * Whether an output-only target can wait to be opened by its write.
+ *
+ * Only a `>` on stdout of a builtin that never writes stderr: a target that
+ * cannot be opened then fails that write with the error the open would have
+ * met, the output dropped and the status 1, which is what bash shows for a
+ * command it never ran. A `>>` opens first, because that open asks the backend
+ * whether the file is there; a `&>` target is where its own error would go;
+ * and printf's own error must not reach anyone when bash would never have run
+ * it. Mirrors Python's `_opened_by_output`.
+ */
+function openedByOutput(r: Redirect, name: string): boolean {
+  return !r.append && r.fd === FD_STDOUT && STDERR_FREE_BUILTINS.has(name)
+}
+
+/**
+ * Whether an admitted command reads and writes no file of its own, so its
+ * final write target receives the whole output in one write. `printf -v`
+ * assigns a variable instead of writing, so a printf with an option ahead of
+ * the format is not one. Mirrors Python's `_output_only`.
+ */
 function outputOnly(name: string, args: readonly string[]): boolean {
   if (!OUTPUT_ONLY_BUILTINS.has(name)) return false
   return name !== 'printf' || args.length === 0 || !(args[0] ?? '').startsWith('-')

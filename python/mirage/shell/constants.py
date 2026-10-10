@@ -120,11 +120,13 @@ FD_STDERR = 2
 FD_BOTH = -1
 FD_CLOSE = -1
 
-# Builtins that read and write no file of their own, so a write
-# redirect on one can wait for their output: nothing they do can see a
-# target emptied early. `printf -v` assigns a variable instead, and is
-# opened first like any other command (`redirect.py`).
+# Builtins that read and write no file of their own, so their last
+# write target takes their whole output in one write. `printf -v`
+# assigns a variable instead, and is not one (`redirect.py`).
 OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
+# The output-only builtins that never write stderr, so a `>` target of
+# theirs can be opened by the write of their output.
+STDERR_FREE_BUILTINS = OUTPUT_ONLY_BUILTINS - {"printf"}
 
 # The dynamic variables the shell answers itself: PIPESTATUS reads the
 # session's record of the last pipeline (`SessionState.pipe_status`),

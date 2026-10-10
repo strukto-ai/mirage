@@ -161,8 +161,6 @@ def test_execute_records_op_path_per_mount():
     ops = [(e["op"], e["path"]) for e in events if e["type"] == "op"]
     assert ops == [
         ("write", "/s3/report.json"),
-        ("write", "/s3/report.json"),
-        ("write", "/db/report.json"),
         ("write", "/db/report.json"),
         ("read", "/s3/report.json"),
         ("read", "/db/report.json"),

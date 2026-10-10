@@ -79,10 +79,9 @@ const GENERIC_OUT: [string, string][] = [
   ['write', '/m/m/cs01'],
 ]
 
-// Redirects open before echo runs: `>` records its empty open and output
-// write. Opening `>>` on an existing file records no data write.
+// An echo `>` redirect opens its target with its output, one write; `>>`
+// opens before echo runs, and on an existing file records no data write.
 const SHELL_LEDGER: [string, string][] = [
-  ['write', K],
   ['write', K],
   ['append', K],
   ['append', K],
