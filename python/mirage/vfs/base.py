@@ -612,8 +612,9 @@ class BaseVFS:
         """Files under ``under`` whose content may contain ``text``.
 
         grep and rg still walk, filter, order and label every file, and
-        read only the ones answered here, matched on ``vfs_path``, so an
-        extra file costs a read and a missing one is a wrong answer. A
+        read only the ones answered here, matched on ``vfs_path`` without
+        case, so an extra file costs a read and a missing one is a wrong
+        answer. A
         search that holds only keys names each one with
         ``mounted_path(under[0], "/" + key)``. Return None when the answer
         may be incomplete (an error, a truncated result, an index that
@@ -654,7 +655,10 @@ class BaseVFS:
         when the output shows no line positions (no -n, -b, --column,
         --vimgrep), no context (no -A, -B, -C) and there is one text;
         otherwise the file is read only when some answer holds a line,
-        and only a stream's first chunk is pulled. None reads the file.
+        and only a stream's first chunk is pulled. None reads the file;
+        answer None for a file that may hold a NUL byte, since grep and rg
+        call such a file binary from bytes outside its matching lines.
+        Raise to refuse the command.
 
         Args:
             path (PathSpec): the file.
@@ -673,10 +677,13 @@ class BaseVFS:
         reason: ScanReason,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
-        """Called before grep or rg reads every file under ``under``.
+        """Called before grep or rg reads a file no search answered.
 
-        Return to let the scan run; raise to refuse it, and the error's
-        message is what the command prints.
+        Once per command: before the walk when neither search can be
+        asked, else at the first file ``lines_containing`` declines after
+        ``files_containing`` did not narrow. Return to let the scan run;
+        raise to refuse it, and the error's message is what the command
+        prints.
 
         Args:
             command (str): grep or rg.
@@ -686,7 +693,7 @@ class BaseVFS:
                 NO_SEARCH (no search on this mount or this path),
                 NO_TEXT (-f, or no plain text every match holds),
                 EVERY_LINE (-v, rg --passthru), LINKS (rg -L) or
-                UNANSWERED (``files_containing`` returned None).
+                UNANSWERED (a search returned None).
             index (IndexCacheStore): the mount's index.
         """
         return None

@@ -512,8 +512,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
   /**
    * Files under `under` whose content may contain `text`. grep and rg still
    * walk, filter, order and label every file, and read only the ones answered
-   * here, matched on `vfsPath`, so an extra file costs a read and a missing
-   * one is a wrong answer. A search that holds only keys names each one with
+   * here, matched on `vfsPath` without case, so an extra file costs a read and
+   * a missing one is a wrong answer. A search that holds only keys names each one with
    * `mountedPath(under[0], '/' + key)`. Resolve null when the answer may be
    * incomplete (an error, a truncated result, an index that lags writes), and
    * every file is read; reject to refuse the command, and the error's message
@@ -548,7 +548,10 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * streamed. The lines stand in for the file when the output shows no line
    * positions (no -n, -b, --column, --vimgrep), no context (no -A, -B, -C) and
    * there is one text; otherwise the file is read only when some answer holds
-   * a line, and only a stream's first chunk is pulled. null reads the file.
+   * a line, and only a stream's first chunk is pulled. null reads the file;
+   * answer null for a file that may hold a NUL byte, since grep and rg call
+   * such a file binary from bytes outside its matching lines. Reject to refuse
+   * the command.
    *
    * @param path the file.
    * @param text plain text every match holds, as `filesContaining` gets it.
@@ -566,9 +569,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Called before grep or rg reads every file under `under`. Resolve to let
-   * the scan run; reject to refuse it, and the error's message is what the
-   * command prints.
+   * Called before grep or rg reads a file no search answered, once per command:
+   * before the walk when neither search can be asked, else at the first file
+   * `linesContaining` declines after `filesContaining` did not narrow.
+   * Resolve to let the scan run; reject to refuse it, and the error's message
+   * is what the command prints.
    *
    * @param command grep or rg.
    * @param under the directories about to be walked, as `filesContaining`
@@ -576,7 +581,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * @param reason why the search cannot stand in: NO_SEARCH (no search on
    *   this mount or this path), NO_TEXT (-f, or no plain text every match
    *   holds), EVERY_LINE (-v, rg --passthru), LINKS (rg -L) or UNANSWERED
-   *   (`filesContaining` resolved null).
+   *   (a search resolved null).
    * @param index the mount's index.
    */
   beforeFullScan(

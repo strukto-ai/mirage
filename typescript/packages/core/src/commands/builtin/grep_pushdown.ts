@@ -21,7 +21,7 @@ import { BINARY_EXTENSIONS, PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
 import { breSource, ereSource, perlRegex, rustSource } from './grep_pattern.ts'
-import { requiredNeedles } from './grep_prefilter.ts'
+import { UNICODE_FOLDED, requiredNeedles } from './grep_prefilter.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import { type FlagValue } from '../spec/types.ts'
 
@@ -208,8 +208,9 @@ export function wholeWordLiterals(
  * The texts a mount's search is asked for, and whether as whole words.
  * Literals under -w or -x are asked as whole words, which a word index can
  * answer; any other pattern is narrowed on the needles one of which every
- * match contains, asked anywhere. A non-ASCII literal under -i is left to the
- * scan, since a mount's case folding need not be grep's. Mirrors Python's
+ * match contains, asked anywhere. Under -i a literal with a non-ASCII letter,
+ * or with k or s when case folds by Unicode (`ſ` matches `s`), is left to
+ * the scan, since a mount's case folding need not be grep's. Mirrors Python's
  * `search_terms`.
  */
 export function searchTerms(
@@ -221,7 +222,10 @@ export function searchTerms(
   ignoreCase: boolean,
 ): [string[], boolean] | null {
   const words = wholeWordLiterals(pattern, fixedString, wholeWord, lineRegexp)
-  if (words !== null && !(ignoreCase && words.some((w) => /[\u0080-\uffff]/.test(w)))) {
+  const unicodeFold = ignoreCase && (matcher.unicode || matcher.flags.includes('v'))
+  const untrusted = (w: string): boolean =>
+    /[\u0080-\uffff]/.test(w) || (unicodeFold && UNICODE_FOLDED.test(w.toLowerCase()))
+  if (words !== null && !(ignoreCase && words.some(untrusted))) {
     return [words, true]
   }
   const needles = requiredNeedles(matcher)

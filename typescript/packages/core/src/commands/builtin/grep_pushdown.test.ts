@@ -435,11 +435,15 @@ describe('searchTerms', () => {
     ['Conn.*REFUSED', 'iu', false, true, null],
     ['a.b', '', false, false, null],
     ['café', 'iu', true, true, null],
+    ['ada', 'iu', true, true, [['ada'], true]],
+    ['sun', 'iu', true, true, null],
+    ['sun', 'i', true, true, [['sun'], true]],
   ])('asks %j (flags %j)', (pattern, flags, w, i, expected) => {
     // Whole-word literals go as words; any other pattern as the needles every
-    // match holds, never shorter than three characters. Under -i a needle
-    // with s, k or i is dropped (Unicode folds the long s to s), and a
-    // mount's folding of a non-ASCII literal is not trusted.
+    // match holds, never shorter than three characters. Under -i a needle or
+    // word with s or k is dropped when case folds by Unicode (the long s
+    // folds to s), and a mount's folding of a non-ASCII literal is not
+    // trusted.
     const matcher = new RegExp(pattern.replaceAll('\n', '|'), flags)
     expect(searchTerms(pattern, matcher, false, w, false, i)).toEqual(expected)
   })

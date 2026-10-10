@@ -180,8 +180,12 @@ def grep_terms(
     )
 
 
-def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | ScanReason:
+def rg_terms(
+    fl: FlagView, texts: list[str]
+) -> SearchTerms | ScanReason | None:
     """What an rg line asks the mount's search, or why it cannot ask.
+
+    None when the line reads no file content (--files, --type-list).
 
     Args:
         fl (FlagView): the line's rg flags.
@@ -191,6 +195,8 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | ScanReason:
         UsageError: a flag or pattern rg refuses.
     """
     f = parse_rg_flags(fl)
+    if f.list_files or f.type_list:
+        return None
     pattern = pattern_arg(texts, fl, PATTERN_KEYS["rg"])
     if f.invert or f.passthru:
         return ScanReason.EVERY_LINE
@@ -265,9 +271,12 @@ def candidate_reads(
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
         data = await narrowed(path)
         chunks = source(path) if data is None else ensure_stream(data)
-        async for chunk in chunks:
-            if chunk:
-                yield chunk
+        try:
+            async for chunk in chunks:
+                if chunk:
+                    yield chunk
+        finally:
+            await close_quietly(chunks)
 
     return read, stream
 
@@ -363,6 +372,8 @@ async def search_reads(
     except UsageError as exc:
         logger.debug("%s search left to the scan: %s", name, exc)
         return read_bytes, read_stream
+    if terms is None:
+        return read_bytes, read_stream
     walked = name == "rg" or fl.as_bool("r") or fl.as_bool("R")
     dirs = await _directories(io, accessor, index, paths) if walked else []
     if isinstance(terms, ScanReason):
@@ -385,7 +396,7 @@ async def search_reads(
         )
         if all(answer is not None for answer in answers):
             hits = {
-                hit.vfs_path
+                hit.vfs_path.lower()
                 for answer in answers
                 if answer is not None
                 for hit in answer
@@ -401,6 +412,15 @@ async def search_reads(
         )
         return read_bytes, read_stream
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
+    scan_asked = False
+
+    async def read_unanswered() -> None:
+        nonlocal scan_asked
+        if hits is None and not scan_asked:
+            scan_asked = True
+            await _full_scan(
+                io, name, accessor, dirs, ScanReason.UNANSWERED, index
+            )
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
         if (
@@ -410,19 +430,22 @@ async def search_reads(
                 terms.reads_binary
                 and get_extension(path.virtual) in BINARY_EXTENSIONS
             )
-            and path.vfs_path not in hits
+            and path.vfs_path.lower() not in hits
         ):
             return b""
         if lines is None:
             return None
         if terms.line_output and len(terms.texts) == 1:
-            return await lines(
+            found = await lines(
                 accessor,
                 path,
                 terms.texts[0],
                 ignore_case=terms.ignore_case,
                 index=index,
             )
+            if found is None:
+                await read_unanswered()
+            return found
         for text in terms.texts:
             found = await lines(
                 accessor,
@@ -431,7 +454,10 @@ async def search_reads(
                 ignore_case=terms.ignore_case,
                 index=index,
             )
-            if found is None or await _holds_line(found):
+            if found is None:
+                await read_unanswered()
+                return None
+            if await _holds_line(found):
                 return None
         return b""
 
@@ -469,6 +495,9 @@ async def run_search(
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the adapter's native search, or scan for an unsupported request.
+
+    The scan reads through ``search_reads``, so ``files_containing``,
+    ``lines_containing`` and ``before_full_scan`` still apply.
 
     Args:
         io (CommandIO): guarded resource operations and optional search.
@@ -527,6 +556,9 @@ async def run_search(
         if paths
         else []
     )
+    read_bytes, read_stream = await search_reads(
+        io, name, accessor, resolved, texts, opts
+    )
     stream = meta is None or meta.stream
     return await generic(
         resolved,
@@ -534,12 +566,9 @@ async def run_search(
         opts,
         readdir=bound_op(io.readdir, accessor, opts.index),
         stat=bound_op(io.stat, accessor, opts.index),
-        read_bytes=bound_op(io.read_bytes, accessor, opts.index),
-        read_stream=native_or_bytes(
-            bound_op(io.read_stream, accessor, opts.index),
-            bound_op(io.read_bytes, accessor, opts.index),
-        )
-        if stream
+        read_bytes=read_bytes,
+        read_stream=native_or_bytes(read_stream, read_bytes)
+        if stream and read_stream is not None
         else None,
         stdin=opts.stdin,
     )

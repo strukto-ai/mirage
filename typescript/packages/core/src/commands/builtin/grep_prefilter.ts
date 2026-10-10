@@ -15,7 +15,7 @@ export const LONGEST = 1 << 18
 // The ASCII letters a non-ASCII character matches under JavaScript's Unicode
 // case folding (the Kelvin sign for k, `ſ` for s): a lowercased byte search
 // for a needle holding one could miss a line.
-const UNICODE_FOLDED = /[ks]/
+export const UNICODE_FOLDED = /[ks]/
 const QUANTIFIER = /[*+?]|\{(?<least>[0-9]+)(?:,[0-9]*)?\}/y
 const GROUP = /\?(?:(?<look>=|!|<=|<!)|[:>]|P?<[A-Za-z_$][A-Za-z0-9_$]*>)/y
 const UNKNOWN: Required = { literal: null, needles: [] }

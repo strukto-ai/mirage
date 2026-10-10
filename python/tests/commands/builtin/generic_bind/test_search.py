@@ -361,6 +361,8 @@ class SearchRAM(RAMVFS):
         self.asked: list[tuple[str, bool]] = []
         self.scans: list[ScanReason] = []
         self.pulled: list[bytes] = []
+        self.open = 0
+        self.streams: list[AsyncIterator[bytes]] = []
         if not files:
             self.files_containing = None  # type: ignore[assignment]
         if not lines:
@@ -393,12 +395,19 @@ class SearchRAM(RAMVFS):
             for line in data.splitlines(keepends=True)
             if _holds(line, text, ignore_case)
         ]
-        return self._pull(found) if self.stream else b"".join(found)
+        if not self.stream:
+            return b"".join(found)
+        self.streams.append(self._pull(found))
+        return self.streams[-1]
 
     async def _pull(self, found: list[bytes]) -> AsyncIterator[bytes]:
-        for line in found:
-            self.pulled.append(line)
-            yield line
+        self.open += 1
+        try:
+            for line in found:
+                self.pulled.append(line)
+                yield line
+        finally:
+            self.open -= 1
 
     async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
         self.scans.append(reason)
@@ -515,6 +524,21 @@ def test_a_streamed_answer_is_pulled_only_as_far_as_it_is_needed():
     assert "d/sub/d.txt" in numbered.reads
 
 
+@pytest.mark.parametrize("line", ["grep -ril ada /d", "grep -riq ada /d"])
+def test_a_streamed_answer_is_closed_when_grep_stops_early(line):
+    vfs = SearchRAM(files=False, stream=True)
+
+    async def run() -> int:
+        ws = Workspace({"/": _seed(vfs)})
+        try:
+            await ws.shell(line)
+            return vfs.open
+        finally:
+            await ws.close()
+
+    assert asyncio.run(run()) == 0
+
+
 @pytest.mark.parametrize(
     "line, reason",
     [
@@ -543,3 +567,70 @@ def test_a_mount_may_refuse_a_full_scan():
         1,
     )
     assert asyncio.run(_run(Refusing(), "grep -r ada /d"))[2] == 0
+    # A file listing reads no content, so nothing is refused.
+    assert asyncio.run(_run(Refusing(), "rg --files /d")) == asyncio.run(
+        _run(RAMVFS(), "rg --files /d")
+    )
+
+
+class Declining(SearchRAM):
+    """Line search that answers no file."""
+
+    async def lines_containing(
+        self, path, text, *, ignore_case, index=NULL_INDEX
+    ):
+        return None
+
+
+@pytest.mark.parametrize("line", ["grep -r ada /d", "grep -rn ada /d"])
+def test_a_line_search_that_declines_asks_before_reading_once(line):
+    vfs = Declining(files=False)
+    assert asyncio.run(_run(vfs, line)) == asyncio.run(_run(RAMVFS(), line))
+    assert vfs.scans == [ScanReason.UNANSWERED]
+
+    class Refusing(Declining):
+        async def before_full_scan(
+            self, command, under, reason, index=NULL_INDEX
+        ):
+            raise ValueError(f"{reason}; narrow the path")
+
+    assert asyncio.run(_run(Refusing(files=False), "grep -r ada /d")) == (
+        b"",
+        b"grep: the search could not answer; narrow the path\n",
+        1,
+    )
+
+
+class Uppercase(SearchRAM):
+    """A search that spells its hits in another case."""
+
+    async def files_containing(
+        self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
+    ):
+        found = await super().files_containing(
+            text, under, whole_word=whole_word, ignore_case=ignore_case
+        )
+        return [
+            mounted_path(under[0], hit.mount_path.upper()) for hit in found
+        ]
+
+
+def test_hits_are_matched_without_case():
+    vfs = Uppercase(lines=False)
+    assert asyncio.run(_run(vfs, "grep -r ada /d")) == asyncio.run(
+        _run(RAMVFS(), "grep -r ada /d")
+    )
+    assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"]
+
+
+class Resource(SearchRAM):
+    """A mount with a resource search that grep has no metadata for."""
+
+    async def search(self, path, query, index=NULL_INDEX):
+        return None
+
+
+def test_a_resource_search_still_narrows_the_scan():
+    vfs = Resource(lines=False)
+    asyncio.run(_run(vfs, "grep -r ada /d"))
+    assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"]

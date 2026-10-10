@@ -320,10 +320,12 @@ class ScanReason(StrEnum):
 
     NO_SEARCH: no ``files_containing`` or ``lines_containing`` on the
     mount, or a hide or path rule covers the walk. NO_TEXT: -f, or no
-    plain text of three characters that every match holds (a non-ASCII
-    word under -i counts as none). EVERY_LINE: -v or rg --passthru
-    prints lines that do not match. LINKS: rg -L follows links out of
-    the walk. UNANSWERED: ``files_containing`` returned None.
+    plain text of three characters that every match holds (under -i, a
+    word with a non-ASCII letter, or with i, k or s when case folds by
+    Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints
+    lines that do not match. LINKS: rg -L follows links out of the walk.
+    UNANSWERED: ``files_containing`` returned None, or
+    ``lines_containing`` returned None for a file.
     """
 
     NO_SEARCH = "the mount has no search"
@@ -368,7 +370,7 @@ class LinesContainingOp(Protocol):
 
 
 class BeforeFullScanOp(Protocol):
-    """Called before grep or rg reads every file under ``under``; raise
+    """Called before grep or rg reads a file no search answered; raise
     to refuse."""
 
     def __call__(

@@ -223,7 +223,7 @@ The arguments come from the command line:
 | `ignoreCase` | `-i` | `-i`, or `-S` with a lowercase pattern |
 
 Answer more than needed, never less: an extra file costs a read, a missing one
-is a wrong answer. Files are matched on `vfsPath`; a search that holds only
+is a wrong answer. Files are matched on `vfsPath` without case; a search that holds only
 keys names each with `mountedPath(under[0], '/' + key)` from
 `@struktoai/mirage-core/utils/key_prefix`. Return `null` when the answer may be
 incomplete (an error, a truncated result, an index that lags writes) and every
@@ -255,19 +255,21 @@ class WikiVFS extends BaseVFS {
 `linesContaining` suits row stores, and may stream its rows. Its lines replace
 the file when the output shows no line numbers, byte offsets or context;
 otherwise the file is read only when the answer holds a line, and a stream is
-pulled no further than its first one. A file named on the line, a
-binary-extension file read under `-a`, and any path under a hide or path rule
-are always read.
+pulled no further than its first one. Answer `null` for a file that may hold a
+NUL byte: grep and rg call such a file binary from bytes outside its matching
+lines. A file named on the line, a binary-extension file read under `-a`, and
+any path under a hide or path rule are always read.
 
-When nothing can narrow, `beforeFullScan` gets why:
+`beforeFullScan` is called once, before the first file no search answered is read,
+with why:
 
 | `ScanReason` | When |
 | --- | --- |
 | `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
-| `NO_TEXT` | `-f`, or no plain text of three characters every match holds |
+| `NO_TEXT` | `-f`, or no plain text of three characters every match holds (under `-i`, a word with a non-ASCII letter, or with k or s, counts as none) |
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
 | `LINKS` | rg `-L` |
-| `UNANSWERED` | `filesContaining` resolved `null` |
+| `UNANSWERED` | `filesContaining` resolved `null`, or `linesContaining` resolved `null` for a file |
 
 Reject from it (or from `filesContaining`) to refuse: the error's message is
 what the command prints, and each reason's value is a sentence to put in it.

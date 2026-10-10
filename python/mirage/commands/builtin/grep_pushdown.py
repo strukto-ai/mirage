@@ -23,7 +23,10 @@ from mirage.commands.builtin.grep_pattern import (
     perl_regex,
     rust_source,
 )
-from mirage.commands.builtin.grep_prefilter import required_needles
+from mirage.commands.builtin.grep_prefilter import (
+    UNICODE_FOLDED,
+    required_needles,
+)
 from mirage.commands.builtin.types import (
     GrepSearchMeta,
     GrepSearchOptions,
@@ -266,8 +269,10 @@ def search_terms(
 
     Literals under -w or -x are asked as whole words, which a word index
     can answer; any other pattern is narrowed on the needles one of which
-    every match contains, asked anywhere. A non-ASCII literal under -i is
-    left to the scan, since a mount's case folding need not be grep's.
+    every match contains, asked anywhere. Under -i a literal with a
+    non-ASCII letter, or with i, k or s when case folds by Unicode (``ſ``
+    matches ``s``), is left to the scan, since a mount's case folding need
+    not be grep's.
 
     Args:
         pattern (str | None): the newline-joined patterns.
@@ -278,8 +283,14 @@ def search_terms(
         ignore_case (bool): the match folds case.
     """
     words = whole_word_literals(pattern, fixed_string, whole_word, line_regexp)
+    unicode_fold = ignore_case and not matcher.flags & re.ASCII
     if words is not None and not (
-        ignore_case and not all(w.isascii() for w in words)
+        ignore_case
+        and not all(
+            w.isascii()
+            and not (unicode_fold and UNICODE_FOLDED & set(w.lower()))
+            for w in words
+        )
     ):
         return tuple(words), True
     needles = required_needles(matcher)

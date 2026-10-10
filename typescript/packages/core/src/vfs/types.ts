@@ -195,9 +195,11 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
  * Python's `ScanReason`. NO_SEARCH: no `filesContaining` or
  * `linesContaining` on the mount, or a hide or path rule covers the walk.
  * NO_TEXT: -f, or no plain text of three characters that every match holds
- * (a non-ASCII word under -i counts as none). EVERY_LINE: -v or rg --passthru
- * prints lines that do not match. LINKS: rg -L follows links out of the walk.
- * UNANSWERED: `filesContaining` resolved null.
+ * (under -i, a word with a non-ASCII letter, or with k or s when case folds by
+ * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
+ * do not match. LINKS: rg -L follows links out of the walk. UNANSWERED:
+ * `filesContaining` resolved null, or `linesContaining` resolved null for a
+ * file.
  */
 export const ScanReason = Object.freeze({
   NO_SEARCH: 'the mount has no search',
@@ -227,7 +229,7 @@ export type LinesContainingOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<ByteSource | null>
 
-/** Called before grep or rg reads every file under `under`; reject to refuse. */
+/** Called before grep or rg reads a file no search answered; reject to refuse. */
 export type BeforeFullScanOp<A extends Accessor = Accessor> = (
   accessor: A,
   command: string,

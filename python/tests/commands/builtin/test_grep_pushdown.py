@@ -477,6 +477,9 @@ def test_whole_word_literals_union_only_complete_alternatives(
         ("Conn.*REFUSED", re.I, False, True, None),
         ("a.b", 0, False, False, None),
         ("café", re.I, True, True, None),
+        ("ada", re.I, True, True, (("ada",), True)),
+        ("sun", re.I, True, True, None),
+        ("sun", re.I | re.ASCII, True, True, (("sun",), True)),
     ],
 )
 def test_search_terms_ask_words_or_the_text_every_match_holds(
@@ -484,8 +487,9 @@ def test_search_terms_ask_words_or_the_text_every_match_holds(
 ):
     # Whole-word literals go as words; any other pattern as the needles
     # every match holds, never shorter than three characters. Under -i a
-    # needle with s, k or i is dropped (Unicode folds the long s to s),
-    # and a mount's folding of a non-ASCII literal is not trusted.
+    # needle or word with s, k or i is dropped when case folds by Unicode
+    # (the long s folds to s), and a mount's folding of a non-ASCII
+    # literal is not trusted.
     matcher = re.compile(pattern.replace("\n", "|"), flags)
     assert (
         grep_pushdown.search_terms(pattern, matcher, False, w, False, i)
