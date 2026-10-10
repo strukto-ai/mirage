@@ -90,6 +90,8 @@ REFUSED_CALLS: Mapping[str, FsCondition] = {
 DESCRIPTOR_CALLS: frozenset[str] = frozenset(
     {
         "close",
+        "fchmod",
+        "fchown",
         "fdatasync",
         "fdopen",
         "fstat",

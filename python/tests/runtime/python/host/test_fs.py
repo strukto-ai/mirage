@@ -566,6 +566,17 @@ class TestDescriptors:
             patched.close(fd)
         assert caught.value.errno == errno.EBADF
 
+    def test_a_descriptor_in_a_path_slot_names_its_file(self):
+        _, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDONLY)
+        patched.fchmod(fd, 0o600)
+        assert (
+            stat_mod.S_IMODE(patched.stat("/data/dir/a.txt").st_mode) == 0o600
+        )
+        patched.utime(fd, (981173106, 981173107))
+        assert int(patched.stat(fd).st_mtime) == 981173107
+        patched.close(fd)
+
     def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
         _, patched = seeded()
         target = tmp_path / "a.txt"

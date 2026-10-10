@@ -96,11 +96,12 @@ class Descriptor:
 class Descriptors:
     """The descriptors ``os.open`` hands out for mounted paths, by number.
 
-    Each number is a real host descriptor on the null device, held open
-    as long as the mounted one is, so it never collides with a file the
-    host opens meanwhile, and a call that still reaches the host with it
-    (a C extension) meets an empty stream rather than another file.
-    Writes stay in the handle until a ``close`` or an ``fsync``.
+    Each number is a real host descriptor, the read end of a pipe whose
+    write end is closed, held open as long as the mounted one is: it
+    never collides with a file the host opens meanwhile, and a call that
+    still reaches the host with it (a C extension) meets an empty stream,
+    never another file or a shared device. Writes stay in the handle
+    until a ``close`` or an ``fsync``.
 
     Args:
         adapter (RuntimeFiles): the file adapter files land through.
@@ -164,7 +165,8 @@ class Descriptors:
                 writable=facts.writable,
                 append=facts.append,
             )
-        fd = cast(int, self._host.open(os.devnull, os.O_RDONLY))
+        fd, write_end = cast(tuple[int, int], self._host.pipe())
+        self._host.close(write_end)
         self._open[fd] = Descriptor(path, facts, handle)
         return fd
 

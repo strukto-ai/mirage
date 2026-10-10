@@ -325,7 +325,10 @@ class HostFs:
         return self._descriptors
 
     def _virtual(self, path: Any) -> str | None:
-        """The mounted virtual path this argument names, else None.
+        """The mounted virtual path this argument names, else None. A
+        descriptor ``open`` handed out names the path it opened, so the
+        calls that take one in the path slot (``stat``, ``chmod``,
+        ``utime``) reach the mount.
 
         A backend serving an op is answered None whatever it spelled:
         the path it is reaching for is a physical one, and on a disk
@@ -336,8 +339,13 @@ class HostFs:
         Args:
             path (Any): whatever the caller passed in the path slot.
         """
+        if in_host_io():
+            return None
+        desc = self._descriptors.get(path)
+        if desc is not None:
+            return desc.path
         spelled = _spelled(path)
-        if spelled is None or in_host_io():
+        if spelled is None:
             return None
         return spelled if self._files.is_mounted(spelled) else None
 
@@ -1179,6 +1187,18 @@ class HostFs:
             self._host.fdatasync(fd)
             return
         self._descriptors.land(desc)
+
+    def fchmod(self, fd: int, mode: int) -> None:
+        if self._descriptors.get(fd) is None:
+            self._host.fchmod(fd, mode)
+            return
+        self.chmod(fd, mode)
+
+    def fchown(self, fd: int, uid: int, gid: int) -> None:
+        if self._descriptors.get(fd) is None:
+            self._host.fchown(fd, uid, gid)
+            return
+        self.chown(fd, uid, gid)
 
     def ftruncate(self, fd: int, length: int) -> None:
         if self._descriptors.get(fd) is None:
