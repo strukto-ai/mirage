@@ -681,7 +681,13 @@ def test_a_refusal_stands_for_every_unanswered_file(mount):
 
 
 @pytest.mark.parametrize(
-    "line", ["rg --files-without-match ada /d", "rg -c --include-zero ada /d"]
+    "line",
+    [
+        "rg --files-without-match ada /d",
+        "rg -c --include-zero ada /d",
+        "rg -q --files-without-match ada /d",
+        "rg -q -c --include-zero ada /d",
+    ],
 )
 def test_rg_leaves_a_binary_file_out_whatever_the_search_says(line):
     async def run(vfs: RAMVFS) -> tuple[bytes, bytes, int]:
@@ -693,6 +699,7 @@ def test_rg_leaves_a_binary_file_out_whatever_the_search_says(line):
         finally:
             await ws.close()
 
-    assert asyncio.run(run(SearchRAM(lines=False))) == asyncio.run(
-        run(RAMVFS())
-    )
+    vfs = SearchRAM(lines=False)
+    assert asyncio.run(run(vfs)) == asyncio.run(run(RAMVFS()))
+    # -q prints no row, so the search still narrows.
+    assert bool(vfs.asked) == (" -q " in line)

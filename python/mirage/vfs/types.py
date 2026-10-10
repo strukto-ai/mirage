@@ -329,11 +329,10 @@ class ScanReason(StrEnum):
     word with a non-ASCII letter, or with i, k or s when case folds by
     Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints
     lines that do not match. EVERY_FILE: rg --files-without-match, or
-    rg -c or --count-matches with --include-zero, lists files that do
-    not match, and rg leaves a binary one out. LINKS: rg -L follows
-    links out of the walk.
-    UNANSWERED: ``files_containing`` returned None, or
-    ``lines_containing`` returned None for a file.
+    rg -c or --count-matches with --include-zero, without -q, lists
+    files that do not match, and rg leaves a binary one out. LINKS: rg -L follows
+    links out of the walk. UNANSWERED: ``files_containing`` returned
+    None, or ``lines_containing`` returned None for a file.
     """
 
     NO_SEARCH = "the mount has no search"

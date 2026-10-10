@@ -268,7 +268,7 @@ with why:
 | `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
 | `NO_TEXT` | `-f`, or no plain text of three characters every match holds (under `-i`, a word with a non-ASCII letter, or with k or s, counts as none) |
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
-| `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`: rg leaves a binary file out of these |
+| `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`, without `-q`: rg leaves a binary file out of these |
 | `LINKS` | rg `-L` |
 | `UNANSWERED` | `filesContaining` resolved `null`, or `linesContaining` resolved `null` for a file |
 

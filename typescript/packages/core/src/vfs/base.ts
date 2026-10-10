@@ -590,8 +590,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * @param reason why the search cannot stand in: NO_SEARCH (no search on
    *   this mount or this path), NO_TEXT (-f, or no plain text every match
    *   holds), EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
-   *   --files-without-match, rg -c with --include-zero), LINKS (rg -L) or
-   *   UNANSWERED (a search resolved null).
+   *   --files-without-match, rg -c with --include-zero, without -q), LINKS
+   *   (rg -L) or UNANSWERED (a search resolved null).
    * @param index the mount's index.
    */
   beforeFullScan(

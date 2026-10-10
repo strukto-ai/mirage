@@ -583,16 +583,21 @@ it.each([Declining, DecliningResource])(
 )
 
 // Twin of test_rg_leaves_a_binary_file_out_whatever_the_search_says.
-it.each(['rg --files-without-match ada /d', 'rg -c --include-zero ada /d'])(
-  'leaves a binary file out of %s whatever the search says',
-  async (line) => {
-    const seeded = async (vfs: RAMVFS): Promise<[string, string, number]> => {
-      vfs.store.files.set('/d/z.txt', ENC.encode('\0noise\n'))
-      return run(vfs, line)
-    }
-    expect(await seeded(new SearchRAM(true, false))).toEqual(await seeded(new RAMVFS()))
-  },
-)
+it.each([
+  'rg --files-without-match ada /d',
+  'rg -c --include-zero ada /d',
+  'rg -q --files-without-match ada /d',
+  'rg -q -c --include-zero ada /d',
+])('leaves a binary file out of %s whatever the search says', async (line) => {
+  const seeded = async (vfs: RAMVFS): Promise<[string, string, number]> => {
+    vfs.store.files.set('/d/z.txt', ENC.encode('\0noise\n'))
+    return run(vfs, line)
+  }
+  const vfs = new SearchRAM(true, false)
+  expect(await seeded(vfs)).toEqual(await seeded(new RAMVFS()))
+  // -q prints no row, so the search still narrows.
+  expect(vfs.asked.length > 0).toBe(line.includes(' -q '))
+})
 
 // Twin of test_hits_are_matched_without_case.
 it('matches hits without case', async () => {

@@ -621,8 +621,7 @@ class BaseVFS:
         grep and rg still walk, filter, order and label every file, and
         read only the ones answered here, matched on ``vfs_path`` without
         case, so an extra file costs a read and a missing one is a wrong
-        answer. A
-        search that holds only keys names each one with
+        answer. A search that holds only keys names each one with
         ``mounted_path(under[0], "/" + key)``. Return None when the answer
         may be incomplete (an error, a truncated result, an index that
         lags writes), and every file is read; raise to refuse the
@@ -701,7 +700,8 @@ class BaseVFS:
                 NO_SEARCH (no search on this mount or this path),
                 NO_TEXT (-f, or no plain text every match holds),
                 EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
-                --files-without-match, rg -c with --include-zero), LINKS
+                --files-without-match, rg -c with --include-zero, without
+                -q), LINKS
                 (rg -L) or UNANSWERED (a search returned None).
             index (IndexCacheStore): the mount's index.
         """

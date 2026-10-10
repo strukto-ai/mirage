@@ -156,7 +156,7 @@ export function rgTerms(
   if (f.listFiles || f.typeList) return null
   const pattern = patternArg(texts, bag, PATTERN_KEYS.rg)
   if (f.invert || f.passthru) return ScanReason.EVERY_LINE
-  if (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches))) {
+  if (!f.quiet && (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches)))) {
     return ScanReason.EVERY_FILE
   }
   if (f.follow) return ScanReason.LINKS

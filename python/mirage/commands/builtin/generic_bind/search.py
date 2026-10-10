@@ -200,8 +200,9 @@ def rg_terms(
     pattern = pattern_arg(texts, fl, PATTERN_KEYS["rg"])
     if f.invert or f.passthru:
         return ScanReason.EVERY_LINE
-    if f.files_without_match or (
-        f.include_zero and (f.count_only or f.count_matches)
+    if not f.quiet and (
+        f.files_without_match
+        or (f.include_zero and (f.count_only or f.count_matches))
     ):
         return ScanReason.EVERY_FILE
     if f.follow:
