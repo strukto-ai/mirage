@@ -25,7 +25,7 @@ import { GitError, MissingRepositoryError, NoWorkspaceError } from './errors.ts'
 import { loadRefs, readHead } from './refs.ts'
 import { objectType, openRepo, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

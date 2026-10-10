@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { recordStream } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'

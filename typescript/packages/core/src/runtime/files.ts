@@ -34,7 +34,7 @@ import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import type { RuntimeContext } from './binding.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
-import { concat } from '../io/cachable_iterator.ts'
+import { concat } from '../utils/bytes.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
 
 /** Whether a failure is the mount saying the path is not there. */

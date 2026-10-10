@@ -55,6 +55,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { Effect, type FindOptions, type SearchQuery } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
@@ -67,7 +68,6 @@ import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { OutputStream, closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
-import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import {
   captureCacheContext,
   runWithCacheManager,
@@ -542,17 +542,20 @@ export class MountEntry {
    * Refuse a write the mount's mode no longer grants at any path. Admission
    * judged the mode before the call waited for the mount and for its write
    * lock; `setMountMode` can make the mount read-only in between, so the mode
-   * is read again as the backend call starts. A rename moves everything below
-   * its endpoints, so a read-only region below either refuses it. Mirrors
+   * is read again as the backend call starts. A call that reaches a subtree
+   * (a rename, a tree removal or copy) is refused by a read-only region
+   * anywhere below its paths, and a copy only reads its source. Mirrors
    * Python's `require_writable`.
    */
   requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
-    if (!this.writes(name)) return
+    const mark = declared(this.vfs.constructor, name)
+    if (mark === null || !WRITE_EFFECTS.includes(mark.effect)) return
+    const others = values.filter((value): value is PathSpec => value instanceof PathSpec)
     requirePathsWritable(
-      [path, ...values.filter((value): value is PathSpec => value instanceof PathSpec)],
+      mark.effect === Effect.COPY ? others : [path, ...others],
       this.prefix,
       this.mode,
-      name === 'rename',
+      mark.subtree,
     )
   }
 
@@ -671,11 +674,25 @@ export class MountEntry {
       case 'mkdir':
         return [(scope, _args, kw) => this.mkdir(scope, kw.parents === true)]
       case 'unlink':
-        return [(scope) => vfs.unlink(scope)]
+        return [(scope, _args, kw) => vfs.unlink(scope, kw.index)]
       case 'rmdir':
         return [(scope, _args, kw) => vfs.rmdir(scope, kw.index)]
       case 'rename':
         return [(scope, args) => vfs.rename(scope, dstArg(args[0]))]
+      case 'copy':
+        return [(scope, args) => vfs.copy(scope, dstArg(args[0]))]
+      case 'dir_copy':
+        return [(scope, args) => vfs.dirCopy(scope, dstArg(args[0]))]
+      case 'rm_r':
+        return [(scope) => vfs.rmR(scope)]
+      case 'find':
+        return [(scope, args, kw) => vfs.find(scope, (args[0] ?? {}) as FindOptions, kw.index)]
+      case 'du_size':
+        return [(scope, _args, kw) => vfs.duSize(scope, kw.index)]
+      case 'du_entries':
+        return [(scope, _args, kw) => vfs.duEntries(scope, kw.index)]
+      case 'search':
+        return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, kw.index)]
       case 'truncate':
         return [(scope, args, kw) => vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true)]
       case 'setattr':
@@ -1238,28 +1255,22 @@ async function* commandOutput(
 
 /** Preserve a streaming operation's recording owner after its dispatch frame exits. */
 export function wrapStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
-  if (result instanceof CachableAsyncIterator) {
-    result.wrapSource((source) => withMountContext(source, mountId))
-    return activity.hold(result)
-  }
   if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
     return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId))
   }
   return result
 }
 
-// Push `mountId` back during lazy consumption of anything the command
+// Push `mountId` back during lazy consumption of the stream the command
 // handed back, so a deferred backend read attributes its record the same
-// way an eager one does. Dedup by identity: a stream that appears both as the
-// primary stdout and in IOResult.reads/writes is wrapped once.
-// Mirrors python's _wrap_mount_streams.
+// way an eager one does. Mirrors python's _wrap_mount_streams.
 function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountId: string,
   activity: VFSActivity,
 ): [ByteSource | null, IOResult] {
   const [stream, io] = result
-  const seen = new Map<ByteSource, ByteSource>()
+  if (stream === null || stream instanceof Uint8Array) return [stream, io]
   const scope = new ContextScope([
     ...captureSessionContext(),
     ...captureOpPolicies(),
@@ -1267,24 +1278,7 @@ function wrapMountStreams(
     captureCacheContext(),
     captureCommandScope(),
   ])
-  const wrap = (obj: ByteSource): ByteSource => {
-    if (obj instanceof Uint8Array) return obj
-    const hit = seen.get(obj)
-    if (hit !== undefined) return hit
-    let wrapped: ByteSource
-    if (obj instanceof CachableAsyncIterator) {
-      obj.wrapSource((src) => scope.stream(withMountContext(src, mountId)))
-      wrapped = obj
-    } else {
-      wrapped = scope.stream(withMountContext(obj, mountId))
-    }
-    wrapped = activity.hold(wrapped)
-    seen.set(obj, wrapped)
-    return wrapped
-  }
-  for (const [k, v] of Object.entries(io.reads)) io.reads[k] = wrap(v)
-  for (const [k, v] of Object.entries(io.writes)) io.writes[k] = wrap(v)
-  return [stream !== null ? wrap(stream) : null, io]
+  return [activity.hold(scope.stream(withMountContext(stream, mountId))), io]
 }
 
 function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (string | null)[]> {

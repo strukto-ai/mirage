@@ -14,7 +14,7 @@
 
 import type { OpKwargs } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { applyIo, setCached } from '../../cache/file/io.ts'
+import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
@@ -37,6 +37,7 @@ import {
   isMissingOp,
   eloop,
   exdev,
+  walkDeclined,
   noMount,
   noXattr,
   walkRefusal,
@@ -61,7 +62,8 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
-import { OpRecord, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
+import type { OpRecord } from '../../observe/record.ts'
+import { WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -86,6 +88,8 @@ import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import {
+  COPY_OPS,
+  DESTINATION_OPS,
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
   ENTRY_CREATE_OPS,
@@ -93,11 +97,13 @@ import {
   HIDDEN_CREATE_OPS,
   LINK_ENTRY_OPS,
   NAMESPACE_TABLE_OPS,
+  NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
   STAMP_WRITE_OPS,
+  SUBTREE_OPS,
   XATTR_OPS,
 } from './constants.ts'
 import {
@@ -248,14 +254,15 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
 
 /**
  * A custom function's other path arguments, by position or keyword; a
- * rename's destination is walked on its own. Mirrors Python's `_operands`.
+ * rename's or a copy's destination is walked on its own. Mirrors Python's
+ * `_operands`.
  */
 function operands(
   name: string,
   args: readonly unknown[] | undefined,
   kwargs: Record<string, unknown> | undefined,
 ): [number | string, PathSpec][] {
-  if (name === 'rename') return []
+  if (DESTINATION_OPS.has(name)) return []
   const found: [number | string, PathSpec][] = []
   ;(args ?? []).forEach((value, at) => {
     if (value instanceof PathSpec) found.push([at, value])
@@ -383,7 +390,7 @@ interface Call {
   /** The path as the caller named it. */
   readonly typed: PathSpec
   /** A rename's walked destination. */
-  readonly dst: PathSpec | null
+  dst: PathSpec | null
   /** The op's positional arguments; the operand walk replaces path ones. */
   args: readonly unknown[] | undefined
   /** The op's arguments; `follow` consumes `nofollow`. */
@@ -524,6 +531,10 @@ export class Dispatcher {
       : this.boundary(owner)
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
+      if (await this.declines(call)) {
+        if (name === 'search') return [null, new IOResult()]
+        throw walkDeclined(owner.vfs.name, name, call.path)
+      }
       await this.admit(call, owner, boundary)
       if (looksUp) {
         await mkdirOnReadOnly(
@@ -557,21 +568,15 @@ export class Dispatcher {
     await mount.ensureReady()
     const cached = await this.serveCached(call, mount, vfs, boundary)
     if (cached !== null) {
-      return [cached, new IOResult({ reads: { [call.path.virtual]: cached } })]
+      return [cached, new IOResult()]
     }
-    const [answer, renameDst, fullArgs] = await this.callBackend(call, mount, vfs, scope, mode)
+    const [answer, dst, fullArgs] = await this.callBackend(call, mount, vfs, scope, mode)
     const result = this.filter(call, answer)
     if (
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
     ) {
-      await this.settleWrite(
-        name,
-        call.path,
-        renameDst,
-        fullArgs,
-        operands(name, call.args, call.kwargs),
-      )
+      await this.settleWrite(name, call.path, dst, fullArgs, operands(name, call.args, call.kwargs))
     }
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
@@ -610,7 +615,8 @@ export class Dispatcher {
    * Hidden paths answer before anything else can: the typed path is
    * checked so a link inside hidden space cannot be followed out of it,
    * the followed path is re-checked (`follow`) so a visible link cannot
-   * lead in, and a rename destination is a create. Every link above the
+   * lead in, and a rename's or a copy's destination is a create. Every link
+   * above the
    * final name is then followed, whatever the op does with the name:
    * command dispatch walks the operands it classifies, and this is the
    * same walk for every other caller (a relative word ln resolves itself,
@@ -631,8 +637,8 @@ export class Dispatcher {
     if (!pathVisible(vis, path.virtual)) {
       throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name))
     }
-    let dstArg = args?.[0]
-    if (name === 'rename' && dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
+    let dstArg = DESTINATION_OPS.has(name) ? args?.[0] : undefined
+    if (dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
       throw hiddenRefusal(vis, dstArg.virtual, true)
     }
     // An operand the walk already refused (the empty name, a link loop)
@@ -649,7 +655,7 @@ export class Dispatcher {
     // spelling: `x/` must be a directory, so a create of one is EISDIR
     // before anything is looked up.
     if (FILE_CREATE_OPS.has(name) && path.dotted?.endsWith('/') === true) throw eisdir(path)
-    const renamed = name === 'rename' && dstArg instanceof PathSpec ? dstArg : null
+    const renamed = dstArg instanceof PathSpec ? dstArg : null
     if (path.dotted !== null || (renamed !== null && renamed.dotted !== null)) {
       const walkStat = dispatchStat(this.dispatch)
       const follow = (virtual: string): string => this.namespace.follow(virtual)
@@ -660,20 +666,21 @@ export class Dispatcher {
     }
     const [typed, typedDst] = [path, dstArg]
     path = this.walked(path, HIDDEN_CREATE_OPS.has(name))
-    if (name === 'rename' && dstArg instanceof PathSpec) {
+    if (dstArg instanceof PathSpec) {
       dstArg = this.walked(dstArg, true)
       args = [dstArg, ...(args ?? []).slice(1)]
     }
     // The command's gate judges each spelling, as handed in and as walked,
     // once both walks have answered for hidden space: here for an op on the
-    // name itself, in `follow` for the rest.
+    // name itself and for a destination, in `follow` for the rest.
     const noFollow = NO_FOLLOW_OPS.has(name) || kwargs?.nofollow === true
     if (ruleGate !== null && noFollow) judge(ruleGate, typed, path, typedDst, dstArg)
+    else if (ruleGate !== null) judge(ruleGate, typedDst, dstArg)
     return {
       name,
       path,
       typed,
-      dst: name === 'rename' && dstArg instanceof PathSpec ? dstArg : null,
+      dst: dstArg instanceof PathSpec ? dstArg : null,
       args,
       kwargs,
       vis,
@@ -704,7 +711,7 @@ export class Dispatcher {
    */
   private async refuseRename(call: Call): Promise<void> {
     const dst = call.dst
-    if (dst === null) return
+    if (call.name !== 'rename' || dst === null) return
     if (
       moveReveals(call.vis, call.path.virtual, dst.virtual) &&
       (await this.movedSourceIsDir(call.path, call.issuer))
@@ -719,8 +726,11 @@ export class Dispatcher {
    *
    * `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts on a
    * link entry itself (chown -h writing the link's own attrs) keeps the
-   * typed path. Consumed here, never forwarded. Mirrors Python's
-   * Dispatcher._follow.
+   * typed path. Consumed here, never forwarded. A copy writes its
+   * destination as a write does, through a link at the final name; a
+   * rename moves the name itself. A copy whose two ends then name one file
+   * is refused: a backend that replaces its destination would delete the
+   * source first. Mirrors Python's Dispatcher._follow.
    */
   private follow(call: Call): void {
     const nofollow = call.kwargs?.nofollow === true
@@ -730,6 +740,15 @@ export class Dispatcher {
       call.kwargs = rest
     }
     const walked = call.path
+    if (COPY_OPS.has(call.name) && call.dst !== null && !nofollow) {
+      const dst = PathSpec.fromStrPath(followOrLoop(this.namespace, call.dst, true))
+      if (dst.virtual !== call.dst.virtual) {
+        if (!pathVisible(call.vis, dst.virtual)) throw hiddenRefusal(call.vis, dst.virtual, true)
+        if (call.ruleGate !== null) judge(call.ruleGate, dst)
+        call.dst = dst
+        call.args = [dst, ...(call.args ?? []).slice(1)]
+      }
+    }
     if (!NO_FOLLOW_OPS.has(call.name) && !nofollow) {
       const followed = followOrLoop(this.namespace, call.path, true)
       if (followed !== call.path.virtual) {
@@ -741,6 +760,7 @@ export class Dispatcher {
     }
     if (call.ruleGate !== null && !call.noFollow)
       judge(call.ruleGate, call.typed, walked, call.path)
+    if (COPY_OPS.has(call.name) && call.dst?.virtual === call.path.virtual) throw einval(call.dst)
   }
 
   /**
@@ -762,14 +782,15 @@ export class Dispatcher {
   }
 
   /**
-   * Answer EXDEV for a rename between two mounts.
+   * Answer EXDEV for a rename or a copy between two mounts.
    *
    * A mount is a filesystem boundary: rename(2) moves a name within one and
    * answers EXDEV across two, before any permission is weighed, so `mv`
    * falls back to copy and unlink instead of the source's backend taking
-   * the destination for one of its keys. It resolves both parent
-   * directories first, so a missing one is ENOENT (ENOTDIR through a file)
-   * ahead of EXDEV. Mirrors Python's Dispatcher._refuse_cross_mount.
+   * the destination for one of its keys; a backend copies only within
+   * itself, the same way. It resolves both parent directories first, so a
+   * missing one is ENOENT (ENOTDIR through a file) ahead of EXDEV. Mirrors
+   * Python's Dispatcher._refuse_cross_mount.
    */
   private async refuseCrossMount(call: Call, owner: MountEntry): Promise<void> {
     // A function runs on one backend, so every path it is handed must be
@@ -787,31 +808,61 @@ export class Dispatcher {
   }
 
   /**
+   * Whether a one-call walk gives way to the caller's own walk.
+   *
+   * A backend's find, du, search, tree copy or tree removal answers for
+   * every entry under its path in one call, past the checks each entry would
+   * meet on its own. So when a hide, the command's path rules or a coded
+   * preVfs policy reach below one of its paths, it is declined and the
+   * caller walks, entry by entry, through calls that are each judged. A file
+   * copy is declined the same way: the bytes it moves never pass through a
+   * read. A tree copy is declined too when a link stands below its
+   * destination: the backend writes each child name as it is, where the
+   * walk's copies follow the link. Mirrors Python's Dispatcher._declines.
+   */
+  private async declines(call: Call): Promise<boolean> {
+    if (!NATIVE_WALK_OPS.has(call.name)) return false
+    if (
+      call.name === 'dir_copy' &&
+      call.dst !== null &&
+      this.namespace.linkStatsBelow(call.dst.virtual).length > 0
+    ) {
+      return true
+    }
+    const paths = call.dst === null ? [call.path] : [call.path, call.dst]
+    if (paths.some((p) => hiddenUnder(call.vis, p.virtual))) return true
+    if (call.ruleGate !== null) return paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
+    return this.policies.wantsFor('preVfs', sessionId())
+  }
+
+  /**
    * Run admission for an op on a mounted path.
    *
    * Admission policies fire at the dispatcher, before the warm-cache early
    * return: a cached read must be refused exactly like a cold one, or the
    * cache becomes a policy bypass. This dispatcher is the one dispatcher in
    * TypeScript: shell internals, programmatic access, `ws.vfs`, and
-   * FUSE all end up here. A rename's destination is a create there: it
-   * passes the same gate as the source, so a path rule holds against
-   * moving into a protected scope (or onto the directory that holds one)
-   * the way it holds against writing there, under the mode of the mount
-   * that owns it. Mirrors Python's Dispatcher._admit.
+   * FUSE all end up here. A rename's or a copy's destination is a create
+   * there: it passes the same gate as the source, so a path rule holds
+   * against moving or copying into a protected scope (or onto the directory
+   * that holds one) the way it holds against writing there, under the mode
+   * of the mount that owns it. A copy only reads its source. Mirrors
+   * Python's Dispatcher._admit.
    */
   private async admit(call: Call, mount: MountEntry, boundary: Boundary): Promise<void> {
     // A function the VFS declares a write is judged as one, whatever its
     // name: the POSIX names are known here, a custom one only to the VFS
     // that defines it.
     call.write = call.write || mount.writes(call.name)
+    const subtree = SUBTREE_OPS.has(call.name)
     await boundary.admit(
       call.name,
       call.path,
-      call.write,
+      call.write && !COPY_OPS.has(call.name),
       {
         create: HIDDEN_CREATE_OPS.has(call.name),
-        subtree: call.name === 'rename',
-        final: call.name !== 'rename',
+        subtree,
+        final: call.dst === null,
       },
       call.issuer,
     )
@@ -820,7 +871,7 @@ export class Dispatcher {
         call.name,
         call.dst,
         true,
-        { create: true, subtree: true },
+        { create: true, subtree },
         call.issuer,
       )
     }
@@ -1026,7 +1077,8 @@ export class Dispatcher {
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
-    const renameDst = name === 'rename' && call.args?.[0] instanceof PathSpec ? call.args[0] : null
+    const dst =
+      DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null
     const fullArgs = (call.args ?? []).map(keyed)
     // Per-op command limits bind to the executing (post-follow)
     // mount, and the timeout window covers only the backend op — cache
@@ -1043,11 +1095,7 @@ export class Dispatcher {
     let result
     try {
       if (this.streams(call, mount, vfs)) {
-        return [
-          await recorded(() => this.openStream(call, mount, scope, filler)),
-          renameDst,
-          fullArgs,
-        ]
+        return [await recorded(() => this.openStream(call, mount, scope, filler)), dst, fullArgs]
       }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
         mount.use(async () => {
@@ -1078,13 +1126,13 @@ export class Dispatcher {
           whole || !(kept instanceof Uint8Array) ? kept : sliceWindow(kept, readOffset, readSize)
       } else if (SERIAL_WRITE_OPS.has(name)) {
         // Held by the store's own object, so one store mounted twice is one
-        // file, and a rename holds both of its names, taken in one order so
-        // two renames between the same pair cannot deadlock. What the write
+        // file, and a rename or a copy holds both of its names, taken in one
+        // order so two between the same pair cannot deadlock. What the write
         // changes beside the store (caches, the node table's links and
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
         // another.
-        const keys = [...new Set([p.virtual, ...(renameDst !== null ? [renameDst.virtual] : [])])]
+        const keys = [...new Set([p.virtual, ...(dst !== null ? [dst.virtual] : [])])]
           .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
           .sort(compareCodePoints)
         let mine: OpRecord[] = []
@@ -1104,7 +1152,7 @@ export class Dispatcher {
               : own(onCall),
           async (value) => {
             served(report, value)
-            await this.settleWrite(name, p, renameDst, fullArgs, operands(name, call.args, kwargs))
+            await this.settleWrite(name, p, dst, fullArgs, operands(name, call.args, kwargs))
             await this.keepWritten(call, mount, fullArgs, mine)
           },
         )
@@ -1131,7 +1179,7 @@ export class Dispatcher {
     // cap do next: stamped here so a failure in any of them cannot
     // erase a transfer the backend already made.
     served(report, result)
-    return [result, renameDst, fullArgs]
+    return [result, dst, fullArgs]
   }
 
   /**
@@ -1152,26 +1200,19 @@ export class Dispatcher {
   ): Promise<void> {
     const sent = args[0]
     if (call.name !== 'write' || !(sent instanceof Uint8Array) || !factsOf(mount).cacheable) return
-    const data = sent.slice()
-    // Copies, so the line's records do not hold the written bytes.
-    const claims = records.map((rec) =>
-      WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual
-        ? new OpRecord({
-            op: rec.op,
-            path: rec.path,
-            source: rec.source,
-            bytes: rec.bytes,
-            timestamp: rec.timestamp,
-            durationMs: rec.durationMs,
-            fingerprint: rec.fingerprint,
-            revision: rec.revision,
-            mountId: rec.mountId,
-            claimed: data,
-          })
-        : rec,
-    )
-    await setCached(this.cache, call.path.virtual, data, data, claims, (path) =>
-      factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
+    const record = [...records]
+      .reverse()
+      .find((rec) => WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual)
+    if (record !== undefined && record.bytes !== sent.byteLength) {
+      await this.cache.remove(call.path.virtual)
+      return
+    }
+    await setCached(
+      this.cache,
+      call.path.virtual,
+      sent.slice(),
+      record?.fingerprint ?? null,
+      (path) => factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
     )
   }
 
@@ -1302,22 +1343,36 @@ export class Dispatcher {
   private async settleWrite(
     name: string,
     p: PathSpec,
-    renameDst: PathSpec | null,
+    dst: PathSpec | null,
     args: readonly unknown[],
     others: readonly [number | string, PathSpec][],
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
+    const removes = name === 'unlink' || name === 'rmdir' || name === 'rm_r'
+    // A copy reads its path, so only its destination changes: the copy is a
+    // new file there, or a new tree.
+    if (COPY_OPS.has(name) && dst !== null) {
+      await this.invalidateAfterWriteByPath(dst.virtual)
+      if (name === 'dir_copy') await this.settleTreeCopy(p, dst)
+      return
+    }
     // rename(2) moves a file without touching its times, which the node
     // table carries to the new name below.
     await this.invalidateAfterWriteByPath(
       p.virtual,
       observed,
       !opened && name !== 'rename',
-      name === 'unlink' || name === 'rmdir',
+      removes,
     )
     for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
-    if (name === 'unlink' || name === 'rmdir') {
+    if (name === 'rm_r') {
+      // Everything below went with it: the cached bodies and listings, and
+      // the links and overlays only the node table holds there.
+      await this.invalidateTreeByPath(p.virtual)
+      await this.namespace.purgeUnder(p.virtual)
+    }
+    if (removes) {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as
       // the shell's rm already drops it: a file created there next
@@ -1337,29 +1392,62 @@ export class Dispatcher {
         await this.namespace.purgeUnder(p.virtual, arrived)
       }
     }
-    if (renameDst !== null) {
-      await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
+    if (name === 'rename' && dst !== null) {
+      await this.invalidateAfterRenameByPath(p.virtual, dst.virtual)
       // rename(2) replaces the destination, so a node the table holds
       // at that name does not survive the move. A link left there
       // shadowed the file that had just landed: the listing showed the
       // new file, every read followed the old link, and the moved
       // content was reachable under no name at all.
-      await this.namespace.unlink(renameDst.virtual)
+      await this.namespace.unlink(dst.virtual)
       // The subtree moves with it, and only the node table can move the
       // part of it no backend holds: a link or an attr overlay below the
       // source is addressed by absolute path, so it would otherwise stay
       // behind at a name the rename has emptied. The destination's own
       // subtree is replaced first, as rename(2) replaces what it lands on.
-      await this.namespace.purgeUnder(renameDst.virtual)
+      await this.namespace.purgeUnder(dst.virtual)
       // The node at the source itself is not part of the subtree below it,
       // so re-anchoring that subtree leaves it behind: the mode or ownership
       // a chmod recorded stayed at the emptied name, never reached the
       // landing, and was inherited by whatever was created at the old name
       // next. Shell mv compensates for this in its own prepare step; a verb
       // reaching the dispatcher directly, as git mv does, had nothing to.
-      await this.namespace.rename(p.virtual, renameDst.virtual)
-      await this.namespace.renameUnder(p.virtual, renameDst.virtual)
+      await this.namespace.rename(p.virtual, dst.virtual)
+      await this.namespace.renameUnder(p.virtual, dst.virtual)
     }
+  }
+
+  /**
+   * What a tree copy changed under `dst`: each file it wrote. The copy merges
+   * into what `dst` already held, so a file it left keeps its cached copy and
+   * the version a conditional write needs; the files it wrote are the
+   * source's, listed after the copy. Mirrors Python's
+   * Dispatcher._settle_tree_copy.
+   */
+  private async settleTreeCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    const mount = this.namespace.tryMountFor(src.virtual)
+    if (mount === null) return
+    const base = rstripSlash(src.virtual)
+    const landing = rstripSlash(dst.virtual)
+    for (const virtual of await this.filesBelow(mount, src.virtual)) {
+      await this.invalidateAfterWriteByPath(landing + virtual.slice(base.length))
+    }
+  }
+
+  /** Every file at any depth under `root`, through the mount's own listing. */
+  private async filesBelow(mount: MountEntry, root: string): Promise<string[]> {
+    const files: string[] = []
+    const pending = [root]
+    for (let directory = pending.pop(); directory !== undefined; directory = pending.pop()) {
+      const entries = (await mount.call('readdir', directory)) as string[]
+      for (const entry of entries) {
+        const child = rstripSlash(entry)
+        const row = (await mount.call('stat', child)) as FileStat
+        if (row.type === FileType.DIRECTORY) pending.push(child)
+        else files.push(child)
+      }
+    }
+    return files
   }
 
   /** A number naming one store object, the same for every mount of it. */
@@ -2219,6 +2307,22 @@ export class Dispatcher {
    * old name answering `stat` and `ls` from its cached children, so the next
    * rename onto that name saw a directory that was no longer there.
    */
+  /**
+   * Drop everything cached at and below `path`, and its parents' listings,
+   * under every mount of its store. Mirrors Python's
+   * Dispatcher._invalidate_tree.
+   */
+  private async invalidateTreeByPath(rawPath: string): Promise<void> {
+    const path = rstripSlash(rawPath) || '/'
+    const mount = this.namespace.tryMountFor(path)
+    if (mount === null) return
+    for (const [owner, name] of this.aliases(mount, path)) {
+      const manager = this.managerFor(owner)
+      await manager.invalidateSubtree(name)
+      await manager.invalidateAncestors(name)
+    }
+  }
+
   async invalidateAfterRenameByPath(source: string, dst: string): Promise<void> {
     const from = rstripSlash(source) || '/'
     const to = rstripSlash(dst) || '/'
@@ -2255,17 +2359,12 @@ export class Dispatcher {
     return found
   }
 
-  // The file cache only holds paths for read-caching mounts, mirroring
-  // Python's cache_facts_for gate; without it every backend's reads
-  // land in the cache.
-  cacheFactsFor = (path: string): CacheFacts => factsOf(this.namespace.tryMountFor(path))
-
   /**
-   * Bind deferred command results to the mounts that produced them.
+   * Bind the end of a line to the mounts it started with.
    *
-   * The mount table is pinned at command start, so a fill that lands after
-   * the command is stamped with the bound of the mount that produced the
-   * bytes rather than whatever holds the prefix by then.
+   * The mount table is pinned at the line's start, so a version kept when it
+   * ends is judged by the mount that produced it rather than whatever holds
+   * the prefix by then. Mirrors Python's Dispatcher.capture_cache_facts.
    */
   captureCacheFacts(): (path: string) => CacheFacts {
     const mounts = new Map(
@@ -2279,13 +2378,17 @@ export class Dispatcher {
     }
   }
 
-  async applyIo(
-    io: IOResult,
-    records?: readonly OpRecord[],
-    cacheFacts: (path: string) => CacheFacts = this.cacheFactsFor,
-    lost: LostPaths | null = null,
+  /**
+   * Keep the version each path last had on a line that ended; a nested
+   * line's keeps only the versions of paths still lost. Mirrors Python's
+   * Dispatcher.keep_versions.
+   */
+  async keepVersions(
+    records: readonly OpRecord[],
+    cacheFacts: (path: string) => CacheFacts,
+    lost: LostPaths | null,
     nested = false,
   ): Promise<void> {
-    await applyIo(this.cache, io, cacheFacts, records, lost, nested)
+    await keepVersions(this.cache, records, cacheFacts, lost, nested)
   }
 }

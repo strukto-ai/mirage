@@ -15,7 +15,7 @@
 import { RS, type JqError, type JqHalt, type JqOptions, type JqRun } from './types.ts'
 import { fsStrerror, isEisdir } from '../../errors/fs.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

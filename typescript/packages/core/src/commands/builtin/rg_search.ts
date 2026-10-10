@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { closeQuietly, discardStreams } from '../../io/stream.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'

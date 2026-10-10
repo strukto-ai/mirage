@@ -81,26 +81,33 @@ class Shelf extends BaseVFS {
 // (tests/vfs/test_call.py) pins this same table, so a declaration changed
 // in one language fails the other language's test.
 const BUILT_INS = {
-  append: [Effect.WRITE, Target.FILE, true],
-  create: [Effect.WRITE, Target.FILE, true],
-  mkdir: [Effect.CREATE, Target.DIR, false],
-  pwrite: [Effect.WRITE, Target.FILE, true],
-  read: [Effect.READ, Target.FILE, false],
-  readdir: [Effect.READ, Target.DIR, false],
-  rename: [Effect.RENAME, Target.ANY, false],
-  rmdir: [Effect.REMOVE, Target.DIR, false],
-  setattr: [Effect.ATTR, Target.ANY, false],
-  stat: [Effect.METADATA, Target.ANY, false],
-  truncate: [Effect.WRITE, Target.FILE, true],
-  unlink: [Effect.REMOVE, Target.FILE, false],
-  write: [Effect.WRITE, Target.FILE, true],
+  append: [Effect.WRITE, Target.FILE, true, false],
+  copy: [Effect.COPY, Target.FILE, false, false],
+  create: [Effect.WRITE, Target.FILE, true, false],
+  dir_copy: [Effect.COPY, Target.DIR, false, true],
+  du_entries: [Effect.READ, Target.DIR, false, true],
+  du_size: [Effect.READ, Target.DIR, false, true],
+  find: [Effect.READ, Target.DIR, false, true],
+  mkdir: [Effect.CREATE, Target.DIR, false, false],
+  pwrite: [Effect.WRITE, Target.FILE, true, false],
+  read: [Effect.READ, Target.FILE, false, false],
+  readdir: [Effect.READ, Target.DIR, false, false],
+  rename: [Effect.RENAME, Target.ANY, false, true],
+  rm_r: [Effect.REMOVE, Target.DIR, false, true],
+  rmdir: [Effect.REMOVE, Target.DIR, false, false],
+  search: [Effect.READ, Target.ANY, false, true],
+  setattr: [Effect.ATTR, Target.ANY, false, false],
+  stat: [Effect.METADATA, Target.ANY, false, false],
+  truncate: [Effect.WRITE, Target.FILE, true, false],
+  unlink: [Effect.REMOVE, Target.FILE, false, false],
+  write: [Effect.WRITE, Target.FILE, true, false],
 } as const
 
 describe('declarations', () => {
   it('has the built-ins declare what they do', () => {
-    const expected = Object.entries(BUILT_INS).map(([name, [effect, target, creates]]) => [
+    const expected = Object.entries(BUILT_INS).map(([name, [effect, target, creates, subtree]]) => [
       name,
-      { effect, target, creates },
+      { effect, target, creates, subtree },
     ])
     expect([...declaredCalls(BaseVFS)]).toEqual(expected)
   })
@@ -110,12 +117,14 @@ describe('declarations', () => {
       effect: Effect.WRITE,
       target: Target.ANY,
       creates: false,
+      subtree: false,
     })
   })
 
   it.each([
-    [Effect.REMOVE, 'unlink and rmdir'],
+    [Effect.REMOVE, 'unlink, rmdir, rm_r'],
     [Effect.RENAME, 'rename'],
+    [Effect.COPY, 'copy, dir_copy'],
   ] as const)('lets only the posix calls declare %s', (effect, names) => {
     expect(() => {
       class Discarding extends BaseVFS {
@@ -130,8 +139,13 @@ describe('declarations', () => {
 
   it('keeps the names that match every filter', () => {
     const calls = declaredCalls(BaseVFS)
-    expect([...callNames(calls, { effects: [Effect.REMOVE] })].sort()).toEqual(['rmdir', 'unlink'])
+    expect([...callNames(calls, { effects: [Effect.REMOVE] })].sort()).toEqual([
+      'rm_r',
+      'rmdir',
+      'unlink',
+    ])
     expect([...callNames(calls, { effects: [Effect.REMOVE], targets: [Target.DIR] })]).toEqual([
+      'rm_r',
       'rmdir',
     ])
     expect(callNames(calls, { effects: [Effect.WRITE], creates: false }).size).toBe(0)

@@ -15,7 +15,7 @@
 import { abortable } from '../../../../utils/abort.ts'
 import { discardStreams } from '../../../../io/stream.ts'
 import { chunks } from '../../../../io/cooperative.ts'
-import { concat as concatBytes } from '../../../../io/cachable_iterator.ts'
+import { concat as concatBytes } from '../../../../utils/bytes.ts'
 import { isStdin } from '../../utils/stream.ts'
 import type { TransferLinks } from '../cp.ts'
 import type { LinkView } from '../../../../view/types.ts'
@@ -265,9 +265,6 @@ export function streamOperands(
           ])
           branch.exitCode = readFailExitCode(cmdName, err)
         }
-        Object.assign(io.reads, branch.reads)
-        Object.assign(io.writes, branch.writes)
-        io.cache.push(...branch.cache)
         io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
         io.exitCode = Math.max(io.exitCode, branch.exitCode)
         if (branch.refusal !== null) io.refusal = branch.refusal

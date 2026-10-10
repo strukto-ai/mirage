@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, DeviceInput
 from mirage.io.yield_budget import YieldBudget
@@ -43,7 +42,6 @@ def char_width(data: bytes) -> int:
 
 class AsyncLineIterator:
     def __init__(self, source: ByteSource) -> None:
-        self._input = source
         self._source = chunks(source)
         self._budget = YieldBudget()
         self._buf = b""
@@ -171,8 +169,6 @@ class AsyncLineIterator:
                     self._exhausted = True
         except BaseException:
             await self._source.aclose()
-            if isinstance(self._input, CachableAsyncIterator):
-                await self._input.discard()
             self._buf = b""
             self._exhausted = True
             raise
@@ -205,8 +201,6 @@ class AsyncLineIterator:
         self._buf = b""
         self._exhausted = True
         await self._source.aclose()
-        if isinstance(self._input, CachableAsyncIterator):
-            await self._input.discard()
 
     async def read_chars(
         self, count: int, delim: bytes | None
@@ -264,8 +258,6 @@ class AsyncLineIterator:
             return bytes(out), True
         except BaseException:
             await self._source.aclose()
-            if isinstance(self._input, CachableAsyncIterator):
-                await self._input.discard()
             self._buf = b""
             self._exhausted = True
             raise

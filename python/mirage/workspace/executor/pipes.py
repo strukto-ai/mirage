@@ -27,7 +27,7 @@ from mirage.io.stream import (
     discard_io,
     discard_streams,
 )
-from mirage.io.types import ByteSource, materialize, settled
+from mirage.io.types import ByteSource, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.supervisor import ProcessSupervisor
@@ -251,29 +251,14 @@ async def handle_pipe(
         if rightmost_failure != 0:
             last_io.exit_code = rightmost_failure
     merged_stderr_parts: list[bytes] = []
-    merged_reads: dict[str, ByteSource] = {}
-    merged_writes: dict[str, ByteSource] = {}
-    merged_cache: list[str] = []
     for io, child in zip(ios, child_nodes):
         child.exit_code = io.exit_code
         stderr_bytes = await materialize(io.stderr)
         if stderr_bytes:
             merged_stderr_parts.append(stderr_bytes)
-        merged_reads = {
-            p: v
-            for p, v in merged_reads.items()
-            if p not in io.writes or not settled(v)
-        }
-        merged_reads.update(io.reads)
-        merged_writes.update(io.writes)
-        merged_cache = [p for p in merged_cache if p not in io.writes]
-        merged_cache.extend(io.cache)
 
     if merged_stderr_parts:
         last_io.stderr = b"".join(merged_stderr_parts)
-    last_io.reads = merged_reads
-    last_io.writes = merged_writes
-    last_io.cache = merged_cache
 
     exec_node = ExecutionNode(
         op="|", exit_code=last_io.exit_code, children=child_nodes

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../../utils/bytes.ts'
 import { OutputStream, asyncChain, closeQuietly, drain } from '../../../../../io/stream.ts'
 import { readFailExitCodeFromLine } from '../../../../spec/usage.ts'
 import { IOResult, OutputState, materialize, type ByteSource } from '../../../../../io/types.ts'
@@ -86,9 +86,6 @@ export async function runStream(
       merged = await merged.merge(io)
     }
     if (final !== null) merged = await merged.merge(final)
-    result.reads = merged.reads
-    result.writes = merged.writes
-    result.cache = merged.cache
     result.matchedRuns = merged.matchedRuns
     result.sizedRuns = merged.sizedRuns
     result.countedRuns = merged.countedRuns

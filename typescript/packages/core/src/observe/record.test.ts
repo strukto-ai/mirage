@@ -76,7 +76,7 @@ describe('OpRecord', () => {
 
   it('serializes only the public observation fields', () => {
     // The same fields as python's OpRecord.to_dict: the in-process mount
-    // identity, the claimed value and the seal are internal.
+    // identity is internal.
     const r = new OpRecord({
       op: 'write',
       path: '/data/file',
@@ -87,8 +87,6 @@ describe('OpRecord', () => {
       fingerprint: 'fp',
       revision: 'v1',
       mountId: 'internal-mount',
-      claimed: new TextEncoder().encode('claimed bytes'),
-      sealed: true,
     })
     expect(Object.keys(r.toJSON()).sort()).toEqual(
       [

@@ -47,12 +47,7 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks
-from mirage.io.stream import (
-    OutputStream,
-    close_quietly,
-    materialize,
-    wrap_cachable_streams,
-)
+from mirage.io.stream import OutputStream, close_quietly, materialize
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
@@ -647,7 +642,7 @@ async def handle_cli(
     if out is None:
         stdout, io = None, IOResult()
     else:
-        stdout, io = wrap_cachable_streams(*out)
+        stdout, io = out
     # The spec's `write` is the one answer: what policy calls a write,
     # the cache does too, so a verb that can mutate (`gh api` under any
     # method) costs the mounts a reload rather than a stale read.

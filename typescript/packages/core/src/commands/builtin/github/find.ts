@@ -19,7 +19,7 @@ import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { withCommandGuards } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
@@ -40,13 +40,7 @@ async function find(
   // builder takes. A truncated tree names only some paths and is never
   // refetched, so it takes the same folder-by-folder walk.
   if (accessor.truncated || pathsScoped(opts.ns, resolved)) {
-    return findWalk(
-      withCommandGuards(withPolicyGuard(mountIo(opts))),
-      accessor,
-      resolved,
-      texts,
-      opts,
-    )
+    return findWalk(withCommandGuards(mountIo(opts)), accessor, resolved, texts, opts)
   }
   return findGeneric(resolved, texts, opts, (root, options) => githubFind(accessor, root, options))
 }

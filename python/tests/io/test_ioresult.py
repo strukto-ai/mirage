@@ -33,17 +33,6 @@ def test_merge_combines_stderr():
     asyncio.run(_run())
 
 
-def test_merge_combines_cache():
-    async def _run():
-        a = IOResult(cache=["/a"])
-        b = IOResult(cache=["/b"], exit_code=1)
-        merged = await a.merge(b)
-        assert merged.cache == ["/a", "/b"]
-        assert merged.exit_code == 1
-
-    asyncio.run(_run())
-
-
 def test_merged_read_follows_a_late_settling_origin():
     """The read is fresh however late the origin settles, with no sync.
 

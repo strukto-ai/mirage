@@ -124,9 +124,6 @@ async def run_stream(
             merged = await merged.merge(io)
         if final is not None:
             merged = await merged.merge(final)
-        result.reads = merged.reads
-        result.writes = merged.writes
-        result.cache = merged.cache
         result.matched_runs = merged.matched_runs
         result.sized_runs = merged.sized_runs
         result.counted_runs = merged.counted_runs

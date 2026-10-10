@@ -60,9 +60,8 @@ describe('catGeneric multi-file streaming', () => {
       fileStream(p.virtual, pulled),
     )
     expect(result).not.toBeNull()
-    const [stdout, io] = result ?? [null, new IOResult()]
+    const [stdout] = result ?? [null, new IOResult()]
     expect(DEC.decode(await materialize(stdout))).toBe('a1\na2\na3\nb1\nb2\n')
-    expect(io.reads).toEqual({})
   })
 
   it('does not pull the second file when the consumer stops early', async () => {
@@ -120,7 +119,6 @@ describe('catGeneric per-operand read failure', () => {
     expect(DEC.decode(await materialize(stdout))).toBe('b1\nb2\n')
     expect(DEC.decode(await materialize(io.stderr))).toBe('cat: /a.txt: File too large\n')
     expect(io.exitCode).toBe(1)
-    expect(await materialize(io.reads['/a.txt'])).toEqual(new Uint8Array())
   })
 })
 

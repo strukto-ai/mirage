@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
-import { concat } from '@struktoai/mirage-core/io/cachable_iterator'
+import { concat } from '@struktoai/mirage-core/utils/bytes'
 
 /** Where a spill sink writes: a workspace directory it can create and extend. */
 export interface SpillTarget {

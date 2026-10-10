@@ -16,6 +16,8 @@ import { narrowScope, runSearch } from '../search.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import type { CommandIO } from '../../../config.ts'
+import { pathsScoped } from '../../../../view/namespace_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
@@ -30,7 +32,11 @@ import { patternArg } from '../../grep_pattern.ts'
 import { walkCandidates } from '../../rg_scan.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const rg: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
+const rg: GenericCommandFn = async (raw, accessor, paths, texts, opts) => {
+  // The service's index answers for every file under a scope, so a
+  // narrowing whose scope the caller's view restricts is not taken.
+  const ops: CommandIO = { ...raw }
+  if (pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')) delete ops.contentSearch
   if (ops.search !== undefined) return runSearch(ops, 'rg', accessor, paths, texts, opts)
   const idx = opts.index ?? undefined
   let resolved: PathSpec[] = []

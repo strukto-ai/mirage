@@ -27,6 +27,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gsheetsReaddir } from '../../core/gsheets/readdir.ts'
 import { read as gsheetsRead } from '../../core/gsheets/read.ts'
 import { stat as gsheetsStat } from '../../core/gsheets/stat.ts'
+import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
 
 export interface GSheetsVFSState {
   type: string
@@ -70,6 +71,10 @@ export class GSheetsVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return gsheetsStat(this.accessor, path, index)
+  }
+
+  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
+    return gsheetsUnlink(this.accessor, path, index)
   }
 
   override getState(): Promise<GSheetsVFSState> {

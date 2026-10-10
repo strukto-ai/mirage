@@ -18,8 +18,11 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.errors.fs import enotsup, walk_declined
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.types import DuOps
 from mirage.view.types import MountView
 
 TREE = {
@@ -97,6 +100,27 @@ def test_walk_budget_with_no_cap_charges_each_mount_its_own():
     assert all(budget.spend("/a") for _ in range(100))
     assert [budget.spend("/a/b") for _ in range(2)] == [True, False]
     assert budget.hit is True
+
+
+def _native(refusal) -> DuOps:
+    async def refuse(_accessor, path, index=None):
+        raise refusal("ram", "du_size", path)
+
+    return DuOps(size=refuse, entries=refuse)
+
+
+@pytest.mark.asyncio
+async def test_walks_when_the_dispatcher_declines_the_native_du():
+    ops = dataclasses.replace(_ops(), du=_native(walk_declined))
+    out, code, _ = await _run(ops, "/db")
+    assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_backends_own_refusal_is_not_walked():
+    ops = dataclasses.replace(_ops(), du=_native(enotsup))
+    with pytest.raises(OperationNotSupportedError):
+        await _run(ops, "/db")
 
 
 @pytest.mark.asyncio

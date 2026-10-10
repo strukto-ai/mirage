@@ -4,7 +4,7 @@ import { getExtension } from '../utils/filetype.ts'
 import { isEnoent } from '../errors/fs.ts'
 import { type PathSpec, FileType } from '../types.ts'
 import type { BaseVFS } from './base.ts'
-import { concat } from '../io/cachable_iterator.ts'
+import { concat } from '../utils/bytes.ts'
 
 /** A known file, its parent and absent sibling, and an optional chunk bound. */
 export interface ReadFixture {

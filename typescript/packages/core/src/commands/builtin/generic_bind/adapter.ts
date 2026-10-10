@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ReadBytesOp, ResolveGlobOp, SearchQuery } from '../../../vfs/types.ts'
+import type { DuEntries, ReadBytesOp, ResolveGlobOp, SearchQuery } from '../../../vfs/types.ts'
 import type { BaseVFS } from '../../../vfs/base.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
 import { getExtension } from '../../../utils/filetype.ts'
@@ -30,14 +30,13 @@ import {
   sessionVisibility,
   walkProbeFor,
 } from '../../../context/session_context.ts'
-import { pathsScoped } from '../../../view/namespace_view.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import type { NamespaceView, StatOverlay } from '../../../view/types.ts'
+import type { StatOverlay } from '../../../view/types.ts'
 
 import {
   FileType,
@@ -282,8 +281,12 @@ async function* dispatchedStream(dispatch: DispatchFn, path: PathSpec): AsyncIte
   yield* ensureStream(data as ByteSource)
 }
 
-/** A command's write, at the dispatcher, its answer handed back. */
-async function dispatchedCall(
+/**
+ * Send one call to the dispatcher and hand back its answer: the one way a
+ * command's slot, a cross-mount run and a relayed command reach a mount.
+ * Mirrors Python's `dispatched_call`.
+ */
+export async function dispatchedCall(
   dispatch: DispatchFn,
   name: string,
   path: PathSpec,
@@ -294,61 +297,114 @@ async function dispatchedCall(
   return result
 }
 
-/**
- * The write slots a backend has, each sent to the dispatcher. Mirrors the
- * write half of Python's `dispatched_io`.
- */
-function dispatchedWrites(ops: CommandIO, dispatch: DispatchFn): Partial<CommandIO> {
-  const writes: Partial<CommandIO> = {
-    write: async (_accessor, path, data) => {
+// Each slot the dispatcher answers: the dispatcher function it sends and how
+// a command's arguments travel there. Mirrors Python's `_DISPATCHED_SLOTS`.
+const DISPATCHED_SLOTS = {
+  write:
+    (dispatch: DispatchFn): CommandIO['write'] =>
+    async (_accessor, path, data) => {
       await dispatchedCall(dispatch, 'write', path, [data])
     },
-    append: async (_accessor, path, data) => {
+  append:
+    (dispatch: DispatchFn): CommandIO['append'] =>
+    async (_accessor, path, data) => {
       await dispatchedCall(dispatch, 'append', path, [data])
     },
-    pwrite: async (_accessor, path, data, offset) => {
+  pwrite:
+    (dispatch: DispatchFn): CommandIO['pwrite'] =>
+    async (_accessor, path, data, offset) => {
       await dispatchedCall(dispatch, 'pwrite', path, [data, offset])
     },
-    create: async (_accessor, path) => {
+  create:
+    (dispatch: DispatchFn): CommandIO['create'] =>
+    async (_accessor, path) => {
       await dispatchedCall(dispatch, 'create', path)
     },
-    mkdir: async (_accessor, path, parents) => {
+  mkdir:
+    (dispatch: DispatchFn): CommandIO['mkdir'] =>
+    async (_accessor, path, parents) => {
       await dispatchedCall(dispatch, 'mkdir', path, [], { parents: parents ?? false })
     },
-    unlink: async (_accessor, path) => {
+  unlink:
+    (dispatch: DispatchFn): CommandIO['unlink'] =>
+    async (_accessor, path) => {
       await dispatchedCall(dispatch, 'unlink', path)
     },
-    rmdir: async (_accessor, path) => {
+  rmdir:
+    (dispatch: DispatchFn): CommandIO['rmdir'] =>
+    async (_accessor, path) => {
       await dispatchedCall(dispatch, 'rmdir', path)
     },
-    rename: async (_accessor, src, dst) => {
+  rmR:
+    (dispatch: DispatchFn): CommandIO['rmR'] =>
+    async (_accessor, path) => {
+      await dispatchedCall(dispatch, 'rm_r', path)
+    },
+  rename:
+    (dispatch: DispatchFn): CommandIO['rename'] =>
+    async (_accessor, src, dst) => {
       await dispatchedCall(dispatch, 'rename', src, [dst])
     },
-    truncate: async (_accessor, path, length, noCreate) => {
+  copy:
+    (dispatch: DispatchFn): CommandIO['copy'] =>
+    async (_accessor, src, dst) => {
+      await dispatchedCall(dispatch, 'copy', src, [dst])
+    },
+  dirCopy:
+    (dispatch: DispatchFn): CommandIO['dirCopy'] =>
+    async (_accessor, src, dst) => {
+      await dispatchedCall(dispatch, 'dir_copy', src, [dst])
+    },
+  truncate:
+    (dispatch: DispatchFn): CommandIO['truncate'] =>
+    async (_accessor, path, length, noCreate) => {
       await dispatchedCall(dispatch, 'truncate', path, [length], { no_create: noCreate ?? false })
     },
-    setAttrs: async (_accessor, path, fields) =>
+  setAttrs:
+    (dispatch: DispatchFn): CommandIO['setAttrs'] =>
+    async (_accessor, path, fields) =>
       (await dispatchedCall(dispatch, 'setattr', path, [], { ...fields })) as Record<
         string,
         number | string
       >,
-  }
-  return Object.fromEntries(
-    Object.entries(writes).filter(([slot]) => ops[slot as keyof CommandIO] !== undefined),
-  )
+  find:
+    (dispatch: DispatchFn): CommandIO['find'] =>
+    async (_accessor, path, options) =>
+      (await dispatchedCall(dispatch, 'find', path, [options])) as string[],
+} satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
+
+// The slots that change the mount: with no dispatcher there is nowhere to
+// judge and settle them.
+const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
+  (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
+    (slot) => slot !== 'find',
+  ),
+)
+
+/** `slots`, each sent to the dispatcher. Mirrors Python's `dispatched_slots`. */
+export function dispatchedSlots(
+  dispatch: DispatchFn,
+  slots: readonly (keyof typeof DISPATCHED_SLOTS)[],
+): Partial<CommandIO> {
+  const built: Partial<CommandIO> = {}
+  for (const slot of slots) Object.assign(built, { [slot]: DISPATCHED_SLOTS[slot](dispatch) })
+  return built
 }
 
 /**
- * Return `ops` whose content reads and writes go through the dispatcher.
+ * Return `ops` whose reads, writes and one-call walks go through the
+ * dispatcher.
  *
  * The dispatcher checks hides, the command's path rule, the mount's mode and
- * policy, serves a warm copy and fills a cold one, and settles a write's
- * caches and receipt under its name's hold, so a command's read or write
- * answers what the same call through `ws.vfs` or FUSE answers. A slot the
- * backend does not have stays absent. With no dispatcher (a host running a
- * command straight on its mount) the reads stay the backend's and each write
- * is refused as one the backend does not have: the dispatcher is where a
- * write is judged and settled. Mirrors Python's `dispatched_io`.
+ * policy, serves a warm copy and fills a cold one, settles a write's caches
+ * and receipt under its name's hold, and declines a one-call walk (find, du,
+ * search, a tree copy or removal) whose subtree the caller's view restricts,
+ * so a command's call answers what the same call through `ws.vfs` or FUSE
+ * answers. A slot the backend does not have stays absent. With no dispatcher
+ * (a host running a command straight on its mount) the reads stay the
+ * backend's and each write is refused as one the backend does not have: the
+ * dispatcher is where a write is judged and settled. Mirrors Python's
+ * `dispatched_io`.
  */
 export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): CommandIO {
   if (dispatch === undefined) {
@@ -362,7 +418,31 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
   }
   return {
     ...ops,
-    ...dispatchedWrites(ops, dispatch),
+    ...dispatchedSlots(
+      dispatch,
+      (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
+        (slot) => ops[slot] !== undefined,
+      ),
+    ),
+    ...(ops.du === undefined
+      ? {}
+      : {
+          du: {
+            size: async (_accessor: Accessor, path: PathSpec) =>
+              (await dispatchedCall(dispatch, 'du_size', path)) as number,
+            entries: async (_accessor: Accessor, path: PathSpec) =>
+              (await dispatchedCall(dispatch, 'du_entries', path)) as DuEntries,
+          },
+        }),
+    ...(ops.search === undefined
+      ? {}
+      : {
+          search: {
+            ...ops.search,
+            search: async (_accessor: Accessor, path: PathSpec, query: SearchQuery) =>
+              (await dispatchedCall(dispatch, 'search', path, [query])) as string[] | null,
+          },
+        }),
     readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),
     readStream: (_accessor, path) => dispatchedStream(dispatch, path),
     ...(ops.readRange === undefined
@@ -755,15 +835,6 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
       return ex(accessor, path)
     }
   }
-  const dc = ops.dirCopy
-  if (dc !== undefined) {
-    guarded.dirCopy = (accessor, src, dst) => {
-      refuseHidden(src, false)
-      refuseHidden(dst, true)
-      refuseReveal(src, dst)
-      return dc(accessor, src, dst)
-    }
-  }
   return guarded
 }
 
@@ -792,20 +863,6 @@ const MUTATIONS = {
 type MutationSlot = keyof typeof MUTATIONS
 const mutationSlots = Object.keys(MUTATIONS) as MutationSlot[]
 
-// The write slots `dispatchedIo` sends to the dispatcher, which judges them
-// itself.
-const DISPATCHED_WRITES: ReadonlySet<string> = new Set([
-  'write',
-  'append',
-  'pwrite',
-  'create',
-  'mkdir',
-  'unlink',
-  'rmdir',
-  'setAttrs',
-  'rename',
-  'truncate',
-])
 type GuardedSlot =
   | 'du'
   | 'search'
@@ -955,21 +1012,6 @@ export function withAbortGuard<A extends Accessor = Accessor>(
   return guarded
 }
 
-/**
- * Guard one bare backend write the way the adapter guards a slot.
- *
- * For a bespoke command wired from loose functions rather than a
- * `CommandIO` (the google `rm` family binds an index-threaded unlink):
- * the same chain in the same order, judging the written path. A hidden
- * path answers ENOENT, the flavor of the flat mutation slots. The
- * command path guard applies without firing POSIX policy hooks.
- */
-export function withWriteGuards<A extends Accessor, R>(
-  fn: (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<R> | R,
-): (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<R> {
-  return guardOperation(fn, 'unlink')
-}
-
 /** Require a capability at call time, after the same guards as an available op. */
 export function requireOp<T extends (...args: never[]) => Promise<unknown>>(
   op: T | undefined,
@@ -1021,32 +1063,32 @@ function commandCall<T extends (...args: never[]) => unknown>(
   }) as T
 }
 
+/**
+ * Bind the command's path checks around the slots the dispatcher does not run.
+ *
+ * Reads, writes and one-call walks go through the dispatcher (`dispatchedIo`),
+ * which judges each itself. `stat`, `exists` and `readdir` still reach the
+ * backend past it, so here a hidden path answers as a missing one, a listing
+ * drops the names the session hides, and a listed directory meets the
+ * command's path rule and the coded preVfs hooks. Every slot's operand dots
+ * are walked, a read's as it starts, so a reader that words a failed open
+ * itself gets the walk's refusal. Mirrors Python's `with_command_guards`.
+ */
 export function withCommandGuards<A extends Accessor>(
   ops: CommandIO<A>,
   prefix?: string,
 ): CommandIO<A> {
   const probe = prefix === undefined ? null : walkProbeFor(prefix)
-  const prepared = namespaceOps(ops)
+  const scope = opPolicyScope(prefix ?? null)
+  const prepared = namespaceOps({ ...ops, readdir: policyCall(scope, ops.readdir, 'readdir') })
   const guarded = { ...prepared }
-  for (const slot of [
-    'readBytes',
-    'readRange',
-    'stat',
-    'exists',
-    'readdir',
-    'find',
-    ...mutationSlots,
-  ] as const) {
+  for (const slot of ['readBytes', 'readRange', 'stat', 'exists', 'readdir'] as const) {
     const fn = prepared[slot]
     if (fn === undefined) continue
-    // Hides and the path rule on a content read or a write are the
-    // dispatcher's.
-    const call =
-      slot === 'readBytes' || slot === 'readRange' || DISPATCHED_WRITES.has(slot)
-        ? fn
-        : commandCall(fn, slot)
+    // Hides and the path rule on a content read are the dispatcher's.
+    const call = slot === 'readBytes' || slot === 'readRange' ? fn : commandCall(fn, slot)
     Object.assign(guarded, {
-      [slot]: walkedCall(probe, call as (...args: unknown[]) => Promise<unknown>, slot === 'mkdir'),
+      [slot]: walkedCall(probe, call as (...args: unknown[]) => Promise<unknown>),
     })
   }
   guarded.readStream = (accessor, path, index) => {
@@ -1061,14 +1103,6 @@ export function withCommandGuards<A extends Accessor>(
         ? exists(accessor, path)
         : Promise.resolve(false)
   }
-  if (ops.du !== undefined) {
-    guarded.du = {
-      size: commandCall(ops.du.size, 'du'),
-      entries: commandCall(ops.du.entries, 'du'),
-    }
-  }
-  if (ops.search !== undefined)
-    guarded.search = { ...ops.search, search: commandCall(ops.search.search, 'search') }
   return guarded
 }
 
@@ -1142,41 +1176,6 @@ async function policyAdmit(
   })
 }
 
-/**
- * Return `ops` whose mutation slots and readdir admit each PathSpec
- * through the workspace's coded preVfs hooks.
- *
- * The coded-policy arm of the guard chain. The surface is every mutation
- * slot and the directory a readdir lists; content reads go through the
- * dispatcher, which admits them itself (`dispatchedIo`). stat/exists
- * stay unguarded as presence
- * facts, the mode-000 shape the path rules already take, so a denied
- * entry still lists and stats while the read of it is what fails;
- * `scopedIo` drops the native find/du slots, so the walk meets the
- * guarded readdir. Inert unless a dispatched command bound
- * policies overriding preVfs (`opPolicyScope`, with the mount prefix
- * and session identity captured at wrap time so a lazily drained
- * reader still answers as the command that bound it, see
- * `livePolicyScope`; `prefix` arrives from the wrap site because the
- * fallback mount-gate storage resolves by path, which a drained
- * reader no longer has a live gate for).
- */
-export function withPolicyGuard<A extends Accessor = Accessor>(
-  ops: CommandIO<A>,
-  prefix?: string,
-): CommandIO<A> {
-  const scope = opPolicyScope(prefix ?? null)
-  const guarded: CommandIO<A> = { ...ops }
-  for (const slot of ['readdir', ...mutationSlots] as const) {
-    const fn = ops[slot]
-    if (fn !== undefined && !DISPATCHED_WRITES.has(slot)) {
-      // All slots in this set return promises.
-      Object.assign(guarded, { [slot]: policyCall(scope, fn, slot) })
-    }
-  }
-  return guarded
-}
-
 function policyCall<T extends (...args: never[]) => unknown>(
   scope: OpPolicyScope | null,
   fn: T,
@@ -1201,26 +1200,4 @@ function guardOperation<Args extends unknown[], R>(
   name: MutationSlot | 'exists',
 ): (...args: Args) => Promise<R> {
   return walkedCall(null, commandCall(fn, name) as (...args: Args) => Promise<R>)
-}
-
-/**
- * Drop the native walks when a hide, a path rule or a coded preVfs
- * policy judges the command's paths, as the command's namespace view
- * (`ns`) answers.
- */
-export function scopedIo<A extends Accessor>(
-  ops: CommandIO<A>,
-  ns: NamespaceView | undefined,
-  paths: readonly PathSpec[],
-  prefix: string,
-): CommandIO<A> {
-  if (!pathsScoped(ns, paths, prefix)) return ops
-  const result = { ...ops }
-  delete result.find
-  delete result.du
-  delete result.search
-  delete result.contentSearch
-  delete result.copy
-  delete result.dirCopy
-  return result
 }

@@ -158,7 +158,7 @@ async def test_owned_failed_fetch_is_drained_before_merging_stderr():
 
 
 @pytest.mark.asyncio
-async def test_late_fetch_diagnostics_and_claims_merge_in_operand_order():
+async def test_late_fetch_diagnostics_merge_in_operand_order():
     async def run_single(cmd, paths, texts, flags, **kwargs):
         path = paths[0].virtual
         result = IOResult()
@@ -166,8 +166,6 @@ async def test_late_fetch_diagnostics_and_claims_merge_in_operand_order():
         async def source():
             yield path.encode() + b"\n"
             result.stderr = f"cat: {path}: late diagnostic\n".encode()
-            result.reads[path] = b"saved"
-            result.cache.append(path)
             result.exit_code = 1
 
         return source(), result
@@ -181,8 +179,6 @@ async def test_late_fetch_diagnostics_and_claims_merge_in_operand_order():
         == b"cat: /a/x: late diagnostic\ncat: /b/y: late diagnostic\n"
     )
     assert io.exit_code == 1
-    assert io.reads == {"/a/x": b"saved", "/b/y": b"saved"}
-    assert io.cache == ["/a/x", "/b/y"]
 
 
 @pytest.mark.asyncio

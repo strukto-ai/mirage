@@ -24,7 +24,11 @@ from mirage.commands.errors import LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
-from mirage.errors.types import CommandTimeoutError, ReadOnlyError
+from mirage.errors.types import (
+    CommandTimeoutError,
+    ReadOnlyError,
+    WalkDeclinedError,
+)
 from mirage.io import OpReport
 from mirage.policy import (
     Action,
@@ -520,6 +524,83 @@ async def test_a_rename_replaces_a_link_at_the_destination():
 
 
 @pytest.mark.asyncio
+async def test_a_tree_copy_merges_beside_a_link_at_the_destination():
+    # Only a rename asks for an empty destination: a copy merges into
+    # the directory and the link already there stays.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e/d && echo hi > /ram/d/a.txt")
+        await ws.shell("ln -s gone /ram/e/d/stale")
+        assert (await ws.shell("cp -r /ram/d /ram/e")).exit_code == 0
+        assert (await ws.shell("cat /ram/e/d/a.txt")).stdout == b"hi\n"
+        assert ws._namespace.readlink("/ram/e/d/stale") == "gone"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_writes_through_a_link_at_the_destination():
+    # A copy writes its destination as a write does: the bytes land in
+    # the link's target and the link stays.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("echo tgt > /ram/t.txt")
+        await ws.shell("ln -s t.txt /ram/link")
+        await ws.dispatch(
+            "copy",
+            PathSpec.from_str_path("/ram/a.txt"),
+            dst=PathSpec.from_str_path("/ram/link"),
+        )
+        assert ws._namespace.readlink("/ram/link") == "t.txt"
+        assert (await ws.shell("cat /ram/t.txt")).stdout == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_onto_a_link_to_its_source_is_refused():
+    # Followed, both ends name one file, and a backend that replaces
+    # its destination would delete the source before copying it.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("ln -s a.txt /ram/self")
+        with pytest.raises(OSError) as caught:
+            await ws.dispatch(
+                "copy",
+                PathSpec.from_str_path("/ram/a.txt"),
+                dst=PathSpec.from_str_path("/ram/self"),
+            )
+        assert caught.value.errno == errno.EINVAL
+        assert (await ws.shell("cat /ram/a.txt")).stdout == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tree_copy_over_a_link_below_its_destination_declines():
+    # The backend writes each child name as it is, so the bytes would
+    # land behind the link; the caller's walk copies through it instead.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e/d && echo new > /ram/d/x")
+        await ws.shell("echo old > /ram/t && ln -s /ram/t /ram/e/d/x")
+        with pytest.raises(WalkDeclinedError):
+            await ws.dispatch(
+                "dir_copy",
+                PathSpec.from_str_path("/ram/d"),
+                dst=PathSpec.from_str_path("/ram/e/d"),
+            )
+        assert (await ws.shell("cp -r /ram/d /ram/e")).exit_code == 0
+        assert (await ws.shell("cat /ram/t")).stdout == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tree_copy_writes_through_a_link_into_another_mount():
+    # cp walks a destination holding a link, and the write follows it
+    # across mounts where a backend copy would answer EXDEV.
+    mounts = {"/ram/": RAMVFS(), "/scratch/": RAMVFS()}
+    with Workspace(mounts, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e/d && echo new > /ram/d/a.txt")
+        await ws.shell("echo old > /scratch/a.txt")
+        await ws.shell("ln -s /scratch/a.txt /ram/e/d/a.txt")
+        assert (await ws.shell("cp -r /ram/d /ram/e")).exit_code == 0
+        assert (await ws.shell("cat /scratch/a.txt")).stdout == b"new\n"
+        assert ws._namespace.readlink("/ram/e/d/a.txt") == "/scratch/a.txt"
+
+
+@pytest.mark.asyncio
 async def test_a_read_grant_refuses_link_writes_like_file_writes():
     # The mode gate on the table ops. A read grant refused a file's
     # unlink with EROFS while the same session deleted, created and
@@ -558,13 +639,15 @@ async def test_a_read_grant_refuses_link_writes_like_file_writes():
 # mkdir looks its name up first (test_a_read_only_mkdir_answers_what_its_name_holds).
 @pytest.mark.parametrize("op", sorted(POLICY_WRITE_OPS - {"mkdir"}))
 async def test_read_only_admission_precedes_backend_support_and_io(op):
+    # A copy reads its path and writes its destination.
+    dst = {"dst": PathSpec.from_str_path("/ro/copy")} if "copy" in op else {}
     with Workspace({"/ro": (RAMVFS(), MountMode.READ)}) as ws:
         mount = ws.namespace.mount_for("/ro/file")
         mount.ensure_ready = AsyncMock(
             side_effect=AssertionError("backend reached")
         )
         with pytest.raises(ReadOnlyError) as exc:
-            await ws.dispatch(op, PathSpec.from_str_path("/ro/file"))
+            await ws.dispatch(op, PathSpec.from_str_path("/ro/file"), **dst)
         assert exc.value.errno == errno.EROFS
         mount.ensure_ready.assert_not_awaited()
         assert not ws.namespace.is_link("/ro/file")

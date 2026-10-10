@@ -17,11 +17,31 @@ import { type Declaration, Effect, Target } from './types.ts'
 
 const MARK = Symbol.for('mirage.vfsCall')
 
-// Removing or moving a name is what these calls do, and the dispatcher's link,
-// overlay and cache bookkeeping for it is keyed on their names.
+// The functions whose TypeScript method name is not the name Python gives
+// them: each answers to Python's name at the dispatcher, so a policy sees
+// one name for it on both hosts.
+const DISPATCH_NAMES: ReadonlyMap<string, string> = new Map([
+  ['rmR', 'rm_r'],
+  ['dirCopy', 'dir_copy'],
+  ['duSize', 'du_size'],
+  ['duEntries', 'du_entries'],
+])
+const METHOD_NAMES: ReadonlyMap<string, string> = new Map(
+  [...DISPATCH_NAMES].map(([method, name]) => [name, method]),
+)
+
+/** The method that answers the dispatcher's `name`. */
+export function methodName(name: string): string {
+  return METHOD_NAMES.get(name) ?? name
+}
+
+// Removing, moving or copying a name is what these calls do, and the
+// dispatcher's link, overlay and cache bookkeeping for it is keyed on their
+// names.
 const NAMED: Partial<Record<Effect, readonly string[]>> = {
-  [Effect.REMOVE]: ['unlink', 'rmdir'],
+  [Effect.REMOVE]: ['unlink', 'rmdir', 'rm_r'],
   [Effect.RENAME]: ['rename'],
+  [Effect.COPY]: ['copy', 'dir_copy'],
 }
 
 interface Marked {
@@ -40,30 +60,38 @@ interface Marked {
  *
  * The built-in functions' marks are where the dispatcher's op classes come from:
  * which ops follow a link, create a name, run one at a time per path or stamp
- * an mtime is read off what they declare here. REMOVE belongs to `unlink` and
- * `rmdir` and RENAME to `rename`: what the dispatcher does around them (a link
- * removed rather than followed, a rename refused when it would bring hidden
- * entries into view, the links and cache below a moved directory) is keyed on
- * those names, so another function declaring either is refused. A VFS that deletes or moves defines those functions. `target` is the
- * kind of entry the
- * path names (any when omitted) and `creates` marks a WRITE that makes a
- * missing file, as open(2) with O_CREAT. Mirrors Python's `vfs_call`.
+ * an mtime is read off what they declare here. REMOVE belongs to `unlink`,
+ * `rmdir` and `rm_r`, RENAME to `rename` and COPY to `copy` and `dir_copy`:
+ * what the dispatcher does around them (a link removed rather than followed, a
+ * rename refused when it would bring hidden entries into view, the links and
+ * cache below a moved, removed or copied directory) is keyed on those names,
+ * so another function declaring one is refused. A VFS that deletes, moves or
+ * copies defines those functions. `target` is the kind of entry the path names
+ * (any when omitted), `creates` marks a WRITE that makes a missing file, as
+ * open(2) with O_CREAT, and `subtree` a call that reaches everything below its
+ * paths. Mirrors Python's `vfs_call`.
  */
-export function vfsCall(options: { effect: Effect; target?: Target; creates?: boolean }) {
+export function vfsCall(options: {
+  effect: Effect
+  target?: Target
+  creates?: boolean
+  subtree?: boolean
+}) {
   const mark: Declaration = {
     effect: options.effect,
     target: options.target ?? Target.ANY,
     creates: options.creates ?? false,
+    subtree: options.subtree ?? false,
   }
   return function apply(
     method: (...args: never[]) => unknown,
     context: ClassMethodDecoratorContext,
   ): void {
-    const name = String(context.name)
+    const name = DISPATCH_NAMES.get(String(context.name)) ?? String(context.name)
     const names = NAMED[mark.effect] ?? [name]
     if (!names.includes(name)) {
       throw new TypeError(
-        `${name}: only ${names.join(' and ')} may declare ${mark.effect.toUpperCase()}`,
+        `${name}: only ${names.join(', ')} may declare ${mark.effect.toUpperCase()}`,
       )
     }
     ;(method as Marked)[MARK] = mark
@@ -76,9 +104,10 @@ export function vfsCall(options: { effect: Effect; target?: Target; creates?: bo
  * inherits its base's mark. Mirrors Python's `declared`.
  */
 export function declared(cls: { readonly prototype: unknown }, name: string): Declaration | null {
+  const method = methodName(name)
   let proto: unknown = cls.prototype
   while (typeof proto === 'object' && proto !== null) {
-    const fn: unknown = Object.getOwnPropertyDescriptor(proto, name)?.value
+    const fn: unknown = Object.getOwnPropertyDescriptor(proto, method)?.value
     const mark = typeof fn === 'function' ? (fn as Marked)[MARK] : undefined
     if (mark !== undefined) return mark
     proto = Object.getPrototypeOf(proto)
@@ -95,7 +124,8 @@ export function declaredCalls(cls: { readonly prototype: unknown }): Map<string,
     proto = Object.getPrototypeOf(proto)
   }
   const calls = new Map<string, Declaration>()
-  for (const name of [...names].sort(compareCodePoints)) {
+  const dispatched = [...names].map((name) => DISPATCH_NAMES.get(name) ?? name)
+  for (const name of dispatched.sort(compareCodePoints)) {
     const mark = declared(cls, name)
     if (mark !== null) calls.set(name, mark)
   }

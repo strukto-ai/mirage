@@ -13,63 +13,44 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import { VFSActivity } from './activity.ts'
 
-it.each(['eof', 'error', 'close', 'discard'])(
-  'VFS usage ends with its stream (%s)',
-  async (finish) => {
-    const activity = new VFSActivity()
-    async function* chunks(): AsyncGenerator<Uint8Array> {
-      yield await Promise.resolve(new Uint8Array([1]))
-      if (finish === 'error') throw new Error('read failed')
-    }
-    const source = activity.hold(
-      finish === 'discard' ? new CachableAsyncIterator(chunks()) : chunks(),
-    )
-    if (source instanceof Uint8Array) throw new Error('expected stream')
-    let done = false
-    const waiting = activity.wait().then(() => {
-      done = true
-    })
-    await Promise.resolve()
-    expect(done).toBe(false)
-    const consume = async (): Promise<void> => {
-      for await (const chunk of source) expect(chunk).toEqual(new Uint8Array([1]))
-    }
-    if (finish === 'close') {
-      const iter = source[Symbol.asyncIterator]()
-      await iter.return?.()
-      await iter.return?.()
-    } else if (source instanceof CachableAsyncIterator) {
-      await source.discard()
-    } else if (finish === 'error') {
-      await expect(consume()).rejects.toThrow('read failed')
-    } else {
-      await consume()
-    }
-    await waiting
-    const release = activity.acquire()
-    done = false
-    const next = activity.wait().then(() => {
-      done = true
-    })
-    await Promise.resolve()
-    expect(done).toBe(false)
-    release()
-    await next
-  },
-)
-
-it('exhausted cache streams do not keep a VFS active', async () => {
+it.each(['eof', 'error', 'close'])('VFS usage ends with its stream (%s)', async (finish) => {
+  const activity = new VFSActivity()
   async function* chunks(): AsyncGenerator<Uint8Array> {
     yield await Promise.resolve(new Uint8Array([1]))
+    if (finish === 'error') throw new Error('read failed')
   }
-  const cached = new CachableAsyncIterator(chunks())
-  await cached.drain()
-  const activity = new VFSActivity()
-  activity.hold(cached)
-  await activity.wait()
+  const source = activity.hold(chunks())
+  if (source instanceof Uint8Array) throw new Error('expected stream')
+  let done = false
+  const waiting = activity.wait().then(() => {
+    done = true
+  })
+  await Promise.resolve()
+  expect(done).toBe(false)
+  const consume = async (): Promise<void> => {
+    for await (const chunk of source) expect(chunk).toEqual(new Uint8Array([1]))
+  }
+  if (finish === 'close') {
+    const iter = source[Symbol.asyncIterator]()
+    await iter.return?.()
+    await iter.return?.()
+  } else if (finish === 'error') {
+    await expect(consume()).rejects.toThrow('read failed')
+  } else {
+    await consume()
+  }
+  await waiting
+  const release = activity.acquire()
+  done = false
+  const next = activity.wait().then(() => {
+    done = true
+  })
+  await Promise.resolve()
+  expect(done).toBe(false)
+  release()
+  await next
 })
 
 it('close waits for a pending pull before releasing usage', async () => {

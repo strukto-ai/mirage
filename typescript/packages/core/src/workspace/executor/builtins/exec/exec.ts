@@ -45,7 +45,7 @@ import {
   TO_STDOUT,
 } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'

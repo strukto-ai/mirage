@@ -259,7 +259,7 @@ function unsup(op: string, ...paths: string[]): Map<string, Error> {
   return new Map(paths.map((p) => [p, enotsup('email', op, p)]))
 }
 
-describe('mvGeneric records writes', () => {
+describe('mvGeneric exit status', () => {
   it.each([
     {
       name: 'a native move into a directory',
@@ -268,7 +268,6 @@ describe('mvGeneric records writes', () => {
       dirs: ['/d'],
       paths: ['/a.txt', '/d'],
       exit: 0,
-      writes: ['/a.txt', '/d/a.txt'],
     },
     {
       name: 'a move across backends',
@@ -277,7 +276,6 @@ describe('mvGeneric records writes', () => {
       dirs: ['/src', '/d'],
       paths: ['/src/a.txt', '/d'],
       exit: 0,
-      writes: ['/src/a.txt', '/d/a.txt'],
     },
     {
       name: 'an unsupported unlink',
@@ -287,7 +285,6 @@ describe('mvGeneric records writes', () => {
       paths: ['/src/a.txt', '/d'],
       fails: { unlinkFails: unsup('unlink', '/src/a.txt') },
       exit: 1,
-      writes: ['/d/a.txt'],
     },
     {
       name: 'a failed read',
@@ -297,7 +294,6 @@ describe('mvGeneric records writes', () => {
       paths: ['/src/a.txt', '/d'],
       fails: { readFails: new Map([['/src/a.txt', eacces('/src/a.txt')]]) },
       exit: 1,
-      writes: [],
     },
     {
       name: 'a backup',
@@ -307,7 +303,6 @@ describe('mvGeneric records writes', () => {
       paths: ['/a.txt', '/b.txt'],
       flags: mvFlags({ backup: 'simple' }),
       exit: 0,
-      writes: ['/a.txt', '/b.txt', '/b.txt~'],
     },
     {
       name: 'an exchange',
@@ -317,14 +312,12 @@ describe('mvGeneric records writes', () => {
       paths: ['/a.txt', '/b.txt'],
       flags: mvFlags({ exchange: true }),
       exit: 0,
-      writes: ['/a.txt', '/b.txt'],
     },
-  ])('for $name', async ({ primitive, files, dirs, paths, flags, fails, exit, writes }) => {
+  ])('for $name', async ({ primitive, files, dirs, paths, flags, fails, exit }) => {
     const [, io] = primitive
       ? await runPrimitive(fileMap(files), new Set(dirs), paths, fails)
       : await run(fileMap(files), new Set(dirs), paths, flags === undefined ? {} : { flags })
     expect(io.exitCode).toBe(exit)
-    expect(new Set(Object.keys(io.writes))).toEqual(new Set(writes))
   })
 })
 

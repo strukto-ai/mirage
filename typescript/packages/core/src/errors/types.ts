@@ -133,6 +133,15 @@ export interface MissingOpError extends FsError {
   op: string
 }
 
+// A one-call walk the dispatcher declined for the caller's view: a hide, the
+// command's path rule or a coded preVfs policy reaches below the path, so the
+// caller walks it entry by entry and each call is judged on its own. A
+// backend's own refusal stays a plain MissingOpError. Mirrors Python's
+// WalkDeclinedError.
+export interface WalkDeclinedError extends MissingOpError {
+  declined: true
+}
+
 // A command or op overran its timeout budget (exit 124).
 // Mirrors Python's mirage.errors.types.CommandTimeoutError.
 export class CommandTimeoutError extends Error {

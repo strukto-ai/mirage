@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { unlink } from '../../../core/gsheets/unlink.ts'
 import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
 
-export const GSHEETS_RM = makeRm(VFSName.GSHEETS, unlink)
+export const GSHEETS_RM = makeRm(VFSName.GSHEETS)

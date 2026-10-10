@@ -21,7 +21,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 import { operandsIo, readOperands } from '../utils/operands.ts'
 import { mapLines } from '../utils/lines.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })

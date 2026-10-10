@@ -73,8 +73,8 @@ SERVED = {
         "write",
     },
     "email": {"glob", "read", "readdir", "stat"},
-    "gcal": {"glob", "read", "readdir", "stat"},
-    "gdocs": {"glob", "readdir", "stat"},
+    "gcal": {"glob", "read", "readdir", "stat", "unlink"},
+    "gdocs": {"glob", "readdir", "stat", "unlink"},
     "gdrive": {
         "append",
         "create",
@@ -92,8 +92,8 @@ SERVED = {
     },
     "github": {"glob", "read", "readdir", "stat"},
     "gmail": {"glob", "read", "readdir", "stat"},
-    "gsheets": {"glob", "readdir", "stat"},
-    "gslides": {"glob", "readdir", "stat"},
+    "gsheets": {"glob", "readdir", "stat", "unlink"},
+    "gslides": {"glob", "readdir", "stat", "unlink"},
     "hf_buckets": {
         "append",
         "create",

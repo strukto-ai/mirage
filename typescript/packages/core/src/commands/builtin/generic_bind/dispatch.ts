@@ -25,7 +25,7 @@ import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import type { GenericCommand } from './adapter.ts'
+import { dispatchedSlots, type GenericCommand } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 
 /** Use the workspace's policy-checked operations as a generic IO adapter.
@@ -64,21 +64,7 @@ export function dispatchIO(dispatch: DispatchFn, links?: LinkView, bound?: Mount
     // No cap of its own: a du walk charges each entry to the mount serving
     // it, at that mount's cap (see WalkBudget).
     maxDuEntries: null,
-    unlink: async (_accessor, path) => {
-      await dispatch('unlink', path)
-    },
-    mkdir: async (_accessor, path, parents = false) => {
-      await dispatch('mkdir', path, [], { parents })
-    },
-    truncate: async (_accessor, path, size, options) => {
-      await dispatch('truncate', path, [size], { no_create: options ?? false })
-    },
-    write: async (_accessor, path, data) => {
-      await dispatch('write', path, [data])
-    },
-    pwrite: async (_accessor, path, data, offset) => {
-      await dispatch('pwrite', path, [data, offset])
-    },
+    ...dispatchedSlots(dispatch, ['write', 'pwrite', 'unlink', 'mkdir', 'truncate']),
   }
 }
 

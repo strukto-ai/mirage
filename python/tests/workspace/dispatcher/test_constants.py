@@ -13,16 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.dispatcher.constants import (
+    COPY_OPS,
+    DESTINATION_OPS,
     DISPATCH_READ_OPS,
     DISPATCH_WRITE_OPS,
     ENTRY_CREATE_OPS,
     FILE_CREATE_OPS,
     HIDDEN_CREATE_OPS,
     NAMESPACE_TABLE_OPS,
+    NATIVE_WALK_OPS,
     NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
     SERIAL_WRITE_OPS,
     STAMP_WRITE_OPS,
+    SUBTREE_OPS,
 )
 
 WRITES = {"write", "append", "pwrite", "create", "truncate"}
@@ -38,7 +42,10 @@ def test_the_op_classes_follow_the_declarations():
         "mkdir",
         "unlink",
         "rmdir",
+        "rm_r",
         "rename",
+        "copy",
+        "dir_copy",
     }
     assert POLICY_WRITE_OPS == DISPATCH_WRITE_OPS | {
         "setattr",
@@ -47,7 +54,7 @@ def test_the_op_classes_follow_the_declarations():
         "removexattr",
     }
     assert NAMESPACE_TABLE_OPS == {"symlink", "readlink"}
-    assert SERIAL_WRITE_OPS == WRITES | {"unlink", "rename"}
+    assert SERIAL_WRITE_OPS == WRITES | {"unlink", "rename", "copy"}
     assert FILE_CREATE_OPS == WRITES
     assert ENTRY_CREATE_OPS == {"mkdir", "symlink"}
     assert HIDDEN_CREATE_OPS == WRITES | ENTRY_CREATE_OPS
@@ -55,7 +62,20 @@ def test_the_op_classes_follow_the_declarations():
         "unlink",
         "rename",
         "rmdir",
+        "rm_r",
         "symlink",
         "readlink",
     }
     assert STAMP_WRITE_OPS == WRITES | {"mkdir"}
+    assert COPY_OPS == {"copy", "dir_copy"}
+    assert DESTINATION_OPS == {"rename", "copy", "dir_copy"}
+    assert SUBTREE_OPS == {
+        "rename",
+        "rm_r",
+        "dir_copy",
+        "find",
+        "du_size",
+        "du_entries",
+        "search",
+    }
+    assert NATIVE_WALK_OPS == SUBTREE_OPS - {"rename"} | {"copy"}

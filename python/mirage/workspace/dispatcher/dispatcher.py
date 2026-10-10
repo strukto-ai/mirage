@@ -48,6 +48,7 @@ from mirage.errors.fs import (
     exdev,
     no_mount,
     no_xattr,
+    walk_declined,
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
@@ -90,6 +91,8 @@ from mirage.view.namespace_view import (
     namespace_stat,
 )
 from mirage.workspace.dispatcher.constants import (
+    COPY_OPS,
+    DESTINATION_OPS,
     DISPATCH_READ_OPS,
     DISPATCH_WRITE_OPS,
     ENTRY_CREATE_OPS,
@@ -97,11 +100,13 @@ from mirage.workspace.dispatcher.constants import (
     HIDDEN_CREATE_OPS,
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
+    NATIVE_WALK_OPS,
     NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
     SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     STAMP_WRITE_OPS,
+    SUBTREE_OPS,
     XATTR_OPS,
 )
 from mirage.workspace.mount import MountEntry
@@ -470,13 +475,14 @@ def _follow_or_loop(
 def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
     """A custom function's other path arguments, by keyword.
 
-    A rename's destination is walked on its own and is not one.
+    A rename's or a copy's destination is walked on its own and is not
+    one.
 
     Args:
         name (str): the dispatched function name.
         kwargs (dict[str, Any]): its arguments.
     """
-    if name == "rename":
+    if name in DESTINATION_OPS:
         return []
     return [
         (key, value)
@@ -493,7 +499,8 @@ class _Call:
         name (str): the dispatched op name.
         path (PathSpec): the op's path: walked, then followed.
         typed (PathSpec): the path as the caller named it.
-        dst (PathSpec | None): a rename's walked destination.
+        dst (PathSpec | None): a rename's or a copy's walked
+            destination.
         kwargs (dict[str, Any]): the op's arguments, forwarded to the
             backend.
         vis (Visibility | None): the session's view, read once at the
@@ -702,6 +709,10 @@ class Dispatcher:
         if mount is None:
             return await self._answer_unmounted(call), IOResult()
         await self._refuse_cross_mount(call, mount)
+        if await self._declines(call):
+            if call.name == "search":
+                return None, IOResult()
+            raise walk_declined(str(mount.vfs.name), call.name, call.path)
         # mkdir(2) looks its name up first, so on a read-only region that
         # lookup answers for the mode, after every other policy has spoken.
         # A dry run never looks, so it explains the mode's refusal.
@@ -727,7 +738,7 @@ class Dispatcher:
         await mount.ensure_ready()
         served = await self._serve_cached(call, mount, boundary)
         if served is not None:
-            return served, IOResult(reads={call.path.virtual: served})
+            return served, IOResult()
         result = self._filter(
             call, await self._call(call, mount, self._filler(call, mount))
         )
@@ -772,7 +783,8 @@ class Dispatcher:
         Hidden paths answer before anything else can: the typed path is
         checked so a link inside hidden space cannot be followed out of
         it, the followed path is re-checked (``_follow``) so a visible
-        link cannot lead in, and a rename destination is a create. Every
+        link cannot lead in, and a rename's or a copy's destination is a
+        create. Every
         link above the final name is then followed, whatever the op does
         with the name: command dispatch walks the operands it classifies,
         and this is the same walk for every other caller (a relative word
@@ -783,20 +795,16 @@ class Dispatcher:
         Args:
             name (str): the dispatched op name.
             path (PathSpec): the path as the caller named it.
-            kwargs (dict[str, Any]): the op's arguments; a rename's
-                ``dst`` is replaced by its walked spelling.
+            kwargs (dict[str, Any]): the op's arguments; a rename's or a
+                copy's ``dst`` is replaced by its walked spelling.
             rule_gate (EntryGate | None): the running command's gate.
             report (OpReport | None): the caller's report.
         """
         vis = session_visibility()
         if not path_visible(vis, path.virtual):
             raise hidden_refusal(vis, path.virtual, name in HIDDEN_CREATE_OPS)
-        dst = kwargs.get("dst")
-        if (
-            name == "rename"
-            and isinstance(dst, PathSpec)
-            and not path_visible(vis, dst.virtual)
-        ):
+        dst = kwargs.get("dst") if name in DESTINATION_OPS else None
+        if isinstance(dst, PathSpec) and not path_visible(vis, dst.virtual):
             raise hidden_refusal(vis, dst.virtual, True)
         # An operand the walk already refused (the empty name, a link
         # loop) names nothing an op can reach, whatever `virtual` says.
@@ -815,20 +823,23 @@ class Dispatcher:
         refusal = await dot_refusal(
             self._walk_stat, path, follow, name in ENTRY_CREATE_OPS
         )
-        if refusal is None and name == "rename" and isinstance(dst, PathSpec):
+        if refusal is None and isinstance(dst, PathSpec):
             refusal = await dot_refusal(self._walk_stat, dst, follow)
         if refusal is not None:
             raise refusal
         typed, typed_dst = path, dst
         path = self._walked(path, name in HIDDEN_CREATE_OPS)
-        if name == "rename" and isinstance(dst, PathSpec):
+        if isinstance(dst, PathSpec):
             dst = kwargs["dst"] = self._walked(dst, True)
         # The command's gate judges each spelling, as handed in and as
         # walked, once both walks have answered for hidden space: here
-        # for an op on the name itself, in ``_follow`` for the rest.
+        # for an op on the name itself and for a destination, in
+        # ``_follow`` for the rest.
         no_follow = name in NO_FOLLOW_OPS or bool(kwargs.get("nofollow"))
         if rule_gate is not None and no_follow:
             _judge(rule_gate, typed, path, typed_dst, dst)
+        elif rule_gate is not None:
+            _judge(rule_gate, typed_dst, dst)
         return _Call(
             name=name,
             path=path,
@@ -876,13 +887,27 @@ class Dispatcher:
 
         ``nofollow`` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts
         on a link entry itself (chown -h writing the link's own attrs)
-        keeps the typed path. Consumed here, never forwarded.
+        keeps the typed path. Consumed here, never forwarded. A copy
+        writes its destination as a write does, through a link at the
+        final name; a rename moves the name itself. A copy whose two ends
+        then name one file is refused: a backend that replaces its
+        destination would delete the source first.
 
         Args:
             call (_Call): the walked op; its ``path`` becomes the target.
         """
         walked = call.path
         nofollow = call.kwargs.pop("nofollow", False)
+        if call.name in COPY_OPS and call.dst is not None and not nofollow:
+            dst = PathSpec.from_str_path(
+                _follow_or_loop(self._namespace, call.dst, True)
+            )
+            if dst.virtual != call.dst.virtual:
+                if not path_visible(call.vis, dst.virtual):
+                    raise hidden_refusal(call.vis, dst.virtual, True)
+                if call.rule_gate is not None:
+                    _judge(call.rule_gate, dst)
+                call.dst = call.kwargs["dst"] = dst
         if call.name not in NO_FOLLOW_OPS and not nofollow:
             followed = _follow_or_loop(self._namespace, call.path, True)
             if followed != call.path.virtual:
@@ -895,6 +920,12 @@ class Dispatcher:
                     )
         if call.rule_gate is not None and not call.no_follow:
             _judge(call.rule_gate, call.typed, walked, call.path)
+        if (
+            call.name in COPY_OPS
+            and call.dst is not None
+            and call.dst.virtual == call.path.virtual
+        ):
+            raise einval(call.dst)
 
     async def _walk_operands(self, call: _Call) -> None:
         """Walk and follow each other path argument as the path is.
@@ -941,14 +972,15 @@ class Dispatcher:
     async def _refuse_cross_mount(
         self, call: _Call, mount: MountEntry
     ) -> None:
-        """Answer EXDEV for a rename between two mounts.
+        """Answer EXDEV for a rename or a copy between two mounts.
 
         A mount is a filesystem boundary: rename(2) moves a name within
         one and answers EXDEV across two, before any permission is
         weighed, so `mv` falls back to copy and unlink instead of the
-        source's backend taking the destination for one of its keys. It
-        resolves both parent directories first, so a missing one is
-        ENOENT (ENOTDIR through a file) ahead of EXDEV.
+        source's backend taking the destination for one of its keys; a
+        backend copies only within itself, the same way. It resolves
+        both parent directories first, so a missing one is ENOENT
+        (ENOTDIR through a file) ahead of EXDEV.
 
         Args:
             call (_Call): the followed op.
@@ -956,8 +988,7 @@ class Dispatcher:
         """
         dst = call.dst
         if (
-            call.name == "rename"
-            and dst is not None
+            dst is not None
             and self._namespace.try_mount_for(dst.virtual) is not mount
         ):
             refusal = await self._parent_refusal(call.path)
@@ -969,6 +1000,39 @@ class Dispatcher:
             if self._namespace.try_mount_for(other.virtual) is not mount:
                 raise exdev(other)
 
+    async def _declines(self, call: _Call) -> bool:
+        """Whether a one-call walk gives way to the caller's own walk.
+
+        A backend's find, du, search, tree copy or tree removal answers
+        for every entry under its path in one call, past the checks each
+        entry would meet on its own. So when a hide, the command's path
+        rules or a coded pre_vfs policy reach below one of its paths, it
+        is declined and the caller walks, entry by entry, through calls
+        that are each judged. A file copy is declined the same way: the
+        bytes it moves never pass through a read. A tree copy is declined
+        too when a link stands below its destination: the backend writes
+        each child name as it is, where the walk's copies follow the link.
+
+        Args:
+            call (_Call): the followed op.
+        """
+        if call.name not in NATIVE_WALK_OPS:
+            return False
+        if (
+            call.name == "dir_copy"
+            and call.dst is not None
+            and self._namespace.link_stats_below(call.dst.virtual)
+        ):
+            return True
+        paths = [call.path] if call.dst is None else [call.path, call.dst]
+        if any(hidden_under(call.vis, p.virtual) for p in paths):
+            return True
+        if call.rule_gate is not None:
+            return any(call.rule_gate.scopes(p.virtual) for p in paths)
+        return await self._namespace.registry.policies.wants_for(
+            "pre_vfs", _session_id()
+        )
+
     async def _admit(
         self, call: _Call, mount: MountEntry, judge_mode: bool = True
     ) -> Boundary:
@@ -976,11 +1040,12 @@ class Dispatcher:
 
         Admission policies fire at the dispatcher, before the warm-cache early
         return: a cached read must be refused exactly like a cold one, or
-        the cache becomes a policy bypass. A rename's destination is a
-        create there: it passes the same gate as the source, so a path
-        rule holds against moving into a protected scope (or onto the
-        directory that holds one) the way it holds against writing there,
-        under the mode of the mount that owns it.
+        the cache becomes a policy bypass. A rename's or a copy's
+        destination is a create there: it passes the same gate as the
+        source, so a path rule holds against moving or copying into a
+        protected scope (or onto the directory that holds one) the way it
+        holds against writing there, under the mode of the mount that owns
+        it. A copy only reads its source.
 
         Args:
             call (_Call): the followed op.
@@ -998,18 +1063,19 @@ class Dispatcher:
         boundary = self._boundary(mount)
         if not judge_mode:
             boundary = dataclasses.replace(boundary, mode=None)
+        subtree = call.name in SUBTREE_OPS
         await boundary.admit(
             call.name,
             call.path,
-            call.write,
+            call.write and call.name not in COPY_OPS,
             create=call.name in HIDDEN_CREATE_OPS,
-            subtree=call.name == "rename",
-            final=call.name != "rename",
+            subtree=subtree,
+            final=call.dst is None,
         )
-        if call.name == "rename" and call.dst is not None:
+        if call.dst is not None:
             await self._boundary(
                 self._namespace.try_mount_for(call.dst.virtual)
-            ).admit(call.name, call.dst, True, create=True, subtree=True)
+            ).admit(call.name, call.dst, True, create=True, subtree=subtree)
         for _, other in _operands(call.name, call.kwargs):
             await boundary.admit(call.name, other, call.write)
         if call.name == "rmdir" and any(
@@ -1300,20 +1366,23 @@ class Dispatcher:
             or not _facts_of(mount).cacheable
         ):
             return
-        # Copies, so the line's records do not hold the written bytes.
-        claims = [
-            dataclasses.replace(rec, claimed=data)
-            if rec.op in WRITE_FINGERPRINT_OPS
-            and rec.path == call.path.virtual
-            else rec
-            for rec in records
-        ]
+        record = next(
+            (
+                rec
+                for rec in reversed(records)
+                if rec.op in WRITE_FINGERPRINT_OPS
+                and rec.path == call.path.virtual
+            ),
+            None,
+        )
+        if record is not None and record.bytes != len(data):
+            await self._cache.remove(call.path.virtual)
+            return
         await cache_io.set_cached(
             self._cache,
             call.path.virtual,
             data,
-            data,
-            claims,
+            record.fingerprint or None if record is not None else None,
             lambda path: _facts_of(
                 mount if self._namespace.try_mount_for(path) is mount else None
             ),
@@ -1360,17 +1429,26 @@ class Dispatcher:
         """What a write changes beside the store: the caches above the
         path, and the node table's links and attributes at its names.
 
+        A copy reads its path, so only its ``dst`` changes: the copy is
+        a new file there, or a new tree.
+
         Args:
             mount (MountEntry): the mount the write ran on.
             name (str): the write op that ran.
             path (PathSpec): the path it wrote, after any follow.
-            kwargs (dict[str, Any]): the op's kwargs; a rename's ``dst``
-                is the moved name.
+            kwargs (dict[str, Any]): the op's kwargs; a rename's or a
+                copy's ``dst`` is the moved or copied name.
         """
         opened = _appends_nothing(name, kwargs)
         observed = (
             time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
+        dst = kwargs.get("dst") if name in DESTINATION_OPS else None
+        if name in COPY_OPS and isinstance(dst, PathSpec):
+            await self.invalidate_after_write(mount, dst)
+            if name == "dir_copy":
+                await self._settle_tree_copy(mount, path, dst)
+            return
         # rename(2) moves a file without touching its times, which the
         # node table carries to the new name below.
         await self.invalidate_after_write(
@@ -1378,11 +1456,17 @@ class Dispatcher:
             path,
             observed=observed,
             times=not opened and name != "rename",
-            removed=name in ("unlink", "rmdir"),
+            removed=name in ("unlink", "rmdir", "rm_r"),
         )
         for _, other in _operands(name, kwargs):
             await self.invalidate_after_write(mount, other)
-        if name in ("unlink", "rmdir"):
+        if name == "rm_r":
+            # Everything below went with it: the cached bodies and
+            # listings, and the links and overlays only the node table
+            # holds there.
+            await self._invalidate_tree(mount, path)
+            await self._namespace.purge_under(path.virtual)
+        if name in ("unlink", "rmdir", "rm_r"):
             # The name no longer holds that file, so what was set on
             # it (overlay mode and owner, extended attributes) goes
             # with it, as the shell's rm already drops it: a file
@@ -1432,6 +1516,48 @@ class Dispatcher:
             await self._namespace.rename_under(
                 path.virtual, kwargs["dst"].virtual
             )
+
+    async def _settle_tree_copy(
+        self, mount: MountEntry, src: PathSpec, dst: PathSpec
+    ) -> None:
+        """What a tree copy changed under ``dst``: each file it wrote.
+
+        The copy merges into what ``dst`` already held, so a file it left
+        keeps its cached copy and the version a conditional write needs;
+        the files it wrote are the source's, listed after the copy.
+
+        Args:
+            mount (MountEntry): the mount the copy ran on.
+            src (PathSpec): the copied tree.
+            dst (PathSpec): where it landed.
+        """
+        base = src.virtual.rstrip("/")
+        landing = dst.virtual.rstrip("/")
+        for virtual in await self._files_below(mount, src.virtual):
+            await self.invalidate_after_write(
+                mount, PathSpec.from_str_path(landing + virtual[len(base) :])
+            )
+
+    async def _files_below(self, mount: MountEntry, root: str) -> list[str]:
+        """Every file at any depth under ``root``, through the mount's own
+        listing.
+
+        Args:
+            mount (MountEntry): the mount serving ``root``.
+            root (str): absolute virtual directory path.
+        """
+        files: list[str] = []
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            for entry in await mount.call("readdir", directory):
+                child = entry.rstrip("/")
+                row = await mount.call("stat", child)
+                if row.type is FileType.DIRECTORY:
+                    pending.append(child)
+                else:
+                    files.append(child)
+        return files
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
         """Whether a rename's source stats as a directory.
@@ -2161,28 +2287,31 @@ class Dispatcher:
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 
-    async def apply_io(
+    async def keep_versions(
         self,
-        io: IOResult,
-        records: list[OpRecord] | None = None,
-        cache_facts: Callable[[str], CacheFacts] | None = None,
+        records: list[OpRecord],
+        cache_facts: Callable[[str], CacheFacts],
         nested: bool = False,
     ) -> None:
-        await cache_io.apply_io(
-            self._cache,
-            io,
-            cache_facts or self.cache_facts_for,
-            records=records,
-            lost=active_lost(),
-            nested=nested,
+        """Keep the version each path last had on a line that ended.
+
+        Args:
+            records (list[OpRecord]): the line's records.
+            cache_facts (Callable[[str], CacheFacts]): the facts of the
+                mounts the line started with.
+            nested (bool): a nested line's, which keeps only the
+                versions of paths still lost.
+        """
+        await cache_io.keep_versions(
+            self._cache, records, cache_facts, active_lost(), nested
         )
 
     def capture_cache_facts(self) -> Callable[[str], CacheFacts]:
-        """Bind deferred command results to the mounts that produced them.
+        """Bind the end of a line to the mounts it started with.
 
-        The mount table is pinned at command start, so a fill that lands
-        after the command is stamped with the bound of the mount that
-        produced the bytes rather than whatever holds the prefix by then.
+        The mount table is pinned at the line's start, so a version kept
+        when it ends is judged by the mount that produced it rather than
+        whatever holds the prefix by then.
         """
         mounts = {
             m.prefix: m for m in self._namespace.registry.visible_mounts()
@@ -2195,14 +2324,6 @@ class Dispatcher:
             return _facts_of(mount if original is mount else None)
 
         return facts
-
-    def cache_facts_for(self, path: str) -> CacheFacts:
-        """The mount's cache facts for one path, resolved live.
-
-        Args:
-            path (str): absolute virtual path.
-        """
-        return _facts_of(self._namespace.try_mount_for(path))
 
     async def invalidate_all_after_remote(self) -> None:
         """Drop the file cache and every mount index wholesale.
@@ -2265,6 +2386,21 @@ class Dispatcher:
                 await manager.invalidate_after_unlink(name)
             else:
                 await manager.invalidate_after_write(name)
+            await manager.invalidate_ancestors(name)
+
+    async def _invalidate_tree(
+        self, mount: MountEntry, path: PathSpec
+    ) -> None:
+        """Drop everything cached at and below ``path``, and its parents'
+        listings, under every mount of its store.
+
+        Args:
+            mount (MountEntry): the mount the tree was changed through.
+            path (PathSpec): the tree's root.
+        """
+        for owner, name in self._aliases(mount, path):
+            manager = self._manager_for(owner)
+            await manager.invalidate_subtree(name)
             await manager.invalidate_ancestors(name)
 
     async def invalidate_after_rename(

@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
+from typing import TypeVar
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -24,11 +26,14 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 from mirage.vfs.types import DuEntries
 from mirage.view.types import MountView
+
+T = TypeVar("T")
 
 
 @dataclass(slots=True)
@@ -201,6 +206,24 @@ async def walk_entries(
     return entries, total
 
 
+async def _native_or_walk(
+    native: Callable[[PathSpec], Awaitable[T]],
+    walk: Callable[[PathSpec], Awaitable[T]],
+    path: PathSpec,
+) -> T:
+    """The native answer for ``path``, or the walk's where it is declined.
+
+    Args:
+        native (Callable): the backend's one-call answer.
+        walk (Callable): the walk's answer.
+        path (PathSpec): the operand.
+    """
+    try:
+        return await native(path)
+    except WalkDeclinedError:
+        return await walk(path)
+
+
 async def du(
     ops: CommandIO,
     accessor: Accessor,
@@ -214,18 +237,26 @@ async def du(
         ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
     )
     native = ops.du
-    compute_size: ComputeSize
-    compute_entries: ComputeEntries
-    # Hides and path rules turn the native du off upstream (scoped_io),
-    # so the walk is what reports a directory a rule refuses to open.
-    if native is None:
-        compute_size = partial(walk_size, ops, accessor, opts.index, budget)
-        compute_entries = partial(
-            walk_entries, ops, accessor, opts.index, budget
+    compute_size: ComputeSize = partial(
+        walk_size, ops, accessor, opts.index, budget
+    )
+    compute_entries: ComputeEntries = partial(
+        walk_entries, ops, accessor, opts.index, budget
+    )
+    # The dispatcher declines a native du whose tree a hide or a path
+    # rule reaches, and the walk is what reports a directory a rule
+    # refuses to open.
+    if native is not None:
+        compute_size = partial(
+            _native_or_walk,
+            partial(native.size, accessor, index=opts.index),
+            compute_size,
         )
-    else:
-        compute_size = partial(native.size, accessor, index=opts.index)
-        compute_entries = partial(native.entries, accessor, index=opts.index)
+        compute_entries = partial(
+            _native_or_walk,
+            partial(native.entries, accessor, index=opts.index),
+            compute_entries,
+        )
     return await du_generic(
         paths,
         list(texts),

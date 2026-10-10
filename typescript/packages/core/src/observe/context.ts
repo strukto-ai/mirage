@@ -88,7 +88,7 @@ export interface LostMark {
  * it is refused again until a read. A read or write of the path after the
  * loss names the bytes now there, and lifts the mark. Mirrors Python's
  * `LostPaths`, which rides the recorder; here it is keyed by the line's
- * records, since `applyIo` runs after the recording scope ends.
+ * records, since `keepVersions` runs after the recording scope ends.
  */
 export class LostPaths {
   readonly marks = new Map<string, LostMark>()

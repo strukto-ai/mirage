@@ -52,7 +52,7 @@ async function tallyCat(ws: Workspace, paths: PathSpec[]): Promise<CommandFnResu
   const out = Object.entries(body)
     .map(([k, v]) => `${k} ${String(v)}\n`)
     .join('')
-  return [enc.encode(out), new IOResult({ cache: [path.mountPath] })]
+  return [enc.encode(out), new IOResult()]
 }
 
 async function main(): Promise<void> {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -344,9 +344,6 @@ export async function finishShell(
     stdout: asyncChain([io.stdout, cleanup.stdout]),
     stderr: stderr.byteLength > 0 ? stderr : null,
     exitCode: cleanup.exitCode,
-    reads: io.reads,
-    writes: io.writes,
-    cache: io.cache,
     refusal: io.refusal,
   })
 }

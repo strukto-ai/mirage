@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { CHUNK_SIZE } from './cooperative.ts'
 import { PipeClosed } from './errors.ts'
 import { CAPACITY, BytePipe } from './pipe.ts'
-import { concat } from './cachable_iterator.ts'
+import { concat } from '../utils/bytes.ts'
 
 describe('BytePipe', () => {
   it.each([CHUNK_SIZE, CAPACITY, 262144])(

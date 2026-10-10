@@ -22,7 +22,6 @@ import { PartialOutputError } from '../../../commands/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
 import { Limit, PathSpec } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
@@ -1030,33 +1029,6 @@ it.each([
     expect(dec.decode(await materialize(help))).toMatch(/^usage: renamed run /)
     expect(fn).not.toHaveBeenCalled()
   }
-})
-
-async function* body(): AsyncGenerator<Uint8Array> {
-  yield await Promise.resolve(new TextEncoder().encode('body'))
-}
-
-it('keeps a cached read whole after the output reads it', async () => {
-  const cli = new CLI({
-    spec: new CommandSpec({ name: 'reader' }),
-    handlers: {
-      '': new CLIHandler({
-        fn: () => {
-          const stream = body()
-          return [stream, new IOResult({ reads: { '/f': stream }, cache: ['/f'] })]
-        },
-      }),
-    },
-  })
-  const [stdout, io] = await handleCli(
-    { name: 'reader', cli, config: null },
-    ['reader'],
-    new SessionState({ sessionId: 'test' }),
-  )
-  expect(new TextDecoder().decode(await materialize(stdout))).toBe('body')
-  const cached = io.reads['/f']
-  expect(cached).toBeInstanceOf(CachableAsyncIterator)
-  expect(new TextDecoder().decode(await (cached as CachableAsyncIterator).drain())).toBe('body')
 })
 
 it.each([null, 1])(

@@ -63,17 +63,15 @@ class Policy:
         command tier's backend I/O.
 
         The entry points are the dispatcher and ``ws.vfs``, which is also
-        how FUSE, the runtime guests, ``find -delete`` and the warm
-        cache arrive; a mount command's handler (cat, grep -r, sed -i,
-        rm) admits each content read, mutation and readdir through the
-        same hook (``with_policy_guard``), before its own warm cache.
-        On that tier the op is named by adapter slot (read_bytes,
-        read_stream, rm_r, ...), so a policy portable across the tiers
-        keys on ``write`` and ``path``; stat/exists and native find/du
-        enumeration stay unguarded as presence facts (mode-000 shape: a
-        denied entry lists and stats, the read of it fails), and a
-        native subtree op (rm_r, dir_copy) admits as the one op the
-        backend performs.
+        how FUSE, the runtime guests, ``find -delete``, the warm cache
+        and a mount command's content reads and mutations arrive; the
+        command's readdir admits through the same hook
+        (``with_command_guards``). stat/exists stay unguarded as
+        presence facts (mode-000 shape: a denied entry lists and stats,
+        the read of it fails). While a coded policy is installed the
+        dispatcher declines a one-call tree op (rm_r, copy, dir_copy,
+        find, du, search), so the command walks and each entry's op is
+        admitted on its own.
 
         The hot path: fires per op (thousands under one recursive
         command), so keep the hook cheap; expensive decisions belong at

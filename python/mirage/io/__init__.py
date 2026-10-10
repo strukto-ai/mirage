@@ -13,12 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import IOResult, OpReport
 
 __all__ = [
     "AsyncLineIterator",
-    "CachableAsyncIterator",
     "IOResult",
     "OpReport",
 ]

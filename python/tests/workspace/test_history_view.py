@@ -412,7 +412,7 @@ def test_in_place_restore_rewinds_history(tmp_path):
 def test_failed_line_ops_still_in_audit(monkeypatch):
     ws = _ws()
     _exec(ws, "echo hi > /data/f.txt")
-    monkeypatch.setattr(ws._dispatcher, "apply_io", _raise_induced)
+    monkeypatch.setattr(ws._dispatcher, "keep_versions", _raise_induced)
     io = _exec(ws, "cat /data/f.txt")
     assert io.exit_code == 1
     events = asyncio.run(ws.observer.events())

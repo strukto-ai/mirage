@@ -18,6 +18,7 @@ from dataclasses import replace
 import pytest
 
 from mirage.io import IOResult
+from mirage.io.types import CountedRun
 from mirage.policy import PolicyDenied
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -62,11 +63,11 @@ def test_fail_triple():
 
 
 def test_finish_no_errors_keeps_io():
-    io = IOResult(writes={"/data/f.txt": b""})
+    io = IOResult(counted_runs=[CountedRun((1,), "/data/f.txt")])
     out, result_io, node = finish("touch", [], io=io)
     assert out is None
     assert result_io.exit_code == 0
-    assert result_io.writes == {"/data/f.txt": b""}
+    assert result_io.counted_runs == [CountedRun((1,), "/data/f.txt")]
     assert node.exit_code == 0
     assert node.stderr == b""
 

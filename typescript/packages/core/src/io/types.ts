@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec, Producer, Refusal } from '../types.ts'
-import { CachableAsyncIterator, concat } from './cachable_iterator.ts'
+import { concat } from '../utils/bytes.ts'
 import { chunks } from './cooperative.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
@@ -46,17 +46,9 @@ export class OutputState {
  */
 export class DeviceInput extends Uint8Array {}
 
-/** Whether a read is over: bytes, or a stream drained to its end. Mirrors
- * Python's settled. */
-export function settled(source: ByteSource): boolean {
-  if (source instanceof CachableAsyncIterator) return source.exhausted
-  return source instanceof Uint8Array
-}
-
 export async function materialize(source: ByteSource | null | undefined): Promise<Uint8Array> {
   if (source === null || source === undefined) return new Uint8Array()
   if (source instanceof Uint8Array) return source
-  if (source instanceof CachableAsyncIterator) return source.drain()
   const parts: Uint8Array[] = []
   for await (const chunk of chunks(source)) parts.push(chunk)
   return concat(parts)
@@ -128,9 +120,6 @@ export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
   exitCode?: number
-  reads?: Record<string, ByteSource>
-  writes?: Record<string, ByteSource>
-  cache?: string[]
   producer?: Producer | null
   matchedRuns?: PathSpec[][] | null
   sizedRuns?: SizedRun[] | null
@@ -153,9 +142,6 @@ export class IOResult {
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
-  reads: Record<string, ByteSource>
-  writes: Record<string, ByteSource>
-  cache: string[]
   // Provenance of this result (which command, spanning which
   // mounts); merge keeps the last command for attribution, not
   // ownership of every byte in a combined result. The workspace boundary hands it to the
@@ -179,9 +165,6 @@ export class IOResult {
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
-    this.reads = init.reads ?? {}
-    this.writes = init.writes ?? {}
-    this.cache = init.cache ?? []
     this.producer = init.producer ?? null
     this.refusal = init.refusal ?? null
     this.streamSource = null
@@ -240,16 +223,6 @@ export class IOResult {
       sizedRuns: other.sizedRuns,
       countedRuns: other.countedRuns,
       stderr: mergedStderr,
-      // A later write voids earlier claims on its path, and a read that is
-      // over; a running one stays for the drain to close.
-      reads: {
-        ...Object.fromEntries(
-          Object.entries(this.reads).filter(([p, v]) => !(p in other.writes) || !settled(v)),
-        ),
-        ...other.reads,
-      },
-      writes: { ...this.writes, ...other.writes },
-      cache: [...this.cache.filter((p) => !(p in other.writes)), ...other.cache],
       producer: other.producer,
       refusal: other.refusal ?? this.refusal,
     })

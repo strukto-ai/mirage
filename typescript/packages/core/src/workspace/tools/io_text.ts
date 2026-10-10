@@ -14,7 +14,7 @@
 
 import { PolicyDenied, describeRefusal, saysWhy } from '../../policy/index.ts'
 import { REFUSAL_WINDOW } from '../../policy/constants.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import type { Refusal } from '../../types.ts'
 import type { ExecuteResult } from '../workspace/types.ts'
 import { errorVirtualPath, fsStrerror } from '../../errors/fs.ts'

@@ -108,7 +108,7 @@ import { Admitted, admit } from './admission.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
 import { preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 

@@ -16,7 +16,6 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.core.ram.stat import stat as ram_stat
-from mirage.io import IOResult
 from mirage.types import FileStat, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.vfs_io import override, render
@@ -172,9 +171,7 @@ async def test_a_warm_cache_still_answers_a_ranged_read_with_the_window():
     # the dispatcher is the dispatcher it reaches too.
     ws = _workspace(_CachingRAM())
     await ws.vfs.write("/data/f.bin", b"0123456789")
-    await ws.apply_io(
-        IOResult(reads={"/data/f.bin": b"0123456789"}, cache=["/data/f.bin"])
-    )
+    assert await ws.cache.get("/data/f.bin") == b"0123456789"
     assert await ws.vfs.read("/data/f.bin", 2, 3) == b"234"
     assert await ws.vfs.read("/data/f.bin") == b"0123456789"
     assert await ws.vfs.read("/data/f.bin", 7) == b"789"
@@ -186,10 +183,10 @@ async def test_a_warm_cache_still_answers_a_ranged_read_with_the_window():
 async def test_a_cold_and_a_warm_ranged_read_agree():
     ws = _workspace(_CachingRAM())
     await ws.vfs.write("/data/f.bin", b"0123456789")
+    await ws.cache.remove("/data/f.bin")
     cold = await ws.vfs.read("/data/f.bin", 2, 3)
-    await ws.apply_io(
-        IOResult(reads={"/data/f.bin": b"0123456789"}, cache=["/data/f.bin"])
-    )
+    await ws.vfs.read("/data/f.bin")
+    assert await ws.cache.get("/data/f.bin") == b"0123456789"
     assert await ws.vfs.read("/data/f.bin", 2, 3) == cold
 
 

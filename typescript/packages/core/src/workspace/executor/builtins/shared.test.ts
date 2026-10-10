@@ -64,12 +64,12 @@ describe('builtins/shared: the result triple', () => {
     expect(DEC.decode(node.stderr)).toBe('chmod: missing operand\n')
   })
 
-  it('finish with no errors keeps the carried writes and exits 0', () => {
-    const io = new IOResult({ writes: { '/data/f.txt': new Uint8Array() } })
+  it('finish with no errors keeps the carried result and exits 0', () => {
+    const io = new IOResult({ countedRuns: [{ values: [1], label: '/data/f.txt' }] })
     const [out, resultIo, node] = finish('touch', [], io)
     expect(out).toBeNull()
     expect(resultIo.exitCode).toBe(0)
-    expect(Object.keys(resultIo.writes)).toEqual(['/data/f.txt'])
+    expect(resultIo.countedRuns).toEqual([{ values: [1], label: '/data/f.txt' }])
     expect(node.exitCode).toBe(0)
     expect(node.stderr).toEqual(new Uint8Array())
   })

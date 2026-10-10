@@ -36,7 +36,7 @@ import {
   SPLIT_TRY_HELP,
   UINTMAX,
 } from '../constants.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 // The three -n modes: byte chunks, line-preserving chunks, round robin.

@@ -24,6 +24,7 @@ import type { GenericCommand } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
 import { requireOp, resolveGlobOf } from '../adapter.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { pathsScoped } from '../../../../view/namespace_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 
 // The backend stat, merged with the namespace attr overlay if any. cp/mv
@@ -42,7 +43,17 @@ export function overlayableStat(
 export const BUILDER: GenericCommand = {
   name: 'cp',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
+  fn: async (raw, accessor, paths, _texts, opts) => {
+    // A native copy or find answers for a whole tree in one call, so the
+    // dispatcher declines one whose tree the caller's view restricts; cp
+    // takes the entry-by-entry walk up front there, which is where GNU's
+    // per-entry refusals are worded.
+    const ops: CommandIO = { ...raw }
+    if (pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')) {
+      delete ops.copy
+      delete ops.dirCopy
+      delete ops.find
+    }
     const { dirCopy, find } = ops
     // Without a file transfer capability, creating directories would
     // leave an uncopyable destination tree. Keep the refusal guarded.

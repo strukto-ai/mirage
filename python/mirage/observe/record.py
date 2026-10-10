@@ -14,7 +14,6 @@
 
 from dataclasses import dataclass, field
 
-from mirage.io.types import ByteSource
 from mirage.utils.key_prefix import under_path
 
 # Ops whose record carries a token describing the bytes it moved, split
@@ -104,12 +103,6 @@ class OpRecord:
             backends that can guarantee revision durability.
         mount_id (str | None): In-process mount identity for snapshot
             ownership checks; never used as a persisted backend revision.
-        claimed (ByteSource | None): The exact value the command that
-            made this ``write`` put in ``IOResult.writes`` for a path it
-            claims, set by the executor and cleared when the line ends.
-            Internal: out of equality, ``repr`` and ``to_dict``.
-        sealed (bool): Set when the line that persisted this record has
-            ended, so a command returning later cannot mark it.
     """
 
     op: str
@@ -121,8 +114,6 @@ class OpRecord:
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
     mount_id: str | None = field(default=None, repr=False, compare=False)
-    claimed: ByteSource | None = field(default=None, repr=False, compare=False)
-    sealed: bool = field(default=False, repr=False, compare=False)
     execution_id: str | None = None
 
     @property

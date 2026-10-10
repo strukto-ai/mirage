@@ -17,7 +17,7 @@ import { Channel } from '@struktoai/mirage-core/shell/console/types'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { ServerChannel } from 'ssh2'
-import { concat } from '@struktoai/mirage-core/io/cachable_iterator'
+import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { SaidWindow } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 // How far the client may type or pipe ahead of whoever reads it before

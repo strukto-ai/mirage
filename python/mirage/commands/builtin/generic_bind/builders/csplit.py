@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import (
-    relay,
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.csplit import (
@@ -26,6 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     Operation,
     bound_op,
+    dispatched_call,
     require_op,
     resolve_or_empty,
 )
@@ -52,7 +52,7 @@ async def csplit(
     # removal of a failed run's pieces, to the mount that owns it.
     if opts.dispatch is not None:
         write_bytes = transfer_primitives(opts.dispatch)["write"]
-        unlink = partial(relay, opts.dispatch, "unlink")
+        unlink = partial(dispatched_call, opts.dispatch, "unlink")
     else:
         write_bytes = partial(require_op(ops, Operation.WRITE), accessor)
         unlink = partial(require_op(ops, Operation.UNLINK), accessor)

@@ -19,7 +19,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     mount_io,
     with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -76,11 +75,7 @@ async def grep(
     if used_search:
         opts = labelled(opts)
 
-    io = (
-        with_command_guards(with_policy_guard(mount_io(opts)))
-        if scoped
-        else None
-    )
+    io = with_command_guards(mount_io(opts)) if scoped else None
     return await grep_generic(
         resolved,
         texts,

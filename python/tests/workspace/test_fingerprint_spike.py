@@ -18,10 +18,8 @@ import time
 
 import pytest
 
-from mirage.io import IOResult
 from mirage.types import (
     DEFAULT_READ_TTL,
-    CacheFacts,
     HiddenPaths,
     MountMode,
     ReadPolicy,
@@ -187,9 +185,8 @@ def test_a_tokenless_entry_costs_one_extra_get_then_carries_the_etag():
 
     On s3 the ETag of a simple unencrypted PUT *is* md5(content), so the
     old fallback was a valid validator there -- the one backend where it
-    was. An entry that reaches the cache with no token (here through the
-    programmatic ``apply_io`` entry point, which defaults ``records=None``) can
-    no longer claim freshness, so the next read under ``fresh`` refetches
+    was. An entry that reaches the cache with no token can no longer
+    claim freshness, so the next read under ``fresh`` refetches
     once. After that the entry carries the backend's own ETag and the
     read after it is served from cache: the cost is one GET, once, not a
     refetch per read.
@@ -216,14 +213,9 @@ def test_a_tokenless_entry_costs_one_extra_get_then_carries_the_etag():
         )
 
         async def run() -> tuple[int, int]:
-            # No `records`: the bytes land in the cache carrying no token,
-            # which is exactly what the md5 default used to paper over.
-            await ws.apply_io(
-                IOResult(
-                    reads={"/s3/data.txt": b"payload\n"},
-                    cache=["/s3/data.txt"],
-                )
-            )
+            # The bytes land in the cache carrying no token, which is
+            # exactly what the md5 default used to paper over.
+            await ws.cache.set("/s3/data.txt", b"payload\n")
             assert not await ws.cache.is_fresh("/s3/data.txt", "anything")
             before = client.calls["get_object"]
             io1 = await ws.shell("cat /s3/data.txt")
@@ -966,48 +958,6 @@ def test_one_line_serves_each_mount_under_its_own_policy(
         "a single-mount read of the bounded leg must not reconcile at "
         "routing; v2 here means the routing probe read another policy"
     )
-
-
-def test_the_live_cache_facts_entry_point_reads_the_mounts_bound():
-    """``apply_io`` with no captured function is the embedder's entry point.
-
-    ``cache_facts_for`` resolves the mount live and is what the public
-    ``Workspace.apply_io`` (FUSE and facade fills) uses. Only
-    ``capture_cache_facts``, reached through a shell line, is covered by
-    the tests above, so an entry point returning ``DEFAULT_READ_TTL`` here
-    would go unnoticed.
-    """
-    config = S3Config(
-        bucket="test-bucket",
-        region="us-east-1",
-        aws_access_key_id="fake",
-        aws_secret_access_key="fake",
-    )
-    ws = Workspace(
-        {
-            "/s3": Mount(
-                vfs=S3VFS(config),
-                mode=MountMode.WRITE,
-                read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45),
-            )
-        },
-        mode=MountMode.WRITE,
-    )
-
-    async def run() -> tuple[int | None, CacheFacts]:
-        await ws.apply_io(
-            IOResult(reads={"/s3/f.txt": b"x"}, cache=["/s3/f.txt"])
-        )
-        entry = ws.cache._entries["/s3/f.txt"].ttl
-        unmounted = ws._dispatcher.cache_facts_for("/nowhere/f.txt")
-        await ws.close()
-        return entry, unmounted
-
-    ttl, unmounted = asyncio.run(run())
-    assert ttl == 45, (
-        "the live entry point must read the mount's bound, not the package default"
-    )
-    assert unmounted.cacheable is False
 
 
 def test_a_fresh_mount_still_stamps_a_bound():

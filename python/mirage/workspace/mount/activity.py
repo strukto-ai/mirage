@@ -15,7 +15,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource
 from mirage.utils.activity import Activity
 
@@ -25,13 +24,6 @@ class VFSActivity(Activity):
 
     def hold(self, source: ByteSource) -> ByteSource:
         if isinstance(source, (bytes, bytearray)):
-            return source
-        if isinstance(source, CachableAsyncIterator):
-            if source.exhausted:
-                return source
-            source.replace_source(
-                ActivityStream(source.source, self.acquire())
-            )
             return source
         return ActivityStream(source, self.acquire())
 

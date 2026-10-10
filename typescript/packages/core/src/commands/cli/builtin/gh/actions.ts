@@ -44,7 +44,7 @@ import {
   textValue,
   typedOut,
 } from './accessor.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 
 const RUN_FIELDS = [
   'attempt',

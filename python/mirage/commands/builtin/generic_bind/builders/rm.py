@@ -16,7 +16,10 @@ import functools
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import walk
-from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
+from mirage.commands.builtin.generic.rm_cmd import (
+    remove_tree,
+    rm_without_operands,
+)
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     Operation,
@@ -36,6 +39,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_path, fs_strerror
 from mirage.errors.render import operand_spelling
+from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -59,7 +63,6 @@ async def rm(
     recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
-    removed: dict[str, ByteSource] = {}
     links = opts.ns.links if opts.ns is not None else None
     for p in paths:
         if is_slashed_link(p, links):
@@ -88,19 +91,47 @@ async def rm(
         try:
             if s.type == FileType.DIRECTORY:
                 if recursive:
-                    if v:
-                        readdir = functools.partial(
-                            ops.readdir, accessor, index=opts.index
-                        )
-                        entry_lines = removal_lines(
-                            await walk(
-                                readdir,
-                                bound_op(ops.stat, accessor, opts.index),
-                                p,
-                            ),
+                    readdir = functools.partial(
+                        ops.readdir, accessor, index=opts.index
+                    )
+                    stat = bound_op(ops.stat, accessor, opts.index)
+                    # -v names each entry before the tree goes in one
+                    # call; a tree it cannot list whole goes entry by
+                    # entry, as does one the dispatcher declines for
+                    # the caller's view.
+                    unlisted: list[str] = []
+                    listed = (
+                        await walk(readdir, stat, p, "rm", unlisted)
+                        if v
+                        else []
+                    )
+                    declined = bool(unlisted)
+                    if not declined:
+                        try:
+                            await require_op(ops, Operation.RM_R)(accessor, p)
+                        except WalkDeclinedError:
+                            declined = True
+                    failures: list[tuple[PathSpec, OSError]] = []
+                    if declined:
+                        listed, failures = await remove_tree(
                             p,
+                            readdir=readdir,
+                            stat=stat,
+                            unlink=functools.partial(
+                                require_op(ops, Operation.UNLINK), accessor
+                            ),
+                            rmdir=functools.partial(
+                                require_op(ops, Operation.RMDIR), accessor
+                            ),
+                            ns=opts.ns,
+                            force=f,
                         )
-                    await require_op(ops, Operation.RM_R)(accessor, p)
+                        errors.extend(
+                            f"rm: cannot remove '{entry.raw_path}': "
+                            f"{fs_strerror(exc)}"
+                            for entry, exc in failures
+                        )
+                    entry_lines = removal_lines(listed, p) if v else []
                     # A removal never crosses into a mount below, so it
                     # says so as GNU's --one-file-system does.
                     errors.extend(
@@ -111,6 +142,9 @@ async def rm(
                             p.virtual,
                         )
                     )
+                    if failures:
+                        verbose_parts.extend(entry_lines)
+                        continue
                 elif d:
                     if await ops.readdir(accessor, p, index=opts.index):
                         errors.append(
@@ -140,14 +174,11 @@ async def rm(
                 f"{fs_strerror(exc)}"
             )
             continue
-        removed[p.mount_path] = b""
         if v:
             verbose_parts.extend(entry_lines)
     output = format_optional_records(verbose_parts) if v else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
-    return output, IOResult(
-        writes=removed, stderr=stderr, exit_code=1 if errors else 0
-    )
+    return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
 
 BUILDER = GenericCommand("rm", rm, write=True)

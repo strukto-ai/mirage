@@ -25,7 +25,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     mount_io,
     with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
@@ -90,11 +89,7 @@ async def rg(
             return b"", IOResult(exit_code=1, stderr=msg.encode())
         paths = narrowed
 
-    io = (
-        with_command_guards(with_policy_guard(mount_io(opts)))
-        if scoped
-        else None
-    )
+    io = with_command_guards(mount_io(opts)) if scoped else None
     return await rg_generic(
         paths,
         texts,

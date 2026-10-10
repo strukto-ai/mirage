@@ -50,7 +50,7 @@ import { isStdin, stdinStream } from '../utils/stream.ts'
 import { RegexSyntax } from '../types.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
 import { RustRegexError, translateRust, wholeLine, wholeWord } from '../utils/rust_regex.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 // ripgrep's own words for a line with no pattern, exit 2 (14.1.1).
