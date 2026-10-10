@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 export { Accessor } from './accessor/base.ts'
+export type { RedisCacheConfig } from './cache/file/config.ts'
 export { IndexEntry } from './cache/index/config.ts'
 export type { RedisIndexConfig } from './cache/index/config.ts'
 export { RedisIndexCacheStore } from './cache/index/redis.ts'

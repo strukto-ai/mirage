@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexConfig } from '../../cache/index/config.ts'
+import type { IndexConfig, RedisIndexConfig } from '../../cache/index/config.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { Limit, MountBackend, MountMode, ReadSpec, WritePolicy } from '../../types.ts'
 
@@ -24,7 +24,7 @@ export interface MountSpecOptions {
   commandLimits?: Record<string, Limit>
   /** Registry name or code loader used to rebuild the driver from a snapshot. */
   vfsRef?: string | null
-  index?: IndexConfig
+  index?: IndexConfig | RedisIndexConfig
   read?: ReadSpec
   /** Whether this mount's writes carry the version they were based on. */
   write?: WritePolicy
