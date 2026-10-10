@@ -65,6 +65,7 @@ from mirage.core.generic.rewrite import (
     expect_offset,
     pwrite_by_rewrite,
     refuse_taken,
+    truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
@@ -1175,7 +1176,7 @@ class MountEntry:
             return levels
         if name == "glob":
             return [self._glob] if vfs.supports("readdir") else []
-        if name in ("append", "pwrite") and not vfs.supports(name):
+        if name in ("append", "pwrite", "truncate") and not vfs.supports(name):
             return (
                 [getattr(self, f"_{name}_by_rewrite")]
                 if vfs.supports("write")
@@ -1217,6 +1218,21 @@ class MountEntry:
             path,
             data,
             expect_offset(offset, path),
+        )
+
+    async def _truncate_by_rewrite(
+        self,
+        path: PathSpec,
+        length: int,
+        no_create: bool = False,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await truncate_by_rewrite(
+            functools.partial(self.vfs.read, index=index),
+            self.vfs.write,
+            path,
+            length,
+            no_create,
         )
 
     async def _pwrite(

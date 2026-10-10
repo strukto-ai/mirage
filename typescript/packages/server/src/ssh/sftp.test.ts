@@ -173,6 +173,7 @@ describe('helpers', () => {
       mode: 0o100640,
       uid: 501,
       gid: 20,
+      rdev: 0,
     })
     expect(attrs).toEqual({
       mode: 0o100640,
@@ -532,4 +533,25 @@ it('serves a key bound to a profile under it', async () => {
       sealed.readFile('/vault/secret', cb)
     }),
   ).rejects.toMatchObject({ code: STATUS.PERMISSION_DENIED })
+})
+
+it('does not follow a hidden link on a stat', async () => {
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    { mode: MountMode.WRITE, profiles: { hiding: { paths: { hide: ['/lnk'] } } } },
+  )
+  await ws.shell('echo body > /a.txt && ln -s /a.txt /lnk')
+  const h = await startHarness(MountMode.WRITE, ws)
+  const hiding = bindKey(h, 'mirage-profile="hiding"')
+  const open = await sftpOf(await connect(h))
+  const st = await call<Stats>((cb) => {
+    open.stat('/lnk', cb)
+  })
+  expect(st.size).toBe('body\n'.length)
+  const hidden = await sftpOf(await connect(h, 'demo', hiding))
+  await expect(
+    call<Stats>((cb) => {
+      hidden.stat('/lnk', cb)
+    }),
+  ).rejects.toMatchObject({ code: STATUS.NO_SUCH_FILE })
 })

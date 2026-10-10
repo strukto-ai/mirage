@@ -1385,6 +1385,28 @@ class _CachingRAM(RAMVFS):
     caches_reads = True
 
 
+class _UnsizedRAM(_CachingRAM):
+    async def stat(self, path, *args, **kwargs):
+        row = await super().stat(path, *args, **kwargs)
+        return row.model_copy(update={"size": None})
+
+
+@pytest.mark.asyncio
+async def test_a_stat_with_no_size_takes_the_cached_length():
+    # An API mount cannot size a file without fetching it; once a read
+    # kept its bytes, every caller of the dispatcher sees their length.
+    vfs = _UnsizedRAM()
+    vfs._store.dirs.add("/")
+    vfs._store.files["/f"] = b"hello\n"
+    ws = Workspace({"/api": vfs}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.vfs.stat("/api/f")).size is None
+        await ws.vfs.read("/api/f")
+        assert (await ws.vfs.stat("/api/f")).size == len(b"hello\n")
+    finally:
+        await ws.close()
+
+
 def _counted_workspace(
     race: bool = False, filetype: str | None = None
 ) -> tuple[Workspace, list[str]]:

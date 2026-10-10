@@ -84,27 +84,44 @@ function mountView(registry: MountRegistry, vis: Visibility | null): MountView {
 // The live symlink facts on offer, or null without a namespace, built
 // with the namespace's own attr overlay so a link's target stat carries
 // the same rows `ls -l` renders.
-function linkViewFor(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
+function linkViewFor(
+  namespace: Namespace | null,
+  dispatch: DispatchFn,
+  vis: Visibility | null,
+): LinkView | null {
   const overlay =
     namespace !== null
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
-  return linkView(namespace, dispatch, overlay)
+  return linkView(namespace, dispatch, overlay, vis)
 }
 
+// Filtered by the session's hides, as the dispatcher's own answers are: a
+// hidden link has no row, no listing entry and no target, and resolving one
+// leaves the path as typed, for the dispatcher to refuse.
 function linkView(
   namespace: Namespace | null,
   dispatch: DispatchFn,
   overlay: StatOverlay | null,
+  vis: Visibility | null,
 ): LinkView | null {
   if (namespace === null) return null
   return {
-    statAt: (path: string) => namespace.linkStatAt(path),
-    children: (directory: string) => namespace.linkStatsUnder(directory),
-    subtree: (directory: string) => namespace.linkStatsBelow(directory),
-    resolve: (path: string) => resolveLink(namespace, path),
+    statAt: (path: string) => (pathVisible(vis, path) ? namespace.linkStatAt(path) : null),
+    children: (directory: string) => {
+      const base = rstripSlash(directory)
+      return namespace
+        .linkStatsUnder(directory)
+        .filter((st) => pathVisible(vis, `${base}/${st.name}`))
+    },
+    subtree: (directory: string) =>
+      namespace.linkStatsBelow(directory).filter(([path]) => pathVisible(vis, path)),
+    resolve: (path: string) => (pathVisible(vis, path) ? resolveLink(namespace, path) : path),
     exists: (path: string) => pathExists(dispatch, path),
-    targetStat: (path: string) => linkTargetStat(namespace, dispatch, path, overlay),
+    targetStat: (path: string) =>
+      pathVisible(vis, path)
+        ? linkTargetStat(namespace, dispatch, path, overlay)
+        : Promise.resolve(null),
   }
 }
 
@@ -126,7 +143,6 @@ export function namespaceViewOf(
   dispatch: DispatchFn,
   session: SessionState | null,
 ): NamespaceView {
-  const links = linkViewFor(namespace, dispatch)
   const statOverlay =
     namespace !== null
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
@@ -138,6 +154,7 @@ export function namespaceViewOf(
     session !== null && liveSessions().includes(session)
       ? sessionVisibility()
       : (session?.visibility ?? null)
+  const links = linkViewFor(namespace, dispatch, vis)
   const gate = getAdmission()
   return {
     ...(links !== null ? { links } : {}),

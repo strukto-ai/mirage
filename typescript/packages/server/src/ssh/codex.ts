@@ -19,7 +19,7 @@ import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type FuseAttr } from '@struktoai/mirage-node'
-import { errnoError } from '@struktoai/mirage-node/fuse/errors'
+import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import {
@@ -213,7 +213,7 @@ async function lookup(core: MountCore, path: string): Promise<FuseAttr | null> {
 }
 
 function followed(core: MountCore, path: string): Promise<FuseAttr> {
-  return core.getattr(core.identity(path))
+  return core.getattr(path, true)
 }
 
 /** `fs/getMetadata`: what the path points at, and whether it is a link. */
@@ -255,7 +255,7 @@ async function readFile(core: MountCore, path: string): Promise<Uint8Array> {
 
 /** `fs/writeFile`: create or replace the file; its directory must exist. */
 async function writeFile(core: MountCore, path: string, data: Uint8Array): Promise<void> {
-  if ((await lookup(core, posix.dirname(path))) === null) throw errnoError('ENOENT', path)
+  if ((await lookup(core, posix.dirname(path))) === null) throw enoent(path)
   const fd =
     (await lookup(core, path)) !== null
       ? await core.open(path, fsConstants.O_TRUNC)
@@ -269,8 +269,8 @@ async function writeFile(core: MountCore, path: string, data: Uint8Array): Promi
 }
 
 async function makeDirectory(core: MountCore, path: string): Promise<void> {
-  if ((await lookup(core, path)) !== null) throw errnoError('EEXIST', path)
-  if ((await lookup(core, posix.dirname(path))) === null) throw errnoError('ENOENT', path)
+  if ((await lookup(core, path)) !== null) throw eexist(path)
+  if ((await lookup(core, posix.dirname(path))) === null) throw enoent(path)
   await core.mkdir(path)
 }
 
@@ -795,9 +795,11 @@ class CodexChannel {
   }
 
   private async canonicalize(params: Message): Promise<JsonValue> {
-    const target = this.core.identity(toPath(arg(params, 'path', 'string')))
-    await this.core.getattr(target)
-    return { path: toUri(target) }
+    const path = toPath(arg(params, 'path', 'string'))
+    // The stat goes first: it refuses a link the session cannot see before
+    // its target is named.
+    await this.core.getattr(path, true)
+    return { path: toUri(this.core.identity(path)) }
   }
 
   private async writeFile(params: Message): Promise<JsonValue> {
@@ -821,7 +823,7 @@ class CodexChannel {
     const st = await lookup(this.core, path)
     if (st === null) {
       if (force) return {}
-      throw rpcError(errnoError('ENOENT', path))
+      throw rpcError(enoent(path))
     }
     if (!isDir(st.mode)) await this.core.unlink(path)
     else if (recursive) await this.line(`rm -r -- ${shellWord(path)}`)

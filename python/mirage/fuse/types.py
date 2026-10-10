@@ -12,25 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.handles.chunked import ChunkedHandle
-from mirage.runtime.handles.file_handle import (
-    FileHandle,
-    overlaid,
-    write_runs,
-)
-from mirage.runtime.handles.file_table import FileTable
-from mirage.runtime.handles.flush import plan_flush
-from mirage.runtime.handles.mode import parse_mode
-from mirage.runtime.handles.types import FlushKind, FlushStep
+from dataclasses import dataclass, field
 
-__all__ = [
-    "ChunkedHandle",
-    "FileHandle",
-    "FileTable",
-    "FlushKind",
-    "FlushStep",
-    "overlaid",
-    "parse_mode",
-    "plan_flush",
-    "write_runs",
-]
+from mirage.runtime.handles import ChunkedHandle
+
+WriteBuf = list[tuple[int, bytes]]
+
+
+@dataclass(slots=True)
+class Handle:
+    """One open file of a kernel mount."""
+
+    path: str
+    # Where the path really points once namespace links are followed.
+    key: str
+    live: bool = False
+    data: bytes | None = None
+    write_buf: WriteBuf = field(default_factory=list)
+    # A large file reads a chunk at a time rather than hydrating whole.
+    chunked: ChunkedHandle | None = None

@@ -75,6 +75,11 @@ class LocalRuntime(PythonRuntime):
             self._python = os.path.abspath(resolved)
         else:
             self._python = sys.executable
+        # Each running child with the loop it runs on, which alone may
+        # wait for it.
+        self._children: dict[
+            asyncio.subprocess.Process, asyncio.AbstractEventLoop
+        ] = {}
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
@@ -101,14 +106,35 @@ class LocalRuntime(PythonRuntime):
             stderr=asyncio.subprocess.PIPE,
             env={**self.config.env, **env},
         )
+        self._children[proc] = asyncio.get_running_loop()
         try:
             stdout, stderr = await proc.communicate(input=stdin)
         except asyncio.CancelledError:
-            proc.kill()
+            if proc.returncode is None:
+                proc.kill()
             await proc.wait()
             raise
+        finally:
+            self._children.pop(proc, None)
         return RunResult(
             stdout=stdout,
             stderr=stderr or None,
             exit_code=proc.returncode if proc.returncode is not None else 1,
+        )
+
+    async def close(self) -> None:
+        """Kill every child still running, so none outlives the workspace.
+
+        Only a child on the closing loop is waited for. One a sync
+        ``with`` block left running belongs to the loop that block exits
+        inside, which runs nothing until the close returns; that loop
+        reaps it once the kill lands.
+        """
+        children = list(self._children.items())
+        for child, _ in children:
+            if child.returncode is None:
+                child.kill()
+        loop = asyncio.get_running_loop()
+        await asyncio.gather(
+            *(child.wait() for child, owner in children if owner is loop)
         )

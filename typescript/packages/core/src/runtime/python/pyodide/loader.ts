@@ -64,7 +64,8 @@ export interface PyodideInterface {
   _module?: NetworkHost
 }
 
-function isNode(): boolean {
+/** Whether this runs under Node, where pyodide loads from the installed package. */
+export function isNode(): boolean {
   const proc = (globalThis as { process?: { versions?: Record<string, string> } }).process
   return typeof proc?.versions?.node === 'string'
 }

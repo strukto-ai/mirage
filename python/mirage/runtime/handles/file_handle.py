@@ -354,3 +354,37 @@ def write_runs(
                 continue
         runs.append((offset, bytearray(chunk)))
     return [(start, bytes(buf)) for start, buf in runs]
+
+
+def overlaid(
+    stored: bytes, offset: int, size: int, writes: Iterable[tuple[int, bytes]]
+) -> bytes:
+    """A read window with a handle's buffered writes laid over it.
+
+    The kernel adapters keep a handle's writes until flush; a read
+    through that handle sees them, as a read after write(2) does. They
+    apply in arrival order, so a later write wins where it overlaps, and
+    a gap a write grew the file across reads as zeros.
+
+    Args:
+        stored (bytes): the stored bytes from ``offset``, short where the
+            stored file ends.
+        offset (int): where the window starts.
+        size (int): the window's length.
+        writes (Iterable[tuple[int, bytes]]): the buffered writes, in
+            arrival order.
+    """
+    runs = list(writes)
+    reach = max([offset + len(stored)] + [o + len(d) for o, d in runs])
+    end = min(offset + size, reach)
+    if end <= offset:
+        return b""
+    out = bytearray(stored[: end - offset])
+    out.extend(bytes(end - offset - len(out)))
+    for start, data in runs:
+        low, high = max(start, offset), min(start + len(data), end)
+        if low < high:
+            out[low - offset : high - offset] = data[
+                low - start : high - start
+            ]
+    return bytes(out)

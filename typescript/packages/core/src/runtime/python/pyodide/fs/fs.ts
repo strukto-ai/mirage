@@ -21,7 +21,6 @@ import { isMissingPath } from '../../../../errors/fs.ts'
 import { isUnclassified } from '../../../files.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { MirageMutation, MutationJournal } from './journal.ts'
-import type { PyodideFsSeed } from './seed.ts'
 import { NodeTable } from './nodes.ts'
 import type {
   ErrnoCodes,
@@ -59,23 +58,6 @@ const STD_STREAM_RDEV: ReadonlyMap<string, number> = new Map([
 const NULL_RDEV = 0x103
 
 const EOF_ON_READ_RDEV: ReadonlySet<number> = new Set([NULL_RDEV, ...STD_STREAM_RDEV.values()])
-
-/**
- * Whether the seed already places a node at this path, by any means.
- *
- * Args:
- *   seed: the tree collected from the mounts before the run.
- *   path: guest-absolute path to check.
- */
-function seedHolds(seed: PyodideFsSeed, path: string): boolean {
-  return (
-    seed.files.has(path) ||
-    seed.devices.has(path) ||
-    seed.links.has(path) ||
-    seed.unreadable.has(path) ||
-    seed.dirs.includes(path)
-  )
-}
 
 function isCharDevice(mode: number): boolean {
   return (mode & S_IFMT) === S_IFCHR
@@ -126,10 +108,10 @@ export function changedAttrs(node: FSNode, attr: SetAttr): SetAttrFields | null 
  * fd-relative walk) arrives as the same callback. Nothing is patched
  * inside the interpreter.
  *
- * Callbacks are synchronous. In a worker, uncached lookups and reads wait
- * for the host through SyncVFS. Without a worker, reads use the complete
- * seed collected before execution. Writes enter the journal and flush
- * before a lazy backend read or after the run, preserving guest order.
+ * Callbacks are synchronous: uncached lookups and reads wait for the host
+ * through SyncVFS, which needs the worker. Writes enter the journal and
+ * flush before a lazy backend read or after the run, preserving guest
+ * order.
  *
  * The node table lives in `NodeTable` and the flush decision in
  * `planFlush`; what is left here is one method per Emscripten callback,
@@ -157,7 +139,6 @@ export class PyodideFs {
   private readonly journal: MutationJournal
   private readonly nodes: NodeTable
   private readonly mountOf: (path: string) => string | null
-  private readonly prefix: string
   // The file node FS.open just created, whose finalizing chmod is the
   // filesystem's own and not a guest metadata write. Cleared by the
   // first setattr, so it can never outlive the create it belongs to.
@@ -173,7 +154,7 @@ export class PyodideFs {
    *     One mountpoint serves every mirage mount nested under its
    *     prefix, so this is the only boundary fact left to check ops
    *     against; Emscripten's own cross-mount checks cannot see it.
-   *   sync: the worker's blocking way to the mounts, absent without one.
+   *   sync: the worker's blocking way to the mounts.
    *   deferred: the refusals the mount gave a path whose call has not
    *     come yet, shared by every mountpoint as the journal is.
    */
@@ -183,11 +164,10 @@ export class PyodideFs {
     journal: MutationJournal,
     prefix: string,
     mountOf: (path: string) => string | null,
-    private readonly sync?: SyncVFS,
+    private readonly sync: SyncVFS,
     private readonly deferred = new Map<string, FlushFailure>(),
   ) {
     this.host = host
-    this.prefix = prefix
     this.errno = errno
     this.journal = journal
     this.mountOf = mountOf
@@ -214,34 +194,6 @@ export class PyodideFs {
     }
     this.nodes = new NodeTable(host, prefix, nodeOps, streamOps)
     this.type = { mount: this.nodes.mount.bind(this.nodes) }
-  }
-
-  /**
-   * Populate the tree. Must run after `FS.mount`; see `NodeTable.seed`.
-   *
-   * Args:
-   *   seed: tree collected from the mounts before the run.
-   */
-  seed(seed: PyodideFsSeed): void {
-    // Only when this shim is what /dev resolves to. The mount's own listing
-    // is untouched: these nodes live in this tree, which is what the
-    // interpreter reads, not what `ls /dev` on the mount reports.
-    if (this.prefix === '/dev' && this.sync === undefined) {
-      for (const [name, rdev] of STD_STREAM_RDEV) {
-        const path = `/dev/${name}`
-        // Only where the mount itself has nothing by that name. `NodeTable.seed`
-        // places devices after files, directories and links, so injecting one
-        // blindly would overwrite a real entry the mount is serving and hand
-        // the guest an empty device instead of its content.
-        if (seedHolds(seed, path)) continue
-        // A write is swallowed, as it is for every synthetic character device
-        // here. The interpreter's real stderr rides its own capture, not this
-        // node, so nothing that used to be reported is lost: before this the
-        // path did not exist at all and the open raised.
-        seed.charDevice(path, S_IFCHR | 0o666, rdev)
-      }
-    }
-    this.nodes.seed(seed)
   }
 
   private getattr(node: FSNode): FSAttr {
@@ -313,7 +265,7 @@ export class PyodideFs {
   private lookup(parent: FSNode, name: string): FSNode {
     const sync = this.sync
     let found = this.nodes.childOf(parent, name)
-    if (found === undefined && sync !== undefined) {
+    if (found === undefined) {
       const path = this.nodes.pathOf(parent) + '/' + name
       found = this.readThrough([path], () => {
         let stat: VFSStat
@@ -333,9 +285,6 @@ export class PyodideFs {
         return this.placeEntry(parent, name, stat)
       })
     }
-    // The eager fallback has already collected every reachable entry;
-    // lazy misses have just been checked against the workspace.
-    if (found === undefined) throw errnoError(this.host, this.errno, 'ENOENT')
     return found
   }
 
@@ -389,7 +338,7 @@ export class PyodideFs {
   }
 
   private rmdir(parent: FSNode, name: string): void {
-    if (this.sync !== undefined && this.readdir(this.lookup(parent, name)).length > 2) {
+    if (this.readdir(this.lookup(parent, name)).length > 2) {
       throw errnoError(this.host, this.errno, 'ENOTEMPTY')
     }
     const path = this.nodes.pathOf(parent) + '/' + name
@@ -408,18 +357,16 @@ export class PyodideFs {
    */
   private readdir(node: FSNode): string[] {
     const sync = this.sync
-    if (sync !== undefined) {
-      this.readThrough([], () => {
-        const dir = this.nodes.pathOf(node) + '/'
-        const again = node.listed === true
-        for (const entry of sync.readdir(dir, !again)) {
-          const name = entry.path.replace(/\/$/, '').split('/').pop() ?? ''
-          if (this.nodes.childOf(node, name) !== undefined) continue
-          this.placeEntry(node, name, again ? ownRow(sync, dir + name, entry) : entry)
-        }
-        node.listed = true
-      })
-    }
+    this.readThrough([], () => {
+      const dir = this.nodes.pathOf(node) + '/'
+      const again = node.listed === true
+      for (const entry of sync.readdir(dir, !again)) {
+        const name = entry.path.replace(/\/$/, '').split('/').pop() ?? ''
+        if (this.nodes.childOf(node, name) !== undefined) continue
+        this.placeEntry(node, name, again ? ownRow(sync, dir + name, entry) : entry)
+      }
+      node.listed = true
+    })
     return ['.', '..', ...this.nodes.childNames(node)]
   }
 
@@ -440,7 +387,6 @@ export class PyodideFs {
    */
   private settle(...paths: string[]): void {
     const sync = this.sync
-    if (sync === undefined) return
     const sendable = (m: MirageMutation): boolean =>
       !this.deferred.has(m.path) && !(m.kind === 'rename' && this.deferred.has(m.dst))
     let pending = this.journal.takeMutations().filter(sendable)
@@ -475,10 +421,9 @@ export class PyodideFs {
   }
 
   private placeEntry(parent: FSNode, name: string, stat: VFSStat | VFSEntry): FSNode {
-    const target =
-      stat.isLink && this.sync !== undefined
-        ? this.sync.readlink(this.nodes.pathOf(parent) + '/' + name)
-        : undefined
+    const target = stat.isLink
+      ? this.sync.readlink(this.nodes.pathOf(parent) + '/' + name)
+      : undefined
     const mode = stat.isLink ? LINK_MODE : (stat.mode ?? (stat.isDir ? 0o40755 : 0o100644))
     const node = this.nodes.makeNode(parent, name, mode, stat.rdev ?? 0)
     node.usedBytes = stat.size
@@ -500,15 +445,13 @@ export class PyodideFs {
    * failure belongs, so this one asks the mount rather than answering
    * from the guess. An answer restamps the node, turning it into a
    * directory if that is what it is; content already loaded or written
-   * keeps its own length. Without a worker there is no mount to ask
-   * mid-run, and the preload already asked twice, so the answer is EIO.
+   * keeps its own length.
    *
    * Args:
    *   node: the node to classify.
    */
   private classifyNode(node: FSNode): void {
     const sync = this.sync
-    if (sync === undefined) throw errnoError(this.host, this.errno, 'EIO')
     const path = this.nodes.pathOf(node)
     const stat = this.readThrough([path], () => sync.stat(path))
     node.unclassified = false
@@ -520,7 +463,7 @@ export class PyodideFs {
 
   private loadContents(node: FSNode): void {
     const sync = this.sync
-    if (node.loaded !== false || sync === undefined) return
+    if (node.loaded !== false) return
     const path = this.nodes.pathOf(node)
     const bytes = this.readThrough([path], () => sync.read(path))
     node.contents = bytes
@@ -563,10 +506,6 @@ export class PyodideFs {
 
   private streamOpen(stream: FSStream): void {
     this.loadContents(stream.node)
-    // The mount listed this file but would not serve it, so its real
-    // length and content are unknown. Any handle at all is refused,
-    // because a write through one could only guess at what it replaces.
-    if (stream.node.unreadable === true) throw errnoError(this.host, this.errno, 'EIO')
   }
 
   private streamRead(

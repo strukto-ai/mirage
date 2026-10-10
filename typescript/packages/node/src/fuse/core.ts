@@ -16,48 +16,35 @@ import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
-import { ChunkedHandle, FileTable, writeRuns } from '@struktoai/mirage-core/runtime/handles/index'
+import {
+  ChunkedHandle,
+  FileTable,
+  overlaid,
+  writeRuns,
+} from '@struktoai/mirage-core/runtime/handles/index'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
-import { FileType } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { isMissingOp } from '@struktoai/mirage-core/errors/fs'
+import { classify } from '@struktoai/mirage-core/errors/index'
+import { FileStat, FileType, LIVE_KEY } from '@struktoai/mirage-core/types'
+import type { SetAttrFields } from '@struktoai/mirage-core/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { DIR_MODE, DIR_SIZE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
+import {
+  DIR_MODE,
+  DIR_SIZE,
+  atimeMs,
+  contentSize,
+  deviceRdev,
+  isDir,
+  isLink,
+  mtimeMs,
+  posixMode,
+} from '@struktoai/mirage-core/utils/stat_view'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { errnoError } from './errors.ts'
+import { enoent, erofs } from '@struktoai/mirage-core/errors/fs'
 import { isMacosMetadata } from './platform/macos.ts'
-
-export interface FuseAttr {
-  mtime: Date
-  atime: Date
-  ctime: Date
-  nlink: number
-  size: number
-  mode: number
-  uid: number
-  gid: number
-}
-
-export interface Handle {
-  path: string
-  /** Where the path really points once namespace links are followed. */
-  key: string
-  data?: Uint8Array
-  writeBuf?: [number, Uint8Array][]
-  live?: boolean
-  /** A large file reads a chunk at a time rather than hydrating whole. */
-  chunked?: ChunkedHandle
-}
-
-interface PrefetchEntry {
-  data: Uint8Array
-  expires: number
-}
-
-const PREFETCH_TTL_MS = 30_000
+import type { FuseAttr, Handle } from './types.ts'
 
 export interface MountCoreOptions {
   rootPrefix?: string
@@ -94,13 +81,14 @@ export class MountCore {
   private readonly now: Date
   private readonly root: string
   readonly handles = new FileTable<Handle>()
-  readonly prefetchCache = new Map<string, PrefetchEntry>()
-  private readonly prefetchInflight = new Map<string, Promise<Uint8Array | null>>()
-  // Bumped whenever the file changes underneath an in-flight prefetch, so
-  // a read that started before a truncate or write cannot install the
+  // One hydration read per file identity at a time: opens of the same
+  // size-unknown file while one is out share it.
+  private readonly hydrations = new Map<string, Promise<Uint8Array | undefined>>()
+  // Bumped whenever the file changes underneath a hydration in flight, so a
+  // read that started before a truncate or write cannot hand a handle the
   // bytes it fetched as the file's current content. An entry exists only
-  // while that path's prefetch is in flight.
-  private readonly prefetchGen = new Map<string, number>()
+  // while that file's hydration is out.
+  private readonly hydrationGen = new Map<string, number>()
   // One chain per file identity that persists and truncations join in
   // order, so a truncate cannot slip in between a flush detaching its
   // buffer and that buffer landing, which would let the flush restore the
@@ -158,61 +146,45 @@ export class MountCore {
       mode: DIR_MODE,
       uid: this.uid,
       gid: this.gid,
+      rdev: 0,
     }
   }
 
-  fileStat(size: number): FuseAttr {
+  /**
+   * The attrs for one stat row, the way a guest's stat reads it. The row
+   * carries the namespace overlay (chmod bits, chown ids, a touched mtime),
+   * so what a metadata op stored is what the mount shows, and a device
+   * keeps its type and numbers. String uid/gid (names) fall back to the
+   * mounting user: the kernel wants numbers and there is no user db to map
+   * against. A missing stamp falls back to the mount's start time; epoch
+   * zero is a real time and lands. `size` replaces the row's, from an open
+   * handle or a link's shown target. Mirrors Python's `MountCore.attrs`.
+   */
+  attrs(s: FileStat, size: number | null = null): FuseAttr {
+    const mtime = mtimeMs(s)
+    const when = mtime === null ? this.now : new Date(mtime)
+    const atime = atimeMs(s)
     return {
-      mtime: this.now,
-      atime: this.now,
-      ctime: this.now,
-      nlink: 1,
-      size,
-      mode: FILE_MODE,
-      uid: this.uid,
-      gid: this.gid,
+      mtime: when,
+      atime: atime === null ? when : new Date(atime),
+      ctime: when,
+      nlink: isDir(s) ? 2 : 1,
+      size: size ?? contentSize(s),
+      mode: posixMode(s),
+      uid: typeof s.uid === 'number' ? s.uid : this.uid,
+      gid: typeof s.gid === 'number' ? s.gid : this.gid,
+      rdev: deviceRdev(s),
     }
   }
 
   /**
-   * Fold merged stat attributes into an attr record. The workspace stat
-   * already carries the namespace overlay (chmod bits, chown ids, touched
-   * mtime), so honoring these fields here is what makes metadata ops
-   * visible through a mount. String uid/gid (names) are skipped: the kernel
-   * wants numeric ids and there is no user db to map against.
+   * The target to present for a link at a mount path. Relative targets are
+   * stored verbatim and returned as-is. Absolute targets name virtual
+   * paths, so they are rewritten relative to the link's directory: returned
+   * raw, the kernel would resolve them against the host root and escape
+   * the mountpoint.
    */
-  applyStatAttrs(entry: FuseAttr, s: FileStat): FuseAttr {
-    if (s.mode !== null) {
-      entry.mode = (entry.mode & ~0o7777) | (s.mode & 0o7777)
-    }
-    if (typeof s.uid === 'number') entry.uid = s.uid
-    if (typeof s.gid === 'number') entry.gid = s.gid
-    if (s.modified !== null) {
-      // One translator per language: the naive-stamp-is-UTC rule lives
-      // in core's stat view, never re-parsed here with a bare Date.
-      // Null means the stamp did not parse; epoch zero is a real time
-      // and lands.
-      const ms = mtimeMs(s)
-      if (ms !== null) {
-        entry.mtime = new Date(ms)
-        entry.ctime = new Date(ms)
-      }
-    }
-    return entry
-  }
-
-  /**
-   * The target to present for a namespace link at a mount path, or null
-   * when not a link. Relative targets are stored verbatim and returned
-   * as-is. Absolute targets name virtual paths, so they are rewritten
-   * relative to the link's directory: returned raw, the kernel would
-   * resolve them against the host root and escape the mountpoint.
-   */
-  linkTarget(path: string): string | null {
-    const links = this.files.links
-    if (links === null) return null
-    const target = links.readlink(this.resolve(path))
-    if (target === null) return null
+  shownTarget(path: string, target: string): string {
     if (!target.startsWith('/')) return target
     let virtualTarget = target
     if (this.root !== '') {
@@ -232,71 +204,50 @@ export class MountCore {
   }
 
   /**
-   * The attrs a namespace link reports, from its own node row.
-   *
-   * Built from the target string alone, every link over a mount answered
-   * the mount's construction time and the mounting user, so what
-   * `chown -h` and `touch -h` wrote was invisible through the kernel.
-   * The row is the same one the dispatcher answers a no-follow stat with. Size
-   * stays the displayable target's length (what this mount's readlink
-   * returns), and the mode is always lrwxrwxrwx: a symlink's permission
-   * bits are not consulted by any POSIX system.
+   * The length of the bytes an open handle on the file holds. A size-unknown
+   * file is read whole when it opens, so while a handle is open its length
+   * answers a stat by path too (`ls -l` beside a `cat`). Once every handle
+   * is released, the dispatcher answers from the workspace cache instead.
+   * Mirrors Python's `held_size`.
    */
-  linkStat(target: string, virtual: string): FuseAttr {
-    const entry = this.fileStat(new TextEncoder().encode(target).byteLength)
-    const row = this.files.links?.linkStatAt(virtual) ?? null
-    if (row !== null) this.applyStatAttrs(entry, row)
-    entry.mode = 0o120777
-    return entry
-  }
-
-  cachedSize(path: string): number | null {
-    return this.cachedData(path)?.byteLength ?? null
-  }
-
-  cachedData(path: string): Uint8Array | null {
+  heldSize(path: string): number | null {
     const key = this.identity(path)
     for (const ctx of this.handles.values()) {
-      if (ctx.key === key && ctx.data !== undefined) return ctx.data
+      if (ctx.key === key && ctx.data !== undefined) return ctx.data.byteLength
     }
-    const entry = this.prefetchCache.get(key)
-    if (entry !== undefined && entry.expires > Date.now()) return entry.data
-    if (entry !== undefined) this.prefetchCache.delete(key)
     return null
   }
 
   /**
-   * Fetch bytes for a size-unknown file and cache them so the open → read →
-   * fstat burst (and subsequent stats within the TTL) reuse the same fetch.
-   * With getattr reporting 0 pre-open, this hydration is what lets fgetattr
-   * answer with the real byte length after open (mirrors Python's
-   * `prefetch_read`).
+   * Read a size-unknown file whole for the handle opening it, through the
+   * dispatcher, so a caching mount keeps the bytes for the next open and for
+   * a stat once this one closes. Undefined when the read fails: open() stays
+   * permissive and the read() that follows surfaces the error. Mirrors
+   * Python's `_hydrate`.
    */
-  async prefetch(path: string): Promise<Uint8Array | null> {
-    const cached = this.cachedData(path)
-    if (cached !== null) return cached
+  private hydrate(path: string): Promise<Uint8Array | undefined> {
     const key = this.identity(path)
-    const inflight = this.prefetchInflight.get(key)
+    const inflight = this.hydrations.get(key)
     if (inflight !== undefined) return inflight
-    const promise = (async (): Promise<Uint8Array | null> => {
+    const promise = (async (): Promise<Uint8Array | undefined> => {
       try {
         for (;;) {
-          const gen = this.prefetchGen.get(key) ?? 0
+          const gen = this.hydrationGen.get(key) ?? 0
           const data = await this.op(() => this.files.read(this.resolve(path)))
           // The file changed while this read was out: what came back is
-          // stale, so read again rather than install it.
-          if ((this.prefetchGen.get(key) ?? 0) !== gen) continue
-          this.prefetchCache.set(key, { data, expires: Date.now() + PREFETCH_TTL_MS })
+          // stale, so read again rather than hand it over.
+          if ((this.hydrationGen.get(key) ?? 0) !== gen) continue
           return data
         }
-      } catch {
-        return null
+      } catch (err) {
+        console.debug(`fuse: hydration read of ${path} failed, deferring to read(): ${String(err)}`)
+        return undefined
       } finally {
-        this.prefetchInflight.delete(key)
-        this.prefetchGen.delete(key)
+        this.hydrations.delete(key)
+        this.hydrationGen.delete(key)
       }
     })()
-    this.prefetchInflight.set(key, promise)
+    this.hydrations.set(key, promise)
     return promise
   }
 
@@ -359,10 +310,6 @@ export class MountCore {
     return records
   }
 
-  private async writeFile(path: string, data: Uint8Array): Promise<void> {
-    await this.op(() => this.files.write(this.resolve(path), data))
-  }
-
   /**
    * Land write runs on the mount, one pwrite each, in order. A pwrite keeps
    * every stored byte the handle did not write, so nothing is read through
@@ -389,40 +336,82 @@ export class MountCore {
 
   // ── POSIX surface (throws; adapters classify) ────────────────────
 
-  async getattr(path: string): Promise<FuseAttr> {
-    if (path === '/') return this.dirStat()
+  /**
+   * POSIX attributes for a path. One stat through the dispatcher answers: a
+   * link the session cannot see is absent, as it is to the shell, and a
+   * visible one reports its own row with its target read through the
+   * dispatcher too. `follow` reports a trailing link's target rather than
+   * the link (stat rather than lstat).
+   */
+  async getattr(path: string, follow = false, ctx: Handle | null = null): Promise<FuseAttr> {
+    let size = ctx?.data?.byteLength ?? null
+    if (path === '/') return this.rootAttrs()
     // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
     // Reject early to avoid hitting the ops layer.
     const name = path.slice(path.lastIndexOf('/') + 1)
     if (isMacosMetadata(name)) {
-      throw errnoError('ENOENT', `no such file or directory: ${path}`)
+      throw enoent(path)
     }
-    // Link check must precede the workspace stat: `ws.vfs` follows
-    // namespace links, so stat on a link path reports the target.
-    const target = this.linkTarget(path)
-    if (target !== null) return this.linkStat(target, this.resolve(path))
-    const s = await this.op(() => this.files.stat(this.resolve(path)))
-    if (s.type === FileType.DIRECTORY) {
-      return this.applyStatAttrs(this.dirStat(), s)
+    const virtual = this.resolve(path)
+    let s: FileStat
+    try {
+      s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
+    } catch (err) {
+      // An open descriptor keeps the bytes it had after an unlink.
+      if (size === null || classify(err) !== 'ENOENT') throw err
+      return this.attrs(new FileStat({ name, type: FileType.FILE }), size)
     }
-    // Size-unknown API files stat as 0 before open (never a fake size):
-    // the mount's direct_io makes the kernel read to EOF regardless, and
-    // attrTimeout '0' routes the post-open fstat to fgetattr, which serves
-    // the real hydrated size. Mirrors Python's core.py; see the CLAUDE.md
-    // FUSE section.
-    let size = s.size
-    size ??= this.cachedSize(path) ?? 0
-    return this.applyStatAttrs(this.fileStat(size), s)
+    if (isLink(s)) {
+      const target = await this.op(() => this.files.readlink(virtual))
+      return this.attrs(s, new TextEncoder().encode(this.shownTarget(path, target)).byteLength)
+    }
+    if (isDir(s)) return this.attrs(s)
+    // A size-unknown file the cache has not seen stats as 0 (never a fake
+    // size): the mount's direct_io makes the kernel read to EOF regardless,
+    // and attrTimeout '0' routes the post-open fstat to fgetattr, which
+    // serves the real hydrated size. Mirrors Python's core.py; see the
+    // CLAUDE.md FUSE section.
+    if (size === null && s.size === null) size = this.heldSize(path)
+    if (ctx?.writeBuf !== undefined && ctx.writeBuf.length > 0) {
+      let end = size ?? contentSize(s)
+      for (const [offset, data] of ctx.writeBuf) end = Math.max(end, offset + data.byteLength)
+      size = end
+    }
+    return this.attrs(s, size)
   }
 
-  /** Attributes through an open handle, or path-based when not hydrated. */
+  /**
+   * Attributes through an open handle: the path's row, with the size the
+   * handle holds, what it wrote and has not flushed included.
+   */
   async fgetattr(path: string, fd: number): Promise<FuseAttr> {
-    // fstat(fd) after open: the open handler prefetched size-unknown files
+    // fstat(fd) after open: the open handler hydrated size-unknown files
     // into the handle, so answer with the real byte length instead of the
     // 0 that path-based getattr reported before open.
-    const ctx = this.handles.get(fd)
-    if (ctx?.data !== undefined) return this.fileStat(ctx.data.byteLength)
-    return this.getattr(ctx?.path ?? path)
+    const ctx = this.handles.get(fd) ?? null
+    // A flush still landing has taken the handle's buffer: wait for it, so
+    // the size counts what it wrote.
+    if (ctx !== null) await this.pending.get(ctx.key)
+    // The handle is open on the file a link led to, so its stat is the
+    // target's.
+    return this.getattr(ctx?.path ?? path, ctx !== null, ctx)
+  }
+
+  /**
+   * The mount root's attrs: its own row through the dispatcher, so a chmod
+   * made on it shows, or a plain directory when nothing answers for it (a
+   * workspace with no mount at `/`). Mirrors Python's `root_attrs`.
+   */
+  async rootAttrs(): Promise<FuseAttr> {
+    let s: FileStat
+    try {
+      s = await this.op(() => this.files.stat(this.resolve('/')))
+    } catch (err) {
+      if (classify(err) !== 'ENOENT') throw err
+      console.debug(`fuse: the mount root has no row of its own: ${String(err)}`)
+      return this.dirStat()
+    }
+    return this.attrs(s)
   }
 
   async readdir(path: string): Promise<string[]> {
@@ -440,24 +429,33 @@ export class MountCore {
   }
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
-    const ctx = this.handles.get(fd)
-    if (ctx?.live === true)
-      return this.op(() => this.files.read(this.resolve(ctx.path), { offset: pos, size: len }))
     // Filetype-aware read: no `raw: true`, so an extension with a
     // registered renderer surfaces as rendered text. Mirage registers
     // none by default, so this reads raw bytes until a mount adds one.
-    // Matches Python's `self._ops.read(path)`, which also dispatches.
-    path = ctx?.path ?? path
-    if (ctx?.chunked !== undefined && ctx.data === undefined) return ctx.chunked.pread(pos, len)
-    if (ctx !== undefined && ctx.data === undefined) {
-      const cached = this.cachedData(path)
-      ctx.data = cached ?? (await this.op(() => this.files.read(this.resolve(path))))
+    // Matches Python's MountCore.read, which also dispatches.
+    const ctx = this.handles.get(fd)
+    // A flush still landing has taken the handle's buffer and not yet
+    // refreshed its bytes: wait for it, so the read sees what was written.
+    if (ctx !== undefined) await this.pending.get(ctx.key)
+    if (ctx === undefined) {
+      // Whole, as a handle's first read is: the read that fills the cache
+      // and records the version a conditional write sends.
+      const data = await this.op(() => this.files.read(this.resolve(path)))
+      return data.subarray(pos, pos + len)
     }
-    const data =
-      ctx?.data ??
-      this.cachedData(path) ??
-      (await this.op(() => this.files.read(this.resolve(path))))
-    return data.subarray(pos, pos + len)
+    let stored: Uint8Array
+    if (ctx.live === true) {
+      stored = await this.op(() =>
+        this.files.read(this.resolve(ctx.path), { offset: pos, size: len }),
+      )
+    } else if (ctx.chunked !== undefined && ctx.data === undefined) {
+      stored = await ctx.chunked.pread(pos, len)
+    } else {
+      ctx.data ??= await this.op(() => this.files.read(this.resolve(ctx.path)))
+      stored = ctx.data.subarray(pos, pos + len)
+    }
+    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return stored
+    return overlaid(stored, pos, len, ctx.writeBuf)
   }
 
   /** Buffer a write on its handle, or apply it directly when there is none. */
@@ -474,15 +472,7 @@ export class MountCore {
   async create(path: string): Promise<number> {
     const key = this.identity(path)
     await this.mutate(key, async () => {
-      // Route through the VFS's `create` op so backends that distinguish
-      // "create empty" from "write bytes" get the right code path. Falls back
-      // to writeFile(empty) when the VFS doesn't expose `create`.
-      try {
-        await this.op(() => this.files.create(this.resolve(path)))
-      } catch (dispatchErr) {
-        if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
-        await this.writeFile(path, new Uint8Array(0))
-      }
+      await this.op(() => this.files.create(this.resolve(path)))
       await this.changed(path)
     })
     return this.handles.add({ path, key })
@@ -492,10 +482,10 @@ export class MountCore {
     await this.op(() => this.files.mkdir(this.resolve(path)))
   }
 
-  readlink(path: string): string {
-    const target = this.linkTarget(path)
-    if (target === null) throw errnoError('EINVAL', `not a symbolic link: ${path}`)
-    return target
+  /** The target of a namespace link, read through the dispatcher; EINVAL when not a link. */
+  async readlink(path: string): Promise<string> {
+    const target = await this.op(() => this.files.readlink(this.resolve(path)))
+    return this.shownTarget(path, target)
   }
 
   /**
@@ -509,7 +499,7 @@ export class MountCore {
     // The write routes through the dispatcher like every other FUSE op, so
     // session grants and admission policies refuse a scoped kernel
     // mount exactly like a scoped shell.
-    if (this.files.links === null) throw errnoError('EROFS', 'workspace has no namespace links')
+    if (this.files.links === null) throw erofs(dest)
     const stored = src.startsWith('/') ? this.resolve(src) : src
     await this.op(() => this.files.symlink(this.resolve(dest), stored))
   }
@@ -535,25 +525,23 @@ export class MountCore {
   }
 
   /**
-   * The one function every mutation of a file's bytes goes through. Every
-   * cache the core keeps for a file is keyed by its identity (the mount
-   * path with namespace links followed), and this is the only place they
-   * are invalidated, so a new mutating op cannot forget one of them and a
-   * link alias cannot slip past. The TTL entry is dropped, a prefetch
-   * still in flight is outdated so it re-reads instead of installing
-   * what it fetched, and hydrated handles on the file are refreshed from
-   * the backend in one read, so fstat and read through any of them,
-   * including the handle that wrote, see the new bytes. A removal or
-   * rename passes `rehydrate = false`: POSIX keeps an open descriptor on
-   * the bytes it had. A refresh that fails is logged and leaves the
-   * handles unhydrated rather than failing the committed mutation.
-   * Mirrors Python's `_changed`.
+   * The one function every mutation of a file's bytes goes through. The
+   * open handles on a file are matched by its identity (the mount path with
+   * namespace links followed), and this is the only place their bytes are
+   * refreshed, so a new mutating op cannot forget one of them and a link
+   * alias cannot slip past. A hydration still in flight is outdated so it
+   * re-reads instead of handing over what it fetched, and hydrated handles
+   * on the file are refreshed in one read through the dispatcher, so fstat
+   * and read through any of them, including the handle that wrote, see the
+   * new bytes. A removal or rename passes `rehydrate = false`: POSIX keeps
+   * an open descriptor on the bytes it had. A refresh that fails is logged
+   * and leaves the handles unhydrated rather than failing the committed
+   * mutation. Mirrors Python's `_changed`.
    */
   private async changed(path: string, rehydrate = true): Promise<void> {
     const key = this.identity(path)
-    this.prefetchCache.delete(key)
-    if (this.prefetchInflight.has(key)) {
-      this.prefetchGen.set(key, (this.prefetchGen.get(key) ?? 0) + 1)
+    if (this.hydrations.has(key)) {
+      this.hydrationGen.set(key, (this.hydrationGen.get(key) ?? 0) + 1)
     }
     if (!rehydrate) return
     for (const ctx of this.handles.values()) {
@@ -658,18 +646,7 @@ export class MountCore {
       for (const ctx of this.handles.values()) {
         if (ctx.key === key) await this.persistBuffered(ctx)
       }
-      // Prefer the VFS's dedicated `truncate` op (atomic on most
-      // backends). Fall back to read/resize/write for mounts that don't
-      // expose one.
-      try {
-        await this.op(() => this.files.truncate(this.resolve(path), size))
-      } catch (dispatchErr) {
-        if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
-        const data = await this.op(() => this.files.read(this.resolve(path), { raw: true }))
-        const out = new Uint8Array(size)
-        out.set(data.subarray(0, Math.min(data.byteLength, size)), 0)
-        await this.writeFile(path, out)
-      }
+      await this.op(() => this.files.truncate(this.resolve(path), size))
       await this.changed(path)
     })
   }
@@ -686,6 +663,28 @@ export class MountCore {
       favail: 1_000_000,
       namemax: 255,
     }
+  }
+
+  /**
+   * Store metadata through the dispatcher. The backend keeps what it can and
+   * the namespace overlay the rest, so a chmod or chown through the mount is
+   * what `stat` in a shell reads back, on a backend with no permission bits
+   * of its own too. A null field is left as it is. Mirrors Python's
+   * `MountCore.setattr`.
+   */
+  async setattr(
+    path: string,
+    mode: number | null,
+    uid: number | null = null,
+    gid: number | null = null,
+  ): Promise<void> {
+    // The kernel has already resolved any link the call follows, so the
+    // path names the entry to change, a link itself for `chown -h`.
+    const fields: SetAttrFields = { nofollow: true }
+    if (mode !== null) fields.mode = mode & 0o7777
+    if (uid !== null) fields.uid = uid
+    if (gid !== null) fields.gid = gid
+    await this.op(() => this.files.setattr(this.resolve(path), fields))
   }
 
   /**
@@ -722,7 +721,7 @@ export class MountCore {
   async open(path: string, flags = 0): Promise<number> {
     await this.removals.get(this.identity(path))
     const s = await this.op(() => this.files.stat(this.resolve(path)))
-    const ctx: Handle = { path, key: this.identity(path), live: s.extra['mirage.live'] === true }
+    const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
     if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
       // libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
@@ -739,8 +738,8 @@ export class MountCore {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored
       // rather than shadowed by literal raw emptiness.
-      const data = await this.prefetch(path)
-      if (data !== null) ctx.data = data
+      const data = await this.hydrate(path)
+      if (data !== undefined) ctx.data = data
     } else if (s.size > READ_CHUNK && (flags & fsConstants.O_TRUNC) === 0) {
       // A file larger than a chunk is read a chunk at a time: the kernel
       // asks in small pieces, and fetching the whole file on the first one

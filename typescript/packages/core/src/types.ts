@@ -608,6 +608,11 @@ export const LINK_TARGET_KEY = 'link_target'
 // FileStat.extra key holding a synthetic device's logical [major, minor].
 export const DEVICE_NUMBERS_KEY = 'device_numbers'
 
+// FileStat.extra key marking a file whose bytes change on their own (a
+// generated document): a kernel mount reads it fresh on every read rather
+// than holding what an earlier read returned.
+export const LIVE_KEY = 'mirage.live'
+
 /**
  * The metadata fields a `setattr` writes, all optional.
  *

@@ -146,7 +146,6 @@ def _run_fuse(
     fuse: Any,
     fs: MirageFS,
     mountpoint: str,
-    foreground: bool,
     backend: MountBackend = MountBackend.FUSE,
 ) -> None:
     # direct_io: the kernel ignores st_size and keeps issuing reads until the
@@ -175,7 +174,7 @@ def _run_fuse(
         fs,
         mountpoint,
         nothreads=True,
-        foreground=foreground,
+        foreground=True,
         **opts,
         **win_opts,
     )
@@ -238,63 +237,9 @@ def mount_background(
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(
         target=_run_fuse,
-        args=(fuse, fs, mountpoint, True, resolved),
+        args=(fuse, fs, mountpoint, resolved),
         daemon=True,
     )
     t.start()
     _await_ready(t, mountpoint)
     return t
-
-
-def mount(
-    files: Files | None = None,
-    mountpoint: str = "",
-    foreground: bool = True,
-    fs: MirageFS | None = None,
-    daemon: bool = False,
-    post_fork=None,
-    backend: str | MountBackend = MountBackend.FUSE,
-) -> None:
-    resolved = prepare_backend(backend, files=files, mountpoint=mountpoint)
-    if fs is None:
-        if files is None:
-            raise ValueError("mount requires either ops or a prebuilt fs")
-        fs = MirageFS(files)
-    fuse = load_fuse()
-    _prepare_mountpoint(mountpoint)
-    if daemon:
-        pid = os.fork()
-        if pid > 0:
-            os._exit(0)
-        os.setsid()
-        if post_fork:
-            post_fork()
-        _run_fuse(fuse, fs, mountpoint, True, resolved)
-        return
-    t = threading.Thread(
-        target=_run_fuse,
-        args=(fuse, fs, mountpoint, foreground, resolved),
-        daemon=True,
-    )
-    if post_fork:
-        post_fork()
-    t.start()
-    try:
-        while t.is_alive():
-            t.join(timeout=0.5)
-    except KeyboardInterrupt:
-        print("\nUnmounting...", flush=True)
-        if sys.platform == "darwin":
-            subprocess.run(
-                ["diskutil", "unmount", "force", mountpoint],
-                capture_output=True,
-            )
-        elif sys.platform == "win32":
-            # No fusermount equivalent: WinFsp tears the mount down when the
-            # serving process exits.
-            pass
-        else:
-            binary = resolve_fusermount_binary()
-            if binary is not None:
-                subprocess.run([binary, "-u", mountpoint], capture_output=True)
-        t.join(timeout=5)

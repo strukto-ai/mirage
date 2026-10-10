@@ -50,7 +50,11 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
         super().__init__(captures, config, script)
-        self._children: set[asyncio.subprocess.Process] = set()
+        # Each running child with the loop it runs on, which alone may
+        # wait for it.
+        self._children: dict[
+            asyncio.subprocess.Process, asyncio.AbstractEventLoop
+        ] = {}
 
     def policy_argv(self) -> list[str]:
         argv: list[str] = []
@@ -98,7 +102,7 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        self._children.add(proc)
+        self._children[proc] = asyncio.get_running_loop()
         try:
             stdout, stderr = await proc.communicate(request.stdin)
         except asyncio.CancelledError:
@@ -107,7 +111,7 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
             await proc.wait()
             raise
         finally:
-            self._children.discard(proc)
+            self._children.pop(proc, None)
         return RunResult(
             stdout=stdout,
             stderr=stderr or None,
@@ -115,8 +119,18 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         )
 
     async def close(self) -> None:
-        children = tuple(self._children)
-        for child in children:
+        """Kill every child still running, so none outlives the workspace.
+
+        Only a child on the closing loop is waited for. One a sync
+        ``with`` block left running belongs to the loop that block exits
+        inside, which runs nothing until the close returns; that loop
+        reaps it once the kill lands.
+        """
+        children = list(self._children.items())
+        for child, _ in children:
             if child.returncode is None:
                 child.kill()
-        await asyncio.gather(*(child.wait() for child in children))
+        loop = asyncio.get_running_loop()
+        await asyncio.gather(
+            *(child.wait() for child, owner in children if owner is loop)
+        )

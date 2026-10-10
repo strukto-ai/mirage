@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DocumentAccessor } from '../../accessor/document.ts'
-import { FileType, FileStat, type PathSpec } from '../../types.ts'
+import { FileType, FileStat, LIVE_KEY, type PathSpec } from '../../types.ts'
 import { read } from './read.ts'
 
 export async function stat(accessor: DocumentAccessor, path: PathSpec): Promise<FileStat> {
@@ -23,6 +23,6 @@ export async function stat(accessor: DocumentAccessor, path: PathSpec): Promise<
     type: FileType.FILE,
     size: data.byteLength,
     modified: null,
-    extra: { 'mirage.live': true },
+    extra: { [LIVE_KEY]: true },
   })
 }

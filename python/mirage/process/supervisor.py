@@ -205,9 +205,25 @@ class ProcessSupervisor:
         with self._lock:
             return tuple(handle for _, handle in self._live.values())
 
-    async def drain(self) -> None:
-        """Join managed runners before releasing their workspace resources."""
-        await asyncio.gather(*(process.join() for process in self.live()))
+    async def drain(
+        self, blocked: asyncio.AbstractEventLoop | None = None
+    ) -> None:
+        """Join managed runners before releasing their workspace resources.
+
+        Args:
+            blocked (asyncio.AbstractEventLoop | None): a loop that is
+                waiting for this drain to return (a sync ``with`` block
+                exiting inside it). Its runners cannot run until then, so
+                they are left to unwind from their cancellation instead
+                of being joined.
+        """
+        await asyncio.gather(
+            *(
+                process.join()
+                for process in self.live()
+                if process.task.get_loop() is not blocked
+            )
+        )
 
     def stop(self) -> None:
         """Close admission and request cancellation of all remaining runners.

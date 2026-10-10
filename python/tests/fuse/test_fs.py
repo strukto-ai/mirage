@@ -24,8 +24,9 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
-from mirage.fuse.fs import XATTR_CREATE, XATTR_REPLACE, MirageFS
-from mirage.types import MountMode
+from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
+from mirage.fuse.fs import MirageFS
+from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -251,15 +252,21 @@ async def test_statfs(seed_ws):
 
 
 @pytest.mark.asyncio
-async def test_chmod_does_not_raise(seed_ws):
+async def test_chmod_is_what_the_shell_stat_reads(seed_ws):
     fs = MirageFS(seed_ws.vfs)
-    fs.chmod("/a.txt", 0o644)
+    fs.chmod("/a.txt", stat.S_IFREG | 0o600)
+    result = await seed_ws.shell("stat -c %a /a.txt")
+    assert result.stdout == b"600\n"
+    assert stat.S_IMODE(fs.getattr("/a.txt")["st_mode"]) == 0o600
 
 
 @pytest.mark.asyncio
-async def test_chown_does_not_raise(seed_ws):
+async def test_chown_is_what_the_shell_stat_reads(seed_ws):
     fs = MirageFS(seed_ws.vfs)
-    fs.chown("/a.txt", os.getuid(), os.getgid())
+    fs.chown("/a.txt", 1234, 5678)
+    fs.chown("/a.txt", -1, 4321)
+    result = await seed_ws.shell("stat -c '%u %g' /a.txt")
+    assert result.stdout == b"1234 4321\n"
 
 
 @pytest.mark.asyncio
@@ -273,7 +280,9 @@ async def test_setattr_x_metadata_only_accepts(seed_ws):
     # The FSKit shim finalizes every created item through setattr_x; a
     # metadata-only payload must succeed for create/mkdir to work at all.
     fs = MirageFS(seed_ws.vfs)
-    assert fs.setattr_x("/a.txt", {"mode": 0o644, "uid": 501, "gid": 20}) == 0
+    assert fs.setattr_x("/a.txt", {"mode": 0o640, "uid": 501, "gid": 20}) == 0
+    result = await seed_ws.shell("stat -c '%a %u %g' /a.txt")
+    assert result.stdout == b"640 501 20\n"
 
 
 @pytest.mark.asyncio
@@ -593,8 +602,8 @@ class _SizelessOps:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    async def stat(self, path):
-        s = await self._inner.stat(path)
+    async def stat(self, path, nofollow=False):
+        s = await self._inner.stat(path, nofollow=nofollow)
         return s.model_copy(update={"size": None})
 
     async def read(self, path, offset=0, size=None, raw=False):
@@ -669,15 +678,50 @@ async def test_unknown_size_truncate_rehydrates_with_settled_writes(
     fs.release("/u.json", reader)
 
 
+class _UnsizedRAM(RAMVFS):
+    """A caching mount whose backend names no size, as an API mount does."""
+
+    caches_reads = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._store.dirs.add("/")
+        self._store.files["/u.json"] = _PAYLOAD
+        self.reads = 0
+
+    async def stat(self, path, *args, **kwargs):
+        row = await super().stat(path, *args, **kwargs)
+        if row.type == FileType.DIRECTORY:
+            return row
+        return row.model_copy(update={"size": None})
+
+    async def read(self, path, *args, **kwargs):
+        self.reads += 1
+        return await super().read(path, *args, **kwargs)
+
+
 @pytest.mark.asyncio
-async def test_unknown_size_truncate_through_a_link_drops_the_targets_cache():
+async def test_a_released_files_size_comes_from_the_workspace_cache():
+    vfs = _UnsizedRAM()
+    fs = MirageFS(Workspace({"/": vfs}, mode=MountMode.WRITE).vfs)
+    assert fs.getattr("/u.json")["st_size"] == 0
+    fh = fs.open("/u.json", os.O_RDONLY)
+    assert fs.read("/u.json", 1024, 0, fh) == _PAYLOAD
+    fs.release("/u.json", fh)
+    assert fs.getattr("/u.json")["st_size"] == len(_PAYLOAD)
+    fh = fs.open("/u.json", os.O_RDONLY)
+    fs.release("/u.json", fh)
+    assert vfs.reads == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_truncate_through_a_link_leaves_no_stale_size():
     # The target was opened and released as /u.json, leaving its bytes in
-    # the TTL cache; an O_TRUNC open through a link to it must drop that
-    # entry too, or the next stat of /u.json serves the old length.
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("tee /u.json", stdin=_PAYLOAD)
+    # the workspace cache; an O_TRUNC open through a link to it must not
+    # leave the old length for the next stat of /u.json.
+    ws = Workspace({"/": _UnsizedRAM()}, mode=MountMode.WRITE)
     await ws.shell("ln -s u.json /lk")
-    fs = MirageFS(_SizelessOps(ws.vfs))
+    fs = MirageFS(ws.vfs)
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
     assert fs.getattr("/u.json")["st_size"] == len(_PAYLOAD)
@@ -762,53 +806,12 @@ async def test_unknown_size_path_stat_uses_open_handle(sizeless_fs):
 
 
 @pytest.mark.asyncio
-async def test_prefetch_survives_release_within_ttl(sizeless_fs):
-    fs, ops = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDONLY)
-    fs.release("/u.json", fh)
-    attrs = fs.getattr("/u.json")
-    assert attrs["st_size"] == len(_PAYLOAD)
-    assert ops.read_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_prefetch_expires_after_ttl(sizeless_fs):
-    fs, _ = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDONLY)
-    fs.release("/u.json", fh)
-    data, _ = fs.core._prefetch["/u.json"]
-    fs.core._prefetch["/u.json"] = (data, 0.0)
-    attrs = fs.getattr("/u.json")
-    assert attrs["st_size"] == 0
-    assert "/u.json" not in fs.core._prefetch
-
-
-@pytest.mark.asyncio
 async def test_open_then_read_does_not_refetch(sizeless_fs):
     fs, ops = sizeless_fs
     fh = fs.open("/u.json", os.O_RDONLY)
     assert fs.read("/u.json", 1024, 0, fh) == _PAYLOAD
     assert fs.read("/u.json", 7, 0, fh) == _PAYLOAD[:7]
     assert ops.read_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_flush_drops_prefetch(sizeless_fs):
-    fs, _ = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDWR)
-    assert "/u.json" in fs.core._prefetch
-    fs.write("/u.json", b"NEW", 0, fh)
-    fs.flush("/u.json", fh)
-    assert "/u.json" not in fs.core._prefetch
-
-
-@pytest.mark.asyncio
-async def test_unlink_drops_prefetch(sizeless_fs):
-    fs, _ = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDONLY)
-    fs.release("/u.json", fh)
-    fs.unlink("/u.json")
-    assert "/u.json" not in fs.core._prefetch
 
 
 @pytest.mark.asyncio
@@ -882,6 +885,40 @@ async def test_getattr_honors_chmod_overlay(seed_ws):
     attrs = fs.getattr("/a.txt")
     assert stat.S_ISREG(attrs["st_mode"])
     assert stat.S_IMODE(attrs["st_mode"]) == 0o640
+
+
+@pytest.mark.asyncio
+async def test_fstat_keeps_the_mode_and_mtime(seed_ws):
+    await seed_ws.shell("chmod 600 /a.txt; touch -t 202603041200 /a.txt")
+    fs = MirageFS(seed_ws.vfs)
+    fh = fs.open("/a.txt", os.O_RDONLY)
+    fs.read("/a.txt", 1024, 0, fh)
+    attrs = fs.getattr("/a.txt", fh)
+    stamp = datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc)
+    assert stat.S_IMODE(attrs["st_mode"]) == 0o600
+    assert attrs["st_mtime"] == int(stamp.timestamp()) * 10**9
+    assert attrs["st_size"] == len(b"hello world")
+
+
+@pytest.mark.asyncio
+async def test_a_device_reports_our_row(seed_ws):
+    attrs = MirageFS(seed_ws.vfs).getattr("/dev/null")
+    assert stat.S_ISCHR(attrs["st_mode"])
+    assert stat.S_IMODE(attrs["st_mode"]) == 0o666
+    assert attrs["st_rdev"] == (1 << 8) | 3
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_link_is_absent(seed_ws):
+    await seed_ws.shell("ln -s /a.txt /lnk")
+    session = seed_ws.create_session("agent")
+    session.visibility = Visibility(paths=HiddenPaths(paths=("/lnk",)))
+    fs = MirageFS(seed_ws.vfs, session=session)
+    for call in (lambda: fs.getattr("/lnk"), lambda: fs.readlink("/lnk")):
+        with pytest.raises(OSError) as exc:
+            call()
+        assert exc.value.errno == errno.ENOENT
+    assert MirageFS(seed_ws.vfs).readlink("/lnk") == "a.txt"
 
 
 @pytest.mark.asyncio

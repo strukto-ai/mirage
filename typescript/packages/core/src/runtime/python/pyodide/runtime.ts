@@ -35,10 +35,8 @@ import {
 import { noWorker, PyodideUnavailableError } from './errors.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
 import { RuntimeFiles } from '../../files.ts'
-import { applyMutation, createJournal, type MutationJournal } from './fs/journal.ts'
+import { createJournal, type MutationJournal } from './fs/journal.ts'
 import { PyodideFs } from './fs/fs.ts'
-import { preloadInto } from './fs/preload.ts'
-import { PyodideFsSeed } from './fs/seed.ts'
 import { PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
@@ -127,7 +125,7 @@ function servable(prefix: string): boolean {
 
 /**
  * Drop every prefix nested inside another: only the shallowest of a
- * nested pair earns an Emscripten mountpoint, and its preload descends
+ * nested pair earns an Emscripten mountpoint, and its lookups descend
  * into the child through the dispatcher's merged readdir.
  *
  * Args:
@@ -435,7 +433,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       if (armed?.disarm() === 'deadline') {
         throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
       }
-      const flushFailures = await this.drainMutations()
+      const flushFailures = this.drainMutations()
       const [valueJson, out, errBytes, ok, syntax] = arr
       if (!ok) {
         for (const failure of flushFailures) console.warn(failure)
@@ -451,7 +449,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       }
     } catch (err) {
       const deadline = armed?.disarm() === 'deadline'
-      for (const failure of await this.drainMutations()) console.warn(failure)
+      for (const failure of this.drainMutations()) console.warn(failure)
       if (deadline) {
         throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`, {
           cause: err,
@@ -524,7 +522,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private async ensureLoaded(): Promise<PyodideInterface> {
     if (this.pyodide !== null) {
       if (this.bootstrapPromise !== null) await this.bootstrapPromise
-      await this.syncMounts(this.pyodide)
+      this.syncMounts(this.pyodide)
       await this.wireInterruptIfNeeded(this.pyodide)
       return this.pyodide
     }
@@ -566,7 +564,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       })()
       await this.bootstrapPromise
     }
-    await this.syncMounts(this.pyodide)
+    this.syncMounts(this.pyodide)
     await this.wireInterruptIfNeeded(this.pyodide)
     return this.pyodide
   }
@@ -581,17 +579,16 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   /**
    * Rebuild mount nodes before each run so cached bytes never survive a
-   * session change. Workers populate nodes on lookup/open. The fallback
-   * for hosts without shared memory would collect a complete seed of
-   * every mount instead, so a bound run with no worker is refused before
-   * it gets here (`noWorker`). Removed mounts disappear, and nested
+   * session change. The worker populates nodes on lookup and open, so
+   * only a worker mounts anything; a bound run with no worker is refused
+   * before it gets here (`noWorker`). Removed mounts disappear, and nested
    * mounts share their parent's Emscripten mountpoint while retaining
    * workspace routing boundaries.
    */
-  private async syncMounts(pyodide: PyodideInterface): Promise<void> {
+  private syncMounts(pyodide: PyodideInterface): void {
     const files = this.files
-    if (files === null) return
     const sync = this.sync
+    if (files === null || sync === undefined) return
     const all = files.prefixes()
     for (const prefix of all) {
       if (servable(prefix) || this.refused.has(prefix)) continue
@@ -621,11 +618,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       }
     }
     for (const prefix of [...wanted].sort((a, b) => a.length - b.length)) {
-      // Collect before touching the mount table: a failed readdir then
-      // leaves the previous snapshot serving rather than an empty mount,
-      // and the prefix retries on the next run.
-      const seed = new PyodideFsSeed()
-      if (this.sync === undefined) await preloadInto(seed, files, prefix)
       const mountpoint = mountpointOf(prefix)
       if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
       const fs = new PyodideFs(
@@ -634,23 +626,21 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         this.journal,
         mountpoint,
         (p) => files.mountOf(p),
-        sync === undefined
-          ? undefined
-          : {
-              ...sync,
-              flush: (mutations) => {
-                if (this.syncFailures.length > 0) {
-                  this.syncSkipped += mutations.length
-                  throw new Error(this.syncFailures[0])
-                }
-                try {
-                  return sync.flush(mutations)
-                } catch (error) {
-                  this.syncFailures.push(error instanceof Error ? error.message : String(error))
-                  throw error
-                }
-              },
-            },
+        {
+          ...sync,
+          flush: (mutations) => {
+            if (this.syncFailures.length > 0) {
+              this.syncSkipped += mutations.length
+              throw new Error(this.syncFailures[0])
+            }
+            try {
+              return sync.flush(mutations)
+            } catch (error) {
+              this.syncFailures.push(error instanceof Error ? error.message : String(error))
+              throw error
+            }
+          },
+        },
         this.deferred,
       )
       let dir = ''
@@ -661,10 +651,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         this.madeDirs.add(dir)
       }
       pyodide.FS.mount(fs.type, {}, mountpoint)
-      // After the mount, never inside it: Emscripten assigns the root's
-      // `mount` only once `type.mount()` has returned, and a node built
-      // before that inherits an undefined one.
-      fs.seed(seed)
       this.mounted.add(prefix)
       this.mountedFilesystems.set(prefix, fs)
     }
@@ -762,10 +748,10 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * makes a create-then-rename or mkdir-then-write sequence land the same
    * way it ran. Returns one message per failure for the caller's stderr.
    */
-  private async drainMutations(): Promise<string[]> {
+  private drainMutations(): string[] {
     this.journal.reopen()
-    const files = this.files
-    if (files === null) return []
+    const sync = this.sync
+    if (this.files === null || sync === undefined) return []
     // A refusal no later call of its file came to claim.
     const deferred = [...this.deferred.values()].map((failure) => failure.message)
     this.deferred.clear()
@@ -778,25 +764,19 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         failures.push(`python3: skipped ${String(skipped)} later mutation(s) after that failure`)
       return [...deferred, ...failures]
     }
-    for (let i = 0; i < pending.length; i++) {
-      const mutation = pending[i]
-      if (mutation === undefined) continue
-      try {
-        await applyMutation(files, mutation)
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
-        failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)
-        // Stop: the journal is a sequence, not a set. Replaying past a
-        // failure applies later entries against a prerequisite that was
-        // never established, which can put the mount in a state the guest
-        // never produced (a rename landing on a temp file the failed write
-        // left stale). Report what was dropped rather than truncating
-        // silently.
-        const dropped = pending.length - i - 1
-        if (dropped > 0) {
-          failures.push(`python3: skipped ${String(dropped)} later mutation(s) after that failure`)
-        }
-        break
+    // One round trip: the host applies the journal in order and stops at the
+    // first failure, since the journal is a sequence, not a set. Replaying
+    // past a failure applies later entries against a prerequisite that was
+    // never established, which can put the mount in a state the guest never
+    // produced (a rename landing on a temp file the failed write left
+    // stale). What was dropped is reported rather than truncated silently.
+    const failure = pending.length === 0 ? undefined : sync.flush(pending)
+    if (failure !== undefined) {
+      failures.push(failure.message)
+      if (failure.skipped > 0) {
+        failures.push(
+          `python3: skipped ${String(failure.skipped)} later mutation(s) after that failure`,
+        )
       }
     }
     return [...deferred, ...failures]
@@ -879,7 +859,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       if (slot.armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
-      const flushFailures = await this.drainMutations()
+      const flushFailures = this.drainMutations()
       return {
         stdout: bridgeBytes(arr[0]),
         // A seed notice rides on stderr but never on the exit code: an
@@ -894,7 +874,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       // Files closed before the failure are complete in MEMFS, so their
       // marks still flush; failures can only be warned here.
       const deadline = slot.armed?.disarm() === 'deadline'
-      for (const notice of [...seedNotices, ...(await this.drainMutations())]) console.warn(notice)
+      for (const notice of [...seedNotices, ...this.drainMutations()]) console.warn(notice)
       if (deadline && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
@@ -914,7 +894,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     await this.loadImports(pyodide, code)
 
     const arr = this.guestModule(pyodide).repl(code, sessionId, inputs, cwd)
-    const flushFailures = await this.drainMutations()
+    const flushFailures = this.drainMutations()
     return {
       stdout: bridgeBytes(arr[0]),
       stderr: appendStderrLines(bridgeStderr(arr[1]), flushFailures),

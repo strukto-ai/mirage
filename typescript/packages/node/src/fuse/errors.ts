@@ -18,22 +18,23 @@ import { classify } from '@struktoai/mirage-core/errors/index'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type { FsCondition } from '@struktoai/mirage-core/errors/index'
 
-// Positive POSIX errno values. FUSE callbacks want them negated; other
+// Positive POSIX errno values in the host's numbering, which is what the
+// kernel reads: fuse-native passes the number through, so a macOS value on
+// Linux names a different error. FUSE callbacks want them negated; other
 // kernel interfaces (FSKit) want them positive, so the classification is
 // kept protocol-neutral here and adapters apply their own sign.
-export const ENOENT = 2
-export const EIO = 5
-export const EACCES = 13
-export const EEXIST = 17
-export const EINVAL = 22
-export const ENOTDIR = 20
-export const EISDIR = 21
-export const EROFS = 30
-// macOS value; Linux is 39 — fuse-native normalizes.
-export const ENOTEMPTY = 66
+export const ENOENT = osConstants.errno.ENOENT
+export const EIO = osConstants.errno.EIO
+export const EACCES = osConstants.errno.EACCES
+export const EEXIST = osConstants.errno.EEXIST
+export const EINVAL = osConstants.errno.EINVAL
+export const ENOTDIR = osConstants.errno.ENOTDIR
+export const EISDIR = osConstants.errno.EISDIR
+export const EROFS = osConstants.errno.EROFS
+export const ENOTEMPTY = osConstants.errno.ENOTEMPTY
 // A rename across mounts. The kernel reads this as "not one filesystem"
 // and `mv` falls back to copy+unlink, so it must survive the trip out.
-export const EXDEV = 18
+export const EXDEV = osConstants.errno.EXDEV
 
 // This kernel boundary's own numbering for the shared vocabulary: the
 // naming lives in core's `classify`, and the numbers here are the
@@ -62,13 +63,17 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   STALE_WRITE: osConstants.errno.ESTALE,
 }
 
+// Genuine last resort, for an error whose only signal is its message (a
+// third-party client's untyped failure). "read-only" and "no mount" are not
+// here: those arrive typed and `classify` names them. Mirrors python's
+// `_MESSAGE_CODES`.
 const MESSAGE_ERRNO: [string[], number][] = [
   [['not empty', 'enotempty'], ENOTEMPTY],
   [['not a directory', 'enotdir'], ENOTDIR],
   [['is a directory', 'eisdir'], EISDIR],
-  [['permission', 'eacces', 'read-only'], EACCES],
+  [['permission', 'eacces'], EACCES],
   [['file exists', 'eexist'], EEXIST],
-  [['not found', 'no such', 'enoent', 'no mount'], ENOENT],
+  [['not found', 'no such', 'enoent'], ENOENT],
 ]
 
 /**
@@ -106,12 +111,4 @@ export function classifyErrno(err: unknown): number {
 /** Same classification, negated for `@zkochan/fuse-native` callbacks. */
 export function classifyError(err: unknown): number {
   return -classifyErrno(err)
-}
-
-/**
- * Build an error carrying a POSIX code, so the mount core can signal a
- * specific errno without importing any adapter's numbering.
- */
-export function errnoError(code: FsCondition, message: string): Error {
-  return Object.assign(new Error(message), { code })
 }

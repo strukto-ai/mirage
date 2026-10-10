@@ -5071,7 +5071,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=128\nrc=128\nrc=128\nrc=0\nrc=128\n",
-        "stderr": "fatal: Permission denied, source=mixed, destination=moved\nfatal: Permission denied, source=only, destination=moved\nfatal: Permission denied, source=move, destination=landing\nfatal: not under version control, source=link.tkn, destination=link-moved\n"
+        "stderr": "fatal: Permission denied, source=mixed, destination=moved\nfatal: Permission denied, source=only, destination=moved\nfatal: Permission denied, source=move, destination=landing\nfatal: bad source, source=link.tkn, destination=link-moved\n"
       },
       "session": "pathspec-veiled"
     },

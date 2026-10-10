@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,7 @@ from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background, resolve_fusermount_binary
 from mirage.policy import Policy
 from mirage.policy.types import Deny, VfsContext, VfsResultContext
-from mirage.types import FileStat
+from mirage.types import FileStat, FileType
 from mirage.vfs.ram import RAMVFS
 
 # What a probe records: a captured file body or stat string, a byte
@@ -35,22 +36,21 @@ from mirage.vfs.ram import RAMVFS
 ProbeValue = str | int | bool | None
 
 
-class SizelessFiles:
-    """Files proxy that strips stat sizes.
+class SizelessRAM(RAMVFS):
+    """A caching mount whose backend names no size.
 
     Simulates API-backed mounts (Linear, Slack, Trello, ...) whose byte
     size is unknown until the content is fetched: over FUSE such files must
-    stat as 0 until first open and read fully afterwards.
+    stat as 0 until first open and read fully afterwards, and once read
+    the workspace cache sizes them.
     """
 
-    def __init__(self, inner) -> None:
-        self._inner = inner
+    caches_reads = True
 
-    def __getattr__(self, name: str):
-        return getattr(self._inner, name)
-
-    async def stat(self, path: str) -> FileStat:
-        result = await self._inner.stat(path)
+    async def stat(self, path, *args, **kwargs) -> FileStat:
+        result = await super().stat(path, *args, **kwargs)
+        if result.type == FileType.DIRECTORY:
+            return result
         return result.model_copy(update={"size": None})
 
 
@@ -142,6 +142,11 @@ def run_link_probe(result: dict[str, ProbeValue]) -> None:
         )
         with open(f"{mountpoint}/data/f.txt", "rb") as fh:
             result["link_target_survives"] = fh.read().decode().strip()
+        # A device reports the row the workspace's /dev answers. Windows
+        # has no character devices to show one as.
+        result["dev_null_char_device"] = sys.platform == "win32" or (
+            stat.S_ISCHR(os.stat(f"{mountpoint}/dev/null").st_mode)
+        )
     finally:
         if sys.platform == "darwin":
             subprocess.run(
@@ -238,10 +243,11 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
     session = ws.create_session(
         "agent",
         profile={
-            "paths": {"hide": ["/data/vault"]},
+            "paths": {"hide": ["/data/vault", "/data/hl"]},
             "mounts": {"/data": "read"},
         },
     )
+    asyncio.run(ws.shell("ln -s pub.txt /data/hl"))
     # The shell entry point first, before the mount goes live, on the same
     # loop discipline the link probe keeps.
     hidden = asyncio.run(
@@ -272,6 +278,12 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
         result["session_kernel_create_under_hidden_absent"] = _absent(
             lambda: open(f"{data}/vault/new.txt", "wb")
         )
+        # A hidden link is absent too, not reported from the link table.
+        try:
+            os.lstat(f"{data}/hl")
+            result["session_kernel_hidden_link_absent"] = False
+        except FileNotFoundError:
+            result["session_kernel_hidden_link_absent"] = True
         # The cap's refusal is an errno the adapter picks; what is
         # pinned is that the write fails and the body survives.
         try:
@@ -327,12 +339,12 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
     Args:
         result (dict[str, ProbeValue]): the probe result to extend.
     """
-    api = RAMVFS()
+    api = SizelessRAM()
     api._store.dirs.add("/")
     api._store.files["/api.json"] = API_CONTENT
     ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
-    mount_background(SizelessFiles(ws.vfs), mountpoint)
+    mount_background(ws.vfs, mountpoint)
     api_file = f"{mountpoint}/api/api.json"
     try:
         # Size-unknown semantics (see the CLAUDE.md FUSE section): stat 0
@@ -460,6 +472,23 @@ def main() -> None:
             fh.write(b"Z")
         with open(f"{data_mp}/s.txt", "rb") as fh:
             result["sparse_writes_body"] = fh.read().decode()
+        # A read through the descriptor that wrote sees the write before
+        # it is flushed, as on any filesystem.
+        with open(f"{data_mp}/w.txt", "w+b", buffering=0) as fh:
+            fh.write(b"written")
+            fh.seek(0)
+            result["kernel_reads_its_own_writes"] = fh.read(64).decode()
+        # A chmod through the mount is stored, and an open handle reports
+        # it. Windows maps a mode onto the read-only flag alone.
+        os.chmod(f"{data_mp}/a.txt", 0o600)
+        mode = stat.S_IMODE(os.stat(f"{data_mp}/a.txt").st_mode)
+        result["kernel_chmod_kept"] = sys.platform == "win32" or mode == 0o600
+        with open(f"{data_mp}/a.txt", "rb") as fh:
+            fh.read()
+            mode = stat.S_IMODE(os.fstat(fh.fileno()).st_mode)
+        result["kernel_fstat_keeps_mode"] = (
+            sys.platform == "win32" or mode == 0o600
+        )
         result["data_pinned"] = data_mp == pinned
         result["distinct_mounts"] = data_mp != logs_mp
 
