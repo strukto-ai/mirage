@@ -47,7 +47,7 @@ async def test_readdir_root_lists_folder_zero(accessor, index):
         result = await readdir(
             accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
         )
-    assert result == ["/docs/", "/a.txt"]
+    assert result == ["/a.txt", "/docs/"]
     mock_list.assert_awaited_once_with(accessor.token_manager, "0")
     entry = (await index.get("/a.txt")).entry
     assert entry is not None

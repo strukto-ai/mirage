@@ -24,6 +24,7 @@ import { SHA1 } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
 import { enotdir, enoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export function resourceTypeFor(item: BoxItem): string {
   if (item.type === 'folder') return 'box/folder'
@@ -86,6 +87,7 @@ export async function readdir(
     })
     entries.push({ name: filename, entry, isDir })
   }
+  entries.sort((a, b) => compareCodePoints(a.name, b.name))
 
   if (index !== undefined) {
     await index.setDir(

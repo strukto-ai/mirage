@@ -147,10 +147,10 @@
         "box",
         "dropbox"
       ],
-      "command": "mkdir -p /search/order && printf 'numbat\\n' > /search/order/$'\\xee\\x80\\x80'.txt && printf 'numbat\\n' > /search/order/\ud83d\ude00.txt && grep -rlw numbat /search/order; rg -lw numbat /search/order; rm -r /search/order",
+      "command": "mkdir -p /search/order && printf 'numbat\\n' > /search/order/$'\\xee\\x80\\x80'.txt && printf 'numbat\\n' > /search/order/\ud83d\ude00.txt && grep -rl numbat /search/order; grep -rlw numbat /search/order; rg -lw numbat /search/order; rm -r /search/order",
       "expect": {
         "exit": 0,
-        "stdout": "/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n",
+        "stdout": "/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n",
         "stderr": ""
       }
     }
