@@ -84,14 +84,23 @@ export function openMode(flags: number): OpenMode {
 
 /** One descriptor `open` handed out for a mounted path; `handle` is null
  * for a directory, which a descriptor may name but not read. */
+/**
+ * One descriptor `open` handed out for a mounted path. `path` is the path
+ * it names now (a rename through the patch moves it); `handle` is null for
+ * a directory, which a descriptor may name but not read; `kept` holds the
+ * bytes its file had once its name was removed or replaced, which it reads
+ * from then on and never lands on.
+ */
 export interface Descriptor {
-  readonly path: string
+  path: string
   readonly mode: OpenMode
-  readonly handle: FileHandle | null
+  handle: FileHandle | null
+  kept: Uint8Array | null
 }
 
 /** Read `size` bytes at `offset` without moving the handle's position,
- * fetching what the handle lacks first. */
+ * fetching what the handle lacks first; the caller holds the descriptor's
+ * queue, so nothing else moves the position meanwhile. */
 export async function readAt(
   handle: FileHandle,
   offset: number,
@@ -121,10 +130,15 @@ export async function readOn(handle: FileHandle, size: number): Promise<Uint8Arr
  * as the mounted one is, so it never collides with a file the process
  * opens meanwhile; the descriptor calls that could reach the device with
  * it (fchmod, fchown, futimes) are routed too. Writes stay in the handle
- * until a `close` or an `fsync`.
+ * until a `close` or an `fsync`. The calls on one descriptor run one at a
+ * time (`serial`), so a sync never settles writes made while it was out
+ * and a positioned read never moves another call's position. A descriptor
+ * follows its file through a rename made through the patch, and keeps the
+ * bytes it had once one removes or replaces its name.
  */
 export class Descriptors {
   private readonly table = new Map<number, Descriptor>()
+  private readonly queues = new Map<number, Promise<void>>()
 
   constructor(
     private readonly files: RuntimeFiles,
@@ -136,6 +150,21 @@ export class Descriptors {
     return typeof fd === 'number' ? this.table.get(fd) : undefined
   }
 
+  /** Run `fn` after every call already queued on `fd`. */
+  serial<T>(fd: number, fn: () => Promise<T>): Promise<T> {
+    const prev = this.queues.get(fd) ?? Promise.resolve()
+    const run = prev.then(fn)
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.queues.set(fd, tail)
+    void tail.then(() => {
+      if (this.queues.get(fd) === tail) this.queues.delete(fd)
+    })
+    return run
+  }
+
   /** Open a mounted path by open(2) flags and number the result. */
   async open(path: string, flags: number): Promise<number> {
     const mode = openMode(flags)
@@ -144,44 +173,91 @@ export class Descriptors {
     if ((flags & O_DIRECTORY) !== 0 && row?.isDir !== true) {
       throw row === null ? enoent(path) : enotdir(path)
     }
-    let handle: FileHandle | null = null
+    const desc: Descriptor = { path, mode, handle: null, kept: null }
     if (row?.isDir !== true || mode.writable || mode.create) {
       const opened = await applyOpen(this.files, path, mode)
-      handle = FileHandle.opened(path, opened === null ? null : this.fetch(path, mode.writable), {
-        size: opened?.size ?? 0,
-        writable: mode.writable,
-        append: mode.append,
-      })
+      desc.handle = FileHandle.opened(
+        path,
+        opened === null ? null : this.fetch(desc, mode.writable),
+        { size: opened?.size ?? 0, writable: mode.writable, append: mode.append },
+      )
     }
     const fd = (this.native.openSync as (p: string, f: string) => number)(devNull, 'r')
-    this.table.set(fd, { path, mode, handle })
+    this.table.set(fd, desc)
     return fd
   }
 
-  private fetch(path: string, raw: boolean): FileFetch {
-    return (offset, size) => this.files.read(path, size === null ? { raw } : { offset, size, raw })
+  /** A descriptor's ranged read: what it kept once its name went, else
+   * what is at its path now. */
+  private fetch(desc: Descriptor, raw: boolean): FileFetch {
+    return (offset, size) => {
+      if (desc.kept !== null) {
+        return Promise.resolve(desc.kept.slice(offset, size === null ? undefined : offset + size))
+      }
+      return this.files.read(desc.path, size === null ? { raw } : { offset, size, raw })
+    }
   }
 
-  /** Land a descriptor's writes on the mount. */
+  /** Land a descriptor's writes on the mount; one whose name went keeps
+   * them, as writes to an unlinked file stay with it. */
   async land(desc: Descriptor): Promise<void> {
     const handle = desc.handle
-    if (handle === null) return
+    if (handle === null || desc.kept !== null) return
     const steps = handle.flushPlan()
     if (steps.length === 0) return
     await this.files.flush(desc.path, steps)
-    handle.settle(this.fetch(desc.path, true))
+    handle.settle(this.fetch(desc, true))
+  }
+
+  /** Land the writes of every descriptor open on `path`, which a change of
+   * its times must come after. */
+  async landPath(path: string): Promise<void> {
+    for (const [fd, desc] of this.table) {
+      if (desc.path === path) await this.serial(fd, () => this.land(desc))
+    }
+  }
+
+  /** Follow a rename: a descriptor on `old` or under it names the same
+   * file at `next` now. */
+  moved(old: string, next: string): void {
+    const under = `${old.replace(/\/+$/, '')}/`
+    for (const desc of this.table.values()) {
+      if (desc.kept === null && (desc.path === old || desc.path.startsWith(under))) {
+        desc.path = next + desc.path.slice(old.length)
+      }
+    }
+  }
+
+  /** Read what the descriptors open on `path` (or under it) need before
+   * its name is removed or replaced; `keep` them once it has gone. */
+  async hold(path: string, under = false): Promise<[Descriptor, Uint8Array][]> {
+    const prefix = `${path.replace(/\/+$/, '')}/`
+    const held: [Descriptor, Uint8Array][] = []
+    for (const desc of this.table.values()) {
+      const named = desc.path === path || (under && desc.path.startsWith(prefix))
+      if (!named || desc.kept !== null || desc.handle === null) continue
+      held.push([desc, await this.files.read(desc.path, { raw: desc.mode.writable })])
+    }
+    return held
+  }
+
+  /** Detach the descriptors `hold` read for, now their name went. */
+  keep(held: [Descriptor, Uint8Array][]): void {
+    for (const [desc, data] of held) desc.kept = data
   }
 
   /** Land a descriptor's writes and give its number back. */
-  async close(fd: number): Promise<void> {
-    const desc = this.table.get(fd)
-    if (desc === undefined) throw ebadf(String(fd))
-    this.table.delete(fd)
-    try {
-      await this.land(desc)
-    } finally {
-      ;(this.native.closeSync as (f: number) => void)(fd)
-    }
+  close(fd: number): Promise<void> {
+    return this.serial(fd, async () => {
+      const desc = this.table.get(fd)
+      if (desc === undefined) throw ebadf(String(fd))
+      this.table.delete(fd)
+      try {
+        await this.land(desc)
+      } finally {
+        ;(this.native.closeSync as (f: number) => void)(fd)
+      }
+    })
   }
 
   /** The handle a read or a write through `fd` uses. */

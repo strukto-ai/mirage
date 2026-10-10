@@ -381,6 +381,115 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
+  it('lands a write made while a sync is out', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const handle = await fs.promises.open('/data/f.txt', 'w')
+    await handle.write('a')
+    const syncing = handle.sync()
+    await handle.write('b')
+    await syncing
+    await handle.close()
+    expect(await fs.promises.readFile('/data/f.txt', 'utf-8')).toBe('ab')
+    await ws.close()
+  })
+
+  it('leaves the position where it was across positioned reads', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'abcdefgh')
+    const handle = await fs.promises.open('/data/f.txt', 'r')
+    await Promise.all([
+      handle.read(Buffer.alloc(2), 0, 2, 3),
+      handle.read(Buffer.alloc(2), 0, 2, 6),
+    ])
+    const { bytesRead, buffer } = await handle.read(Buffer.alloc(2), 0, 2, null)
+    expect(buffer.toString('utf8', 0, bytesRead)).toBe('ab')
+    await handle.close()
+    await ws.close()
+  })
+
+  it('follows its file through a rename and keeps it once its name goes', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/a.txt', 'hello')
+    await fs.promises.writeFile('/data/c.txt', 'kept')
+    const moving = await fs.promises.open('/data/a.txt', 'r+')
+    const removed = await fs.promises.open('/data/c.txt', 'r')
+    await fs.promises.rename('/data/a.txt', '/data/b.txt')
+    await fs.promises.writeFile('/data/a.txt', 'new file')
+    await fs.promises.unlink('/data/c.txt')
+    await fs.promises.writeFile('/data/c.txt', 'other')
+    await moving.write('HE', 0)
+    await moving.close()
+    const { bytesRead, buffer } = await removed.read(Buffer.alloc(8), 0, 8, 0)
+    await removed.close()
+    expect(await fs.promises.readFile('/data/b.txt', 'utf-8')).toBe('HEllo')
+    expect(await fs.promises.readFile('/data/a.txt', 'utf-8')).toBe('new file')
+    expect(buffer.toString('utf8', 0, bytesRead)).toBe('kept')
+    await ws.close()
+  })
+
+  it('sets times through a handle after its writes land', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'hello')
+    const handle = await fs.promises.open('/data/f.txt', 'r+')
+    await handle.write('J', 0)
+    await handle.utimes(981173106, 981173107)
+    await handle.close()
+    expect(await fs.promises.readFile('/data/f.txt', 'utf-8')).toBe('Jello')
+    expect(Math.trunc((await fs.promises.stat('/data/f.txt')).mtimeMs / 1000)).toBe(981173107)
+    await ws.close()
+  })
+
+  it('reads and writes whole files through a descriptor or a handle', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'abc')
+    const handle = await fs.promises.open('/data/f.txt', 'r')
+    expect(await fs.promises.readFile(handle, 'utf-8')).toBe('abc')
+    await handle.close()
+    const fd = await new Promise<number>((resolve, reject) => {
+      fs.open('/data/f.txt', 'r', (err, value) => {
+        if (err) reject(err)
+        else resolve(value)
+      })
+    })
+    const text = await new Promise<string>((resolve, reject) => {
+      fs.readFile(fd, 'utf-8', (err, data) => {
+        if (err) reject(err)
+        else resolve(data)
+      })
+    })
+    expect(text).toBe('abc')
+    await fs.promises.writeFile('/data/g.txt', '')
+    const writer = await fs.promises.open('/data/g.txt', 'w')
+    await fs.promises.writeFile(writer, 'via handle')
+    await writer.close()
+    expect(await fs.promises.readFile('/data/g.txt', 'utf-8')).toBe('via handle')
+    await ws.close()
+  })
+
+  it('reads and writes vectors through a handle', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const handle = await fs.promises.open('/data/v.txt', 'w+')
+    await handle.writev([Buffer.from('ab'), Buffer.from('cd')], 0)
+    const parts = [Buffer.alloc(1), Buffer.alloc(3)]
+    const { bytesRead } = await handle.readv(parts, 0)
+    await handle.close()
+    expect(bytesRead).toBe(4)
+    expect(Buffer.concat(parts).toString()).toBe('abcd')
+    await ws.close()
+  })
+
   it('answers existsSync on a mounted path without throwing', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
