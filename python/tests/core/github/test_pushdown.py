@@ -18,8 +18,6 @@ import pytest
 
 from mirage.core.github.pushdown import (
     count_scope_files,
-    is_directory_key,
-    is_repo_root,
     scope_blobs,
     scope_relative_key,
     search_safe,
@@ -64,12 +62,6 @@ def test_scope_relative_key_root_becomes_slash():
         vfs_path=mount_key("/gh", "/gh"), virtual="/gh", directory="/gh"
     )
     assert scope_relative_key(path) == "/"
-
-
-def test_is_repo_root():
-    assert is_repo_root("/")
-    assert is_repo_root("")
-    assert not is_repo_root("/src")
 
 
 def test_count_scope_files_root_counts_all(entries):
@@ -178,10 +170,3 @@ def test_unsearchable_keys_lists_what_code_search_never_indexes():
         "src/none.py",
         "srcx/big.bin",
     ]
-
-
-def test_is_directory_key(entries):
-    assert is_directory_key(entries, "/")
-    assert is_directory_key(entries, "/src")
-    assert not is_directory_key(entries, "/src/main.py")
-    assert not is_directory_key(entries, "/nope")

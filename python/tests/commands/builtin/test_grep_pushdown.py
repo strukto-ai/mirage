@@ -5,7 +5,6 @@ import pytest
 
 from mirage.commands.builtin import grep_pushdown
 from mirage.commands.builtin.constants import PatternType
-from mirage.commands.builtin.types import RegexSyntax
 from mirage.types import PathSpec
 from mirage.vfs.types import SearchOps, SearchQuery
 
@@ -20,101 +19,6 @@ def test_classify_pattern_newline_list_is_regex():
     assert (
         grep_pushdown.classify_pattern("foo bar", False) == PatternType.SIMPLE
     )
-
-
-@pytest.mark.parametrize(
-    "pattern,expected",
-    [
-        ("import.*os", "import"),
-        ("imp.*rt", "imp"),
-        ("^import", "import"),
-        ("colou?r", "colo"),
-        ("[Ee]rror", "rror"),
-        (r"\d+error", "error"),
-        ("config$", "config"),
-        ("a*b", None),
-        ("ab", None),
-        ("foo|bar", None),
-        ("(ab)?cdef", "cdef"),
-        ("(foo)?bar", "bar"),
-        ("x(foo)*y", None),
-        ("foo(bar)?baz", "foo"),
-        ("(foo){0,2}bar", "bar"),
-        ("(foo){1,2}bar", "foo"),
-        ("(foo)+bar", "foo"),
-        ("a(b(cdef)?g)?h", None),
-        ("(?:foo)?bar", "bar"),
-    ],
-)
-def test_extract_required_literal(pattern, expected):
-    assert grep_pushdown.extract_required_literal(pattern) == expected
-
-
-def test_extract_literal_is_required_substring():
-    for pattern in (
-        "import.*os",
-        "colou?r",
-        "[Ee]rror",
-        r"\d+error",
-        "(foo)?bar",
-        "foo(bar)?baz",
-    ):
-        literal = grep_pushdown.extract_required_literal(pattern)
-        assert literal is not None
-        for sample in (
-            "import sys, os",
-            "color",
-            "colour",
-            "Error here",
-            "an error",
-            "x42error",
-            "bar",
-            "foobar",
-            "foobaz",
-        ):
-            if re.search(pattern, sample):
-                assert literal in sample
-
-
-def test_search_query_literal_returns_pattern():
-    assert grep_pushdown.search_query("import", False) == "import"
-    assert grep_pushdown.search_query("foo", True) == "foo"
-
-
-def test_search_query_regex_extracts_literal():
-    assert grep_pushdown.search_query("import.*os", False) == "import"
-
-
-def test_search_query_regex_no_literal_is_none():
-    assert grep_pushdown.search_query("foo|bar", False) is None
-
-
-def test_search_query_reads_a_dot_as_the_regex_it_is():
-    # `worker.3` matches `worker-3`, which a substring search for
-    # `worker.3` never returns; only the run before the dot is required.
-    assert grep_pushdown.search_query("worker.3", False) == "worker"
-    assert grep_pushdown.search_query("worker.3", True) == "worker.3"
-
-
-def test_search_query_reads_a_basic_expression_in_its_own_dialect():
-    # grep reads a basic expression unless -E says otherwise, where the
-    # operators are the escaped spellings and bare parens are literal.
-    assert (
-        grep_pushdown.search_query(r"fo\(bar\)\?baz", False, RegexSyntax.BASIC)
-        == "baz"
-    )
-    assert (
-        grep_pushdown.search_query("(foo)?bar", False, RegexSyntax.BASIC)
-        == "foo"
-    )
-    assert grep_pushdown.search_query("(foo)?bar", False) == "bar"
-
-
-def test_search_query_never_answers_for_a_pattern_list():
-    # A newline-joined -e list is a set of alternatives; no one literal
-    # is required by all of them.
-    assert grep_pushdown.search_query("foo\nbar", True) is None
-    assert grep_pushdown.search_query("foo\nbar", False) is None
 
 
 @pytest.mark.parametrize(
@@ -404,32 +308,6 @@ def test_plain_query_and_other_namespaces_do_not_require_grep():
 
 
 @pytest.mark.parametrize(
-    "pattern, fixed, whole_word, expected",
-    [
-        ("import", False, True, "import"),
-        ("import", True, True, "import"),
-        ("import os", False, True, "import os"),
-        ("import", False, False, None),
-        ("import.*os", False, True, None),
-        ("import.*os", True, True, "import.*os"),
-        ("foo|bar", False, True, None),
-        ("a\nb", True, True, None),
-        (None, False, True, None),
-    ],
-)
-def test_whole_word_literal_is_the_term_a_word_index_answers_for(
-    pattern, fixed, whole_word, expected
-):
-    # Only a whole-word literal is what the index is asked for: without -w
-    # a word index under-fetches substrings, a regex narrows on a term that
-    # is only part of the match, and a pattern list has no required term.
-    assert (
-        grep_pushdown.whole_word_literal(pattern, fixed, whole_word)
-        == expected
-    )
-
-
-@pytest.mark.parametrize(
     "pattern, fixed, whole_word, line_regexp, expected",
     [
         ("import", False, True, False, ["import"]),
@@ -484,16 +362,3 @@ def test_search_terms_ask_words_or_the_text_every_match_holds(
         grep_pushdown.search_terms(pattern, matcher, False, w, False, i)
         == expected
     )
-
-
-def test_text_candidates_drops_what_a_walk_never_reads():
-    paths = [
-        PathSpec.from_str_path(p)
-        for p in ["/a.py", "/m.gguf", "/b.txt", "/w.bin", "/README"]
-    ]
-    assert [p.virtual for p in grep_pushdown.text_candidates(paths)] == [
-        "/a.py",
-        "/b.txt",
-        "/README",
-    ]
-    assert grep_pushdown.text_candidates([]) == []

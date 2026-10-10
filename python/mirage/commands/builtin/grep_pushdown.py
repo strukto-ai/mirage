@@ -16,13 +16,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Literal, cast
 
-from mirage.commands.builtin.constants import BINARY_EXTENSIONS, PatternType
-from mirage.commands.builtin.grep_pattern import (
-    bre_source,
-    ere_source,
-    perl_regex,
-    rust_source,
-)
+from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_prefilter import (
     UNICODE_FOLDED,
     folds_by_unicode,
@@ -38,7 +32,6 @@ from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.types import PathSpec
-from mirage.utils.filetype import get_extension
 from mirage.vfs.types import SearchOps, SearchQuery
 
 
@@ -64,110 +57,7 @@ def classify_pattern(
     return PatternType.REGEX
 
 
-_REGEX_BREAKERS = frozenset(".^$*+?()|{}")
 _MIN_SEARCH_LITERAL = 3
-
-
-def _quantifier_min(pattern: str, i: int) -> int | None:
-    """Fewest repeats the quantifier starting at ``pattern[i]`` allows.
-
-    Args:
-        pattern (str): a regular expression.
-        i (int): index just past the atom the quantifier would apply to.
-
-    Returns:
-        int | None: 0 for ``?``, ``*`` and an interval whose lower bound
-            is 0 or missing, 1 for ``+``, the lower bound of any other
-            interval, or None when no quantifier starts there.
-    """
-    if i >= len(pattern):
-        return None
-    ch = pattern[i]
-    if ch in "?*":
-        return 0
-    if ch == "+":
-        return 1
-    if ch == "{":
-        end = pattern.find("}", i)
-        low = (pattern[i + 1 : end] if end != -1 else "").split(",", 1)[0]
-        return int(low) if low.isdigit() else 0
-    return None
-
-
-def extract_required_literal(pattern: str) -> str | None:
-    """Longest substring every match of a regex must contain.
-
-    Returns a literal that any line matching ``pattern`` is guaranteed to
-    contain, suitable for narrowing via a literal search API before the real
-    regex is scanned locally. Conservative: returns None whenever a required
-    literal cannot be proven (top-level alternation, character classes,
-    escapes, a ``(?`` group, runs shorter than ``_MIN_SEARCH_LITERAL``), so
-    the caller falls back to a full scan rather than risk a false negative.
-    A run inside a group that ``?``, ``*`` or a zero-floored interval makes
-    optional is not required either: ``(foo)?bar`` matches ``bar`` alone,
-    so only ``bar`` may be searched for.
-
-    Args:
-        pattern (str): a regular expression in extended syntax.
-
-    Returns:
-        str | None: the longest required literal, or None.
-    """
-    if "|" in pattern:
-        return None
-    runs: list[str] = []
-    current: list[str] = []
-    groups: list[int] = []
-    i = 0
-    n = len(pattern)
-    while i < n:
-        ch = pattern[i]
-        if ch == "\\":
-            runs.append("".join(current))
-            current = []
-            i += 2
-            continue
-        if ch == "[":
-            runs.append("".join(current))
-            current = []
-            i += 1
-            while i < n and pattern[i] != "]":
-                i += 2 if pattern[i] == "\\" else 1
-            i += 1
-            continue
-        if ch == "(":
-            opener = 3 if pattern.startswith("(?:", i) else 1
-            if opener == 1 and pattern.startswith("(?", i):
-                return None
-            runs.append("".join(current))
-            current = []
-            groups.append(len(runs))
-            i += opener
-            continue
-        if ch == ")":
-            runs.append("".join(current))
-            current = []
-            if groups:
-                opened = groups.pop()
-                if _quantifier_min(pattern, i + 1) == 0:
-                    del runs[opened:]
-            i += 1
-            continue
-        if ch in _REGEX_BREAKERS:
-            if ch in "*?{" and current:
-                current.pop()
-            runs.append("".join(current))
-            current = []
-            if ch == "{":
-                while i < n and pattern[i] != "}":
-                    i += 1
-            i += 1
-            continue
-        current.append(ch)
-        i += 1
-    runs.append("".join(current))
-    best = max(runs, key=len, default="")
-    return best if len(best) >= _MIN_SEARCH_LITERAL else None
 
 
 def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
@@ -194,36 +84,6 @@ def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
     )
 
 
-def whole_word_literal(
-    pattern: str | None, fixed_string: bool, whole_word: bool
-) -> str | None:
-    """The term a whole-word search index may narrow a scan on, or None.
-
-    A word-based index (GitHub code search, Dropbox and Box file search)
-    matches whole words while grep matches substrings, so for a bare
-    literal its answer is a strict subset of the grep matches: a file
-    holding the literal only inside a longer word (``quokka`` in
-    ``quokkabuild``) never comes back and would be silently dropped from
-    the scan. Under ``-w`` both sides mean the same thing, and any
-    tokenizer disagreement can only over-fetch, which the local scan
-    filters. A regex narrowed on an extracted literal stays excluded even
-    under ``-w`` (``is_literal_pattern``), and a newline-joined pattern
-    list is a set of alternatives no one literal is required by.
-
-    Args:
-        pattern (str | None): the search pattern, or None for -f-only runs.
-        fixed_string (bool): True if -F is set.
-        whole_word (bool): True if -w is set.
-
-    Returns:
-        str | None: the pattern itself when the index is asked for exactly
-            it, or None when no narrowing is complete.
-    """
-    if pattern is None or not whole_word or "\n" in pattern:
-        return None
-    return pattern if is_literal_pattern(pattern, fixed_string) else None
-
-
 def whole_word_literals(
     pattern: str | None,
     fixed_string: bool,
@@ -232,9 +92,8 @@ def whole_word_literals(
 ) -> list[str] | None:
     """The terms a whole-word search index may narrow a scan on, or None.
 
-    The list form of ``whole_word_literal``. A newline-joined pattern list
-    (several -e, or the lines of -f) matches a line when any one
-    alternative does, so one search per alternative, unioned, is complete
+    A newline-joined pattern list (several -e, or the lines of -f)
+    matches a line when any one alternative does, so one search per alternative, unioned, is complete
     when every alternative is itself a whole-word literal. -x narrows as
     -w does: a line that is the literal entire is a word match of it. An
     empty alternative matches every line, which no search can stand in
@@ -299,105 +158,6 @@ def search_terms(
     if needles is None or any(len(n) < _MIN_SEARCH_LITERAL for n in needles):
         return None
     return tuple(n.decode("ascii") for n in needles), False
-
-
-def grep_needs_every_file(fl: FlagView) -> bool:
-    """Whether a grep's output needs files a content narrowing drops.
-
-    A narrowing holds only files matching the searched literal: -v, -c
-    and -L also print from the rest, -f adds patterns the search never
-    saw, and --text or --binary-files=text read what the walk skips.
-    -x overrides -w, so a word index cannot stand in for its line matcher.
-
-    Args:
-        fl (FlagView): the invocation's grep flags.
-    """
-    return (
-        fl.as_bool("v")
-        or fl.as_bool("c")
-        or fl.as_bool("files_without_match")
-        or fl.as_bool("line_regexp")
-        or bool(fl.raw("file"))
-        or fl.as_bool("text")
-        or fl.as_str("binary_files") == "text"
-    )
-
-
-def text_candidates(paths: list[PathSpec]) -> list[PathSpec]:
-    """Drop the candidates a recursive walk would never have read.
-
-    A narrowing stands in for the walk it replaces, and that walk skips
-    binary extensions, so a candidate with one is dropped rather than
-    downloaded. The result may be empty, which a caller must not hand to
-    grep as its operand list: no operands means standard input.
-
-    Args:
-        paths (list[PathSpec]): search-narrowed candidate files.
-
-    Returns:
-        list[PathSpec]: the candidates in order, without binary extensions.
-    """
-    return [
-        p for p in paths if get_extension(p.virtual) not in BINARY_EXTENSIONS
-    ]
-
-
-def search_query(
-    pattern: str,
-    fixed_string: bool,
-    syntax: RegexSyntax = RegexSyntax.EXTENDED,
-) -> str | None:
-    """Literal to push down to a substring or code-search API for a pattern.
-
-    A SIMPLE pattern holding a dot is a regex here, not a literal:
-    ``worker.3`` matches ``worker-3``, which a substring search for
-    ``worker.3`` never returns, so only the run before the dot is required.
-    ``is_literal_pattern`` already draws that line for the whole-word case.
-    Every dialect is translated to host source before a literal is
-    extracted, since the operators differ: in a basic expression
-    ``\\(bar\\)\\?`` is an optional group and ``(bar)?`` three literal
-    characters plus a literal question mark, and ``\\d`` is a ``d`` to
-    grep -E and a digit to rg.
-
-    Args:
-        pattern (str): the search pattern.
-        fixed_string (bool): True if -F is set.
-        syntax (RegexSyntax): the dialect the pattern is written in.
-
-    Returns:
-        str | None: the pattern itself when it is literal, the longest
-            literal every match of a regex must contain, or None when no
-            literal can be searched: a newline-joined pattern list is a set
-            of alternatives no one literal is required by.
-
-    Raises:
-        UsageError: a pattern the dialect's compiler would refuse, which
-            grep and rg report before they read anything.
-    """
-    if "\n" in pattern:
-        return None
-    if is_literal_pattern(pattern, fixed_string):
-        return pattern
-    return extract_required_literal(host_source(pattern, syntax))
-
-
-def host_source(pattern: str, syntax: RegexSyntax) -> str:
-    """One pattern's host source in its dialect, for literal extraction.
-
-    Args:
-        pattern (str): a single pattern.
-        syntax (RegexSyntax): its dialect.
-
-    Raises:
-        UsageError: the dialect's compiler refuses the pattern.
-    """
-    if syntax is RegexSyntax.BASIC:
-        return bre_source(pattern)
-    if syntax is RegexSyntax.EXTENDED:
-        return ere_source(pattern)
-    if syntax is RegexSyntax.PERL:
-        return perl_regex(pattern, False, False, True)[0]
-    return rust_source(pattern, False, False, False).source
 
 
 # grep's dests, then rg's, which spells each flag by its long name; a

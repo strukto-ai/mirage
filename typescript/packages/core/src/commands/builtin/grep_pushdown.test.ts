@@ -15,23 +15,18 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
-import { RegexSyntax } from './types.ts'
 import {
   grepSearchMeta,
   grepSearchOptions,
   textSearchResults,
   classifyPattern,
-  extractRequiredLiteral,
   hasSearchShapingFlags,
   isLiteralPattern,
   literalPushdownOperand,
   loneOperand,
   pushdownOperand,
   searchPushdownOk,
-  searchQuery,
   searchTerms,
-  textCandidates,
-  wholeWordLiteral,
   wholeWordLiterals,
 } from './grep_pushdown.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
@@ -44,92 +39,6 @@ describe('classifyPattern', () => {
     expect(classifyPattern('foo bar', false)).toBe(PatternType.SIMPLE)
     expect(classifyPattern('foo', true)).toBe(PatternType.EXACT)
     expect(classifyPattern('fo+', false)).toBe(PatternType.REGEX)
-  })
-})
-
-describe('extractRequiredLiteral', () => {
-  it.each([
-    ['import.*os', 'import'],
-    ['imp.*rt', 'imp'],
-    ['^import', 'import'],
-    ['colou?r', 'colo'],
-    ['[Ee]rror', 'rror'],
-    ['\\d+error', 'error'],
-    ['config$', 'config'],
-    ['a*b', null],
-    ['ab', null],
-    ['foo|bar', null],
-    ['(ab)?cdef', 'cdef'],
-    ['(foo)?bar', 'bar'],
-    ['x(foo)*y', null],
-    ['foo(bar)?baz', 'foo'],
-    ['(foo){0,2}bar', 'bar'],
-    ['(foo){1,2}bar', 'foo'],
-    ['(foo)+bar', 'foo'],
-    ['a(b(cdef)?g)?h', null],
-    ['(?:foo)?bar', 'bar'],
-  ])('extracts the longest required literal from %s', (pattern, expected) => {
-    expect(extractRequiredLiteral(pattern)).toBe(expected)
-  })
-
-  it('the extracted literal is present in every matching sample', () => {
-    for (const pattern of [
-      'import.*os',
-      'colou?r',
-      '[Ee]rror',
-      '\\d+error',
-      '(foo)?bar',
-      'foo(bar)?baz',
-    ]) {
-      const literal = extractRequiredLiteral(pattern)
-      expect(literal).not.toBeNull()
-      const re = new RegExp(pattern)
-      for (const sample of [
-        'import sys, os',
-        'color',
-        'colour',
-        'Error here',
-        'an error',
-        'x42error',
-        'bar',
-        'foobar',
-        'foobaz',
-      ]) {
-        if (re.test(sample)) expect(sample).toContain(String(literal))
-      }
-    }
-  })
-})
-
-describe('searchQuery', () => {
-  it('returns the pattern itself when literal', () => {
-    expect(searchQuery('import', false)).toBe('import')
-    expect(searchQuery('foo', true)).toBe('foo')
-  })
-  it('extracts a required literal from a regex', () => {
-    expect(searchQuery('import.*os', false)).toBe('import')
-  })
-  it('returns null when no literal can be proven', () => {
-    expect(searchQuery('foo|bar', false)).toBeNull()
-  })
-  it('reads a dot as the regex it is', () => {
-    // `worker.3` matches `worker-3`, which a substring search for
-    // `worker.3` never returns; only the run before the dot is required.
-    expect(searchQuery('worker.3', false)).toBe('worker')
-    expect(searchQuery('worker.3', true)).toBe('worker.3')
-  })
-  it('reads a basic expression in its own dialect', () => {
-    // grep reads a basic expression unless -E says otherwise, where the
-    // operators are the escaped spellings and bare parens are literal.
-    expect(searchQuery('fo\\(bar\\)\\?baz', false, RegexSyntax.BASIC)).toBe('baz')
-    expect(searchQuery('(foo)?bar', false, RegexSyntax.BASIC)).toBe('foo')
-    expect(searchQuery('(foo)?bar', false)).toBe('bar')
-  })
-  it('never answers for a pattern list', () => {
-    // A newline-joined -e list is a set of alternatives; no one literal
-    // is required by all of them.
-    expect(searchQuery('foo\nbar', true)).toBeNull()
-    expect(searchQuery('foo\nbar', false)).toBeNull()
   })
 })
 
@@ -374,28 +283,6 @@ it('leaves resource namespaces opaque and treats plain queries as literal', () =
   expect(grepSearchMeta({ search: () => Promise.resolve([]), meta: { semantic: true } })).toBeNull()
 })
 
-// Twins of test_whole_word_literal_is_the_term_a_word_index_answers_for and
-// test_text_candidates_drops_what_a_walk_never_reads in
-// python/tests/commands/builtin/test_grep_pushdown.py.
-describe('wholeWordLiteral', () => {
-  it.each<[string | null, boolean, boolean, string | null]>([
-    ['import', false, true, 'import'],
-    ['import', true, true, 'import'],
-    ['import os', false, true, 'import os'],
-    ['import', false, false, null],
-    ['import.*os', false, true, null],
-    ['import.*os', true, true, 'import.*os'],
-    ['foo|bar', false, true, null],
-    ['a\nb', true, true, null],
-    [null, false, true, null],
-  ])('answers %j (fixed=%s, -w=%s) with %j', (pattern, fixed, wholeWord, expected) => {
-    // Only a whole-word literal is what the index is asked for: without -w
-    // a word index under-fetches substrings, a regex narrows on a term that
-    // is only part of the match, and a pattern list has no required term.
-    expect(wholeWordLiteral(pattern, fixed, wholeWord)).toBe(expected)
-  })
-})
-
 // Twin of test_whole_word_literals_union_only_complete_alternatives.
 describe('wholeWordLiterals', () => {
   it.each<[string | null, boolean, boolean, boolean, string[] | null]>([
@@ -441,15 +328,5 @@ describe('searchTerms', () => {
     expect(
       searchTerms('sun', compilePosixRegex('sun', 'i', true), false, true, false, true),
     ).toEqual([['sun'], true])
-  })
-})
-
-describe('textCandidates', () => {
-  it('drops what a walk never reads', () => {
-    const paths = ['/a.py', '/m.gguf', '/b.txt', '/w.bin', '/README'].map((p) =>
-      PathSpec.fromStrPath(p),
-    )
-    expect(textCandidates(paths).map((p) => p.virtual)).toEqual(['/a.py', '/b.txt', '/README'])
-    expect(textCandidates([])).toEqual([])
   })
 })

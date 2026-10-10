@@ -16,11 +16,9 @@ import type { Accessor } from '../../accessor/base.ts'
 import type { SearchOps, SearchQuery } from '../../vfs/types.ts'
 import { RegexSyntax, type GrepSearchOptions, type GrepSearchMeta } from './types.ts'
 import type { PathSpec } from '../../types.ts'
-import { getExtension } from '../../utils/filetype.ts'
-import { BINARY_EXTENSIONS, PatternType } from './constants.ts'
+import { PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
-import { breSource, ereSource, perlRegex, rustSource } from './grep_pattern.ts'
 import { UNICODE_FOLDED, foldsByUnicode, requiredNeedles } from './grep_prefilter.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import { type FlagValue } from '../spec/types.ts'
@@ -33,123 +31,7 @@ export function classifyPattern(pattern: string, fixedString: boolean): PatternT
   return PatternType.REGEX
 }
 
-const REGEX_BREAKERS: ReadonlySet<string> = new Set('.^$*+?()|{}')
 const MIN_SEARCH_LITERAL = 3
-
-// Fewest repeats the quantifier starting at `pattern[i]` allows: 0 for `?`,
-// `*` and an interval whose lower bound is 0 or missing, 1 for `+`, the lower
-// bound of any other interval, or null when no quantifier starts there.
-function quantifierMin(pattern: string, i: number): number | null {
-  if (i >= pattern.length) return null
-  const ch = pattern.charAt(i)
-  if (ch === '?' || ch === '*') return 0
-  if (ch === '+') return 1
-  if (ch === '{') {
-    const end = pattern.indexOf('}', i)
-    const low = (end === -1 ? '' : pattern.slice(i + 1, end)).split(',', 1)[0] ?? ''
-    return /^\d+$/.test(low) ? Number(low) : 0
-  }
-  return null
-}
-
-// Longest substring every match of a regex must contain. Returns a literal
-// any matching line is guaranteed to contain, suitable for narrowing via a
-// literal search API before the real regex is scanned locally. Conservative:
-// returns null whenever a required literal cannot be proven (top-level
-// alternation, character classes, escapes, a `(?` group, runs shorter than
-// MIN_SEARCH_LITERAL), so the caller falls back to a full scan. A run inside
-// a group that `?`, `*` or a zero-floored interval makes optional is not
-// required either: `(foo)?bar` matches `bar` alone, so only `bar` may be
-// searched for.
-export function extractRequiredLiteral(pattern: string): string | null {
-  if (pattern.includes('|')) return null
-  const runs: string[] = []
-  let current: string[] = []
-  const groups: number[] = []
-  let i = 0
-  const n = pattern.length
-  while (i < n) {
-    const ch = pattern.charAt(i)
-    if (ch === '\\') {
-      runs.push(current.join(''))
-      current = []
-      i += 2
-      continue
-    }
-    if (ch === '[') {
-      runs.push(current.join(''))
-      current = []
-      i += 1
-      while (i < n && pattern[i] !== ']') i += pattern[i] === '\\' ? 2 : 1
-      i += 1
-      continue
-    }
-    if (ch === '(') {
-      const opener = pattern.startsWith('(?:', i) ? 3 : 1
-      if (opener === 1 && pattern.startsWith('(?', i)) return null
-      runs.push(current.join(''))
-      current = []
-      groups.push(runs.length)
-      i += opener
-      continue
-    }
-    if (ch === ')') {
-      runs.push(current.join(''))
-      current = []
-      const opened = groups.pop()
-      if (opened !== undefined && quantifierMin(pattern, i + 1) === 0) runs.length = opened
-      i += 1
-      continue
-    }
-    if (REGEX_BREAKERS.has(ch)) {
-      if ((ch === '*' || ch === '?' || ch === '{') && current.length > 0) current.pop()
-      runs.push(current.join(''))
-      current = []
-      if (ch === '{') {
-        while (i < n && pattern[i] !== '}') i += 1
-      }
-      i += 1
-      continue
-    }
-    current.push(ch)
-    i += 1
-  }
-  runs.push(current.join(''))
-  let best = ''
-  for (const r of runs) if (r.length > best.length) best = r
-  return best.length >= MIN_SEARCH_LITERAL ? best : null
-}
-
-// Literal to push down to a substring or code-search API for a grep/rg
-// pattern: the pattern itself when literal, the longest literal every match
-// of a regex must contain, or null when no literal can be searched (a
-// newline-joined pattern list is a set of alternatives no one literal is
-// required by). A SIMPLE pattern holding a dot is a regex here, not a
-// literal: `worker.3` matches `worker-3`, which a substring search for
-// `worker.3` never returns, so only the run before the dot is required.
-// `isLiteralPattern` already draws that line for the whole-word case. Every
-// dialect is translated to host source before a literal is extracted, since
-// the operators differ: in a basic expression `\(bar\)\?` is an optional
-// group and `(bar)?` three literal characters plus a literal question mark,
-// and `\d` is a `d` to grep -E and a digit to rg.
-export function searchQuery(
-  pattern: string,
-  fixedString: boolean,
-  syntax = RegexSyntax.EXTENDED,
-): string | null {
-  if (pattern.includes('\n')) return null
-  if (isLiteralPattern(pattern, fixedString)) return pattern
-  return extractRequiredLiteral(hostSource(pattern, syntax))
-}
-
-// One pattern's host source in its dialect, for literal extraction; throws
-// UsageError when the dialect's compiler refuses it.
-export function hostSource(pattern: string, syntax: RegexSyntax): string {
-  if (syntax === RegexSyntax.BASIC) return breSource(pattern)
-  if (syntax === RegexSyntax.EXTENDED) return ereSource(pattern)
-  if (syntax === RegexSyntax.PERL) return perlRegex(pattern, false, false, true).source
-  return rustSource(pattern, false, false, false).source
-}
 
 // Whether the pattern is searched verbatim, with no regex extraction.
 // Push-down against a whole-word search index is only complete when the term
@@ -162,32 +44,12 @@ export function isLiteralPattern(pattern: string, fixedString: boolean): boolean
   return pt === PatternType.EXACT || (pt === PatternType.SIMPLE && !pattern.includes('.'))
 }
 
-// The term a whole-word search index may narrow a scan on, or null. A
-// word-based index (GitHub code search, Dropbox and Box file search) matches
-// whole words while grep matches substrings, so for a bare literal its answer
-// is a strict subset of the grep matches: a file holding the literal only
-// inside a longer word (quokka in quokkabuild) never comes back and would be
-// silently dropped from the scan. Under -w both sides mean the same thing,
-// and any tokenizer disagreement can only over-fetch, which the local scan
-// filters. A regex narrowed on an extracted literal stays excluded even under
-// -w (isLiteralPattern), and a newline-joined pattern list is a set of
-// alternatives no one literal is required by.
-export function wholeWordLiteral(
-  pattern: string | null,
-  fixedString: boolean,
-  wholeWord: boolean,
-): string | null {
-  if (pattern === null || !wholeWord || pattern.includes('\n')) return null
-  return isLiteralPattern(pattern, fixedString) ? pattern : null
-}
-
 /**
  * The terms a whole-word search index may narrow a scan on, or null.
  *
- * The list form of `wholeWordLiteral`. A newline-joined pattern list (several
- * -e, or the lines of -f) matches a line when any one alternative does, so one
- * search per alternative, unioned, is complete when every alternative is
- * itself a whole-word literal. -x narrows as -w does: a line that is the
+ * A newline-joined pattern list (several -e, or the lines of -f) matches a
+ * line when any one alternative does, so one search per alternative, unioned,
+ * is complete when every alternative is itself a whole-word literal. -x narrows as -w does: a line that is the
  * literal entire is a word match of it. An empty alternative matches every
  * line, which no search can stand in for. Mirrors Python's
  * `whole_word_literals`.
@@ -230,35 +92,6 @@ export function searchTerms(
   const needles = requiredNeedles(matcher)
   if (needles === null || needles.some((n) => n.length < MIN_SEARCH_LITERAL)) return null
   return [needles, false]
-}
-
-// Drop the candidates a recursive walk would never have read. A narrowing
-// stands in for the walk it replaces, and that walk skips binary extensions,
-// so a candidate with one is dropped rather than downloaded. The result may
-// be empty, which a caller must not hand to grep as its operand list: no
-// operands means standard input.
-/**
- * Whether a grep's output needs files a content narrowing drops: a narrowing
- * holds only files matching the searched literal, so -v, -c and -L also
- * print from the rest, -f adds patterns the search never saw, and --text or
- * --binary-files=text read what the walk skips. -x overrides -w, so a word
- * index cannot stand in for its line matcher. Mirrors Python's
- * `grep_needs_every_file`.
- */
-export function grepNeedsEveryFile(fl: FlagView): boolean {
-  return (
-    fl.asBool('v') ||
-    fl.asBool('c') ||
-    fl.asBool('files_without_match') ||
-    fl.asBool('line_regexp') ||
-    Boolean(fl.raw('file')) ||
-    fl.asBool('text') ||
-    fl.asStr('binary_files') === 'text'
-  )
-}
-
-export function textCandidates(paths: readonly PathSpec[]): PathSpec[] {
-  return paths.filter((p) => !BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? ''))
 }
 
 // grep's dests, then rg's, which spells each flag by its long name; a

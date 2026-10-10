@@ -18,12 +18,9 @@ import { PathSpec } from '../../types.ts'
 import type { TreeEntry } from './tree_entry.ts'
 import {
   countScopeFiles,
-  isDirectoryKey,
-  isRepoRoot,
   scopeBlobs,
   scopeRelativeKey,
   searchSafe,
-  shouldUseSearch,
   unsearchableKeys,
 } from './pushdown.ts'
 
@@ -61,14 +58,6 @@ describe('scopeRelativeKey', () => {
   })
 })
 
-describe('isRepoRoot', () => {
-  it('detects root keys', () => {
-    expect(isRepoRoot('/')).toBe(true)
-    expect(isRepoRoot('')).toBe(true)
-    expect(isRepoRoot('/src')).toBe(false)
-  })
-})
-
 describe('countScopeFiles', () => {
   it('counts all files at the repo root', () => {
     expect(countScopeFiles(TREE, '/')).toBe(4)
@@ -103,14 +92,6 @@ describe('scopeBlobs', () => {
     expect(scopeBlobs(tree, '/docs').map(([p]) => p)).toEqual(['docs/a.md', 'docs/b.md'])
     expect(scopeBlobs(tree, '/readme.txt').map(([p]) => p)).toEqual(['readme.txt'])
     expect(scopeBlobs(tree, '/nope')).toEqual([])
-  })
-})
-
-describe('shouldUseSearch', () => {
-  it('requires recursive and default branch (literal check moved to caller)', () => {
-    expect(shouldUseSearch(true, true)).toBe(true)
-    expect(shouldUseSearch(false, true)).toBe(false)
-    expect(shouldUseSearch(true, false)).toBe(false)
   })
 })
 
@@ -174,14 +155,5 @@ describe('unsearchableKeys', () => {
       'src/none.py',
       'srcx/big.bin',
     ])
-  })
-})
-
-describe('isDirectoryKey', () => {
-  it('names the root and tree entries only', () => {
-    expect(isDirectoryKey(TREE, '/')).toBe(true)
-    expect(isDirectoryKey(TREE, '/src')).toBe(true)
-    expect(isDirectoryKey(TREE, '/src/main.py')).toBe(false)
-    expect(isDirectoryKey(TREE, '/nope')).toBe(false)
   })
 })

@@ -28,15 +28,6 @@ export function scopeRelativeKey(path: PathSpec): string {
   return key
 }
 
-export function isRepoRoot(key: string): boolean {
-  return key === '' || key === '/'
-}
-
-export function isDirectoryKey(tree: Record<string, TreeEntry>, key: string): boolean {
-  if (isRepoRoot(key)) return true
-  return tree[stripSlash(key)]?.type === 'tree'
-}
-
 // The file entries at or below a repo-relative scope key, in tree order:
 // every blob for the repository root, the file itself for a file key. A
 // sibling that merely shares the scope's spelling (srcx/ beside src/) is
@@ -56,13 +47,6 @@ export function scopeBlobs(tree: Record<string, TreeEntry>, key: string): [strin
 
 export function countScopeFiles(tree: Record<string, TreeEntry>, key: string): number {
   return scopeBlobs(tree, key).length
-}
-
-export function shouldUseSearch(recursive: boolean, onDefaultBranch: boolean): boolean {
-  // Search only helps recursive scans on the default branch (code search only
-  // indexes the default branch). Whether a usable literal exists, and whether
-  // the scope is large enough to bother, is decided by the caller.
-  return recursive && onDefaultBranch
 }
 
 const NARROWING = /[:"]|(?:^|[^A-Za-z0-9_])-|(?:^|[^A-Za-z0-9_])NOT(?:[^A-Za-z0-9_]|$)/
