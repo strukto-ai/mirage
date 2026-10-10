@@ -39,7 +39,7 @@ import { dispatchStat } from '../utils/paths.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 

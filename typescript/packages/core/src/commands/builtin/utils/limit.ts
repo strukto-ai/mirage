@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'

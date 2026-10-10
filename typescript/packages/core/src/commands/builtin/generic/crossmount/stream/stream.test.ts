@@ -131,15 +131,13 @@ it('drains an owned failed fetch before merging stderr and skips its stdout', as
   expect(io.exitCode).toBe(1)
 })
 
-it('merges late fetch diagnostics and claims in operand order', async () => {
+it('merges late fetch diagnostics in operand order', async () => {
   const run: RunSingle = (_cmd, paths) => {
     const path = paths[0]?.virtual ?? ''
     const io = new IOResult()
     async function* source(): AsyncGenerator<Uint8Array> {
       yield await Promise.resolve(ENC.encode(`${path}\n`))
       io.stderr = ENC.encode(`cat: ${path}: late diagnostic\n`)
-      io.reads[path] = ENC.encode('saved')
-      io.cache.push(path)
       io.exitCode = 1
     }
     return Promise.resolve([source(), io])
@@ -148,8 +146,6 @@ it('merges late fetch diagnostics and claims in operand order', async () => {
   expect(DEC.decode(await materialize(out))).toBe('/a/x\n/b/y\n')
   expect(await io.stderrStr()).toBe('cat: /a/x: late diagnostic\ncat: /b/y: late diagnostic\n')
   expect(io.exitCode).toBe(1)
-  expect(io.reads).toEqual({ '/a/x': ENC.encode('saved'), '/b/y': ENC.encode('saved') })
-  expect(io.cache).toEqual(['/a/x', '/b/y'])
 })
 
 it('keeps the final command late diagnostic and status', async () => {

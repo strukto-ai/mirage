@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { Activity } from '../../utils/activity.ts'
@@ -21,11 +20,6 @@ import { Activity } from '../../utils/activity.ts'
 export class VFSActivity extends Activity {
   hold(source: ByteSource): ByteSource {
     if (source instanceof Uint8Array) return source
-    if (source instanceof CachableAsyncIterator) {
-      if (source.exhausted) return source
-      source.wrapSource((inner) => new ActivityStream(inner, this.acquire()))
-      return source
-    }
     return new ActivityStream(source, this.acquire())
   }
 }

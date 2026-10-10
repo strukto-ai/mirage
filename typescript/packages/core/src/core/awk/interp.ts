@@ -71,7 +71,7 @@ import {
   toStr,
   type Value,
 } from './value.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 
 const SCALAR_DEFAULTS: Readonly<Record<string, string>> = {
   FS: ' ',

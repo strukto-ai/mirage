@@ -256,6 +256,8 @@ async function fullScan<A extends Accessor>(
  * `linesContaining` hands a file's matching lines in its place when the
  * output shows nothing else, or tells whether it is worth reading. An operand
  * named on the line is never ruled out by a search asked about directories.
+ * Neither is asked when a hide, a path rule or a preVfs policy judges a path,
+ * since a search sees the raw tree.
  * When neither can stand in for a walk, `beforeFullScan` may refuse it.
  * `read` is the plain stream narrowed, the mount's `readStream` by default.
  * Mirrors Python's `search_reads`.
@@ -271,8 +273,9 @@ export async function searchReads<A extends Accessor>(
 ): Promise<Reads> {
   const index = opts.index ?? undefined
   const stream: Reads = read ?? ((p) => io.readStream(accessor, p, index))
-  const files = io.filesContaining
-  const lines = io.linesContaining
+  const scoped = pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')
+  const files = scoped ? undefined : io.filesContaining
+  const lines = scoped ? undefined : io.linesContaining
   if (
     paths.length === 0 ||
     (files === undefined && lines === undefined && io.beforeFullScan === undefined)

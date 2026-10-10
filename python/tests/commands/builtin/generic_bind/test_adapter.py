@@ -27,7 +27,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     with_command_guards,
     with_dir_guard,
     with_dispatch_rule_guard,
-    with_policy_guard,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
@@ -343,22 +342,6 @@ def _spec(virtual: str) -> PathSpec:
         vfs_path=virtual,
         resolved=True,
     )
-
-
-def test_scoped_io_sets_the_mount_search_aside():
-    # The mount's search reads under a listing a rule may refuse, so a
-    # scoped command walks and reads through the guards instead, as it
-    # does for every other native scan.
-    io = make_io(files_containing=fake_readdir, lines_containing=fake_readdir)
-    roots = [_spec("/data")]
-    free = NamespaceView(scoped=lambda _virtual: False)
-    judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
-    for ns in (free, None):
-        kept = adapter.scoped_io(io, ns, roots, "/data/")
-        assert kept.files_containing is fake_readdir
-        assert kept.lines_containing is fake_readdir
-    scoped = adapter.scoped_io(io, judged, roots, "/data/")
-    assert (scoped.files_containing, scoped.lines_containing) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -704,7 +687,7 @@ async def test_resolve_or_empty_no_paths():
 @pytest.mark.parametrize(
     "operation,available",
     # A write slot the backend has is the dispatcher's (`dispatched_io`),
-    # which judges it itself; the guards hold a missing one and a copy.
+    # which judges it itself; the guards hold a missing one.
     [
         (Operation.WRITE, False),
         (Operation.MKDIR, False),
@@ -712,7 +695,6 @@ async def test_resolve_or_empty_no_paths():
         (Operation.RENAME, False),
         (Operation.COPY, False),
         (Operation.TRUNCATE, False),
-        (Operation.COPY, True),
     ],
 )
 @pytest.mark.parametrize(
@@ -877,26 +859,16 @@ async def test_dir_guard_distinguishes_empty_files_from_directory_eof(is_dir):
 
 
 @pytest.mark.asyncio
-async def test_policy_guard_admits_slots_and_leaves_stat_alone():
+async def test_command_guards_admit_a_listing_and_leave_stat_alone():
     calls: list[tuple[str, ...]] = []
     raw = _policy_probe_ops(calls)
     acc = NOOPAccessor()
-    # No binding: every slot runs as is, and no hook fires.
-    assert (
-        await with_policy_guard(raw).read_bytes(acc, _spec("/data/secret"))
-        == b"x"
-    )
-    calls.clear()
-
     policy = _SealedRead("/data/secret")
     ptoken = set_op_policies(Policies([policy]))
     gtoken = set_mount_gate("/data", MountMode.WRITE)
     try:
-        ops = with_policy_guard(raw)
-        # Content reads are the dispatcher's, which admits them itself.
-        assert ops.read_bytes is raw.read_bytes
-        assert ops.read_stream is raw.read_stream
-        # stat is not a guarded slot: deny is present and refused.
+        ops = with_command_guards(raw)
+        # stat is a presence fact: deny is present and refused.
         assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
         # readdir asks about the directory it lists.
         with pytest.raises(PermissionError) as excinfo:
@@ -904,21 +876,18 @@ async def test_policy_guard_admits_slots_and_leaves_stat_alone():
         assert excinfo.value.errno == errno.EACCES
         assert ("readdir", "/data/secret") not in calls
         assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
-        # A copy's source is a read; its destination is a write.
-        await ops.copy(acc, _spec("/data/src"), _spec("/data/dst"))
-        # The other writes are the dispatcher's too.
+        # Writes and copies are the dispatcher's, which judges them itself.
+        assert ops.copy is raw.copy
         assert ops.unlink is raw.unlink
     finally:
         reset_mount_gate(gtoken)
         reset_op_policies(ptoken)
     assert ("readdir", "/data/dir", False) in policy.asked
-    assert ("copy", "/data/src", False) in policy.asked
-    assert ("copy", "/data/dst", True) in policy.asked
     assert not any(op == "stat" for op, _, _ in policy.asked)
 
 
 @pytest.mark.asyncio
-async def test_policy_guard_wrap_time_capture_covers_late_calls():
+async def test_command_guards_wrap_time_capture_covers_late_calls():
     # A slot called after dispatch has reset the context is still
     # admitted by the scope the guard captured at wrap time
     # (_live_policy_scope).
@@ -929,7 +898,7 @@ async def test_policy_guard_wrap_time_capture_covers_late_calls():
     ptoken = set_op_policies(Policies([policy]))
     gtoken = set_mount_gate("/data", MountMode.WRITE)
     try:
-        ops = with_policy_guard(raw)
+        ops = with_command_guards(raw)
     finally:
         reset_mount_gate(gtoken)
         reset_op_policies(ptoken)

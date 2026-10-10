@@ -62,7 +62,6 @@ from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
-from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
     AskHandler,
@@ -107,7 +106,6 @@ from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.shell.literal import literal_tree
 from mirage.shell.variable import VarAttr
 from mirage.types import (
-    CacheFacts,
     DriftPolicy,
     FileEvent,
     FileStat,
@@ -2242,16 +2240,6 @@ class Workspace:
             has_managed_env=lambda: self._has_managed_env,
             secret_sources=self._secret_sources,
             execute=self.shell,
-        )
-
-    async def apply_io(
-        self,
-        io: IOResult,
-        records: list[OpRecord] | None = None,
-        cache_facts: Callable[[str], CacheFacts] | None = None,
-    ) -> None:
-        await self._dispatcher.apply_io(
-            io, records=records, cache_facts=cache_facts
         )
 
     async def _serialize_line(

@@ -60,7 +60,7 @@ import type { Result } from '../types.ts'
 import type { AttrMarks, DeclarationOperand } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { traceAssignment } from '../../../../shell/xtrace.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 
 /**
  * Put a declaration's value-shaping marks on a name before its value

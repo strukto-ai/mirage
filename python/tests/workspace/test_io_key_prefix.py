@@ -67,71 +67,40 @@ def _zip_bytes() -> bytes:
     return buf.getvalue()
 
 
-def _capture_io(ws: Workspace) -> list:
-    captured: list = []
-    orig = ws._dispatcher.apply_io
-
-    async def recording(result, records=None, cache_facts=None, nested=False):
-        captured.append(result)
-        return await orig(
-            result, records=records, cache_facts=cache_facts, nested=nested
-        )
-
-    ws._dispatcher.apply_io = recording
-    return captured
-
-
-def _assert_single_prefix(captured: list) -> None:
-    for result in captured:
-        keys = list(result.writes) + list(result.reads) + list(result.cache)
-        for key in keys:
-            if key.startswith("/dev/"):
-                continue
-            assert key.startswith("/data/"), key
-            assert not key.startswith("/data/data/"), key
-
-
 @pytest.mark.parametrize(
-    "cmd,stdin,recorded",
+    "cmd,stdin",
     [
-        ("tee /data/t.txt > /dev/null", b"x\ny\n", ()),
-        ("csplit -f /data/cs_ /data/seed.txt 2", None, ()),
-        ("csplit /data/seed.txt 2", None, ()),
-        ("split -l 1 /data/seed.txt", None, ()),
-        ("cd /data && split -l 1", b"x\ny\n", ()),
-        ("cd /data && csplit - 2", b"x\ny\n", ()),
-        ("unzip /data/a.zip -d /data/exout", None, ()),
-        ("cp /data/seed.txt /data/copy.txt", None, ()),
-        ("mkdir /data/newdir", None, ()),
-        (
-            "mv /data/seed.txt /data/moved.txt",
-            None,
-            ("/data/seed.txt", "/data/moved.txt"),
-        ),
-        ("rm -r /data/d", None, ("/data/d",)),
-        ("grep x /data/seed.txt > /data/red.txt", None, ()),
-        ("cat /data/seed.txt >> /data/app.txt", None, ()),
-        ("cat /data/seed.txt | tee /data/piped.txt > /dev/null", None, ()),
+        ("tee /data/t.txt > /dev/null", b"x\ny\n"),
+        ("csplit -f /data/cs_ /data/seed.txt 2", None),
+        ("csplit /data/seed.txt 2", None),
+        ("split -l 1 /data/seed.txt", None),
+        ("cd /data && split -l 1", b"x\ny\n"),
+        ("cd /data && csplit - 2", b"x\ny\n"),
+        ("unzip /data/a.zip -d /data/exout", None),
+        ("cp /data/seed.txt /data/copy.txt", None),
+        ("mkdir /data/newdir", None),
+        ("mv /data/seed.txt /data/moved.txt", None),
+        ("rm -r /data/d", None),
+        ("grep x /data/seed.txt > /data/red.txt", None),
+        ("cat /data/seed.txt >> /data/app.txt", None),
+        ("cat /data/seed.txt | tee /data/piped.txt > /dev/null", None),
         (
             "sed s/x/z/ /data/seed.txt > /data/s1.txt && cat /data/s1.txt"
             " > /data/s2.txt",
             None,
-            (),
         ),
     ],
 )
-def test_ram_io_keys_single_prefixed(cmd, stdin, recorded):
+def test_ram_writes_land_inside_the_mount(cmd, stdin):
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
     async def run():
         await ws.shell("tee /data/seed.txt > /dev/null", stdin=b"x\ny\n")
         await ws.shell("tee /data/a.zip > /dev/null", stdin=_zip_bytes())
         await ws.shell("mkdir -p /data/d/sub && cp /data/seed.txt /data/d/sub")
-        captured = _capture_io(ws)
         result = await ws.shell(cmd, stdin=stdin)
         assert result.exit_code == 0, await result.stderr_str()
-        _assert_single_prefix(captured)
-        assert set(recorded) <= set(result.writes)
+        assert not await ws.vfs.exists("/data/data")
         await ws.close()
 
     asyncio.run(run())
@@ -141,10 +110,8 @@ def test_ram_stderr_redirect_records_mount_relative_key():
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
     async def run():
-        captured = _capture_io(ws)
         result = await ws.shell("cat /data/missing.txt 2> /data/err.txt")
         assert result.exit_code != 0
-        _assert_single_prefix(captured)
         back = await ws.shell("cat /data/err.txt")
         assert back.exit_code == 0
         assert "missing.txt" in await back.stdout_str()
@@ -182,11 +149,10 @@ def test_ram_stdin_csplit_writes_its_part_inside_mount():
     asyncio.run(run())
 
 
-def test_s3_io_keys_single_prefixed(s3_endpoint):
+def test_s3_writes_land_inside_the_mount(s3_endpoint):
     ws = _s3_workspace(s3_endpoint, "key-prefix-test")
 
     async def run():
-        captured = _capture_io(ws)
         await ws.shell("tee /data/t.txt > /dev/null", stdin=b"x\ny\n")
         for cmd in (
             "touch /data/new.txt",
@@ -195,7 +161,7 @@ def test_s3_io_keys_single_prefixed(s3_endpoint):
         ):
             result = await ws.shell(cmd)
             assert result.exit_code == 0, await result.stderr_str()
-        _assert_single_prefix(captured)
+        assert not await ws.vfs.exists("/data/data")
         await ws.close()
 
     asyncio.run(run())

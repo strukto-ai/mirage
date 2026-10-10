@@ -30,6 +30,7 @@ from mirage.errors.types import (
     OperationNotSupportedError,
     ReadOnlyError,
     StaleWriteError,
+    WalkDeclinedError,
 )
 from mirage.types import PathSpec
 
@@ -351,6 +352,27 @@ def enotsup(
         FsCondition.ENOTSUP,
         path,
         f"{vfs}: no op {name!r}",
+    )
+
+
+def walk_declined(
+    vfs: str, name: str, path: str | PathSpec
+) -> WalkDeclinedError:
+    """The dispatcher's refusal of a one-call walk the caller makes itself.
+
+    Mirrors TS ``walkDeclined``.
+
+    Args:
+        vfs (str): VFS name of the mount the walk was sent to.
+        name (str): The declined op (e.g. ``rm_r``).
+        path (str | PathSpec): The operand; ``virtual`` is the reported
+            spelling.
+    """
+    return _stamped(
+        WalkDeclinedError,
+        FsCondition.ENOTSUP,
+        path,
+        f"{vfs}: {name!r} declined",
     )
 
 

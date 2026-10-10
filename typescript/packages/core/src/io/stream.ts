@@ -14,7 +14,6 @@
 
 import { KeyLock } from '../cache/lock.ts'
 import { SharedInput } from './async_line_iterator.ts'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import type { ByteSource, IOResult } from './types.ts'
 
 /**
@@ -55,35 +54,8 @@ export class SharedStdin implements AsyncIterable<Uint8Array> {
   }
 }
 
-export function wrapCachableStreams(
-  stdout: ByteSource | null,
-  io: IOResult,
-): [ByteSource | null, IOResult] {
-  for (const path of io.cache) {
-    const source = io.reads[path] ?? io.writes[path]
-    if (
-      source !== undefined &&
-      !(source instanceof Uint8Array) &&
-      !(source instanceof CachableAsyncIterator)
-    ) {
-      const ci = new CachableAsyncIterator(source)
-      if (path in io.reads) {
-        io.reads[path] = ci
-      } else if (path in io.writes) {
-        io.writes[path] = ci
-      }
-      if (stdout === source) stdout = ci
-    }
-  }
-  return [stdout, io]
-}
-
 export async function drain(stream: ByteSource | null): Promise<void> {
   if (stream === null || stream instanceof Uint8Array) return
-  if (stream instanceof CachableAsyncIterator) {
-    await stream.drain()
-    return
-  }
   for await (const _chunk of stream) {
     void _chunk
   }
@@ -122,7 +94,7 @@ export class OutputStream implements AsyncIterableIterator<Uint8Array> {
 /** Discard failed reads without changing normal early-consumer close semantics. */
 export async function discardStreams(...streams: (ByteSource | null)[]): Promise<void> {
   for (const stream of new Set(streams)) {
-    if (stream instanceof CachableAsyncIterator || stream instanceof SharedInput) {
+    if (stream instanceof SharedInput) {
       await stream.discard()
     } else {
       await closeQuietly(stream)
@@ -131,12 +103,7 @@ export async function discardStreams(...streams: (ByteSource | null)[]): Promise
 }
 
 export async function discardIo(io: IOResult): Promise<void> {
-  await discardStreams(
-    ...Object.values(io.reads),
-    ...Object.values(io.writes),
-    io.stdout,
-    io.stderr,
-  )
+  await discardStreams(io.stdout, io.stderr)
 }
 
 export async function* asyncChain(streams: Iterable<ByteSource | null>): AsyncIterable<Uint8Array> {

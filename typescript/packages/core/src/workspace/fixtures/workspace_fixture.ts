@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import type { ByteSource, IOResult } from '../../io/types.ts'
+import type { LostPaths } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
@@ -43,28 +43,27 @@ export async function cachingRamWorkspace(): Promise<Workspace> {
   return new Workspace({ '/r': ram }, { mode: MountMode.WRITE, shellParser: await getTestParser() })
 }
 
-export type Mark = [op: string, path: string, claimed: ByteSource | null | undefined]
+export type Mark = [op: string, path: string]
 
-type ApplyIoFn = (
-  io: IOResult,
-  records?: readonly OpRecord[],
-  cacheFacts?: (path: string) => CacheFacts,
+type KeepVersionsFn = (
+  records: readonly OpRecord[],
+  cacheFacts: (path: string) => CacheFacts,
+  lost: LostPaths | null,
+  nested?: boolean,
 ) => Promise<void>
 
 /**
- * Snapshot each `applyIo` call's records (as `[op, path, claimed]`) and a copy
- * of its writes on `ws`. The hook only snapshots: an assertion thrown inside
- * applyIo is folded into the line's result. The marks are read before the
- * real applyIo, since the line clears them once it has run.
+ * Snapshot the records each line's end keeps versions against, as
+ * `[op, path]`, and whether the line was nested. Mirrors Python's
+ * `capture_marks`.
  */
-export function captureMarks(ws: Workspace): [Mark[], Record<string, ByteSource>][] {
-  const captured: [Mark[], Record<string, ByteSource>][] = []
-  const dispatcher = (ws as unknown as { dispatcher: { applyIo: ApplyIoFn } }).dispatcher
-  const orig = dispatcher.applyIo.bind(dispatcher)
-  dispatcher.applyIo = async (io, records, cacheFacts) => {
-    const marks: Mark[] = (records ?? []).map((r) => [r.op, r.path, r.claimed])
-    captured.push([marks, { ...io.writes }])
-    return orig(io, records, cacheFacts)
+export function captureMarks(ws: Workspace): [Mark[], boolean][] {
+  const captured: [Mark[], boolean][] = []
+  const dispatcher = (ws as unknown as { dispatcher: { keepVersions: KeepVersionsFn } }).dispatcher
+  const orig = dispatcher.keepVersions.bind(dispatcher)
+  dispatcher.keepVersions = async (records, cacheFacts, lost, nested = false) => {
+    captured.push([records.map((r): Mark => [r.op, r.path]), nested])
+    await orig(records, cacheFacts, lost, nested)
   }
   return captured
 }

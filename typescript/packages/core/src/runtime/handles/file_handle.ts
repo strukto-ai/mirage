@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import { ChunkedHandle } from './chunked.ts'
 import { READ_CHUNK } from './constants.ts'

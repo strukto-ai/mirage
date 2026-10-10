@@ -14,7 +14,7 @@
 
 import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
-import { hasGlob } from '../../../utils/glob_walk.ts'
+import { hasGlob, unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { dottedSpelling, posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
@@ -34,7 +34,7 @@ export function relativeSpec(
   cwd: string,
 ): string | PathSpec {
   const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
-  if (registry.tryMountFor(path) === null) return word
+  if (registry.tryMountFor(unmarkGlobs(path)) === null) return word
   const lastSlash = path.lastIndexOf('/')
   if (hasGlob(word)) {
     return new PathSpec({

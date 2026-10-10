@@ -694,7 +694,7 @@ const opPoliciesStorage = createAsyncContext<Policies | null>()
  * Bound by command dispatch around routing, the same window the
  * admission gate binds in, so the command tier's policy guard can fire
  * `preVfs` for the backend I/O a handler performs. Read at wrap or
- * call time by `withPolicyGuard`; unset outside a dispatched command
+ * call time by `withCommandGuards`; unset outside a dispatched command
  * (a generic invoked directly in a test), where the guard is inert.
  */
 export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {

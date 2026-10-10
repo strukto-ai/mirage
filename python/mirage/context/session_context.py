@@ -244,6 +244,22 @@ def dotglob_active() -> bool:
     return sess is not None and bool(sess.shopts.get("dotglob"))
 
 
+def extglob_active() -> bool:
+    """Whether the bound session's `shopt -s extglob` is on.
+
+    Read where `dotglob_active` is, for the same reason: pathname
+    expansion runs in every backend's `resolve_glob`, and whether
+    `@(a|b)` is a group or text decides both how a word splits into
+    segments and how a name matches one. False when no session is bound,
+    which is bash's default.
+
+    Args:
+        None
+    """
+    sess = get_current_session()
+    return sess is not None and bool(sess.shopts.get("extglob"))
+
+
 def session_visibility() -> Visibility | None:
     """The bound session's visibility, None when no session is bound.
 

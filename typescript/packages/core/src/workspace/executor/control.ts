@@ -17,7 +17,7 @@ import { lineBuffer } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -510,8 +510,9 @@ export async function handleCfor(
 export async function handleCase(
   run: BodyRun,
   word: string,
-  items: readonly [readonly string[], readonly TSNodeLike[], string][],
+  items: readonly [readonly TSNodeLike[], readonly TSNodeLike[], string][],
   session: SessionState,
+  expand: (node: TSNodeLike) => Promise<string>,
 ): Promise<Result> {
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
@@ -521,8 +522,19 @@ export async function handleCase(
   // reaches an arm it falls into.
   const bound = fd0Binding(session)
   for (const [patterns, body, terminator] of items) {
-    if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
+    // An arm a `;;&` left can have turned extglob on for this one.
+    const extglob = session.shopts.extglob ?? false
     try {
+      let matched = fallthrough
+      if (!matched) {
+        for (const pattern of patterns) {
+          if (fnmatch(word, await expand(pattern), extglob)) {
+            matched = true
+            break
+          }
+        }
+      }
+      if (!matched) continue
       const [stdout, io, execNode] = await run(body, bound)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)

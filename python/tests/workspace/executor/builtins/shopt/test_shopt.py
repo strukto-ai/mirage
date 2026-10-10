@@ -15,7 +15,7 @@
 
 Set/unset/print/query pinned against bash 5.2.37; ``nullglob``,
 ``failglob``, ``dotglob`` and ``globstar`` verified through real
-expansions, and ``extglob`` refused because the parser has no such mode.
+expansions, including extended groups with ``extglob``.
 """
 
 import pytest
@@ -107,10 +107,45 @@ async def test_globstar():
 
 
 @pytest.mark.asyncio
-async def test_extglob_is_refused():
+async def test_extglob_is_enabled():
     ws = _ws()
     _, code = await _run(ws, "shopt -s extglob")
-    assert code == 1
-    # Querying an off option exits 1, as bash does.
+    assert code == 0
+    assert await _run(ws, "shopt extglob") == ("extglob        \ton\n", 0)
+    await _run(ws, "shopt -u extglob")
     assert await _run(ws, "shopt extglob") == ("extglob        \toff\n", 1)
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_extglob_reuses_namespace_walk_across_mounts():
+    ws = Workspace(
+        {"/left": RAMVFS(), "/right": RAMVFS()}, mode=MountMode.WRITE
+    )
+    try:
+        await _run(ws, "touch /left/a.txt /right/b.txt; shopt -s extglob")
+        assert await _run(ws, "echo /@(left|right)/@(a|b).txt") == (
+            "/left/a.txt /right/b.txt\n",
+            0,
+        )
+        assert await _run(ws, "echo /@(left|right)/+(a|b).txt") == (
+            "/left/a.txt /right/b.txt\n",
+            0,
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_extglob_requires_enable_before_read_but_conditionals_are_implicit():
+    ws = _ws()
+    try:
+        _, code = await _run(ws, "shopt -s extglob; echo @(a|b)")
+        assert code == 2
+        assert await _run(ws, "shopt -q extglob") == ("", 1)
+        assert await _run(ws, "[[ ab == +(a|b) ]]; echo $?") == ("0\n", 0)
+        assert await _run(
+            ws, "shopt -s extglob; eval 'case ab in +(a|b)) echo yes;; esac'"
+        ) == ("yes\n", 0)
+    finally:
+        await ws.close()

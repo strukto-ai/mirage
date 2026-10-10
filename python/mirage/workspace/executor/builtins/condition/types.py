@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Union
 
@@ -21,8 +22,19 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 
 CondNode = Union[
-    "CondWord", "CondUnary", "CondBinary", "CondNot", "CondAnd", "CondOr"
+    "CondWord",
+    "CondUnary",
+    "CondBinary",
+    "CondNot",
+    "CondAnd",
+    "CondOr",
+    "CondLazy",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class CondLazy:
+    expand: Callable[[], Awaitable[CondNode]]
 
 
 @dataclass(frozen=True, slots=True)

@@ -23,11 +23,19 @@ _MARK = "__vfs_call__"
 
 # Removing or moving a name is what these calls do, and the dispatcher's link,
 # overlay and cache bookkeeping for it is keyed on their names.
-_NAMED = {Effect.REMOVE: ("unlink", "rmdir"), Effect.RENAME: ("rename",)}
+_NAMED = {
+    Effect.REMOVE: ("unlink", "rmdir", "rm_r"),
+    Effect.RENAME: ("rename",),
+    Effect.COPY: ("copy", "dir_copy"),
+}
 
 
 def vfs_call(
-    *, effect: Effect, target: Target = Target.ANY, creates: bool = False
+    *,
+    effect: Effect,
+    target: Target = Target.ANY,
+    creates: bool = False,
+    subtree: bool = False,
 ) -> Callable[[Fn], Fn]:
     """Make a VFS method callable by name through the dispatcher.
 
@@ -41,28 +49,30 @@ def vfs_call(
     The built-in functions' marks are where the dispatcher's op classes come
     from: which ops follow a link, create a name, run one at a time per
     path or stamp an mtime is read off what they declare here. REMOVE
-    belongs to ``unlink`` and ``rmdir`` and RENAME to ``rename``: what
-    the dispatcher does around them (a link removed rather than followed, a
-    rename refused when it would bring hidden entries into view, the
-    links and cache below a moved directory) is keyed on those names, so
-    another function declaring either is refused. A VFS that deletes or
-    moves defines those functions.
+    belongs to ``unlink``, ``rmdir`` and ``rm_r``, RENAME to ``rename``
+    and COPY to ``copy`` and ``dir_copy``: what the dispatcher does
+    around them (a link removed rather than followed, a rename refused
+    when it would bring hidden entries into view, the links and cache
+    below a moved, removed or copied directory) is keyed on those names,
+    so another function declaring one is refused. A VFS that deletes,
+    moves or copies defines those functions.
 
     Args:
         effect (Effect): what the call does to the mount.
         target (Target): the kind of entry its path names.
         creates (bool): a WRITE that makes a missing file, as open(2)
             with O_CREAT.
+        subtree (bool): the call reaches everything below its paths.
     """
 
     def mark(fn: Fn) -> Fn:
         names = _NAMED.get(effect, (fn.__name__,))
         if fn.__name__ not in names:
             raise TypeError(
-                f"{fn.__name__}: only {' and '.join(names)} may declare"
+                f"{fn.__name__}: only {', '.join(names)} may declare"
                 f" {effect.name}"
             )
-        setattr(fn, _MARK, Declaration(effect, target, creates))
+        setattr(fn, _MARK, Declaration(effect, target, creates, subtree))
         return fn
 
     return mark

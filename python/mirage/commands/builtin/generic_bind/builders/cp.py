@@ -37,6 +37,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeCopy, PathSpec, PrimitiveCopy
 from mirage.utils.key_prefix import rekey
 from mirage.vfs.types import OperationFn
+from mirage.view.namespace_view import paths_scoped
 from mirage.view.types import StatOverlay
 
 
@@ -111,6 +112,12 @@ async def cp(
         raise ValueError("cp: no VFS")
     fl = FlagView(opts.flags, spec=SPECS["cp"])
     parsed = parse_flags(fl)
+    # A native copy or find answers for a whole tree in one call, so the
+    # dispatcher declines one whose tree the caller's view restricts; cp
+    # takes the entry-by-entry walk up front there, which is where GNU's
+    # per-entry refusals are worded.
+    if paths_scoped(opts.ns, paths, opts.mount_prefix):
+        ops = replace(ops, copy=None, dir_copy=None, find=None)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     mkdir = partial(ops.mkdir, accessor) if ops.mkdir else None

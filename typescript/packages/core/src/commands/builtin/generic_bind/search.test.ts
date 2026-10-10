@@ -20,6 +20,7 @@ import type { Searcher } from '../../../core/hierarchy/search.ts'
 import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { parseSessionProfile } from '../../../policy/profile.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -502,6 +503,22 @@ describe('a walk that reads every file', () => {
       await run(new RAMVFS(), 'rg --files /d'),
     )
   })
+})
+
+// Twin of test_a_hidden_path_is_walked_without_the_search.
+it('walks a hidden path without the search', async () => {
+  const vfs = new SearchRAM()
+  for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
+  for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
+  const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
+  try {
+    ws.createSession('agent', { profile: parseSessionProfile({ paths: { hide: ['/d/sub'] } }) })
+    const out = await ws.shell('grep -r ada /d', { sessionId: 'agent' })
+    expect(DEC.decode(out.stdout)).toBe('/d/a.txt:ada here\n')
+    expect(vfs.asked).toEqual([])
+  } finally {
+    await ws.close()
+  }
 })
 
 // Line search that answers no file.

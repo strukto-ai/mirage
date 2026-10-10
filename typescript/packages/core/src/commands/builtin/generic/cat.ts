@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'

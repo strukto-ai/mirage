@@ -73,13 +73,7 @@ import { standardRequest } from '../../../commands/spec/standard.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { namespaceViewOf } from '../../mount/namespace/view.ts'
-import {
-  dropMountCaches,
-  findStartPoints,
-  runClaiming,
-  runOnMount,
-  type RunOnMountCtx,
-} from './run.ts'
+import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { sessionView } from '../../session/state.ts'
@@ -97,7 +91,7 @@ import {
   routedOperands,
 } from './routing.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 // One handler per JOB_BUILTINS member but ps, which also takes the workspace
@@ -550,24 +544,21 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
     )
-    // The relay's keys are already virtual, so no prefix.
-    const [csStdout0, csIo] = await runClaiming('', () =>
-      handleCrossMount(
-        cmdName,
-        csScopes,
-        csTexts,
-        csFlags,
-        dispatch,
-        runOperand,
-        stdin,
-        makeStorageKey(registry),
-        csNs,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-        session.cwd,
-        spelledWords(parts.slice(1)),
-        aggregateFor(cmdName, csScopes, registry),
-        makeCheckUnlink(registry),
-      ),
+    const [csStdout0, csIo] = await handleCrossMount(
+      cmdName,
+      csScopes,
+      csTexts,
+      csFlags,
+      dispatch,
+      runOperand,
+      stdin,
+      makeStorageKey(registry),
+      csNs,
+      sessionView(session, registry.policies, context.frame.diagnostics),
+      session.cwd,
+      spelledWords(parts.slice(1)),
+      aggregateFor(cmdName, csScopes, registry),
+      makeCheckUnlink(registry),
     )
     const csExec = new ExecutionNode({
       command: cmdStr,

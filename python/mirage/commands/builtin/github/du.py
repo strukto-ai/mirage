@@ -21,7 +21,6 @@ from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     mount_io,
     with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.builders.du import (
     WalkBudget,
@@ -121,7 +120,7 @@ async def _live_size(
     # what the session cannot see and never report a refused directory.
     if _walked(accessor, ns, path):
         return await walk_size(
-            with_command_guards(with_policy_guard(io)),
+            with_command_guards(io),
             accessor,
             index,
             budget,
@@ -143,7 +142,7 @@ async def _live_entries(
     await live()
     if _walked(accessor, ns, path):
         return await walk_entries(
-            with_command_guards(with_policy_guard(io)),
+            with_command_guards(io),
             accessor,
             index,
             budget,

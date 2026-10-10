@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic.cp import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.fs import enotsup
+from mirage.errors.fs import eacces, enotsup, walk_declined
 from mirage.io.types import IOResult
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -123,13 +123,6 @@ async def test_duplicate_basenames_keep_the_first_copy():
 
 
 @pytest.mark.asyncio
-async def test_records_writes_by_strip_prefix():
-    files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/d/keep": b"K"}
-    _, io = await _run(files, {"/d"}, ["/a.txt", "/b.txt", "/d"])
-    assert set(io.writes) == {"/d/a.txt", "/d/b.txt"}
-
-
-@pytest.mark.asyncio
 async def test_same_file_via_directory_target_errors():
     files = {"/d/a.txt": b"AAA", "/d/keep": b"K"}
     _, io = await _run(files, {"/d"}, ["/d/a.txt", "/d"])
@@ -147,39 +140,6 @@ async def test_recursive_into_nested_subtree_refused():
     assert io.exit_code == 1
     assert b"into itself" in io.stderr
     assert set(files) == {"/d/a.txt", "/d/sub/d/a.txt"}
-
-
-@pytest.mark.asyncio
-async def test_primitive_copy_reports_no_reads():
-    # Its reads went through the dispatcher, which keeps what it fetched.
-    files = {"/a.txt": b"AAA"}
-    stat, _, _ = _make_backend(files, set())
-
-    async def read_bytes(p) -> bytes:
-        return files[_key(p)]
-
-    async def write(p, data: bytes) -> None:
-        files[_key(p)] = data
-
-    _, io = await cp_generic(
-        [_spec("/a.txt"), _spec("/copy.txt")],
-        stat=stat,
-        strategy=PrimitiveCopy(
-            read_bytes=read_bytes, write=write, mkdir=write, readdir=write
-        ),
-        flags=CpFlags(),
-    )
-    assert files["/copy.txt"] == b"AAA"
-    assert io.reads == {}
-    assert io.cache == []
-
-
-@pytest.mark.asyncio
-async def test_native_copy_records_no_reads():
-    files = {"/a.txt": b"AAA"}
-    _, io = await _run(files, set(), ["/a.txt", "/copy.txt"])
-    assert io.reads == {}
-    assert io.cache == []
 
 
 def _make_primitive(
@@ -268,7 +228,6 @@ async def test_primitive_write_failure_reports_cannot_create():
         b"cp: cannot create regular file '/d/a.txt': Operation not supported\n"
     )
     assert files["/src/a.txt"] == b"AAA"
-    assert io.reads == {}
 
 
 @pytest.mark.asyncio
@@ -352,15 +311,6 @@ async def test_backup_existing_follows_the_numbered_versions(before, backups):
         flags=CpFlags(backup="existing"),
     )
     assert files == {"/a.txt": b"SRC", "/b.txt": b"SRC", **backups}
-
-
-@pytest.mark.asyncio
-async def test_backup_records_write():
-    files = {"/a.txt": b"SRC", "/b.txt": b"DST"}
-    _, io = await _run(
-        files, set(), ["/a.txt", "/b.txt"], flags=CpFlags(backup="simple")
-    )
-    assert set(io.writes) == {"/b.txt", "/b.txt~"}
 
 
 @pytest.mark.asyncio
@@ -483,6 +433,54 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
         )
         assert io.exit_code == 0
         assert used["dir_copy"], flags
+
+
+@pytest.mark.asyncio
+async def test_a_declined_dir_copy_copies_entry_by_entry():
+    # The dispatcher may turn a one-call tree copy down (a link below the
+    # destination); the copy then goes per entry, directories included.
+    files = {"/t/f.txt": b"F"}
+    dirs = {"/t", "/t/empt"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+
+    async def dir_copy(src, dst) -> None:
+        raise walk_declined("ram", "dir_copy", dst)
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(
+            copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
+        ),
+        stat=stat,
+        flags=CpFlags(recursive=True, verbose=True),
+    )
+    assert io.exit_code == 0
+    assert files["/c/f.txt"] == b"F"
+    assert {"/c", "/c/empt"} <= dirs
+
+
+@pytest.mark.asyncio
+async def test_a_refused_entry_copy_names_the_entry_and_goes_on():
+    files = {"/t/a.txt": b"A", "/t/b.txt": b"B"}
+    dirs = {"/t"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+
+    async def refusing_copy(src, dst) -> None:
+        if _key(dst) == "/c/a.txt":
+            raise eacces(dst)
+        await copy(src, dst)
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(copy=refusing_copy, find=find, mkdir=mkdir),
+        stat=stat,
+        flags=CpFlags(recursive=True, backup="simple"),
+    )
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"cp: cannot create regular file '/c/a.txt': Permission denied\n"
+    )
+    assert files["/c/b.txt"] == b"B"
 
 
 @pytest.mark.asyncio
@@ -728,7 +726,6 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
     )
     assert io.exit_code == 1
     assert io.stderr == b"cp: cannot backup '/dst': Permission denied\n"
-    assert io.writes == {}
     assert links == {"/dst~": referent}
     assert files == {"/src": b"new", "/dst": b"old", "/safe": b"safe"}
 

@@ -1,4 +1,4 @@
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { byteView, encodeText, fromByteView, utf8Locale } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'

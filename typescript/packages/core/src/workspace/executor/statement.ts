@@ -29,7 +29,7 @@ import {
   unreadableStdin,
 } from '../../shell/descriptors.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { TSNodeLike } from '../../shell/types.ts'

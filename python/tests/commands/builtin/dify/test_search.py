@@ -73,8 +73,6 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
     )
 
     assert await materialize(stdout) == b"api\nauth\n"
-    assert io.reads == {}
-    assert io.cache == []
     assert [path.virtual for path in calls[0][0]] == [
         "/knowledge/guides/api.md",
         "/knowledge/guides/auth.md",

@@ -15,7 +15,7 @@
 import type { EvaluationContext } from '../evaluation.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'

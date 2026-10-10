@@ -42,9 +42,7 @@ async def stat_zzz_disk(
 ) -> tuple[bytes | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
     raw = await read(accessor, paths[0])
-    return b"CUSTOM DISK STAT %d\n" % len(raw), IOResult(
-        reads={paths[0].mount_path: raw}, cache=[paths[0].mount_path]
-    )
+    return b"CUSTOM DISK STAT %d\n" % len(raw), IOResult()
 
 
 @pytest.mark.asyncio

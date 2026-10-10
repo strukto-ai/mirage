@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from bisect import bisect_right
 from typing import Any, cast
 
 import tree_sitter
@@ -37,24 +38,59 @@ class SourceNode:
     """A node of a shielded parse that reads the original bytes.
 
     Every shield keeps the source's width, so a span names the same bytes
-    in both and only ``text`` differs. Reparsing the original against the
+    in both. Text and row/column positions use the original source:
+    pattern shielding can hide a newline inside a word. Reparsing against the
     shielded tree did the same until tree-sitter relexed a statement on
     its own, which it does at a line's end.
     """
 
-    def __init__(self, node: tree_sitter.Node, data: bytes) -> None:
+    def __init__(
+        self,
+        node: tree_sitter.Node,
+        data: bytes,
+        lines: tuple[int, ...] | None = None,
+    ) -> None:
         self._node = node
         self._data = data
+        self._lines = (
+            lines
+            if lines is not None
+            else (0, *(i + 1 for i, c in enumerate(data) if c == 10))
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._node, name)
 
     def _wrap(self, node: tree_sitter.Node | None) -> "SourceNode | None":
-        return None if node is None else SourceNode(node, self._data)
+        return (
+            None if node is None else SourceNode(node, self._data, self._lines)
+        )
+
+    @property
+    def type(self) -> str:
+        if self._node.type == "$(" and self.text in (b"<(", b">("):
+            return decode_text(self.text)
+        if self._node.type == "command_substitution" and self.text.startswith(
+            (b"<(", b">(")
+        ):
+            return "process_substitution"
+        return self._node.type
 
     @property
     def text(self) -> bytes:
         return self._data[self._node.start_byte : self._node.end_byte]
+
+    def _point(self, at: int) -> tuple[int, int]:
+        row = bisect_right(self._lines, at) - 1
+        return row, at - self._lines[row]
+
+    @property
+    def start_point(self) -> tuple[int, int]:
+        return self._point(self._node.start_byte)
+
+    @property
+    def end_point(self) -> tuple[int, int]:
+        return self._point(self._node.end_byte)
 
     @property
     def children(self) -> list["SourceNode"]:

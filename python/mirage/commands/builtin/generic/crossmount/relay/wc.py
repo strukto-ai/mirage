@@ -25,7 +25,6 @@ from mirage.commands.builtin.generic.crossmount.types import (
 )
 from mirage.commands.builtin.generic.crossmount.utils import (
     merge_operand_ios,
-    relay,
     run_operands,
 )
 from mirage.commands.builtin.generic.wc import (
@@ -34,6 +33,7 @@ from mirage.commands.builtin.generic.wc import (
     number_width,
     parse_flags,
 )
+from mirage.commands.builtin.generic_bind.adapter import dispatched_call
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.errors import UsageError
@@ -68,7 +68,7 @@ async def operand_size(
     if is_stdin(path):
         return None
     try:
-        info = await relay(dispatch, "stat", path)
+        info = await dispatched_call(dispatch, "stat", path)
     except FS_ERRORS as exc:
         # Gone since its mount counted it: the width is only layout, so
         # the counts already taken still print, padded to the lower bound.

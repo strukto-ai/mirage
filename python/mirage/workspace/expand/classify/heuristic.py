@@ -15,7 +15,9 @@
 import posixpath
 import re
 
+from mirage.context import extglob_active
 from mirage.types import PathSpec
+from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, unmark_globs
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import dotted_spelling
@@ -50,15 +52,20 @@ def classify_word(
     # like a path at all is a question about the name itself, so the
     # shape tests below read the literal spelling.
     word_has_glob = has_glob(word)
-    shape = unmark_globs(word)
+    shape = (
+        pattern_shape(word)
+        if word_has_glob and extglob_active()
+        else unmark_globs(word)
+    )
 
     if word.startswith("/"):
-        mount = registry.try_mount_for(word)
+        # A quoted character names the mount literally (`'/team+'/*`).
+        mount = registry.try_mount_for(unmark_globs(word))
         if mount is None:
             return word
         is_dir = word.endswith("/")
         path = posixpath.normpath(word)
-        if not is_dir and path + "/" == mount.prefix:
+        if not is_dir and unmark_globs(path) + "/" == mount.prefix:
             is_dir = True
         vfs_path = mount_key(path, mount.prefix.rstrip("/"))
         # `raw_path` keeps the spelling as typed, the way `relative_spec`

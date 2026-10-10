@@ -203,10 +203,10 @@ def test_a_write_after_a_guarded_cp_keeps_its_own_bytes():
 
 
 def test_read_then_write_on_one_line_keeps_the_read_token():
-    """`IOResult.merge` unions a line's reads and writes, and apply_io
-    caches the read's bytes. If those bytes were stamped with the write's
-    token the entry would read as fresh forever and the stale bytes would
-    serve; the next read must see the written content instead."""
+    """A line that reads a file and then writes it caches the read's
+    bytes first. If those bytes kept the write's token the entry would
+    read as fresh forever and the stale bytes would serve; the next read
+    must see the written content instead."""
     store = {"f.txt": b"old\n"}
     with _workspace(store, ReadSpec(policy=ReadPolicy.FRESH)) as (ws, _client):
 
@@ -257,9 +257,8 @@ def test_write_then_truncate_on_one_line_does_not_pin_stale_bytes():
 
 
 def test_write_then_copy_over_it_does_not_pin_stale_bytes():
-    """`cp` replaces the path's entry in `IOResult.writes` with an empty
-    eviction marker while tee's write record stays the last one, so the
-    token would land on bytes it does not describe."""
+    """`cp` over a file tee just wrote must not leave tee's token on the
+    copied bytes: tee's write record describes bytes that are gone."""
     store = {"a.txt": b"x\n"}
     with _workspace(store, ReadSpec(policy=ReadPolicy.FRESH)) as (ws, _client):
 

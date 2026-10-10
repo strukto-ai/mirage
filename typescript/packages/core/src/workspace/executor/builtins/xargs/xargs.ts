@@ -43,7 +43,7 @@ import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 
 const SYNOPSIS = 'xargs [OPTION]... COMMAND [INITIAL-ARGS]...'
 const PROCS_MAX = 2147483647

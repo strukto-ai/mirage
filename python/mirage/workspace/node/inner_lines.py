@@ -19,6 +19,7 @@ from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
+from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
 from mirage.workspace.executor.builtins.timeout.timeout import timeout_missing
@@ -52,7 +53,7 @@ class Word:
 
 def _word_globs(node: TSNodeLike) -> bool:
     if node.type in (NT.WORD, NT.NUMBER):
-        return has_glob(mark_escaped_globs(get_text(node)))
+        return has_glob(pattern_shape(mark_escaped_globs(get_text(node))))
     if node.type in (NT.COMMAND_NAME, NT.CONCATENATION):
         return any(_word_globs(child) for child in node.named_children)
     return node.type == NT.EXTGLOB_PATTERN

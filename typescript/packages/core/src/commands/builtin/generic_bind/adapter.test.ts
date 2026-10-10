@@ -24,27 +24,14 @@ import type { Policy } from '../../../policy/base.ts'
 import { Policies, runWithOpPolicies } from '../../../policy/policies.ts'
 import type { Action, VfsContext } from '../../../policy/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import {
-  requireOp,
-  withAbortGuard,
-  withCommandGuards,
-  withDispatchRuleGuard,
-  withPolicyGuard,
-} from './adapter.ts'
+import { requireOp, withAbortGuard, withCommandGuards, withDispatchRuleGuard } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts, CommandIO } from '../../config.ts'
-import {
-  commandIo,
-  dirAwareStat,
-  dirAwareStream,
-  resolveGlobOf,
-  scopedIo,
-  withDirGuard,
-} from './adapter.ts'
+import { commandIo, dirAwareStat, dirAwareStream, resolveGlobOf, withDirGuard } from './adapter.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { makeResolveGlob } from '../../../utils/glob_walk.ts'
@@ -429,29 +416,6 @@ describe('withDispatchRuleGuard', () => {
   })
 })
 
-describe('scopedIo', () => {
-  it('sets the mount search aside', () => {
-    // The mount's search reads under a listing a rule may refuse, so a scoped
-    // command walks and reads through the guards instead, as it does for
-    // every other native scan.
-    const filesContaining = () => Promise.resolve(null)
-    const linesContaining = () => Promise.resolve(null)
-    const io: CommandIO = { ...dirOps([]), filesContaining, linesContaining }
-    const roots = [PathSpec.fromStrPath('/data')]
-    const free = { scoped: () => false }
-    const judged = { scoped: (virtual: string) => virtual === '/data' }
-    for (const ns of [free, undefined]) {
-      const kept = scopedIo(io, ns, roots, '/data/')
-      expect([kept.filesContaining, kept.linesContaining]).toEqual([
-        filesContaining,
-        linesContaining,
-      ])
-    }
-    const scoped = scopedIo(io, judged, roots, '/data/')
-    expect([scoped.filesContaining, scoped.linesContaining]).toEqual([undefined, undefined])
-  })
-})
-
 const SEALED = { message: 'Permission denied', refusal: { reason: 'sealed' } }
 
 class SealedRead implements Policy {
@@ -469,7 +433,7 @@ class SealedRead implements Policy {
   }
 }
 
-describe('withPolicyGuard', () => {
+describe('withCommandGuards policy', () => {
   const spec = (virtual: string): PathSpec =>
     new PathSpec({
       virtual,
@@ -511,39 +475,25 @@ describe('withPolicyGuard', () => {
     }
   }
 
-  it('admits slots and leaves stat alone', async () => {
+  it('admits a listing and leaves stat alone', async () => {
     const calls: string[][] = []
     const raw = probeOps(calls)
-    // No binding: every slot runs as is, and no hook fires.
-    expect(await withPolicyGuard(raw).readBytes(accessor, spec('/data/secret'))).toEqual(
-      new Uint8Array([1]),
-    )
-    calls.length = 0
-
     const policy = new SealedRead('/data/secret')
     await runWithOpPolicies(new Policies([policy]), () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withPolicyGuard(raw)
-        // Content reads are the dispatcher's, which admits them itself.
-        expect(ops.readBytes).toBe(raw.readBytes)
-        expect(ops.readStream).toBe(raw.readStream)
-        // stat is not a guarded slot: deny is present and refused.
+        const ops = withCommandGuards(raw)
+        // stat is a presence fact: deny is present and refused.
         expect((await ops.stat(accessor, spec('/data/secret'))).size).toBe(1)
         // readdir asks about the directory it lists.
         await expect(ops.readdir(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
         expect(calls).not.toContainEqual(['readdir', '/data/secret'])
         expect(await ops.readdir(accessor, spec('/data/dir'))).toEqual(['a'])
-        // A copy's source is a read; its destination is a write.
-        const copy = ops.copy
-        if (copy === undefined) throw new Error('copy slot missing')
-        await copy(accessor, spec('/data/src'), spec('/data/dst'))
-        // The other writes are the dispatcher's too.
+        // Writes and copies are the dispatcher's, which judges them itself.
+        expect(ops.copy).toBe(raw.copy)
         expect(ops.unlink).toBe(raw.unlink)
       }),
     )
     expect(policy.asked).toContainEqual(['readdir', '/data/dir', false])
-    expect(policy.asked).toContainEqual(['copy', '/data/src', false])
-    expect(policy.asked).toContainEqual(['copy', '/data/dst', true])
     expect(policy.asked.some(([op]) => op === 'stat')).toBe(false)
   })
 
@@ -554,7 +504,7 @@ describe('withPolicyGuard', () => {
     const raw = probeOps(calls)
     const policy = new SealedRead('/data/secret')
     const ops = await runWithOpPolicies(new Policies([policy]), () =>
-      Promise.resolve(withPolicyGuard(raw)),
+      Promise.resolve(withCommandGuards(raw)),
     )
     // The slot call happens outside the window now.
     await expect(ops.readdir(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
@@ -806,13 +756,12 @@ function capabilityOps(backend?: () => Promise<void>): CommandIO {
 }
 
 // A write slot the backend has is the dispatcher's (`dispatchedIo`), which
-// judges it itself; the guards hold a missing one and a copy.
+// judges it itself; the guards hold a missing one.
 const capabilityCases = [
   ...(['write', 'mkdir', 'unlink', 'rename', 'copy', 'truncate'] as const).map((operation) => ({
     available: false,
     operation,
   })),
-  { available: true, operation: 'copy' as const },
 ].flatMap(({ available, operation }) =>
   (['locked', 'hidden', 'build'] as const).map((region) => ({ available, operation, region })),
 )

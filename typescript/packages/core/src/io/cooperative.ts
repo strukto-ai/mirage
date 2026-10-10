@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { abortable } from '../utils/abort.ts'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { YieldBudget } from './yield_budget.ts'
 
 export const CHUNK_SIZE = 16 * 1024
@@ -58,22 +57,12 @@ export async function* chunks(
         yield data.subarray(offset, offset + CHUNK_SIZE)
       }
     }
-  } catch (error) {
-    // The discard closes the producer as well, and behind a pull that
-    // never settles that close would hang the abort; it is not awaited
-    // then. `discard` never rejects.
-    if (source instanceof CachableAsyncIterator) {
-      const discarding = source.discard()
-      if (pulling) void discarding
-      else await discarding
-    }
-    throw error
   } finally {
     // What for-await did implicitly: close a producer left mid-stream,
     // whether the consumer stopped early or an abort landed. A return
     // queued behind a pull that never settles would hang, so that one
     // is not awaited.
-    if (!finished && !(source instanceof CachableAsyncIterator)) {
+    if (!finished) {
       const closing = iterator.return?.()
       if (closing !== undefined) {
         if (pulling) void closing.catch(() => undefined)

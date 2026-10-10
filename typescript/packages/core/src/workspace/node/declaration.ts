@@ -43,7 +43,7 @@ import {
   startLocal,
 } from '../executor/builtins/declare/declare.ts'
 import { traceArray, traceCommand } from '../../shell/xtrace.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -73,9 +73,6 @@ function mergeConversionErrors(result: Result, errors: readonly string[]): Resul
   const newIo = new IOResult({
     exitCode: 1,
     stderr: merged,
-    reads: io.reads,
-    writes: io.writes,
-    cache: io.cache,
   })
   return [stream, newIo, new ExecutionNode({ command: node.command, exitCode: 1, stderr: merged })]
 }

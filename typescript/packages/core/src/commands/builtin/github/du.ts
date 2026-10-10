@@ -16,7 +16,7 @@ import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlobOf, mountIo } from '../generic_bind/index.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { NamespaceView } from '../../../view/types.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { withCommandGuards } from '../generic_bind/adapter.ts'
 import { ensureTree } from '../../../core/github/tree.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -97,13 +97,13 @@ async function du(
     async (p) => {
       await live()
       if (walked(accessor, opts.ns, p))
-        return walkSize(withCommandGuards(withPolicyGuard(io)), accessor, idx, budget, p)
+        return walkSize(withCommandGuards(io), accessor, idx, budget, p)
       return subtree(accessor, p)[0][1]
     },
     async (p) => {
       await live()
       if (walked(accessor, opts.ns, p))
-        return walkEntries(withCommandGuards(withPolicyGuard(io)), accessor, idx, budget, p)
+        return walkEntries(withCommandGuards(io), accessor, idx, budget, p)
       const [entries, directories] = subtree(accessor, p)
       const mount = mountPrefixOf(p.virtual, p.vfsPath)
       budget.directories.push(...directories.map((d) => `${mount}${d}`))

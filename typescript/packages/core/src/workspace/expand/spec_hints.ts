@@ -17,6 +17,7 @@ import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { type CommandSpec } from '../../commands/spec/types.ts'
+import { unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 // Find the spec that classifies a mount command's words. The cwd
@@ -59,9 +60,10 @@ export function specWordKinds(
   argv: readonly string[],
   name = '',
 ): (ValueType | null)[] {
-  const kinds = [...parseCommand(spec, [...argv], '/', name).wordKinds]
+  const literal = argv.map(unmarkGlobs)
+  const kinds = [...parseCommand(spec, literal, '/', name).wordKinds]
   if (name === 'find') {
-    for (const [start, end] of execSpans(argv)) {
+    for (const [start, end] of execSpans(literal)) {
       for (let i = start; i <= end; i++) kinds[i] = 'str'
     }
   }
@@ -80,5 +82,5 @@ export function specWordBases(
   cwd: string,
 ): (string | null)[] | null {
   if (spec.operandBase === null) return null
-  return [...parseCommand(spec, [...argv], cwd).wordBases]
+  return [...parseCommand(spec, argv.map(unmarkGlobs), cwd).wordBases]
 }

@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
 import { cpWalk } from '../../generic/cp.ts'
-import { rmWithoutOperands } from '../../generic/rm_cmd.ts'
+import { removeTree, rmWithoutOperands } from '../../generic/rm_cmd.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { mountPoints } from '../../utils/operands.ts'
 import { removalLines } from '../../utils/verbose.ts'
@@ -30,6 +30,7 @@ import {
   isFsError,
 } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
+import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
 const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
@@ -74,24 +75,47 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
         // rmR/rmdir are resolved lazily so object stores without a real
         // directory-remove op still unlink plain files (mirrors Python).
         if (recursive) {
-          if (verbose) {
-            entryLines = removalLines(
-              await cpWalk(
-                (dir) => ops.readdir(accessor, dir, idx),
-                (spec) => ops.stat(accessor, spec, idx),
-                p,
-                idx,
-              ),
-              p,
-            )
+          const listing = (dir: PathSpec): Promise<string[]> => ops.readdir(accessor, dir, idx)
+          const probe = (spec: PathSpec): Promise<FileStat> => ops.stat(accessor, spec, idx)
+          // -v names each entry before the tree goes in one call; a tree it
+          // cannot list whole goes entry by entry, as does one the
+          // dispatcher declines for the caller's view.
+          const unlisted: string[] = []
+          let listed = verbose ? await cpWalk(listing, probe, p, idx, 'rm', unlisted) : []
+          let declined = unlisted.length > 0
+          if (!declined) {
+            try {
+              await rmR(accessor, p)
+            } catch (err) {
+              if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+              declined = true
+            }
           }
-          await rmR(accessor, p)
+          let failures: [PathSpec, unknown][] = []
+          if (declined) {
+            ;({ removed: listed, failures } = await removeTree(p, {
+              readdir: listing,
+              stat: probe,
+              unlink: (spec) => unlink(accessor, spec),
+              rmdir: (spec) => rmdir(accessor, spec, idx),
+              ns: opts.ns,
+              force,
+            }))
+            for (const [entry, why] of failures) {
+              errors.push(`rm: cannot remove '${entry.rawPath}': ${fsStrerror(why) ?? String(why)}`)
+            }
+          }
+          entryLines = verbose ? removalLines(listed, p) : []
           // A removal never crosses into a mount below, so it says so as
           // GNU's --one-file-system does.
           for (const root of mountPoints(opts.ns?.mounts, p.virtual))
             errors.push(
               `rm: skipping '${operandSpelling(root, p)}', since it's on a different device`,
             )
+          if (failures.length > 0) {
+            if (verbose) lines.push(...entryLines)
+            continue
+          }
         } else if (dirFlag) {
           if ((await ops.readdir(accessor, p, idx)).length > 0) {
             errors.push(`rm: cannot remove '${p.rawPath}': Directory not empty`)

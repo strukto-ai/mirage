@@ -107,9 +107,13 @@ async def discard(path: PathSpec) -> None:
 
 @pytest.mark.parametrize(
     ("effect", "names"),
-    [(Effect.REMOVE, "unlink and rmdir"), (Effect.RENAME, "rename")],
+    [
+        (Effect.REMOVE, "unlink, rmdir, rm_r"),
+        (Effect.RENAME, "rename"),
+        (Effect.COPY, "copy, dir_copy"),
+    ],
 )
-def test_only_the_posix_calls_remove_or_move_a_name(effect, names):
+def test_only_the_posix_calls_remove_move_or_copy_a_name(effect, names):
     refusal = f"discard: only {names} may declare {effect.name}"
     with pytest.raises(TypeError, match=refusal):
         vfs_call(effect=effect)(discard)
@@ -120,13 +124,20 @@ def test_only_the_posix_calls_remove_or_move_a_name(effect, names):
 # one language fails the other language's test.
 BUILT_INS = {
     "append": (Effect.WRITE, Target.FILE, True),
+    "copy": (Effect.COPY, Target.FILE, False),
     "create": (Effect.WRITE, Target.FILE, True),
+    "dir_copy": (Effect.COPY, Target.DIR, False, True),
+    "du_entries": (Effect.READ, Target.DIR, False, True),
+    "du_size": (Effect.READ, Target.DIR, False, True),
+    "find": (Effect.READ, Target.DIR, False, True),
     "mkdir": (Effect.CREATE, Target.DIR, False),
     "pwrite": (Effect.WRITE, Target.FILE, True),
     "read": (Effect.READ, Target.FILE, False),
     "readdir": (Effect.READ, Target.DIR, False),
-    "rename": (Effect.RENAME, Target.ANY, False),
+    "rename": (Effect.RENAME, Target.ANY, False, True),
+    "rm_r": (Effect.REMOVE, Target.DIR, False, True),
     "rmdir": (Effect.REMOVE, Target.DIR, False),
+    "search": (Effect.READ, Target.ANY, False, True),
     "setattr": (Effect.ATTR, Target.ANY, False),
     "stat": (Effect.METADATA, Target.ANY, False),
     "truncate": (Effect.WRITE, Target.FILE, True),
@@ -143,10 +154,14 @@ def test_the_built_ins_declare_what_they_do():
 
 def test_call_names_keeps_what_matches_every_filter():
     calls = declared_calls(BaseVFS)
-    assert call_names(calls, effects={Effect.REMOVE}) == {"unlink", "rmdir"}
+    assert call_names(calls, effects={Effect.REMOVE}) == {
+        "unlink",
+        "rmdir",
+        "rm_r",
+    }
     assert call_names(
         calls, effects={Effect.REMOVE}, targets={Target.DIR}
-    ) == {"rmdir"}
+    ) == {"rmdir", "rm_r"}
     assert call_names(calls, effects={Effect.WRITE}, creates=False) == set()
     assert call_names(calls, targets={Target.LINK}) == set()
 

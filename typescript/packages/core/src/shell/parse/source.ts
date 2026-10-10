@@ -24,7 +24,8 @@ import type { ShellNode, TSNodeLike } from '../types.ts'
  * A node of a shielded parse that reads the original text.
  *
  * Every shield keeps the source's width, so a span names the same text in
- * both and only `text` differs. Reparsing the original against the
+ * both. Text and row/column positions use the original source: pattern
+ * shielding can hide a newline inside a word. Reparsing against the
  * shielded tree did the same until tree-sitter relexed a statement on its
  * own, which it does at a line's end. Mirrors Python's SourceNode.
  */
@@ -32,11 +33,18 @@ export class SourceNode implements WrappedNode {
   constructor(
     protected readonly node: ShellNode,
     protected readonly original: string,
+    private readonly lines: readonly number[] = [
+      0,
+      ...Array.from(original.matchAll(/\n/g), (match) => match.index + 1),
+    ],
   ) {}
   get inner(): ShellNode {
     return this.node
   }
   get type(): string {
+    if (this.node.type === '$(' && (this.text === '<(' || this.text === '>(')) return this.text
+    if (this.node.type === 'command_substitution' && /^(?:<|>)\(/.test(this.text))
+      return 'process_substitution'
     return this.node.type
   }
   get text(): string {
@@ -52,10 +60,21 @@ export class SourceNode implements WrappedNode {
     return this.node.endIndex
   }
   get startPosition() {
-    return this.node.startPosition
+    return this.point(this.node.startIndex)
   }
   get endPosition() {
-    return this.node.endPosition
+    return this.point(this.node.endIndex)
+  }
+  private point(at: number): { row: number; column: number } {
+    let lo = 0
+    let hi = this.lines.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if ((this.lines[mid] ?? 0) <= at) lo = mid + 1
+      else hi = mid
+    }
+    const row = lo - 1
+    return { row, column: at - (this.lines[row] ?? 0) }
   }
   get isNamed(): boolean {
     return this.node.isNamed
@@ -79,7 +98,7 @@ export class SourceNode implements WrappedNode {
     return this.node.namedChildren.map((node) => this.wrap(node)).filter((node) => node !== null)
   }
   protected wrap(node: ShellNode | null): SourceNode | null {
-    return node === null ? null : new SourceNode(node, this.original)
+    return node === null ? null : new SourceNode(node, this.original, this.lines)
   }
   get parent(): SourceNode | null {
     return this.wrap(this.node.parent)

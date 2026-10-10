@@ -49,7 +49,7 @@ import type { ExecAction, FindAction, PrintfAction } from '../../commands/builti
 import type { ExecuteFn } from '../expand/node.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 export interface FindActionOptions {

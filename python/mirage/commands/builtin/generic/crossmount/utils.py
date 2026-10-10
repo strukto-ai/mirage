@@ -37,6 +37,7 @@ from mirage.commands.builtin.generic.rg import (
     between_files as rg_between_files,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
+from mirage.commands.builtin.generic_bind.adapter import dispatched_call
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -55,15 +56,6 @@ from mirage.types import FileType, PathSpec, PrimitiveCopy, Visibility
 from mirage.view.types import LinkView
 
 
-async def relay(
-    dispatch: DispatchFn, name: str, path: PathSpec, **kwargs: Any
-) -> Any:
-    # Relay one op for one path to the mount that owns it. The generics call
-    # ops as (path); dispatch keys off the path.
-    data, _ = await dispatch(name, path, **kwargs)
-    return data
-
-
 async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
     """Read a relayed file.
 
@@ -71,10 +63,10 @@ async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
         dispatch (DispatchFn): Workspace operation dispatcher.
         path (PathSpec): Full virtual input path.
     """
-    info = await relay(dispatch, "stat", path)
+    info = await dispatched_call(dispatch, "stat", path)
     if info.type is FileType.DIRECTORY:
         raise eisdir(path.virtual)
-    return cast(bytes, await relay(dispatch, "read", path))
+    return cast(bytes, await dispatched_call(dispatch, "read", path))
 
 
 async def _relay_write(
@@ -90,7 +82,7 @@ async def _relay_write(
         path (PathSpec): The file to write.
         data (bytes): Its entire content.
     """
-    await dispatch("write", path, data=data)
+    await dispatched_call(dispatch, "write", path, data=data)
 
 
 async def run_operands(
@@ -203,11 +195,11 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     """
     p = functools.partial
     return dict(
-        stat=p(relay, dispatch, "stat"),
-        read_bytes=p(relay, dispatch, "read"),
+        stat=p(dispatched_call, dispatch, "stat"),
+        read_bytes=p(dispatched_call, dispatch, "read"),
         write=p(_relay_write, dispatch),
-        mkdir=p(relay, dispatch, "mkdir"),
-        readdir=p(relay, dispatch, "readdir"),
+        mkdir=p(dispatched_call, dispatch, "mkdir"),
+        readdir=p(dispatched_call, dispatch, "readdir"),
     )
 
 
@@ -311,9 +303,6 @@ async def stream_operands(
                         fs_error_line(cmd_name, scope, exc)
                     )
                     branch.exit_code = read_fail_exit_code(cmd_name, exc)
-                io.reads.update(branch.reads)
-                io.writes.update(branch.writes)
-                io.cache.extend(branch.cache)
                 io.stderr = await materialize(io.stderr) + await materialize(
                     branch.stderr
                 )

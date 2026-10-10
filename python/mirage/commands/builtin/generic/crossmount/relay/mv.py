@@ -18,13 +18,15 @@ from typing import Callable
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
-    relay,
     transfer_links_of,
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
-from mirage.commands.builtin.generic_bind.adapter import refuse_reveal
+from mirage.commands.builtin.generic_bind.adapter import (
+    dispatched_call,
+    refuse_reveal,
+)
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -72,8 +74,8 @@ async def run_mv(
             write=primitives["write"],
             mkdir=primitives["mkdir"],
             readdir=primitives["readdir"],
-            unlink=p(relay, dispatch, "unlink"),
-            rmdir=p(relay, dispatch, "rmdir"),
+            unlink=p(dispatched_call, dispatch, "unlink"),
+            rmdir=p(dispatched_call, dispatch, "rmdir"),
             check_unlink=check_unlink,
         ),
         flags=parse_flags(fl),

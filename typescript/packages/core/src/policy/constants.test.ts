@@ -23,13 +23,12 @@ const sorted = (names: Iterable<string>): string[] => [...names].sort()
 
 describe('policy op tables', () => {
   it('holds the subtree ops the functions declare', () => {
-    // A rename and a directory removal take everything under them along;
-    // rm_r is the command tier's, which no VFS function declares.
+    // A rename and a directory removal take everything under them along.
     const declared = [
       ...callNames(CALLS, { effects: [Effect.RENAME] }),
       ...callNames(CALLS, { effects: [Effect.REMOVE], targets: [Target.DIR] }),
     ]
-    expect(sorted(SUBTREE_OPS)).toEqual(sorted([...declared, 'rm_r']))
+    expect(sorted(SUBTREE_OPS)).toEqual(sorted(declared))
   })
 
   it('holds the metadata ops the functions declare', () => {

@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dotglobActive, sessionVisibility } from '../context/session_context.ts'
+import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
-import { fnmatch } from './fnmatch.ts'
+import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
@@ -80,6 +80,8 @@ export function globPrefix(pattern: string | null | undefined): string {
     const idx = pattern.indexOf(ch)
     if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
   }
+  const opener = extglobActive() ? pattern.search(EXTGLOB_RE) : -1
+  if (opener !== -1 && (metaIndex === -1 || opener < metaIndex)) metaIndex = opener
   if (metaIndex === -1) return ''
   return unmarkGlobs(pattern.slice(0, metaIndex))
 }
@@ -168,24 +170,24 @@ export function literalSpan(literal: string): [string, string] | null {
 // The marks are Unicode noncharacters, permanently unassigned and never
 // valid interchange text -- the same impossible input `brace.ts` assumes
 // away when it delimits its inert atoms with NUL.
-const GLOB_MARKS: Readonly<Record<string, string>> = {
-  '*': '\uFDD0',
-  '?': '\uFDD1',
-  '[': '\uFDD2',
-}
+const GLOB_MARKS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(QUOTED_CHARS).map(([mark, ch]) => [ch, mark]),
+)
 const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(GLOB_MARKS).map(([ch, mark]) => [mark, ch]),
 )
 // One native pass, not a per-character rebuild: every expanded word is
 // marked and unmarked, so a JS-level loop made the cost quadratic in a
 // loop that grows one word (`while true; do export X=$X.; done`).
-const GLOB_CHAR_RE = /[*?[]/g
-const GLOB_MARK_RE = /[\uFDD0-\uFDD2]/g
+const GLOB_CHAR_RE = /[*?[@+!()|]/g
+const GLOB_MARK_RE = /[\uFDD0-\uFDD8]/g
 
 export const DEFAULT_MAX_GLOB_MATCHES = 10000
 
 export function hasGlob(segment: string): boolean {
-  return GLOB_CHARS.some((ch) => segment.includes(ch))
+  return (
+    GLOB_CHARS.some((ch) => segment.includes(ch)) || (extglobActive() && EXTGLOB_RE.test(segment))
+  )
 }
 
 // Quote every glob character, the way enclosing quotes would.
@@ -234,10 +236,14 @@ export function markEscapedGlobs(text: string): string {
  *
  * fnmatch has no escape character, so a quoted glob character is handed
  * over as its own one-character class, exactly what `escapeGlob` builds
- * for text that is literal throughout.
+ * for text that is literal throughout. Extended operators retain their
+ * marks until matching: turning a quoted `@` into `[@]` inside `[a"@"]`
+ * would create a nested bracket expression; unquoting it could create a group.
  */
 export function globPattern(segment: string): string {
-  return segment.replace(GLOB_MARK_RE, (ch) => `[${GLOB_CHAR_OF[ch] ?? ch}]`)
+  return segment.replace(GLOB_MARK_RE, (ch) =>
+    GLOB_CHARS.includes(GLOB_CHAR_OF[ch] ?? '') ? `[${GLOB_CHAR_OF[ch] ?? ch}]` : ch,
+  )
 }
 
 // Drop the marks from a spec, leaving the literal path it names.
@@ -284,14 +290,10 @@ export function literalWord(item: string | PathSpec): string | PathSpec {
  * fnmatch has no escape character, so each special is wrapped in its own
  * one-character class: `*` becomes `[*]`. A `]` needs no treatment: outside
  * a class it is already literal, and no class can open because every `[`
- * gets wrapped.
+ * gets wrapped. Extended operators retain the quote marks in `globPattern`.
  */
 export function escapeGlob(text: string): string {
-  let out = ''
-  for (const c of text) {
-    out += GLOB_CHARS.includes(c) ? `[${c}]` : c
-  }
-  return out
+  return globPattern(markGlobs(text))
 }
 
 // Whether a pattern spec is a typed word (not a directory listing). A
@@ -302,6 +304,11 @@ export function isWordShaped(p: PathSpec): boolean {
   return rstripSlash(p.virtual) !== rstripSlash(p.directory)
 }
 
+/** Path components under the active shell's pattern grammar. */
+export function globParts(pattern: string): string[] {
+  return extglobActive() ? patternParts(pattern) : pattern.split('/')
+}
+
 // Spell a match the way bash expansion would. Bash rewrites only the glob
 // segments of the typed word; everything before the first glob segment keeps
 // its typed spelling, so `../s*/x.txt` expands to `../sub/x.txt`. The walked
@@ -309,9 +316,9 @@ export function isWordShaped(p: PathSpec): boolean {
 // virtual path, so the spelling is the typed head plus the match's last
 // `walked` segments.
 export function spellMatch(raw: string, virtual: string, walked: number): string {
-  const head = rstripSlash(raw).split('/').slice(0, -walked)
+  const head = globParts(rstripSlash(raw)).slice(0, -walked)
   const tail = rstripSlash(virtual).split('/').slice(-walked)
-  return [...head, ...tail].join('/')
+  return [...head.map(unmarkGlobs), ...tail].join('/')
 }
 
 function isMissingDir(err: unknown): boolean {
@@ -471,8 +478,7 @@ export async function resolveGlobWith<A, I>(
  * `fnmatch` directly.
  */
 export function globNameMatches(name: string, pattern: string): boolean {
-  if (name.startsWith('.') && !pattern.startsWith('.') && !dotglobActive()) return false
-  return fnmatch(name, pattern)
+  return fnmatch(name, pattern, extglobActive(), !dotglobActive())
 }
 
 /**
@@ -493,7 +499,7 @@ export async function expandPattern<A, I>(
   children?: ChildMounts,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
-  const segments = path.vfsPath === '' ? [] : path.vfsPath.split('/')
+  const segments = path.vfsPath === '' ? [] : globParts(path.vfsPath)
   // Two spec shapes reach resolvers: a full pattern path (classify), where
   // the pattern is already the last segment, and a directory-shaped spec
   // (PathSpec.dir), where the pattern applies to the directory's entries.
@@ -555,7 +561,7 @@ export async function expandPattern<A, I>(
   // form and keep the resolved virtual.
   if (path.rawPath === path.virtual) return matches
   const walked = segments.length - first
-  const raw = unmarkGlobs(path.rawPath)
+  const raw = path.rawPath
   return matches.map(
     (m) =>
       new PathSpec({

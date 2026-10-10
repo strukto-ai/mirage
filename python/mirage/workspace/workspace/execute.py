@@ -677,9 +677,8 @@ async def run_prepared_line(
     is_line = record
     scope = RecordingScope(active=is_line)
     parse_scope = ParseScope()
-    # A nested line applies against the records added to the enclosing
-    # line's since it began, copied at apply; apply_io keeps their reads
-    # out of the tokens it labels bytes with.
+    # A nested line keeps versions against the records added to the
+    # enclosing line's since it began, its reads left out.
     outer = None if is_line else active_records()
     nested_start = len(outer) if outer is not None else 0
 
@@ -711,7 +710,9 @@ async def run_prepared_line(
         found = None
         if argv is None:
             found = check_syntax(
-                command, expanding_aliases(effective_session)
+                command,
+                expanding_aliases(effective_session),
+                extglob=effective_session.shopts.get("extglob", False),
             ) or find_syntax_issue(ast)
         if found is not None:
             io = syntax_error_result(found)
@@ -1029,9 +1030,10 @@ async def run_prepared_line(
         if not is_line:
             applied = None if outer is None else outer[nested_start:]
         # The line's own end keeps the versions its nested lines saw.
-        await ws.dispatcher.apply_io(
-            io, records=applied, cache_facts=cache_facts, nested=not is_line
-        )
+        if applied is not None:
+            await ws.dispatcher.keep_versions(
+                applied, cache_facts, nested=not is_line
+            )
         return io
     except CommandTimeoutError as exc:
         # The caller's event is read, never written: a timeout is this
@@ -1077,16 +1079,7 @@ async def run_prepared_line(
             effective_session._alias_marks.clear()
             effective_session._expand_aliases_marks.clear()
         reset_current_session(session_token)
-        # The marks were only for this line's apply_io, so they go however
-        # the save ends, with any a background job added during it; the
-        # seal stops a background command that returns later from marking
-        # a record persisted here, which nothing outside FUSE ever trims.
-        try:
-            await ws.sessions.flush(session.session_id)
-        finally:
-            for rec in scope.records:
-                rec.claimed = None
-                rec.sealed = True
+        await ws.sessions.flush(session.session_id)
         ws.records.extend(scope.records)
         # bash adds a line to history only when it is non-empty
         # (anything before its newline): a blank line is skipped, while a

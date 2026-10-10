@@ -25,7 +25,7 @@ import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
 import { respellOne } from '../../../utils/path.ts'
 import type { MemberKind } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 

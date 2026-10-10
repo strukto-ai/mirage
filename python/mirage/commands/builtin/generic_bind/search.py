@@ -343,8 +343,9 @@ async def search_reads(
     ``lines_containing`` hands a file's matching lines in its place when
     the output shows nothing else, or tells whether it is worth reading.
     An operand named on the line is never ruled out by a search asked
-    about directories. When neither can stand in for a walk,
-    ``before_full_scan`` may refuse it.
+    about directories. Neither is asked when a hide, a path rule or a
+    pre_vfs policy judges a path, since a search sees the raw tree. When
+    neither can stand in for a walk, ``before_full_scan`` may refuse it.
 
     Args:
         io (CommandIO): the backend table.
@@ -358,6 +359,8 @@ async def search_reads(
     read_bytes = bound_op(io.read_bytes, accessor, index)
     read_stream = bound_op(io.read_stream, accessor, index)
     files, lines = io.files_containing, io.lines_containing
+    if paths_scoped(opts.ns, paths, opts.mount_prefix):
+        files = lines = None
     if not paths or (
         files is None and lines is None and io.before_full_scan is None
     ):

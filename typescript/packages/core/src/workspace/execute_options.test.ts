@@ -656,9 +656,9 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     const ws = await makeWs()
     await ws.shell('false')
     const controller = new AbortController()
-    const dispatcher = (ws as unknown as { dispatcher: { applyIo: () => Promise<void> } })
+    const dispatcher = (ws as unknown as { dispatcher: { keepVersions: () => Promise<void> } })
       .dispatcher
-    dispatcher.applyIo = async () => {
+    dispatcher.keepVersions = async () => {
       controller.abort()
       await new Promise<never>(() => undefined)
     }

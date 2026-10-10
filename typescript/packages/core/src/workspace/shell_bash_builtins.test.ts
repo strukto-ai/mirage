@@ -14,7 +14,10 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { Workspace } from './workspace/workspace.ts'
+import { Workspace } from './workspace/workspace.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { MountMode } from '../types.ts'
+import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { makeIntegrationWS, runResult } from './fixtures/integration_fixture.ts'
 
 let ws: Workspace | null = null
@@ -94,7 +97,7 @@ const CASES: [string, string, string, string, number][] = [
     2,
   ],
   ['shopt_o_bridges_set', 'shopt -so errexit; shopt -o errexit', 'errexit        \ton\n', '', 0],
-  ['shopt_refuses_extglob', 'shopt -s extglob', '', 'mirage: shopt: extglob: not supported\n', 1],
+  ['shopt_enables_extglob', 'shopt -s extglob; shopt -q extglob', '', '', 0],
 
   // ── glob options ──────────────────────────────────────────
   ['glob_default_keeps_literal', 'echo /data/zz*', '/data/zz*\n', '', 0],
@@ -466,4 +469,35 @@ describe('bash builtins: let, umask, shopt, alias, mapfile, read flags, nameref,
       expect([out, err, code]).toEqual([wantOut, wantErr, wantCode])
     })
   }
+})
+
+it('extglob reuses the namespace walk across mounts', async () => {
+  ws = new Workspace(
+    { '/left': new RAMVFS(), '/right': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      shellParser: await getTestParser(),
+    },
+  )
+  await ws.shell('touch /left/a.txt /right/b.txt; shopt -s extglob')
+  expect(await runResult(ws, 'echo /@(left|right)/@(a|b).txt')).toEqual([
+    0,
+    '/left/a.txt /right/b.txt\n',
+    '',
+  ])
+  expect(await runResult(ws, 'echo /@(left|right)/+(a|b).txt')).toEqual([
+    0,
+    '/left/a.txt /right/b.txt\n',
+    '',
+  ])
+})
+
+it('requires extglob before the read, with implicit conditional matching', async () => {
+  ;({ ws } = await makeIntegrationWS())
+  expect((await runResult(ws, 'shopt -s extglob; echo @(a|b)'))[0]).toBe(2)
+  expect(await runResult(ws, 'shopt -q extglob')).toEqual([1, '', ''])
+  expect(await runResult(ws, '[[ ab == +(a|b) ]]; echo $?')).toEqual([0, '0\n', ''])
+  expect(
+    await runResult(ws, "shopt -s extglob; eval 'case ab in +(a|b)) echo yes;; esac'"),
+  ).toEqual([0, 'yes\n', ''])
 })

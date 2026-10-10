@@ -122,8 +122,7 @@ async def expand_argv(
     slots the expanded words fill.
 
     Args:
-        parts (list[TSNodeLike]): word nodes after env-prefix
-            stripping and process-substitution removal.
+        parts (list[TSNodeLike]): word nodes after env-prefix stripping.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.

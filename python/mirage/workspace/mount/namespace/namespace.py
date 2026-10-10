@@ -654,6 +654,9 @@ class Namespace:
     ) -> int:
         """Drop every node entry under a directory (``rm -r`` semantics).
 
+        Entries in a mount below stay: removing a tree never reaches into
+        another mount, so its links and overlays are still that mount's.
+
         Args:
             directory (str): absolute virtual directory path being removed.
             keep (frozenset[str]): entries under it that survive.
@@ -662,10 +665,16 @@ class Namespace:
             int: number of entries dropped.
         """
         base = directory.rstrip("/") + "/"
+        roots = [
+            m.prefix.rstrip("/")
+            for m in self.registry.descendant_mounts(directory)
+        ]
         doomed = [
             path
             for path in self._nodes
-            if path.startswith(base) and path not in keep
+            if path.startswith(base)
+            and path not in keep
+            and not any(path == r or path.startswith(r + "/") for r in roots)
         ]
         for path in doomed:
             del self._nodes[path]

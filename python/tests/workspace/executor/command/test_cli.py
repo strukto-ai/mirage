@@ -25,7 +25,6 @@ from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
@@ -372,29 +371,6 @@ async def test_a_canceled_write_still_drops_the_caches():
     with pytest.raises(asyncio.CancelledError):
         await calling
     assert dropped == [True]
-
-
-async def _body():
-    yield b"body"
-
-
-async def _cached_read(inv):
-    stream = _body()
-    return stream, IOResult(reads={"/f": stream}, cache=["/f"])
-
-
-@pytest.mark.asyncio
-async def test_a_cached_read_outlives_the_output_reading_it():
-    cli = CLI(
-        CommandSpec(name="reader"), handlers={"": CLIHandler(_cached_read)}
-    )
-    stdout, io, _ = await handle_cli(
-        CLIInstall(name="reader", cli=cli), ["reader"], SessionState("t")
-    )
-    assert await materialize(stdout) == b"body"
-    cached = io.reads["/f"]
-    assert isinstance(cached, CachableAsyncIterator)
-    assert await cached.drain() == b"body"
 
 
 @pytest.mark.asyncio

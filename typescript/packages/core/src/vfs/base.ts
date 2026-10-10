@@ -21,7 +21,7 @@ import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } fro
 import { CapacityState, ListingVersion } from '../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
-import { vfsCall } from './call.ts'
+import { methodName, vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
 import {
   type DuEntries,
@@ -311,10 +311,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * because it exists.
    */
   supports(name: string): boolean {
-    const own: unknown = (this as unknown as Record<string, unknown>)[name]
+    const method = methodName(name)
+    const own: unknown = (this as unknown as Record<string, unknown>)[method]
     return (
       typeof own === 'function' &&
-      own !== (BaseVFS.prototype as unknown as Record<string, unknown>)[name]
+      own !== (BaseVFS.prototype as unknown as Record<string, unknown>)[method]
     )
   }
 
@@ -368,6 +369,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Answer `find` natively instead of walking `readdir`. */
+  @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   find(path: PathSpec, _options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
     return Promise.reject(enotsup(this.name, 'find', path))
   }
@@ -377,6 +379,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `duSize` and `duEntries`: the generic derives its per-directory rows
    * from the entries, so one without the other is not served.
    */
+  @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
     return Promise.reject(enotsup(this.name, 'du', path))
   }
@@ -388,6 +391,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * readdir walk prints its `0` row. The difference is accepted for the
    * speed and pinned in `integ/unix/du/empty.json`.
    */
+  @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
     return Promise.reject(enotsup(this.name, 'du', path))
   }
@@ -438,7 +442,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Remove a file. */
   @vfsCall({ effect: Effect.REMOVE, target: Target.FILE })
-  unlink(path: PathSpec): Promise<void> {
+  unlink(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
     return Promise.reject(enotsup(this.name, 'unlink', path))
   }
 
@@ -452,22 +456,25 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Remove a subtree in one call instead of entry by entry. */
+  @vfsCall({ effect: Effect.REMOVE, target: Target.DIR, subtree: true })
   rmR(path: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmR', path))
   }
 
   /** Move a name within this VFS. */
-  @vfsCall({ effect: Effect.RENAME })
+  @vfsCall({ effect: Effect.RENAME, subtree: true })
   rename(src: PathSpec, _dst: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rename', src))
   }
 
   /** Copy a file within this VFS without moving its bytes through mirage. */
+  @vfsCall({ effect: Effect.COPY, target: Target.FILE })
   copy(_src: PathSpec, dst: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'copy', dst))
   }
 
   /** Copy a directory tree within this VFS in one call. */
+  @vfsCall({ effect: Effect.COPY, target: Target.DIR, subtree: true })
   dirCopy(_src: PathSpec, dst: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'dirCopy', dst))
   }
@@ -496,6 +503,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * are text records in the format `searchMeta` declares. Errors and
    * incomplete results reject, never answered as a miss.
    */
+  @vfsCall({ effect: Effect.READ, subtree: true })
   search(path: PathSpec, _query: SearchQuery, _index?: IndexCacheStore): Promise<string[] | null> {
     return Promise.reject(enotsup(this.name, 'search', path))
   }

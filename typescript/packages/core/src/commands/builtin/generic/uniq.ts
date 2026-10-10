@@ -23,7 +23,7 @@ import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/ty
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 
 interface UniqFlags {

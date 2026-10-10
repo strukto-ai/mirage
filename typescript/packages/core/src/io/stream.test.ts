@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { SharedInput } from './async_line_iterator.ts'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import {
   SharedStdin,
   asyncChain,
@@ -22,10 +21,8 @@ import {
   discardStreams,
   drain,
   ensureStream,
-  wrapCachableStreams,
   yieldBytes,
 } from './stream.ts'
-import { IOResult } from './types.ts'
 
 async function* fromChunks(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
   await Promise.resolve()
@@ -41,29 +38,6 @@ async function collect(stream: AsyncIterable<Uint8Array>): Promise<string> {
   for await (const c of stream) out.push(new TextDecoder().decode(c))
   return out.join('')
 }
-
-describe('wrapCachableStreams', () => {
-  it('wraps listed cache paths in CachableAsyncIterator', () => {
-    const raw = fromChunks([encode('x')])
-    const io = new IOResult({ reads: { '/a': raw }, cache: ['/a'] })
-    const [, out] = wrapCachableStreams(null, io)
-    expect(out.reads['/a']).toBeInstanceOf(CachableAsyncIterator)
-  })
-
-  it('rewires stdout when it aliased the wrapped read', () => {
-    const raw = fromChunks([encode('x')])
-    const io = new IOResult({ reads: { '/a': raw }, cache: ['/a'] })
-    const [newStdout] = wrapCachableStreams(raw, io)
-    expect(newStdout).toBeInstanceOf(CachableAsyncIterator)
-  })
-
-  it('leaves bytes alone', () => {
-    const bytes = encode('x')
-    const io = new IOResult({ reads: { '/a': bytes }, cache: ['/a'] })
-    const [, out] = wrapCachableStreams(null, io)
-    expect(out.reads['/a']).toBe(bytes)
-  })
-})
 
 describe('drain', () => {
   it('consumes all chunks from a stream', async () => {

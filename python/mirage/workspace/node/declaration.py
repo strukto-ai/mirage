@@ -84,9 +84,6 @@ def _merge_conversion_errors(
     new_io = IOResult(
         exit_code=1,
         stderr=merged,
-        reads=io.reads,
-        writes=io.writes,
-        cache=io.cache,
     )
     new_node = ExecutionNode(command=node.command, exit_code=1, stderr=merged)
     return stream, new_io, new_node

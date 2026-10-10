@@ -36,7 +36,7 @@ import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { OutputStream, closeQuietly, wrapCachableStreams } from '../../../io/stream.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { SessionState } from '../../session/session.ts'
@@ -51,7 +51,7 @@ import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { optionError, parseFlags } from './flags.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 // A textual rest operand is a CLI node's pass-through form: parsed under
@@ -492,7 +492,7 @@ export async function handleCli(
   try {
     const out = await runWithTimeout(body, timeout, prog)
     if (out !== null) {
-      ;[stdout, io] = wrapCachableStreams(...out)
+      ;[stdout, io] = out
     }
   } catch (err) {
     // Leaf-raised usage errors (a malformed --json) keep the bare

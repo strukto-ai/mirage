@@ -279,6 +279,92 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
+  it('merges a tree copy beside a link at the destination', async () => {
+    // Only a rename asks for an empty destination: a copy merges into the
+    // directory and the link already there stays.
+    const ws = await linkWorkspace()
+    try {
+      await ws.shell('echo hi > /ram/d/a.txt')
+      await ws.shell('mkdir -p /ram/e/d')
+      await ws.shell('ln -s gone /ram/e/d/stale')
+      const res = await ws.shell('cp -r /ram/d /ram/e')
+      expect(res.exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /ram/e/d/a.txt')).stdout)).toBe('hi\n')
+      expect(DEC.decode((await ws.shell('readlink /ram/e/d/stale')).stdout)).toBe('gone\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('copies through a link at the destination', async () => {
+    // A copy writes its destination as a write does: the bytes land in the
+    // link's target and the link stays.
+    const ws = await linkWorkspace()
+    try {
+      await ws.shell('echo tgt > /ram/t.txt')
+      await ws.shell('ln -s t.txt /ram/to-t')
+      await ws.dispatch('copy', '/ram/a.txt', [PathSpec.fromStrPath('/ram/to-t')])
+      expect(DEC.decode((await ws.shell('readlink /ram/to-t')).stdout)).toBe('t.txt\n')
+      expect(DEC.decode((await ws.shell('cat /ram/t.txt')).stdout)).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a copy onto a link to its own source', async () => {
+    // Followed, both ends name one file, and a backend that replaces its
+    // destination would delete the source before copying it.
+    const ws = await linkWorkspace()
+    try {
+      await expect(
+        ws.dispatch('copy', '/ram/a.txt', [PathSpec.fromStrPath('/ram/link')]),
+      ).rejects.toMatchObject({ code: 'EINVAL' })
+      expect(DEC.decode((await ws.shell('cat /ram/a.txt')).stdout)).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('declines a tree copy over a link below its destination', async () => {
+    // The backend writes each child name as it is, so the bytes would land
+    // behind the link; the caller's walk copies through it instead.
+    const ws = await linkWorkspace()
+    try {
+      await ws.shell('echo new > /ram/d/x')
+      await ws.shell('mkdir -p /ram/e/d')
+      await ws.shell('echo old > /ram/t && ln -s /ram/t /ram/e/d/x')
+      await expect(
+        ws.dispatch('dir_copy', '/ram/d', [PathSpec.fromStrPath('/ram/e/d')]),
+      ).rejects.toMatchObject({ declined: true })
+      expect((await ws.shell('cp -r /ram/d /ram/e')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /ram/t')).stdout)).toBe('new\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('writes a tree copy through a link into another mount', async () => {
+    // cp walks a destination holding a link, and the write follows it
+    // across mounts where a backend copy would answer EXDEV.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/ram': new RAMVFS(), '/scratch': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.shell('mkdir -p /ram/d /ram/e/d && echo new > /ram/d/a.txt')
+      await ws.shell('echo old > /scratch/a.txt')
+      await ws.shell('ln -s /scratch/a.txt /ram/e/d/a.txt')
+      expect((await ws.shell('cp -r /ram/d /ram/e')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /scratch/a.txt')).stdout)).toBe('new\n')
+      expect(DEC.decode((await ws.shell('readlink /ram/e/d/a.txt')).stdout)).toBe(
+        '/scratch/a.txt\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('answers a no-follow stat with the link row', async () => {
     // lstat asks for the row only the node table holds; a following stat
     // arrives resolved to the target and must not see a link at all.
@@ -485,7 +571,9 @@ describe('the turf mode gates the node table', () => {
       try {
         const mount = ws.namespace.mountFor('/ro/file')
         const ready = vi.spyOn(mount, 'ensureReady').mockRejectedValue(new Error('backend reached'))
-        await expect(ws.dispatch(op, '/ro/file')).rejects.toMatchObject({ code: 'EROFS' })
+        // A copy reads its path and writes its destination.
+        const dst = op.includes('copy') ? [PathSpec.fromStrPath('/ro/copy')] : undefined
+        await expect(ws.dispatch(op, '/ro/file', dst)).rejects.toMatchObject({ code: 'EROFS' })
         expect(ready).not.toHaveBeenCalled()
         expect(ws.namespace.isLink('/ro/file')).toBe(false)
       } finally {

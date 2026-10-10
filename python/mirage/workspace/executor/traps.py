@@ -405,9 +405,6 @@ async def finish_shell(
         + (await cleanup.materialize_stderr())
         or None,
         exit_code=cleanup.exit_code,
-        reads=io.reads,
-        writes=io.writes,
-        cache=io.cache,
         refusal=io.refusal,
     )
 

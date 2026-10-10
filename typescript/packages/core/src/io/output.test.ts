@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { concat } from './cachable_iterator.ts'
+import { concat } from '../utils/bytes.ts'
 import { CHUNK_SIZE } from './cooperative.ts'
 import { PipeClosed } from './errors.ts'
 import { OutputPipe } from './output.ts'

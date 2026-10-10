@@ -15,7 +15,7 @@
 import { quoteText } from '../../../../commands/quote.ts'
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { SessionView } from '../../../../view/types.ts'

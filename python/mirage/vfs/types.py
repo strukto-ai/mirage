@@ -50,9 +50,10 @@ class Effect(StrEnum):
     READ returns content and METADATA an entry's metadata; neither
     changes the mount. WRITE changes a file's bytes, CREATE makes a name
     that must not exist yet, REMOVE drops a name, RENAME moves one with
-    everything under it, and ATTR changes an entry's metadata. Every
-    effect but READ and METADATA is a write: a read-only mount refuses
-    the call and admission judges it as one.
+    everything under it, COPY makes its ``dst`` hold what its path holds,
+    and ATTR changes an entry's metadata. Every effect but READ and
+    METADATA is a write: a read-only mount refuses the call and admission
+    judges it as one. A COPY reads its path and writes only its ``dst``.
     """
 
     READ = "read"
@@ -61,6 +62,7 @@ class Effect(StrEnum):
     CREATE = "create"
     REMOVE = "remove"
     RENAME = "rename"
+    COPY = "copy"
     ATTR = "attr"
 
 
@@ -81,11 +83,14 @@ class Declaration(NamedTuple):
         target (Target): the kind of entry its path names.
         creates (bool): a WRITE that makes a missing file, as open(2)
             with O_CREAT.
+        subtree (bool): the call reaches everything below its paths, as
+            a rename, a tree removal or a tree copy does.
     """
 
     effect: Effect
     target: Target
     creates: bool
+    subtree: bool = False
 
 
 OperationFn = Callable[..., Any]

@@ -33,7 +33,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
 
 import { renderWriteOut } from './curl_write_out.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 

@@ -349,6 +349,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "exists", path)
 
+    @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
     async def find(
         self,
         path: PathSpec,
@@ -364,6 +365,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "find", path)
 
+    @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
     async def du_size(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> int:
@@ -379,6 +381,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "du", path)
 
+    @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
     async def du_entries(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> DuEntries:
@@ -488,6 +491,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "rmdir", path)
 
+    @vfs_call(effect=Effect.REMOVE, target=Target.DIR, subtree=True)
     async def rm_r(self, path: PathSpec) -> Any:
         """Remove a subtree in one call instead of entry by entry.
 
@@ -496,7 +500,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "rm_r", path)
 
-    @vfs_call(effect=Effect.RENAME)
+    @vfs_call(effect=Effect.RENAME, subtree=True)
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
         """Move a name within this VFS.
 
@@ -506,6 +510,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "rename", src)
 
+    @vfs_call(effect=Effect.COPY, target=Target.FILE)
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a file within this VFS without moving its bytes through
         mirage.
@@ -516,6 +521,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "copy", dst)
 
+    @vfs_call(effect=Effect.COPY, target=Target.DIR, subtree=True)
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a directory tree within this VFS in one call.
 
@@ -566,6 +572,7 @@ class BaseVFS:
         """
         raise enotsup(self.name, "setattr", path)
 
+    @vfs_call(effect=Effect.READ, subtree=True)
     async def search(
         self,
         path: PathSpec,

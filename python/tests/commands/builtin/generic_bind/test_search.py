@@ -573,6 +573,22 @@ def test_a_mount_may_refuse_a_full_scan():
     )
 
 
+def test_a_hidden_path_is_walked_without_the_search():
+    vfs = SearchRAM()
+
+    async def run() -> bytes:
+        ws = Workspace({"/": _seed(vfs)})
+        try:
+            ws.create_session("agent", profile={"paths": {"hide": ["/d/sub"]}})
+            result = await ws.shell("grep -r ada /d", session_id="agent")
+            return await result.materialize_stdout()
+        finally:
+            await ws.close()
+
+    assert asyncio.run(run()) == b"/d/a.txt:ada here\n"
+    assert vfs.asked == []
+
+
 class Declining(SearchRAM):
     """Line search that answers no file."""
 

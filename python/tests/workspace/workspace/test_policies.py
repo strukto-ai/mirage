@@ -19,7 +19,6 @@ import pytest
 
 from mirage import Action, CommandContext, Deny, Policy, Workspace
 from mirage.commands.errors import LimitExceededError
-from mirage.io import IOResult
 from mirage.policy import (
     CommandRule,
     ExecuteResultContext,
@@ -363,12 +362,7 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
     try:
         await ws.shell("mkdir -p /data/prod")
         await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        await ws.apply_io(
-            IOResult(
-                reads={"/data/prod/x.txt": b"0123456789"},
-                cache=["/data/prod/x.txt"],
-            )
-        )
+        await ws.vfs.read("/data/prod/x.txt")
         ws.vfs.records.clear()
         ws.policies.add(SuppressProdReads())
         with pytest.raises(PermissionError):
@@ -424,12 +418,7 @@ async def test_a_hard_capped_warm_read_is_not_network_traffic():
     try:
         await ws.shell("mkdir -p /data/prod")
         await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        await ws.apply_io(
-            IOResult(
-                reads={"/data/prod/x.txt": b"0123456789"},
-                cache=["/data/prod/x.txt"],
-            )
-        )
+        await ws.vfs.read("/data/prod/x.txt")
         ws.vfs.records.clear()
         ws.policies.add(HardCapProdReads())
         with pytest.raises(LimitExceededError):
@@ -492,9 +481,7 @@ class SealedPaths(Policy):
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if not ctx.write and ctx.path.virtual == "/data/secret.txt":
             return Deny("secret is sealed")
-        # The subtree spelling covers the root too: a native tree op
-        # (rm_r) admits as one op on the root, per the pre_vfs
-        # docstring.
+        # The subtree spelling covers the root too.
         if ctx.write and (
             ctx.path.virtual == "/data/prod"
             or ctx.path.virtual.startswith("/data/prod/")
@@ -507,7 +494,7 @@ class SealedPaths(Policy):
 async def test_pre_vfs_binds_dispatcher_and_command_tier_io():
     # The documented boundary (Policy.pre_vfs): coded op hooks fire at
     # the dispatcher AND for the backend I/O inside a mount command's
-    # handler (with_policy_guard). Both tiers are pinned so a move of
+    # handler (with_command_guards). Both tiers are pinned so a move of
     # the boundary is loud.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -632,9 +619,9 @@ class OpRecorder(Policy):
 @pytest.mark.asyncio
 async def test_shell_rm_r_admits_through_pre_vfs():
     # The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
-    # admitted per deletion while a shell rm -r admitted nothing. The
-    # shell tree removal now admits the op the backend performs (the
-    # native rm_r here), and a write-deny refuses it outright.
+    # admitted per deletion while a shell rm -r admitted nothing. Under a
+    # coded pre_vfs policy the one-call rm_r is declined, so the tree goes
+    # entry by entry, each removal admitted, and a write-deny refuses it.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("mkdir -p /data/prod/sub")
@@ -645,7 +632,9 @@ async def test_shell_rm_r_admits_through_pre_vfs():
         removed = await ws.shell("rm -r /data/prod")
         assert removed.exit_code == 0
         writes = [a for a in rec.asked if a[2]]
-        assert ("rm_r", "/data/prod", True) in writes
+        assert ("unlink", "/data/prod/sub/b.txt", True) in writes
+        assert ("rmdir", "/data/prod", True) in writes
+        assert not any(op == "rm_r" for op, _, _ in writes)
     finally:
         await ws.close()
 
@@ -658,6 +647,34 @@ async def test_shell_rm_r_admits_through_pre_vfs():
         assert refused.exit_code != 0
         survives = await ws.shell("cat /data/prod/a.txt")
         assert survives.exit_code == 0
+    finally:
+        await ws.close()
+
+
+class SealedListing(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.op == "readdir" and ctx.path.virtual == "/data/prod/sub":
+            return Deny("sub is sealed")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_shell_rm_rv_removes_what_a_sealed_listing_allows():
+    # -v lists the tree before it goes in one call; a listing a policy
+    # refuses sends the removal entry by entry, as without -v.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/prod/sub")
+        await ws.vfs.write("/data/prod/a.txt", b"a\n")
+        await ws.vfs.write("/data/prod/sub/b.txt", b"b\n")
+        ws.policies.add(SealedListing())
+        io = await ws.shell("rm -rv /data/prod")
+        assert io.exit_code == 1
+        assert await io.stdout_str() == "removed '/data/prod/a.txt'\n"
+        assert await io.stderr_str() == (
+            "rm: cannot remove '/data/prod/sub': Permission denied\n"
+        )
+        assert not await ws.vfs.exists("/data/prod/a.txt")
     finally:
         await ws.close()
 

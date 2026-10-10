@@ -251,7 +251,7 @@ _PERM = PermissionError("denied")
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "run, files, dirs, paths, kw, exit_code, writes",
+    "run, files, dirs, paths, kw, exit_code",
     [
         (
             _run,
@@ -260,7 +260,6 @@ _PERM = PermissionError("denied")
             ["/a.txt", "/d"],
             {},
             0,
-            {"/a.txt", "/d/a.txt"},
         ),
         (
             _run_primitive,
@@ -269,7 +268,6 @@ _PERM = PermissionError("denied")
             ["/src/a.txt", "/d"],
             {},
             0,
-            {"/src/a.txt", "/d/a.txt"},
         ),
         (
             _run_primitive,
@@ -282,7 +280,6 @@ _PERM = PermissionError("denied")
                 }
             },
             1,
-            {"/d/a.txt"},
         ),
         (
             _run_primitive,
@@ -291,7 +288,6 @@ _PERM = PermissionError("denied")
             ["/src/a.txt", "/d"],
             {"read_fails": {"/src/a.txt": _PERM}},
             1,
-            set(),
         ),
         (
             _run,
@@ -300,7 +296,6 @@ _PERM = PermissionError("denied")
             ["/a.txt", "/b.txt"],
             {"flags": MvFlags(backup="simple")},
             0,
-            {"/a.txt", "/b.txt", "/b.txt~"},
         ),
         (
             _run,
@@ -309,14 +304,12 @@ _PERM = PermissionError("denied")
             ["/a.txt", "/b.txt"],
             {"flags": MvFlags(exchange=True)},
             0,
-            {"/a.txt", "/b.txt"},
         ),
     ],
 )
-async def test_records_writes(run, files, dirs, paths, kw, exit_code, writes):
+async def test_exit_code(run, files, dirs, paths, kw, exit_code):
     _, io = await run(files, dirs, paths, **kw)
     assert io.exit_code == exit_code
-    assert set(io.writes) == writes
 
 
 _TWO = {"/src/a.txt": b"AAA", "/src/b.txt": b"BBB", "/d/keep": b"K"}

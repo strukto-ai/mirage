@@ -19,5 +19,12 @@ DEFAULT_MAX_DU_ENTRIES = 10000
 # Every effect that changes the mount: a read-only mount refuses these
 # and admission judges them as writes.
 WRITE_EFFECTS = frozenset(
-    {Effect.WRITE, Effect.CREATE, Effect.REMOVE, Effect.RENAME, Effect.ATTR}
+    {
+        Effect.WRITE,
+        Effect.CREATE,
+        Effect.REMOVE,
+        Effect.RENAME,
+        Effect.COPY,
+        Effect.ATTR,
+    }
 )

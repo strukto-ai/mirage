@@ -23,5 +23,6 @@ export const WRITE_EFFECTS: readonly Effect[] = [
   Effect.CREATE,
   Effect.REMOVE,
   Effect.RENAME,
+  Effect.COPY,
   Effect.ATTR,
 ]

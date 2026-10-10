@@ -16,19 +16,12 @@ import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { ChildMounts, LinkView, NamespaceView } from '../../../view/types.ts'
 import { type CommandFn, type Command, command, type CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import {
-  mountIo,
-  scopedIo,
-  withAbortGuard,
-  withCommandGuards,
-  withDirGuard,
-  withPolicyGuard,
-} from './adapter.ts'
+import { mountIo, withAbortGuard, withCommandGuards, withDirGuard } from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
@@ -127,7 +120,7 @@ export function scanIo<A extends Accessor>(
 ): [CommandIO<A>, boolean] {
   const scoped = ns?.scoped
   if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
-  return [withCommandGuards(withPolicyGuard(withStatCache(ops), prefix), prefix), true]
+  return [withCommandGuards(withStatCache(ops), prefix), true]
 }
 
 // The builder tier's stat and slash wraps, chosen at registration from
@@ -234,41 +227,32 @@ export function genericCommands(vfs: string, options: GenericCommandsOptions = {
     // refuses an explicit `undefined` for an optional field, so an absent
     // namespace has to mean an absent key rather than an undefined value.
     // Python's `glob_children` is `| None` and takes the uniform path.
-    // Command path restrictions speak first, then the coded preVfs
-    // hooks, both outside the stat and slash wraps (`finish`). Content
-    // reads are the dispatcher's (dispatchedIo on the mount's table), which
-    // judges them itself before a warm serve. A probe answer is served
-    // below the guards (withProbeAnswers on the raw adapter), so they
-    // still judge every path before it. The
-    // invocation's mount prefix rides into its wrap-time scope for
-    // readers drained after the gate scopes return. Under a hide or a
-    // path rule the native subtree ops are set aside (scopedIo), so
-    // every entry passes through the guarded walk. The abort guard sits
-    // outermost: once the invocation's signal has fired no slot starts,
-    // so a handler the caller was released from begins no further read
-    // or write between its operands.
+    // The command's path checks speak outside the stat and slash wraps
+    // (`finish`), for the slots that still reach the backend past the
+    // dispatcher (stat, exists, readdir). Reads, writes and one-call walks
+    // are the dispatcher's (dispatchedIo on the mount's table), which
+    // judges each itself and declines a one-call walk whose subtree the
+    // caller's view restricts. A probe answer is served below the guards
+    // (withProbeAnswers on the raw adapter), so they still judge every path
+    // before it. The invocation's mount prefix rides into its wrap-time
+    // scope for readers drained after the gate scopes return. The abort
+    // guard sits outermost: once the invocation's signal has fired no slot
+    // starts, so a handler the caller was released from begins no further
+    // read or write between its operands.
     const fn: CommandFn = (accessor, paths, texts, opts) => {
       const io = table === undefined ? mountIo(opts) : table(mountIo(opts))
       const raw = change === undefined ? io : change(io)
       // A per-command table with its own stat (dify's light ls) would
       // otherwise print the probe's full stat under fresh only.
       const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
-      const guarded = scopedIo(
-        withAbortGuard(
-          withDirGuard(
-            withCommandGuards(
-              withPolicyGuard(
-                finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
-                opts.mountPrefix,
-              ),
-              opts.mountPrefix,
-            ),
+      const guarded = withAbortGuard(
+        withDirGuard(
+          withCommandGuards(
+            finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
+            opts.mountPrefix,
           ),
-          opts.signal,
         ),
-        opts.ns,
-        paths.length > 0 ? paths : [PathSpec.fromStrPath(opts.cwd)],
-        opts.mountPrefix ?? '',
+        opts.signal,
       )
       return b.fn(
         {

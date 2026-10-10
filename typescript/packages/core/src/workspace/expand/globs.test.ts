@@ -296,15 +296,15 @@ describe('matchRaw via resolveGlobs', () => {
 // The `glob` op never sees the mount prefix: the mount stamps each spec's
 // `vfsPath` with `mountKey(virtual, prefix)` before the op runs, on every
 // entry point that expands a word (the workspace expander, its mid-path and
-// globstar walks, and the builtins' operands). Pinned the same way in
-// python's test_globs.py.
+// globstar walks, and the builtins' operands), a quoted prefix read by its
+// literal spelling. Pinned the same way in python's test_globs.py.
 describe('the glob op under a non-root mount prefix', () => {
   it('is handed keys below the prefix on every expansion path', async () => {
     const ws = new Workspace(
-      { '/mnt/x/': new RAMVFS() },
+      { '/mnt/x+/': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
-    const mount = ws.mount('/mnt/x/')
+    const mount = ws.mount('/mnt/x+/')
     const derived = mount.glob.bind(mount)
     const seen: [string, string][] = []
     mount.glob = (path, index) => {
@@ -312,25 +312,26 @@ describe('the glob op under a non-root mount prefix', () => {
       return derived(path, index)
     }
     for (const line of [
-      'mkdir -p /mnt/x/team/sub',
-      'printf 1 > /mnt/x/team/f1',
-      'printf 2 > /mnt/x/tea.txt',
-      'printf 3 > /mnt/x/other',
+      'mkdir -p /mnt/x+/team/sub',
+      'printf 1 > /mnt/x+/team/f1',
+      'printf 2 > /mnt/x+/tea.txt',
+      'printf 3 > /mnt/x+/other',
     ]) {
       await ws.shell(line)
     }
     const cases: [string, string][] = [
-      ['echo /mnt/x/*', '/mnt/x/other /mnt/x/tea.txt /mnt/x/team'],
-      ['echo /mnt/x/*/f*', '/mnt/x/team/f1'],
-      ['cd /mnt/x && echo tea*', 'tea.txt team'],
-      ['shopt -s globstar; echo /mnt/x/**/f1', '/mnt/x/team/f1'],
-      ['touch /mnt/x/tea* && echo touched', 'touched'],
+      ['echo /mnt/x+/*', '/mnt/x+/other /mnt/x+/tea.txt /mnt/x+/team'],
+      ['echo /mnt/x+/*/f*', '/mnt/x+/team/f1'],
+      ['cd /mnt/x+ && echo tea*', 'tea.txt team'],
+      ['shopt -s globstar; echo /mnt/x+/**/f1', '/mnt/x+/team/f1'],
+      ['touch /mnt/x+/tea* && echo touched', 'touched'],
+      ["echo '/mnt/x+'/t*", '/mnt/x+/tea.txt /mnt/x+/team'],
     ]
     for (const [line, want] of cases) {
       expect((await ws.shell(line)).stdoutText.trim(), line).toBe(want)
     }
     expect(seen.length).toBeGreaterThan(0)
-    expect(seen.filter(([v, key]) => key !== mountKey(v, '/mnt/x'))).toEqual([])
+    expect(seen.filter(([v, key]) => key !== mountKey(v, '/mnt/x+'))).toEqual([])
     await ws.close()
   })
 })

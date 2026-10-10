@@ -69,7 +69,6 @@ from mirage.core.generic.rewrite import (
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
@@ -101,6 +100,7 @@ from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
+from mirage.vfs.types import Effect
 from mirage.view.types import StatPath
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
@@ -150,15 +150,13 @@ def _wrap_mount_streams(
     mount_id: str | None = None,
     activity: VFSActivity | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Wrap any async-iterator streams in ``result`` with the mount
-    identity and active revisions, so ``record_stream`` and
-    ``revision_for`` calls inside the lazy backend body see the right
-    context when consumed after this frame exits.
+    """Wrap the stream in ``result`` with the mount identity and active
+    revisions, so ``record_stream`` and ``revision_for`` calls inside the
+    lazy backend body see the right context when consumed after this
+    frame exits.
 
     A thin async-gen wrapper that side-effects the recorder state as
-    bytes flow through. Same object
-    appearing in both the primary stream and IOResult.reads/writes is
-    wrapped once (dedup by identity).
+    bytes flow through.
 
     Args:
         result: ``(stream, io)`` as returned by a command handler.
@@ -167,33 +165,13 @@ def _wrap_mount_streams(
         mount_id (str | None): identity of the serving mount.
     """
     stream, io = result
-    seen: dict[int, ByteSource] = {}
-    scope = ContextScope()
-
-    def _wrap(obj: ByteSource) -> ByteSource:
-        if isinstance(obj, (bytes, bytearray)):
-            return obj
-        oid = id(obj)
-        if oid in seen:
-            return seen[oid]
-        source = obj.source if isinstance(obj, CachableAsyncIterator) else obj
-        wrapped = with_mount_context(source, mount_id)
-        if revisions:
-            wrapped = with_revisions(revisions, wrapped)
-        wrapped = scope.stream(with_host_io(wrapped))
-        if isinstance(obj, CachableAsyncIterator):
-            obj.replace_source(wrapped)
-            wrapped = obj
-        held = activity.hold(wrapped) if activity is not None else wrapped
-        seen[oid] = held
-        return held
-
-    stream = _wrap(stream) if stream is not None else None
-    for k, v in list(io.reads.items()):
-        io.reads[k] = _wrap(v)
-    for k, v in list(io.writes.items()):
-        io.writes[k] = _wrap(v)
-    return stream, io
+    if stream is None or isinstance(stream, (bytes, bytearray)):
+        return stream, io
+    wrapped = with_mount_context(stream, mount_id)
+    if revisions:
+        wrapped = with_revisions(revisions, wrapped)
+    wrapped = ContextScope().stream(with_host_io(wrapped))
+    return (activity.hold(wrapped) if activity is not None else wrapped), io
 
 
 def _wrap_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
@@ -208,11 +186,6 @@ def _wrap_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
         result (Any): whatever the op returned.
         mount_id (str): identity of the serving mount.
     """
-    if isinstance(result, CachableAsyncIterator):
-        result.replace_source(
-            with_host_io(with_mount_context(result.source, mount_id))
-        )
-        return activity.hold(result)
     if hasattr(result, "__aiter__"):
         return activity.hold(
             with_host_io(with_mount_context(result, mount_id))
@@ -690,8 +663,9 @@ class MountEntry:
         Admission judged the mode before the call waited for the mount
         and for its write lock; ``set_mount_mode`` can make the mount
         read-only in between, so the mode is read again here, as the
-        backend call starts. A rename moves everything below its
-        endpoints, so a read-only region below either refuses it.
+        backend call starts. A call that reaches a subtree (a rename, a
+        tree removal or copy) is refused by a read-only region anywhere
+        below its paths, and a copy only reads its source.
 
         Args:
             name (str): the function name.
@@ -699,13 +673,15 @@ class MountEntry:
             values (Iterable[Any]): the call's other arguments; each
                 PathSpec among them is a path it reaches.
         """
-        if not self.writes(name):
+        mark = declared(type(self.vfs), name)
+        if mark is None or mark.effect not in WRITE_EFFECTS:
             return
+        others = [v for v in values if isinstance(v, PathSpec)]
         require_paths_writable(
-            [path, *(v for v in values if isinstance(v, PathSpec))],
+            others if mark.effect is Effect.COPY else [path, *others],
             self.prefix,
             self.mode,
-            subtree=name == "rename",
+            subtree=mark.subtree,
         )
 
     def refuse_keywords(self, name: str, kwargs: dict[str, Any]) -> None:

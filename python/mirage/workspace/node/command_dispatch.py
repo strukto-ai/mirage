@@ -17,7 +17,6 @@ import dataclasses
 from collections.abc import Awaitable, Callable
 from functools import partial
 from itertools import accumulate
-from types import SimpleNamespace
 from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
@@ -45,8 +44,6 @@ from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
 from mirage.shell.helpers import (
     get_command_name,
     get_parts,
-    get_process_sub_body,
-    get_process_sub_direction,
     get_text,
     read_row,
     split_env_prefix,
@@ -55,14 +52,13 @@ from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.parse.source import source_offsets
 from mirage.shell.parse.syntax import find_syntax_issue
-from mirage.shell.types import AliasExpansion, ProcessSubDirection
+from mirage.shell.types import AliasExpansion
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
 from mirage.types import LsLinkMode, PathSpec, Producer, word_text
 from mirage.utils.glob_walk import glob_pattern
 from mirage.utils.path import CycleError
-from mirage.vfs.dev.dev import DevVFS
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
@@ -94,7 +90,6 @@ from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
-from mirage.workspace.expand.node import child_line
 from mirage.workspace.lookup import (
     SLASH_KEEPS_LAST,
     UNSUPPORTED_BUILTINS,
@@ -198,6 +193,7 @@ async def execute_command(
                     line,
                     expanding_aliases(session) | names,
                     lambda name, at: name in owners[offsets[at]],
+                    extglob=session.shopts.get("extglob", False),
                 ) or find_syntax_issue(ast)
                 if found is not None:
                     io = syntax_error_result(found)
@@ -420,152 +416,97 @@ async def _dispatch_command_body(
     claimant = claimant_for(node, handed)
     execute_fn = partial(execute_fn, node=node)
 
-    # Buffered virtual files preserve operand identity without host pipes.
-    dev: DevVFS | None = None
-    proc_sub_inputs: list[tuple[str, int]] = []
-    proc_sub_stderr = []
-    clean_parts = []
-    try:
-        for p in parts:
-            if p.type != NT.PROCESS_SUBSTITUTION:
-                clean_parts.append(p)
-                continue
-            if get_process_sub_direction(p) == ProcessSubDirection.OUTPUT:
-                err = b"mirage: unsupported: process substitution >(...)\n"
-                return (
-                    None,
-                    IOResult(exit_code=2, stderr=err),
-                    ExecutionNode(
-                        command=name or "process_sub", exit_code=2, stderr=err
-                    ),
-                )
-            if dev is None:
-                dev, _, _ = registry.resolve("/dev/null")
-                assert isinstance(dev, DevVFS)
-            path, allocation = dev.allocate_input()
-            proc_sub_inputs.append((path, allocation))
-            inner = get_process_sub_body(p)
-            if inner:
-                io_ps = await child_line(
-                    context, execute_fn, inner, p, call_stack
-                )
-                data = await materialize(io_ps.stdout)
-                dev.set_input(path, allocation, data)
-                proc_sub_stderr.append(await materialize(io_ps.stderr))
-            clean_parts.append(
-                SimpleNamespace(
-                    type=NT.WORD,
-                    text=encode_text(path),
-                    children=[],
-                    named_children=[],
-                )
-            )
-        parts = clean_parts
-
-        argv = await _own_words(
-            node,
-            expand_argv(
-                parts,
-                context,
-                execute_fn,
-                call_stack,
-                registry,
-                namespace,
-                view=session_view(
-                    session,
-                    registry.policies,
-                    diagnostics=context.frame.diagnostics,
-                ),
-                routing=routing_decision,
-            ),
-        )
-
-        # Limits resolve against the expanded name, so `$CMD`-style
-        # invocations get their real command's policy.
-        # Mount, CLI and external dispatch own their resolved deadlines.
-        owns_deadline = (
-            "/" not in argv.name
-            and lookup(argv.name, session, registry, routing_decision)
-            in (Consumer.EXTERNAL, Consumer.MOUNT, Consumer.CLI)
-        ) or argv.name in INTERPRETER_NAMES
-        resolved = (
-            resolve_limit(
-                argv.name,
-                workspace_limits=registry.command_limits,
-                profile_limits=session.command_limits,
-            )
-            if argv.name and not owns_deadline
-            else None
-        )
-        timeout = resolved.timeout_seconds if resolved is not None else None
-        body = _run_argv(
-            recurse,
-            dispatch,
+    argv = await _own_words(
+        node,
+        expand_argv(
+            parts,
+            context,
+            execute_fn,
+            call_stack,
             registry,
             namespace,
-            execute_fn,
-            argv,
-            context,
-            stdin,
-            call_stack,
-            job_table,
-            cancel,
-            routing_decision,
-            row=read_row(node),
-            agent_id=agent_id,
-            redirects=redirect_paths_for(node.id),
-            runner=redirect_runner_for(node.id),
-            seed_prefix=seed_prefix,
-            claimant=claimant,
-            sink=sink,
+            view=session_view(
+                session,
+                registry.policies,
+                diagnostics=context.frame.diagnostics,
+            ),
+            routing=routing_decision,
+        ),
+    )
+
+    # Limits resolve against the expanded name, so `$CMD`-style
+    # invocations get their real command's policy.
+    # Mount, CLI and external dispatch own their resolved deadlines.
+    owns_deadline = (
+        "/" not in argv.name
+        and lookup(argv.name, session, registry, routing_decision)
+        in (Consumer.EXTERNAL, Consumer.MOUNT, Consumer.CLI)
+    ) or argv.name in INTERPRETER_NAMES
+    resolved = (
+        resolve_limit(
+            argv.name,
+            workspace_limits=registry.command_limits,
+            profile_limits=session.command_limits,
         )
-        # Capture xtrace before the body runs so `set -x` itself is not
-        # traced (bash enables tracing only for the following commands).
-        # A body that writes as it runs is traced before it starts.
-        xtrace = bool(session.shell_options.get("xtrace")) and bool(argv.name)
-        if xtrace and sink is not None:
-            await sink.emit(
-                Channel.STDERR, trace_command([argv.name, *argv.args])
+        if argv.name and not owns_deadline
+        else None
+    )
+    timeout = resolved.timeout_seconds if resolved is not None else None
+    body = _run_argv(
+        recurse,
+        dispatch,
+        registry,
+        namespace,
+        execute_fn,
+        argv,
+        context,
+        stdin,
+        call_stack,
+        job_table,
+        cancel,
+        routing_decision,
+        row=read_row(node),
+        agent_id=agent_id,
+        redirects=redirect_paths_for(node.id),
+        runner=redirect_runner_for(node.id),
+        seed_prefix=seed_prefix,
+        claimant=claimant,
+        sink=sink,
+    )
+    # Capture xtrace before the body runs so `set -x` itself is not
+    # traced (bash enables tracing only for the following commands).
+    # A body that writes as it runs is traced before it starts.
+    xtrace = bool(session.shell_options.get("xtrace")) and bool(argv.name)
+    if xtrace and sink is not None:
+        await sink.emit(Channel.STDERR, trace_command([argv.name, *argv.args]))
+        xtrace = False
+    stdout, io, exec_node = await run_with_timeout(
+        body, timeout, argv.name or "?"
+    )
+    if io.producer is None and argv.name:
+        # Builtins and other non-mount routes return no rider; stamp the
+        # expanded name here so post_execute policies keyed on a command
+        # (echo, printf, ...) still see it.
+        io.producer = Producer(command=argv.name)
+    if not io.output_finalized:
+        io.output_finalized = True
+        if (
+            session.terminal_output
+            and session.exec_stdout in (None, "&1")
+            and io.producer is not None
+        ):
+            bound = resolve_producer(
+                io.producer,
+                registry.limit_override,
+                registry.command_limits,
+                session.command_limits,
             )
-            xtrace = False
-        stdout, io, exec_node = await run_with_timeout(
-            body, timeout, argv.name or "?"
-        )
-        if io.producer is None and argv.name:
-            # Builtins and other non-mount routes return no rider; stamp the
-            # expanded name here so post_execute policies keyed on a command
-            # (echo, printf, ...) still see it.
-            io.producer = Producer(command=argv.name)
-        if not io.output_finalized:
-            io.output_finalized = True
-            if (
-                session.terminal_output
-                and session.exec_stdout in (None, "&1")
-                and io.producer is not None
-            ):
-                bound = resolve_producer(
-                    io.producer,
-                    registry.limit_override,
-                    registry.command_limits,
-                    session.command_limits,
-                )
-                stdout = guard_io(stdout, io, bound, io.producer.command)
-                exec_node.exit_code = io.exit_code
-        if proc_sub_stderr:
-            io.stderr = b"".join(proc_sub_stderr) + await materialize(
-                io.stderr
-            )
-            exec_node.stderr = io.stderr
-        if xtrace:
-            existing = await materialize(io.stderr) or b""
-            io.stderr = trace_command([argv.name, *argv.args]) + existing
-        if proc_sub_inputs and stdout is not None:
-            stdout = await materialize(stdout)
-        return stdout, io, exec_node
-    finally:
-        if dev is not None:
-            for path, allocation in proc_sub_inputs:
-                dev.release_input(path, allocation)
+            stdout = guard_io(stdout, io, bound, io.producer.command)
+            exec_node.exit_code = io.exit_code
+    if xtrace:
+        existing = await materialize(io.stderr) or b""
+        io.stderr = trace_command([argv.name, *argv.args]) + existing
+    return stdout, io, exec_node
 
 
 async def _run_argv(

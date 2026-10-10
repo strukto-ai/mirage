@@ -28,8 +28,6 @@ const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
 const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
-import { applyIo } from '@struktoai/mirage-core/cache/file/io'
-import { IOResult } from '@struktoai/mirage-core/io/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Workspace } from '../../workspace.ts'
 import type { S3Config } from './config.ts'
@@ -323,18 +321,15 @@ describe('S3 cache consistency (mocked)', () => {
     // was. An entry that reaches the cache with no token can no longer
     // claim freshness, so the next read under `fresh` refetches once; after
     // that it carries the backend's own ETag and the read after it is
-    // served from cache. The python twin is in test_fingerprint_spike.py,
-    // where `Workspace.applyIo` is public; here the seed goes through
-    // core's applyIo on the same cache.
+    // served from cache. The python twin is in test_fingerprint_spike.py.
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
       { mode: MountMode.WRITE, read: FRESH },
     )
     try {
-      await applyIo(
-        ws.cache,
-        new IOResult({ reads: { '/s3/c.txt': ENC.encode('v1') }, cache: ['/s3/c.txt'] }),
-      )
+      // The bytes land in the cache carrying no token, which is exactly
+      // what the md5 default used to paper over.
+      await ws.cache.set('/s3/c.txt', ENC.encode('v1'))
       expect(await ws.cache.isFresh('/s3/c.txt', 'anything')).toBe(false)
       mock.resetCalls()
       expect(DEC.decode((await ws.shell('cat /s3/c.txt')).stdout)).toBe('v1')

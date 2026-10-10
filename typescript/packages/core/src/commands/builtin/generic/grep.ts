@@ -23,7 +23,7 @@ import { mountKey, mountPrefixOf, sameMountSpec } from '../../../utils/key_prefi
 import { respellOne } from '../../../utils/path.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {

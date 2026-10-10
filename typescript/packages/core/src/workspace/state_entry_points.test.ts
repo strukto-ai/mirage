@@ -615,8 +615,7 @@ class SealedPaths implements Policy {
     if (!ctx.write && ctx.path.virtual === '/a/secret.txt') {
       return { kind: 'deny', reason: 'secret is sealed' }
     }
-    // The subtree spelling covers the root too: a native tree op
-    // (rm_r) admits as one op on the root, per the preVfs docstring.
+    // The subtree spelling covers the root too.
     if (ctx.write && (ctx.path.virtual === '/a/prod' || ctx.path.virtual.startsWith('/a/prod/'))) {
       return { kind: 'deny', reason: 'prod is read-only' }
     }
@@ -662,7 +661,7 @@ describe('op hooks bind at the dispatcher and the command tier', () => {
   it('preVfs refuses the entry points and handler I/O alike', async () => {
     // The documented boundary (Policy.preVfs): coded op hooks fire at
     // the dispatcher AND for the backend I/O inside a mount command's
-    // handler (withPolicyGuard). Both tiers are pinned so a move of
+    // handler (withCommandGuards). Both tiers are pinned so a move of
     // the boundary is loud.
     const ws = await makeSealedWs([new SealedPaths()])
 
@@ -752,22 +751,48 @@ describe('op hooks bind at the dispatcher and the command tier', () => {
 
   it('shell rm -r admits through preVfs', async () => {
     // The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
-    // admitted per deletion while a shell rm -r admitted nothing. The
-    // shell tree removal now admits the op the backend performs, and
-    // the subtree write-deny refuses it outright.
+    // admitted per deletion while a shell rm -r admitted nothing. Under a
+    // coded preVfs policy the one-call rm_r is declined, so the tree goes
+    // entry by entry, each removal admitted, and a write-deny refuses it.
     const recorder = new OpRecorder()
     const ws = await makeSealedWs([recorder])
     const removed = await ws.shell('rm -r /a/prod')
     expect(removed.exitCode).toBe(0)
-    expect(
-      recorder.asked.some(([op, path, write]) => write && path === '/a/prod' && op === 'rm_r'),
-    ).toBe(true)
+    const writes = recorder.asked.filter(([, , write]) => write)
+    expect(writes).toContainEqual(['unlink', '/a/prod/keep.txt', true])
+    expect(writes).toContainEqual(['rmdir', '/a/prod', true])
+    expect(writes.some(([op]) => op === 'rm_r')).toBe(false)
 
     const sealed = await makeSealedWs([new SealedPaths()])
     const refused = await sealed.shell('rm -r /a/prod')
     expect(refused.exitCode).not.toBe(0)
     const survives = await sealed.shell('cat /a/prod/keep.txt')
     expect(survives.exitCode).toBe(0)
+  })
+
+  it('shell rm -rv removes what a sealed listing allows', async () => {
+    // -v lists the tree before it goes in one call; a listing a policy
+    // refuses sends the removal entry by entry, as without -v.
+    const sealedListing: Policy = {
+      preVfs: (ctx) =>
+        ctx.op === 'readdir' && ctx.path.virtual === '/a/prod/sub'
+          ? { kind: 'deny', reason: 'sub is sealed' }
+          : null,
+    }
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /a/prod/sub')
+    await ws.vfs.write('/a/prod/a.txt', ENC.encode('a\n'))
+    await ws.vfs.write('/a/prod/sub/b.txt', ENC.encode('b\n'))
+    ws.policies.add(sealedListing)
+    const io = await ws.shell('rm -rv /a/prod')
+    expect(io.exitCode).toBe(1)
+    expect(stdoutStr(io)).toBe("removed '/a/prod/a.txt'\n")
+    expect(stderrStr(io)).toBe("rm: cannot remove '/a/prod/sub': Permission denied\n")
+    expect(await ws.vfs.exists('/a/prod/a.txt')).toBe(false)
   })
 
   it('find -delete admits each deletion exactly once', async () => {

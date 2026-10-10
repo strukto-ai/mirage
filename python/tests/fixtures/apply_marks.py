@@ -1,13 +1,11 @@
 from collections.abc import Callable
 
-from mirage.io import IOResult
-from mirage.io.types import ByteSource
 from mirage.observe.record import OpRecord
 from mirage.types import CacheFacts, MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
-Mark = tuple[str, str, ByteSource | None]
+Mark = tuple[str, str]
 
 
 def caching_ram_workspace() -> Workspace:
@@ -17,36 +15,26 @@ def caching_ram_workspace() -> Workspace:
     return Workspace({"/r": ram}, mode=MountMode.WRITE)
 
 
-def capture_marks(
-    ws: Workspace,
-) -> list[tuple[list[Mark], dict[str, ByteSource]]]:
-    """Snapshot each ``apply_io`` call's records and writes on ``ws``.
-
-    The hook only snapshots: an assertion raised inside apply_io is
-    folded into the line's result. The marks are read before the real
-    apply_io, since the line clears them once it has run.
+def capture_marks(ws: Workspace) -> list[tuple[list[Mark], bool]]:
+    """Snapshot the records each line's end keeps versions against.
 
     Args:
         ws (Workspace): the workspace whose dispatcher to wrap.
 
     Returns:
-        list[tuple[list[Mark], dict[str, ByteSource]]]: per call, each
-        record's ``(op, path, claimed)`` and a copy of ``IOResult.writes``.
+        list[tuple[list[Mark], bool]]: per line end, each record's
+        ``(op, path)`` and whether the line was nested.
     """
-    captured: list[tuple[list[Mark], dict[str, ByteSource]]] = []
-    orig = ws._dispatcher.apply_io
+    captured: list[tuple[list[Mark], bool]] = []
+    orig = ws._dispatcher.keep_versions
 
     async def recording(
-        result: IOResult,
-        records: list[OpRecord] | None = None,
-        cache_facts: Callable[[str], CacheFacts] | None = None,
+        records: list[OpRecord],
+        cache_facts: Callable[[str], CacheFacts],
         nested: bool = False,
     ) -> None:
-        marks = [(r.op, r.path, r.claimed) for r in records or []]
-        captured.append((marks, dict(result.writes)))
-        return await orig(
-            result, records=records, cache_facts=cache_facts, nested=nested
-        )
+        captured.append(([(r.op, r.path) for r in records], nested))
+        await orig(records, cache_facts, nested)
 
-    ws._dispatcher.apply_io = recording
+    ws._dispatcher.keep_versions = recording  # type: ignore[method-assign]
     return captured

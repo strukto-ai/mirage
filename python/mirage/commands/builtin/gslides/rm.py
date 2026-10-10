@@ -13,6 +13,5 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.rm_cmd import make_rm
-from mirage.core.gslides.unlink import unlink
 
-rm = make_rm(vfs="gslides", unlink=unlink)
+rm = make_rm(vfs="gslides")

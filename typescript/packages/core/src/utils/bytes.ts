@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
-import { makeRm } from '../generic/rm_cmd.ts'
-
-export const GDOCS_RM = makeRm(VFSName.GDOCS)
+/** One byte array holding every chunk in order. */
+export function concat(chunks: readonly Uint8Array[]): Uint8Array {
+  let total = 0
+  for (const c of chunks) total += c.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}

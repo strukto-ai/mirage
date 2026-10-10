@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command, CommandIO } from '../../config.ts'
-import { withCommandGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { withCommandGuards } from '../generic_bind/adapter.ts'
 import { withProbeAnswers, withSlashGuard } from '../generic_bind/factory.ts'
 import { makeMkdir } from './mkdir.ts'
 import { makeRm } from './rm.ts'
@@ -27,11 +27,11 @@ import { makeTouch } from './touch.ts'
 export const OBJECT_STORE_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
 
 function guarded(io: CommandIO): CommandIO {
-  return withCommandGuards(withPolicyGuard(withSlashGuard(io)))
+  return withCommandGuards(withSlashGuard(io))
 }
 
 function answered(io: CommandIO): CommandIO {
-  return withCommandGuards(withPolicyGuard(withSlashGuard(withProbeAnswers(io))))
+  return withCommandGuards(withSlashGuard(withProbeAnswers(io)))
 }
 
 /**
