@@ -153,6 +153,48 @@
         "stdout": "/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "search_word_counts_case_and_lines",
+      "seq": 540226,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rcw wombat /search; grep -riw WOMBAT /search; grep -rw -e wombat -e sleeps /search; grep -rnw wombat /search; rg -cw wombat /search; rg -iw WOMBAT /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt:1\n/search/beta.txt:1\n/search/gamma.txt:0\n/search/alpha.txt:wombat runs fast\n/search/beta.txt:the wombat sleeps\n/search/alpha.txt:wombat runs fast\n/search/beta.txt:the wombat sleeps\n/search/alpha.txt:1:wombat runs fast\n/search/beta.txt:1:the wombat sleeps\n/search/alpha.txt:1\n/search/beta.txt:1\n/search/alpha.txt:wombat runs fast\n/search/beta.txt:the wombat sleeps\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_word_rg_listings",
+      "seq": 540227,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "rg -c --include-zero -w wombat /search; rg --files-without-match -w wombat /search; rg -q --files-without-match -w wombat /search; echo $?; rg -q -c --include-zero -w wombat /search; echo $?; rg --files /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt:1\n/search/beta.txt:1\n/search/gamma.txt:0\n/search/gamma.txt\n0\n0\n/search/alpha.txt\n/search/beta.txt\n/search/gamma.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_word_binary_and_unicode_fold",
+      "seq": 540228,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "mkdir -p /search/edge && printf 'wom\\0bat\\n' > /search/edge/blob.txt && printf '\\xc5\\xbfun rises\\n' > /search/edge/fold.txt && printf 'wombat and the sun\\n' > /search/edge/hit.txt && rg --files-without-match -w wombat /search/edge; rg -c --include-zero -w wombat /search/edge; rg -iw sun /search/edge; grep -riw sun /search/edge; rm -r /search/edge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/edge/fold.txt\n/search/edge/fold.txt:0\n/search/edge/hit.txt:1\n/search/edge/fold.txt:\u017fun rises\n/search/edge/hit.txt:wombat and the sun\n/search/edge/hit.txt:wombat and the sun\n",
+        "stderr": ""
+      }
     }
   ]
 }

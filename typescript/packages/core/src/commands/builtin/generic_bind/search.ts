@@ -232,6 +232,7 @@ async function directories<A extends Accessor>(
       info = await io.stat(accessor, path, index)
     } catch (err) {
       if (!isFsError(err)) throw err
+      console.debug(`search scope ${path.virtual}: ${String(err)}`)
       continue
     }
     if (info.type === FileType.DIRECTORY) found.push(path)
@@ -293,6 +294,7 @@ export async function searchReads<A extends Accessor>(
         : grepTerms(opts.flags, texts, utf8Locale(opts.env))
   } catch (err) {
     if (!(err instanceof Error)) throw err
+    console.debug(`${name} search left to the scan: ${err.message}`)
     return stream
   }
   if (terms === null) return stream
