@@ -568,6 +568,28 @@ describe('per-entry policy still materializes directories', () => {
     expect(files.get('/c/f.txt')).toEqual(new Uint8Array([70]))
     expect(dirs.has('/c/empt')).toBe(true)
   })
+
+  it('names a refused entry copy and goes on', async () => {
+    const files = new Map([
+      ['/t/a.txt', new Uint8Array([65])],
+      ['/t/b.txt', new Uint8Array([66])],
+    ])
+    const dirs = new Set(['/t'])
+    const { stat, copy, find, mkdir } = typedBackend(files, dirs)
+    const refusingCopy = (src: PathSpec, dst: PathSpec): Promise<void> =>
+      key(dst) === '/c/a.txt' ? Promise.reject(eacces(dst)) : copy(src, dst)
+    const [, io] = await cpGeneric(
+      ['/t', '/c'].map(spec),
+      stat,
+      { copy: refusingCopy, find, mkdir },
+      cpFlags({ recursive: true, backup: 'simple' }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "cp: cannot create regular file '/c/a.txt': Permission denied\n",
+    )
+    expect(files.get('/c/b.txt')).toEqual(new Uint8Array([66]))
+  })
 })
 
 describe('backup version scan failures', () => {

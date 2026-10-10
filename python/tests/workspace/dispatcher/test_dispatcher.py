@@ -587,6 +587,20 @@ async def test_a_tree_copy_over_a_link_below_its_destination_declines():
 
 
 @pytest.mark.asyncio
+async def test_a_tree_copy_writes_through_a_link_into_another_mount():
+    # cp walks a destination holding a link, and the write follows it
+    # across mounts where a backend copy would answer EXDEV.
+    mounts = {"/ram/": RAMVFS(), "/scratch/": RAMVFS()}
+    with Workspace(mounts, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e/d && echo new > /ram/d/a.txt")
+        await ws.shell("echo old > /scratch/a.txt")
+        await ws.shell("ln -s /scratch/a.txt /ram/e/d/a.txt")
+        assert (await ws.shell("cp -r /ram/d /ram/e")).exit_code == 0
+        assert (await ws.shell("cat /scratch/a.txt")).stdout == b"new\n"
+        assert ws._namespace.readlink("/ram/e/d/a.txt") == "/scratch/a.txt"
+
+
+@pytest.mark.asyncio
 async def test_a_read_grant_refuses_link_writes_like_file_writes():
     # The mode gate on the table ops. A read grant refused a file's
     # unlink with EROFS while the same session deleted, created and

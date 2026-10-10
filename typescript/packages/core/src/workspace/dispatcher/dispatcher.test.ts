@@ -343,6 +343,28 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
+  it('writes a tree copy through a link into another mount', async () => {
+    // cp walks a destination holding a link, and the write follows it
+    // across mounts where a backend copy would answer EXDEV.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/ram': new RAMVFS(), '/scratch': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.shell('mkdir -p /ram/d /ram/e/d && echo new > /ram/d/a.txt')
+      await ws.shell('echo old > /scratch/a.txt')
+      await ws.shell('ln -s /scratch/a.txt /ram/e/d/a.txt')
+      expect((await ws.shell('cp -r /ram/d /ram/e')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /scratch/a.txt')).stdout)).toBe('new\n')
+      expect(DEC.decode((await ws.shell('readlink /ram/e/d/a.txt')).stdout)).toBe(
+        '/scratch/a.txt\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('answers a no-follow stat with the link row', async () => {
     // lstat asks for the row only the node table holds; a following stat
     // arrives resolved to the target and must not see a link at all.

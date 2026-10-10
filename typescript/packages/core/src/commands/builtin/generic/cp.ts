@@ -1309,7 +1309,15 @@ export async function cpGeneric(
           copies,
         )
         if (!made.ok) continue
-        await strategy.copy(entry, entryDst)
+        try {
+          await strategy.copy(entry, entryDst)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          errors.push(
+            `cp: cannot create regular file '${entryDst.rawPath}': ${String(fsStrerror(err))}`,
+          )
+          continue
+        }
         if (flags.verbose) lines.push(transferLine(entry, entryDst, made.backup))
       }
       if (copies !== undefined) {

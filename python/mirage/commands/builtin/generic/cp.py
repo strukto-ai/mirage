@@ -1701,7 +1701,14 @@ async def cp_generic(
                 )
                 if not ok:
                     continue
-                await strategy.copy(entry, entry_dst)
+                try:
+                    await strategy.copy(entry, entry_dst)
+                except FS_ERRORS as exc:
+                    errors.append(
+                        f"cp: cannot create regular file "
+                        f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
+                    )
+                    continue
                 if flags.verbose:
                     lines.append(transfer_line(entry, entry_dst, backup))
             if copies is not None:

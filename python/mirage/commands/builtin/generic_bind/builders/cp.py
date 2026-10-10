@@ -115,8 +115,14 @@ async def cp(
     # A native copy or find answers for a whole tree in one call, so the
     # dispatcher declines one whose tree the caller's view restricts; cp
     # takes the entry-by-entry walk up front there, which is where GNU's
-    # per-entry refusals are worded.
-    if paths_scoped(opts.ns, paths, opts.mount_prefix):
+    # per-entry refusals are worded. A link below the destination is a
+    # name the backend's copy writes as it is, where a write follows it,
+    # into another mount too, so cp walks there as well.
+    links = opts.ns.links if opts.ns is not None else None
+    dst = parsed.target_dir or (paths[-1] if paths else None)
+    if paths_scoped(opts.ns, paths, opts.mount_prefix) or (
+        links is not None and dst is not None and links.subtree(dst.virtual)
+    ):
         ops = replace(ops, copy=None, dir_copy=None, find=None)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
@@ -153,7 +159,6 @@ async def cp(
             mkdir=mkdir,
         )
     overlay = opts.ns.stat_overlay if opts.ns is not None else None
-    links = opts.ns.links if opts.ns is not None else None
     cwd = opts.cwd.virtual if opts.cwd is not None else "/"
     return await generic_cp(
         paths,

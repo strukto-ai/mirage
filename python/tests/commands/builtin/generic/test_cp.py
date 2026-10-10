@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic.cp import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.fs import enotsup, walk_declined
+from mirage.errors.fs import eacces, enotsup, walk_declined
 from mirage.io.types import IOResult
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -457,6 +457,30 @@ async def test_a_declined_dir_copy_copies_entry_by_entry():
     assert io.exit_code == 0
     assert files["/c/f.txt"] == b"F"
     assert {"/c", "/c/empt"} <= dirs
+
+
+@pytest.mark.asyncio
+async def test_a_refused_entry_copy_names_the_entry_and_goes_on():
+    files = {"/t/a.txt": b"A", "/t/b.txt": b"B"}
+    dirs = {"/t"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+
+    async def refusing_copy(src, dst) -> None:
+        if _key(dst) == "/c/a.txt":
+            raise eacces(dst)
+        await copy(src, dst)
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(copy=refusing_copy, find=find, mkdir=mkdir),
+        stat=stat,
+        flags=CpFlags(recursive=True, backup="simple"),
+    )
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"cp: cannot create regular file '/c/a.txt': Permission denied\n"
+    )
+    assert files["/c/b.txt"] == b"B"
 
 
 @pytest.mark.asyncio
