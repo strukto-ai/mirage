@@ -156,11 +156,11 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux.
 ## Path → ID resolution
 
 Box uses numeric folder/file IDs internally (root folder is id `0`). Mirage caches the path → ID
-mapping in the `RAMIndexCacheStore` attached to the VFS. The first time you `ls /box/foo/bar/`,
+mapping in the mount's index store (RAM unless an `index:` is configured). The first time you `ls /box/foo/bar/`,
 it walks the tree top-down (one API call per level) and caches each entry's ID. Subsequent reads
 of `/box/foo/bar/anyfile.json` hit the cache instead of re-walking.
 
-Listings live for the mount's `ttl` (600 s by default), at most 24 hours. To force re-resolution, recreate the `BoxVFS`.
+With no `index:` configured, listings live for the mount's `ttl` (600 s by default), at most 24 hours; a configured `index:` uses its own `ttl`, still capped by the mount's `ttl:` ([index TTL](/home/cache#index-ttl)). To force re-resolution, unmount the prefix and mount a new `BoxVFS` there.
 
 ## Writes
 

@@ -91,7 +91,8 @@ results.
 
 The GridFS VFS uses `IndexCacheStore` with `index_ttl = 600`
 (10 minutes). Directory listings are cached before being refreshed from
-MongoDB, reducing queries for repeated traversals.
+MongoDB, reducing queries for repeated traversals. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
+[index TTL](/home/cache#index-ttl).
 
 ## Example
 

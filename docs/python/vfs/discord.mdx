@@ -127,10 +127,10 @@ Scope detection is handled by `mirage/core/discord/scope.py`.
 
 ## Cache
 
-The Discord VFS uses `IndexCacheStore` (same as RAM/S3/disk/GitHub).
+The Discord VFS uses `IndexCacheStore` (same as S3, disk and GitHub).
 Index entries store guild IDs, channel IDs, and `last_message_id` for
-date range computation. There is no separate content cache - file content
-caching is handled by the workspace `IOResult` mechanism.
+date range computation. File bytes go through the workspace
+[file cache](/home/cache).
 
 ## Example
 

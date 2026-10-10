@@ -419,6 +419,13 @@ Take the version from a backend response, the same kind of token the stat answer
 
 `node/src/vfs/listing_version.test.ts` holds every declarer to this, as `tests/vfs/test_listing_version.py` does in Python: the fill stores a version, a stat through an empty index answers the stored value, a second command sends only the expected checks, and an outside change moves the version. Live declaration parity is checked by `scripts/check_spec_parity.py` using the temporary manifests produced by both generators. A new declarer adds a harness to the test and adds its name to the pinned roster, or the roster tests fail.
 
+### Renderers and the file cache
+
+A file extension the VFS lists in `renderers` is never served from or kept in the file cache when the dispatcher reads it, since the cache holds what the VFS's own IO returns, not rendered bytes. Two cases fall outside that rule:
+
+- the VFS's own `read` is cached as usual, whatever it returns;
+- a command that names a path in its result's `cache` list has the bytes it reported for that path stored as given, so a command that reports rendered bytes there makes `cat` serve rendered bytes afterwards.
+
 ## 6. Snapshot Support
 
 Leave `supportsSnapshot` unset unless the complete drift contract is implemented:
