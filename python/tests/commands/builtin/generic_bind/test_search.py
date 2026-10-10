@@ -565,6 +565,26 @@ def test_what_a_search_reads_asks_and_scans(line, mount, reads, asked, scan):
         assert sorted(vfs.reads) == [f"d/{key}" for key in reads.split()]
 
 
+@pytest.mark.parametrize(
+    "searchable, reads",
+    [
+        (
+            ("d/sub",),
+            ["d/a.txt", "d/b.txt", "d/c.txt", "d/sub/d.txt", "d/z.txt"],
+        ),
+        (("d/*.txt",), ["d/a.txt", "d/sub/d.txt"]),
+    ],
+)
+def test_a_file_the_search_does_not_cover_is_always_read(searchable, reads):
+    # A glob naming a directory covers what is below it, and `*` stays
+    # within one segment, so d/*.txt leaves d/sub/d.txt uncovered.
+    vfs = SearchRAM(lines=None)
+    vfs.searchable = searchable
+    line = "grep -r ada /d"
+    assert _run(vfs, line) == _run(RAMVFS(), line)
+    assert sorted(vfs.reads) == reads
+
+
 def test_a_hidden_path_is_walked_without_the_search():
     vfs, hide = SearchRAM(), ("/d/sub",)
     line = "grep -r ada /d"

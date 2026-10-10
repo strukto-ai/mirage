@@ -475,6 +475,19 @@ it.each<[string, string, string | null, string, ScanReason | null]>([
   }
 })
 
+// Twin of test_a_file_the_search_does_not_cover_is_always_read: a glob naming
+// a directory covers what is below it, and `*` stays within one segment.
+it.each([
+  [['d/sub'], ['d/a.txt', 'd/b.txt', 'd/c.txt', 'd/sub/d.txt', 'd/z.txt']],
+  [['d/*.txt'], ['d/a.txt', 'd/sub/d.txt']],
+])('always reads a file outside searchable %j', async (searchable, reads) => {
+  const vfs = new SearchRAM({ lines: null })
+  Object.assign(vfs, { searchable })
+  const line = 'grep -r ada /d'
+  expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
+  expect([...vfs.reads].sort()).toEqual(reads)
+})
+
 // Twin of test_a_hidden_path_is_walked_without_the_search.
 it('walks a hidden path without the search', async () => {
   const vfs = new SearchRAM()

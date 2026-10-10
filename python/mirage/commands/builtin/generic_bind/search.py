@@ -56,6 +56,7 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.utils.filetype import get_extension
+from mirage.utils.path import glob_prefix_match
 from mirage.vfs.types import ScanReason, SearchQuery
 from mirage.view.namespace_view import paths_scoped
 
@@ -344,7 +345,8 @@ async def search_reads(
 ]:
     """grep's or rg's reads, narrowed by the mount's search where it can.
 
-    ``files_containing`` rules out walked files no match can be in, and
+    ``files_containing`` rules out walked files no match can be in, of
+    those the mount's ``searchable`` names, and
     ``lines_containing`` hands a file's matching lines in its place when
     the output shows nothing else, or tells whether it is worth reading.
     An operand named on the line is never ruled out by a search asked
@@ -446,6 +448,12 @@ async def search_reads(
                 and get_extension(path.virtual) in BINARY_EXTENSIONS
             )
             and path.vfs_path.lower() not in hits
+            and (
+                io.searchable is None
+                or any(
+                    glob_prefix_match(path.vfs_path, g) for g in io.searchable
+                )
+            )
         ):
             return b""
         if lines is None:

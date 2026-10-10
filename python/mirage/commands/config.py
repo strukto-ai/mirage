@@ -152,6 +152,7 @@ class CommandIO:
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     search: SearchOps | None = None
     files_containing: FilesContainingOp | None = None
+    searchable: tuple[str, ...] | None = None
     lines_containing: LinesContainingOp | None = None
     before_full_scan: BeforeFullScanOp | None = None
     glob_children: ChildMounts | None = None

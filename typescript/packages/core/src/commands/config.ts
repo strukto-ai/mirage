@@ -125,6 +125,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   maxDuEntries?: number | null
   search?: SearchOps<A>
   filesContaining?: FilesContainingOp<A>
+  searchable?: readonly string[] | null
   linesContaining?: LinesContainingOp<A>
   beforeFullScan?: BeforeFullScanOp<A>
   // Child names the namespace owes a directory (nested mount roots and

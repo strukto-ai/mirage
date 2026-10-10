@@ -258,6 +258,13 @@ export class BaseVFS<A extends Accessor = Accessor> {
   /** How many paths one glob may expand to before it stops. */
   readonly maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES
   /**
+   * The files `filesContaining` answers for, as mount-relative globs matched
+   * segment by segment (a glob naming a directory covers what is below it);
+   * null for every file. grep and rg read any other file whatever the
+   * answer, as a full scan would.
+   */
+  readonly searchable: readonly string[] | null = null
+  /**
    * What `search` supports, read by the consumers that opt in by namespace
    * (`{grep: {mode: 'literal'}}` lets grep and rg use it). Empty means no
    * consumer may assume anything.
