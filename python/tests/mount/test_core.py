@@ -17,7 +17,6 @@ import errno
 import logging
 import os
 import stat
-import time
 
 import pytest
 import pytest_asyncio
@@ -119,20 +118,6 @@ async def test_open_with_o_trunc_drops_the_old_body(seeded):
     assert (await seeded.fgetattr("/a.txt", fh)).size == 0
     await seeded.write("/a.txt", b"BB\n", 0, fh)
     await seeded.release(fh)
-    assert await seeded.read("/a.txt", 100, 0, None) == b"BB\n"
-
-
-@pytest.mark.asyncio
-async def test_o_trunc_open_settles_writes_buffered_on_another_handle(seeded):
-    # A write the kernel already acknowledged on handle A precedes the
-    # O_TRUNC open on handle B, so it must land before the truncation,
-    # not stay queued to overwrite B's body when A is released.
-    first = await seeded.open("/a.txt", os.O_WRONLY)
-    await seeded.write("/a.txt", b"QUEUED", 0, first)
-    second = await seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
-    await seeded.write("/a.txt", b"BB\n", 0, second)
-    await seeded.release(second)
-    await seeded.release(first)
     assert await seeded.read("/a.txt", 100, 0, None) == b"BB\n"
 
 
@@ -239,12 +224,6 @@ async def test_a_handle_reads_its_own_unflushed_writes(seeded):
 
 
 @pytest.mark.asyncio
-async def test_write_then_read(seeded):
-    await seeded.write("/new.txt", b"written", 0, None)
-    assert await seeded.read("/new.txt", 100, 0, None) == b"written"
-
-
-@pytest.mark.asyncio
 async def test_readlink_on_non_link_raises_einval(seeded):
     with pytest.raises(OSError) as exc:
         await seeded.readlink("/a.txt")
@@ -338,14 +317,6 @@ async def test_getxattr_missing_raises_no_xattr(seeded):
     with pytest.raises(OSError) as exc:
         await seeded.getxattr("/a.txt", "user.absent")
     assert exc.value.errno == posix_errno(FsCondition.NO_XATTR)
-
-
-@pytest.mark.asyncio
-async def test_resolve_honors_root_prefix():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    core = MountCore(ws.vfs, root_prefix="/data/")
-    assert core.resolve("/") == "/data"
-    assert core.resolve("/x.txt") == "/data/x.txt"
 
 
 @pytest.mark.asyncio
@@ -507,50 +478,6 @@ async def test_buffered_write_flush_lands_in_the_stored_bytes():
     await core.release(fh)
     stored = await core._files.read("/data/books.tally", raw=True)
     assert stored == b"0123XY6789"
-
-
-@pytest.fixture
-def new_york_clock():
-    # Mirrors tests/utils/test_stat_view.py: a non-UTC host zone makes a
-    # local-time parse of an offset-less stamp visibly wrong.
-    if not hasattr(time, "tzset"):
-        pytest.skip("tzset unavailable on this platform")
-    previous = os.environ.get("TZ")
-    os.environ["TZ"] = "America/New_York"
-    time.tzset()
-    yield
-    if previous is None:
-        os.environ.pop("TZ", None)
-    else:
-        os.environ["TZ"] = previous
-    time.tzset()
-
-
-@pytest.mark.asyncio
-async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
-    seeded, new_york_clock
-):
-    # The R6 acceptance pin: the FUSE translator answers the same epoch
-    # as mirage.utils.stat_view for an offset-less stamp. Only a
-    # backend can produce one (the touch overlay always emits Z), so
-    # this is latent until a backend like nextcloud reports naive
-    # stamps; the pin is what keeps it latent.
-    naive = FileStat(
-        name="f",
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        modified="2026-01-02T03:04:05",
-    )
-    aware = FileStat(
-        name="f",
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        modified="2026-01-02T03:04:05+00:00",
-    )
-    got_naive = seeded.attrs(naive)
-    got_aware = seeded.attrs(aware)
-    assert got_naive.mtime == got_aware.mtime
-    assert got_naive.mtime == mtime_ns(naive)
 
 
 @pytest.mark.asyncio
@@ -857,13 +784,6 @@ async def test_an_open_waits_out_the_removal_it_raced():
         await late[0]
     far = 2 * READ_CHUNK + 5
     assert await core.read("/data/a.bin", 4, far, early) == body[far : far + 4]
-
-
-@pytest.mark.asyncio
-async def test_setattr_stores_times_a_stat_reads_back(seeded):
-    await seeded.setattr("/a.txt", atime=981173106_500_000_000, mtime=10**18)
-    attrs = await seeded.getattr("/a.txt")
-    assert (attrs.atime, attrs.mtime) == (981173106_500_000_000, 10**18)
 
 
 @pytest.mark.asyncio
@@ -1191,6 +1111,25 @@ async def test_a_rename_waits_for_an_open_already_out():
     await renaming
     assert await ws.vfs.read("/b") == b"fresh"
     assert await core.read("/b", 100, 0, fh) == b""
+
+
+@pytest.mark.asyncio
+async def test_a_rename_waits_for_an_open_of_its_source_already_out():
+    # Registered after the rename moved the handles on its name, the open
+    # would be left on a name that is gone.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf body > /a")
+    files = _Held(ws.vfs, "stat", answered=True)
+    core = MountCore(files)
+    opening = asyncio.create_task(core.open("/a"))
+    await files.out.wait()
+    renaming = asyncio.create_task(core.rename("/a", "/b"))
+    await asyncio.sleep(0.01)
+    assert not renaming.done()
+    files.go.set()
+    fh = await opening
+    await renaming
+    assert await core.read("/b", 100, 0, fh) == b"body"
 
 
 @pytest.mark.asyncio

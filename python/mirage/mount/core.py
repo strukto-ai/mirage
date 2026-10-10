@@ -211,44 +211,53 @@ class MountCore:
         """
         return self._queue(self._pending, key, fn)
 
-    def _mutate_all(
-        self, keys: list[str], fn: Callable[[], Awaitable[T]]
+    def _queue_all(
+        self,
+        queues: dict[str, asyncio.Future[None]],
+        keys: list[str],
+        fn: Callable[[], Awaitable[T]],
     ) -> Awaitable[T]:
-        """Run one mutation that touches several files, holding each one's
-        chain, taken in sorted order so two renames that cross never wait
-        on each other.
+        """Run ``fn`` holding the chain of every key, taken in sorted order
+        so two callers that hold the same pair never wait on each other.
 
         Args:
+            queues (dict[str, asyncio.Future[None]]): the chains to join.
             keys (list[str]): the file identities.
-            fn (Callable[[], Awaitable[T]]): the mutation.
+            fn (Callable[[], Awaitable[T]]): the work to run.
         """
         first, *rest = sorted(set(keys))
         if not rest:
-            return self._mutate(first, fn)
-        return self._mutate(first, lambda: self._mutate_all(rest, fn))
+            return self._queue(queues, first, fn)
+        return self._queue(
+            queues, first, lambda: self._queue_all(queues, rest, fn)
+        )
 
     def _removing(
-        self, path: str, fn: Callable[[], Awaitable[None]]
+        self, paths: list[str], fn: Callable[[], Awaitable[None]]
     ) -> Awaitable[None]:
-        """Run ``fn``, which removes or replaces the file at ``path``, after
-        the opens of that name already out, with later ones held back until
-        it is done, as the kernel orders an open and an unlink of one name.
-        A chain of its own, taken before any ``_pending`` one, rather than
-        ``_pending`` itself: an open it waits for may be truncating there.
+        """Run ``fn``, which removes, replaces or moves the files at
+        ``paths``, after the opens of those names already out, with later
+        ones held back until it is done, as the kernel orders an open and
+        an unlink or a rename of one name. Chains of their own, taken
+        before any ``_pending`` one, rather than ``_pending`` itself: an
+        open they wait for may be truncating there.
 
         Args:
-            path (str): mount path being removed or replaced.
+            paths (list[str]): mount paths being removed, replaced or
+                moved.
             fn (Callable[[], Awaitable[None]]): the removal.
         """
-        key = self.identity(path, follow=False)
+        keys = [self.identity(path, follow=False) for path in paths]
 
         async def run() -> None:
-            opening = self._opening.get(key)
+            opening = [
+                out for key in keys for out in self._opening.get(key, ())
+            ]
             if opening:
-                await asyncio.wait(list(opening))
+                await asyncio.wait(opening)
             await fn()
 
-        return self._queue(self._removals, key, run)
+        return self._queue_all(self._removals, keys, run)
 
     async def _settled(self, ctx: Handle) -> None:
         """Wait for a flush or truncation of the handle's file still
@@ -694,7 +703,7 @@ class MountCore:
                 ctx.detached = row
             await self._changed(path, rehydrate=False)
 
-        await self._removing(path, lambda: self._mutate(key, remove))
+        await self._removing([path], lambda: self._mutate(key, remove))
 
     async def rename(self, old: str, new: str) -> None:
         """Rename an entry, carrying the handles open under it along.
@@ -726,7 +735,10 @@ class MountCore:
             await self._changed(old, rehydrate=False)
             await self._changed(new, rehydrate=False)
 
-        await self._removing(new, lambda: self._mutate_all(keys, replace))
+        await self._removing(
+            [old, new],
+            lambda: self._queue_all(self._pending, keys, replace),
+        )
 
     async def rmdir(self, path: str) -> None:
         await self._op(self._files.rmdir(self.resolve(path)))

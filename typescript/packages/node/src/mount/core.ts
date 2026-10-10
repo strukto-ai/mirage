@@ -264,30 +264,34 @@ export class MountCore {
   }
 
   /**
-   * Run one mutation that touches several files, holding each one's chain,
-   * taken in sorted order so two renames that cross never wait on each
-   * other. Mirrors Python's `_mutate_all`.
+   * Run `fn` holding the chain of every key, taken in sorted order so two
+   * callers that hold the same pair never wait on each other. Mirrors
+   * Python's `_queue_all`.
    */
-  private mutateAll<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
+  private queueAll<T>(
+    queues: Map<string, Promise<void>>,
+    keys: string[],
+    fn: () => Promise<T>,
+  ): Promise<T> {
     const [first = '', ...rest] = [...new Set(keys)].sort(compareCodePoints)
-    if (rest.length === 0) return this.mutate(first, fn)
-    return this.mutate(first, () => this.mutateAll(rest, fn))
+    if (rest.length === 0) return this.queue(queues, first, fn)
+    return this.queue(queues, first, () => this.queueAll(queues, rest, fn))
   }
 
   /**
-   * Run `fn`, which removes or replaces the file at `path`, after the opens
-   * of that name already out, with later ones held back until it is done,
-   * as the kernel orders an open and an unlink of one name. `hold` reads
-   * the rest for the handles open before; an open that slipped in while
-   * that read was out would get a chunked handle onto bytes about to go. A
-   * chain of its own, taken before any `pending` one, rather than `pending`
-   * itself: an open it waits for may be truncating there.
+   * Run `fn`, which removes, replaces or moves the files at `paths`, after
+   * the opens of those names already out, with later ones held back until
+   * it is done, as the kernel orders an open and an unlink or a rename of
+   * one name. `hold` reads the rest for the handles open before; an open
+   * that slipped in while that read was out would get a chunked handle onto
+   * bytes about to go. Chains of their own, taken before any `pending` one,
+   * rather than `pending` itself: an open they wait for may be truncating
+   * there.
    */
-  private removing(path: string, fn: () => Promise<void>): Promise<void> {
-    const key = this.identity(path, false)
-    return this.queue(this.removals, key, async () => {
-      const opening = this.opening.get(key)
-      if (opening !== undefined) await Promise.all(opening)
+  private removing(paths: string[], fn: () => Promise<void>): Promise<void> {
+    const keys = paths.map((path) => this.identity(path, false))
+    return this.queueAll(this.removals, keys, async () => {
+      await Promise.all(keys.flatMap((key) => [...(this.opening.get(key) ?? [])]))
       await fn()
     })
   }
@@ -556,7 +560,7 @@ export class MountCore {
    */
   async unlink(path: string): Promise<void> {
     const key = this.identity(path, false)
-    await this.removing(path, () =>
+    await this.removing([path], () =>
       this.mutate(key, async () => {
         const named = this.named(path)
         const row = await this.hold(path, named)
@@ -620,8 +624,8 @@ export class MountCore {
     const source = this.resolve(src)
     const target = this.resolve(dst)
     const moved = this.identity(src, false)
-    await this.removing(dst, () =>
-      this.mutateAll([moved, this.identity(dst, false)], async () => {
+    await this.removing([src, dst], () =>
+      this.queueAll(this.pending, [moved, this.identity(dst, false)], async () => {
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         const row = await this.hold(dst, replaced)
         await this.op(() => this.files.rename(source, target))

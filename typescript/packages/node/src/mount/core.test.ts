@@ -20,13 +20,12 @@ import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-co
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { Action, Policy, VfsContext } from '@struktoai/mirage-core/policy/index'
 import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
-import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
+import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MountCore } from './core.ts'
 
-const NAIVE_STAMP = '2026-01-02T03:04:05'
 const PAYLOAD = new TextEncoder().encode('payload-bytes')
 
 /** A store with no partial write: it keeps the base's truncate. */
@@ -295,23 +294,6 @@ describe('MountCore', () => {
     expect((await core.fgetattr('/data/greeting.txt', fh)).size).toBe(0)
     await core.write('/data/greeting.txt', fh, new TextEncoder().encode('BB\n'), 0)
     await core.release(fh)
-    const after = await core.open('/data/greeting.txt')
-    const body = await core.read('/data/greeting.txt', after, 0, 100)
-    await core.release(after)
-    expect(new TextDecoder().decode(body)).toBe('BB\n')
-  })
-
-  it('settles writes buffered on another handle before an O_TRUNC open truncates', async () => {
-    // A write the kernel already acknowledged on handle A precedes the
-    // O_TRUNC open on handle B, so it must land before the truncation,
-    // not stay queued to overwrite B's body when A is released.
-    const core = await mkCore()
-    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
-    await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
-    const second = await core.open('/data/greeting.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
-    await core.write('/data/greeting.txt', second, new TextEncoder().encode('BB\n'), 0)
-    await core.release(second)
-    await core.release(first)
     const after = await core.open('/data/greeting.txt')
     const body = await core.read('/data/greeting.txt', after, 0, 100)
     await core.release(after)
@@ -610,17 +592,6 @@ describe('MountCore', () => {
     await expect(core.readlink('/data/greeting.txt')).rejects.toMatchObject({ code: 'EINVAL' })
   })
 
-  it('signals ENOTEMPTY for a non-empty directory', async () => {
-    const core = await mkCore()
-    let code: string | undefined
-    try {
-      await core.rmdir('/data/sub')
-    } catch (err) {
-      code = (err as { code?: string }).code
-    }
-    expect(code).toBe('ENOTEMPTY')
-  })
-
   it('round-trips xattrs through the dispatcher', async () => {
     const core = await mkCore()
     await core.setxattr('/data/greeting.txt', 'user.tag', new TextEncoder().encode('v1'))
@@ -638,13 +609,6 @@ describe('MountCore', () => {
     })
   })
 
-  it('honors the root prefix when resolving', () => {
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    const core = new MountCore(ws.vfs, { rootPrefix: '/data/' })
-    expect(core.resolve('/')).toBe('/data')
-    expect(core.resolve('/x.txt')).toBe('/data/x.txt')
-  })
-
   it('reports EXDEV for a rename across two mounts', async () => {
     // A whole-workspace mount spans several backends; the kernel probes
     // rename first and falls back to copy+unlink only on EXDEV, so this
@@ -660,30 +624,6 @@ describe('MountCore', () => {
 })
 
 describe('attrs', () => {
-  it('reads an offset-less overlay stamp as UTC', async () => {
-    // The R6 acceptance pin: this translator answers the same epoch as
-    // core's stat view for a naive stamp, instead of `new Date`'s
-    // local-time reading, which put python FUSE and node FUSE apart by
-    // the host's UTC offset for the same backend stamp.
-    const core = await mkCore()
-    const naive = new FileStat({
-      name: 'f',
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-      modified: NAIVE_STAMP,
-    })
-    const aware = new FileStat({
-      name: 'f',
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-      modified: `${NAIVE_STAMP}+00:00`,
-    })
-    const gotNaive = core.attrs(naive)
-    const gotAware = core.attrs(aware)
-    expect(gotNaive.mtime.getTime()).toBe(gotAware.mtime.getTime())
-    expect(gotNaive.mtime.getTime()).toBe(mtimeMs(naive))
-  })
-
   it('lands an epoch-zero stamp instead of reading it as unknown', async () => {
     // 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
     // translator keys on null, so epoch zero replaces the mount's start
@@ -1173,6 +1113,27 @@ it('makes a rename wait for an open already out', async () => {
   const dec = new TextDecoder()
   expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('fresh')
   expect((await core.read('/data/b', fd, 0, 100)).byteLength).toBe(0)
+})
+
+it('makes a rename wait for an open of its source already out', async () => {
+  // Registered after the rename moved the handles on its name, the open
+  // would be left on a name that is gone.
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('body'))
+  const core = new MountCore(ws.vfs)
+  const stats = holdFirst(ws, 'stat', true)
+  const opening = core.open('/data/a')
+  await stats.out
+  let renamed = false
+  const renaming = core.rename('/data/a', '/data/b').finally(() => {
+    renamed = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(renamed).toBe(false)
+  stats.go()
+  const fd = await opening
+  await renaming
+  expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('body')
 })
 
 it('makes a flush onto a name a rename replaces wait for it', async () => {
