@@ -86,6 +86,18 @@ describe('FileHandle', () => {
     expect(h.flushPlan()).toEqual([{ kind: 'append', data: enc.encode('XY') }])
   })
 
+  it('owes only what it wrote since a settle', async () => {
+    const h = handle('abc', { append: true })
+    h.write(enc.encode('DE'))
+    expect(h.flushPlan()).toEqual([{ kind: 'append', data: enc.encode('DE') }])
+    h.settle(over('abcDE'))
+    expect(h.flushPlan()).toEqual([])
+    h.write(enc.encode('F'))
+    expect(h.flushPlan()).toEqual([{ kind: 'append', data: enc.encode('F') }])
+    h.seek(0, 0)
+    expect(await read(h, 9)).toBe('abcDEF')
+  })
+
   it('owes only the range an edit wrote', async () => {
     const h = handle('0123456789')
     h.seek(5, 0)

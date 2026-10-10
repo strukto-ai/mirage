@@ -289,6 +289,108 @@ describe('patchNodeFs — routed calls', () => {
   })
 })
 
+describe('patchNodeFs — descriptors', () => {
+  it('opens a FileHandle whose writes land at close', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const handle = await fs.promises.open('/data/f.txt', 'w+')
+    await handle.write('hello')
+    expect((await handle.stat()).size).toBe(5)
+    const { bytesRead, buffer } = await handle.read(Buffer.alloc(5), 0, 5, 0)
+    expect(buffer.toString('utf8', 0, bytesRead)).toBe('hello')
+    expect(await ws.vfs.exists('/data/f.txt')).toBe(true)
+    await handle.close()
+    expect(await fs.promises.readFile('/data/f.txt', 'utf-8')).toBe('hello')
+    await ws.close()
+  })
+
+  it('refuses a write through a read-only handle', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'abc')
+    const handle = await fs.promises.open('/data/f.txt', 'r')
+    await expect(handle.write('x')).rejects.toMatchObject({ code: 'EBADF' })
+    await handle.close()
+    await ws.close()
+  })
+
+  it('answers the callback descriptor calls', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'abc')
+    const fd = await new Promise<number>((resolve, reject) => {
+      fs.open('/data/f.txt', 'r+', (err, value) => {
+        if (err) reject(err)
+        else resolve(value)
+      })
+    })
+    const buffer = Buffer.alloc(3)
+    const read = await new Promise<number>((resolve, reject) => {
+      fs.read(fd, buffer, 0, 3, null, (err, n) => {
+        if (err) reject(err)
+        else resolve(n)
+      })
+    })
+    expect(buffer.toString('utf8', 0, read)).toBe('abc')
+    await new Promise<void>((resolve, reject) => {
+      fs.write(fd, 'XY', 0, (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      fs.fsync(fd, (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
+    expect(await fs.promises.readFile('/data/f.txt', 'utf-8')).toBe('XYc')
+    await new Promise<void>((resolve, reject) => {
+      fs.close(fd, (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
+    await ws.close()
+  })
+
+  it('streams a mounted file both ways', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await new Promise<void>((resolve, reject) => {
+      const out = fs.createWriteStream('/data/s.txt')
+      out.on('error', reject)
+      out.on('close', resolve)
+      out.end('streamed')
+    })
+    expect(await fs.promises.readFile('/data/s.txt', 'utf-8')).toBe('streamed')
+    const chunks: Buffer[] = []
+    await new Promise<void>((resolve, reject) => {
+      fs.createReadStream('/data/s.txt')
+        .on('data', (chunk) => {
+          chunks.push(Buffer.from(chunk))
+        })
+        .on('error', reject)
+        .on('close', resolve)
+    })
+    expect(Buffer.concat(chunks).toString()).toBe('streamed')
+    await ws.close()
+  })
+
+  it('answers existsSync on a mounted path without throwing', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    expect(fs.existsSync('/data')).toBe(true)
+    expect(() => fs.existsSync('/data/f.txt')).not.toThrow()
+    await ws.close()
+  })
+})
+
 describe('patchNodeFs — ledger', () => {
   it('records each call on ws.vfs.records', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
@@ -342,7 +444,6 @@ describe('patchNodeFs — what a mount cannot serve', () => {
       (fs: Fs) => fs.promises.rename('/data/f.txt', join(scratch, 'x')),
     ],
     ['a hard link', 'EPERM', (fs: Fs) => fs.promises.link('/data/f.txt', '/data/g.txt')],
-    ['a descriptor', 'ENOTSUP', (fs: Fs) => fs.promises.open('/data/f.txt')],
     [
       'an exclusive create of a name that is there',
       'EEXIST',

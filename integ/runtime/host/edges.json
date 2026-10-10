@@ -103,7 +103,7 @@
           },
           "expect": {
             "exit": 0,
-            "stdout": "ENOTSUP\nENOTSUP\nENOTSUP\nENOTSUP\nENOTSUP\nhost\n",
+            "stdout": "ENOTSUP\nENOTSUP\nserved\nENOTSUP\nENOTSUP\nhost\n",
             "ops_absent": [
               "read /data/f.txt"
             ]

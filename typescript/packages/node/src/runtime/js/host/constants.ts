@@ -53,19 +53,39 @@ export const ROUTED_CALLS = [
 
 export type RoutedCall = (typeof ROUTED_CALLS)[number]
 
-// Descriptors, streams and watchers have no workspace twin: serving them
-// means a descriptor table the host can see, which only the runtimes'
-// handles build. A hard link answers EPERM, as link(2) does on a
-// filesystem without them.
+// The calls that open a mounted path onto a descriptor of the patch's
+// own (descriptors.ts): `open` in its spellings, and node's read and write
+// streams, whose descriptor calls the patch answers through their `fs`
+// option.
+export const OPENED_CALLS = ['open', 'createReadStream', 'createWriteStream'] as const
+
+// The calls that take a descriptor rather than a path: they answer for a
+// descriptor `open` handed out and leave every other one to node. fchmod,
+// fchown and futimes are among them so a mounted descriptor never reaches
+// the device that holds its number.
+export const DESCRIPTOR_CALLS = [
+  'close',
+  'fchmod',
+  'fchown',
+  'fdatasync',
+  'fstat',
+  'fsync',
+  'ftruncate',
+  'futimes',
+  'read',
+  'readv',
+  'write',
+  'writev',
+] as const
+
+// Watchers have no workspace twin. A hard link answers EPERM, as link(2)
+// does on a filesystem without them.
 export const REFUSED_CALLS: Readonly<Record<string, FsCondition>> = {
   cp: 'ENOTSUP',
-  createReadStream: 'ENOTSUP',
-  createWriteStream: 'ENOTSUP',
   glob: 'ENOTSUP',
   link: HARD_LINK_REFUSAL,
   mkdtemp: 'ENOTSUP',
   mkdtempDisposable: 'ENOTSUP',
-  open: 'ENOTSUP',
   openAsBlob: 'ENOTSUP',
   opendir: 'ENOTSUP',
   realpath: 'ENOTSUP',
