@@ -197,11 +197,13 @@ the dispatcher.
 
 ### FUSE and FSKit
 
-`fuse/` (python) and `node/src/fuse/`: `MountCore` owns the semantics,
-`MirageFS` is the libfuse adapter, `classify_error` is the one errno table.
-`direct_io` plus `attr_timeout=0` keep unknown sizes correct. Python fskit
-writes need `fuse/darwin.py`. One FUSE mount per process on macOS. Never
-touch your own TypeScript mountpoint synchronously.
+`mount/` (python) and `node/src/mount/`: `MountCore` owns the semantics
+every kernel or protocol adapter shares (FUSE, SFTP, codex-exec), async on
+both hosts with per-file ordering; `classify_error` is the one errno table.
+`fuse/` and `node/src/fuse/`: `MirageFS` is the libfuse adapter and owns the
+sync bridge. `direct_io` plus `attr_timeout=0` keep unknown sizes correct.
+Python fskit writes need `fuse/darwin.py`. One FUSE mount per process on
+macOS. Never touch your own TypeScript mountpoint synchronously.
 
 ### Records, cache, watch, spec, integ
 
@@ -247,7 +249,7 @@ Repository:
 
 ```
 python/mirage/   accessor core ops vfs commands workspace shell runtime policy
-                 observe cache watch fuse cli server agents
+                 observe cache watch mount fuse cli server agents
 typescript/packages/
   core/          runtime-agnostic twin; no Node-only or browser-only API
   node/ browser/ runtime-specific VFS, commands, wiring, FUSE (node)
