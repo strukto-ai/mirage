@@ -31,7 +31,7 @@ vfs = ChromaVFS(config=config)
 ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
 ```
 
-The VFS is read-only and does not support snapshots.
+The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so a restored mount reads current content.
 
 ## Filesystem Layout
 

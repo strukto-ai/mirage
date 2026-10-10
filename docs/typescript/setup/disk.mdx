@@ -41,6 +41,6 @@ A folder changed in the last 2 seconds gets no version and is re-listed until it
 
 ## Snapshot behavior
 
-`DiskVFS.toState()` captures the file tree as bytes. Loading a snapshot back doesn't re-create the directory; pass a config file with a fresh `root` if the original location changed.
+A snapshot carries the mount's files, and loading it restores them. See [Snapshot & Replay](/home/snapshot#what-a-snapshot-captures).
 
 For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/vfs/disk).
