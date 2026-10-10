@@ -345,9 +345,11 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
-        m.register_commands(commands_for(vfs))
+        # The shared set first, so a command the VFS replaces keeps its own
+        # spec, not the generic one of that name.
         for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
             m.register_general(cmd)
+        m.register_commands(commands_for(vfs))
         if self._file_cache is not None:
             self._attach_manager(m)
         self._mounts.append(m)

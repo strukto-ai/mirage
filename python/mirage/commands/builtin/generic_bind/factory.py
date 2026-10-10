@@ -284,7 +284,7 @@ def walked(io: CommandIO) -> CommandIO:
     return replace(io, find=None, du=None)
 
 
-_BUILDERS = {b.name: b for b in BUILDERS}
+_BY_NAME = {b.name: b for b in BUILDERS}
 
 
 def _bind(
@@ -342,7 +342,7 @@ def generic(
     Raises:
         ValueError: no generic command has that name.
     """
-    builder = _BUILDERS.get(name)
+    builder = _BY_NAME.get(name)
     if builder is None:
         raise ValueError(f"no generic command named {name!r}")
     if vfs is None and table is None:

@@ -304,6 +304,7 @@ describe('a plug-in VFS', () => {
     })
     const mount = wikiMount(makeVfs({ commands: grep }))
     expect(mount.resolveCommand('grep')).toBe(grep[0])
+    expect(mount.specFor('grep')).toBe(grep[0]?.spec)
     expect(mount.resolveCommand('rg')).not.toBeNull()
   })
 

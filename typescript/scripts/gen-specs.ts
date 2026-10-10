@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -58,6 +58,9 @@ type ModuleBag = Record<string, unknown>
 function commandGroupDirs(pkg: string): { dir: string; groups: string[] }[] {
   const root = resolve(PACKAGES, pkg, 'src', 'commands', 'builtin')
   const out: { dir: string; groups: string[] }[] = []
+  // A package whose backends all run the shared generic set has no
+  // commands of its own, and no directory for them.
+  if (!existsSync(root)) return out
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     let source: string

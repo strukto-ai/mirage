@@ -268,7 +268,9 @@ def test_a_handed_command_wins_over_the_generic():
         {"/wiki/": make_vfs(commands=[wiki_grep])}, mode=MountMode.READ
     )
     mount = ws._registry.mount_for("/wiki/a")
-    assert mount.resolve_command("grep").fn is wiki_grep
+    grep = mount.resolve_command("grep")
+    assert grep.fn is wiki_grep
+    assert mount.spec_for("grep") is grep.spec
     assert mount.resolve_command("rg") is not None
 
 
