@@ -16,23 +16,14 @@ import { registerBackendCommands } from '@struktoai/mirage-core/commands/builtin
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { EmailVFS } from '../../vfs/email/email.ts'
 import { GridFSVFS } from '../../vfs/gridfs/gridfs.ts'
-import { HfBucketsVFS } from '../../vfs/hf_buckets/hf_buckets.ts'
-import { HfHubVFS } from '../../vfs/hf_hub/base.ts'
-import { NextcloudVFS } from '../../vfs/nextcloud/nextcloud.ts'
 import { SSHVFS } from '../../vfs/ssh/ssh.ts'
 import { DISK_COMMANDS } from './disk/index.ts'
 import { EMAIL_COMMANDS } from './email/index.ts'
 import { GRIDFS_COMMANDS } from './gridfs/index.ts'
-import { HF_BUCKETS_COMMANDS } from './hf_buckets/index.ts'
-import { HF_HUB_COMMANDS } from './hf_hub/index.ts'
-import { NEXTCLOUD_COMMANDS } from './nextcloud/index.ts'
 import { SSH_COMMANDS } from './ssh/index.ts'
 
 // The shell commands of the backends this package ships.
 registerBackendCommands(DiskVFS, () => DISK_COMMANDS)
 registerBackendCommands(EmailVFS, () => EMAIL_COMMANDS)
 registerBackendCommands(GridFSVFS, () => GRIDFS_COMMANDS)
-registerBackendCommands(HfBucketsVFS, () => HF_BUCKETS_COMMANDS)
-registerBackendCommands(HfHubVFS, () => HF_HUB_COMMANDS)
-registerBackendCommands(NextcloudVFS, () => NEXTCLOUD_COMMANDS)
 registerBackendCommands(SSHVFS, () => SSH_COMMANDS)

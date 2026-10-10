@@ -12,20 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { GITHUB_DU } from './du.ts'
 import { GITHUB_FIND } from './find.ts'
 import { GITHUB_GREP } from './grep.ts'
 import { GITHUB_RG } from './rg.ts'
 
-const GITHUB_OVERRIDES = new Set(['du', 'find', 'grep', 'rg'])
-
 export const GITHUB_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.GITHUB, {
-    overrides: GITHUB_OVERRIDES,
-  }),
   ...GITHUB_DU,
   ...GITHUB_FIND,
   ...GITHUB_GREP,

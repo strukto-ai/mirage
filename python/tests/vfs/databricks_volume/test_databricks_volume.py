@@ -22,7 +22,6 @@ from pydantic import ValidationError
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexEntry, LookupStatus
-from mirage.commands.builtin.backends import commands_for
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
@@ -34,6 +33,7 @@ from mirage.vfs.databricks_volume import (
     DatabricksVolumeVFS,
 )
 from tests.fixtures.driver_ops import ops
+from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
 
@@ -299,7 +299,7 @@ def test_vfs_registers_ops():
 
 def test_vfs_registers_commands():
     vfs = make_vfs(FakeFiles())
-    command_names = {command.name for command in commands_for(vfs)}
+    command_names = {command.name for command in mount_commands(vfs)}
     assert {
         "cat",
         "find",

@@ -20,12 +20,20 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
 from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
     mount_io,
     with_command_guards,
     with_dir_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.commands.config import CommandIO, CommandOpts, command
+from mirage.commands.config import (
+    Command,
+    CommandCatalog,
+    CommandIO,
+    CommandOpts,
+    command,
+    registered_commands,
+)
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
@@ -199,7 +207,6 @@ async def _run_with_namespace_globs(
     finish: Callable[[CommandIO], CommandIO],
     fn: Callable[..., Any],
     table: Callable[[CommandIO], CommandIO] | None,
-    adapt: Callable[[CommandIO], CommandIO] | None,
     write: bool,
     accessor: Accessor,
     paths: list[PathSpec],
@@ -210,9 +217,9 @@ async def _run_with_namespace_globs(
     namespace facts stamped on below every guard.
 
     The table is the mount's (``opts.io``), read per invocation, so one
-    registration serves every mount of the backend. A nested mount's
-    keys live in another VFS and no VFS stores a symlink, so a glob
-    resolved by one backend's readdir misses both, while the same names
+    registration serves every mount. A nested mount's keys live in
+    another VFS and no VFS stores a symlink, so a glob resolved by one
+    backend's readdir misses both, while the same names
     are already merged into a listing. The names are session-scoped, so
     the fact is stamped on here, per invocation, from ``opts.ns`` -- and
     the whole guard chain is applied on top of the stamped copy, so every
@@ -232,17 +239,16 @@ async def _run_with_namespace_globs(
         finish (Callable): the builder tier's stat and slash wraps,
             chosen at registration from the builder's read/write kind.
         fn (Callable): the builder's command function.
-        table (Callable | None): the backend's change to the table for
-            every command.
-        adapt (Callable | None): the command's own change to the table.
+        table (Callable | None): a backend's change to the table for
+            this command.
         write (bool): whether the builder writes.
         accessor (Accessor): backend handle.
         paths (list[PathSpec]): the command's path operands.
         texts (list[str]): the command's text arguments.
         opts (CommandOpts): the per-invocation option bag.
     """
-    io = table(mount_io(opts)) if table is not None else mount_io(opts)
-    raw = adapt(io) if adapt is not None else io
+    io = mount_io(opts)
+    raw = table(io) if table is not None else io
     if raw.stat is io.stat and not write:
         raw = with_probe_answers(raw)
     children = opts.ns.child_mounts if opts.ns is not None else None
@@ -269,7 +275,8 @@ def walked(io: CommandIO) -> CommandIO:
 
     Shell traversals need partial results and per-directory errors,
     which the shared readdir/stat walker owns; the VFS's own aggregate
-    methods stay strict. Disk and ssh pass this as their ``table``.
+    methods stay strict. Disk and ssh run ``cp``, ``du`` and ``find``
+    over it.
 
     Args:
         io (CommandIO): the mount's table.
@@ -277,66 +284,67 @@ def walked(io: CommandIO) -> CommandIO:
     return replace(io, find=None, du=None)
 
 
-def generic_commands(
-    vfs: str,
-    *,
-    overrides: set[str] | frozenset[str] | None = None,
-    table: Callable[[CommandIO], CommandIO] | None = None,
-    adapt: dict[str, Callable[[CommandIO], CommandIO]] | None = None,
-    local: bool = False,
-) -> list[Callable[..., Any]]:
-    """Generate the default command set for a backend.
+_BY_NAME = {b.name: b for b in BUILDERS}
 
-    Each command runs over the table of the mount it runs on
-    (``opts.io``), so the set is built once per backend name.
 
-    Args:
-        vfs (str): VFS name the commands register under.
-        overrides (set[str] | frozenset[str] | None): command names to
-            skip (the backend ships its own wrapper for these).
-        table (Callable | None): a change to the mount's table for every
-            command (disk sets its native ``find`` and ``du`` aside, so a
-            shell walk reports partial results and per-directory errors).
-        adapt (dict[str, Callable] | None): per-command changes to the
-            mount's table, for a command that needs a cheaper backend
-            operation (dify's light ``ls``).
-        local (bool): whether the backend's data lives on the host, which
-            lets a command aggregate there.
-    """
-    skip = overrides or set()
-    changes = adapt or {}
-    # A name no builder has does nothing at all, so a misspelled override
-    # left the generic registered beside the bespoke one, and an override
-    # for a command the table never had (mem0's `search`) read as if it
-    # displaced something. Refused at registration, which is import time.
-    known = {b.name for b in BUILDERS}
-    unknown = sorted((set(skip) | set(changes)) - known)
-    if unknown:
-        raise ValueError(
-            f"generic_commands({vfs!r}): no generic "
-            f"builder named {', '.join(unknown)}"
-        )
-    commands: list[Callable[..., Any]] = []
-    for b in BUILDERS:
-        if b.name in skip:
-            continue
-        finish = _write_wraps if b.write and not b.read else _stat_wraps
-        bound = functools.partial(
-            _run_with_namespace_globs,
-            finish,
-            b.fn,
-            table,
-            changes.get(b.name),
-            b.write,
-        )
-        commands.append(
+def _bind(
+    builder: GenericCommand,
+    vfs: str | None,
+    table: Callable[[CommandIO], CommandIO] | None,
+) -> Command:
+    finish = (
+        _write_wraps if builder.write and not builder.read else _stat_wraps
+    )
+    bound = functools.partial(
+        _run_with_namespace_globs, finish, builder.fn, table, builder.write
+    )
+    (registered,) = registered_commands(
+        [
             command(
-                b.name,
+                builder.name,
                 vfs=vfs,
-                spec=SPECS[b.name],
-                aggregate=b.aggregate if local else None,
-                write=b.write,
+                spec=SPECS[builder.name],
+                aggregate=builder.aggregate,
+                write=builder.write,
                 path_guarded=True,
             )(bound)
-        )
-    return commands
+        ]
+    )
+    return registered
+
+
+# Every mount falls back to these after its VFS's own commands. Each runs
+# over the table of the mount it runs on (``opts.io``), so one set serves
+# the whole workspace.
+GENERIC_COMMANDS = CommandCatalog(_bind(b, None, None) for b in BUILDERS)
+
+
+def generic(
+    name: str,
+    *,
+    vfs: str | None = None,
+    table: Callable[[CommandIO], CommandIO] | None = None,
+) -> Command:
+    """The default command ``name``, which a mount runs when its VFS has
+    no command of that name.
+
+    A VFS that replaces a command hands what the replacement does not
+    support to this one: ``generic("grep").fn(accessor, paths, texts,
+    opts)``. With ``vfs``, the same command registered for that backend,
+    over the mount's table changed by ``table`` (dify's light ``ls``,
+    disk's walks).
+
+    Args:
+        name (str): the command name.
+        vfs (str | None): the backend a changed copy registers under.
+        table (Callable | None): the change to the mount's table.
+
+    Raises:
+        ValueError: no generic command has that name.
+    """
+    builder = _BY_NAME.get(name)
+    if builder is None:
+        raise ValueError(f"no generic command named {name!r}")
+    if vfs is None and table is None:
+        return GENERIC_COMMANDS.require(name)
+    return _bind(builder, vfs, table)

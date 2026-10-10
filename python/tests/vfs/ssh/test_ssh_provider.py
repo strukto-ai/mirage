@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.vfs.ssh import SSHVFS, SSHConfig
+from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
 
@@ -23,14 +23,14 @@ def test_ssh_vfs_attributes():
     vfs = SSHVFS(cfg)
     assert vfs.name == VFSName.SSH
     assert vfs.caches_reads is True
-    assert len(commands_for(vfs)) > 0
+    assert len(mount_commands(vfs)) > 0
     assert served(vfs)
 
 
 def test_ssh_vfs_command_count():
     cfg = SSHConfig(host="dev")
     vfs = SSHVFS(cfg)
-    cmd_names = {c.name for c in commands_for(vfs)}
+    cmd_names = {c.name for c in mount_commands(vfs)}
     assert "cat" in cmd_names
     assert "ls" in cmd_names
     assert "grep" in cmd_names

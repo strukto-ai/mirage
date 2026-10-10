@@ -30,11 +30,12 @@ import { SPECS, specFlagNames } from './spec/index.ts'
 const QUERY_RE = /\.(?:asBool|asInt|asFloat|asStr|asList|raw)\(\s*'([^']+)'\s*\)/g
 
 // Python's twin walks `mirage.commands.__path__[0]`, the whole commands
-// tree. TypeScript splits commands across three packages, so all three
-// roots are scanned or the guarantee stops at the core package boundary
-// (issue #1089 item 8): `packages/node/src/commands` alone holds 40
-// non-test modules, including the email push-down's spec-bound queries.
-const PACKAGES = ['core', 'node', 'browser'] as const
+// tree. TypeScript splits commands across two packages (the browser one
+// has no commands of its own), so both roots are scanned or the guarantee
+// stops at the core package boundary (issue #1089 item 8):
+// `packages/node/src/commands` holds the email push-down's spec-bound
+// queries.
+const PACKAGES = ['core', 'node'] as const
 const SPEC_RE = /(?:specOf\(\s*'([^']+)'\s*\)|SPECS\[\s*'([^']+)'\s*\]|SPECS\.([A-Za-z_$][\w$]*))/g
 
 function* sourceFiles(dir: string): Generator<string> {

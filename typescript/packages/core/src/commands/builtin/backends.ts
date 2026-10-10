@@ -14,75 +14,48 @@
 
 import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import { BinViewVFS } from '../../vfs/bin/bin.ts'
-import { BoxVFS } from '../../vfs/box/box.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
-import { DatabricksVolumeVFSBase } from '../../vfs/databricks_volume/databricks_volume.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { DifyVFS } from '../../vfs/dify/dify.ts'
 import { DiscordVFSBase } from '../../vfs/discord/discord.ts'
-import { DropboxVFS } from '../../vfs/dropbox/dropbox.ts'
 import { GCalVFS } from '../../vfs/gcal/gcal.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
-import { GDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { GitHubVFS } from '../../vfs/github/github.ts'
 import { GmailVFS } from '../../vfs/gmail/gmail.ts'
 import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
 import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
-import { JaegerVFSBase } from '../../vfs/jaeger/jaeger.ts'
 import { LanceDBVFSBase } from '../../vfs/lancedb/lancedb.ts'
 import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
-import { LinearVFS } from '../../vfs/linear/linear.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { MongoDBVFSBase } from '../../vfs/mongodb/mongodb.ts'
-import { NotionVFSBase } from '../../vfs/notion/notion.ts'
-import { OneDriveVFS } from '../../vfs/onedrive/onedrive.ts'
 import { PostgresVFSBase } from '../../vfs/postgres/postgres.ts'
 import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { RedisResourceBase } from '../../vfs/redis/redis.ts'
 import { S3VFSBase } from '../../vfs/s3/s3.ts'
-import { SharePointVFS } from '../../vfs/sharepoint/sharepoint.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
 import { TrelloVFS } from '../../vfs/trello/trello.ts'
-import { WandbVFS } from '../../vfs/wandb/wandb.ts'
 import { Command } from '../config.ts'
 import { AIRTABLE_COMMANDS } from './airtable/index.ts'
-import { BIN_COMMANDS } from './bin/index.ts'
-import { BOX_COMMANDS } from './box/index.ts'
 import { CHROMA_COMMANDS } from './chroma/index.ts'
-import { DATABRICKS_VOLUME_COMMANDS } from './databricks_volume/index.ts'
 import { DEV_COMMANDS } from './dev/index.ts'
 import { DIFY_COMMANDS } from './dify/index.ts'
 import { DISCORD_COMMANDS } from './discord/index.ts'
-import { DROPBOX_COMMANDS } from './dropbox/index.ts'
 import { GCAL_COMMANDS } from './gcal/index.ts'
 import { GDOCS_COMMANDS } from './gdocs/index.ts'
-import { GDRIVE_COMMANDS } from './gdrive/index.ts'
-import { genericCommands } from './generic_bind/index.ts'
 import { GITHUB_COMMANDS } from './github/index.ts'
 import { GMAIL_COMMANDS } from './gmail/index.ts'
 import { GSHEETS_COMMANDS } from './gsheets/index.ts'
 import { GSLIDES_COMMANDS } from './gslides/index.ts'
 import { HISTORY_COMMANDS } from './history/index.ts'
-import { JAEGER_COMMANDS } from './jaeger/index.ts'
 import { LANCEDB_COMMANDS } from './lancedb/index.ts'
 import { LANGFUSE_COMMANDS } from './langfuse/index.ts'
-import { LINEAR_COMMANDS } from './linear/index.ts'
 import { MEM0_COMMANDS } from './mem0/index.ts'
 import { MONGODB_COMMANDS } from './mongodb/index.ts'
-import { NOTION_COMMANDS } from './notion/index.ts'
-import { ONEDRIVE_COMMANDS } from './onedrive/index.ts'
 import { POSTGRES_COMMANDS } from './postgres/index.ts'
 import { QDRANT_COMMANDS } from './qdrant/index.ts'
-import { RAM_COMMANDS } from './ram/index.ts'
-import { REDIS_COMMANDS } from './redis/index.ts'
 import { S3_COMMANDS } from './s3/index.ts'
-import { SHAREPOINT_COMMANDS } from './sharepoint/index.ts'
 import { SLACK_COMMANDS } from './slack/index.ts'
 import { TRELLO_COMMANDS } from './trello/index.ts'
-import { WANDB_COMMANDS } from './wandb/index.ts'
 
 // A VFS class, whatever its constructor's visibility (GitHubVFS builds
 // through a factory).
@@ -127,19 +100,19 @@ function renamed(cmd: Command, vfs: string): Command {
 }
 
 /**
- * Every shell command a mount of `vfs` serves.
+ * The shell commands a mount of `vfs` serves beside the generic set.
  *
  * A builtin's are the ones registered for the first class in its hierarchy
  * that has any; a command registered under that backend's one VFS name is
  * registered under the VFS's own instead, so an S3-compatible alias serves
- * S3's commands as itself. Any other VFS serves the generic set. Either set
- * loses what the VFS overrides, and the commands the VFS was handed come
- * last, so they win. Mirrors Python's `commands_for`.
+ * S3's commands as itself. The commands the VFS was handed come last, so
+ * they win. A name none of these has falls back to the generic command
+ * every mount shares. Mirrors Python's `commands_for`.
  */
 export function commandsFor(vfs: BaseVFS): Command[] {
-  let found: Command[] | null = null
+  let found: Command[] = []
   let cls: unknown = vfs.constructor
-  while (typeof cls === 'function' && found === null) {
+  while (typeof cls === 'function') {
     const own: unknown = Object.hasOwn(cls, BACKENDS)
       ? (cls as unknown as Record<symbol, unknown>)[BACKENDS]
       : undefined
@@ -149,46 +122,31 @@ export function commandsFor(vfs: BaseVFS): Command[] {
       found = commands.map((cmd) =>
         family !== null && cmd.vfs === family && family !== vfs.name ? renamed(cmd, vfs.name) : cmd,
       )
+      break
     }
     cls = Object.getPrototypeOf(cls)
   }
-  const kept = (found ?? genericCommands(vfs.name, { overrides: vfs.overrides })).filter(
-    (cmd) => !vfs.overrides.has(cmd.name),
-  )
-  return [...kept, ...vfs.commands()]
+  return [...found, ...vfs.commands()]
 }
 
 registerBackendCommands(AirtableVFS, () => AIRTABLE_COMMANDS)
-registerBackendCommands(BinViewVFS, () => BIN_COMMANDS)
-registerBackendCommands(BoxVFS, () => BOX_COMMANDS)
 registerBackendCommands(ChromaVFS, () => CHROMA_COMMANDS)
-registerBackendCommands(DatabricksVolumeVFSBase, () => DATABRICKS_VOLUME_COMMANDS)
 registerBackendCommands(DevVFS, () => DEV_COMMANDS)
 registerBackendCommands(DifyVFS, () => DIFY_COMMANDS)
 registerBackendCommands(DiscordVFSBase, () => DISCORD_COMMANDS)
-registerBackendCommands(DropboxVFS, () => DROPBOX_COMMANDS)
 registerBackendCommands(GCalVFS, () => GCAL_COMMANDS)
 registerBackendCommands(GDocsVFS, () => GDOCS_COMMANDS)
-registerBackendCommands(GDriveVFS, () => GDRIVE_COMMANDS)
 registerBackendCommands(GitHubVFS, () => GITHUB_COMMANDS)
 registerBackendCommands(GmailVFS, () => GMAIL_COMMANDS)
 registerBackendCommands(GSheetsVFS, () => GSHEETS_COMMANDS)
 registerBackendCommands(GSlidesVFS, () => GSLIDES_COMMANDS)
 registerBackendCommands(HistoryViewVFS, () => HISTORY_COMMANDS)
-registerBackendCommands(JaegerVFSBase, () => JAEGER_COMMANDS)
 registerBackendCommands(LanceDBVFSBase, () => LANCEDB_COMMANDS)
 registerBackendCommands(LangfuseVFS, () => LANGFUSE_COMMANDS)
-registerBackendCommands(LinearVFS, () => LINEAR_COMMANDS)
 registerBackendCommands(Mem0VFS, () => MEM0_COMMANDS)
 registerBackendCommands(MongoDBVFSBase, () => MONGODB_COMMANDS)
-registerBackendCommands(NotionVFSBase, () => NOTION_COMMANDS)
-registerBackendCommands(OneDriveVFS, () => ONEDRIVE_COMMANDS)
 registerBackendCommands(PostgresVFSBase, () => POSTGRES_COMMANDS)
 registerBackendCommands(QdrantVFS, () => QDRANT_COMMANDS)
-registerBackendCommands(RAMVFS, () => RAM_COMMANDS)
-registerBackendCommands(RedisResourceBase, () => REDIS_COMMANDS)
 registerBackendCommands(S3VFSBase, () => S3_COMMANDS.toArray())
-registerBackendCommands(SharePointVFS, () => SHAREPOINT_COMMANDS)
 registerBackendCommands(SlackVFSBase, () => SLACK_COMMANDS)
 registerBackendCommands(TrelloVFS, () => TRELLO_COMMANDS)
-registerBackendCommands(WandbVFS, () => WANDB_COMMANDS)

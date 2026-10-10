@@ -12,17 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.langfuse.grep import grep
 from mirage.commands.builtin.langfuse.rg import rg
 
-_LANGFUSE_OVERRIDES = {"grep", "rg"}
-
 COMMANDS = [
-    *generic_commands(
-        "langfuse",
-        overrides=_LANGFUSE_OVERRIDES,
-    ),
     grep,
     rg,
 ]

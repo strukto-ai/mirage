@@ -54,17 +54,12 @@
   },
   "unconstructible_vfs_names": {
     "browser": {
-      "bin": "See python: the /usr/bin view mount is workspace-internal.",
-      "databricks_volume": "Node-only on purpose, and not for want of a factory: the Databricks Files API sends no CORS headers, so a browser fetch is blocked whatever the config says. docs/typescript/setup/databricks_volume.mdx states it. The commands still register because they live in core, which every bundle carries.",
-      "history": "See python: the history view mount is workspace-internal.",
-      "jaeger": "Same as databricks_volume, measured rather than assumed: on jaegertracing/jaeger:latest a GET carrying an Origin comes back with no Access-Control-Allow-Origin and the CORS preflight OPTIONS is a 404, so the query API is unreachable from a page. A deployment that fronts Jaeger with a CORS-adding proxy can register its own factory."
+      "history": "See python: the history view mount is workspace-internal."
     },
     "node": {
-      "bin": "See python: the /usr/bin view mount is workspace-internal.",
       "history": "See python: the history view mount is workspace-internal."
     },
     "python": {
-      "bin": "The /usr/bin view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_vfs entry.",
       "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_vfs entry."
     }
   },

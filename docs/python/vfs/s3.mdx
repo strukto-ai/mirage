@@ -126,14 +126,14 @@ from range reads to avoid downloading entire objects.
 
 ### Customize a builtin command
 
-Backend command definitions are available before a workspace is created. Copy
-the definition with the behavior you want to change, then register that copy on
-one mount:
+The generic command definitions are available before a workspace is created.
+Copy the definition with the behavior you want to change, then register that
+copy on one mount:
 
 ```python
-from mirage.commands.builtin.s3 import COMMANDS as S3_COMMANDS
+from mirage import generic
 
-cat = S3_COMMANDS.require("cat")
+cat = generic("cat")
 
 
 async def logged_cat(accessor, paths, texts, opts):

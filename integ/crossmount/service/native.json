@@ -754,9 +754,10 @@
       "command": "grep -r hit /meta; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/meta/top:hit root\nrc=1\n",
-        "stderr": "grep: /meta/child: Operation not supported\n"
-      }
+        "stdout": "/meta/top:hit root\n/meta/child/leaf:hit child\nrc=0\n",
+        "stderr": ""
+      },
+      "note": "A child with no grep of its own runs the generic grep every mount shares."
     },
     {
       "id": "xm_native_stream_timeout",

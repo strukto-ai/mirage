@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.gmail.grep import grep
 from mirage.commands.builtin.gmail.rg import rg
 
@@ -20,10 +19,6 @@ from mirage.commands.builtin.gmail.rg import rg
 # (mirage.commands.cli.builtin.gws), installed by name; the mount only
 # serves the filesystem surface.
 COMMANDS = [
-    *generic_commands(
-        "gmail",
-        overrides={"grep", "rg"},
-    ),
     grep,
     rg,
 ]

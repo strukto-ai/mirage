@@ -14,10 +14,10 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.core.email.config import EmailConfig
 from mirage.types import VFSName
 from mirage.vfs.email.email import EmailVFS
+from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
 
@@ -45,7 +45,7 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands_registered(config):
     vfs = EmailVFS(config=config)
-    cmds = commands_for(vfs)
+    cmds = mount_commands(vfs)
     assert len(cmds) >= 6
 
 

@@ -25,6 +25,7 @@ from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
+from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.context import (
     effective_path_mode,
     strongest_mode_under,
@@ -344,9 +345,11 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
-        m.register_commands(commands_for(vfs))
-        for cmd in GENERAL_COMMANDS:
+        # The shared set first, so a command the VFS replaces keeps its own
+        # spec, not the generic one of that name.
+        for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
             m.register_general(cmd)
+        m.register_commands(commands_for(vfs))
         if self._file_cache is not None:
             self._attach_manager(m)
         self._mounts.append(m)

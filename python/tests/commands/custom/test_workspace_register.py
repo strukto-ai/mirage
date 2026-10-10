@@ -14,13 +14,13 @@
 
 import asyncio
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.commands.config import command
 from mirage.commands.spec import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import mount_commands
 
 
 def _register(ws, fn):
@@ -99,6 +99,6 @@ def test_workspace_user_command_overrides_builtin():
 
 def test_backend_commands_method_returns_commands():
     backend = RAMVFS()
-    cmds = commands_for(backend)
+    cmds = mount_commands(backend)
     assert len(cmds) > 0
-    assert all(c.vfs == "ram" for c in cmds)
+    assert all(c.vfs is None for c in cmds)

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.slack import COMMANDS
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
@@ -30,11 +30,7 @@ GENERAL = "/channels/general__C1"
 
 
 def _find_command():
-    for fn in COMMANDS:
-        for rc in getattr(fn, "_registered_commands", []):
-            if rc.name == "find" and rc.filetype is None:
-                return fn
-    raise AssertionError("factory find not registered for slack")
+    return generic("find").fn
 
 
 def _spec(virtual: str) -> PathSpec:

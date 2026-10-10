@@ -15,13 +15,8 @@
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
 from mirage.commands.builtin.discord.rg import rg
-from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
-    *generic_commands(
-        "discord",
-        overrides={"grep", "rg", "head"},
-    ),
     grep,
     rg,
     head,

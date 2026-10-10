@@ -107,9 +107,9 @@ def _collect_registrations() -> dict[str, list[Command]]:
         if mod is None or not mod_name.startswith("mirage.commands."):
             continue
         candidates = list(vars(mod).values())
-        commands = getattr(mod, "COMMANDS", None)
-        if isinstance(commands, Sequence):
-            candidates.extend(commands)
+        for name, commands in vars(mod).items():
+            if name.endswith("COMMANDS") and isinstance(commands, Sequence):
+                candidates.extend(commands)
         for attr in candidates:
             if id(attr) in seen:
                 continue

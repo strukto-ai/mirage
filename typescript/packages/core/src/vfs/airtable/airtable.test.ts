@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandsFor } from '../../commands/builtin/backends.ts'
+import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { FakeAirtable, TOKEN } from '../../core/airtable/_test_util.ts'
 import { VFSName } from '../../types.ts'
@@ -42,7 +43,9 @@ describe('AirtableVFS', () => {
   })
 
   it('exposes a read-only file surface', () => {
-    const names = new Set(commandsFor(vfs(new FakeAirtable())).map((c) => c.name))
+    const names = new Set(
+      [...GENERIC_COMMANDS, ...commandsFor(vfs(new FakeAirtable()))].map((c) => c.name),
+    )
     for (const name of ['cat', 'ls', 'find', 'grep', 'head', 'jq', 'wc']) {
       expect(names.has(name)).toBe(true)
     }

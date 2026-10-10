@@ -20,7 +20,7 @@ read, write-gated -i).
 
 import pytest
 
-from mirage.commands.builtin.github import COMMANDS
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
@@ -37,15 +37,7 @@ def _patch_read(monkeypatch):
     monkeypatch.setattr("mirage.core.github.read.read_bytes", _read_bytes)
 
 
-def _sed_command():
-    for cmd in COMMANDS:
-        for rc in cmd._registered_commands:
-            if rc.name == "sed":
-                return cmd
-    raise LookupError("sed not registered for github")
-
-
-sed = _sed_command()
+sed = generic("sed").fn
 
 
 def _scope(path: str) -> PathSpec:

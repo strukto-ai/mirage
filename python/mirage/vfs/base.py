@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
 from typing import Any, Unpack
 
@@ -187,9 +187,6 @@ class BaseVFS:
     # ``read`` itself.
     renderers: Mapping[str, str] = MappingProxyType({})
 
-    # The generic shell commands this VFS replaces with its own.
-    overrides: frozenset[str] = frozenset()
-
     _closed: bool = False
 
     def __init__(
@@ -199,8 +196,7 @@ class BaseVFS:
         accessor: Accessor | None = None,
         prompt: str | None = None,
         write_prompt: str | None = None,
-        overrides: set[str] | frozenset[str] | None = None,
-        commands: list[Callable[..., Any]] | None = None,
+        commands: list[Any] | None = None,
         caches_reads: bool | None = None,
         sizes_always_known: bool | None = None,
         supports_snapshot: bool | None = None,
@@ -219,11 +215,9 @@ class BaseVFS:
             accessor (Accessor | None): backend handle the functions use.
             prompt (str | None): LLM-facing description of the layout.
             write_prompt (str | None): appended when mounted writable.
-            overrides (set[str] | frozenset[str] | None): generic command
-                names this VFS replaces (pass the replacements via
-                ``commands``).
-            commands (list[Callable] | None): extra ``@command``
-                functions (bespoke verbs or override replacements).
+            commands (list[Any] | None): extra ``@command`` functions or
+                ``Command`` values: bespoke verbs, or replacements that win
+                over the generic command of the same name.
             caches_reads (bool | None): serve repeat reads from the file
                 cache; enable only for stable, read-mostly content.
             sizes_always_known (bool | None): whether ``stat`` sizes every
@@ -251,8 +245,6 @@ class BaseVFS:
             self.prompt = prompt
         if write_prompt is not None:
             self.write_prompt = write_prompt
-        if overrides is not None:
-            self.overrides = frozenset(overrides)
         if caches_reads is not None:
             self.caches_reads = caches_reads
         if sizes_always_known is not None:
@@ -277,8 +269,9 @@ class BaseVFS:
         fn = getattr(own, "__func__", own)
         return callable(own) and fn is not getattr(BaseVFS, name, None)
 
-    def commands(self) -> list[Callable[..., Any]]:
-        """The bespoke ``@command`` functions this VFS was handed."""
+    def commands(self) -> list[Any]:
+        """The ``@command`` functions and ``Command`` values this VFS was
+        handed."""
         return list(self._commands)
 
     @vfs_call(effect=Effect.READ, target=Target.DIR)

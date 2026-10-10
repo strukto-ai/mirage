@@ -20,7 +20,8 @@ import { requireOp } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 import { BUILDERS } from './builders/index.ts'
 import {
-  genericCommands,
+  GENERIC_COMMANDS,
+  generic,
   scanIo,
   walked,
   withProbeAnswers,
@@ -50,7 +51,7 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
   }
 }
 
-describe('genericCommands', () => {
+describe('GENERIC_COMMANDS', () => {
   it.each(['find', 'cp'])(
     '%s passes the invocation index through the guarded native find',
     async (name) => {
@@ -71,9 +72,7 @@ describe('genericCommands', () => {
           return Promise.resolve()
         },
       })
-      const commands = genericCommands('s3')
-      const command = commands.find((c) => c.name === name)
-      if (command === undefined) throw new Error('command missing')
+      const command = generic(name)
       const opts = {
         stdin: null,
         flags: { r: name === 'cp' },
@@ -95,48 +94,33 @@ describe('genericCommands', () => {
     },
   )
 
-  it('emits read/metadata commands from the catalog', () => {
-    const names = new Set(genericCommands('ram').map((c) => c.name))
-    expect(names.has('cat')).toBe(true)
-    expect(names.has('ls')).toBe(true)
-    expect(names.has('stat')).toBe(true)
-  })
-
-  it('skips overridden commands', () => {
-    const names = genericCommands('ram', {
-      overrides: new Set(['stat', 'du']),
-    }).map((c) => c.name)
-    expect(names).not.toContain('stat')
-    expect(names).not.toContain('du')
-    expect(names).toContain('cat')
-  })
-
-  // A name no builder has did nothing, so a typo left the generic registered
-  // beside the bespoke command, and mem0's `search` read as if it displaced
-  // something.
-  it('refuses a name no builder has', () => {
-    expect(() => genericCommands('fake', { overrides: new Set(['cat', 'search']) })).toThrow(
-      /no generic builder named search/,
-    )
-    expect(() => genericCommands('fake', { adapt: { lss: (io) => io } })).toThrow(
-      /no generic builder named lss/,
-    )
-  })
-
-  it('attaches aggregate only for local backends', () => {
-    const local = genericCommands('ram', { local: true }).find((c) => c.name === 'cat')
-    const remote = genericCommands('s3').find((c) => c.name === 'cat')
-    expect(local?.aggregate).not.toBeNull()
-    expect(remote?.aggregate).toBeNull()
-  })
-
-  it('registers every command whatever the backend lacks', () => {
+  it('has every builder whatever the backend lacks', () => {
     // A backend without the write-side ops still gets the whole family:
     // `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that
     // writes is refused at the missing op instead of the command being
     // absent.
-    const names = new Set(genericCommands('hf_buckets').map((c) => c.name))
-    expect(names).toEqual(new Set(BUILDERS.map((b) => b.name)))
+    expect(new Set(GENERIC_COMMANDS.map((c) => c.name))).toEqual(
+      new Set(BUILDERS.map((b) => b.name)),
+    )
+    expect(new Set(GENERIC_COMMANDS.map((c) => c.vfs))).toEqual(new Set([null]))
+  })
+
+  it('hands back the shared command', () => {
+    expect(generic('grep')).toBe(GENERIC_COMMANDS.require('grep'))
+  })
+
+  it('registers a copy over a changed table for one backend', () => {
+    const ls = generic('ls', { vfs: 'dify', table: walked })
+    expect([ls.name, ls.vfs]).toEqual(['ls', 'dify'])
+    expect(ls).not.toBe(generic('ls'))
+    expect(ls.spec).toEqual(generic('ls').spec)
+  })
+
+  it('refuses a name no builder has', () => {
+    expect(() => generic('lss')).toThrow(/no generic command named 'lss'/)
+    expect(() => generic('lss', { vfs: 'fake', table: walked })).toThrow(
+      /no generic command named 'lss'/,
+    )
   })
 
   it('refuses a missing op where it is called, naming the written path', async () => {
@@ -156,17 +140,9 @@ describe('genericCommands', () => {
     })
   })
 
-  it('registers ops-gated commands once the backend supplies them', () => {
-    const names = new Set(genericCommands('disk').map((c) => c.name))
-    expect(names.has('rmdir')).toBe(true)
-    expect(names.has('truncate')).toBe(true)
-  })
-
-  it('registers shuf on a read-only backend', () => {
+  it('registers shuf as a reader', () => {
     // Only `shuf -o` writes, so a backend with no write op still serves it.
-    const shuf = genericCommands('chroma').find((c) => c.name === 'shuf')
-    expect(shuf).toBeDefined()
-    expect(shuf?.write).toBe(false)
+    expect(generic('shuf').write).toBe(false)
   })
 })
 
@@ -328,20 +304,18 @@ describe('a command with its own stat', () => {
         return Promise.resolve(file(7))
       },
     })
-    const commands = genericCommands('s3', {
-      adapt: {
-        ls: (io) => ({
-          ...io,
-          stat: () => {
-            calls.light += 1
-            return Promise.resolve(file(1))
-          },
-        }),
-      },
+    const ls = generic('ls', {
+      vfs: 's3',
+      table: (io) => ({
+        ...io,
+        stat: () => {
+          calls.light += 1
+          return Promise.resolve(file(1))
+        },
+      }),
     })
     const run = async (name: string): Promise<string> => {
-      const command = commands.find((c) => c.name === name)
-      if (command === undefined) throw new Error('command missing')
+      const command = name === 'ls' ? ls : generic(name)
       const opts = { stdin: null, flags: {}, cwd: '/mnt', io: base }
       const out = await command.fn(new FakeAccessor(), [spec('/a.txt')], [], opts)
       return new TextDecoder().decode(await materialize(out?.[0] ?? null))

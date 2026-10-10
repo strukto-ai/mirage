@@ -21,11 +21,6 @@ import { makeStat } from './stat.ts'
 import { makeTee } from './tee.ts'
 import { makeTouch } from './touch.ts'
 
-// Keyed-store behaviours kept as overrides of the generic commands: no
-// real directories (mkdir -p, rm not-empty), write-tracking (touch/tee),
-// and the index-threaded, missing-operand stat.
-export const OBJECT_STORE_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
-
 function guarded(io: CommandIO): CommandIO {
   return withCommandGuards(withSlashGuard(io))
 }
@@ -35,7 +30,9 @@ function answered(io: CommandIO): CommandIO {
 }
 
 /**
- * Build the five keyed-store command overrides for one backend.
+ * Build the five keyed-store commands that replace the generic ones on one
+ * backend: no real directories (mkdir -p, rm not-empty), write-tracking
+ * (touch/tee), and the index-threaded, missing-operand stat.
  *
  * Each runs over the table of the mount it runs on, wrapped with the same
  * hidden/rule/mode chain the factory gives every generic command, the policy

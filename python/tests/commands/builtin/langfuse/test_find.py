@@ -16,7 +16,7 @@ import pytest
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.langfuse import COMMANDS
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.types import PathSpec
@@ -26,11 +26,7 @@ from tests.fixtures.vfs_io import io_for
 
 
 def _find_command():
-    for fn in COMMANDS:
-        for rc in getattr(fn, "_registered_commands", []):
-            if rc.name == "find" and rc.filetype is None:
-                return fn
-    raise AssertionError("factory find not registered for langfuse")
+    return generic("find").fn
 
 
 def _spec(virtual: str) -> PathSpec:

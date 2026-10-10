@@ -58,7 +58,7 @@ describe('SSHVFS — identity', () => {
   it('serves SSH_COMMANDS', () => {
     const res = makeVfs(state)
     expect(commandsFor(res)).toEqual(SSH_COMMANDS)
-    expect(SSH_COMMANDS.length).toBe(71)
+    expect(SSH_COMMANDS.map((c) => c.name)).toEqual(['cp', 'du', 'find'])
   })
 })
 

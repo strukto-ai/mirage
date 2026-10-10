@@ -17,8 +17,8 @@ from dataclasses import replace
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
+from mirage.commands.builtin.generic_bind import generic, walked
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.commands.cli.types import (
     CLI as CLIProgram,
 )
@@ -54,16 +54,21 @@ class CommandService(RAMVFS):
         super().__init__()
         calls: list[str] = []
         handlers: list[Command] = []
-        dropped = {"grep", "rg", "find", "du"} if metadata_only else set()
+        dropped = {"grep", "rg"} if metadata_only else set()
         # The service's own handlers read through a plain RAM view of its
         # store; every other read reaches the refusal below.
         view = RAMVFS()
         view.accessor = self.accessor
         own = command_io(view)
-        for original in registered_commands(RAM_COMMANDS):
-            if original.name in {"grep", "rg", "rev"} - dropped:
-                handlers.extend(self._search(original, calls, own))
-        self.overrides = frozenset(dropped | {"grep", "rg", "rev"})
+        for name in sorted({"grep", "rg", "rev"} - dropped):
+            handlers.extend(self._search(generic(name), calls, own))
+        # Without its own search it has no walk of its own either: find
+        # and du list through readdir, which refuses what it hides.
+        if metadata_only:
+            handlers.extend(
+                generic(name, vfs="ram", table=walked)
+                for name in ("du", "find")
+            )
 
         @command("calls", vfs="ram", spec=SPECS["cat"])
         async def show_calls(accessor, paths, texts, opts):

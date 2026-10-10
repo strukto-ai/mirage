@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.history.history import history_cmd
 
-COMMANDS = [*generic_commands("history"), history_cmd]
+COMMANDS = [history_cmd]

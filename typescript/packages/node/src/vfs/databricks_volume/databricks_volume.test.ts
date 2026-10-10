@@ -75,7 +75,7 @@ describe('DatabricksVolumeVFS', () => {
     const vfs = await DatabricksVolumeVFS.create(normalizeDatabricksVolumeConfig(BASE_CONFIG))
     expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
     expect(vfs.cachesReads).toBe(true)
-    expect(commandsFor(vfs).length).toBeGreaterThan(20)
+    expect(commandsFor(vfs)).toEqual([])
     expect(vfs.supports('write')).toBe(true)
     const state = await vfs.getState()
     expect(state.config.token).toBe('<REDACTED>')
