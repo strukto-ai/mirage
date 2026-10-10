@@ -60,6 +60,11 @@ overrides:
   '@deepseek-ai/dsh-typert-protocol': 0.2.0-rc.2
   '@deepseek-ai/dsh-http-proxy': 0.2.0-rc.2
 
+patchedDependencies:
+  '@zkochan/fuse-native@0.1.0':
+    hash: 99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7
+    path: patches/@zkochan__fuse-native@0.1.0.patch
+
 importers:
 
   .:
@@ -208,7 +213,7 @@ importers:
         version: 22.19.17
       '@zkochan/fuse-native':
         specifier: ^0.1.0
-        version: 0.1.0
+        version: 0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)
       apache-arrow:
         specifier: ^21.0.0
         version: 21.1.0
@@ -385,7 +390,7 @@ importers:
     optionalDependencies:
       '@zkochan/fuse-native':
         specifier: ^0.1.0
-        version: 0.1.0
+        version: 0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)
 
   packages/agents:
     dependencies:
@@ -530,7 +535,7 @@ importers:
     optionalDependencies:
       '@zkochan/fuse-native':
         specifier: ^0.1.0
-        version: 0.1.0
+        version: 0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)
 
   packages/core:
     dependencies:
@@ -722,7 +727,7 @@ importers:
         version: 1.15.5
       '@zkochan/fuse-native':
         specifier: ^0.1.0
-        version: 0.1.0
+        version: 0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)
       e2b:
         specifier: ^2.45.0
         version: 2.45.0
@@ -9605,7 +9610,7 @@ snapshots:
 
   '@workflow/serde@4.1.0-beta.2': {}
 
-  '@zkochan/fuse-native@0.1.0':
+  '@zkochan/fuse-native@0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)':
     dependencies:
       fuse-shared-library: '@zkochan/fuse-shared-library@0.0.0'
       nanoresource: 1.3.0

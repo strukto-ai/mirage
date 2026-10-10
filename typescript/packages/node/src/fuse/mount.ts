@@ -296,7 +296,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
   // below) makes the kernel read to EOF even though getattr reports 0
   // pre-open, and attrTimeout '0' (string: the option serializer drops falsy
   // values) keeps the kernel from caching that 0, so the post-open fstat
-  // reaches fgetattr, which answers with the prefetched real size. Both are
+  // reaches fgetattr, which answers with the hydrated real size. Both are
   // load-bearing on the macOS kext; see the CLAUDE.md FUSE section.
   const fuseOpts: Record<string, unknown> = {
     force: true,

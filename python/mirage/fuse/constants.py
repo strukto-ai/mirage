@@ -20,3 +20,10 @@ import sys
 XATTR_CREATE, XATTR_REPLACE = (
     (0x2, 0x4) if sys.platform == "darwin" else (0x1, 0x2)
 )
+
+# utimensat(2)'s markers in a timespec's nanoseconds: set the time to
+# now, or leave it as it is. Linux numbers them from the top of the
+# nanosecond range, macOS and the BSDs as -1 and -2.
+UTIME_NOW, UTIME_OMIT = (
+    ((1 << 30) - 1, (1 << 30) - 2) if sys.platform == "linux" else (-1, -2)
+)

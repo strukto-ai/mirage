@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -270,9 +271,65 @@ async def test_chown_is_what_the_shell_stat_reads(seed_ws):
 
 
 @pytest.mark.asyncio
-async def test_utimens_does_not_raise(seed_ws):
+async def test_utimens_stores_the_times_touch_sets(seed_ws):
+    # `touch -d` and `cp -p` through the mount land what a shell stat reads.
     fs = MirageFS(seed_ws.vfs)
+    fs.utimens("/a.txt", (981173106_500_000_000, 981173107_000_000_000))
+    result = await seed_ws.shell("stat -c '%X %Y' /a.txt")
+    assert result.stdout == b"981173106 981173107\n"
+
+
+@pytest.mark.asyncio
+async def test_utimens_leaves_an_omitted_time(seed_ws):
+    # `touch -m` marks the access time UTIME_OMIT.
+    fs = MirageFS(seed_ws.vfs)
+    fs.utimens(
+        "/a.txt", (1_000_000_000_000_000_000, 1_000_000_000_000_000_000)
+    )
+    fs.utimens("/a.txt", (None, 1_100_000_000_000_000_000))
+    result = await seed_ws.shell("stat -c '%X %Y' /a.txt")
+    assert result.stdout == b"1000000000 1100000000\n"
+
+
+@pytest.mark.asyncio
+async def test_utimens_with_no_times_is_now(seed_ws):
+    fs = MirageFS(seed_ws.vfs)
+    before = time.time()
+    fs.utimens(
+        "/a.txt", (1_000_000_000_000_000_000, 1_000_000_000_000_000_000)
+    )
     fs.utimens("/a.txt", None)
+    result = await seed_ws.shell("stat -c '%Y' /a.txt")
+    assert int(result.stdout) >= int(before)
+
+
+@pytest.mark.asyncio
+async def test_setattr_x_stores_times(seed_ws):
+    fs = MirageFS(seed_ws.vfs)
+    assert fs.setattr_x("/a.txt", {"modtime": 1_200_000_000_000_000_000}) == 0
+    result = await seed_ws.shell("stat -c '%Y' /a.txt")
+    assert result.stdout == b"1200000000\n"
+
+
+@pytest.mark.asyncio
+async def test_create_and_mkdir_keep_the_mode_asked_for(rw_ws):
+    # open(O_CREAT, 0600) and mkdir(0700) arrive with the mode, umask
+    # applied; a shell stat reads it back.
+    fs = MirageFS(rw_ws.vfs)
+    fh = fs.create("/secret", stat.S_IFREG | 0o600)
+    fs.release("/secret", fh)
+    fs.mkdir("/private", 0o700)
+    result = await rw_ws.shell("stat -c '%a %n' /secret /private")
+    assert result.stdout == b"600 /secret\n700 /private\n"
+
+
+@pytest.mark.asyncio
+async def test_a_create_with_the_default_mode_stores_nothing(rw_ws):
+    fs = MirageFS(rw_ws.vfs)
+    fh = fs.create("/plain", stat.S_IFREG | 0o644)
+    fs.release("/plain", fh)
+    fs.mkdir("/dir", 0o755)
+    assert [r.op for r in rw_ws.vfs.records if r.op == "setattr"] == []
 
 
 @pytest.mark.asyncio
@@ -375,27 +432,27 @@ async def test_release_cleans_handles(seed_ws):
 
 
 @pytest.mark.asyncio
-async def test_drain_ops_returns_and_clears(rw_ws):
+async def test_mount_ops_land_on_the_workspace_ledger(rw_ws):
     await rw_ws.shell("tee /track.txt", stdin=b"x")
     fs = MirageFS(rw_ws.vfs)
     fh = fs.create("/new.txt", 0o644)
     fs.write("/new.txt", b"y", 0, fh)
     fs.flush("/new.txt", fh)
-    ops = fs.drain_ops()
-    assert any(o["op"] == "create" for o in ops)
-    assert any(o["op"] == "write" for o in ops)
-    assert len(fs.drain_ops()) == 0
+    ops = [r.op for r in rw_ws.vfs.records]
+    assert "create" in ops
+    assert "write" in ops
 
 
 @pytest.mark.asyncio
-async def test_drain_ops_read_deduplication(seed_ws):
+async def test_reads_through_a_handle_land_on_the_ledger(seed_ws):
     fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     fs.read("/a.txt", 1024, 0, fh)
     fs.read("/a.txt", 1024, 0, fh)
-    ops = fs.drain_ops()
-    read_ops = [o for o in ops if o["op"] == "read" and o["path"] == "/a.txt"]
-    assert len(read_ops) >= 1
+    reads = [
+        r for r in seed_ws.vfs.records if r.op == "read" and r.path == "/a.txt"
+    ]
+    assert len(reads) >= 1
 
 
 @pytest.mark.asyncio
@@ -416,19 +473,9 @@ async def test_fuse_read_uses_cache_when_populated():
 async def test_readdir_logs_ls_op(seed_ws):
     fs = MirageFS(seed_ws.vfs)
     fs.readdir("/", None)
-    ops = fs.drain_ops()
-    assert any(o["op"] == "readdir" and o["path"] == "/" for o in ops)
-
-
-@pytest.mark.asyncio
-async def test_total_ops_persists_across_drains(seed_ws):
-    fs = MirageFS(seed_ws.vfs)
-    fs.readdir("/", None)
-    first = fs.drain_ops()
-    fs.readdir("/sub", None)
-    second = fs.drain_ops()
-    assert len(first) >= 1
-    assert len(second) >= 1
+    assert any(
+        r.op == "readdir" and r.path == "/" for r in seed_ws.vfs.records
+    )
 
 
 @pytest.mark.asyncio
@@ -441,8 +488,7 @@ async def test_total_ops_counts_reads_and_writes(rw_ws):
     fh2 = fs.create("/g.txt", 0o644)
     fs.write("/g.txt", b"y", 0, fh2)
     fs.flush("/g.txt", fh2)
-    ops = fs.drain_ops()
-    assert len(ops) >= 3
+    assert len(rw_ws.vfs.records) >= 3
 
 
 def test_permission_error_logged_on_create():
@@ -458,8 +504,7 @@ def test_permission_error_not_counted_as_op():
     fs.core._files.records.clear()
     with pytest.raises(Exception):
         fs.create("/new.txt", 0o644)
-    ops = fs.drain_ops()
-    assert len(ops) == 0
+    assert ro_ws.vfs.records == []
 
 
 @pytest.mark.asyncio

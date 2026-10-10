@@ -151,8 +151,9 @@ class Files:
     def links(self) -> NamespaceLinks | None:
         """The workspace symlink table, when this facade fronts one.
 
-        FUSE reads it for symlink entries (getattr/readlink/readdir and
-        link create/remove); None when the workspace has no link table.
+        The mount core follows it to recognise one file opened through a
+        link and through its target; None when the workspace has no link
+        table.
         """
         return self._links
 

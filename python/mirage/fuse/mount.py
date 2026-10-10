@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 from mirage.fuse.backend import MountBackend, prepare_backend
-from mirage.fuse.darwin import install_macfuse_extensions
+from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
 from mirage.types import JsonValue
 from mirage.workspace.files import Files
@@ -114,6 +114,24 @@ def unmount_with_fusermount(mountpoint: str) -> None:
         )
 
 
+def _marshal_utimens(self: Any, path: bytes | None, buf: Any) -> int:
+    # mfusepy folds each timespec into one number, which loses
+    # utimensat's set-to-now and leave-as-is markers (libfuse 3 passes
+    # them through for `touch -m` and `touch -a`), so they are read off
+    # the struct here instead.
+    now = time.time_ns()
+    times = (
+        None
+        if not buf
+        else (
+            timespec_ns(buf.contents.actime, now),
+            timespec_ns(buf.contents.modtime, now),
+        )
+    )
+    name = None if path is None else path.decode(self.encoding, self.errors)
+    return self.operations.utimens(name, times)
+
+
 def load_fuse() -> Any:
     # mfusepy resolves libfuse while it is imported, and reports each way
     # that can fail with a different type: ImportError when the extra is
@@ -129,6 +147,8 @@ def load_fuse() -> Any:
             "https://mirage.dev/home/setup/fuse"
         ) from err
     install_macfuse_extensions(fuse)
+    # utimens_fuse_3 delegates to utimens_fuse_2, so this covers both.
+    fuse.FUSE.utimens_fuse_2 = _marshal_utimens
     return fuse
 
 

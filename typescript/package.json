@@ -84,6 +84,9 @@
         "GHSA-vfj7-8cjw-p6xm",
         "GHSA-hp3w-g68c-fv3c"
       ]
+    },
+    "patchedDependencies": {
+      "@zkochan/fuse-native@0.1.0": "patches/@zkochan__fuse-native@0.1.0.patch"
     }
   },
   "devDependencies": {

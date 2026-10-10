@@ -23,7 +23,7 @@ import pytest_asyncio
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
-from mirage.fuse.core import MountCore
+from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
 from mirage.types import PathSpec
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
@@ -1032,20 +1032,20 @@ async def test_a_kernel_mount_write_carries_the_version(fake, workspaces):
     # FUSE writes through MountCore; a stale truncating open is refused.
     ws = workspaces()
     core = MountCore(ws.vfs)
-    assert core.read("/s3/d/a", 100, 0, None) == SEED["d/a"]
+    assert await core.read("/s3/d/a", 100, 0, None) == SEED["d/a"]
     fake.ledger.clear()
-    fh = core.open("/s3/d/a", os.O_WRONLY | os.O_TRUNC)
-    core.write("/s3/d/a", b"A\n", 0, fh)
-    core.release(fh)
+    fh = await core.open("/s3/d/a", os.O_WRONLY | os.O_TRUNC)
+    await core.write("/s3/d/a", b"A\n", 0, fh)
+    await core.release(fh)
     assert fake.buckets["b"]["d/a"] == b"A\n"
     assert _sent(fake, PUT) == [
         {"IfMatch": etag(SEED["d/a"])},
         {"IfMatch": etag(b"")},
     ]
-    assert core.read("/s3/f", 100, 0, None) == SEED["f"]
+    assert await core.read("/s3/f", 100, 0, None) == SEED["f"]
     _theirs(fake)
     with pytest.raises(StaleWriteError):
-        core.open("/s3/f", os.O_WRONLY | os.O_TRUNC)
+        await core.open("/s3/f", os.O_WRONLY | os.O_TRUNC)
     assert fake.buckets["b"]["f"] == b"theirs\n"
 
 

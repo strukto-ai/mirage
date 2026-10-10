@@ -19,6 +19,7 @@ import sys
 import pytest
 
 from mirage.fuse import darwin
+from mirage.fuse.constants import UTIME_NOW, UTIME_OMIT
 from mirage.fuse.darwin import (
     RENAME_EXCL,
     RENAME_SWAP,
@@ -26,7 +27,7 @@ from mirage.fuse.darwin import (
     changes_from_setattr,
     install_macfuse_extensions,
     rename_flags_check,
-    timespec_to_float,
+    timespec_ns,
 )
 
 try:
@@ -76,22 +77,26 @@ def test_decompose_fskit_create_payload():
     assert changes == {"mode": 0o644, "uid": 501, "gid": 20}
 
 
-def test_decompose_times_are_seconds():
+def test_decompose_times_are_nanoseconds():
     attr = SetattrX()
     attr.valid = darwin.SETATTR_ACCTIME | darwin.SETATTR_MODTIME
     attr.acctime.tv_sec = 10
     attr.acctime.tv_nsec = 500_000_000
     attr.modtime.tv_sec = 20
     changes = changes_from_setattr(attr)
-    assert changes["acctime"] == pytest.approx(10.5)
-    assert changes["modtime"] == pytest.approx(20.0)
+    assert changes["acctime"] == 10_500_000_000
+    assert changes["modtime"] == 20_000_000_000
 
 
-def test_timespec_to_float():
+def test_timespec_ns_reads_the_utimensat_markers():
     ts = darwin.Timespec()
     ts.tv_sec = 3
     ts.tv_nsec = 250_000_000
-    assert timespec_to_float(ts) == pytest.approx(3.25)
+    assert timespec_ns(ts, 99) == 3_250_000_000
+    ts.tv_nsec = UTIME_NOW
+    assert timespec_ns(ts, 99) == 99
+    ts.tv_nsec = UTIME_OMIT
+    assert timespec_ns(ts, 99) is None
 
 
 def test_rename_flags_plain_rename_proceeds():

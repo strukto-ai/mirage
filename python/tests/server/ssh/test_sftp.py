@@ -15,12 +15,12 @@
 import asyncio
 import inspect
 import stat
-import threading
 
 import asyncssh
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.mount.types import MountAttrs
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
 from mirage.server.ssh.sftp import (
     MirageSFTPServer,
@@ -72,15 +72,17 @@ def test_every_host_reaching_method_is_overridden():
 
 
 def test_attrs_carry_type_mode_size_and_split_times():
-    st = {
-        "st_mode": stat.S_IFREG | 0o640,
-        "st_size": 12,
-        "st_uid": 501,
-        "st_gid": 20,
-        "st_nlink": 1,
-        "st_atime": 1_700_000_000_123_456_789,
-        "st_mtime": 1_700_000_001_000_000_005,
-    }
+    st = MountAttrs(
+        mode=stat.S_IFREG | 0o640,
+        size=12,
+        nlink=1,
+        uid=501,
+        gid=20,
+        rdev=0,
+        atime=1_700_000_000_123_456_789,
+        mtime=1_700_000_001_000_000_005,
+        ctime=1_700_000_001_000_000_005,
+    )
     attrs = to_attrs(st)
     assert attrs.type == filetype(stat.S_IFREG)
     assert (attrs.size, attrs.permissions) == (12, stat.S_IFREG | 0o640)
@@ -131,6 +133,62 @@ async def test_the_host_filesystem_is_not_reachable(ssh):
         with pytest.raises(asyncssh.SFTPNoSuchFile):
             await sftp.stat("/etc/passwd")
         assert await sftp.realpath("/../../etc") == "/etc"
+
+
+@pytest.mark.asyncio
+async def test_setstat_stores_permissions_owner_and_times(ssh):
+    # sftp chmod, chown and `put -p`'s times land where a shell stat reads.
+    async with ssh.connect() as conn:
+        async with conn.start_sftp_client() as sftp:
+            async with sftp.open("/f", "w") as f:
+                await f.write("x")
+            await sftp.chmod("/f", 0o640)
+            await sftp.chown("/f", 1234, 5678)
+            await sftp.utime("/f", (1_000_000_000, 1_100_000_000))
+        result = await conn.run("stat -c '%a %u %g %X %Y' /f")
+        assert result.stdout == "640 1234 5678 1000000000 1100000000\n"
+
+
+@pytest.mark.asyncio
+async def test_setstat_follows_a_link_and_lsetstat_does_not(ssh):
+    # As chown(2) and lchown(2): fstat through the link reads the target.
+    async with ssh.connect() as conn:
+        await conn.run("echo target > /real; ln -s real /link")
+        async with conn.start_sftp_client() as sftp:
+            followed = asyncssh.SFTPAttrs(
+                uid=1234, gid=5678, atime=1_000_000_000, mtime=1_100_000_000
+            )
+            await sftp.setstat("/link", followed)
+            own = asyncssh.SFTPAttrs(uid=4321, gid=8765)
+            await sftp.setstat("/link", own, follow_symlinks=False)
+        result = await conn.run("stat -c '%u %Y' /real; stat -c %u /link")
+        assert result.stdout == "1234 1100000000\n4321\n"
+
+
+@pytest.mark.asyncio
+async def test_fsetstat_on_a_file_whose_name_was_replaced_is_refused(ssh):
+    # The handle's file has no name left; the name now belongs to another.
+    async with ssh.connect() as conn:
+        await conn.run("echo old > /b; echo new > /a")
+        async with conn.start_sftp_client() as sftp:
+            async with sftp.open("/b", "r+") as f:
+                await sftp.posix_rename("/a", "/b")
+                with pytest.raises(asyncssh.SFTPNoSuchFile):
+                    await f.chmod(0o600)
+        result = await conn.run("stat -c %a /b; cat /b")
+        assert result.stdout == "644\nnew\n"
+
+
+@pytest.mark.asyncio
+async def test_create_and_mkdir_keep_the_permissions_asked_for(ssh):
+    async with ssh.connect() as conn:
+        async with conn.start_sftp_client() as sftp:
+            secret = asyncssh.SFTPAttrs(permissions=0o600)
+            async with sftp.open("/secret", "w", attrs=secret) as f:
+                await f.write("x")
+            await sftp.mkdir("/private", asyncssh.SFTPAttrs(permissions=0o700))
+        result = await conn.run("stat -c '%a %n' /secret /private")
+        assert result.stdout == "600 /secret\n700 /private\n"
 
 
 @pytest.mark.asyncio
@@ -348,32 +406,33 @@ async def test_a_stat_does_not_follow_a_hidden_link(tmp_path):
 
 
 class ListingCore:
-    """MountCore double: hold the first batch until the stat pool is full."""
+    """MountCore double: hold the first batch until the cap is full."""
 
     def __init__(self, names, refuse=None):
         self.names = names
         self.refuse = refuse
-        self.lock = threading.Lock()
-        self.started = threading.Barrier(LISTING_CONCURRENCY, timeout=5)
+        self.started = asyncio.Barrier(LISTING_CONCURRENCY)
         self.now = 0
         self.peak = 0
         self.calls = 0
+        self.tasks = 0
 
-    def readdir(self, path):
+    async def readdir(self, path):
         return [".", ".."] + self.names
 
-    def getattr(self, path):
-        with self.lock:
-            self.calls += 1
-            self.now += 1
-            self.peak = max(self.peak, self.now)
-            first_batch = self.calls <= LISTING_CONCURRENCY
+    async def getattr(self, path):
+        self.calls += 1
+        self.now += 1
+        self.peak = max(self.peak, self.now)
+        self.tasks = max(self.tasks, len(asyncio.all_tasks()))
         try:
-            if first_batch:
-                self.started.wait()
+            if self.calls <= LISTING_CONCURRENCY:
+                async with asyncio.timeout(5):
+                    await self.started.wait()
+            else:
+                await asyncio.sleep(0)
         finally:
-            with self.lock:
-                self.now -= 1
+            self.now -= 1
         if path.endswith("gone"):
             raise FileNotFoundError(path)
         if self.refuse is not None and path.endswith(self.refuse):
@@ -381,35 +440,33 @@ class ListingCore:
         return {"st_size": len(path)}
 
 
-def test_listing_stats_entries_together_under_the_cap():
-    # Each stat is a hop to the workspace loop and, on an unindexed
-    # mount, a backend request: a wide directory must not pay them one
-    # after another, nor put them all on the wire at once.
+@pytest.mark.asyncio
+async def test_listing_stats_entries_together_under_the_cap():
+    # Each stat is, on an unindexed mount, a backend request: a wide
+    # directory must not pay them one after another, nor put them all on
+    # the wire at once.
     names = [f"f{i}" for i in range(40)] + ["gone"]
     core = ListingCore(names)
-    rows = listing(core, "/d")
+    rows = await listing(core, "/d")
     assert [name for name, _ in rows] == [".", ".."] + names[:-1]
     assert rows[2] == ("f0", {"st_size": len("/d/f0")})
     assert core.peak == LISTING_CONCURRENCY
+    assert core.tasks <= LISTING_CONCURRENCY + 1
 
 
-def test_listings_at_once_share_one_cap():
-    # Two channels listing together share the pool: their stats stay
-    # under one cap rather than each bringing threads of its own.
+@pytest.mark.asyncio
+async def test_listings_at_once_share_one_cap():
+    # Two channels listing together on one workspace share the cap rather
+    # than each bringing one of its own.
     core = ListingCore([f"f{i}" for i in range(40)])
-    threads = [
-        threading.Thread(target=listing, args=(core, "/d")) for _ in range(2)
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    await asyncio.gather(listing(core, "/d"), listing(core, "/d"))
     assert core.peak == LISTING_CONCURRENCY
 
 
-def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
+@pytest.mark.asyncio
+async def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
     core = ListingCore([f"f{i}" for i in range(100)], refuse="/d/f2")
     with pytest.raises(PermissionError):
-        listing(core, "/d")
+        await listing(core, "/d")
     assert core.now == 0
-    assert core.calls <= LISTING_CONCURRENCY + 5
+    assert core.calls < 3 * LISTING_CONCURRENCY

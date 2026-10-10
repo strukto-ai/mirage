@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '@struktoai/mirage-core/errors/index'
-import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
-import { MountCore } from './core.ts'
-import type { FuseAttr } from './types.ts'
-import { classifyError } from './errors.ts'
+import { MountCore } from '../mount/core.ts'
+import type { MountAttrs } from '../mount/types.ts'
+import { classifyError } from '../mount/errors.ts'
 
 type Cb<T> = (code: number, result?: T) => void
 
@@ -47,11 +46,6 @@ export class MirageFS {
 
   constructor(files: Files, options: MirageFSOptions = {}) {
     this.core = new MountCore(files, options)
-  }
-
-  /** Drain and return accumulated op records (mirrors Python's drainOps). */
-  drainOps(): OpRecord[] {
-    return this.core.drainOps()
   }
 
   // ── FUSE op surface (mirrors mfusepy Operations) ─────────────────
@@ -90,11 +84,11 @@ export class MirageFS {
     return table
   }
 
-  private getattr(path: string, cb: Cb<FuseAttr>): void {
+  private getattr(path: string, cb: Cb<MountAttrs>): void {
     this.respond(this.core.getattr(path), cb)
   }
 
-  private fgetattr(path: string, fd: number, cb: Cb<FuseAttr>): void {
+  private fgetattr(path: string, fd: number, cb: Cb<MountAttrs>): void {
     this.respond(this.core.fgetattr(path, fd), cb)
   }
 
@@ -143,12 +137,12 @@ export class MirageFS {
     })
   }
 
-  private create(path: string, _mode: number, cb: Cb<number>): void {
-    this.respond(this.core.create(path), cb)
+  private create(path: string, mode: number, cb: Cb<number>): void {
+    this.respond(this.core.create(path, mode), cb)
   }
 
-  private mkdir(path: string, _mode: number, cb: (code: number) => void): void {
-    this.respond(this.core.mkdir(path), cb)
+  private mkdir(path: string, mode: number, cb: (code: number) => void): void {
+    this.respond(this.core.mkdir(path, mode), cb)
   }
 
   private readlink(path: string, cb: Cb<string>): void {
@@ -190,12 +184,11 @@ export class MirageFS {
     this.respond(this.core.setattr(path, null, keptUid, keptGid), cb)
   }
 
-  // Accepted, not stored: libfuse marks "now" and "leave it" in the
-  // nanosecond field, which fuse-native folds into milliseconds, and it
-  // passes the access time in both slots. utimens and access only check
-  // that the path is there.
-  private utimens(path: string, _atime: number, _mtime: number, cb: (code: number) => void): void {
-    this.validate(path, cb)
+  // Epoch milliseconds. libfuse 2, which fuse-native speaks, calls this only
+  // when both times change; patches/@zkochan__fuse-native@0.1.0.patch fixes
+  // the binding passing the access time in both slots.
+  private utimens(path: string, atime: number, mtime: number, cb: (code: number) => void): void {
+    this.respond(this.core.setattr(path, null, null, null, new Date(atime), new Date(mtime)), cb)
   }
 
   private access(path: string, _amode: number, cb: (code: number) => void): void {

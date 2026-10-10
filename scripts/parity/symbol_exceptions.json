@@ -1,6 +1,25 @@
 {
-  "baseline": 3890,
+  "baseline": 3889,
  "modules": {
+  "fuse/constants": {
+   "python_only": {
+    "UTIME_NOW": "mfusepy hands utimens the raw timespecs, whose nanosecond field carries utimensat's markers; fuse-native converts the times to milliseconds in its C binding and libfuse 2 sends it no marker.",
+    "UTIME_OMIT": "mfusepy hands utimens the raw timespecs, whose nanosecond field carries utimensat's markers; fuse-native converts the times to milliseconds in its C binding and libfuse 2 sends it no marker."
+   }
+  },
+  "fuse/mount": {
+   "python_only": {
+    "_marshal_utimens": "mfusepy folds a timespec into one number and loses the utimensat markers, so the Python loader swaps in marshalling that reads them; fuse-native marshals in C, fixed by a pnpm patch."
+   }
+  },
+  "server/ssh/sftp": {
+   "python_only": {
+    "epoch_ns": "asyncssh splits an SFTP time into whole seconds and a nanosecond part, which the mount core takes as epoch nanoseconds; ssh2 hands whole seconds, which TypeScript turns into a Date inline."
+   },
+   "typescript_only": {
+    "modeOf": "ssh2 types every SFTP attribute as present, so TypeScript narrows the permissions a request may omit; asyncssh already reports an omitted one as None."
+   }
+  },
   "execution/context": {
    "typescript_only": {
     "captureExecutionContext": "Deferred TypeScript callbacks restore the execution async-local store explicitly; Python contextvars travel with the copied context."

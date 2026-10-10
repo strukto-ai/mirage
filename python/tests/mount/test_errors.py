@@ -20,7 +20,7 @@ import pytest
 
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import no_mount
-from mirage.fuse.errors import classify_error
+from mirage.mount.errors import classify_error
 from mirage.policy import PolicyDenied
 from mirage.runtime.errors import CrossMountError
 from mirage.types import Refusal
@@ -104,6 +104,6 @@ def test_a_policys_reason_goes_to_the_log(caplog):
         "/data/x",
         refusal=Refusal(kind="deny", reason="sealed", policy="RulePolicy"),
     )
-    with caplog.at_level(logging.INFO, logger="mirage.fuse.errors"):
+    with caplog.at_level(logging.INFO, logger="mirage.mount.errors"):
         assert classify_error(refused) == errno.EACCES
     assert "policy RulePolicy refused /data/x: sealed" in caplog.text
