@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable, Container, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from types import MappingProxyType
 from typing import Any, Unpack
 
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.errors.fs import enotsup
+from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
     CapacityState,
@@ -607,23 +608,32 @@ class BaseVFS:
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> Container[str] | None:
+    ) -> list[PathSpec] | None:
         """Files under ``under`` whose content may contain ``text``.
 
         grep and rg still walk, filter, order and label every file, and
-        read only the ones answered here, so extra files cost a read and
-        a missing one is a wrong answer. ``text`` is plain text, never a
-        pattern. Answer the keys ``read`` gets as ``path.vfs_path``, or
-        any object whose ``in`` also says yes for files the search cannot
-        see; None when the search cannot answer, which reads every file.
+        read only the ones answered here, matched on ``vfs_path``, so an
+        extra file costs a read and a missing one is a wrong answer. A
+        search that holds only keys names each one with
+        ``mounted_path(under[0], "/" + key)``. Return None when the answer
+        may be incomplete (an error, a truncated result, an index that
+        lags writes), and every file is read; raise to refuse the
+        command, and the error's message is what it prints.
 
         Args:
-            text (str): the plain text every match holds.
-            under (list[PathSpec]): the directories walked.
-            whole_word (bool): ``text`` is needed only as a whole word
-                (-w, -x); False needs it anywhere, inside a word too.
-            ignore_case (bool): any case must match (-i); folding when
-                False is fine.
+            text (str): plain text every match holds, never a pattern:
+                the pattern or each -e of grep and rg, or for a regex a
+                fixed piece of at least three characters every match
+                contains. Asked once per text; a file any answer holds
+                is read.
+            under (list[PathSpec]): the directories walked: grep's
+                directory operands under -r or -R, rg's directory
+                operands or the cwd.
+            whole_word (bool): True under -w or -x with a plain-text
+                pattern, where ``text`` is a whole word of every match;
+                False otherwise, where it may sit inside a word.
+            ignore_case (bool): True under -i, and under rg -S with a
+                lowercase pattern; folding case when False is fine.
             index (IndexCacheStore): the mount's index.
         """
         return None
@@ -635,19 +645,23 @@ class BaseVFS:
         *,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> bytes | None:
+    ) -> ByteSource | None:
         """The lines of ``path`` that may contain ``text``, in file order.
 
-        grep and rg match each line themselves, so extra lines are fine
-        and a missing one is a wrong answer. The lines are joined with
-        their newlines as the file has them. Used in place of the file when the output
-        shows no line positions or unmatched lines, and as a test of
-        whether the file is worth reading otherwise; None reads the file.
+        grep and rg match each line themselves, so an extra line is fine
+        and a missing one is a wrong answer. Each line keeps the newline
+        the file has, whole or streamed. The lines stand in for the file
+        when the output shows no line positions (no -n, -b, --column,
+        --vimgrep), no context (no -A, -B, -C) and there is one text;
+        otherwise the file is read only when some answer holds a line,
+        and only a stream's first chunk is pulled. None reads the file.
 
         Args:
             path (PathSpec): the file.
-            text (str): the plain text every match holds.
-            ignore_case (bool): any case must match (-i).
+            text (str): plain text every match holds, as
+                ``files_containing`` gets it.
+            ignore_case (bool): True under -i, and under rg -S with a
+                lowercase pattern.
             index (IndexCacheStore): the mount's index.
         """
         return None
@@ -666,8 +680,13 @@ class BaseVFS:
 
         Args:
             command (str): grep or rg.
-            under (list[PathSpec]): the directories about to be walked.
-            reason (ScanReason): why the search cannot stand in.
+            under (list[PathSpec]): the directories about to be walked,
+                as ``files_containing`` gets them.
+            reason (ScanReason): why the search cannot stand in:
+                NO_SEARCH (no search on this mount or this path),
+                NO_TEXT (-f, or no plain text every match holds),
+                EVERY_LINE (-v, rg --passthru), LINKS (rg -L) or
+                UNANSWERED (``files_containing`` returned None).
             index (IndexCacheStore): the mount's index.
         """
         return None

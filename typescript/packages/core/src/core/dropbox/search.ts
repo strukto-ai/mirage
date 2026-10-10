@@ -14,13 +14,14 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { PathSpec } from '../../types.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchFiles } from './api.ts'
 import { DropboxApiError } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
 
 /**
- * Mount keys of the files under `under` Dropbox search returns. Hits are
+ * The files under `under` Dropbox search returns. Hits are
  * kept inside each scope on `path_lower` (Dropbox paths are case-insensitive)
  * and keyed from `path_display`. Null whenever the answer may miss a match:
  * an API failure, the 10,000-match ceiling, or no hit at all, since Dropbox
@@ -31,9 +32,9 @@ export async function filesContaining(
   accessor: DropboxAccessor,
   text: string,
   under: readonly PathSpec[],
-): Promise<Set<string> | null> {
+): Promise<PathSpec[] | null> {
   const root = accessor.rootPath
-  const keys = new Set<string>()
+  const found: PathSpec[] = []
   for (const p of under) {
     const scopeApi = dropboxPathOf(accessor, p)
     let results: [string, string][]
@@ -51,8 +52,8 @@ export async function filesContaining(
     for (const [lower, display] of results) {
       if (lower !== scopeLower && !lower.startsWith(scopePrefix)) continue
       const key = stripSlash(display.slice(root.length))
-      if (key) keys.add(key)
+      if (key) found.push(mountedPath(p, `/${key}`))
     }
   }
-  return keys.size > 0 ? keys : null
+  return found.length > 0 ? found : null
 }

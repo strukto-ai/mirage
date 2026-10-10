@@ -217,26 +217,31 @@ search only tells them what they can skip, so their output never changes.
 
 | Function | Asked | Answer |
 | --- | --- | --- |
-| `files_containing(text, under, *, whole_word, ignore_case, index)` | which files under the walked directories may hold `text` | the keys `read` gets as `path.vfs_path` (a set), or `None` |
-| `lines_containing(path, text, *, ignore_case, index)` | which lines of one file may hold `text` | those lines joined in file order, or `None` |
+| `files_containing(text, under, *, whole_word, ignore_case, index)` | which files under the walked directories may hold `text` | a list of `PathSpec`, or `None` |
+| `lines_containing(path, text, *, ignore_case, index)` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `None` |
 | `before_full_scan(command, under, reason, index)` | nothing can narrow, so every file is about to be read | return to scan, raise to refuse |
 
 The arguments come from the command line:
 
 | Argument | grep | rg |
 | --- | --- | --- |
-| `text` | the pattern or each `-e`, reduced to plain text | the same |
+| `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds | the same |
 | `under` | directory operands under `-r` or `-R` | directory operands, the cwd when none |
-| `whole_word=True` | `-w` or `-x` with plain-text patterns | `-w` or `-x` |
+| `whole_word=True` | `-w` or `-x` with plain-text patterns | the same |
 | `whole_word=False` | any other pattern; `text` may sit inside a word | the same |
 | `ignore_case` | `-i` | `-i`, or `-S` with a lowercase pattern |
 
 Answer more than needed, never less: an extra file costs a read, a missing one
-is a wrong answer. Return `None` when the answer may be incomplete (an error, a
-truncated result, an index that lags writes) and every file is read. A
+is a wrong answer. Files are matched on `vfs_path`; a search that holds only
+keys names each with `mounted_path(under[0], "/" + key)` from
+`mirage.utils.key_prefix`. Return `None` when the answer may be incomplete (an
+error, a truncated result, an index that lags writes) and every file is read. A
 word-based index answers `whole_word=True` and returns `None` otherwise.
 
 ```python
+from mirage.utils.key_prefix import mounted_path
+
+
 class WikiVFS(BaseVFS):
     async def files_containing(
         self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
@@ -244,19 +249,33 @@ class WikiVFS(BaseVFS):
         if not whole_word:
             return None
         hits = await self.api.search(text, under=[p.vfs_path for p in under])
-        return None if hits.truncated else {hit.path for hit in hits}
+        if hits.truncated:
+            return None
+        return [mounted_path(under[0], "/" + hit.key) for hit in hits]
 
     async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
         raise ValueError(f"{reason}; narrow the path")
 ```
 
-`lines_containing` suits row stores. Its lines replace the file when the output
-shows no line numbers, byte offsets or context; otherwise the file is read only
-when it has such a line. A file named on the line, a binary-extension file read
-under `-a`, and any path under a hide or path rule are always read. `-v`,
-`--passthru`, `-f` and a pattern with no plain text read every file, and
-`before_full_scan` gets the `ScanReason`. Raise from it (or from
-`files_containing`) to refuse: the error's message is what the command prints.
+`lines_containing` suits row stores, and may stream its rows. Its lines replace
+the file when the output shows no line numbers, byte offsets or context;
+otherwise the file is read only when the answer holds a line, and a stream is
+pulled no further than its first one. A file named on the line, a
+binary-extension file read under `-a`, and any path under a hide or path rule
+are always read.
+
+When nothing can narrow, `before_full_scan` gets why:
+
+| `ScanReason` | When |
+| --- | --- |
+| `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
+| `NO_TEXT` | `-f`, or no plain text of three characters every match holds |
+| `EVERY_LINE` | `-v`, or rg `--passthru` |
+| `LINKS` | rg `-L` |
+| `UNANSWERED` | `files_containing` returned `None` |
+
+Raise from it (or from `files_containing`) to refuse: the error's message is
+what the command prints, and each reason's value is a sentence to put in it.
 `examples/python/other/custom_vfs.py` defines `files_containing` for its wiki.
 
 Native traversal (`find`) and size enumeration (`du_size` with `du_entries`)

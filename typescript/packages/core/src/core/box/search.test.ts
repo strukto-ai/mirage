@@ -72,7 +72,7 @@ beforeEach(() => {
 })
 
 describe('filesContaining', () => {
-  it('keys each hit from its path_collection', async () => {
+  it('names each hit from its path_collection', async () => {
     search.mockResolvedValueOnce({
       items: [
         file('2', 'x.txt', ROOT),
@@ -83,7 +83,10 @@ describe('filesContaining', () => {
     })
     const out = await filesContaining(makeAccessor(), 'needle', [mountRoot()])
     expect(search.mock.calls[0]?.[2]).toBe('0')
-    expect(out).toEqual(new Set(['x.txt', 'Sub/y.txt']))
+    expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([
+      ['/data/x.txt', 'x.txt'],
+      ['/data/Sub/y.txt', 'Sub/y.txt'],
+    ])
   })
 
   it('searches a subfolder scope under its folder id', async () => {
@@ -99,7 +102,7 @@ describe('filesContaining', () => {
     })
     const out = await filesContaining(makeAccessor(), 'needle', [scope])
     expect(search.mock.calls[0]?.[2]).toBe('100')
-    expect(out).toEqual(new Set(['docs/in.txt']))
+    expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([['/data/docs/in.txt', 'docs/in.txt']])
   })
 
   // No hit is distrusted too: Box indexes a write after it lands.

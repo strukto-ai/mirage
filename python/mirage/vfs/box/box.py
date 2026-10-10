@@ -148,7 +148,7 @@ class BoxVFS(BaseVFS):
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> set[str] | None:
+    ) -> list[PathSpec] | None:
         if not whole_word or not self.accessor.config.content_search:
             return None
         return await _files_containing(self.accessor, text, under)

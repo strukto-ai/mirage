@@ -55,27 +55,27 @@ async function ask(
   scope: PathSpec,
   rootPath?: string,
   truncated = false,
-): Promise<[Set<string> | null, unknown]> {
+): Promise<[string[] | null, unknown]> {
   search.mockResolvedValueOnce({ paths, truncated })
   const out = await filesContaining(makeAccessor(rootPath), 'needle', [scope])
-  return [out, search.mock.calls[0]?.[2]]
+  return [out === null ? null : out.map((p) => p.virtual), search.mock.calls[0]?.[2]]
 }
 
 describe('filesContaining', () => {
-  it('keys each hit from its display path', async () => {
+  it('names each hit from its display path', async () => {
     const paths: [string, string][] = [
       ['/x.txt', '/x.txt'],
       ['/sub/y.txt', '/Sub/Y.txt'],
     ]
-    expect(await ask(paths, mountRoot())).toEqual([new Set(['x.txt', 'Sub/Y.txt']), { path: '' }])
+    expect(await ask(paths, mountRoot())).toEqual([
+      ['/data/x.txt', '/data/Sub/Y.txt'],
+      { path: '' },
+    ])
   })
 
   it('strips the root path case-insensitively', async () => {
     const paths: [string, string][] = [['/team/sub/a.txt', '/Team/Sub/A.txt']]
-    expect(await ask(paths, mountRoot(), '/Team')).toEqual([
-      new Set(['Sub/A.txt']),
-      { path: '/Team' },
-    ])
+    expect(await ask(paths, mountRoot(), '/Team')).toEqual([['/data/Sub/A.txt'], { path: '/Team' }])
   })
 
   it('drops hits outside the scope', async () => {
@@ -83,7 +83,7 @@ describe('filesContaining', () => {
       ['/docs/in.txt', '/docs/in.txt'],
       ['/other/out.txt', '/other/out.txt'],
     ]
-    expect(await ask(paths, subdir())).toEqual([new Set(['docs/in.txt']), { path: '/docs' }])
+    expect(await ask(paths, subdir())).toEqual([['/data/docs/in.txt'], { path: '/docs' }])
   })
 
   // No hit is distrusted too: Dropbox indexes a write after it lands.

@@ -24,6 +24,7 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { efbig, enoent } from '../../../errors/fs.ts'
+import { mountedPath } from '../../../utils/key_prefix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
@@ -289,8 +290,13 @@ class SearchRAM extends RAMVFS {
   reads: string[] = []
   asked: [string, boolean][] = []
   scans: ScanReason[] = []
+  pulled: string[] = []
 
-  constructor(files = true, lines = true) {
+  constructor(
+    files = true,
+    lines = true,
+    readonly stream = false,
+  ) {
     super()
     if (!files) Object.assign(this, { filesContaining: undefined })
     if (!lines) Object.assign(this, { linesContaining: undefined })
@@ -313,26 +319,36 @@ class SearchRAM extends RAMVFS {
 
   override filesContaining(
     text: string,
-    _under: PathSpec[],
+    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
-  ): Promise<Set<string>> {
+  ): Promise<PathSpec[]> {
     this.asked.push([text, opts.wholeWord])
-    const keys = [...this.store.files]
+    const [scope] = under
+    if (scope === undefined) return Promise.resolve([])
+    const found = [...this.store.files]
       .filter(
         ([key, data]) => holds(DEC.decode(data), text, opts.ignoreCase) && !key.endsWith('.bin'),
       )
-      .map(([key]) => stripSlash(key))
-    return Promise.resolve(new Set(keys))
+      .map(([key]) => mountedPath(scope, key))
+    return Promise.resolve(found)
   }
 
   override linesContaining(
     path: PathSpec,
     text: string,
     opts: { ignoreCase: boolean },
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
     const data = DEC.decode(this.store.files.get(`/${path.vfsPath}`))
     const kept = data.split(/(?<=\n)/).filter((line) => holds(line, text, opts.ignoreCase))
-    return Promise.resolve(ENC.encode(kept.join('')))
+    return Promise.resolve(this.stream ? this.pull(kept) : ENC.encode(kept.join('')))
+  }
+
+  private async *pull(kept: string[]): AsyncIterable<Uint8Array> {
+    for (const line of kept) {
+      this.pulled.push(line)
+      yield ENC.encode(line)
+      await Promise.resolve()
+    }
   }
 
   override beforeFullScan(_command: string, _under: PathSpec[], reason: ScanReason): Promise<void> {
@@ -378,17 +394,19 @@ describe('a search never changes what grep and rg print', () => {
     'rg -n ada /d',
     'rg -w -e ada -e nothing /d',
   ]
-  const flavors: [boolean, boolean][] = [
-    [true, false],
-    [false, true],
-    [true, true],
+  const flavors: [boolean, boolean, boolean][] = [
+    [true, false, false],
+    [false, true, false],
+    [true, true, false],
+    [false, true, true],
   ]
-  it.each(lines.flatMap((line) => flavors.map(([files, ls]) => [line, files, ls] as const)))(
-    '%s (files=%s, lines=%s)',
-    async (line, files, ls) => {
-      expect(await run(new SearchRAM(files, ls), line)).toEqual(await run(new RAMVFS(), line))
-    },
-  )
+  it.each(
+    lines.flatMap((line) =>
+      flavors.map(([files, ls, stream]) => [line, files, ls, stream] as const),
+    ),
+  )('%s (files=%s, lines=%s, stream=%s)', async (line, files, ls, stream) => {
+    expect(await run(new SearchRAM(files, ls, stream), line)).toEqual(await run(new RAMVFS(), line))
+  })
 })
 
 // Twin of test_only_the_files_a_search_returns_are_read.
@@ -414,6 +432,17 @@ describe('matching lines', () => {
     const numbered = new SearchRAM(false, true)
     await run(numbered, 'grep -rn ada /d')
     expect([...numbered.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'])
+  })
+
+  // Twin of test_a_streamed_answer_is_pulled_only_as_far_as_it_is_needed.
+  it('are pulled from a stream only as far as needed', async () => {
+    const whole = new SearchRAM(false, true, true)
+    await run(whole, 'grep -ri ada /d')
+    expect(whole.pulled).toContain('ada lovelace\n')
+    const numbered = new SearchRAM(false, true, true)
+    await run(numbered, 'grep -rin ada /d')
+    expect(numbered.pulled).not.toContain('ada lovelace\n')
+    expect(numbered.reads).toContain('d/sub/d.txt')
   })
 })
 

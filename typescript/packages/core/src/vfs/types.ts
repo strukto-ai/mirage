@@ -1,6 +1,7 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../core/generic/find_eval.ts'
+import type { ByteSource } from '../io/types.ts'
 import type {
   PathSpec,
   JsonValue,
@@ -189,7 +190,15 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
 ) => Promise<string[] | null>
 
 /** Optional resource search. Consumers validate their own metadata namespace. */
-/** Why grep or rg reads every file instead of asking the mount. Mirrors Python's `ScanReason`. */
+/**
+ * Why grep or rg reads every file instead of asking the mount. Mirrors
+ * Python's `ScanReason`. NO_SEARCH: no `filesContaining` or
+ * `linesContaining` on the mount, or a hide or path rule covers the walk.
+ * NO_TEXT: -f, or no plain text of three characters that every match holds
+ * (a non-ASCII word under -i counts as none). EVERY_LINE: -v or rg --passthru
+ * prints lines that do not match. LINKS: rg -L follows links out of the walk.
+ * UNANSWERED: `filesContaining` resolved null.
+ */
 export const ScanReason = Object.freeze({
   NO_SEARCH: 'the mount has no search',
   NO_TEXT: 'the pattern has no plain text to search for',
@@ -207,16 +216,16 @@ export type FilesContainingOp<A extends Accessor = Accessor> = (
   under: PathSpec[],
   opts: { wholeWord: boolean; ignoreCase: boolean },
   index?: IndexCacheStore,
-) => Promise<{ has(key: string): boolean } | null>
+) => Promise<PathSpec[] | null>
 
-/** The lines of `path` that may contain `text`, joined in file order; null when the search cannot answer for this file. */
+/** The lines of `path` that may contain `text`, in file order, whole or streamed; null when the search cannot answer for this file. */
 export type LinesContainingOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   text: string,
   opts: { ignoreCase: boolean },
   index?: IndexCacheStore,
-) => Promise<Uint8Array | null>
+) => Promise<ByteSource | null>
 
 /** Called before grep or rg reads every file under `under`; reject to refuse. */
 export type BeforeFullScanOp<A extends Accessor = Accessor> = (

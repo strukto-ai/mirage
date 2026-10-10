@@ -14,12 +14,13 @@
 
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { PathSpec } from '../../types.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 import { searchContent, type BoxSearchItem } from './api.ts'
 import { BoxApiError } from './client.ts'
 import { mountRelativeKey, pathParts, resolveItem } from './resolve.ts'
 
 /**
- * Mount keys of the files under `under` Box content search returns. Each
+ * The files under `under` Box content search returns. Each
  * scope is searched with its folder id as `ancestor_folder_ids` and each hit
  * keyed from its `path_collection`. Null whenever the answer may miss a
  * match: an API failure, the 10,000-match ceiling, a scope that no longer
@@ -30,9 +31,9 @@ export async function filesContaining(
   accessor: BoxAccessor,
   text: string,
   under: readonly PathSpec[],
-): Promise<Set<string> | null> {
+): Promise<PathSpec[] | null> {
   const root = accessor.rootFolderId
-  const keys = new Set<string>()
+  const found: PathSpec[] = []
   for (const p of under) {
     const parts = pathParts(p)
     let folderId: string
@@ -55,8 +56,8 @@ export async function filesContaining(
     }
     for (const item of results) {
       const key = mountRelativeKey(item, root)
-      if (key) keys.add(key)
+      if (key) found.push(mountedPath(p, `/${key}`))
     }
   }
-  return keys.size > 0 ? keys : null
+  return found.length > 0 ? found : null
 }

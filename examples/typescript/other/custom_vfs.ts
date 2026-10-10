@@ -34,6 +34,7 @@ import {
   registerVfsFactory,
   Workspace,
 } from "@struktoai/mirage-node";
+import { mountedPath } from "@struktoai/mirage-core/utils/key_prefix";
 import { rstripSlash } from "@struktoai/mirage-core/utils/slash";
 
 // A whole custom backend in one script: a BaseVFS whose methods answer
@@ -139,19 +140,20 @@ class PagesVFS extends BaseVFS<WikiAccessor> {
 
   // Optional: say which pages may hold a text, and grep and rg read only
   // those. What they print is unchanged; null reads every page.
+  // mountedPath names a page key at the prefix the walk runs under.
   override filesContaining(
     text: string,
-    _under: PathSpec[],
+    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
-  ): Promise<Set<string>> {
+  ): Promise<PathSpec[] | null> {
+    const [scope] = under;
+    if (scope === undefined) return Promise.resolve(null);
     const fold = (value: string) =>
       opts.ignoreCase ? value.toLowerCase() : value;
     return Promise.resolve(
-      new Set(
-        pageEntries(this.accessor.pages)
-          .filter(([, page]) => fold(page).includes(fold(text)))
-          .map(([key]) => key),
-      ),
+      pageEntries(this.accessor.pages)
+        .filter(([, page]) => fold(page).includes(fold(text)))
+        .map(([key]) => mountedPath(scope, `/${key}`)),
     );
   }
 }

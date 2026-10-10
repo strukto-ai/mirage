@@ -17,7 +17,8 @@ import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
 import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { ensureStream } from '../../../io/stream.ts'
+import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { isEfbig, isFsError } from '../../../errors/fs.ts'
@@ -190,13 +191,24 @@ export function rgTerms(bag: Record<string, FlagValue>, texts: string[]): Search
  */
 export function candidateReads(
   stream: Reads,
-  narrowed: (p: PathSpec) => Promise<Uint8Array | null>,
+  narrowed: (p: PathSpec) => Promise<ByteSource | null>,
 ): Reads {
   return async function* (p: PathSpec): AsyncIterable<Uint8Array> {
     const data = await narrowed(p)
-    if (data === null) yield* stream(p)
-    else if (data.length > 0) yield data
+    for await (const chunk of data === null ? stream(p) : ensureStream(data)) {
+      if (chunk.length > 0) yield chunk
+    }
   }
+}
+
+// Whether a `linesContaining` answer holds a line; a stream is pulled to its
+// first non-empty chunk and closed.
+async function holdsLine(found: ByteSource): Promise<boolean> {
+  if (found instanceof Uint8Array) return found.length > 0
+  for await (const chunk of found) {
+    if (chunk.length > 0) return true
+  }
+  return false
 }
 
 // The operands that stat as directories, the scopes a walk covers.
@@ -279,7 +291,7 @@ export async function searchReads<A extends Accessor>(
     return stream
   }
   const asked = terms
-  let hits: { has(key: string): boolean }[] | null = null
+  let hits: Set<string> | null = null
   if (files !== undefined && dirs.length > 0) {
     const answers = await Promise.all(
       asked.texts.map((text) =>
@@ -292,7 +304,9 @@ export async function searchReads<A extends Accessor>(
         ),
       ),
     )
-    if (answers.every((answer) => answer !== null)) hits = answers
+    if (answers.every((answer) => answer !== null)) {
+      hits = new Set(answers.flatMap((answer) => answer.map((hit) => hit.vfsPath)))
+    }
   }
   if (hits === null && lines === undefined) {
     const reason = files === undefined ? ScanReason.NO_SEARCH : ScanReason.UNANSWERED
@@ -302,12 +316,12 @@ export async function searchReads<A extends Accessor>(
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
   const found = hits
-  const narrowed = async (path: PathSpec): Promise<Uint8Array | null> => {
+  const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
     if (
       found !== null &&
       !named.has(path.virtual) &&
       !(asked.readsBinary && BINARY_EXTENSIONS.has(getExtension(path.virtual) ?? '')) &&
-      !found.some((hit) => hit.has(path.vfsPath))
+      !found.has(path.vfsPath)
     ) {
       return new Uint8Array(0)
     }
@@ -319,7 +333,7 @@ export async function searchReads<A extends Accessor>(
     }
     for (const text of asked.texts) {
       const answer = await lines(accessor, path, text, ignoreCase, index)
-      if (answer === null || answer.length > 0) return null
+      if (answer === null || (await holdsLine(answer))) return null
     }
     return new Uint8Array(0)
   }

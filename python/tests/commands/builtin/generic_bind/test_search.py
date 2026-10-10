@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from functools import partial
 from unittest.mock import AsyncMock
@@ -28,6 +29,7 @@ from mirage.core.hierarchy.search import make_search_op
 from mirage.errors.fs import efbig, enoent
 from mirage.io.types import ByteSource
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mounted_path
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import ScanReason, SearchOps, SearchQuery
 from mirage.workspace import Workspace
@@ -350,11 +352,15 @@ class SearchRAM(RAMVFS):
     Like a real index it never covers a binary-extension file.
     """
 
-    def __init__(self, files: bool = True, lines: bool = True) -> None:
+    def __init__(
+        self, files: bool = True, lines: bool = True, stream: bool = False
+    ) -> None:
         super().__init__()
+        self.stream = stream
         self.reads: list[str] = []
         self.asked: list[tuple[str, bool]] = []
         self.scans: list[ScanReason] = []
+        self.pulled: list[bytes] = []
         if not files:
             self.files_containing = None  # type: ignore[assignment]
         if not lines:
@@ -372,21 +378,27 @@ class SearchRAM(RAMVFS):
         self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
     ):
         self.asked.append((text, whole_word))
-        return {
-            key.strip("/")
+        return [
+            mounted_path(under[0], key)
             for key, data in self._store.files.items()
             if _holds(data, text, ignore_case) and not key.endswith(".bin")
-        }
+        ]
 
     async def lines_containing(
         self, path, text, *, ignore_case, index=NULL_INDEX
     ):
         data = self._store.files["/" + path.vfs_path]
-        return b"".join(
+        found = [
             line
             for line in data.splitlines(keepends=True)
             if _holds(line, text, ignore_case)
-        )
+        ]
+        return self._pull(found) if self.stream else b"".join(found)
+
+    async def _pull(self, found: list[bytes]) -> AsyncIterator[bytes]:
+        for line in found:
+            self.pulled.append(line)
+            yield line
 
     async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
         self.scans.append(reason)
@@ -438,12 +450,16 @@ LINES = [
 ]
 
 
-@pytest.mark.parametrize("files, lines", [(1, 0), (0, 1), (1, 1)])
+@pytest.mark.parametrize(
+    "files, lines, stream", [(1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 1, 1)]
+)
 @pytest.mark.parametrize("line", LINES)
-def test_a_search_never_changes_what_grep_and_rg_print(line, files, lines):
+def test_a_search_never_changes_what_grep_and_rg_print(
+    line, files, lines, stream
+):
     plain = asyncio.run(_run(RAMVFS(), line))
-    narrowed = asyncio.run(_run(SearchRAM(bool(files), bool(lines)), line))
-    assert narrowed == plain
+    vfs = SearchRAM(bool(files), bool(lines), bool(stream))
+    assert asyncio.run(_run(vfs, line)) == plain
 
 
 @pytest.mark.parametrize(
@@ -484,6 +500,19 @@ def test_matching_lines_stand_in_for_a_file_when_nothing_else_prints():
     numbered = SearchRAM(files=False)
     asyncio.run(_run(numbered, "grep -rn ada /d"))
     assert sorted(numbered.reads) == ["d/a.txt", "d/sub/d.txt"]
+
+
+def test_a_streamed_answer_is_pulled_only_as_far_as_it_is_needed():
+    # The lines stand in for the file, so every one is pulled.
+    whole = SearchRAM(files=False, stream=True)
+    asyncio.run(_run(whole, "grep -ri ada /d"))
+    assert b"ada lovelace\n" in whole.pulled
+    # -n reads the file instead; the answer only says whether to, so
+    # the pull stops at its first line.
+    numbered = SearchRAM(files=False, stream=True)
+    asyncio.run(_run(numbered, "grep -rin ada /d"))
+    assert b"ada lovelace\n" not in numbered.pulled
+    assert "d/sub/d.txt" in numbered.reads
 
 
 @pytest.mark.parametrize(

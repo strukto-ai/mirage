@@ -52,20 +52,24 @@ async def _search(results, scope, root_path="/", truncated=False):
         out = await files_containing(
             make_accessor(root_path), "needle", [scope]
         )
-    return out, spy.await_args.kwargs["path"]
+    named = None if out is None else [p.virtual for p in out]
+    return named, spy.await_args.kwargs["path"]
 
 
 @pytest.mark.asyncio
-async def test_hits_are_keyed_from_their_display_path():
+async def test_hits_are_named_from_their_display_path():
     results = [("/x.txt", "/x.txt"), ("/sub/y.txt", "/Sub/Y.txt")]
-    assert await _search(results, mount_root()) == ({"x.txt", "Sub/Y.txt"}, "")
+    assert await _search(results, mount_root()) == (
+        ["/data/x.txt", "/data/Sub/Y.txt"],
+        "",
+    )
 
 
 @pytest.mark.asyncio
 async def test_the_root_path_is_stripped_case_insensitively():
     results = [("/team/sub/a.txt", "/Team/Sub/A.txt")]
     out = await _search(results, mount_root(), "/Team")
-    assert out == ({"Sub/A.txt"}, "/Team")
+    assert out == (["/data/Sub/A.txt"], "/Team")
 
 
 @pytest.mark.asyncio
@@ -74,7 +78,10 @@ async def test_hits_outside_the_scope_are_dropped():
         ("/docs/in.txt", "/docs/in.txt"),
         ("/other/out.txt", "/other/out.txt"),
     ]
-    assert await _search(results, subdir()) == ({"docs/in.txt"}, "/docs")
+    assert await _search(results, subdir()) == (
+        ["/data/docs/in.txt"],
+        "/docs",
+    )
 
 
 @pytest.mark.asyncio

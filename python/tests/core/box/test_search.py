@@ -53,7 +53,7 @@ ROOT = [("0", "All Files")]
 
 
 @pytest.mark.asyncio
-async def test_hits_are_keyed_from_their_path_collection():
+async def test_hits_are_named_from_their_path_collection():
     results = [
         _file("2", "x.txt", ROOT),
         _file("3", "y.txt", ROOT + [("100", "Sub")]),
@@ -66,7 +66,11 @@ async def test_hits_are_keyed_from_their_path_collection():
     ) as spy:
         out = await files_containing(make_accessor(), "needle", [mount_root()])
     assert spy.await_args.args[2] == "0"
-    assert out == {"x.txt", "Sub/y.txt"}
+    assert out is not None
+    assert [(p.virtual, p.vfs_path) for p in out] == [
+        ("/data/x.txt", "x.txt"),
+        ("/data/Sub/y.txt", "Sub/y.txt"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -89,7 +93,10 @@ async def test_a_subfolder_scope_searches_under_its_folder_id():
     ):
         out = await files_containing(make_accessor(), "needle", [scope])
     assert spy.await_args.args[2] == "100"
-    assert out == {"docs/in.txt"}
+    assert out is not None
+    assert [(p.virtual, p.vfs_path) for p in out] == [
+        ("/data/docs/in.txt", "docs/in.txt")
+    ]
 
 
 @pytest.mark.asyncio

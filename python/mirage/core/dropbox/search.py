@@ -19,14 +19,15 @@ from mirage.core.dropbox.api import search_files
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mounted_path
 
 logger = logging.getLogger(__name__)
 
 
 async def files_containing(
     accessor: DropboxAccessor, text: str, under: list[PathSpec]
-) -> set[str] | None:
-    """Mount keys of the files under ``under`` Dropbox search returns.
+) -> list[PathSpec] | None:
+    """The files under ``under`` Dropbox search returns.
 
     Hits are kept inside each scope on ``path_lower`` (Dropbox paths are
     case-insensitive) and keyed from ``path_display``. None whenever the
@@ -39,7 +40,7 @@ async def files_containing(
         under (list[PathSpec]): the directories walked.
     """
     root = accessor.root_path
-    keys: set[str] = set()
+    found: list[PathSpec] = []
     for p in under:
         scope_api = dropbox_path_of(accessor, p)
         try:
@@ -59,5 +60,5 @@ async def files_containing(
             if lower == scope_lower or lower.startswith(scope_prefix):
                 key = display[len(root) :].strip("/")
                 if key:
-                    keys.add(key)
-    return keys or None
+                    found.append(mounted_path(p, "/" + key))
+    return found or None

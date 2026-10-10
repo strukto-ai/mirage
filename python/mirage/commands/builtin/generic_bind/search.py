@@ -14,7 +14,7 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Container
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -51,7 +51,8 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FileTooLargeError
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
 from mirage.utils.filetype import get_extension
@@ -229,7 +230,7 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | ScanReason:
 def candidate_reads(
     read_bytes: Callable[[PathSpec], Awaitable[bytes]],
     read_stream: Callable[[PathSpec], AsyncIterator[bytes]] | None,
-    narrowed: Callable[[PathSpec], Awaitable[bytes | None]],
+    narrowed: Callable[[PathSpec], Awaitable[ByteSource | None]],
 ) -> tuple[
     Callable[[PathSpec], Awaitable[bytes]],
     Callable[[PathSpec], AsyncIterator[bytes]] | None,
@@ -246,13 +247,16 @@ def candidate_reads(
             whole-read op.
         read_stream (Callable[[PathSpec], AsyncIterator[bytes]] | None):
             the bound stream op, or None when the backend reads whole.
-        narrowed (Callable[[PathSpec], Awaitable[bytes | None]]): what to
-            search in place of a file, or None for the file itself.
+        narrowed (Callable[[PathSpec], Awaitable[ByteSource | None]]):
+            what to search in place of a file, or None for the file
+            itself.
     """
 
     async def read(path: PathSpec) -> bytes:
         data = await narrowed(path)
-        return data if data is not None else await read_bytes(path)
+        return (
+            await read_bytes(path) if data is None else await materialize(data)
+        )
 
     if read_stream is None:
         return read, None
@@ -260,13 +264,31 @@ def candidate_reads(
 
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
         data = await narrowed(path)
-        if data is None:
-            async for chunk in source(path):
+        chunks = source(path) if data is None else ensure_stream(data)
+        async for chunk in chunks:
+            if chunk:
                 yield chunk
-        elif data:
-            yield data
 
     return read, stream
+
+
+async def _holds_line(found: ByteSource) -> bool:
+    """Whether a ``lines_containing`` answer holds a line.
+
+    A stream is pulled to its first non-empty chunk and closed.
+
+    Args:
+        found (ByteSource): the answer.
+    """
+    if isinstance(found, bytes):
+        return bool(found)
+    try:
+        async for chunk in found:
+            if chunk:
+                return True
+        return False
+    finally:
+        await close_quietly(found)
 
 
 async def _directories(
@@ -346,7 +368,7 @@ async def search_reads(
     if isinstance(terms, ScanReason):
         await _full_scan(io, name, accessor, dirs, terms, index)
         return read_bytes, read_stream
-    hits: list[Container[str]] | None = None
+    hits: set[str] | None = None
     if files is not None and dirs:
         answers = await asyncio.gather(
             *(
@@ -362,7 +384,12 @@ async def search_reads(
             )
         )
         if all(answer is not None for answer in answers):
-            hits = [answer for answer in answers if answer is not None]
+            hits = {
+                hit.vfs_path
+                for answer in answers
+                if answer is not None
+                for hit in answer
+            }
     if hits is None and lines is None:
         await _full_scan(
             io,
@@ -375,7 +402,7 @@ async def search_reads(
         return read_bytes, read_stream
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
 
-    async def narrowed(path: PathSpec) -> bytes | None:
+    async def narrowed(path: PathSpec) -> ByteSource | None:
         if (
             hits is not None
             and path.virtual not in named
@@ -383,7 +410,7 @@ async def search_reads(
                 terms.reads_binary
                 and get_extension(path.virtual) in BINARY_EXTENSIONS
             )
-            and not any(path.vfs_path in hit for hit in hits)
+            and path.vfs_path not in hits
         ):
             return b""
         if lines is None:
@@ -404,7 +431,7 @@ async def search_reads(
                 ignore_case=terms.ignore_case,
                 index=index,
             )
-            if found is None or found:
+            if found is None or await _holds_line(found):
                 return None
         return b""
 

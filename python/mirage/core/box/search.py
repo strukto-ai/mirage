@@ -24,14 +24,15 @@ from mirage.core.box.resolve import (
     root_id,
 )
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mounted_path
 
 logger = logging.getLogger(__name__)
 
 
 async def files_containing(
     accessor: BoxAccessor, text: str, under: list[PathSpec]
-) -> set[str] | None:
-    """Mount keys of the files under ``under`` Box content search returns.
+) -> list[PathSpec] | None:
+    """The files under ``under`` Box content search returns.
 
     Each scope is searched with its folder id as ``ancestor_folder_ids``
     and each hit keyed from its ``path_collection``. None whenever the
@@ -45,7 +46,7 @@ async def files_containing(
         under (list[PathSpec]): the directories walked.
     """
     root = root_id(accessor)
-    keys: set[str] = set()
+    found: list[PathSpec] = []
     for p in under:
         parts = path_parts(p)
         if parts:
@@ -67,5 +68,5 @@ async def files_containing(
         for item in results:
             key = mount_relative_key(item, root)
             if key:
-                keys.add(key)
-    return keys or None
+                found.append(mounted_path(p, "/" + key))
+    return found or None

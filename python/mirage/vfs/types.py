@@ -2,7 +2,6 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
-    Container,
     Mapping,
     Sequence,
 )
@@ -19,6 +18,7 @@ from typing import (
 )
 
 from mirage.cache.index import IndexCacheStore
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, JsonValue, PathSpec
 
 if TYPE_CHECKING:
@@ -316,7 +316,15 @@ class DuOps:
 
 
 class ScanReason(StrEnum):
-    """Why grep or rg reads every file instead of asking the mount."""
+    """Why grep or rg reads every file instead of asking the mount.
+
+    NO_SEARCH: no ``files_containing`` or ``lines_containing`` on the
+    mount, or a hide or path rule covers the walk. NO_TEXT: -f, or no
+    plain text of three characters that every match holds (a non-ASCII
+    word under -i counts as none). EVERY_LINE: -v or rg --passthru
+    prints lines that do not match. LINKS: rg -L follows links out of
+    the walk. UNANSWERED: ``files_containing`` returned None.
+    """
 
     NO_SEARCH = "the mount has no search"
     NO_TEXT = "the pattern has no plain text to search for"
@@ -339,12 +347,13 @@ class FilesContainingOp(Protocol):
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[Container[str] | None]: ...
+    ) -> Awaitable[list[PathSpec] | None]: ...
 
 
 class LinesContainingOp(Protocol):
-    """The lines of ``path`` that may contain ``text``, joined in file
-    order; None when the search cannot answer for this file."""
+    """The lines of ``path`` that may contain ``text``, in file order,
+    whole or streamed; None when the search cannot answer for this
+    file."""
 
     def __call__(
         self,
@@ -355,7 +364,7 @@ class LinesContainingOp(Protocol):
         *,
         ignore_case: bool,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[bytes | None]: ...
+    ) -> Awaitable[ByteSource | None]: ...
 
 
 class BeforeFullScanOp(Protocol):

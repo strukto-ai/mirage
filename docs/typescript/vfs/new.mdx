@@ -208,37 +208,42 @@ search only tells them what they can skip, so their output never changes.
 
 | Function | Asked | Answer |
 | --- | --- | --- |
-| `filesContaining(text, under, { wholeWord, ignoreCase }, index?)` | which files under the walked directories may hold `text` | the keys `read` gets as `path.vfsPath` (a `Set`), or `null` |
-| `linesContaining(path, text, { ignoreCase }, index?)` | which lines of one file may hold `text` | those lines joined in file order, or `null` |
+| `filesContaining(text, under, { wholeWord, ignoreCase }, index?)` | which files under the walked directories may hold `text` | a `PathSpec[]`, or `null` |
+| `linesContaining(path, text, { ignoreCase }, index?)` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `null` |
 | `beforeFullScan(command, under, reason, index?)` | nothing can narrow, so every file is about to be read | resolve to scan, reject to refuse |
 
 The arguments come from the command line:
 
 | Argument | grep | rg |
 | --- | --- | --- |
-| `text` | the pattern or each `-e`, reduced to plain text | the same |
+| `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds | the same |
 | `under` | directory operands under `-r` or `-R` | directory operands, the cwd when none |
-| `wholeWord: true` | `-w` or `-x` with plain-text patterns | `-w` or `-x` |
+| `wholeWord: true` | `-w` or `-x` with plain-text patterns | the same |
 | `wholeWord: false` | any other pattern; `text` may sit inside a word | the same |
 | `ignoreCase` | `-i` | `-i`, or `-S` with a lowercase pattern |
 
 Answer more than needed, never less: an extra file costs a read, a missing one
-is a wrong answer. Return `null` when the answer may be incomplete (an error, a
-truncated result, an index that lags writes) and every file is read. A
-word-based index answers `wholeWord: true` and returns `null` otherwise.
+is a wrong answer. Files are matched on `vfsPath`; a search that holds only
+keys names each with `mountedPath(under[0], '/' + key)` from
+`@struktoai/mirage-core/utils/key_prefix`. Return `null` when the answer may be
+incomplete (an error, a truncated result, an index that lags writes) and every
+file is read. A word-based index answers `wholeWord: true` and returns `null`
+otherwise.
 
 ```ts
 import { BaseVFS, type PathSpec, type ScanReason } from '@struktoai/mirage-core'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 
 class WikiVFS extends BaseVFS {
   override async filesContaining(
     text: string,
     under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
-  ): Promise<Set<string> | null> {
-    if (!opts.wholeWord) return null
+  ): Promise<PathSpec[] | null> {
+    const [scope] = under
+    if (!opts.wholeWord || scope === undefined) return null
     const hits = await this.api.search(text, under.map((p) => p.vfsPath))
-    return hits.truncated ? null : new Set(hits.map((hit) => hit.path))
+    return hits.truncated ? null : hits.map((hit) => mountedPath(scope, `/${hit.key}`))
   }
 
   override beforeFullScan(command: string, under: PathSpec[], reason: ScanReason): Promise<void> {
@@ -247,14 +252,27 @@ class WikiVFS extends BaseVFS {
 }
 ```
 
-`linesContaining` suits row stores. Its lines replace the file when the output
-shows no line numbers, byte offsets or context; otherwise the file is read only
-when it has such a line. A file named on the line, a binary-extension file read
-under `-a`, and any path under a hide or path rule are always read. `-v`,
-`--passthru`, `-f` and a pattern with no plain text read every file, and
-`beforeFullScan` gets the `ScanReason`. Reject from it (or from
-`filesContaining`) to refuse: the error's message is what the command prints.
-`examples/typescript/other/custom_vfs.ts` defines `filesContaining` for its wiki.
+`linesContaining` suits row stores, and may stream its rows. Its lines replace
+the file when the output shows no line numbers, byte offsets or context;
+otherwise the file is read only when the answer holds a line, and a stream is
+pulled no further than its first one. A file named on the line, a
+binary-extension file read under `-a`, and any path under a hide or path rule
+are always read.
+
+When nothing can narrow, `beforeFullScan` gets why:
+
+| `ScanReason` | When |
+| --- | --- |
+| `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
+| `NO_TEXT` | `-f`, or no plain text of three characters every match holds |
+| `EVERY_LINE` | `-v`, or rg `--passthru` |
+| `LINKS` | rg `-L` |
+| `UNANSWERED` | `filesContaining` resolved `null` |
+
+Reject from it (or from `filesContaining`) to refuse: the error's message is
+what the command prints, and each reason's value is a sentence to put in it.
+`examples/typescript/other/custom_vfs.ts` defines `filesContaining` for its
+wiki.
 
 To make the backend constructible by name (workspace config, snapshots, the daemon), register a factory:
 

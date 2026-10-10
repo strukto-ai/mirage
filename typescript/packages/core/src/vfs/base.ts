@@ -16,6 +16,7 @@ import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
+import type { ByteSource } from '../io/types.ts'
 import type { CapacityResult, FileStat, JsonValue, PathSpec, SetAttrFields } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
@@ -511,42 +512,72 @@ export class BaseVFS<A extends Accessor = Accessor> {
   /**
    * Files under `under` whose content may contain `text`. grep and rg still
    * walk, filter, order and label every file, and read only the ones answered
-   * here, so extra files cost a read and a missing one is a wrong answer.
-   * `text` is plain text, never a pattern; `wholeWord` says it is needed only
-   * as a whole word (-w, -x), and `ignoreCase` that any case must match (-i).
-   * Answer the keys `read` gets as `path.vfsPath`, or any object whose `has`
-   * also says yes for files the search cannot see; null reads every file.
+   * here, matched on `vfsPath`, so an extra file costs a read and a missing
+   * one is a wrong answer. A search that holds only keys names each one with
+   * `mountedPath(under[0], '/' + key)`. Resolve null when the answer may be
+   * incomplete (an error, a truncated result, an index that lags writes), and
+   * every file is read; reject to refuse the command, and the error's message
+   * is what it prints.
+   *
+   * @param text plain text every match holds, never a pattern: the pattern
+   *   or each -e of grep and rg, or for a regex a fixed piece of at least
+   *   three characters every match contains. Asked once per text; a file any
+   *   answer holds is read.
+   * @param under the directories walked: grep's directory operands under -r
+   *   or -R, rg's directory operands or the cwd.
+   * @param opts `wholeWord` is true under -w or -x with a plain-text
+   *   pattern, where `text` is a whole word of every match, and false
+   *   otherwise, where it may sit inside a word. `ignoreCase` is true under
+   *   -i, and under rg -S with a lowercase pattern; folding case when false
+   *   is fine.
+   * @param index the mount's index.
    */
   filesContaining(
     _text: string,
     _under: PathSpec[],
     _opts: { wholeWord: boolean; ignoreCase: boolean },
     _index?: IndexCacheStore,
-  ): Promise<{ has(key: string): boolean } | null> {
+  ): Promise<PathSpec[] | null> {
     return Promise.resolve(null)
   }
 
   /**
-   * The lines of `path` that may contain `text`, joined in file order with
-   * their newlines as the file has them. grep and rg match each line
-   * themselves, so extra lines are fine and a missing one is a wrong answer.
-   * Used in place of the file when the output shows no line positions or
-   * unmatched lines, and as a test of whether the file is worth reading
-   * otherwise; null reads the file.
+   * The lines of `path` that may contain `text`, in file order. grep and rg
+   * match each line themselves, so an extra line is fine and a missing one is
+   * a wrong answer. Each line keeps the newline the file has, whole or
+   * streamed. The lines stand in for the file when the output shows no line
+   * positions (no -n, -b, --column, --vimgrep), no context (no -A, -B, -C) and
+   * there is one text; otherwise the file is read only when some answer holds
+   * a line, and only a stream's first chunk is pulled. null reads the file.
+   *
+   * @param path the file.
+   * @param text plain text every match holds, as `filesContaining` gets it.
+   * @param opts `ignoreCase` is true under -i, and under rg -S with a
+   *   lowercase pattern.
+   * @param index the mount's index.
    */
   linesContaining(
     _path: PathSpec,
     _text: string,
     _opts: { ignoreCase: boolean },
     _index?: IndexCacheStore,
-  ): Promise<Uint8Array | null> {
+  ): Promise<ByteSource | null> {
     return Promise.resolve(null)
   }
 
   /**
-   * Called before grep or rg reads every file under `under`, with why the
-   * search cannot stand in. Resolve to let the scan run; reject to refuse
-   * it, and the error's message is what the command prints.
+   * Called before grep or rg reads every file under `under`. Resolve to let
+   * the scan run; reject to refuse it, and the error's message is what the
+   * command prints.
+   *
+   * @param command grep or rg.
+   * @param under the directories about to be walked, as `filesContaining`
+   *   gets them.
+   * @param reason why the search cannot stand in: NO_SEARCH (no search on
+   *   this mount or this path), NO_TEXT (-f, or no plain text every match
+   *   holds), EVERY_LINE (-v, rg --passthru), LINKS (rg -L) or UNANSWERED
+   *   (`filesContaining` resolved null).
+   * @param index the mount's index.
    */
   beforeFullScan(
     _command: string,
