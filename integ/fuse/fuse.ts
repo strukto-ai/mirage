@@ -19,17 +19,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import {
-  FileStat,
   FileType,
   fuseMount,
   Mount,
   MountBackend,
   MountMode,
   parseSessionProfile,
-  PathSpec,
   RAMVFS,
   Workspace,
   type Action,
+  type FileStat,
+  type PathSpec,
   type VfsContext,
   type VfsResultContext,
   type Policy,
