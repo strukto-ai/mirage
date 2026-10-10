@@ -28,4 +28,4 @@ class SlackAccessor(SessionAccessor):
         self.time_range = time_range
         # The words of the workspace's names while a search fetches them,
         # so the patterns of one grep share one users.list.
-        self.name_words: asyncio.Future[frozenset[str]] | None = None
+        self.name_words: asyncio.Future[frozenset[str] | None] | None = None

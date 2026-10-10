@@ -632,16 +632,38 @@ async def test_a_narrowed_scan_past_the_scope_cap_is_refused(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(monkeypatch):
+    # Code search never indexes a big file, so the answer names it; the walk
+    # skips a binary extension without -a, so it is not a read to cap.
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 3)
+    weights = {f"w{i}.bin": REPO["big.txt"] for i in range(2)}
+    line = "grep -rw import /gh"
+    with serve(FakeGitHub(files=dict(REPO) | weights)) as hub:
+        vfs = build_vfs(
+            "github",
+            {"token": "t", "owner": "o", "repo": "r", "base_url": hub.url},
+        )
+        assert await _run(vfs, line) == await _run(_ram(), line)
+        assert hub.count("search") == 1
+
+
+async def _load_truncated(
+    accessor: GitHubAccessor, index: RAMIndexCacheStore, prefix: str
+) -> None:
+    accessor.tree = {"src/a.py": _blob("src/a.py", 10)}
+    accessor.truncated = True
+
+
+@pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_files_containing_judges_the_tree_it_loads(
     mock_search, config, monkeypatch
 ):
     # A cold mount learns its tree is truncated only once it loads it.
-    async def load(accessor, index, prefix):
-        accessor.tree = {"src/a.py": _blob("src/a.py", 10)}
-        accessor.truncated = True
-
-    monkeypatch.setattr("mirage.core.github.search.ensure_tree", load)
+    monkeypatch.setattr(
+        "mirage.core.github.search.ensure_tree", _load_truncated
+    )
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
     accessor = _accessor(config, {})
     out = await files_containing(

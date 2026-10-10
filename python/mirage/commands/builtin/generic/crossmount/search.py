@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import cast
 
-from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.generic.crossmount.fanout.exit import (
     combined_exit,
 )
@@ -62,7 +61,7 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.filetype import get_extension
+from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.view.types import NamespaceView
 
 

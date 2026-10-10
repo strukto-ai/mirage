@@ -20,7 +20,7 @@ import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
-import { getExtension } from '../../../utils/filetype.ts'
+import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
 import { globPrefixMatch } from '../../../utils/path.ts'
 import { isEfbig, isFsError } from '../../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
@@ -29,7 +29,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 
-import { BINARY_EXTENSIONS } from '../constants.ts'
 import { grepGeneric, parseFlags as parseGrepFlags } from '../generic/grep.ts'
 import {
   foldsCase,

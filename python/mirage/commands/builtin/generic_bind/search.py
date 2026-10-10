@@ -18,7 +18,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic.grep import (
     parse_flags as parse_grep_flags,
@@ -55,7 +54,7 @@ from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, JsonValue, PathSpec
-from mirage.utils.filetype import get_extension
+from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import glob_prefix_match
 from mirage.vfs.types import ScanReason, SearchQuery
 from mirage.view.namespace_view import paths_scoped

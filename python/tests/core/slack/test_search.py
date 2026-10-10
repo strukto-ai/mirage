@@ -18,8 +18,14 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.search import MAX_PAGES, search_files, search_messages
+from mirage.core.slack.search import (
+    MAX_PAGES,
+    _name_words,
+    search_files,
+    search_messages,
+)
 from tests.core.slack.conftest import FakeSlack
 
 
@@ -113,6 +119,34 @@ async def test_the_patterns_of_one_grep_share_one_user_listing(slack):
     fake = FakeSlack()
     await slack("grep -rlw -e deploy -e lunch /slack/channels", fake)
     assert fake.user_lists == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_search_stops_its_user_listing(monkeypatch):
+    # The first pattern fetches in its own task, so stopping it stops the
+    # listing; a pattern waiting on it reads every day instead.
+    listing = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def hang(config, method, params=None, session=None):
+        listing.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr("mirage.core.slack.paginate.slack_get", hang)
+    accessor = SlackAccessor(SlackConfig(token="xoxp-test"))
+    first = asyncio.create_task(_name_words(accessor))
+    await listing.wait()
+    second = asyncio.create_task(_name_words(accessor))
+    await asyncio.sleep(0)
+    first.cancel()
+    assert await second is None
+    await asyncio.wait([first])
+    assert first.cancelled()
+    assert stopped.is_set()
+    assert accessor.name_words is None
 
 
 @pytest.mark.asyncio

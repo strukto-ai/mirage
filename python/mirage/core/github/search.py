@@ -34,6 +34,7 @@ from mirage.core.github.pushdown import (
 from mirage.core.github.repo import ensure_default_branch, ensure_ref
 from mirage.core.github.tree import ensure_tree
 from mirage.types import JsonValue, PathSpec
+from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.vfs.types import ScanReason
 
@@ -204,8 +205,10 @@ async def files_containing(
     (``search_safe``), and an answer that is the whole set
     (``narrow_paths``, which adds back every file the search never
     indexes). An empty answer is not trusted either: the index trails
-    a push. Each file is one blob request, so an answer of more than
-    ``SCOPE_ERROR`` files is refused as a scan that large would be.
+    a push. A file with a binary extension is left out: the walk reads
+    one only under ``-a``, and then whatever the answer says. Each file
+    is one blob request, so an answer of more than ``SCOPE_ERROR`` files
+    is refused as a scan that large would be.
 
     Args:
         accessor (GitHubAccessor): backend handle.
@@ -224,12 +227,19 @@ async def files_containing(
     ):
         return None
     narrowed = await narrow_paths(accessor, text, under)
-    if narrowed and len(narrowed) > SCOPE_ERROR:
+    if narrowed is None:
+        return None
+    texts = [
+        p
+        for p in narrowed
+        if get_extension(p.virtual) not in BINARY_EXTENSIONS
+    ]
+    if len(texts) > SCOPE_ERROR:
         raise ValueError(
-            f"{len(narrowed)} files in scope and code search could not "
+            f"{len(texts)} files in scope and code search could not "
             "narrow them; narrow the path"
         )
-    return narrowed or None
+    return texts or None
 
 
 async def before_full_scan(

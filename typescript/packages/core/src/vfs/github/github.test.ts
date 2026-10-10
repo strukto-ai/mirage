@@ -297,6 +297,17 @@ describe('grep and rg over code search', () => {
     expect(got).toEqual(await run(ram(), line))
   })
 
+  // Code search never indexes a big file, so the answer names it; the walk
+  // skips a binary extension without -a, so it is not a read to cap.
+  it('does not count a binary the walk skips toward the cap', async () => {
+    scope.error = 3
+    const weights = { 'w0.bin': REPO['big.txt'] ?? '', 'w1.bin': REPO['big.txt'] ?? '' }
+    const line = 'grep -rw import /gh'
+    const [got, hub] = await onGithub(line, new FakeGitHub({ ...REPO, ...weights }))
+    expect(got).toEqual(await run(ram(), line))
+    expect(hub.count('search')).toBe(1)
+  })
+
   it('refuses a narrowed scan past the scope cap', async () => {
     scope.error = 2
     const [got, hub] = await onGithub('grep -rw import /gh')

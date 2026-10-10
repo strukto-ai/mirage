@@ -465,28 +465,32 @@ async def _fetch_name_words(accessor: SlackAccessor) -> frozenset[str]:
     return frozenset(words)
 
 
-async def _name_words(accessor: SlackAccessor) -> frozenset[str]:
+async def _name_words(accessor: SlackAccessor) -> frozenset[str] | None:
     """The words of every user's name and of the workspace's domain.
 
     A message may carry its author's profile and a file its permalink on
-    the workspace's domain. The patterns of one grep ask at once, so they
-    share the fetch in flight; a later command fetches again and sees a
-    user added since.
+    the workspace's domain. The patterns of one grep ask at once, so the
+    first fetches in its own task and the rest wait for its answer; a
+    later command fetches again and sees a user added since. None to a
+    waiter when that fetch failed or its command was stopped.
 
     Args:
         accessor (SlackAccessor): the workspace.
     """
-    pending = accessor.name_words
-    if pending is None or pending.get_loop() is not asyncio.get_running_loop():
-        pending = asyncio.ensure_future(_fetch_name_words(accessor))
-        accessor.name_words = pending
-
-        def forget(done: asyncio.Future[frozenset[str]]) -> None:
-            if accessor.name_words is done:
-                accessor.name_words = None
-
-        pending.add_done_callback(forget)
-    return await asyncio.shield(pending)
+    loop = asyncio.get_running_loop()
+    shared = accessor.name_words
+    if shared is not None and shared.get_loop() is loop:
+        return await asyncio.shield(shared)
+    ready: asyncio.Future[frozenset[str] | None] = loop.create_future()
+    accessor.name_words = ready
+    words: frozenset[str] | None = None
+    try:
+        words = await _fetch_name_words(accessor)
+        return words
+    finally:
+        ready.set_result(words)
+        if accessor.name_words is ready:
+            accessor.name_words = None
 
 
 def _day_of(ts: Any) -> str | None:
@@ -625,7 +629,8 @@ async def _search(
     index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     words = text.lower().split()
-    if not set(words).isdisjoint(await _name_words(accessor)):
+    name_words = await _name_words(accessor)
+    if name_words is None or not set(words).isdisjoint(name_words):
         return None
     reaction = words[0] if len(words) == 1 else None
     found: list[PathSpec] = []

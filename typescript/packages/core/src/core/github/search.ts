@@ -16,6 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
+import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
 import { ScanReason } from '../../vfs/types.ts'
 import { type GitHubTransport, type GitHubCodeSearch, searchCode } from './client.ts'
@@ -96,8 +97,10 @@ async function scopeFiles(
  * word the search grammar reads as plain terms (`searchSafe`), and an
  * answer that is the whole set (`narrowPaths`, which adds back every file
  * the search never indexes). An empty answer is not trusted either: the
- * index trails a push. Each file is one blob request, so an answer of more
- * than `SCOPE_ERROR` files is refused as a scan that large would be.
+ * index trails a push. A file with a binary extension is left out: the walk
+ * reads one only under `-a`, and then whatever the answer says. Each file is
+ * one blob request, so an answer of more than `SCOPE_ERROR` files is refused
+ * as a scan that large would be.
  */
 export async function filesContaining(
   accessor: GitHubAccessor,
@@ -114,13 +117,15 @@ export async function filesContaining(
     return null
   }
   const narrowed = await narrowPaths(accessor, text, under)
-  if (narrowed !== null && narrowed.length > SCOPE_ERROR) {
+  if (narrowed === null) return null
+  const texts = narrowed.filter((p) => !BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? ''))
+  if (texts.length > SCOPE_ERROR) {
     throw new Error(
-      `${String(narrowed.length)} files in scope and code search could not narrow them; ` +
+      `${String(texts.length)} files in scope and code search could not narrow them; ` +
         'narrow the path',
     )
   }
-  return narrowed !== null && narrowed.length > 0 ? narrowed : null
+  return texts.length > 0 ? texts : null
 }
 
 /**

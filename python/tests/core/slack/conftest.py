@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import re
 from typing import Any
 
@@ -91,7 +92,8 @@ class FakeSlack:
     (``search.messages``), a reaction name (``has::name:``) and a file's
     name or title (``search.files``, naming every message that shares it
     unless ``shares`` is off), scoped by ``in:#name``. Every page answers
-    ``pages`` as its page count; a search raises ``fails`` when set.
+    ``pages`` as its page count; a search raises ``fails`` when set. Each
+    call yields to the loop once, as a request does.
     """
 
     def __init__(
@@ -107,6 +109,7 @@ class FakeSlack:
         self.user_lists = 0
 
     async def get(self, config, method, params=None, session=None):
+        await asyncio.sleep(0)
         params = params or {}
         if method == "conversations.list":
             return {

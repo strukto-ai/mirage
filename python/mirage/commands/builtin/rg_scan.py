@@ -16,7 +16,6 @@ import posixpath
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.rg_filetypes import FileTypes
 from mirage.commands.builtin.rg_glob import Overrides, Verdict, walk_candidate
 from mirage.commands.builtin.utils.links import LinkResolver
@@ -26,7 +25,7 @@ from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import linux_errno
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.filetype import get_extension
+from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.types import MountIsRoot, MountRoot
 
