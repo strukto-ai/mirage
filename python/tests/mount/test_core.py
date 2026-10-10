@@ -1173,31 +1173,30 @@ async def test_a_removal_holds_the_bytes_when_only_the_stat_is_refused():
 
 
 @pytest.mark.asyncio
-async def test_an_open_a_removal_overtook_opens_again_after_it():
-    # Its stat found the file going away; registered as it was, the handle
-    # would be neither held nor detached.
+async def test_a_rename_waits_for_an_open_already_out():
+    # The open has truncated and is reading the file back when a rename
+    # onto its name starts: the rename takes the file the open made, and
+    # an open replayed after it would truncate the file it put there.
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("printf fresh > /a; printf stale-file > /b")
-    stats = _Held(ws.vfs, "stat", answered=True)
-    files = _Held(stats, "read", answered=True)
+    await ws.shell("printf fresh > /a; printf old > /b")
+    files = _Held(_Sizeless(ws.vfs), "read", answered=True)
     core = MountCore(files)
-    opening = asyncio.create_task(core.open("/b"))
-    await stats.out.wait()
-    early = await core.open("/b")
-    renaming = asyncio.create_task(core.rename("/a", "/b"))
+    opening = asyncio.create_task(core.open("/b", os.O_RDWR | os.O_TRUNC))
     await files.out.wait()
-    stats.go.set()
+    renaming = asyncio.create_task(core.rename("/a", "/b"))
     await asyncio.sleep(0.01)
-    assert not opening.done()
+    assert not renaming.done()
     files.go.set()
+    fh = await opening
     await renaming
-    late = await opening
-    assert await core.read("/b", 100, 0, late) == b"fresh"
-    assert await core.read("/b", 100, 0, early) == b"stale-file"
+    assert await ws.vfs.read("/b") == b"fresh"
+    assert await core.read("/b", 100, 0, fh) == b""
 
 
 @pytest.mark.asyncio
-async def test_a_hold_a_write_raced_reads_again():
+async def test_a_flush_onto_a_name_a_rename_replaces_waits_for_it():
+    # Landing under the rename's hold would make what it read stale, and
+    # reading again for as long as the file kept being written never ends.
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("printf fresh > /a; printf old-body > /b")
     files = _Held(ws.vfs, "read", answered=True)
@@ -1207,7 +1206,13 @@ async def test_a_hold_a_write_raced_reads_again():
     await core.write("/b", b"NEW", 0, writer)
     renaming = asyncio.create_task(core.rename("/a", "/b"))
     await files.out.wait()
-    await core.flush("/b", writer)
+    flushing = asyncio.create_task(core.flush("/b", writer))
+    await asyncio.sleep(0.01)
+    assert not flushing.done()
     files.go.set()
     await renaming
-    assert await core.read("/b", 100, 0, reader) == b"NEW-body"
+    await flushing
+    assert files.calls == 1
+    assert await core.read("/b", 100, 0, reader) == b"old-body"
+    assert await core.read("/b", 100, 0, writer) == b"NEW-body"
+    assert await ws.vfs.read("/b") == b"fresh"

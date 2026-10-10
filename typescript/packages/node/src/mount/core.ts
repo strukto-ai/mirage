@@ -96,6 +96,9 @@ export class MountCore {
   // One chain per file identity that its removals (an unlink, a rename
   // onto it) join, which an open of the file waits out: see `removing`.
   private readonly removals = new Map<string, Promise<void>>()
+  // The opens out per name they opened, which a removal of that name waits
+  // for.
+  private readonly opening = new Map<string, Set<Promise<void>>>()
   private readonly uid: number
   private readonly gid: number
 
@@ -261,16 +264,32 @@ export class MountCore {
   }
 
   /**
-   * Run `fn`, which removes or replaces the file at `path`, with opens of
-   * that file held back until it is done, as the kernel orders an open
-   * and an unlink of one name. `hold` reads the rest for the handles open
-   * before; an open that slipped in while that read was out would get a
-   * chunked handle onto bytes about to go. A chain of its own rather than
-   * `pending`, which a rename holds for its source: holding the target's
-   * there too would let two renames that cross wait on each other.
+   * Run one mutation that touches several files, holding each one's chain,
+   * taken in sorted order so two renames that cross never wait on each
+   * other. Mirrors Python's `_mutate_all`.
+   */
+  private mutateAll<T>(keys: string[], fn: () => Promise<T>): Promise<T> {
+    const [first = '', ...rest] = [...new Set(keys)].sort(compareCodePoints)
+    if (rest.length === 0) return this.mutate(first, fn)
+    return this.mutate(first, () => this.mutateAll(rest, fn))
+  }
+
+  /**
+   * Run `fn`, which removes or replaces the file at `path`, after the opens
+   * of that name already out, with later ones held back until it is done,
+   * as the kernel orders an open and an unlink of one name. `hold` reads
+   * the rest for the handles open before; an open that slipped in while
+   * that read was out would get a chunked handle onto bytes about to go. A
+   * chain of its own, taken before any `pending` one, rather than `pending`
+   * itself: an open it waits for may be truncating there.
    */
   private removing(path: string, fn: () => Promise<void>): Promise<void> {
-    return this.queue(this.removals, this.identity(path, false), fn)
+    const key = this.identity(path, false)
+    return this.queue(this.removals, key, async () => {
+      const opening = this.opening.get(key)
+      if (opening !== undefined) await Promise.all(opening)
+      await fn()
+    })
   }
 
   /**
@@ -536,15 +555,16 @@ export class MountCore {
    * hides. Mirrors Python's MountCore.unlink.
    */
   async unlink(path: string): Promise<void> {
-    await this.mutate(this.identity(path, false), async () => {
-      await this.removing(path, async () => {
+    const key = this.identity(path, false)
+    await this.removing(path, () =>
+      this.mutate(key, async () => {
         const named = this.named(path)
         const row = await this.hold(path, named)
         await this.op(() => this.files.unlink(this.resolve(path)))
         for (const ctx of named) ctx.detached = row
-      })
-      await this.changed(path, false)
-    })
+        await this.changed(path, false)
+      }),
+    )
   }
 
   /**
@@ -597,26 +617,26 @@ export class MountCore {
     // which is what makes `mv` between two backends fall back to
     // copy+unlink instead of addressing the destination against the
     // source's backend.
-    await this.mutate(this.identity(src, false), async () => {
-      const source = this.resolve(src)
-      const target = this.resolve(dst)
-      await this.removing(dst, async () => {
-        const moved = this.identity(src, false)
+    const source = this.resolve(src)
+    const target = this.resolve(dst)
+    const moved = this.identity(src, false)
+    await this.removing(dst, () =>
+      this.mutateAll([moved, this.identity(dst, false)], async () => {
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         const row = await this.hold(dst, replaced)
         await this.op(() => this.files.rename(source, target))
         for (const ctx of replaced) ctx.detached = row
-      })
-      for (const ctx of this.handles.values()) {
-        if (ctx.detached !== undefined) continue
-        if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
-          ctx.key = target + ctx.key.slice(source.length)
-          ctx.path = ctx.key.slice(this.root.length)
+        for (const ctx of this.handles.values()) {
+          if (ctx.detached !== undefined) continue
+          if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
+            ctx.key = target + ctx.key.slice(source.length)
+            ctx.path = ctx.key.slice(this.root.length)
+          }
         }
-      }
-      await this.changed(src, false)
-      await this.changed(dst, false)
-    })
+        await this.changed(src, false)
+        await this.changed(dst, false)
+      }),
+    )
   }
 
   // No emptiness pre-check here, matching the python MountCore. Every
@@ -809,9 +829,29 @@ export class MountCore {
     ) {
       await removal
     }
+    const keys = new Set([this.identity(path, false), this.identity(path)])
+    const opened = this.openPath(path, flags)
+    const out = opened.then(
+      () => undefined,
+      () => undefined,
+    )
+    for (const key of keys) this.opening.set(key, (this.opening.get(key) ?? new Set()).add(out))
+    try {
+      return await opened
+    } finally {
+      for (const key of keys) {
+        const opening = this.opening.get(key)
+        opening?.delete(out)
+        if (opening?.size === 0) this.opening.delete(key)
+      }
+    }
+  }
+
+  /** The open itself, which a removal of its name waits for. */
+  private async openPath(path: string, flags: number): Promise<number> {
     const s = await this.op(() => this.files.stat(this.resolve(path)))
     const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
-    if (s.type === FileType.DIRECTORY) return this.register(path, flags, ctx)
+    if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
       // libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
       // kernel sends no SETATTR ahead of an O_TRUNC open: the flag on the
@@ -822,7 +862,7 @@ export class MountCore {
       // (#1032). Mirrors Python's MountCore.open.
       await this.truncate(path, 0)
     }
-    if (ctx.live === true) return this.register(path, flags, ctx)
+    if (ctx.live === true) return this.handles.add(ctx)
     if (s.size === null) {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored
@@ -838,7 +878,7 @@ export class MountCore {
         this.op(() => this.files.read(this.resolve(ctx.path), { offset, size })),
       )
     }
-    return this.register(path, flags, ctx)
+    return this.handles.add(ctx)
   }
 
   /**
@@ -850,23 +890,14 @@ export class MountCore {
   }
 
   /**
-   * Track the handle an open built, or open again when a removal of its name
-   * began while the open was out: what it opened may be the file going away,
-   * and a removal keeps and detaches only the handles it finds.
-   */
-  private register(path: string, flags: number, ctx: Handle): Promise<number> | number {
-    if (this.removalOf(path) !== undefined) return this.open(path, flags)
-    return this.handles.add(ctx)
-  }
-
-  /**
    * Keep what the handles open on `path` need once it goes, and return the
    * row they stat by from then on. POSIX keeps an open descriptor on the
    * file it had, so an unlink or a rename onto it must not leave a handle
    * reading or stat'ing the file at that name next. A handle holding no
    * bytes yet (never read, or chunked and holding one chunk) gets them all
-   * from one read every such handle shares; it runs under `removing`, so no
-   * handle opens on the file meanwhile. The handles are matched by the
+   * from one read every such handle shares; it runs under `removing` and
+   * the file's `pending` chain, so no handle opens on the file and no write
+   * lands on it meanwhile. The handles are matched by the
    * entry itself, so removing a link holds nothing: it takes the link,
    * never its target's bytes. A stat or a read that fails (a policy may
    * allow the removal and refuse either) leaves a bare row or the handles
@@ -884,24 +915,17 @@ export class MountCore {
       console.warn(`fuse: the row of ${path} before it goes failed: ${String(err)}`)
     }
     const lacking = named.filter((ctx) => ctx.data === undefined && ctx.live !== true)
-    while (lacking.length > 0) {
-      const seen = lacking.map((ctx) => ctx.generation ?? 0)
-      let data: Uint8Array
-      try {
-        data = await this.op(() => this.files.read(virtual))
-      } catch (err) {
-        console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
-        return row
-      }
-      // A write that landed while the read was out made what it fetched
-      // stale: read again.
-      if (lacking.every((ctx, i) => (ctx.generation ?? 0) === seen[i])) {
-        for (const ctx of lacking) {
-          ctx.data = data
-          delete ctx.chunked
-        }
-        return row
-      }
+    if (lacking.length === 0) return row
+    let data: Uint8Array
+    try {
+      data = await this.op(() => this.files.read(virtual))
+    } catch (err) {
+      console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
+      return row
+    }
+    for (const ctx of lacking) {
+      ctx.data = data
+      delete ctx.chunked
     }
     return row
   }

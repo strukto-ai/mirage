@@ -74,9 +74,9 @@ class MountCore:
 
     Ops on one file can interleave at their awaits when the caller runs
     several at once, so the mutations of one file identity run one at a
-    time (``_mutate``), an open waits out a removal of its file
-    (``_removing``), and a read through a handle waits for a flush still
-    landing. Mirrors ``core.ts``.
+    time (``_mutate``), an open and a removal of one name wait for each
+    other (``_removing``), and a read through a handle waits for a flush
+    still landing. Mirrors ``core.ts``.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every filesystem call routes to.
@@ -127,6 +127,9 @@ class MountCore:
         # One chain per file identity that its removals (an unlink, a
         # rename onto it) join, which an open of the file waits out.
         self._removals: dict[str, asyncio.Future[None]] = {}
+        # The opens out per name they opened, which a removal of that
+        # name waits for.
+        self._opening: dict[str, set[asyncio.Future[None]]] = {}
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
         # as owned by the mounting user (see fuse/mount.py). Mirrors core.ts.
@@ -208,23 +211,44 @@ class MountCore:
         """
         return self._queue(self._pending, key, fn)
 
+    def _mutate_all(
+        self, keys: list[str], fn: Callable[[], Awaitable[T]]
+    ) -> Awaitable[T]:
+        """Run one mutation that touches several files, holding each one's
+        chain, taken in sorted order so two renames that cross never wait
+        on each other.
+
+        Args:
+            keys (list[str]): the file identities.
+            fn (Callable[[], Awaitable[T]]): the mutation.
+        """
+        first, *rest = sorted(set(keys))
+        if not rest:
+            return self._mutate(first, fn)
+        return self._mutate(first, lambda: self._mutate_all(rest, fn))
+
     def _removing(
         self, path: str, fn: Callable[[], Awaitable[None]]
     ) -> Awaitable[None]:
-        """Run ``fn``, which removes or replaces the file at ``path``, with
-        opens of that file held back until it is done, as the kernel orders
-        an open and an unlink of one name. A chain of its own rather than
-        ``_pending``, which a rename holds for its source: holding the
-        target's there too would let two renames that cross wait on each
-        other.
+        """Run ``fn``, which removes or replaces the file at ``path``, after
+        the opens of that name already out, with later ones held back until
+        it is done, as the kernel orders an open and an unlink of one name.
+        A chain of its own, taken before any ``_pending`` one, rather than
+        ``_pending`` itself: an open it waits for may be truncating there.
 
         Args:
             path (str): mount path being removed or replaced.
             fn (Callable[[], Awaitable[None]]): the removal.
         """
-        return self._queue(
-            self._removals, self.identity(path, follow=False), fn
-        )
+        key = self.identity(path, follow=False)
+
+        async def run() -> None:
+            opening = self._opening.get(key)
+            if opening:
+                await asyncio.wait(list(opening))
+            await fn()
+
+        return self._queue(self._removals, key, run)
 
     async def _settled(self, ctx: Handle) -> None:
         """Wait for a flush or truncation of the handle's file still
@@ -660,18 +684,17 @@ class MountCore:
             path (str): mount path of the entry to remove.
         """
 
+        key = self.identity(path, follow=False)
+
         async def remove() -> None:
             named = self._named(path)
             row = await self._hold(path, named)
             await self._op(self._files.unlink(self.resolve(path)))
             for ctx in named:
                 ctx.detached = row
-
-        async def run() -> None:
-            await self._removing(path, remove)
             await self._changed(path, rehydrate=False)
 
-        await self._mutate(self.identity(path, follow=False), run)
+        await self._removing(path, lambda: self._mutate(key, remove))
 
     async def rename(self, old: str, new: str) -> None:
         """Rename an entry, carrying the handles open under it along.
@@ -685,17 +708,15 @@ class MountCore:
             new (str): mount path it moves to.
         """
         source, target = self.resolve(old), self.resolve(new)
+        moved = self.identity(old, follow=False)
+        keys = [moved, self.identity(new, follow=False)]
 
         async def replace() -> None:
-            moved = self.identity(old, follow=False)
             replaced = [c for c in self._named(new) if c.key != moved]
             row = await self._hold(new, replaced)
             await self._op(self._files.rename(source, target))
             for ctx in replaced:
                 ctx.detached = row
-
-        async def run() -> None:
-            await self._removing(new, replace)
             for ctx in self._handles.values():
                 if ctx.detached is not None:
                     continue
@@ -705,7 +726,7 @@ class MountCore:
             await self._changed(old, rehydrate=False)
             await self._changed(new, rehydrate=False)
 
-        await self._mutate(self.identity(old, follow=False), run)
+        await self._removing(new, lambda: self._mutate_all(keys, replace))
 
     async def rmdir(self, path: str) -> None:
         await self._op(self._files.rmdir(self.resolve(path)))
@@ -935,6 +956,26 @@ class MountCore:
         """
         while (removal := self._removal_of(path)) is not None:
             await asyncio.shield(removal)
+        keys = {self.identity(path, follow=False), self.identity(path)}
+        out: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        for key in keys:
+            self._opening.setdefault(key, set()).add(out)
+        try:
+            return await self._open_path(path, flags)
+        finally:
+            out.set_result(None)
+            for key in keys:
+                self._opening[key].discard(out)
+                if not self._opening[key]:
+                    del self._opening[key]
+
+    async def _open_path(self, path: str, flags: int) -> int:
+        """The open itself, which a removal of its name waits for.
+
+        Args:
+            path (str): mount path to open.
+            flags (int): the open(2) flags the kernel passed.
+        """
         s = await self._op(self._files.stat(self.resolve(path)))
         ctx = Handle(
             path=path,
@@ -942,7 +983,7 @@ class MountCore:
             live=s.extra.get(LIVE_KEY) is True,
         )
         if s.type == FileType.DIRECTORY:
-            return await self._register(path, flags, ctx)
+            return self._handles.add(ctx)
         if flags & os.O_TRUNC:
             # libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the
             # kernel sends no SETATTR ahead of an O_TRUNC open: the flag on
@@ -952,7 +993,7 @@ class MountCore:
             # fuse3-only host, where a shorter overwrite kept the old tail.
             await self.truncate(path, 0)
         if ctx.live:
-            return await self._register(path, flags, ctx)
+            return self._handles.add(ctx)
         if s.size is None:
             # API-backed mounts cannot size a file without fetching it, so
             # hydrate now: fgetattr and read() then serve real bytes. This
@@ -968,7 +1009,7 @@ class MountCore:
             # kernel asks in small pieces, and fetching the whole file on
             # the first one moved all of it to answer a `head`.
             ctx.chunked = ChunkedHandle(path=path, size=s.size)
-        return await self._register(path, flags, ctx)
+        return self._handles.add(ctx)
 
     def _removal_of(self, path: str) -> asyncio.Future[None] | None:
         """A removal of ``path`` still running. One is keyed by the name it
@@ -983,21 +1024,6 @@ class MountCore:
             if removal is not None:
                 return removal
         return None
-
-    async def _register(self, path: str, flags: int, ctx: Handle) -> int:
-        """Track the handle an open built, or open again when a removal of
-        its name began while the open was out: what it opened may be the
-        file going away, and a removal keeps and detaches only the handles
-        it finds.
-
-        Args:
-            path (str): mount path opened.
-            flags (int): the open(2) flags it passed.
-            ctx (Handle): the handle the open built.
-        """
-        if self._removal_of(path) is not None:
-            return await self.open(path, flags)
-        return self._handles.add(ctx)
 
     async def _read_chunk(
         self, ctx: Handle, chunked: ChunkedHandle, offset: int, size: int
@@ -1078,8 +1104,9 @@ class MountCore:
         a rename onto it must not leave a handle reading or stat'ing the
         file at that name next. A handle holding no bytes yet (never read,
         or chunked and holding one chunk) gets them all from one read every
-        such handle shares; it runs under ``_removing``, so no handle opens
-        on the file meanwhile. The handles are matched by the entry itself,
+        such handle shares; it runs under ``_removing`` and the file's
+        ``_pending`` chain, so no handle opens on the file and no write
+        lands on it meanwhile. The handles are matched by the entry itself,
         so removing a link holds nothing: it takes the link, never its
         target's bytes. A stat or a read that fails (a policy may allow the
         removal and refuse either) leaves a bare row or the handles as they
@@ -1106,22 +1133,18 @@ class MountCore:
                 "fuse: the row of %s before it goes failed: %r", path, err
             )
         lacking = [c for c in named if c.data is None and not c.live]
-        while lacking:
-            seen = [c.generation for c in lacking]
-            try:
-                data = await self._op(self._files.read(virtual))
-            except Exception as err:
-                logger.warning(
-                    "fuse: holding %s before it goes failed: %r", path, err
-                )
-                return row
-            # A write that landed while the read was out made what it
-            # fetched stale: read again.
-            if [c.generation for c in lacking] == seen:
-                for ctx in lacking:
-                    ctx.data = data
-                    ctx.chunked = None
-                return row
+        if not lacking:
+            return row
+        try:
+            data = await self._op(self._files.read(virtual))
+        except Exception as err:
+            logger.warning(
+                "fuse: holding %s before it goes failed: %r", path, err
+            )
+            return row
+        for ctx in lacking:
+            ctx.data = data
+            ctx.chunked = None
         return row
 
     async def release(self, fh: int) -> None:
