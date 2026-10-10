@@ -39,8 +39,8 @@ from asyncssh.constants import (
 
 from mirage.errors.fs import eexist, eisdir, enoent
 from mirage.errors.types import NoMountError
-from mirage.fuse.core import MountCore
-from mirage.fuse.errors import classify_error
+from mirage.mount.core import MountCore
+from mirage.mount.errors import classify_error
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
 from mirage.server.ssh.session import (

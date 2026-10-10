@@ -37,7 +37,7 @@ from mirage.context import (
     reset_current_session,
     set_current_session,
 )
-from mirage.fuse.core import MountCore
+from mirage.mount.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import Deny, Policy, PolicyDenied
 from mirage.runtime.binding import WorkspaceBinding, capture_binding

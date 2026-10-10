@@ -18,10 +18,10 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from './errors.ts'
+import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from '../mount/errors.ts'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
 import { MirageFS } from './fs.ts'
-import type { FuseAttr } from './types.ts'
+import type { FuseAttr } from '../mount/types.ts'
 
 const ENOENT = -2
 const ENOTEMPTY = -POSITIVE_ENOTEMPTY

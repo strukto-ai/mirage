@@ -17,9 +17,9 @@ import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
-import { MountCore } from './core.ts'
-import type { FuseAttr } from './types.ts'
-import { classifyError } from './errors.ts'
+import { MountCore } from '../mount/core.ts'
+import type { FuseAttr } from '../mount/types.ts'
+import { classifyError } from '../mount/errors.ts'
 
 type Cb<T> = (code: number, result?: T) => void
 

@@ -35,8 +35,8 @@ from mirage.errors.classify import failure_text
 from mirage.errors.fs import eexist, enoent
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import NoMountError
-from mirage.fuse.core import MountCore
 from mirage.io.types import ByteSource
+from mirage.mount.core import MountCore
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,

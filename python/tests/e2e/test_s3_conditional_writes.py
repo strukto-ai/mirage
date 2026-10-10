@@ -23,7 +23,7 @@ import pytest_asyncio
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
-from mirage.fuse.core import MountCore
+from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
 from mirage.types import PathSpec
 from mirage.vfs.minio import MinIOConfig, MinIOVFS

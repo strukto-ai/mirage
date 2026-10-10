@@ -18,9 +18,9 @@ import os
 from typing import Any, Callable
 
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
-from mirage.fuse.core import MountCore
 from mirage.fuse.darwin import rename_flags_check
-from mirage.fuse.errors import classify_error
+from mirage.mount.core import MountCore
+from mirage.mount.errors import classify_error
 from mirage.types import JsonValue
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState

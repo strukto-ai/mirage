@@ -24,8 +24,8 @@ from typing import Any, Coroutine
 from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent, erofs
-from mirage.fuse.platform.macos import is_macos_metadata
-from mirage.fuse.types import Handle, WriteBuf
+from mirage.mount.platform.macos import is_macos_metadata
+from mirage.mount.types import Handle, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
 from mirage.runtime.handles import (
     ChunkedHandle,
@@ -63,7 +63,7 @@ class MountCore:
     The division of labour: this class decides *what* the filesystem
     contains, an adapter decides *how* to say it to a particular kernel
     interface. Adapters translate the exceptions raised here into their own
-    error codes with ``mirage.fuse.errors.classify_error``.
+    error codes with ``mirage.mount.errors.classify_error``.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every filesystem call routes to.

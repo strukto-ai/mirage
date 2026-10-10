@@ -17,7 +17,7 @@ import type { FsCondition, PosixErrno } from './types.ts'
 // Linux-canonical numbers: core is runtime-agnostic and has no host
 // errno module to ask (python's posix.py resolves per platform). A
 // kernel adapter that must speak its host's dialect keeps its own
-// condition -> number table (node/src/fuse/errors.ts reads node:os);
+// condition -> number table (node/src/mount/errors.ts reads node:os);
 // what lives here once is the canonical numbering and the strerror
 // phrases every message renderer shares.
 export const POSIX: Record<FsCondition, PosixErrno> = {

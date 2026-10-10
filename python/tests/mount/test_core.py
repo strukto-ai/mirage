@@ -24,7 +24,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
-from mirage.fuse.core import MountCore
+from mirage.mount.core import MountCore
 from mirage.observe import OpRecord
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -48,7 +48,7 @@ async def seeded():
 def test_core_needs_no_fuse_module():
     # The whole point of the split: MountCore imports nothing from mfusepy,
     # so the mount layer is exercisable without the [fuse] extra or a kernel.
-    import mirage.fuse.core as core
+    import mirage.mount.core as core
 
     assert not hasattr(core, "fuse")
     assert "mfusepy" not in str(core.__dict__.keys())
@@ -729,7 +729,7 @@ async def test_a_session_is_told_the_command_rules_fuse_skips(
             }
         },
     )
-    with caplog.at_level(logging.WARNING, logger="mirage.fuse.core"):
+    with caplog.at_level(logging.WARNING, logger="mirage.mount.core"):
         MountCore(ws.vfs, session=ruled)
     assert "commands.deny: no rm" in caplog.text
     assert "keys" not in caplog.text
@@ -737,7 +737,7 @@ async def test_a_session_is_told_the_command_rules_fuse_skips(
     pathed = ws.create_session(
         "pathed", profile={"commands": {"deny": [keys]}}
     )
-    with caplog.at_level(logging.WARNING, logger="mirage.fuse.core"):
+    with caplog.at_level(logging.WARNING, logger="mirage.mount.core"):
         MountCore(ws.vfs, session=pathed)
     assert caplog.text == ""
 
