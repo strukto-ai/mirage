@@ -266,13 +266,14 @@ async def test_profile_change_refuses_shutdown_during_hydration(monkeypatch):
 @pytest.mark.asyncio
 async def test_existing_meta_wins():
     store = RAMWorkspaceStateStore()
-    await store.set_meta(
+    await store.cas_set_meta(
         "ws-a",
         {
             "workspace_id": "ws-a",
             "default_session_id": "sess_x",
             "created_at": 1.0,
         },
+        0,
     )
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -281,7 +282,8 @@ async def test_existing_meta_wins():
         store=store,
     )
     await ws.shell("echo hi")
-    meta = await ws.workspace_meta()
+    meta = await store.load_meta("ws-a")
+    assert meta is not None
     assert meta["default_session_id"] == "sess_x"
     assert meta["created_at"] == 1.0
     await ws.close()

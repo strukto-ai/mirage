@@ -198,17 +198,6 @@ export class BoxTokenManager extends OAuthTokenManager {
     }
   }
 
-  /**
-   * Returns the latest refresh token. Box rotates the refresh token on each
-   * refresh, so the token passed to the constructor may be stale after the
-   * first refresh. Persist this value if you want to survive restarts without
-   * re-authenticating. Returns empty string in developer-token and
-   * client-credentials modes.
-   */
-  getRefreshToken(): string {
-    return this.currentRefreshToken
-  }
-
   protected async refreshPair(): Promise<[string, number]> {
     if (this.devTokenMode) {
       // Unreachable while the seeded expiry is +Infinity, but keep the

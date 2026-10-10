@@ -24,47 +24,12 @@ from mirage.io.stream import (
     discard_streams,
     drain,
     ensure_stream,
-    exit_on_empty,
 )
-from mirage.io.types import IOResult
 
 
 async def _make_stream(*items):
     for item in items:
         yield item
-
-
-def test_exit_on_empty_with_items():
-    async def _run():
-        io = IOResult()
-        stream = exit_on_empty(_make_stream(b"a", b"b"), io)
-        chunks = [chunk async for chunk in stream]
-        assert chunks == [b"a", b"b"]
-        assert io.exit_code == 0
-
-    asyncio.run(_run())
-
-
-def test_exit_on_empty_no_items():
-    async def _run():
-        io = IOResult()
-        stream = exit_on_empty(_make_stream(), io)
-        chunks = [chunk async for chunk in stream]
-        assert chunks == []
-        assert io.exit_code == 1
-
-    asyncio.run(_run())
-
-
-def test_exit_on_empty_single_item():
-    async def _run():
-        io = IOResult()
-        stream = exit_on_empty(_make_stream(b"only"), io)
-        chunks = [chunk async for chunk in stream]
-        assert chunks == [b"only"]
-        assert io.exit_code == 0
-
-    asyncio.run(_run())
 
 
 def test_drain_consumes_without_accumulating():

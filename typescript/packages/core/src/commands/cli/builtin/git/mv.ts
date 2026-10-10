@@ -31,7 +31,8 @@ import {
   UsageError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { basename, removeFile, renamePath } from './io.ts'
+import { removeFile, renamePath } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 
 import { opened } from './session.ts'
 import type { Dispatch, IndexEntry, RepoLocation } from './types.ts'
@@ -274,8 +275,8 @@ export async function plan(
     const source = repoRelative(location, start, operand)
     const landing = into
       ? destination === ''
-        ? basename(source)
-        : `${destination}/${basename(source)}`
+        ? entryName(source)
+        : `${destination}/${entryName(source)}`
       : destination
     const verdict = await check(
       statPath,

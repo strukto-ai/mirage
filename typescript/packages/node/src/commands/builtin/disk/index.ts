@@ -12,18 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { Command, CommandIO } from '@struktoai/mirage-core/commands/config'
+import { genericCommands, walked } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import type { Command } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-
-// Shell traversals need partial results and per-directory errors; the shared
-// readdir/stat walker owns those. Direct VFS aggregate methods remain strict.
-function walked(io: CommandIO): CommandIO {
-  const rest = { ...io }
-  delete rest.find
-  delete rest.du
-  return rest
-}
 
 export const DISK_COMMANDS: readonly Command[] = [
   ...genericCommands(VFSName.DISK, { table: walked, local: true }),

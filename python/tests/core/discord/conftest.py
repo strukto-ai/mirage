@@ -23,7 +23,7 @@ from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import snowflake_at
-from mirage.core.discord.render import history_jsonl_bytes
+from mirage.core.render.json import jsonl_bytes
 
 GUILD = {"id": "G001", "name": "My Server"}
 CHANNELS = [
@@ -117,7 +117,7 @@ class FakeDiscordApi:
     async def get_history_jsonl(
         self, config, channel_id, date_str, scope, session=None
     ):
-        return history_jsonl_bytes(
+        return jsonl_bytes(
             await self.list_messages_for_day(
                 config, channel_id, date_str, scope
             )

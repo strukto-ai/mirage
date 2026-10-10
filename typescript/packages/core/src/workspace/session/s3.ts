@@ -14,7 +14,7 @@
 
 import { normalizeKeyPrefix, type S3Config } from '../../vfs/s3/config.ts'
 import { S3RecordClient } from '../record/s3.ts'
-import { SessionStore, type SessionFields } from './store.ts'
+import { RecordSessionStore } from './store.ts'
 
 /**
  * SessionStore backed by per-session S3 objects.
@@ -27,49 +27,8 @@ import { SessionStore, type SessionFields } from './store.ts'
  * same multi-process sharing. Works on any S3-compatible backend that
  * honors conditional PUTs. Mirrors the Python S3SessionStore.
  */
-export class S3SessionStore extends SessionStore {
-  private readonly records: S3RecordClient
-
+export class S3SessionStore extends RecordSessionStore {
   constructor(config: S3Config) {
-    super()
-    const prefix = normalizeKeyPrefix(config.keyPrefix) ?? ''
-    this.records = new S3RecordClient(config, `${prefix}sessions/`)
-  }
-
-  async load(): Promise<Map<string, SessionFields>> {
-    return this.records.loadAll()
-  }
-
-  async set(sessionId: string, fields: SessionFields): Promise<void> {
-    await this.records.put(sessionId, fields)
-  }
-
-  async casSet(
-    sessionId: string,
-    fields: SessionFields,
-    expectedGeneration: number,
-  ): Promise<boolean> {
-    return this.records.casPut(sessionId, fields, expectedGeneration)
-  }
-
-  async delete(sessionIds: readonly string[]): Promise<void> {
-    await this.records.delete(sessionIds)
-  }
-
-  async replaceAll(entries: Map<string, SessionFields>): Promise<void> {
-    const names = await this.records.listNames()
-    const stale = names.filter((name) => !entries.has(name))
-    await this.records.delete(stale)
-    await Promise.all(
-      [...entries].map(([sessionId, fields]) => this.records.put(sessionId, fields)),
-    )
-  }
-
-  async clear(): Promise<void> {
-    await this.records.clear()
-  }
-
-  async close(): Promise<void> {
-    await this.records.close()
+    super(new S3RecordClient(config, `${normalizeKeyPrefix(config.keyPrefix) ?? ''}sessions/`))
   }
 }

@@ -13,7 +13,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
+import {
+  CAS_MAX_RETRIES,
+  generationOf,
+  type RecordClient,
+  type RecordFields,
+} from '../record/types.ts'
 
 export { CAS_MAX_RETRIES, generationOf }
 
@@ -66,4 +71,58 @@ export abstract class SessionStore {
   abstract clear(): Promise<void>
   // Release any underlying connections.
   abstract close(): Promise<void>
+}
+
+/**
+ * A SessionStore over a keyed-record client, one record per session. The disk
+ * and S3 stores differ only in the client they hand in. Mirrors Python's
+ * `RecordSessionStore`.
+ */
+export class RecordSessionStore extends SessionStore {
+  constructor(private readonly records: RecordClient) {
+    super()
+  }
+
+  async load(): Promise<Map<string, SessionFields>> {
+    const names = await this.records.listNames()
+    const records = await Promise.all(names.map((name) => this.records.get(name)))
+    const out = new Map<string, SessionFields>()
+    names.forEach((name, i) => {
+      const fields = records[i]?.[0]
+      if (fields != null) out.set(name, fields)
+    })
+    return out
+  }
+
+  async set(sessionId: string, fields: SessionFields): Promise<void> {
+    await this.records.put(sessionId, fields)
+  }
+
+  async casSet(
+    sessionId: string,
+    fields: SessionFields,
+    expectedGeneration: number,
+  ): Promise<boolean> {
+    return this.records.casPut(sessionId, fields, expectedGeneration)
+  }
+
+  async delete(sessionIds: readonly string[]): Promise<void> {
+    await this.records.delete(sessionIds)
+  }
+
+  async replaceAll(entries: Map<string, SessionFields>): Promise<void> {
+    const stale = (await this.records.listNames()).filter((name) => !entries.has(name))
+    await this.records.delete(stale)
+    await Promise.all(
+      [...entries].map(([sessionId, fields]) => this.records.put(sessionId, fields)),
+    )
+  }
+
+  async clear(): Promise<void> {
+    await this.records.clear()
+  }
+
+  async close(): Promise<void> {
+    await this.records.close()
+  }
 }

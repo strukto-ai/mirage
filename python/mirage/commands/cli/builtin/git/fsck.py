@@ -8,7 +8,6 @@ from dulwich.repo import BaseRepo
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
-    basename,
     file_size,
     read_file,
     read_names,
@@ -25,6 +24,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
+from mirage.utils.remnants import entry_name
 from mirage.view.types import StatPath
 
 PACK_BLOCK = 1 << 18
@@ -80,7 +80,7 @@ async def check_packs(dispatch: DispatchFn, commondir: PathSpec) -> None:
     """
     root = commondir.join("objects/pack")
     for entry in await read_names(dispatch, root):
-        name = basename(entry)
+        name = entry_name(entry)
         if not name.endswith(".idx"):
             continue
         path = root.join(name)
@@ -112,7 +112,7 @@ async def log_roots(
     """
     found: set[bytes] = set()
     for entry in await read_names(dispatch, path):
-        name = basename(entry)
+        name = entry_name(entry)
         target = path.join(name)
         info = await stat_path(target)
         if info is not None and info.type is FileType.DIRECTORY:

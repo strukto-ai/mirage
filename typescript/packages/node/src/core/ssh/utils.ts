@@ -16,7 +16,8 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { lstripSlash, rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import type { OpenMode, SFTPWrapper } from 'ssh2'
+import type { FileEntryWithStats, OpenMode, SFTPWrapper } from 'ssh2'
+import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { FXF_CREAT, FXF_WRITE } from './constants.ts'
 
 const S_IFMT = 0o170000
@@ -64,6 +65,21 @@ export function isFailure(err: unknown): boolean {
   if (typeof err !== 'object') return false
   const code = (err as { code?: unknown }).code
   return code === 4
+}
+
+/** A remote directory's entries with their attributes, or null when it is not there. */
+export async function readRemoteDir(
+  accessor: SSHAccessor,
+  remote: string,
+): Promise<FileEntryWithStats[] | null> {
+  const sftp = await accessor.sftp()
+  return new Promise<FileEntryWithStats[] | null>((resolveFn, rejectFn) => {
+    sftp.readdir(remote, (err, entries) => {
+      if (err === undefined) resolveFn(entries)
+      else if (isNoSuchFile(err)) resolveFn(null)
+      else rejectFn(err)
+    })
+  })
 }
 
 export function isDirectoryAttrs(attrs: { mode?: number }): boolean {

@@ -5,10 +5,10 @@ import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { mountPrefixOf, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { isNotFound, rawPathOf } from './util.ts'
+import { isNotFound } from './util.ts'
 
 export async function stat(
   accessor: NextcloudAccessor,

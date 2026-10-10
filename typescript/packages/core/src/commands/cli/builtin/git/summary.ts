@@ -14,6 +14,7 @@
 
 import { getOpcodes } from '../../../builtin/diff_format.ts'
 import { DiffOpTag } from '../../../builtin/diff_types.ts'
+import { plural } from './dates.ts'
 import { short } from './format.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
 import type { TreeEntry } from './tree.ts'
@@ -202,11 +203,6 @@ export function statTable(stats: readonly FileStat[], width: number = STAT_WIDTH
   }
   lines.push(statLine(stats.length, totalInsertions, totalDeletions))
   return lines
-}
-
-/** `N noun` with the noun pluralised the way git pluralises it. */
-function plural(count: number, noun: string): string {
-  return count === 1 ? `${String(count)} ${noun}` : `${String(count)} ${noun}s`
 }
 
 /**

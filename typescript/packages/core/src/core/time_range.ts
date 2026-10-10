@@ -1,8 +1,10 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { PathSpec } from '../types.ts'
+import { FileStat, FileType, type PathSpec } from '../types.ts'
 import { ancestorEntry, resolveEntry, type ReaddirFn } from './hierarchy/probe.ts'
+import type { Guard } from './hierarchy/readdir.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
+import type { StatHook } from './hierarchy/stat.ts'
 import { enoent } from '../errors/fs.ts'
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
@@ -108,4 +110,23 @@ export async function dayChannelId<A extends Accessor>(
   const channel = await ancestorEntry(readdir, accessor, path, index, 2)
   if (channel === null) throw enoent(path)
   return channel.id
+}
+
+/**
+ * Stat a day directory, which resolves beyond the listed window.
+ *
+ * The parent listing synthesizes a bounded window of recent days, but the API
+ * answers a range query for any date, so a well-formed day under a parent that
+ * exists is a directory whether or not the window lists it. A bogus parent
+ * chain is ENOENT. `guard` refuses a day outside the mount's scope before any
+ * lookup, `guardDay` on a scoped mount. Mirrors Python's `day_stat`.
+ */
+export function dayStat<A extends Accessor>(readdir: ReaddirFn<A>, guard?: Guard<A>): StatHook<A> {
+  return async (accessor, match, path, index) => {
+    if (guard !== undefined) await guard(accessor, match, path.virtual)
+    const entry = await resolveEntry(readdir, accessor, path, index)
+    if (entry !== null) return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
+    if ((await ancestorEntry(readdir, accessor, path, index, 1)) === null) throw enoent(path)
+    return new FileStat({ name: match.slots.day ?? '', type: FileType.DIRECTORY })
+  }
 }

@@ -258,9 +258,6 @@ class Namespace:
             if meta.target is not None
         }
 
-    def has_links(self) -> bool:
-        return any(meta.target is not None for meta in self._nodes.values())
-
     def is_link(self, path: str) -> bool:
         meta = self._nodes.get(path)
         return meta is not None and meta.target is not None

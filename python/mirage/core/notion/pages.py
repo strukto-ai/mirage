@@ -226,12 +226,6 @@ async def create_page(
     return await notion_post(config, "/pages", body, session=session)
 
 
-async def create_comment(
-    config: NotionConfig, body: dict[str, Any], session: SessionArg = None
-) -> dict[str, Any]:
-    return await notion_post(config, "/comments", body, session=session)
-
-
 async def update_page(
     config: NotionConfig,
     page_id: str,

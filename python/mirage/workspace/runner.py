@@ -132,25 +132,6 @@ class WorkspaceRunner:
                 )
             raise
 
-    def call_sync(
-        self, coro: Coroutine[Any, Any, T], timeout: float | None = None
-    ) -> T:
-        """Run ``coro`` on the workspace loop and block until done.
-
-        Use from synchronous callers (tests, blocking scripts). Do
-        NOT use from inside another running event loop -- that will
-        deadlock the caller's loop. Use :meth:`call` from there.
-
-        Args:
-            coro (Awaitable[T]): the workspace coroutine to run.
-            timeout (float | None): seconds to wait, or None for no
-                limit.
-
-        Returns:
-            T: whatever ``coro`` resolves to.
-        """
-        return self._schedule(coro).result(timeout=timeout)
-
     async def stop(self, *, delete: bool = False) -> None:
         """Close the workspace and shut down the runner cleanly.
 

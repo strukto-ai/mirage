@@ -90,8 +90,6 @@ function endpoint(url: string): { host: string; port: number } {
   }
 }
 
-let httpProxyBase: string | null = null
-
 // A fetch that does not verify the server's certificate, which curl's -k
 // asks for. fetch itself takes no TLS options, so this runtime-agnostic core
 // cannot build one; a host that can registers it (the node package: undici
@@ -101,17 +99,6 @@ let insecureFetch: typeof fetch | null = null
 
 export function registerInsecureFetch(fn: typeof fetch | null): void {
   insecureFetch = fn
-}
-
-export function setHttpProxyBase(base: string | null): void {
-  httpProxyBase = base
-}
-
-function applyProxy(url: string): string {
-  if (httpProxyBase === null) return url
-  if (url.startsWith(httpProxyBase) || url.startsWith('/')) return url
-  const sep = httpProxyBase.includes('?') ? '&' : '?'
-  return `${httpProxyBase}${sep}url=${encodeURIComponent(url)}`
 }
 
 export interface HttpRequestOptions {
@@ -168,13 +155,13 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       let resp: Response
       let buf: ArrayBuffer
       try {
-        resp = await send(applyProxy(current), init)
+        resp = await send(current, init)
         if (follow && resp.type === 'opaqueredirect') {
           // A browser answers a manual redirect with an opaque one: status
           // 0, no headers, no Location, so the hops cannot be walked here.
           // The platform follows them instead and the history stays empty,
           // a deliberate divergence from curl, whose -iL shows every hop.
-          resp = await send(applyProxy(current), { ...init, redirect: 'follow' })
+          resp = await send(current, { ...init, redirect: 'follow' })
         }
         // The deadline can fire while the body is still arriving, so the
         // body is read inside the same catch, as httpx reads it inside the

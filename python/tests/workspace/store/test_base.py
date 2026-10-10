@@ -35,7 +35,7 @@ def test_workspace_override_carries_sessions_and_meta_together():
 async def test_workspace_override_meta_lands_on_override():
     control = RAMWorkspaceStateStore()
     base = RAMWorkspaceStateStore(workspace=control)
-    await base.set_meta("ws", {"workspace_id": "ws", "created_at": 1.0})
+    await base.cas_set_meta("ws", {"workspace_id": "ws", "created_at": 1.0}, 0)
     assert await control.load_meta("ws") == {
         "workspace_id": "ws",
         "created_at": 1.0,
@@ -75,7 +75,7 @@ async def _fill(store, workspace_id):
     await store.namespace(workspace_id).set("/a", {"mode": 0o600})
     await store.observer(workspace_id).append("d/s1.jsonl", b"{}\n")
     await store.sessions(workspace_id).set("s1", {"session_id": "s1"})
-    await store.set_meta(workspace_id, {"workspace_id": workspace_id})
+    await store.cas_set_meta(workspace_id, {"workspace_id": workspace_id}, 0)
 
 
 async def _held(store, workspace_id):

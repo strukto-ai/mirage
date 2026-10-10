@@ -412,7 +412,3 @@ export const BUILTIN_GROUP: ReadonlyMap<ShellBuiltin, BuiltinGroup> = new Map<
 export const GRAMMAR_BUILTINS: ReadonlySet<ShellBuiltin> = new Set<ShellBuiltin>(
   [...BUILTIN_GROUP].filter(([, g]) => GROUP_TIER.get(g) === BuiltinTier.GRAMMAR).map(([b]) => b),
 )
-
-export const TOOL_BUILTINS: ReadonlySet<ShellBuiltin> = new Set<ShellBuiltin>(
-  [...BUILTIN_GROUP].filter(([, g]) => GROUP_TIER.get(g) === BuiltinTier.TOOL).map(([b]) => b),
-)

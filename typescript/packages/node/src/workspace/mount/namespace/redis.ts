@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedisClientType } from 'redis'
 import { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
 import type { NodeFields } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import { connectRedis } from '../../../optional_peer.ts'
+import { RedisConnection } from '../../../optional_peer.ts'
 
 export interface RedisNamespaceStoreOptions {
   url?: string
@@ -34,7 +33,7 @@ export class RedisNamespaceStore extends NamespaceStore {
   readonly url: string
   private readonly key: string
   private readonly userKey: string
-  private clientPromise: Promise<RedisClientType> | null = null
+  private readonly redis: RedisConnection
 
   constructor(options: RedisNamespaceStoreOptions = {}) {
     super()
@@ -42,20 +41,11 @@ export class RedisNamespaceStore extends NamespaceStore {
     const prefix = options.keyPrefix ?? 'mirage:namespace:'
     this.key = `${prefix}nodes`
     this.userKey = `${prefix}user`
-  }
-
-  private async client(): Promise<RedisClientType> {
-    if (this.clientPromise === null) {
-      const pending = connectRedis(this.url, 'RedisNamespaceStore', () => {
-        if (this.clientPromise === pending) this.clientPromise = null
-      })
-      this.clientPromise = pending
-    }
-    return this.clientPromise
+    this.redis = new RedisConnection(this.url, 'RedisNamespaceStore')
   }
 
   async load(): Promise<Map<string, NodeFields>> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const raw = await c.hGetAll(this.key)
     const out = new Map<string, NodeFields>()
     for (const [path, value] of Object.entries(raw)) {
@@ -65,18 +55,18 @@ export class RedisNamespaceStore extends NamespaceStore {
   }
 
   async set(path: string, fields: NodeFields): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.hSet(this.key, path, JSON.stringify(fields))
   }
 
   async delete(paths: readonly string[]): Promise<void> {
     if (paths.length === 0) return
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.hDel(this.key, [...paths])
   }
 
   async replaceAll(entries: Map<string, NodeFields>): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const multi = c.multi().del(this.key)
     for (const [path, fields] of entries) {
       multi.hSet(this.key, path, JSON.stringify(fields))
@@ -85,28 +75,21 @@ export class RedisNamespaceStore extends NamespaceStore {
   }
 
   async loadUser(): Promise<string | null> {
-    const c = await this.client()
+    const c = await this.redis.client()
     return c.get(this.userKey)
   }
 
   async setUser(user: string): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.set(this.userKey, user)
   }
 
   async clear(): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.del([this.key, this.userKey])
   }
 
   async close(): Promise<void> {
-    // Idempotent: the workspace closes the plane store it consumed and the
-    // owning WorkspaceStateStore closes every plane it built; the second
-    // close must be a no-op, not a crash on an already-quit client.
-    if (this.clientPromise === null) return
-    const pending = this.clientPromise
-    this.clientPromise = null
-    const c = await pending
-    await c.quit()
+    await this.redis.close()
   }
 }

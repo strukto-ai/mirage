@@ -321,7 +321,7 @@ describe('parseCommand — grep -f pattern file', () => {
     expect(p.flags['--file']).toEqual(['/data/pats.txt'])
     expect(p.texts()).toEqual([])
     expect(p.paths()).toEqual(['/data/a.txt'])
-    expect(p.routingPaths()).toContain('/data/pats.txt')
+    expect(p.pathFlagValues).toEqual(['/data/pats.txt'])
   })
 
   it('keeps -e and -f together', () => {
@@ -335,8 +335,7 @@ describe('parseCommand — grep -f pattern file', () => {
     const p = parseCommand(specOf('grep'), ['-f', 'p1.txt', '-f', 'p2.txt', 'a.txt'], '/data')
     expect(p.flags['--file']).toEqual(['/data/p1.txt', '/data/p2.txt'])
     expect(p.paths()).toEqual(['/data/a.txt'])
-    expect(p.routingPaths()).toContain('/data/p1.txt')
-    expect(p.routingPaths()).toContain('/data/p2.txt')
+    expect(p.pathFlagValues).toEqual(['/data/p1.txt', '/data/p2.txt'])
   })
 
   it('keeps rg -f - as stdin, as grep does', () => {
@@ -2021,7 +2020,6 @@ describe('ParsedArgs helpers', () => {
       ['literal', 'str'],
       ['/ram/y', 'path'],
     ],
-    pathFlagValues: ['/ram/z'],
   })
 
   it('paths() returns PATH args only', () => {
@@ -2030,10 +2028,6 @@ describe('ParsedArgs helpers', () => {
 
   it('texts() returns TEXT args only', () => {
     expect(parsed.texts()).toEqual(['literal'])
-  })
-
-  it('routingPaths() combines paths() and pathFlagValues', () => {
-    expect(parsed.routingPaths()).toEqual(['/ram/x', '/ram/y', '/ram/z'])
   })
 
   it('flag() reads with fallback', () => {

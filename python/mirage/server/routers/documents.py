@@ -19,6 +19,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 
 from mirage.policy.errors import PolicyError
+from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces")
 
@@ -36,11 +37,7 @@ async def document(
     session_id: str | None,
     profile: str | None,
 ) -> Response:
-    entry = request.app.state.registry.visible(
-        workspace_id, request.state.account
-    )
-    if entry is None:
-        raise HTTPException(404, "workspace not found")
+    entry = require_entry(request, workspace_id)
     # Loaded before the error mapping: a store that cannot be read is
     # the server's failure, never a 403 or 404 to the client.
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())

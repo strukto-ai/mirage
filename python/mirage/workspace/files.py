@@ -913,19 +913,9 @@ class Files:
         await self._call("truncate", path, session_id, length=length)
 
     @property
-    def network_records(self) -> list[OpRecord]:
-        """Records that hit a remote VFS (not cache)."""
-        return [r for r in self.records if not r.is_cache]
-
-    @property
     def network_bytes(self) -> int:
         """Total bytes transferred over the network."""
         return sum(r.bytes for r in self.records if not r.is_cache)
-
-    @property
-    def cache_records(self) -> list[OpRecord]:
-        """Records served from in-memory cache."""
-        return [r for r in self.records if r.is_cache]
 
     @property
     def cache_bytes(self) -> int:

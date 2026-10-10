@@ -9,7 +9,7 @@ from mirage.core.nextcloud.rename import rename
 from mirage.core.nextcloud.stream import read_stream
 from mirage.core.nextcloud.truncate import truncate
 from mirage.core.nextcloud.unlink import unlink
-from mirage.core.nextcloud.util import nextcloud_key, raw_path_of
+from mirage.core.nextcloud.util import nextcloud_key
 from mirage.core.nextcloud.write import write
 from mirage.types import PathSpec
 
@@ -19,20 +19,18 @@ def _mounted(virtual: str, vfs_path: str) -> PathSpec:
 
 
 @pytest.mark.parametrize(
-    ("virtual", "vfs_path", "raw", "key"),
+    ("virtual", "vfs_path", "key"),
     [
-        ("/nc/docs/a.txt", "docs/a.txt", "/docs/a.txt", "docs/a.txt"),
-        ("/nc", "", "/", ""),
-        ("/nc/", "", "/", ""),
-        ("/nc/docs/", "docs", "/docs/", "docs/"),
-        ("/nc/docs/a.txt/", "docs/a.txt", "/docs/a.txt/", "docs/a.txt/"),
-        ("/a.txt", "a.txt", "/a.txt", "a.txt"),
+        ("/nc/docs/a.txt", "docs/a.txt", "docs/a.txt"),
+        ("/nc", "", ""),
+        ("/nc/", "", ""),
+        ("/nc/docs/", "docs", "docs/"),
+        ("/nc/docs/a.txt/", "docs/a.txt", "docs/a.txt/"),
+        ("/a.txt", "a.txt", "a.txt"),
     ],
 )
-def test_raw_path_and_key_drop_the_mount_prefix(virtual, vfs_path, raw, key):
-    path = _mounted(virtual, vfs_path)
-    assert raw_path_of(path) == raw
-    assert nextcloud_key(path) == key
+def test_key_drops_the_mount_prefix(virtual, vfs_path, key):
+    assert nextcloud_key(_mounted(virtual, vfs_path)) == key
 
 
 class _KeyLog:

@@ -948,7 +948,7 @@ async def test_closing_a_session_purges_its_jobs():
 
 
 @pytest.mark.asyncio
-async def test_closing_every_session_keeps_the_default_ones_jobs():
+async def test_closing_the_other_sessions_keeps_the_default_ones_jobs():
     ws = _workspace()
     ws.create_session("a")
     ws.create_session("b")
@@ -956,7 +956,8 @@ async def test_closing_every_session_keeps_the_default_ones_jobs():
         await ws.shell("sleep 30 &")
         await ws.shell("sleep 30 &", session_id="a")
         await ws.shell("sleep 30 &", session_id="b")
-        await ws.close_all_sessions()
+        await ws.close_session("a")
+        await ws.close_session("b")
         assert ws.job_table.list_jobs("a") == []
         assert ws.job_table.list_jobs("b") == []
         kept = ws.job_table.get(1, ws.default_session_id)

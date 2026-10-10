@@ -98,17 +98,6 @@ class WorkspaceStateStore(ABC):
         )
         return await target._load_meta(workspace_id)
 
-    async def set_meta(
-        self, workspace_id: str, fields: WorkspaceFields
-    ) -> None:
-        """Insert or update one workspace's metadata record."""
-        target = (
-            self._workspace_override
-            if self._workspace_override is not None
-            else self
-        )
-        await target._set_meta(workspace_id, fields)
-
     async def cas_set_meta(
         self,
         workspace_id: str,
@@ -213,12 +202,6 @@ class WorkspaceStateStore(ABC):
     @abstractmethod
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         """Backend read of one metadata record."""
-
-    @abstractmethod
-    async def _set_meta(
-        self, workspace_id: str, fields: WorkspaceFields
-    ) -> None:
-        """Backend write of one metadata record."""
 
     @abstractmethod
     async def _cas_set_meta(

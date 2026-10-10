@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NotionTransport } from './client.ts'
 import {
-  createComment,
   createPage,
   listBlockChildren,
   getChildPages,
@@ -257,18 +256,6 @@ describe('searchPages', () => {
       filter: { value: 'page', property: 'object' },
       page_size: 100,
     })
-  })
-})
-
-describe('createComment', () => {
-  it('invokes API-create-a-comment with the body and returns the comment', async () => {
-    const transport = new FakeTransport()
-    const comment = { id: 'c1', object: 'comment' }
-    transport.responses.push(comment)
-    const body = { parent: { page_id: 'p1' }, rich_text: [{ text: { content: 'hi' } }] }
-    const result = await createComment(transport, body)
-    expect(transport.invocations).toEqual([{ name: 'API-create-a-comment', args: body }])
-    expect(result).toEqual(comment)
   })
 })
 

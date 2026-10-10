@@ -12,16 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
-from mirage.vfs.gsheets.sheet_entry import (
-    SheetEntry,
-    make_filename,
-    sanitize_title,
-)
 
-# A real Google file id is 44 characters, so this is the fixed overhead a
-# title actually has to fit inside.
-DOC_ID = "1" * 44
+from mirage.vfs.gsheets.sheet_entry import SheetEntry, make_filename
 
 
 def test_sheet_entry_creation():
@@ -40,12 +32,6 @@ def test_sheet_entry_creation():
     assert entry.can_edit is True
 
 
-def test_sanitize_title_basic():
-    assert sanitize_title("Hello World") == "Hello_World"
-    assert sanitize_title("My/Doc: A\\Test") == "My_Doc_A_Test"
-    assert sanitize_title("") == "Untitled"
-
-
 def test_make_filename_with_and_without_a_date():
     assert (
         make_filename("My Spreadsheet", "abc123", "2026-03-15T10:00:00Z")
@@ -55,29 +41,3 @@ def test_make_filename_with_and_without_a_date():
         make_filename("My Spreadsheet", "abc123")
         == "My_Spreadsheet__abc123.gsheet.json"
     )
-
-
-def test_make_filename_fits_name_max_for_a_cjk_title():
-    # 100 characters of CJK is 300 bytes, which the character budget passed
-    # untouched: with the date, the id and the suffix the name came to 367
-    # bytes and ext4/APFS reject it with ENAMETOOLONG.
-    name = make_filename("会議の記録" * 40, DOC_ID, "2026-08-20T12:00:00Z")
-    assert byte_length(name) <= NAME_MAX_BYTES
-    assert name.startswith("2026-08-20_")
-    assert name.endswith(f"__{DOC_ID}.gsheet.json")
-    # The cut lands on a character boundary, never mid-sequence.
-    assert "\ufffd" not in name
-
-
-def test_make_filename_leaves_an_ascii_title_on_the_char_budget():
-    name = make_filename("a" * 400, DOC_ID, "")
-    assert byte_length(name) <= NAME_MAX_BYTES
-    assert name == f"{'a' * 97}...__{DOC_ID}.gsheet.json"
-
-
-def test_make_filename_keeps_the_id_when_it_leaves_no_room():
-    # The title is what gives, never the id: a trimmed id would stop
-    # addressing the spreadsheet. Same rule as gcal's event filenames.
-    long_id = "v" * (NAME_MAX_BYTES - 4)
-    name = make_filename("Some Title", long_id, "")
-    assert f"__{long_id}.gsheet.json" in name

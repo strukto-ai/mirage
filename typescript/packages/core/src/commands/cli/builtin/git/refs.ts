@@ -14,15 +14,8 @@
 
 import type { PathSpec } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import {
-  basename,
-  isDirectory,
-  readFile,
-  readNames,
-  readOptional,
-  removeFile,
-  writeFile,
-} from './io.ts'
+import { isDirectory, readFile, readNames, readOptional, removeFile, writeFile } from './io.ts'
+import { entryName } from '../../../../utils/remnants.ts'
 
 import type { Dispatch, HeadRef, Refspec, SymbolicEnd } from './types.ts'
 
@@ -68,7 +61,7 @@ async function walkLooseRefs(
   refs: Map<string, string>,
 ): Promise<void> {
   for (const entry of await readNames(dispatch, root)) {
-    const name = basename(entry)
+    const name = entryName(entry)
     if (name === '') continue
     const child = root.join(name)
     if (await isDirectory(dispatch, child)) {

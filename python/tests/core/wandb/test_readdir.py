@@ -9,7 +9,7 @@ from mirage.cache.index import Evicted, RAMIndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.core.wandb.config import WandbConfig
 from mirage.core.wandb.errors import WandbAPIError
-from mirage.core.wandb.readdir import file_entries, readdir
+from mirage.core.wandb.readdir import file_tree, readdir
 from mirage.core.wandb.stat import stat
 from mirage.types import FileType, PathSpec
 
@@ -19,14 +19,13 @@ from mirage.types import FileType, PathSpec
 )
 def test_unsafe_file_names_fail(name: str) -> None:
     with pytest.raises(WandbAPIError, match="unsafe"):
-        file_entries([{"name": name, "sizeBytes": 1}], "")
+        file_tree([{"name": name, "sizeBytes": 1}])
 
 
 def test_file_directory_collision_fails() -> None:
     with pytest.raises(WandbAPIError, match="collision"):
-        file_entries(
-            [{"name": "a", "sizeBytes": 1}, {"name": "a/b", "sizeBytes": 2}],
-            "",
+        file_tree(
+            [{"name": "a", "sizeBytes": 1}, {"name": "a/b", "sizeBytes": 2}]
         )
 
 

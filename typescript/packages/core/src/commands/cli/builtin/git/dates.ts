@@ -156,7 +156,7 @@ function localWall(timestamp: number, mode: DateMode): [Wall, number] {
 }
 
 /** `1 day` or `2 days`, git's Q_ in the untranslated locale. */
-function plural(count: number, unit: string): string {
+export function plural(count: number, unit: string): string {
   return count === 1 ? `${String(count)} ${unit}` : `${String(count)} ${unit}s`
 }
 

@@ -20,9 +20,9 @@ import {
   listDirname,
   memberFilename,
   sanitizeName,
-  splitSuffixId,
   workspaceDirname,
 } from './pathing.ts'
+import { parseIdName } from '../../utils/naming.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 
 describe('sanitizeName', () => {
@@ -34,21 +34,6 @@ describe('sanitizeName', () => {
   })
   it('truncates long names', () => {
     expect(sanitizeName('a'.repeat(200))).toHaveLength(100)
-  })
-})
-
-describe('splitSuffixId', () => {
-  it('splits dirname into label and id', () => {
-    expect(splitSuffixId('engineering__abc123')).toEqual(['engineering', 'abc123'])
-  })
-  it('splits filename with suffix', () => {
-    expect(splitSuffixId('alice__u1.json', '.json')).toEqual(['alice', 'u1'])
-  })
-  it('throws when missing __', () => {
-    expect(() => splitSuffixId('plain')).toThrow(/plain/)
-  })
-  it('throws when suffix mismatch', () => {
-    expect(() => splitSuffixId('alice__u1', '.json')).toThrow(/__/)
   })
 })
 
@@ -101,6 +86,6 @@ describe('trello names fit NAME_MAX', () => {
     const name = build(CJK, HEX24)
     expect(byteLength(name)).toBeLessThanOrEqual(NAME_MAX_BYTES)
     expect(name).not.toContain('\uFFFD')
-    expect(splitSuffixId(name, suffix)[1]).toBe(HEX24)
+    expect(parseIdName(name, suffix)[1]).toBe(HEX24)
   })
 })

@@ -206,15 +206,6 @@ class DiskRecordClient:
                 names.append(unquote(entry.name.removesuffix(".json")))
         return names
 
-    async def load_all(self) -> dict[str, dict[str, Any]]:
-        names = await self.list_names()
-        records = await asyncio.gather(*(self.get(name) for name in names))
-        return {
-            name: fields
-            for name, (fields, _) in zip(names, records)
-            if fields is not None
-        }
-
     async def delete(self, names: Iterable[str]) -> None:
         for name in names:
             try:

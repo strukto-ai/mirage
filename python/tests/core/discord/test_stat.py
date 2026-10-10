@@ -15,8 +15,8 @@
 import pytest
 
 from mirage.core.discord.entry import snowflake_to_iso
-from mirage.core.discord.render import history_jsonl_bytes
 from mirage.core.discord.stat import stat
+from mirage.core.render.json import jsonl_bytes
 from mirage.types import ContentType, FileType, PathSpec
 from tests.core.discord.conftest import CHANNELS, DAY, MESSAGES, SEALED_DAY
 
@@ -107,7 +107,7 @@ async def test_stat_day_under_bogus_channel_is_enoent(api, accessor, index):
 async def test_stat_chat_jsonl(api, accessor, index):
     row = await stat(accessor, spec(f"/{CHANNEL}/{DAY}/chat.jsonl"), index)
     assert row.content is ContentType.TEXT
-    assert row.size == len(history_jsonl_bytes(MESSAGES))
+    assert row.size == len(jsonl_bytes(MESSAGES))
 
 
 async def test_stat_chat_jsonl_sealed_day_has_unknown_size(

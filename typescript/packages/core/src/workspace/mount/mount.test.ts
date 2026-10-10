@@ -165,27 +165,6 @@ describe('Mount.specFor', () => {
   })
 })
 
-describe('Mount.unregister', () => {
-  it('removes all cmd variants and general fallbacks with the same name', () => {
-    const m = makeMount()
-    const [generic] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
-    const [json] = command({
-      name: 'cat',
-      vfs: 'ram',
-      spec: BASIC_SPEC,
-      fn: OK_CMD,
-      filetype: '.json',
-    })
-    if (generic === undefined || json === undefined) throw new Error('missing')
-    m.register(generic)
-    m.register(json)
-    m.unregister(['cat'])
-    expect(m.resolveCommand('cat')).toBeNull()
-    expect(m.resolveCommand('cat', '.json')).toBeNull()
-    expect(m.specFor('cat')).toBeNull()
-  })
-})
-
 describe('Mount.runCommand', () => {
   it.each([
     [MountMode.READ, false, 'version'],

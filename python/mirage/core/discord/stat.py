@@ -17,14 +17,13 @@ from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.discord.entry import snowflake_to_iso
 from mirage.core.discord.readdir import readdir
 from mirage.core.discord.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import ancestor_entry, resolve_entry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import entry_stat, make_stat
-from mirage.core.time_range import guard_day
+from mirage.core.time_range import day_stat, guard_day
 from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_mime
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 def _dir_stat(
@@ -70,56 +69,6 @@ def _file_blob_stat(
     )
 
 
-async def _channel_proven(
-    accessor: DiscordAccessor, path: PathSpec, index: IndexCacheStore, up: int
-) -> None:
-    """Raise ENOENT unless the path's channel ancestor exists.
-
-    Args:
-        accessor (DiscordAccessor): discord accessor.
-        path (PathSpec): the day or chat.jsonl path being stat'd.
-        index (IndexCacheStore): index cache.
-        up (int): how many trailing segments to drop to reach the
-            channel (1 for a day dir, 2 for its children).
-    """
-    virtual = path.virtual.rstrip("/")
-    for _ in range(up):
-        virtual = virtual.rsplit("/", 1)[0]
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    spec = PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=mount_key(virtual, prefix)
-    )
-    if await resolve_entry(readdir, accessor, spec, index) is None:
-        raise enoent(path.virtual)
-
-
-async def _stat_day(
-    accessor: DiscordAccessor,
-    match: ScopeMatch,
-    path: PathSpec,
-    index: IndexCacheStore,
-) -> FileStat:
-    """Stat a day directory, which resolves beyond the listed window.
-
-    The channel listing synthesizes a bounded window of recent days,
-    but the history API answers a range query for any date, so a
-    well-formed day under a channel that exists is a directory whether
-    or not the window lists it. A bogus channel chain is ENOENT.
-
-    Args:
-        accessor (DiscordAccessor): discord accessor.
-        match (ScopeMatch): a match holding ``guild``/``channel``/``day``.
-        path (PathSpec): the path to stat.
-        index (IndexCacheStore): index cache.
-    """
-    await guard_day(accessor, match, path.virtual)
-    entry = await resolve_entry(readdir, accessor, path, index)
-    if entry is not None:
-        return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
-    await _channel_proven(accessor, path, index, up=1)
-    return FileStat(name=match.slots["day"], type=FileType.DIRECTORY)
-
-
 async def _stat_chat(
     accessor: DiscordAccessor,
     match: ScopeMatch,
@@ -146,7 +95,8 @@ async def _stat_chat(
             content=ContentType.TEXT,
             size=entry.size,
         )
-    await _channel_proven(accessor, path, index, up=2)
+    if await ancestor_entry(readdir, accessor, path, index, up=2) is None:
+        raise enoent(path.virtual)
     return FileStat(
         name="chat.jsonl",
         type=FileType.FILE,
@@ -169,7 +119,7 @@ stat = make_stat(
         "file_blob": _file_blob_stat,
     },
     overrides={
-        "day": _stat_day,
+        "day": day_stat(readdir, guard_day),
         "messages": _stat_chat,
     },
 )

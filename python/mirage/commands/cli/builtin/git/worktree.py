@@ -20,13 +20,13 @@ from mirage.commands.cli.builtin.git.ignore import (
     load_ignores,
 )
 from mirage.commands.cli.builtin.git.io import (
-    basename,
     read_names,
     read_optional,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.remnants import entry_name
 from mirage.view.types import LinkView, StatPath
 
 # git's three untracked modes. "normal" names an untracked directory
@@ -140,7 +140,7 @@ class Scanner:
         for entry in await read_names(
             self._dispatch, self._absolute(relative)
         ):
-            name = basename(entry)
+            name = entry_name(entry)
             if not name:
                 continue
             child = f"{relative}/{name}" if relative else name
@@ -232,7 +232,7 @@ class Scanner:
         for entry in sorted(
             await read_names(self._dispatch, self._absolute(relative))
         ):
-            name = basename(entry)
+            name = entry_name(entry)
             if not name or (not relative and name == GIT_DIR):
                 continue
             child = f"{relative}/{name}" if relative else name

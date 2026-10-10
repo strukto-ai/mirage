@@ -17,6 +17,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from pydantic import SecretStr
 from pymongo import AsyncMongoClient
 
 from mirage.accessor.base import Accessor
@@ -24,14 +25,20 @@ from mirage.vfs.mongodb.config import MongoDBConfig
 from mirage.vfs.secrets import reveal_secret
 
 
-class MongoDBAccessor(Accessor):
-    def __init__(
-        self, config: MongoDBConfig, listing_cache_ttl: float = 5.0
-    ) -> None:
-        self.config = config
-        self.listing_cache_ttl = listing_cache_ttl
+class MongoClientAccessor(Accessor):
+    """An accessor holding one ``AsyncMongoClient`` per event loop.
+
+    AsyncMongoClient binds to the event loop it was created under, so a
+    client is kept per loop. MongoDB and GridFS both reach their server
+    through it.
+
+    Args:
+        uri (SecretStr): the server's connection string.
+    """
+
+    def __init__(self, uri: SecretStr) -> None:
+        self._uri = uri
         self._clients: dict[int, AsyncMongoClient[dict[str, Any]]] = {}
-        self._cache: dict[str, tuple[float, Any]] = {}
 
     @property
     def client(self) -> AsyncMongoClient[dict[str, Any]]:
@@ -47,9 +54,25 @@ class MongoDBAccessor(Accessor):
         key = id(loop) if loop is not None else 0
         client = self._clients.get(key)
         if client is None:
-            client = AsyncMongoClient(reveal_secret(self.config.uri))
+            client = AsyncMongoClient(reveal_secret(self._uri))
             self._clients[key] = client
         return client
+
+    async def close(self) -> None:
+        clients = list(self._clients.values())
+        self._clients.clear()
+        for client in clients:
+            await client.close()
+
+
+class MongoDBAccessor(MongoClientAccessor):
+    def __init__(
+        self, config: MongoDBConfig, listing_cache_ttl: float = 5.0
+    ) -> None:
+        super().__init__(config.uri)
+        self.config = config
+        self.listing_cache_ttl = listing_cache_ttl
+        self._cache: dict[str, tuple[float, Any]] = {}
 
     async def cached_list(
         self, key: str, fetch: Callable[[], Awaitable[Any]]
@@ -65,8 +88,5 @@ class MongoDBAccessor(Accessor):
         return value
 
     async def close(self) -> None:
-        clients = list(self._clients.values())
-        self._clients.clear()
         self._cache.clear()
-        for client in clients:
-            await client.close()
+        await super().close()

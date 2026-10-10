@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedisClientType } from 'redis'
 import { ObserverStoreBase } from '@struktoai/mirage-core/observe/store'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { connectRedis } from '../optional_peer.ts'
+import { RedisConnection } from '../optional_peer.ts'
 
 export interface RedisObserverStoreOptions {
   url?: string
@@ -33,33 +32,24 @@ export class RedisObserverStore extends ObserverStoreBase {
   readonly url: string
   private readonly prefix: string
   private readonly indexKey: string
-  private clientPromise: Promise<RedisClientType> | null = null
+  private readonly redis: RedisConnection
 
   constructor(options: RedisObserverStoreOptions = {}) {
     super()
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.prefix = options.keyPrefix ?? 'mirage:observer:'
     this.indexKey = `${this.prefix}keys`
-  }
-
-  private async client(): Promise<RedisClientType> {
-    if (this.clientPromise === null) {
-      const pending = connectRedis(this.url, 'RedisObserverStore', () => {
-        if (this.clientPromise === pending) this.clientPromise = null
-      })
-      this.clientPromise = pending
-    }
-    return this.clientPromise
+    this.redis = new RedisConnection(this.url, 'RedisObserverStore')
   }
 
   async append(key: string, data: Uint8Array): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
     await c.multi().append(`${this.prefix}${key}`, buf).sAdd(this.indexKey, key).exec()
   }
 
   async write(key: string, data: Uint8Array): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
     await c.multi().set(`${this.prefix}${key}`, buf).sAdd(this.indexKey, key).exec()
   }
@@ -70,7 +60,7 @@ export class RedisObserverStore extends ObserverStoreBase {
   }
 
   private async indexedPaths(): Promise<string[]> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const members = await c.sMembers(this.indexKey)
     return [...members].sort(compareCodePoints)
   }
@@ -78,7 +68,7 @@ export class RedisObserverStore extends ObserverStoreBase {
   private async readPaths(paths: string[]): Promise<Map<string, Uint8Array>> {
     const out = new Map<string, Uint8Array>()
     if (paths.length === 0) return out
-    const c = await this.client()
+    const c = await this.redis.client()
     const mod = (await import('redis')) as unknown as {
       RESP_TYPES: { readonly BLOB_STRING: number }
     }
@@ -97,20 +87,13 @@ export class RedisObserverStore extends ObserverStoreBase {
   }
 
   async clear(): Promise<void> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const paths = await this.indexedPaths()
     const keys = [...paths.map((p) => `${this.prefix}${p}`), this.indexKey]
     if (keys.length > 0) await c.del(keys)
   }
 
   override async close(): Promise<void> {
-    // Idempotent: the workspace closes the plane store it consumed and the
-    // owning WorkspaceStateStore closes every plane it built; the second
-    // close must be a no-op, not a crash on an already-quit client.
-    if (this.clientPromise === null) return
-    const pending = this.clientPromise
-    this.clientPromise = null
-    const c = await pending
-    await c.quit()
+    await this.redis.close()
   }
 }

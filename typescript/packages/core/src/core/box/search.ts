@@ -16,22 +16,10 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { PathSpec } from '../../types.ts'
 import { respellRaw } from '../../utils/path.ts'
+import { compareComponents } from '../../utils/sort.ts'
 import { searchContent, type BoxSearchItem } from './api.ts'
 import { BoxApiError } from './client.ts'
 import { mountRelativeKey, pathParts, resolveItem } from './resolve.ts'
-
-function compareComponents(a: string, b: string): number {
-  const ca = a.split('/')
-  const cb = b.split('/')
-  const n = Math.min(ca.length, cb.length)
-  for (let i = 0; i < n; i += 1) {
-    const x = ca[i] ?? ''
-    const y = cb[i] ?? ''
-    if (x < y) return -1
-    if (x > y) return 1
-  }
-  return ca.length - cb.length
-}
 
 /**
  * Use Box content search to narrow grep/rg scopes to candidate files.

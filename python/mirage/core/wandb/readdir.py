@@ -45,12 +45,6 @@ def file_tree(
     }
 
 
-def file_entries(
-    files: Sequence[Mapping[str, Any]], prefix: str
-) -> list[tuple[str, IndexEntry]]:
-    return file_tree(files).get(prefix.rstrip("/"), [])
-
-
 async def listing(
     accessor: WandbAccessor,
     path: PathSpec,

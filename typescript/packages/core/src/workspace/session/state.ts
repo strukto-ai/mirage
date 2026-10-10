@@ -89,25 +89,6 @@ export function envSnapshot(session: SessionState): Record<string, string> {
 }
 
 /**
- * The names carrying the export attribute, sorted, hidden removed.
- *
- * Wider than `envSnapshot`'s keys by exactly the unset ones: a name
- * `export Z` marked but never assigned is listed by `export -p` as
- * `declare -x Z` while staying out of the environment. So the printers
- * read this and the process view reads `envSnapshot`, rather than one
- * of them re-deriving the other's filter.
- */
-export function exportedNames(session: SessionState): string[] {
-  const out: string[] = []
-  for (const [name, v] of Object.entries(session.vars)) {
-    if (v.attrs.has(VarAttr.Export) && !varHidden(session.visibility, name)) {
-      out.push(name)
-    }
-  }
-  return out.sort(compareCodePoints)
-}
-
-/**
  * The name a `declare -n` reference points at, null otherwise. Null
  * also for a reference declared but not yet aimed (`declare -n r`
  * before `r=v`): bash treats the first assignment as naming the target,

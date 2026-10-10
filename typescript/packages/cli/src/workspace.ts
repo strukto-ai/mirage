@@ -24,14 +24,6 @@ function buildClient() {
   return makeClient(loadDaemonSettings())
 }
 
-function envRecord(): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (typeof v === 'string') out[k] = v
-  }
-  return out
-}
-
 // A config handed to `load` or `clone`: env-interpolated, and with its
 // relative script paths and code refs rebased onto the file's directory
 // exactly as `create` rebases them, so `vfs: ./wiki.mjs:WikiVFS`
@@ -45,7 +37,8 @@ function envRecord(): Record<string, string> {
 // `await` would otherwise typecheck and put `{}` on the wire.
 async function loadConfigArgument(path: string): Promise<JsonValue> {
   if (!existsSync(path)) fail(`config file not found: ${path}`, 2)
-  const { absolutizeScripts, interpolateEnv } = await import('@struktoai/mirage-node/config')
+  const { absolutizeScripts, interpolateEnv, readProcessEnv } =
+    await import('@struktoai/mirage-node/config')
   const { parse: yamlParse } = await import('yaml')
   const text = readFileSync(path, 'utf-8')
   let config: JsonValue
@@ -53,7 +46,7 @@ async function loadConfigArgument(path: string): Promise<JsonValue> {
     // `yamlParse` is typed `any`; naming the shape here is what lets
     // `override` be a JsonValue, which is what makes a dropped `await`
     // on this function a type error rather than an empty body on the wire.
-    config = interpolateEnv(yamlParse(text) as JsonValue, envRecord())
+    config = interpolateEnv(yamlParse(text) as JsonValue, readProcessEnv())
   } catch (err: unknown) {
     fail(`invalid config YAML/JSON at ${path}: ${String(err)}`, 2)
   }

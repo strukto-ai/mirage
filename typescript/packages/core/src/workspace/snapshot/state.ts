@@ -96,7 +96,8 @@ import type {
   SessionSnapshot,
   WorkspaceStateDict,
 } from './types.ts'
-import { FORMAT_VERSION, normMountPrefix } from './utils.ts'
+import { FORMAT_VERSION } from './utils.ts'
+import { normDir } from '../../utils/slash.ts'
 
 /** What a snapshot reads from a workspace and restores into it (`Workspace`). */
 export interface WorkspaceLike {
@@ -120,7 +121,7 @@ export interface WorkspaceLike {
 const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
 
 export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict> {
-  const skip = new Set(['/dev/', normMountPrefix(HISTORY_PREFIX), normMountPrefix(BIN_PREFIX)])
+  const skip = new Set(['/dev/', normDir(HISTORY_PREFIX), normDir(BIN_PREFIX)])
   const mounted = [...ws.registry.allMounts()]
   for (const mount of mounted) await mount.ensureReady()
   const mounts = mounted.filter((m) => !skip.has(m.prefix) && m.vfs.name !== 'document')
@@ -326,8 +327,8 @@ export function buildMountArgs(
   const normalized: Record<string, BaseVFS | Mount> = {}
   const overridePrefixes = new Set<string>()
   for (const [prefix, vfs] of Object.entries(overrides)) {
-    normalized[normMountPrefix(prefix)] = vfs
-    overridePrefixes.add(normMountPrefix(prefix))
+    normalized[normDir(prefix)] = vfs
+    overridePrefixes.add(normDir(prefix))
   }
   // A mount with no override by now is one nobody can build: it asked to
   // be handed back live or was saved with a redacted secret, or the
@@ -339,7 +340,7 @@ export function buildMountArgs(
   const missing = state.mounts
     .filter(
       (m) =>
-        normalized[normMountPrefix(m.prefix)] === undefined &&
+        normalized[normDir(m.prefix)] === undefined &&
         (vfsStateRequiresOverride(m.vfs_state) || !restoresAsFreshRAM(m)),
     )
     .map((m) => m.prefix)
@@ -360,7 +361,7 @@ export function buildMountArgs(
     // A live override placed as a `Mount` names the entry point it
     // came through; a bare VFS, or a rebuilt one, keeps the saved
     // reference so a second round trip rebuilds through the same entry point.
-    const override = normalized[normMountPrefix(m.prefix)]
+    const override = normalized[normDir(m.prefix)]
     if (m.anchor === true && override === undefined) {
       anchorMode = m.mode as MountMode
       continue
@@ -396,7 +397,7 @@ export function buildMountArgs(
     // (`mounts=` vs `_construct_vfs`); here `fromState` merges its
     // rebuilds into the same map first, so it names its callers' set.
     const foreign = userOverrides ?? overridePrefixes
-    const read: ReadSpec = foreign.has(normMountPrefix(m.prefix))
+    const read: ReadSpec = foreign.has(normDir(m.prefix))
       ? (placed?.options.read ?? DEFAULT_READ_SPEC)
       : savedSpec
     // The saved policy survives an override, as `mode` does.
@@ -542,9 +543,9 @@ export async function withRebuiltMounts(
   build: SavedResourceBuilder,
 ): Promise<Record<string, BaseVFS | Mount>> {
   const merged: Record<string, BaseVFS | Mount> = { ...overrides }
-  const held = new Set(Object.keys(overrides).map(normMountPrefix))
+  const held = new Set(Object.keys(overrides).map(normDir))
   for (const m of state.mounts) {
-    if (held.has(normMountPrefix(m.prefix))) continue
+    if (held.has(normDir(m.prefix))) continue
     if (vfsStateRequiresOverride(m.vfs_state)) continue
     const built = await build(m)
     if (built !== null) merged[m.prefix] = built

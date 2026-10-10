@@ -17,9 +17,10 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { makeReaddir, type DirListing, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
+import { jsonlBytes } from '../render/json.ts'
 import { listChannels, listDms } from './channels.ts'
 import { channelDirname, dmDirname, fileBlobName, userFilename } from './formatters.ts'
-import { fetchMessagesForDay, messagesToJsonl, type SlackMessage } from './history.ts'
+import { fetchMessagesForDay, type SlackMessage } from './history.ts'
 import { cursorPages } from './paginate.ts'
 import { detectScope } from './scope.ts'
 import { listUsers, userJsonBytes } from './users.ts'
@@ -252,7 +253,7 @@ async function dayListing(
     name: 'chat.jsonl',
     resourceType: 'slack/chat_jsonl',
     vfsName: 'chat.jsonl',
-    size: messagesToJsonl(messages).byteLength,
+    size: jsonlBytes(messages).byteLength,
   })
   const filesEntry = new IndexEntry({
     id: `${channelId}:${dateStr}:files`,

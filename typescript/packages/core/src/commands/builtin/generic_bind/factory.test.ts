@@ -22,6 +22,7 @@ import { BUILDERS } from './builders/index.ts'
 import {
   genericCommands,
   scanIo,
+  walked,
   withProbeAnswers,
   withSlashGuard,
   withStatCache,
@@ -213,6 +214,19 @@ describe('withSlashGuard on the write tier', () => {
     const guarded = withSlashGuard(makeOps())
     expect(guarded.write).toBeUndefined()
     expect(guarded.append).toBeUndefined()
+  })
+})
+
+describe('walked', () => {
+  it('sets the native find and du aside', () => {
+    const io = makeOps({
+      find: () => Promise.resolve([]),
+      du: { size: () => Promise.resolve(0), entries: () => Promise.resolve([[], 0]) },
+    })
+    const rest = walked(io)
+    expect(rest.find).toBeUndefined()
+    expect(rest.du).toBeUndefined()
+    expect(rest.readdir).toBe(io.readdir)
   })
 })
 

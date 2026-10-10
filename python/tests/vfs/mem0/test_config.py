@@ -7,13 +7,11 @@ from mirage.vfs.mem0.config import Mem0Config
 def test_scope_filter_user():
     cfg = Mem0Config(api_key=SecretStr("k"), user_id="alex")
     assert cfg.scope_filter == {"user_id": "alex"}
-    assert cfg.scope_kind == "user"
 
 
 def test_scope_filter_agent():
     cfg = Mem0Config(api_key=SecretStr("k"), agent_id="routine_agent")
     assert cfg.scope_filter == {"agent_id": "routine_agent"}
-    assert cfg.scope_kind == "agent"
 
 
 def test_requires_exactly_one_entity_none_set():

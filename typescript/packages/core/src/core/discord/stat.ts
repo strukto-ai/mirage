@@ -12,21 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { guardDay } from '../time_range.ts'
+import { dayStat, guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { ancestorEntry, resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat, makeStat } from '../hierarchy/stat.ts'
 import { readdir } from './readdir.ts'
 import { snowflakeToIso } from './entry.ts'
 import { detectScope } from './scope.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 function dirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
@@ -62,53 +60,6 @@ function fileBlobStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
 }
 
 /**
- * Raise ENOENT unless the path's channel ancestor exists. `up` is how many
- * trailing segments to drop to reach the channel (1 for a day dir, 2 for its
- * children).
- */
-async function channelProven(
-  accessor: DiscordAccessor,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-  up: number,
-): Promise<void> {
-  let virtual = rstripSlash(path.virtual)
-  for (let i = 0; i < up; i++) virtual = virtual.split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const spec = new PathSpec({
-    virtual,
-    directory: virtual,
-    vfsPath: mountKey(virtual, prefix),
-  })
-  if ((await resolveEntry(readdir, accessor, spec, index)) === null) {
-    throw enoent(path)
-  }
-}
-
-/**
- * Stat a day directory, which resolves beyond the listed window.
- *
- * The channel listing synthesizes a bounded window of recent days, but the
- * history API answers a range query for any date, so a well-formed day under
- * a channel that exists is a directory whether or not the window lists it. A
- * bogus channel chain is ENOENT.
- */
-async function statDay(
-  accessor: DiscordAccessor,
-  match: ScopeMatch,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  await guardDay(accessor, match, path.virtual)
-  const entry = await resolveEntry(readdir, accessor, path, index)
-  if (entry !== null) {
-    return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-  }
-  await channelProven(accessor, path, index, 1)
-  return new FileStat({ name: match.slots.day ?? '', type: FileType.DIRECTORY })
-}
-
-/**
  * Stat chat.jsonl, which survives a sealed day.
  *
  * A day whose history could not be listed (403/404/429) seals an empty date
@@ -130,7 +81,7 @@ async function statChat(
       ...(entry.size !== null ? { size: entry.size } : {}),
     })
   }
-  await channelProven(accessor, path, index, 2)
+  if ((await ancestorEntry(readdir, accessor, path, index, 2)) === null) throw enoent(path)
   return new FileStat({ name: 'chat.jsonl', type: FileType.FILE, content: ContentType.TEXT })
 }
 
@@ -146,7 +97,7 @@ export const stat = makeStat<DiscordAccessor>(detectScope, readdir, {
     file_blob: fileBlobStat,
   },
   overrides: {
-    day: statDay,
+    day: dayStat(readdir, guardDay),
     messages: statChat,
   },
 })

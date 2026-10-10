@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type PathSpec, type WalkEntry } from '@struktoai/mirage-core/types'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { mountPrefixOf, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { type DeltaHook, ListingDeltaHook, synthDirs } from '@struktoai/mirage-core/watch/index'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
-import { gridfsPrefix, iterLatest, prefixQuery, rawPathOf, stripKeyPrefix } from './client.ts'
+import { gridfsPrefix, iterLatest, prefixQuery, stripKeyPrefix } from './client.ts'
 
 /**
  * One flat `fs.files` aggregation feeding the generic differ.

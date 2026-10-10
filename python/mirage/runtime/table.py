@@ -26,20 +26,19 @@ from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.sandbox.sandlock import SandlockRuntime
 from mirage.runtime.workspace import WorkspaceRuntime
 
-# One source of truth, preference order (sandboxed first, host last).
-# The command -> runtime mapping is derived from each class's captures,
-# never hand-maintained. Process sandboxes are registered separately.
-RUNTIMES: tuple[type[Runtime], ...] = (
-    MontyRuntime,
-    WasiRuntime,
-    LocalRuntime,
-    QuickJsRuntime,
-)
-
-
-NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
-NAMED[WorkspaceRuntime.name] = WorkspaceRuntime
-NAMED[SandlockRuntime.name] = SandlockRuntime
+# The builtin runtimes by name. The command -> runtime mapping is
+# derived from each class's captures, never hand-maintained.
+NAMED: dict[str, type[Runtime]] = {
+    cls.name: cls
+    for cls in (
+        MontyRuntime,
+        WasiRuntime,
+        LocalRuntime,
+        QuickJsRuntime,
+        WorkspaceRuntime,
+        SandlockRuntime,
+    )
+}
 
 # Sandbox runtimes resolve on first use. Their provider SDKs are heavy
 # (the daytona client alone pulls in opentelemetry), and importing them
@@ -129,7 +128,7 @@ def build_runtime(name: str, **options: Any) -> Runtime:
     """Construct a runtime by name, failing loud on unknown names.
 
     Args:
-        name (str): a runtime name from RUNTIMES.
+        name (str): a runtime name from NAMED.
         options (Any): constructor options for the runtime (a yaml
             entry's remaining keys, e.g. wasi's `home`).
 

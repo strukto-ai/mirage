@@ -18,6 +18,7 @@ from stat import S_ISDIR, S_ISLNK, S_ISREG
 from typing import Any, Protocol
 
 from mirage.runtime.python.host.stat import ident
+from mirage.utils.remnants import entry_name
 
 
 class StatRouter(Protocol):
@@ -26,15 +27,6 @@ class StatRouter(Protocol):
     def stat(self, path: Any) -> os.stat_result: ...
 
     def lstat(self, path: Any) -> os.stat_result: ...
-
-
-def leaf(entry: str) -> str:
-    """The basename of a readdir entry, directory slash dropped.
-
-    Args:
-        entry (str): one entry as the readdir op spells it.
-    """
-    return entry.rstrip("/").rsplit("/", 1)[-1]
 
 
 class MountDirEntry:
@@ -72,7 +64,7 @@ class MountDirEntry:
 
     @property
     def name(self) -> str:
-        return leaf(self._path)
+        return entry_name(self._path)
 
     @property
     def path(self) -> str:

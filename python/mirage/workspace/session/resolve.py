@@ -42,6 +42,7 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.hidden import classify_paths, classify_shows, classify_vars
+from mirage.utils.path import norm
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.session import SessionState, vars_from_env
 from mirage.workspace.session.shell_dirs import set_cwd
@@ -323,15 +324,6 @@ def with_inline(
     )
 
 
-def _root_of(prefix: str) -> str:
-    """One spelling for a mount prefix: leading slash, no trailing one.
-
-    Args:
-        prefix (str): the prefix as the document spells it.
-    """
-    return "/" + prefix.strip("/")
-
-
 def _anchored(entries: tuple[str, ...], root: str) -> tuple[str, ...]:
     """A mount section's path entries, anchored to the mount they are
     written under.
@@ -398,7 +390,7 @@ def compile_commands(profile: SessionProfile) -> AdmissionRules | None:
     ask: list[CommandRule] = []
     deny: list[CommandRule] = []
     for prefix, entry in (profile.mounts or {}).items():
-        root = _root_of(prefix)
+        root = norm(prefix)
         ask.extend(_scope_rules(_rules_of(entry.commands, "ask"), root))
         deny.extend(_scope_rules(_rules_of(entry.commands, "deny"), root))
     block = profile.commands
@@ -425,7 +417,7 @@ def _hidden(profile: SessionProfile) -> HiddenPaths | None:
         entries.extend(profile.paths.hide)
     for prefix, entry in (profile.mounts or {}).items():
         if entry.paths is not None:
-            entries.extend(_anchored(entry.paths.hide, _root_of(prefix)))
+            entries.extend(_anchored(entry.paths.hide, norm(prefix)))
     return classify_paths(entries)
 
 
@@ -459,7 +451,7 @@ def _hide_reasons_of(profile: SessionProfile) -> tuple[HideReason, ...]:
         groups.extend(profile.paths.reasons)
     for prefix, entry in (profile.mounts or {}).items():
         if entry.paths is not None:
-            root = _root_of(prefix)
+            root = norm(prefix)
             groups.extend(
                 HideReason(
                     patterns=_anchored(g.patterns, root), reason=g.reason

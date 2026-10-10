@@ -271,6 +271,40 @@
         "stdout": "<a><b><c>\n   <   a   >   < 251   b   >  \\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mapfile_refuses_a_non_ascii_count",
+      "seq": 940069,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | { mapfile -n ² mfn; echo \"rc=$? n=${#mfn[@]}\"; cat; }; printf 'a\\nb\\n' | { mapfile -s ٣ mfn; echo \"rc=$? n=${#mfn[@]}\"; cat; }",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1 n=0\na\nb\nrc=1 n=0\na\nb\n",
+        "stderr": "bash: mapfile: ²: invalid line count\nbash: mapfile: ٣: invalid line count\n"
+      }
     }
   ]
 }

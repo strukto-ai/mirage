@@ -32,7 +32,7 @@ describe('DiskWorkspaceStateStore', () => {
 
   it('round-trips meta and uses the shared layout', async () => {
     expect(await store.loadMeta('ws1')).toBeNull()
-    await store.setMeta('ws1', { workspace_id: 'ws1', generation: 1 })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1', generation: 1 }, 0)
     expect((await store.loadMeta('ws1'))?.workspace_id).toBe('ws1')
     expect(existsSync(join(root, 'workspaces', 'ws1', 'workspace.json'))).toBe(true)
   })
@@ -83,7 +83,7 @@ describe('DiskWorkspaceStateStore', () => {
   })
 
   it('shares state across store instances via the directory', async () => {
-    await store.setMeta('ws1', { workspace_id: 'ws1', generation: 1 })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1', generation: 1 }, 0)
     await store.sessions('ws1').set('s', { session_id: 's', cwd: '/x' })
     const reader = new DiskWorkspaceStateStore({ root })
     expect((await reader.loadMeta('ws1'))?.generation).toBe(1)
@@ -95,8 +95,8 @@ describe('DiskWorkspaceStateStore', () => {
     await store.namespace('ws1').set('/a', { mode: 0o600 })
     await store.observer('ws1').append('d/s1.jsonl', new TextEncoder().encode('{}\n'))
     await store.sessions('ws1').set('s1', { session_id: 's1' })
-    await store.setMeta('ws1', { workspace_id: 'ws1' })
-    await store.setMeta('ws2', { workspace_id: 'ws2' })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
+    await store.casSetMeta('ws2', { workspace_id: 'ws2' }, 0)
     await store.drop('ws1')
     expect(existsSync(join(root, 'workspaces', 'ws1'))).toBe(false)
     expect(await store.loadMeta('ws1')).toBeNull()

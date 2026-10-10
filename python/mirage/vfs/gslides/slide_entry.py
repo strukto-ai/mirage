@@ -15,11 +15,9 @@
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
+from mirage.core.google.scope import app_filename
 
-TITLE_MAX_CHARS = 100
 SUFFIX = ".gslide.json"
-DATE_LEN = 10
 
 
 @dataclass
@@ -34,33 +32,4 @@ class SlideEntry:
     filename: str
 
 
-sanitize_title = partial(
-    sanitize_label, fallback="Untitled", max_len=TITLE_MAX_CHARS
-)
-
-
-def make_filename(title: str, doc_id: str, modified_time: str = "") -> str:
-    """Build a filename from title, doc ID, and modified date.
-
-    The title takes whatever of the 255-byte NAME_MAX the date, the id and
-    the suffix leave, rather than a flat character count: those are the same
-    number only for ASCII, and a 100-character CJK title rendered a name ext4
-    and APFS reject outright. The id never gives, so the name keeps
-    addressing the document -- same rule as gcal's event filenames.
-
-    Args:
-        title (str): raw document title.
-        doc_id (str): Google Slides presentation ID.
-        modified_time (str): ISO 8601 timestamp.
-
-    Returns:
-        str: filename in format "YYYY-MM-DD_Sanitized_Title__docid.json".
-    """
-    lead = (
-        f"{modified_time[:DATE_LEN]}_"
-        if len(modified_time) >= DATE_LEN
-        else ""
-    )
-    fixed = byte_length(lead) + len("__") + byte_length(doc_id) + len(SUFFIX)
-    label = sanitize_title(title, max_bytes=NAME_MAX_BYTES - fixed)
-    return f"{lead}{label}__{doc_id}{SUFFIX}"
+make_filename = partial(app_filename, suffix=SUFFIX)

@@ -18,6 +18,7 @@ from difflib import SequenceMatcher
 from dulwich.object_store import BaseObjectStore
 from dulwich.objects import Blob, Commit, ObjectID
 
+from mirage.commands.cli.builtin.git.dates import plural
 from mirage.commands.cli.builtin.git.format import short
 
 ROOT_COMMIT = "(root-commit) "
@@ -252,16 +253,6 @@ def stat_table(stats: list[FileStat], width: int = STAT_WIDTH) -> list[str]:
     return lines
 
 
-def _plural(count: int, noun: str) -> str:
-    """``N noun`` with the noun pluralised the way git pluralises it.
-
-    Args:
-        count (int): how many.
-        noun (str): the singular noun.
-    """
-    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
-
-
 def stat_line(files: int, insertions: int, deletions: int) -> str:
     """git's one-line diffstat.
 
@@ -276,11 +267,11 @@ def stat_line(files: int, insertions: int, deletions: int) -> str:
         insertions (int): lines added.
         deletions (int): lines removed.
     """
-    parts = [f" {_plural(files, 'file')} changed"]
+    parts = [f" {plural(files, 'file')} changed"]
     if insertions or not deletions:
-        parts.append(_plural(insertions, "insertion") + "(+)")
+        parts.append(plural(insertions, "insertion") + "(+)")
     if deletions or not insertions:
-        parts.append(_plural(deletions, "deletion") + "(-)")
+        parts.append(plural(deletions, "deletion") + "(-)")
     return ", ".join(parts)
 
 

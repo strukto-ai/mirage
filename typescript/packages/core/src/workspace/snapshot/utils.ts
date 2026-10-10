@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
-
 // How long a capture (a snapshot, a copy, a clone) waits for the lines
 // already running to end before it answers EBUSY.
 export const QUIESCE_SECONDS = 30
@@ -27,9 +25,4 @@ export function isSafeBlobPath(path: unknown): path is string {
   if (path.startsWith('/')) return false
   if (path.includes('\0')) return false
   return !path.split('/').includes('..')
-}
-
-export function normMountPrefix(prefix: string): string {
-  const s = stripSlash(prefix)
-  return s === '' ? '/' : '/' + s + '/'
 }

@@ -78,18 +78,6 @@ export function wrapCachableStreams(
   return [stdout, io]
 }
 
-export async function* exitOnEmpty(
-  stream: AsyncIterable<Uint8Array>,
-  io: IOResult,
-): AsyncIterable<Uint8Array> {
-  let yielded = false
-  for await (const chunk of stream) {
-    yielded = true
-    yield chunk
-  }
-  if (!yielded) io.exitCode = 1
-}
-
 export async function drain(stream: ByteSource | null): Promise<void> {
   if (stream === null || stream instanceof Uint8Array) return
   if (stream instanceof CachableAsyncIterator) {

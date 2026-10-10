@@ -169,13 +169,13 @@ class IOResult:
 
     ``exit_code`` is a delegating read, not a plain field, because a
     streaming command's status can depend on its content: grep returns
-    ``(exit_on_empty(stream, io_A), io_A)`` with a provisional
-    ``io_A.exit_code = 0``, and the wrapper settles the real value on
-    ``io_A`` only when the stream is drained. ``merge()`` therefore
-    links the merged result to its right-hand original instead of
-    copying the number, and a read follows the link, so the value is
-    exactly as fresh as the origin at the moment it is read, however
-    many merges sit in between and however early or often it is read.
+    its lazy stream with ``io_A`` at a provisional ``io_A.exit_code = 0``
+    and settles the real value on ``io_A`` only as the stream is drained.
+    ``merge()`` therefore links the merged result to its right-hand
+    original instead of copying the number, and a read follows the
+    link, so the value is exactly as fresh as the origin at the moment
+    it is read, however many merges sit in between and however early or
+    often it is read.
     An explicit write (``io.exit_code = 124``) stores locally and
     severs the link, so an aggregated or overridden status always
     wins over the lazy one (issue #43). The one rule left for callers
@@ -283,7 +283,7 @@ class IOResult:
             merged_stderr = left_stderr + right_stderr
         # The exit code is not copied: the merged result reads it
         # through the link, so a lazy status settling after this merge
-        # (exit_on_empty firing at drain time) is still visible.
+        # (grep's, at drain time) is still visible.
         result = IOResult(
             stdout=other.stdout,
             matched_runs=other.matched_runs,
