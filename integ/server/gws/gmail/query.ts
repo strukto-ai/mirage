@@ -32,9 +32,10 @@ export function gmailDateMs(token: string): number {
   return NaN
 }
 
-// AND-only Gmail query subset: label:, from:, to:, subject:, is:unread,
-// is:read, after:<date|epoch>, before:<date|epoch>, and bare terms matching
-// subject or body as case-insensitive substrings.
+// AND-only Gmail query subset: label:, from:, to:, subject:, filename:,
+// is:unread, is:read, after:<date|epoch>, before:<date|epoch>, and bare terms
+// matching the From, To, Cc and Subject headers or the body as
+// case-insensitive substrings, as Gmail searches every one of them.
 export function matchGmailQuery(st: GwsState, msg: GmailMessage, q: string): boolean {
   for (const token of q.split(/\s+/)) {
     if (token === '') continue
@@ -48,6 +49,9 @@ export function matchGmailQuery(st: GwsState, msg: GmailMessage, q: string): boo
       if (!gmailHeader(msg, 'To').toLowerCase().includes(lower.slice(3))) return false
     } else if (lower.startsWith('subject:')) {
       if (!gmailHeader(msg, 'Subject').toLowerCase().includes(lower.slice(8))) return false
+    } else if (lower.startsWith('filename:')) {
+      const name = lower.slice(9)
+      if (!msg.attachments.some((a) => a.filename.toLowerCase().includes(name))) return false
     } else if (lower === 'is:unread') {
       if (!msg.labelIds.includes('UNREAD')) return false
     } else if (lower === 'is:read') {
@@ -59,7 +63,8 @@ export function matchGmailQuery(st: GwsState, msg: GmailMessage, q: string): boo
       const ms = gmailDateMs(token.slice(7))
       if (Number.isNaN(ms) || msg.internalDate >= ms) return false
     } else {
-      const haystack = `${gmailHeader(msg, 'Subject')}\n${msg.bodyText}`.toLowerCase()
+      const headers = ['From', 'To', 'Cc', 'Subject'].map((name) => gmailHeader(msg, name))
+      const haystack = [...headers, msg.bodyText].join('\n').toLowerCase()
       if (!haystack.includes(lower)) return false
     }
   }

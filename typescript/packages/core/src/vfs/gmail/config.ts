@@ -12,11 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  normalizeGoogleConfig as normalizeGmailConfig,
-  redactGoogleConfig as redactGmailConfig,
-} from '../../core/google/config.ts'
-export type {
-  GoogleConfig as GmailConfig,
-  GoogleConfigRedacted as GmailConfigRedacted,
-} from '../../core/google/config.ts'
+import { GoogleConfigSchema } from '../../core/google/config.ts'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  z,
+} from '../secrets.ts'
+
+const GmailConfigSchema = GoogleConfigSchema.extend({
+  // Let grep -w and rg -w read only the messages Gmail search names
+  // (`filesContaining`). Off by default: Gmail indexes a message some time
+  // after it arrives.
+  contentSearch: z.boolean().optional(),
+})
+
+export type GmailConfig = ConfigOf<typeof GmailConfigSchema>
+
+export type GmailConfigRedacted = RedactedConfig<
+  GmailConfig,
+  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
+>
+
+export function redactGmailConfig(config: GmailConfig): GmailConfigRedacted {
+  return redactConfigWithSchema(GmailConfigSchema, config) as unknown as GmailConfigRedacted
+}
+
+export function normalizeGmailConfig(input: Record<string, unknown>): GmailConfig {
+  return parseConfigWithSchema(GmailConfigSchema, input)
+}

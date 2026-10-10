@@ -12,137 +12,244 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timezone
-from typing import Any
+import logging
 
-from mirage.core.gmail.messages import (
-    _decode_body,
-    _extract_header,
-    get_message_processed,
-    get_message_raw,
-    list_messages,
+import aiohttp
+
+from mirage.accessor.gmail import GmailAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.core.gmail.date_query import date_dir_to_gmail_query
+from mirage.core.gmail.messages import list_messages
+from mirage.core.gmail.readdir import MSG_SUFFIX, readdir
+from mirage.core.gmail.scope import detect_scope
+from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.scope import ROOT
+from mirage.types import PathSpec
+from mirage.utils.key_prefix import mounted_path
+from mirage.utils.naming import parse_id_name
+from mirage.utils.record_search import record_queries
+
+logger = logging.getLogger(__name__)
+
+MAX_HITS = 500
+
+# What a .gmail.json holds besides the headers, body and attachment names
+# Gmail searches: its key names, JSON literals, system label ids, the
+# words of a Date header, the entities a snippet escapes and MIME types.
+RECORD_KEYS = frozenset(
+    {
+        "id",
+        "from",
+        "name",
+        "email",
+        "to",
+        "cc",
+        "subject",
+        "date",
+        "snippet",
+        "labels",
+        "attachments",
+        "filename",
+        "path",
+        "size",
+        "true",
+        "false",
+        "null",
+        "inbox",
+        "sent",
+        "draft",
+        "spam",
+        "trash",
+        "unread",
+        "starred",
+        "important",
+        "chat",
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun",
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "oct",
+        "nov",
+        "dec",
+        "gmt",
+        "utc",
+        "ut",
+        "est",
+        "edt",
+        "cst",
+        "cdt",
+        "mst",
+        "mdt",
+        "pst",
+        "pdt",
+        "time",
+        "standard",
+        "daylight",
+        "universal",
+        "coordinated",
+        "pacific",
+        "eastern",
+        "central",
+        "mountain",
+        "amp",
+        "quot",
+        "apos",
+        "lt",
+        "gt",
+        "nbsp",
+        "text",
+        "plain",
+        "html",
+        "csv",
+        "markdown",
+        "calendar",
+        "pdf",
+        "image",
+        "png",
+        "jpeg",
+        "jpg",
+        "gif",
+        "webp",
+        "svg",
+        "audio",
+        "video",
+        "mpeg",
+        "application",
+        "octet",
+        "stream",
+        "zip",
+        "json",
+        "xml",
+        "x",
+        "vnd",
+        "ms",
+        "msword",
+        "excel",
+        "powerpoint",
+        "openxmlformats",
+        "officedocument",
+        "spreadsheetml",
+        "sheet",
+        "wordprocessingml",
+        "document",
+        "presentationml",
+        "presentation",
+        "message",
+        "rfc",
+    }
 )
-from mirage.core.gmail.readdir import _msg_filename
-from mirage.core.google.client import TokenManager
-
-EXCERPT_WINDOW = 120
-EXCERPT_MAX = 240
 
 
-def _extract_excerpt(text: str, pattern: str) -> str:
-    if not text or not pattern:
-        return ""
-    flat = " ".join(text.split())
-    idx = flat.lower().find(pattern.lower())
-    if idx < 0:
-        return flat[:EXCERPT_MAX]
-    start = max(0, idx - EXCERPT_WINDOW)
-    end = min(len(flat), idx + len(pattern) + EXCERPT_WINDOW)
-    prefix = "..." if start > 0 else ""
-    suffix = "..." if end < len(flat) else ""
-    return f"{prefix}{flat[start:end]}{suffix}"
-
-
-def _build_query(
-    pattern: str, label_name: str | None, date_str: str | None
-) -> str:
-    parts = [pattern]
-    if label_name:
-        parts.append(f"label:{label_name}")
-    if date_str:
-        try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            parts.append(f"after:{dt.strftime('%Y/%m/%d')}")
-        except ValueError:
-            # invalid date filter: skip the clause rather than fail the search
-            pass
-    return " ".join(parts)
-
-
-def _date_from_internal(internal_date: str) -> str:
-    try:
-        ts = int(internal_date) / 1000
-    except (TypeError, ValueError):
-        return ""
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
-
-
-async def search_messages(
-    token_manager: TokenManager,
-    pattern: str,
-    label_name: str | None = None,
-    date_str: str | None = None,
-    max_results: int = 50,
-) -> list[dict[str, Any]]:
-    """Search Gmail and return formatted result rows.
-
-    Returns:
-        list[dict]: each row has keys path, subject, snippet, sender.
-    """
-    query = _build_query(pattern, label_name, date_str)
-    stubs = await list_messages(
-        token_manager,
-        query=query,
-        max_results=max_results,
+def _child(directory: PathSpec, name: str) -> PathSpec:
+    return mounted_path(
+        directory, f"{directory.mount_path.rstrip('/')}/{name}"
     )
-    rows: list[dict[str, Any]] = []
-    for stub in stubs:
-        mid = stub.get("id")
-        if not mid:
-            continue
-        raw = await get_message_raw(token_manager, mid)
-        headers = raw.get("payload", {}).get("headers", [])
-        subject = _extract_header(headers, "Subject") or "No Subject"
-        sender = _extract_header(headers, "From") or "?"
-        snippet = raw.get("snippet", "")
-        body_text = _decode_body(raw.get("payload", {}))
-        msg_date = _date_from_internal(raw.get("internalDate", "0"))
-        rows.append(
-            {
-                "id": mid,
-                "subject": subject,
-                "snippet": snippet,
-                "sender": sender,
-                "date": msg_date,
-                "label": label_name or "",
-                "body_text": body_text,
-            }
+
+
+async def _messages(
+    accessor: GmailAccessor, directory: PathSpec, index: IndexCacheStore
+) -> dict[str, list[PathSpec]]:
+    found: dict[str, list[PathSpec]] = {}
+    pending = [directory]
+    while pending:
+        current = pending.pop()
+        for listed in await readdir(accessor, current, index):
+            child = _child(current, listed.rsplit("/", 1)[-1])
+            kind = detect_scope(child).kind
+            if kind == "day":
+                pending.append(child)
+            elif kind == "message":
+                name = child.mount_path.rsplit("/", 1)[-1]
+                message_id = parse_id_name(name, suffix=MSG_SUFFIX)[1]
+                found.setdefault(message_id, []).append(child)
+    return found
+
+
+async def _hits(
+    accessor: GmailAccessor,
+    directory: PathSpec,
+    queries: list[str],
+    index: IndexCacheStore,
+) -> list[PathSpec] | None:
+    match = detect_scope(directory)
+    label = mounted_path(directory, "/" + match.slots["label"])
+    entry = await resolve_entry(readdir, accessor, label, index)
+    day = match.slots.get("day")
+    bound = date_dir_to_gmail_query(day) if day else ""
+    if entry is None or bound is None:
+        return None
+    ids: set[str] = set()
+    for query in queries:
+        stubs = await list_messages(
+            accessor.token_manager,
+            label_id=entry.id,
+            query=f"{query} {bound}".strip(),
+            max_results=MAX_HITS,
         )
-    return rows
+        if len(stubs) >= MAX_HITS:
+            return None
+        ids.update(stub["id"] for stub in stubs)
+    files = await _messages(accessor, directory, index)
+    return [path for message_id in ids for path in files.get(message_id, [])]
 
 
-def format_grep_results(
-    rows: list[dict[str, Any]],
-    label_name: str | None,
-    prefix: str,
-    pattern: str = "",
-) -> list[str]:
-    lines: list[str] = []
-    for row in rows:
-        label = row.get("label") or label_name or "INBOX"
-        date = row.get("date", "")
-        mid = row.get("id", "")
-        # The same builder readdir names the file with, not a second
-        # spelling of it: the subject's budget depends on the id and the
-        # suffix, so a hit composed from a bare `_sanitize` pointed at a
-        # path that does not exist once a long subject was trimmed.
-        filename = _msg_filename(row.get("subject") or "No Subject", mid)
-        sender = row.get("sender", "?")
-        haystack = f"{row.get('subject', '')}\n{row.get('body_text', '')}"
-        excerpt = _extract_excerpt(haystack, pattern) if pattern else ""
-        if not excerpt:
-            excerpt = (row.get("snippet") or "").replace("\n", " ")
-        path = (
-            f"{prefix}/{label}/{date}/{filename}"
-            if date
-            else f"{prefix}/{label}/{filename}"
-        )
-        lines.append(f"{path}:[{sender}] {excerpt}")
-    return lines
+async def files_containing(
+    accessor: GmailAccessor,
+    text: str,
+    under: list[PathSpec],
+    index: IndexCacheStore,
+) -> list[PathSpec] | None:
+    """The message files under ``under`` Gmail search names.
 
+    Gmail matches whole words of the headers, the body and (with
+    ``filename:``) attachment names, so each hit is a message that may
+    hold ``text``. Each label is searched on its own, since an account
+    search leaves out spam and trash; a day adds its UTC bounds. Hits map
+    to files by the message id the listing names them with. None when
+    ``text`` could match the JSON around those fields
+    (``record_queries``), on an API error, at ``MAX_HITS`` hits, or with
+    no hit at all, since Gmail indexes a message some time after it
+    arrives.
 
-__all__ = [
-    "search_messages",
-    "get_message_processed",
-    "format_grep_results",
-]
+    Args:
+        accessor (GmailAccessor): the account.
+        text (str): the whole word or words searched for.
+        under (list[PathSpec]): the directories walked.
+        index (IndexCacheStore): the listings the walk filled.
+    """
+    queries = record_queries(text, RECORD_KEYS, whole_word=True)
+    if queries is None:
+        return None
+    queries += [f"filename:{query.split()[0]}" for query in queries]
+    found: list[PathSpec] = []
+    try:
+        for scope in under:
+            match = detect_scope(scope)
+            if match.kind == ROOT:
+                listed = await readdir(accessor, scope, index)
+                labels = [_child(scope, p.rsplit("/", 1)[-1]) for p in listed]
+            elif match.kind in ("label", "day"):
+                labels = [scope]
+            else:
+                continue
+            for directory in labels:
+                hits = await _hits(accessor, directory, queries, index)
+                if hits is None:
+                    return None
+                found.extend(hits)
+    except aiohttp.ClientResponseError as exc:
+        logger.warning("gmail search failed (%s); reading every file", exc)
+        return None
+    return found or None

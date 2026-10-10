@@ -18,6 +18,7 @@ from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gmail.read import read as _read
 from mirage.core.gmail.readdir import readdir as _readdir
+from mirage.core.gmail.search import files_containing as _files_containing
 from mirage.core.gmail.stat import stat as _stat
 from mirage.core.google.client import TokenManager
 from mirage.types import FileStat, PathSpec, VFSName
@@ -41,6 +42,8 @@ class GmailVFS(BaseVFS):
     index_ttl: float = 86_400
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
+    # Gmail search names messages; an attachment is read as usual.
+    searchable = ("*/*/*.gmail.json",)
 
     def __init__(self, config: GmailConfig) -> None:
         super().__init__()
@@ -67,6 +70,19 @@ class GmailVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec] | None:
+        if not whole_word or not self.config.content_search:
+            return None
+        return await _files_containing(self.accessor, text, under, index)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

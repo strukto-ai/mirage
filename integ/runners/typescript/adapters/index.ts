@@ -1844,7 +1844,7 @@ function gwsNativeVfs(
   }
   if (vfs === 'gdocs') return new GDocsVFS(config)
   if (vfs === 'gsheets') return new GSheetsVFS(config)
-  if (vfs === 'gmail') return new GmailVFS(config)
+  if (vfs === 'gmail') return new GmailVFS({ ...config, contentSearch: true })
   // today is pinned so the rolling window is the same on both hosts and
   // lands on the seeded events.
   if (vfs === 'gcal')

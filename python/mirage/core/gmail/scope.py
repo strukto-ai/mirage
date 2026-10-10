@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.hierarchy.codec import DATE, Codec
-from mirage.core.hierarchy.scope import ROOT, Scope, Slot, make_detect_scope
+from mirage.core.hierarchy.scope import Scope, Slot, make_detect_scope
 from mirage.types import ContentType
 
 GMAIL_JSON = Codec(suffix=".gmail.json")
@@ -21,11 +21,11 @@ GMAIL_JSON = Codec(suffix=".gmail.json")
 _LABEL = (Slot("label"),)
 _DAY = _LABEL + (Slot("day", DATE),)
 
-# One description of the tree: readdir, stat, read and the search
-# push-down all classify through it, so the file surface and the command
-# surface cannot disagree about what a path means. The message scope is
-# declared before the attachment dir because only the suffix separates
-# the two at that depth.
+# One description of the tree: readdir, stat, read and search all
+# classify through it, so the file surface and the command surface
+# cannot disagree about what a path means. The message scope is declared
+# before the attachment dir because only the suffix separates the two at
+# that depth.
 SCOPES = (
     Scope(kind="label", segments=_LABEL),
     Scope(kind="day", segments=_DAY),
@@ -48,10 +48,3 @@ SCOPES = (
 )
 
 detect_scope = make_detect_scope(SCOPES)
-
-# Kinds the Gmail search push-down may answer for: the whole account or
-# one label. A day is absent because its query has no upper bound, so it
-# would report the later days' messages too; a message file or an
-# attachment names one node, which a query over the account cannot stand
-# in for.
-NATIVE_KINDS = frozenset({ROOT, "label"})

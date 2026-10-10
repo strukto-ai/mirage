@@ -826,7 +826,10 @@ class GwsService:
     def gmail_vfs(self) -> GmailVFS:
         return GmailVFS(
             GmailConfig(
-                client_id="integ", refresh_token=GWS_TOKEN, api_base=self.url
+                client_id="integ",
+                refresh_token=GWS_TOKEN,
+                api_base=self.url,
+                content_search=True,
             )
         )
 

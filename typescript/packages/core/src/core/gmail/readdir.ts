@@ -32,7 +32,7 @@ import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 import { dateDirToGmailQuery, spanToGmailQuery } from './date_query.ts'
 
 const TITLE_MAX = 80
-const MSG_SUFFIX = '.gmail.json'
+export const MSG_SUFFIX = '.gmail.json'
 const MAX_MESSAGES = 50
 
 export const sanitize = (text: string, maxBytes?: number): string =>

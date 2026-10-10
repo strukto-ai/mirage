@@ -16,4 +16,7 @@ from mirage.core.google.config import GoogleConfig
 
 
 class GmailConfig(GoogleConfig):
-    pass
+    # Let grep -w and rg -w read only the messages Gmail search names
+    # (`files_containing`). Off by default: Gmail indexes a message some
+    # time after it arrives.
+    content_search: bool = False

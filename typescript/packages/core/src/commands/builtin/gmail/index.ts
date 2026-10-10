@@ -15,18 +15,8 @@
 import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
 import { genericCommands } from '../generic_bind/index.ts'
-import { GMAIL_GREP } from './grep.ts'
-import { GMAIL_RG } from './rg.ts'
-
-const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
 
 // Gmail verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves
 // the filesystem surface.
-export const GMAIL_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.GMAIL, {
-    overrides: GMAIL_OVERRIDES,
-  }),
-  ...GMAIL_GREP,
-  ...GMAIL_RG,
-]
+export const GMAIL_COMMANDS: readonly Command[] = genericCommands(VFSName.GMAIL)

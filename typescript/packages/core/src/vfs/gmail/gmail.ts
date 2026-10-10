@@ -25,6 +25,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
+import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { read as gmailRead } from '../../core/gmail/read.ts'
 import { stat as gmailStat } from '../../core/gmail/stat.ts'
 
@@ -43,6 +44,8 @@ export class GmailVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = PROMPT
   override readonly writePrompt: string = WRITE_PROMPT
+  // Gmail search names messages; an attachment is read as usual.
+  override readonly searchable: readonly string[] = ['*/*/*.gmail.json']
   readonly config: GmailConfig
   override readonly accessor: GmailAccessor
 
@@ -69,6 +72,16 @@ export class GmailVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return gmailStat(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+    index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
+    return gmailFilesContaining(this.accessor, text, under, index)
   }
 
   override getState(): Promise<GmailVFSState> {
