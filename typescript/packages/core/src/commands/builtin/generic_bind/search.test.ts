@@ -24,7 +24,8 @@ import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 
-import { narrowScope, runSearch } from './search.ts'
+import { candidateReads, narrowScope, runSearch } from './search.ts'
+import { grepGeneric } from '../generic/grep.ts'
 import { grepNeedsEveryFile } from '../grep_pushdown.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -357,5 +358,74 @@ describe('narrowScope', () => {
       resolved: [],
       usedSearch: true,
     })
+  })
+})
+
+describe('candidateReads', () => {
+  const tree: Record<string, string | null> = {
+    '/d': null,
+    '/d/a.txt': 'ada here\n',
+    '/d/b.txt': 'ada too\n',
+    '/d/c.txt': 'nothing\n',
+  }
+  const enc = new TextEncoder()
+  const treeSpec = (virtual: string): PathSpec =>
+    new PathSpec({ virtual, directory: virtual, vfsPath: virtual })
+  const treeStat = (p: PathSpec): Promise<FileStat> => {
+    const data = tree[p.virtual]
+    return Promise.resolve(
+      data === null || data === undefined
+        ? new FileStat({ name: p.virtual, type: FileType.DIRECTORY })
+        : new FileStat({ name: p.virtual, type: FileType.FILE, size: data.length }),
+    )
+  }
+  const treeReaddir = (p: PathSpec): Promise<string[]> => {
+    const base = `${p.virtual.replace(/\/$/, '')}/`
+    return Promise.resolve(
+      Object.keys(tree)
+        .filter((k) => k.startsWith(base) && !k.slice(base.length).includes('/'))
+        .sort(),
+    )
+  }
+  const treeStream = (log: string[]) =>
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      log.push(p.virtual)
+      yield enc.encode(tree[p.virtual] ?? '')
+    }
+  const collect = async (it: AsyncIterable<Uint8Array>): Promise<string> => {
+    let out = ''
+    for await (const chunk of it) out += new TextDecoder().decode(chunk)
+    return out
+  }
+
+  it('reads empty only what the search ruled out', async () => {
+    const log: string[] = []
+    const read = candidateReads(treeStream(log), new Set(['/d/a.txt']), new Set(['/d/c.txt']))
+    expect(await collect(read(treeSpec('/d/a.txt')))).toBe('ada here\n')
+    expect(await collect(read(treeSpec('/d/b.txt')))).toBe('')
+    expect(await collect(read(treeSpec('/d/c.txt')))).toBe('nothing\n')
+    expect(log).toEqual(['/d/a.txt', '/d/c.txt'])
+  })
+
+  it('narrows a walk without changing it', async () => {
+    // The walk still lists and labels every file; only the candidate is
+    // read, and the file the search ruled out still counts 0 under -c.
+    const log: string[] = []
+    const read = candidateReads(treeStream(log), new Set(['/d/a.txt']), new Set(['/d']))
+    const [out, io] = unwrap(
+      await grepGeneric(
+        'grep',
+        [treeSpec('/d')],
+        ['ada'],
+        opts({ r: true, c: true }),
+        treeStat,
+        treeReaddir,
+        read,
+      ),
+    )
+    expect(await drain(out)).toBe('/d/a.txt:1\n/d/b.txt:0\n/d/c.txt:0\n')
+    expect(io.exitCode).toBe(0)
+    expect(log).toEqual(['/d/a.txt'])
   })
 })

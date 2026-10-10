@@ -88,6 +88,29 @@ async function* nativeOrBytes<A extends Accessor>(
   }
 }
 
+/**
+ * A read that answers a file a complete search ruled out as empty.
+ *
+ * A search narrows a walk without changing it: the walk lists, filters,
+ * orders and labels every file as it always does, and only the files the
+ * search returned are read. A walked file outside that set cannot match, so
+ * it reads as empty, which leaves every output the walk would print for it
+ * unchanged (-c counts 0, -L lists it, the rest print nothing). An operand
+ * named on the line is always read, since the search was asked about scopes,
+ * not about it. Output that needs a ruled-out file's real bytes (-v, --text)
+ * must not be narrowed at all. Mirrors Python's `candidate_reads`.
+ */
+export function candidateReads(
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  candidates: ReadonlySet<string>,
+  operands: ReadonlySet<string>,
+): (p: PathSpec) => AsyncIterable<Uint8Array> {
+  return async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+    if (!candidates.has(p.virtual) && !operands.has(p.virtual)) return
+    yield* stream(p)
+  }
+}
+
 // How a native search matches the pushed-down pattern. `utf8` is grep under a
 // UTF-8 locale; ripgrep matches text under any.
 export function searchOptions(

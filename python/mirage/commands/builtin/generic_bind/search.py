@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Container
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -116,6 +116,56 @@ def native_or_bytes(
             yield chunk
 
     return stream
+
+
+def candidate_reads(
+    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
+    read_stream: Callable[[PathSpec], AsyncIterator[bytes]] | None,
+    candidates: Container[str],
+    operands: Container[str],
+) -> tuple[
+    Callable[[PathSpec], Awaitable[bytes]],
+    Callable[[PathSpec], AsyncIterator[bytes]] | None,
+]:
+    """Reads that answer a file a complete search ruled out as empty.
+
+    A search narrows a walk without changing it: the walk lists, filters,
+    orders and labels every file as it always does, and only the files the
+    search returned are read. A walked file outside that set cannot match,
+    so it reads as empty, which leaves every output the walk would print
+    for it unchanged (-c counts 0, -L lists it, the rest print nothing).
+    An operand named on the line is always read, since the search was
+    asked about scopes, not about it. Output that needs a ruled-out
+    file's real bytes (-v, --text) must not be narrowed at all.
+
+    Args:
+        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): the bound
+            whole-read op.
+        read_stream (Callable[[PathSpec], AsyncIterator[bytes]] | None):
+            the bound stream op, or None when the backend reads whole.
+        candidates (Container[str]): virtual paths the search returned.
+        operands (Container[str]): virtual paths named on the line.
+    """
+
+    def ruled_out(path: PathSpec) -> bool:
+        return path.virtual not in candidates and path.virtual not in operands
+
+    async def read(path: PathSpec) -> bytes:
+        if ruled_out(path):
+            return b""
+        return await read_bytes(path)
+
+    if read_stream is None:
+        return read, None
+    source = read_stream
+
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        if ruled_out(path):
+            return
+        async for chunk in source(path):
+            yield chunk
+
+    return read, stream
 
 
 async def run_search(

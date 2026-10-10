@@ -20,7 +20,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.cache.index import NULL_INDEX
+from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic_bind.search import (
+    candidate_reads,
     narrow_scope,
     run_search,
 )
@@ -444,3 +446,85 @@ def test_binary_candidates_are_dropped_and_may_leave_none():
     assert (used, [p.virtual for p in resolved]) == (True, ["/data/a.txt"])
     io, _ = _narrowing(answer=[_hit("/data/a.parquet")])
     assert _narrow(io) == ([], True)
+
+
+_TREE = {
+    "/d": None,
+    "/d/a.txt": b"ada here\n",
+    "/d/b.txt": b"ada too\n",
+    "/d/c.txt": b"nothing\n",
+}
+
+
+async def _tree_readdir(path: PathSpec) -> list[str]:
+    base = path.virtual.rstrip("/") + "/"
+    return sorted(
+        key
+        for key in _TREE
+        if key.startswith(base) and "/" not in key[len(base) :]
+    )
+
+
+async def _tree_stat(path: PathSpec) -> FileStat:
+    data = _TREE[path.virtual]
+    if data is None:
+        return FileStat(name=path.virtual, type=FileType.DIRECTORY)
+    return FileStat(name=path.virtual, type=FileType.FILE, size=len(data))
+
+
+def _tree_reads(read_log: list[str]):
+    async def read(path: PathSpec) -> bytes:
+        read_log.append(path.virtual)
+        data = _TREE[path.virtual]
+        assert data is not None
+        return data
+
+    return read
+
+
+def _spec(virtual: str) -> PathSpec:
+    return PathSpec(virtual=virtual, directory=virtual, vfs_path=virtual)
+
+
+@pytest.mark.asyncio
+async def test_candidate_reads_empty_only_what_the_search_ruled_out():
+    log: list[str] = []
+    read, stream = candidate_reads(
+        _tree_reads(log),
+        partial(stream_from_bytes, _tree_reads(log)),
+        {"/d/a.txt"},
+        {"/d/c.txt"},
+    )
+    assert await read(_spec("/d/a.txt")) == b"ada here\n"
+    assert await read(_spec("/d/b.txt")) == b""
+    assert await read(_spec("/d/c.txt")) == b"nothing\n"
+    assert stream is not None
+    assert b"".join([c async for c in stream(_spec("/d/b.txt"))]) == b""
+    assert log == ["/d/a.txt", "/d/c.txt"]
+
+
+@pytest.mark.asyncio
+async def test_candidate_reads_keep_a_whole_read_backend_whole():
+    read, stream = candidate_reads(_tree_reads([]), None, set(), set())
+    assert stream is None
+    assert await read(_spec("/d/a.txt")) == b""
+
+
+@pytest.mark.asyncio
+async def test_candidate_reads_narrow_a_walk_without_changing_it():
+    # The walk still lists and labels every file; only the candidate is
+    # read, and the file the search ruled out still counts 0 under -c.
+    log: list[str] = []
+    read, _ = candidate_reads(_tree_reads(log), None, {"/d/a.txt"}, {"/d"})
+    output, io = await grep_generic(
+        [_spec("/d")],
+        ["ada"],
+        CommandOpts(flags={"r": True, "c": True}),
+        readdir=_tree_readdir,
+        stat=_tree_stat,
+        read_bytes=read,
+        read_stream=None,
+    )
+    assert await _drain(output) == b"/d/a.txt:1\n/d/b.txt:0\n/d/c.txt:0\n"
+    assert io.exit_code == 0
+    assert log == ["/d/a.txt"]
