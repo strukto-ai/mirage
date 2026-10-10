@@ -15,7 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { type CacheConfig, CacheType, type RedisCacheConfig } from '../../cache/file/config.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { IndexType } from '../../cache/index/config.ts'
+import type { WorkspaceOptions } from './types.ts'
 import { Workspace } from './workspace.ts'
+import { Mount } from '../mount/spec.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { buildFileCache, registerFileCacheStore } from './cache.ts'
 
 describe('buildFileCache', () => {
@@ -56,6 +60,24 @@ describe('buildFileCache', () => {
 })
 
 describe('the workspace cache', () => {
+  it('types a Redis cache and index the way the runtime takes them', () => {
+    const options: WorkspaceOptions = {
+      cache: { type: CacheType.REDIS, url: 'redis://localhost:6379/0', keyPrefix: 'c:' },
+      index: { type: IndexType.REDIS, url: 'redis://localhost:6379/0', keyPrefix: 'i:' },
+    }
+    expect([options.cache, options.index]).toMatchObject([{ keyPrefix: 'c:' }, { keyPrefix: 'i:' }])
+    const mount = new Mount(new RAMVFS(), {
+      index: { type: IndexType.REDIS, url: 'redis://localhost:6379/0', keyPrefix: 'm:' },
+    })
+    expect(mount.options.index).toMatchObject({ keyPrefix: 'm:' })
+    const added: Parameters<Workspace['addMount']>[5] = {
+      type: IndexType.REDIS,
+      url: 'redis://localhost:6379/0',
+      keyPrefix: 'a:',
+    }
+    expect(added).toMatchObject({ keyPrefix: 'a:' })
+  })
+
   it('takes the cache as config, the way index already does', () => {
     const ws = new Workspace({}, { cache: { type: CacheType.RAM, limit: 4096 } })
     expect(ws.cache).toBeInstanceOf(RAMFileCacheStore)

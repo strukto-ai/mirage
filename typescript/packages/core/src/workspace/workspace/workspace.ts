@@ -23,7 +23,11 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config.ts'
+import {
+  normalizeIndexConfig,
+  type IndexConfig,
+  type RedisIndexConfig,
+} from '../../cache/index/config.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -1193,7 +1197,7 @@ export class Workspace {
     mode: MountMode = MountMode.READ,
     read?: ReadSpec,
     vfsRef: string | null = null,
-    index?: IndexConfig,
+    index?: IndexConfig | RedisIndexConfig,
     write?: string | null,
   ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
