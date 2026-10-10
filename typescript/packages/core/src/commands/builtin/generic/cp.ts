@@ -816,6 +816,26 @@ async function treeLines(
   return lines
 }
 
+// Copy one entry natively, or by bytes where a link leads elsewhere. The
+// dispatcher follows a link standing at the destination name, so a native
+// copy whose link leads onto another mount answers EXDEV; that entry goes
+// through the relay's read and write instead, which follow the link wherever
+// it lands. Every other entry keeps the backend's copy (a Drive document
+// stays a document). Mirrors Python's _copy_entry.
+async function copyEntry(
+  strategy: NativeCopy,
+  copies: TransferLinks | undefined,
+  src: PathSpec,
+  dst: PathSpec,
+): Promise<void> {
+  try {
+    await strategy.copy(src, dst)
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'EXDEV' || copies === undefined) throw err
+    await copies.relay.write(dst, await copies.relay.readBytes(src))
+  }
+}
+
 // A failed mkdir stops the whole source, mirroring copyEntries and GNU: the
 // children of a directory that could not be created cannot land, so reporting
 // one line per descendant (and then copying the files anyway) would be both
@@ -1310,7 +1330,7 @@ export async function cpGeneric(
         )
         if (!made.ok) continue
         try {
-          await strategy.copy(entry, entryDst)
+          await copyEntry(strategy, copies, entry, entryDst)
         } catch (err) {
           if (!isFsError(err)) throw err
           errors.push(

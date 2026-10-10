@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from functools import partial
@@ -1068,6 +1069,36 @@ def within(path: str, root: str) -> bool:
     return path.rstrip("/") == base or path.startswith(f"{base}/")
 
 
+async def _copy_entry(
+    strategy: NativeCopy,
+    copies: TransferLinks | None,
+    src: PathSpec,
+    dst: PathSpec,
+) -> None:
+    """Copy one entry natively, or by bytes where a link leads elsewhere.
+
+    The dispatcher follows a link standing at the destination name, so a
+    native copy whose link leads onto another mount answers EXDEV; that
+    entry goes through the relay's read and write instead, which follow
+    the link wherever it lands. Every other entry keeps the backend's
+    copy (a Drive document stays a document).
+
+    Args:
+        strategy (NativeCopy): the mount's native copy.
+        copies (TransferLinks | None): the relay; None outside a
+            workspace, where no link can stand.
+        src (PathSpec): the entry to copy.
+        dst (PathSpec): where it goes.
+    """
+    try:
+        await strategy.copy(src, dst)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV or copies is None:
+            raise
+        data = await copies.relay.read_bytes(src)
+        await copies.relay.write(dst, data=data)
+
+
 async def _mirror_dirs(
     strategy: NativeCopy,
     stat: StatFn,
@@ -1702,7 +1733,7 @@ async def cp_generic(
                 if not ok:
                     continue
                 try:
-                    await strategy.copy(entry, entry_dst)
+                    await _copy_entry(strategy, copies, entry, entry_dst)
                 except FS_ERRORS as exc:
                     errors.append(
                         f"cp: cannot create regular file "

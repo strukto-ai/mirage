@@ -47,17 +47,9 @@ export const BUILDER: GenericCommand = {
     // A native copy or find answers for a whole tree in one call, so the
     // dispatcher declines one whose tree the caller's view restricts; cp
     // takes the entry-by-entry walk up front there, which is where GNU's
-    // per-entry refusals are worded. A link below the destination is a
-    // name the backend's copy writes as it is, where a write follows it,
-    // into another mount too, so cp walks there as well.
-    const parsed = parseFlags(new FlagView(opts.flags, specOf('cp')))
-    const links = opts.ns?.links ?? null
-    const dst = parsed.targetDir ?? paths.at(-1)
+    // per-entry refusals are worded.
     const ops: CommandIO = { ...raw }
-    if (
-      pathsScoped(opts.ns, paths, opts.mountPrefix ?? '') ||
-      (links !== null && dst !== undefined && links.subtree(dst.virtual).length > 0)
-    ) {
+    if (pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')) {
       delete ops.copy
       delete ops.dirCopy
       delete ops.find
@@ -88,6 +80,7 @@ export const BUILDER: GenericCommand = {
               options,
               idx,
             )
+    const parsed = parseFlags(new FlagView(opts.flags, specOf('cp')))
     // A native copy moves a tree in one backend call and a native find
     // lists it, neither of which passes an entry through the guard the
     // way a read does; while a path rule scopes cp, or a hide could
@@ -114,6 +107,7 @@ export const BUILDER: GenericCommand = {
               : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
             ...(mkdir === undefined ? {} : { mkdir: (p: PathSpec) => mkdir(accessor, p) }),
           }
+    const links = opts.ns?.links ?? null
     const cwd = opts.cwd
     return cpGeneric(
       resolved,
