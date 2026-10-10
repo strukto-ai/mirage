@@ -21,6 +21,8 @@ import { posixPhrase } from '../../../../errors/posix.ts'
 import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { sessionVisibility } from '../../../../context/session_context.ts'
+import { pathVisible } from '../../../../utils/hidden.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { fail } from '../shared.ts'
@@ -72,9 +74,12 @@ export function followPaths(
   followLast = true,
   slashFollows = true,
 ): (string | PathSpec)[] {
+  const vis = sessionVisibility()
   const out: (string | PathSpec)[] = []
   for (const item of items) {
-    if (!(item instanceof PathSpec)) {
+    // A path the line's session cannot see stays as typed, so the op that
+    // reaches it answers ENOENT rather than reading through a hidden link.
+    if (!(item instanceof PathSpec) || !pathVisible(vis, item.virtual)) {
       out.push(item)
       continue
     }

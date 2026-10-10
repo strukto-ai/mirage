@@ -298,7 +298,7 @@ class MirageSFTPServer {
   private async stat(id: number, path: string, follow: boolean): Promise<void> {
     const core = await this.mount()
     const p = workspacePath(path)
-    this.sftp.attrs(id, toAttrs(await core.getattr(follow ? core.identity(p) : p)))
+    this.sftp.attrs(id, toAttrs(await core.getattr(p, follow)))
   }
 
   private async fstat(id: number, buf: Buffer): Promise<void> {
@@ -417,7 +417,7 @@ class MirageSFTPServer {
 
   private async readlink(id: number, path: string): Promise<void> {
     const core = await this.mount()
-    const target = core.readlink(workspacePath(path))
+    const target = await core.readlink(workspacePath(path))
     this.sftp.name(id, [{ filename: target, longname: target, attrs: NO_ATTRS }])
   }
 

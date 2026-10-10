@@ -174,11 +174,7 @@ export class MirageFS {
   }
 
   private readlink(path: string, cb: Cb<string>): void {
-    try {
-      cb(0, this.core.readlink(path))
-    } catch (err) {
-      cb(classifyError(err))
-    }
+    this.respond(this.core.readlink(path), cb)
   }
 
   private symlink(src: string, dest: string, cb: (code: number) => void): void {
@@ -205,19 +201,22 @@ export class MirageFS {
     cb(0, this.core.statfs())
   }
 
-  // chmod / chown / utimens / access are no-ops for the filesystem but must
-  // validate path existence — callers like `touch`/`chmod` on a missing file
-  // should fail with ENOENT, not silently succeed.
-
-  private chmod(path: string, _mode: number, cb: (code: number) => void): void {
-    this.validate(path, cb)
+  private chmod(path: string, mode: number, cb: (code: number) => void): void {
+    this.respond(this.core.setattr(path, mode), cb)
   }
 
-  private chown(path: string, _uid: number, _gid: number, cb: (code: number) => void): void {
-    this.validate(path, cb)
+  // -1 leaves an id as it is (chown(2)); fuse-native hands it over unsigned.
+  private chown(path: string, uid: number, gid: number, cb: (code: number) => void): void {
+    const keptUid = uid === -1 || uid === 0xffffffff ? null : uid
+    const keptGid = gid === -1 || gid === 0xffffffff ? null : gid
+    this.respond(this.core.setattr(path, null, keptUid, keptGid), cb)
   }
 
-  private utimens(path: string, _atime: Date, _mtime: Date, cb: (code: number) => void): void {
+  // Accepted, not stored: libfuse marks "now" and "leave it" in the
+  // nanosecond field, which fuse-native folds into milliseconds, and it
+  // passes the access time in both slots. utimens and access only check
+  // that the path is there.
+  private utimens(path: string, _atime: number, _mtime: number, cb: (code: number) => void): void {
     this.validate(path, cb)
   }
 

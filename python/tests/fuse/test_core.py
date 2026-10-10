@@ -317,8 +317,8 @@ class _Sizeless:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    async def stat(self, path):
-        s = await self._inner.stat(path)
+    async def stat(self, path, nofollow=False):
+        s = await self._inner.stat(path, nofollow=nofollow)
         return s.model_copy(update={"size": None})
 
 
@@ -489,9 +489,8 @@ async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
         content=ContentType.TEXT,
         modified="2026-01-02T03:04:05+00:00",
     )
-    entry = {"st_mode": 0o100644, "st_mtime": 0, "st_ctime": 0}
-    got_naive = seeded._apply_stat_attrs(dict(entry), naive)
-    got_aware = seeded._apply_stat_attrs(dict(entry), aware)
+    got_naive = seeded.attrs(naive)
+    got_aware = seeded.attrs(aware)
     assert got_naive["st_mtime"] == got_aware["st_mtime"]
     assert got_naive["st_mtime"] == mtime_ns(naive)
 
@@ -499,16 +498,15 @@ async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
 @pytest.mark.asyncio
 async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
     # 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
-    # fold keys on None, so epoch zero overwrites the construction-time
-    # default instead of leaving it in place.
+    # translator keys on None, so epoch zero replaces the mount's start
+    # time instead of reading as unknown.
     epoch = FileStat(
         name="f",
         type=FileType.FILE,
         content=ContentType.TEXT,
         modified="1970-01-01T00:00:00Z",
     )
-    entry = {"st_mode": 0o100644, "st_mtime": 12345, "st_ctime": 12345}
-    got = seeded._apply_stat_attrs(dict(entry), epoch)
+    got = seeded.attrs(epoch)
     assert got["st_mtime"] == 0
     assert got["st_ctime"] == 0
 

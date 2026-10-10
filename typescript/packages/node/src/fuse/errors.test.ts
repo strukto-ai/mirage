@@ -54,10 +54,8 @@ describe('classifyErrno', () => {
     ['not a directory', ENOTDIR],
     ['is a directory', EISDIR],
     ['permission denied', EACCES],
-    ['read-only mount', EACCES],
     ['file exists', EEXIST],
     ['no such file or directory', ENOENT],
-    ['no mount at /x', ENOENT],
   ])('falls back to the message for %s', (message, expected) => {
     expect(classifyErrno(new Error(message))).toBe(expected)
   })

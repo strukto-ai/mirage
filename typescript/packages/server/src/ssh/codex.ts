@@ -213,7 +213,7 @@ async function lookup(core: MountCore, path: string): Promise<FuseAttr | null> {
 }
 
 function followed(core: MountCore, path: string): Promise<FuseAttr> {
-  return core.getattr(core.identity(path))
+  return core.getattr(path, true)
 }
 
 /** `fs/getMetadata`: what the path points at, and whether it is a link. */
@@ -795,9 +795,11 @@ class CodexChannel {
   }
 
   private async canonicalize(params: Message): Promise<JsonValue> {
-    const target = this.core.identity(toPath(arg(params, 'path', 'string')))
-    await this.core.getattr(target)
-    return { path: toUri(target) }
+    const path = toPath(arg(params, 'path', 'string'))
+    // The stat goes first: it refuses a link the session cannot see before
+    // its target is named.
+    await this.core.getattr(path, true)
+    return { path: toUri(this.core.identity(path)) }
   }
 
   private async writeFile(params: Message): Promise<JsonValue> {

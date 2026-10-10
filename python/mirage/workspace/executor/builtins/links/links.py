@@ -21,12 +21,14 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, walk_spelling
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context import session_visibility
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import Result
@@ -78,7 +80,9 @@ def follow_paths(
     ``vfs_path`` at dispatch. A path a link loop stands in resolves to
     nothing, so it stays as typed with ``walk_error`` set, and the op that
     reaches it answers ELOOP: GNU reports the one operand in the command's
-    own words and goes on to the next.
+    own words and goes on to the next. A path the line's session cannot
+    see stays as typed too, so the op that reaches it answers ENOENT
+    rather than reading through a hidden link.
 
     Args:
         namespace (Namespace): addressing authority holding the link table.
@@ -89,9 +93,12 @@ def follow_paths(
             ``follow_last``; False only for ``tar``, which strips the
             slash before it stats.
     """
+    vis = session_visibility()
     out: list[str | PathSpec] = []
     for item in items:
-        if not isinstance(item, PathSpec):
+        if not isinstance(item, PathSpec) or not path_visible(
+            vis, item.virtual
+        ):
             out.append(item)
             continue
         last = follow_last or (slash_follows and item.raw_path.endswith("/"))

@@ -14,7 +14,7 @@
 
 import { execFile } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { open, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, open, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -52,8 +52,8 @@ async function runSizelessProbe(
     '/api': new Mount(api, { mode: MountMode.READ }),
   })
   const realStat = ws.vfs.stat.bind(ws.vfs)
-  ws.vfs.stat = async (path) => {
-    const s = await realStat(path)
+  ws.vfs.stat = async (path, sessionId, opts) => {
+    const s = await realStat(path, sessionId, opts)
     if (s.type === FileType.DIRECTORY) return s
     return new FileStat({ name: s.name, type: s.type, size: null })
   }
@@ -182,6 +182,8 @@ async function runLinkProbe(
     await unlink(`${mp}/data/lk.plain`)
     result.link_plain_unlink_ok = !ws.namespace.isLink('/data/lk.plain')
     result.link_target_survives = (await readFile(`${mp}/data/f.txt`, 'utf8')).trim()
+    // A device reports the row the workspace's /dev answers.
+    result.dev_null_char_device = (await stat(`${mp}/dev/null`)).isCharacterDevice()
   } finally {
     await handle.unmount()
     await ws.close()
@@ -222,10 +224,11 @@ async function runSessionProbe(
   const ws = new Workspace({ '/data': new Mount(res, { mode: MountMode.WRITE }) })
   const session = ws.createSession('agent', {
     profile: parseSessionProfile({
-      paths: { hide: ['/data/vault'] },
+      paths: { hide: ['/data/vault', '/data/hl'] },
       mounts: { '/data': 'read' },
     }),
   })
+  await ws.shell('ln -s pub.txt /data/hl')
   const hidden = await ws.shell('cat /data/vault/secret.txt', { sessionId: 'agent' })
   result.session_shell_hidden_exit = hidden.exitCode
   const listing = await ws.shell('ls /data', { sessionId: 'agent' })
@@ -241,6 +244,8 @@ async function runSessionProbe(
     result.session_kernel_visible_read = (await readFile(`${data}/pub.txt`, 'utf8')).trim()
     result.session_kernel_listing = (await readdir(data)).sort().join(',')
     result.session_kernel_hidden_absent = await absent(() => readFile(`${data}/vault/secret.txt`))
+    // A hidden link is absent too, not reported from the link table.
+    result.session_kernel_hidden_link_absent = await absent(() => lstat(`${data}/hl`))
     result.session_kernel_create_under_hidden_absent = await absent(() =>
       writeFile(`${data}/vault/new.txt`, 'x\n'),
     )
@@ -377,6 +382,16 @@ async function main(): Promise<void> {
       await sparse.close()
     }
     result.sparse_writes_body = await readFile(`${dataMp}/s.txt`, 'utf8')
+    // A chmod through the mount is stored, and an open handle reports it.
+    await chmod(`${dataMp}/a.txt`, 0o600)
+    result.kernel_chmod_kept = ((await stat(`${dataMp}/a.txt`)).mode & 0o7777) === 0o600
+    const held = await open(`${dataMp}/a.txt`, 'r')
+    try {
+      await held.read(Buffer.alloc(64), 0, 64, 0)
+      result.kernel_fstat_keeps_mode = ((await held.stat()).mode & 0o7777) === 0o600
+    } finally {
+      await held.close()
+    }
     result.data_pinned = dataMp === pinned
     result.distinct_mounts = dataMp !== logsMp
 

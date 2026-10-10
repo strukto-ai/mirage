@@ -99,6 +99,20 @@
    ]
   },
   {
+   "id": "a_hidden_link_is_absent_to_the_shell",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/data/hl"]}}},
+    {"op": "exec", "command": "echo pub > /data/pub.txt; ln -s pub.txt /data/hl", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "command": "ls /data", "expect": {"value": {"exit_code": 0, "stdout": "hl\npub.txt\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "ls /data", "expect": {"value": {"exit_code": 0, "stdout": "pub.txt\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "ls -l /data | grep -c hl", "expect": {"value": {"exit_code": 1, "stdout": "0\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "stat -c %F /data/hl", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "stat: cannot statx '/data/hl': No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/hl", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/hl: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/pub.txt", "expect": {"value": {"exit_code": 0, "stdout": "pub\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
    "id": "mount_modes_narrow_what_a_session_may_write",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/ro": {"vfs": "ram", "config": {}, "mode": "read"}}},
    "steps": [

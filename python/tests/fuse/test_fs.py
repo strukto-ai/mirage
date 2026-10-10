@@ -25,7 +25,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.fuse.fs import XATTR_CREATE, XATTR_REPLACE, MirageFS
-from mirage.types import MountMode
+from mirage.types import HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -251,15 +251,21 @@ async def test_statfs(seed_ws):
 
 
 @pytest.mark.asyncio
-async def test_chmod_does_not_raise(seed_ws):
+async def test_chmod_is_what_the_shell_stat_reads(seed_ws):
     fs = MirageFS(seed_ws.vfs)
-    fs.chmod("/a.txt", 0o644)
+    fs.chmod("/a.txt", stat.S_IFREG | 0o600)
+    result = await seed_ws.shell("stat -c %a /a.txt")
+    assert result.stdout == b"600\n"
+    assert stat.S_IMODE(fs.getattr("/a.txt")["st_mode"]) == 0o600
 
 
 @pytest.mark.asyncio
-async def test_chown_does_not_raise(seed_ws):
+async def test_chown_is_what_the_shell_stat_reads(seed_ws):
     fs = MirageFS(seed_ws.vfs)
-    fs.chown("/a.txt", os.getuid(), os.getgid())
+    fs.chown("/a.txt", 1234, 5678)
+    fs.chown("/a.txt", -1, 4321)
+    result = await seed_ws.shell("stat -c '%u %g' /a.txt")
+    assert result.stdout == b"1234 4321\n"
 
 
 @pytest.mark.asyncio
@@ -273,7 +279,9 @@ async def test_setattr_x_metadata_only_accepts(seed_ws):
     # The FSKit shim finalizes every created item through setattr_x; a
     # metadata-only payload must succeed for create/mkdir to work at all.
     fs = MirageFS(seed_ws.vfs)
-    assert fs.setattr_x("/a.txt", {"mode": 0o644, "uid": 501, "gid": 20}) == 0
+    assert fs.setattr_x("/a.txt", {"mode": 0o640, "uid": 501, "gid": 20}) == 0
+    result = await seed_ws.shell("stat -c '%a %u %g' /a.txt")
+    assert result.stdout == b"640 501 20\n"
 
 
 @pytest.mark.asyncio
@@ -593,8 +601,8 @@ class _SizelessOps:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    async def stat(self, path):
-        s = await self._inner.stat(path)
+    async def stat(self, path, nofollow=False):
+        s = await self._inner.stat(path, nofollow=nofollow)
         return s.model_copy(update={"size": None})
 
     async def read(self, path, offset=0, size=None, raw=False):
@@ -882,6 +890,40 @@ async def test_getattr_honors_chmod_overlay(seed_ws):
     attrs = fs.getattr("/a.txt")
     assert stat.S_ISREG(attrs["st_mode"])
     assert stat.S_IMODE(attrs["st_mode"]) == 0o640
+
+
+@pytest.mark.asyncio
+async def test_fstat_keeps_the_mode_and_mtime(seed_ws):
+    await seed_ws.shell("chmod 600 /a.txt; touch -t 202603041200 /a.txt")
+    fs = MirageFS(seed_ws.vfs)
+    fh = fs.open("/a.txt", os.O_RDONLY)
+    fs.read("/a.txt", 1024, 0, fh)
+    attrs = fs.getattr("/a.txt", fh)
+    stamp = datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc)
+    assert stat.S_IMODE(attrs["st_mode"]) == 0o600
+    assert attrs["st_mtime"] == int(stamp.timestamp()) * 10**9
+    assert attrs["st_size"] == len(b"hello world")
+
+
+@pytest.mark.asyncio
+async def test_a_device_reports_our_row(seed_ws):
+    attrs = MirageFS(seed_ws.vfs).getattr("/dev/null")
+    assert stat.S_ISCHR(attrs["st_mode"])
+    assert stat.S_IMODE(attrs["st_mode"]) == 0o666
+    assert attrs["st_rdev"] == (1 << 8) | 3
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_link_is_absent(seed_ws):
+    await seed_ws.shell("ln -s /a.txt /lnk")
+    session = seed_ws.create_session("agent")
+    session.visibility = Visibility(paths=HiddenPaths(paths=("/lnk",)))
+    fs = MirageFS(seed_ws.vfs, session=session)
+    for call in (lambda: fs.getattr("/lnk"), lambda: fs.readlink("/lnk")):
+        with pytest.raises(OSError) as exc:
+            call()
+        assert exc.value.errno == errno.ENOENT
+    assert MirageFS(seed_ws.vfs).readlink("/lnk") == "a.txt"
 
 
 @pytest.mark.asyncio

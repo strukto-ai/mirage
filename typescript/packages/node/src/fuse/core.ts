@@ -18,12 +18,22 @@ import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { ChunkedHandle, FileTable, writeRuns } from '@struktoai/mirage-core/runtime/handles/index'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
-import { FileType } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { isMissingOp } from '@struktoai/mirage-core/errors/fs'
+import { classify } from '@struktoai/mirage-core/errors/index'
+import { FileStat, FileType } from '@struktoai/mirage-core/types'
+import type { SetAttrFields } from '@struktoai/mirage-core/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { DIR_MODE, DIR_SIZE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
+import {
+  DIR_MODE,
+  DIR_SIZE,
+  atimeMs,
+  contentSize,
+  deviceRdev,
+  isDir,
+  isLink,
+  mtimeMs,
+  posixMode,
+} from '@struktoai/mirage-core/utils/stat_view'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
@@ -39,6 +49,7 @@ export interface FuseAttr {
   mode: number
   uid: number
   gid: number
+  rdev: number
 }
 
 export interface Handle {
@@ -158,61 +169,45 @@ export class MountCore {
       mode: DIR_MODE,
       uid: this.uid,
       gid: this.gid,
+      rdev: 0,
     }
   }
 
-  fileStat(size: number): FuseAttr {
+  /**
+   * The attrs for one stat row, the way a guest's stat reads it. The row
+   * carries the namespace overlay (chmod bits, chown ids, a touched mtime),
+   * so what a metadata op stored is what the mount shows, and a device
+   * keeps its type and numbers. String uid/gid (names) fall back to the
+   * mounting user: the kernel wants numbers and there is no user db to map
+   * against. A missing stamp falls back to the mount's start time; epoch
+   * zero is a real time and lands. `size` replaces the row's, from an open
+   * handle or a link's shown target. Mirrors Python's `MountCore.attrs`.
+   */
+  attrs(s: FileStat, size: number | null = null): FuseAttr {
+    const mtime = mtimeMs(s)
+    const when = mtime === null ? this.now : new Date(mtime)
+    const atime = atimeMs(s)
     return {
-      mtime: this.now,
-      atime: this.now,
-      ctime: this.now,
-      nlink: 1,
-      size,
-      mode: FILE_MODE,
-      uid: this.uid,
-      gid: this.gid,
+      mtime: when,
+      atime: atime === null ? when : new Date(atime),
+      ctime: when,
+      nlink: isDir(s) ? 2 : 1,
+      size: size ?? contentSize(s),
+      mode: posixMode(s),
+      uid: typeof s.uid === 'number' ? s.uid : this.uid,
+      gid: typeof s.gid === 'number' ? s.gid : this.gid,
+      rdev: deviceRdev(s),
     }
   }
 
   /**
-   * Fold merged stat attributes into an attr record. The workspace stat
-   * already carries the namespace overlay (chmod bits, chown ids, touched
-   * mtime), so honoring these fields here is what makes metadata ops
-   * visible through a mount. String uid/gid (names) are skipped: the kernel
-   * wants numeric ids and there is no user db to map against.
+   * The target to present for a link at a mount path. Relative targets are
+   * stored verbatim and returned as-is. Absolute targets name virtual
+   * paths, so they are rewritten relative to the link's directory: returned
+   * raw, the kernel would resolve them against the host root and escape
+   * the mountpoint.
    */
-  applyStatAttrs(entry: FuseAttr, s: FileStat): FuseAttr {
-    if (s.mode !== null) {
-      entry.mode = (entry.mode & ~0o7777) | (s.mode & 0o7777)
-    }
-    if (typeof s.uid === 'number') entry.uid = s.uid
-    if (typeof s.gid === 'number') entry.gid = s.gid
-    if (s.modified !== null) {
-      // One translator per language: the naive-stamp-is-UTC rule lives
-      // in core's stat view, never re-parsed here with a bare Date.
-      // Null means the stamp did not parse; epoch zero is a real time
-      // and lands.
-      const ms = mtimeMs(s)
-      if (ms !== null) {
-        entry.mtime = new Date(ms)
-        entry.ctime = new Date(ms)
-      }
-    }
-    return entry
-  }
-
-  /**
-   * The target to present for a namespace link at a mount path, or null
-   * when not a link. Relative targets are stored verbatim and returned
-   * as-is. Absolute targets name virtual paths, so they are rewritten
-   * relative to the link's directory: returned raw, the kernel would
-   * resolve them against the host root and escape the mountpoint.
-   */
-  linkTarget(path: string): string | null {
-    const links = this.files.links
-    if (links === null) return null
-    const target = links.readlink(this.resolve(path))
-    if (target === null) return null
+  shownTarget(path: string, target: string): string {
     if (!target.startsWith('/')) return target
     let virtualTarget = target
     if (this.root !== '') {
@@ -229,25 +224,6 @@ export class MountCore {
     const slash = path.lastIndexOf('/')
     const parent = slash <= 0 ? '/' : path.slice(0, slash)
     return posix.relative(parent, virtualTarget)
-  }
-
-  /**
-   * The attrs a namespace link reports, from its own node row.
-   *
-   * Built from the target string alone, every link over a mount answered
-   * the mount's construction time and the mounting user, so what
-   * `chown -h` and `touch -h` wrote was invisible through the kernel.
-   * The row is the same one the dispatcher answers a no-follow stat with. Size
-   * stays the displayable target's length (what this mount's readlink
-   * returns), and the mode is always lrwxrwxrwx: a symlink's permission
-   * bits are not consulted by any POSIX system.
-   */
-  linkStat(target: string, virtual: string): FuseAttr {
-    const entry = this.fileStat(new TextEncoder().encode(target).byteLength)
-    const row = this.files.links?.linkStatAt(virtual) ?? null
-    if (row !== null) this.applyStatAttrs(entry, row)
-    entry.mode = 0o120777
-    return entry
   }
 
   cachedSize(path: string): number | null {
@@ -359,10 +335,6 @@ export class MountCore {
     return records
   }
 
-  private async writeFile(path: string, data: Uint8Array): Promise<void> {
-    await this.op(() => this.files.write(this.resolve(path), data))
-  }
-
   /**
    * Land write runs on the mount, one pwrite each, in order. A pwrite keeps
    * every stored byte the handle did not write, so nothing is read through
@@ -389,7 +361,14 @@ export class MountCore {
 
   // ── POSIX surface (throws; adapters classify) ────────────────────
 
-  async getattr(path: string): Promise<FuseAttr> {
+  /**
+   * POSIX attributes for a path. One stat through the dispatcher answers: a
+   * link the session cannot see is absent, as it is to the shell, and a
+   * visible one reports its own row with its target read through the
+   * dispatcher too. `follow` reports a trailing link's target rather than
+   * the link (stat rather than lstat).
+   */
+  async getattr(path: string, follow = false, size: number | null = null): Promise<FuseAttr> {
     if (path === '/') return this.dirStat()
     // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
     // Reject early to avoid hitting the ops layer.
@@ -397,32 +376,35 @@ export class MountCore {
     if (isMacosMetadata(name)) {
       throw errnoError('ENOENT', `no such file or directory: ${path}`)
     }
-    // Link check must precede the workspace stat: `ws.vfs` follows
-    // namespace links, so stat on a link path reports the target.
-    const target = this.linkTarget(path)
-    if (target !== null) return this.linkStat(target, this.resolve(path))
-    const s = await this.op(() => this.files.stat(this.resolve(path)))
-    if (s.type === FileType.DIRECTORY) {
-      return this.applyStatAttrs(this.dirStat(), s)
+    const virtual = this.resolve(path)
+    let s: FileStat
+    try {
+      s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
+    } catch (err) {
+      // An open descriptor keeps the bytes it had after an unlink.
+      if (size === null || classify(err) !== 'ENOENT') throw err
+      return this.attrs(new FileStat({ name, type: FileType.FILE }), size)
+    }
+    if (isLink(s)) {
+      const target = await this.op(() => this.files.readlink(virtual))
+      return this.attrs(s, new TextEncoder().encode(this.shownTarget(path, target)).byteLength)
     }
     // Size-unknown API files stat as 0 before open (never a fake size):
     // the mount's direct_io makes the kernel read to EOF regardless, and
     // attrTimeout '0' routes the post-open fstat to fgetattr, which serves
     // the real hydrated size. Mirrors Python's core.py; see the CLAUDE.md
     // FUSE section.
-    let size = s.size
-    size ??= this.cachedSize(path) ?? 0
-    return this.applyStatAttrs(this.fileStat(size), s)
+    if (size === null && s.size === null && !isDir(s)) size = this.cachedSize(path)
+    return this.attrs(s, size)
   }
 
-  /** Attributes through an open handle, or path-based when not hydrated. */
+  /** Attributes through an open handle: the path's row, the handle's size. */
   async fgetattr(path: string, fd: number): Promise<FuseAttr> {
     // fstat(fd) after open: the open handler prefetched size-unknown files
     // into the handle, so answer with the real byte length instead of the
     // 0 that path-based getattr reported before open.
     const ctx = this.handles.get(fd)
-    if (ctx?.data !== undefined) return this.fileStat(ctx.data.byteLength)
-    return this.getattr(ctx?.path ?? path)
+    return this.getattr(ctx?.path ?? path, false, ctx?.data?.byteLength ?? null)
   }
 
   async readdir(path: string): Promise<string[]> {
@@ -474,15 +456,7 @@ export class MountCore {
   async create(path: string): Promise<number> {
     const key = this.identity(path)
     await this.mutate(key, async () => {
-      // Route through the VFS's `create` op so backends that distinguish
-      // "create empty" from "write bytes" get the right code path. Falls back
-      // to writeFile(empty) when the VFS doesn't expose `create`.
-      try {
-        await this.op(() => this.files.create(this.resolve(path)))
-      } catch (dispatchErr) {
-        if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
-        await this.writeFile(path, new Uint8Array(0))
-      }
+      await this.op(() => this.files.create(this.resolve(path)))
       await this.changed(path)
     })
     return this.handles.add({ path, key })
@@ -492,10 +466,10 @@ export class MountCore {
     await this.op(() => this.files.mkdir(this.resolve(path)))
   }
 
-  readlink(path: string): string {
-    const target = this.linkTarget(path)
-    if (target === null) throw errnoError('EINVAL', `not a symbolic link: ${path}`)
-    return target
+  /** The target of a namespace link, read through the dispatcher; EINVAL when not a link. */
+  async readlink(path: string): Promise<string> {
+    const target = await this.op(() => this.files.readlink(this.resolve(path)))
+    return this.shownTarget(path, target)
   }
 
   /**
@@ -658,18 +632,7 @@ export class MountCore {
       for (const ctx of this.handles.values()) {
         if (ctx.key === key) await this.persistBuffered(ctx)
       }
-      // Prefer the VFS's dedicated `truncate` op (atomic on most
-      // backends). Fall back to read/resize/write for mounts that don't
-      // expose one.
-      try {
-        await this.op(() => this.files.truncate(this.resolve(path), size))
-      } catch (dispatchErr) {
-        if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
-        const data = await this.op(() => this.files.read(this.resolve(path), { raw: true }))
-        const out = new Uint8Array(size)
-        out.set(data.subarray(0, Math.min(data.byteLength, size)), 0)
-        await this.writeFile(path, out)
-      }
+      await this.op(() => this.files.truncate(this.resolve(path), size))
       await this.changed(path)
     })
   }
@@ -686,6 +649,26 @@ export class MountCore {
       favail: 1_000_000,
       namemax: 255,
     }
+  }
+
+  /**
+   * Store metadata through the dispatcher. The backend keeps what it can and
+   * the namespace overlay the rest, so a chmod or chown through the mount is
+   * what `stat` in a shell reads back, on a backend with no permission bits
+   * of its own too. A null field is left as it is. Mirrors Python's
+   * `MountCore.setattr`.
+   */
+  async setattr(
+    path: string,
+    mode: number | null,
+    uid: number | null = null,
+    gid: number | null = null,
+  ): Promise<void> {
+    const fields: SetAttrFields = {}
+    if (mode !== null) fields.mode = mode & 0o7777
+    if (uid !== null) fields.uid = uid
+    if (gid !== null) fields.gid = gid
+    await this.op(() => this.files.setattr(this.resolve(path), fields))
   }
 
   /**

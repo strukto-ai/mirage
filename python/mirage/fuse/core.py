@@ -24,7 +24,7 @@ from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
-from mirage.errors.fs import einval, enoent, erofs
+from mirage.errors.fs import enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.policy.match import skipped_at_dispatch
 from mirage.runtime.handles import ChunkedHandle, FileTable, write_runs
@@ -33,9 +33,13 @@ from mirage.types import FileStat, FileType
 from mirage.utils.stat_view import (
     DIR_MODE,
     DIR_SIZE,
-    FILE_MODE,
-    LINK_MODE,
+    atime_ns,
+    content_size,
+    device_rdev,
+    is_dir,
+    is_link,
     mtime_ns,
+    posix_mode,
 )
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
@@ -195,54 +199,40 @@ class MountCore:
             "st_ctime": self._now,
         }
 
-    def file_stat(self, size: int) -> dict[str, Any]:
-        return {
-            "st_mode": FILE_MODE,
-            "st_nlink": 1,
-            "st_uid": self._uid,
-            "st_gid": self._gid,
-            "st_size": size,
-            "st_atime": self._now,
-            "st_mtime": self._now,
-            "st_ctime": self._now,
-        }
+    def attrs(self, s: FileStat, size: int | None = None) -> dict[str, Any]:
+        """The POSIX attrs for one stat row, the way a guest's stat reads
+        it (``runtime/files.py:stat_row``).
 
-    def _apply_stat_attrs(
-        self, entry: dict[str, Any], s: FileStat
-    ) -> dict[str, Any]:
-        """Fold merged stat attributes into a POSIX attr dict.
-
-        ``Files.stat`` already carries the namespace overlay (chmod bits,
-        chown ids, touched mtime), so honoring these fields here is what
-        makes metadata ops visible through a mount. String uid/gid (names)
-        are skipped: the kernel wants numeric ids and there is no user db
-        to map against.
+        The row carries the namespace overlay (chmod bits, chown ids, a
+        touched mtime), so what a metadata op stored is what the mount
+        shows. A device keeps its type and numbers. String uid/gid
+        (names) fall back to the mounting user: the kernel wants numbers
+        and there is no user db to map against. A missing stamp falls
+        back to the mount's start time; epoch zero is a real time and
+        lands.
 
         Args:
-            entry (dict): base attr dict from dir_stat/file_stat.
-            s (FileStat): the merged stat returned by ``ws.vfs``.
-
-        Returns:
-            dict: the attr dict with overlay fields applied.
+            s (FileStat): the row the dispatcher answered with.
+            size (int | None): the size to report instead of the row's,
+                from an open handle or a link's shown target.
         """
-        if s.mode is not None:
-            entry["st_mode"] = (entry["st_mode"] & ~0o7777) | (s.mode & 0o7777)
-        if isinstance(s.uid, int):
-            entry["st_uid"] = s.uid
-        if isinstance(s.gid, int):
-            entry["st_gid"] = s.gid
-        if s.modified is not None:
-            # One translator per language: the naive-stamp-is-UTC rule
-            # lives in stat_view, never re-parsed here. None means the
-            # stamp did not parse; epoch zero is a real time and lands.
-            ns = mtime_ns(s)
-            if ns is not None:
-                entry["st_mtime"] = ns
-                entry["st_ctime"] = ns
-        return entry
+        mtime = mtime_ns(s)
+        when = self._now if mtime is None else mtime
+        atime = atime_ns(s)
+        return {
+            "st_mode": posix_mode(s),
+            "st_nlink": 2 if is_dir(s) else 1,
+            "st_uid": s.uid if isinstance(s.uid, int) else self._uid,
+            "st_gid": s.gid if isinstance(s.gid, int) else self._gid,
+            "st_size": content_size(s) if size is None else size,
+            "st_rdev": device_rdev(s),
+            "st_atime": when if atime is None else atime,
+            "st_mtime": when,
+            "st_ctime": when,
+        }
 
-    def link_target(self, path: str) -> str | None:
-        """The target to present for a namespace link at a mount path.
+    def shown_target(self, path: str, target: str) -> str:
+        """The target to present for a link at a mount path.
 
         Relative targets are stored verbatim and returned as-is. Absolute
         targets name virtual paths, so they are rewritten relative to the
@@ -250,17 +240,9 @@ class MountCore:
         against the host root and escape the mountpoint.
 
         Args:
-            path (str): mount path to inspect.
-
-        Returns:
-            str | None: displayable target, or None when not a link.
+            path (str): mount path of the link.
+            target (str): the stored target, as the dispatcher read it.
         """
-        links = self._files.links
-        if links is None:
-            return None
-        target = links.readlink(self.resolve(path))
-        if target is None:
-            return None
         if not target.startswith("/"):
             return target
         virtual_target = target
@@ -275,29 +257,6 @@ class MountCore:
                 return target
         parent = path.rsplit("/", 1)[0] or "/"
         return posixpath.relpath(virtual_target, parent)
-
-    def link_stat(self, target: str, virtual: str) -> dict[str, Any]:
-        """The attrs a namespace link reports, from its own node row.
-
-        Built from the target string alone, every link over a mount
-        answered the mount's construction time and the mounting user, so
-        what ``chown -h`` and ``touch -h`` wrote was invisible through
-        the kernel. The row is the same one the dispatcher answers a no-follow
-        stat with. Size stays the displayable target's length (what this
-        mount's readlink returns), and the mode is always lrwxrwxrwx: a
-        symlink's permission bits are not consulted by any POSIX system.
-
-        Args:
-            target (str): the target as this mount presents it.
-            virtual (str): the link's virtual path, for the node row.
-        """
-        entry = self.file_stat(len(target.encode()))
-        links = self._files.links
-        row = None if links is None else links.link_stat_at(virtual)
-        if row is not None:
-            entry = self._apply_stat_attrs(entry, row)
-        entry["st_mode"] = LINK_MODE
-        return entry
 
     def drain_ops(self) -> list[dict[str, Any]]:
         records = [r.to_dict() for r in self._files.records]
@@ -372,12 +331,20 @@ class MountCore:
         )
         return data
 
-    def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
+    def getattr(
+        self, path: str, fh: int | None = None, follow: bool = False
+    ) -> dict[str, Any]:
         """POSIX attributes for a path, optionally through an open handle.
+
+        One stat through the dispatcher answers: a link the session cannot
+        see is absent, as it is to the shell, and a visible one reports
+        its own row with its target read through the dispatcher too.
 
         Args:
             path (str): mount path to stat.
             fh (int | None): open handle, when the caller is fstat-ing.
+            follow (bool): report a trailing link's target rather than
+                the link (stat rather than lstat).
 
         Returns:
             dict: ``st_*`` attribute dict.
@@ -385,16 +352,18 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        # fstat(fd) after open: answer with the hydrated handle's real byte
-        # length. attr_timeout=0 on FUSE mounts makes the kernel actually ask
-        # here instead of trusting the cached pre-open size, which is what
-        # keeps wc -c, BSD cp, and tail -c correct for size-unknown files.
+        # fstat(fd) after open: the hydrated handle knows the real byte
+        # length. attr_timeout=0 on FUSE mounts makes the kernel actually
+        # ask here instead of trusting the cached pre-open size, which is
+        # what keeps wc -c, BSD cp, and tail -c correct for size-unknown
+        # files.
+        size = None
         if fh is not None:
             ctx = self._handles.get(fh)
             if ctx is not None:
                 path = ctx.path
                 if ctx.data is not None:
-                    return self.file_stat(len(ctx.data))
+                    size = len(ctx.data)
         if path == "/":
             return self.dir_stat()
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
@@ -402,26 +371,26 @@ class MountCore:
         name = path.rsplit("/", 1)[-1]
         if is_macos_metadata(name):
             raise enoent(path)
-        # Link check must precede `Files.stat`: `ws.vfs` follows
-        # namespace links, so stat on a link path reports the target.
-        target = self.link_target(path)
-        if target is not None:
-            return self.link_stat(target, self.resolve(path))
-        s = self._run(self._files.stat(self.resolve(path)))
-        if s.type == FileType.DIRECTORY:
-            return self._apply_stat_attrs(self.dir_stat(), s)
-        size = s.size
-        if size is None:
-            size = self.cached_size(path)
-        if size is None:
+        virtual = self.resolve(path)
+        try:
+            s = self._run(self._files.stat(virtual, nofollow=not follow))
+        except FileNotFoundError:
+            if size is None:
+                raise
+            # An open descriptor keeps the bytes it had after an unlink.
+            s = FileStat(name=name, type=FileType.FILE)
+        if is_link(s):
+            target = self._run(self._files.readlink(virtual))
+            return self.attrs(s, len(self.shown_target(path, target).encode()))
+        if size is None and s.size is None and not is_dir(s):
             # Unopened size-unknown files stat as 0, matching mirage's own
             # find semantics. Reads stay correct anyway: direct_io makes the
             # kernel ignore st_size, and the fh branch above serves the real
             # size to fstat-based tools after open. Never report a fake size
             # and never fetch content here: getattr runs once per entry on
             # every ls -l.
-            size = 0
-        return self._apply_stat_attrs(self.file_stat(size), s)
+            size = self.cached_size(path)
+        return self.attrs(s, size)
 
     def readdir(self, path: str) -> list[str]:
         """Entry names under a directory, including "." and "..".
@@ -542,21 +511,19 @@ class MountCore:
         self._run(self._files.mkdir(self.resolve(path)))
 
     def readlink(self, path: str) -> str:
-        """The stored target of a namespace link.
+        """The target of a namespace link, read through the dispatcher.
 
         Args:
             path (str): mount path to read.
 
         Returns:
-            str: the link target.
+            str: the link target, as this mount shows it.
 
         Raises:
             OSError: EINVAL when the path is not a link.
         """
-        target = self.link_target(path)
-        if target is None:
-            raise einval(path)
-        return target
+        target = self._run(self._files.readlink(self.resolve(path)))
+        return self.shown_target(path, target)
 
     def symlink(self, target: str, source: str) -> None:
         """Create namespace link ``target -> source`` (ln -s source target).
@@ -623,6 +590,34 @@ class MountCore:
             "f_favail": 1000000,
             "f_namemax": 255,
         }
+
+    def setattr(
+        self,
+        path: str,
+        mode: int | None = None,
+        uid: int | None = None,
+        gid: int | None = None,
+    ) -> None:
+        """Store metadata through the dispatcher.
+
+        The backend keeps what it can and the namespace overlay the rest,
+        so a chmod or chown through the mount is what ``stat`` in a shell
+        reads back, on a backend with no permission bits of its own too.
+
+        Args:
+            path (str): mount path to change.
+            mode (int | None): permission bits; None leaves them.
+            uid (int | None): owner id; None leaves it.
+            gid (int | None): group id; None leaves it.
+        """
+        self._run(
+            self._files.setattr(
+                self.resolve(path),
+                mode=None if mode is None else mode & 0o7777,
+                uid=uid,
+                gid=gid,
+            )
+        )
 
     def setxattr(
         self,

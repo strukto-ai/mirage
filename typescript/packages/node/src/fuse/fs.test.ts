@@ -18,11 +18,11 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { EEXIST } from './errors.ts'
+import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from './errors.ts'
 import { MirageFS, XATTR_CREATE, XATTR_REPLACE, type FuseAttr } from './fs.ts'
 
 const ENOENT = -2
-const ENOTEMPTY = -66
+const ENOTEMPTY = -POSITIVE_ENOTEMPTY
 const EACCES = -13
 const EROFS = -30
 
@@ -120,7 +120,7 @@ describe('MirageFS — chmod/chown/utimens/access validate path existence', () =
   it.each([
     ['chmod', [0o644]],
     ['chown', [0, 0]],
-    ['utimens', [new Date(), new Date()]],
+    ['utimens', [Date.now(), Date.now()]],
     ['access', [0]],
   ] as const)('%s returns ENOENT for missing path', async (op, extra) => {
     const ws = await mkWs()
@@ -132,13 +132,76 @@ describe('MirageFS — chmod/chown/utimens/access validate path existence', () =
   it.each([
     ['chmod', [0o644]],
     ['chown', [0, 0]],
-    ['utimens', [new Date(), new Date()]],
+    ['utimens', [Date.now(), Date.now()]],
     ['access', [0]],
   ] as const)('%s returns 0 for existing path', async (op, extra) => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
     const [code] = await callOp<[number]>(mfs, op, '/data/greeting.txt', ...extra)
     expect(code).toBe(0)
+  })
+})
+
+describe('MirageFS — metadata through the dispatcher', () => {
+  it('stores a chmod the shell stat reads back', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    expect(await callOp<[number]>(mfs, 'chmod', '/data/greeting.txt', 0o100600)).toEqual([0])
+    const out = await ws.shell('stat -c %a /data/greeting.txt')
+    expect(new TextDecoder().decode(out.stdout)).toBe('600\n')
+    const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    expect(attr.mode & 0o7777).toBe(0o600)
+  })
+
+  it('stores a chown the shell stat reads back, -1 leaving an id', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    expect(await callOp<[number]>(mfs, 'chown', '/data/greeting.txt', 1234, 5678)).toEqual([0])
+    expect(await callOp<[number]>(mfs, 'chown', '/data/greeting.txt', 0xffffffff, 4321)).toEqual([
+      0,
+    ])
+    const out = await ws.shell("stat -c '%u %g' /data/greeting.txt")
+    expect(new TextDecoder().decode(out.stdout)).toBe('1234 4321\n')
+  })
+
+  it('keeps the mode and mtime through an open handle', async () => {
+    const ws = await mkWs()
+    await ws.shell('chmod 600 /data/greeting.txt; touch -t 202603041200 /data/greeting.txt')
+    const mfs = new MirageFS(ws.vfs)
+    const [, fd] = await callOp<[number, number]>(mfs, 'open', '/data/greeting.txt', 0)
+    await callOp(mfs, 'read', '/data/greeting.txt', fd, Buffer.alloc(64), 64, 0)
+    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/greeting.txt', fd)
+    expect(code).toBe(0)
+    expect(attr.mode & 0o7777).toBe(0o600)
+    expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0))
+    expect(attr.size).toBe('hello world\n'.length)
+  })
+
+  it('reports a device as our row', async () => {
+    const ws = await mkWs()
+    const [code, attr] = await callOp<[number, FuseAttr]>(
+      new MirageFS(ws.vfs),
+      'getattr',
+      '/dev/null',
+    )
+    expect(code).toBe(0)
+    expect(attr.mode).toBe(0o020666)
+    expect(attr.rdev).toBe((1 << 8) | 3)
+  })
+
+  it('treats a link the session cannot see as absent', async () => {
+    const ws = await mkWs()
+    await ws.shell('ln -s /data/greeting.txt /data/lnk')
+    const sess = ws.createSession('agent', { profile: { paths: { hide: ['/data/lnk'] } } })
+    const mfs = new MirageFS(ws.vfs, { session: sess })
+    expect((await callOp<[number]>(mfs, 'getattr', '/data/lnk'))[0]).toBe(ENOENT)
+    expect((await callOp<[number]>(mfs, 'readlink', '/data/lnk'))[0]).toBe(ENOENT)
+    const [code, target] = await callOp<[number, string]>(
+      new MirageFS(ws.vfs),
+      'readlink',
+      '/data/lnk',
+    )
+    expect([code, target]).toEqual([0, 'greeting.txt'])
   })
 })
 
