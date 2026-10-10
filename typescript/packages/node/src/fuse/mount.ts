@@ -254,8 +254,9 @@ export function forceUnmount(mountpoint: string): void {
         execFileSync(binary, ['-u', mountpoint], { stdio: 'ignore' })
       }
     }
-  } catch {
-    // best-effort; caller already tried the clean path
+  } catch (err) {
+    // Best effort: the caller already tried the clean path.
+    console.debug(`fuse: force unmount of ${mountpoint} failed: ${String(err)}`)
   }
 }
 
@@ -337,8 +338,4 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
         })
       }),
   }
-}
-
-export function mountBackground(ws: Workspace, options: MountOptions = {}): Promise<FuseHandle> {
-  return mount(ws, options)
 }

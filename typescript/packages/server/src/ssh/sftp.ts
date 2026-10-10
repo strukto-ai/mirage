@@ -16,7 +16,8 @@ import { constants as fsConstants } from 'node:fs'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
 import { MountCore, classifyErrno, type FuseAttr } from '@struktoai/mirage-node'
-import { EACCES, ENOENT, EROFS, errnoError } from '@struktoai/mirage-node/fuse/errors'
+import { EACCES, ENOENT, EROFS } from '@struktoai/mirage-node/fuse/errors'
+import { eexist, eisdir, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { SFTPStatusError } from './errors.ts'
@@ -319,7 +320,7 @@ class MirageSFTPServer {
   private async opendir(id: number, path: string): Promise<void> {
     const core = await this.mount()
     const p = workspacePath(path)
-    if (!isDir((await core.getattr(p)).mode)) throw errnoError('ENOTDIR', p)
+    if (!isDir((await core.getattr(p)).mode)) throw enotdir(p)
     this.sftp.handle(id, this.addHandle({ kind: 'dir', path: p, done: false }))
   }
 
@@ -360,14 +361,14 @@ class MirageSFTPServer {
     const path = workspacePath(filename)
     const found = await exists(core, path)
     if (found && (flags & OPEN.CREAT) !== 0 && (flags & OPEN.EXCL) !== 0) {
-      throw errnoError('EEXIST', path)
+      throw eexist(path)
     }
     let fd: number
     if (!found) {
-      if ((flags & OPEN.CREAT) === 0) throw errnoError('ENOENT', path)
+      if ((flags & OPEN.CREAT) === 0) throw enoent(path)
       fd = await core.create(path)
     } else {
-      if (isDir((await core.getattr(path)).mode)) throw errnoError('EISDIR', path)
+      if (isDir((await core.getattr(path)).mode)) throw eisdir(path)
       fd = await core.open(path, (flags & OPEN.TRUNC) !== 0 ? fsConstants.O_TRUNC : 0)
     }
     const appendAt = (flags & OPEN.APPEND) !== 0 ? (await core.fgetattr(path, fd)).size : null
@@ -410,7 +411,7 @@ class MirageSFTPServer {
   // SFTP v3's rename refuses to replace an existing target.
   private async rename(id: number, oldPath: string, newPath: string): Promise<void> {
     const core = await this.mount()
-    if (await exists(core, newPath)) throw errnoError('EEXIST', newPath)
+    if (await exists(core, newPath)) throw eexist(newPath)
     await core.rename(oldPath, newPath)
     this.sftp.status(id, STATUS.OK)
   }

@@ -15,9 +15,9 @@
 import errno
 import logging
 import os
-import sys
 from typing import Any, Callable
 
+from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.core import MountCore
 from mirage.fuse.darwin import rename_flags_check
 from mirage.fuse.errors import classify_error
@@ -26,13 +26,6 @@ from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
-
-# setxattr(2)'s flags as the kernel hands them over: linux numbers
-# XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
-# XATTR_NOFOLLOW, which the kernel has already applied).
-XATTR_CREATE, XATTR_REPLACE = (
-    (0x2, 0x4) if sys.platform == "darwin" else (0x1, 0x2)
-)
 
 
 class MirageFS:

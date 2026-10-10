@@ -12,17 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DocumentAccessor } from '../../accessor/document.ts'
-import { FileType, FileStat, LIVE_KEY, type PathSpec } from '../../types.ts'
-import { read } from './read.ts'
-
-export async function stat(accessor: DocumentAccessor, path: PathSpec): Promise<FileStat> {
-  const data = await read(accessor, path)
-  return new FileStat({
-    name: accessor.name,
-    type: FileType.FILE,
-    size: data.byteLength,
-    modified: null,
-    extra: { [LIVE_KEY]: true },
-  })
-}
+// setxattr(2)'s flags as the kernel hands them over: linux numbers
+// XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
+// XATTR_NOFOLLOW, which the kernel has already applied). Mirrors the
+// python adapter.
+const DARWIN = process.platform === 'darwin'
+export const XATTR_CREATE = DARWIN ? 0x2 : 0x1
+export const XATTR_REPLACE = DARWIN ? 0x4 : 0x2

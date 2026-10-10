@@ -19,13 +19,13 @@ import os
 import posixpath
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
+from mirage.fuse.types import Handle, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
 from mirage.runtime.handles import (
     ChunkedHandle,
@@ -34,7 +34,7 @@ from mirage.runtime.handles import (
     write_runs,
 )
 from mirage.runtime.handles.constants import READ_CHUNK
-from mirage.types import FileStat, FileType
+from mirage.types import LIVE_KEY, FileStat, FileType
 from mirage.utils.stat_view import (
     DIR_MODE,
     DIR_SIZE,
@@ -50,20 +50,6 @@ from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
-
-WriteBuf = list[tuple[int, bytes]]
-
-
-@dataclass(slots=True)
-class Handle:
-    path: str
-    # Where the path really points once namespace links are followed.
-    key: str
-    live: bool = False
-    data: bytes | None = None
-    write_buf: WriteBuf = field(default_factory=list)
-    # A large file reads a chunk at a time rather than hydrating whole.
-    chunked: ChunkedHandle | None = None
 
 
 class MountCore:
@@ -121,7 +107,7 @@ class MountCore:
         self._handles: FileTable[Handle] = FileTable()
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
-        # as owned by the mounting user (see mount.py). Mirrors fs.ts.
+        # as owned by the mounting user (see mount.py). Mirrors core.ts.
         self._uid = os.getuid() if hasattr(os, "getuid") else 0
         self._gid = os.getgid() if hasattr(os, "getgid") else 0
         if loop is None:
@@ -655,7 +641,7 @@ class MountCore:
         ctx = Handle(
             path=path,
             key=self.identity(path),
-            live=s.extra.get("mirage.live") is True,
+            live=s.extra.get(LIVE_KEY) is True,
         )
         if s.type == FileType.DIRECTORY:
             return self._handles.add(ctx)

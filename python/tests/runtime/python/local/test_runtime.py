@@ -293,3 +293,18 @@ async def test_user_tracebacks_match_cpython(case):
         assert result.stderr == stderr
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_close_kills_an_interpreter_still_running():
+    runtime = LocalRuntime()
+    run = asyncio.create_task(
+        runtime.run(RunArgs(code="import time; time.sleep(30)"))
+    )
+    while not runtime._children:
+        await asyncio.sleep(0.01)
+    started = time.monotonic()
+    await runtime.close()
+    result = await asyncio.wait_for(run, timeout=5)
+    assert result.exit_code != 0
+    assert time.monotonic() - started < 5

@@ -112,11 +112,3 @@ export function classifyErrno(err: unknown): number {
 export function classifyError(err: unknown): number {
   return -classifyErrno(err)
 }
-
-/**
- * Build an error carrying a POSIX code, so the mount core can signal a
- * specific errno without importing any adapter's numbering.
- */
-export function errnoError(code: FsCondition, message: string): Error {
-  return Object.assign(new Error(message), { code })
-}

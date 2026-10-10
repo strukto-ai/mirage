@@ -17,13 +17,12 @@ import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enotsup } from '@struktoai/mirage-core/errors/fs'
+import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
 import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MountCore } from './core.ts'
-import { errnoError } from './errors.ts'
 
 const NAIVE_STAMP = '2026-01-02T03:04:05'
 const PAYLOAD = new TextEncoder().encode('payload-bytes')
@@ -176,7 +175,7 @@ describe('MountCore', () => {
     const realPwrite = ws.vfs.pwrite.bind(ws.vfs)
     vi.spyOn(ws.vfs, 'pwrite')
       .mockImplementationOnce(realPwrite)
-      .mockRejectedValueOnce(errnoError('EACCES', 'denied'))
+      .mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     const dec = new TextDecoder()
     const enc = new TextEncoder()
@@ -197,7 +196,7 @@ describe('MountCore', () => {
     const pwrite = vi
       .spyOn(ws.vfs, 'pwrite')
       .mockImplementationOnce(realPwrite)
-      .mockRejectedValueOnce(errnoError('EACCES', 'denied'))
+      .mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     const enc = new TextEncoder()
     const fd = await core.open('/data/f', fsConstants.O_WRONLY)
@@ -213,7 +212,7 @@ describe('MountCore', () => {
   it('keeps the errno of a failed direct write', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('printf abcdefgh > /data/f')
-    vi.spyOn(ws.vfs, 'pwrite').mockRejectedValueOnce(errnoError('EACCES', 'denied'))
+    vi.spyOn(ws.vfs, 'pwrite').mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     await expect(core.write('/data/f', -1, new TextEncoder().encode('X'), 0)).rejects.toMatchObject(
       { code: 'EACCES' },

@@ -75,6 +75,7 @@ class LocalRuntime(PythonRuntime):
             self._python = os.path.abspath(resolved)
         else:
             self._python = sys.executable
+        self._children: set[asyncio.subprocess.Process] = set()
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
@@ -101,14 +102,27 @@ class LocalRuntime(PythonRuntime):
             stderr=asyncio.subprocess.PIPE,
             env={**self.config.env, **env},
         )
+        self._children.add(proc)
         try:
             stdout, stderr = await proc.communicate(input=stdin)
         except asyncio.CancelledError:
-            proc.kill()
+            if proc.returncode is None:
+                proc.kill()
             await proc.wait()
             raise
+        finally:
+            self._children.discard(proc)
         return RunResult(
             stdout=stdout,
             stderr=stderr or None,
             exit_code=proc.returncode if proc.returncode is not None else 1,
         )
+
+    async def close(self) -> None:
+        """Kill every interpreter still running, so none outlives the
+        workspace."""
+        children = tuple(self._children)
+        for child in children:
+            if child.returncode is None:
+                child.kill()
+        await asyncio.gather(*(child.wait() for child in children))

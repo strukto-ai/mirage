@@ -62,7 +62,7 @@ def fs():
 
 
 def test_run_fuse_mount_options(fs):
-    _run_fuse(_FUSE, fs, "/tmp/mp", foreground=True)
+    _run_fuse(_FUSE, fs, "/tmp/mp")
     assert _CaptureFuse.args == (fs, "/tmp/mp")
     assert _CaptureFuse.kwargs["nothreads"] is True
     assert _CaptureFuse.kwargs["foreground"] is True
@@ -101,7 +101,7 @@ def test_prepare_mountpoint_posix_keeps_dir(monkeypatch, tmp_path):
 
 def test_run_fuse_win32_adds_winfsp_owner_mapping(monkeypatch, fs):
     monkeypatch.setattr("sys.platform", "win32")
-    _run_fuse(_FUSE, fs, "/tmp/mp", foreground=True)
+    _run_fuse(_FUSE, fs, "/tmp/mp")
     # WinFsp builtin: uid=-1/gid=-1 presents files as owned by the
     # mounting user (POSIX ids have no meaningful SID mapping).
     assert _CaptureFuse.kwargs["uid"] == -1
@@ -110,7 +110,7 @@ def test_run_fuse_win32_adds_winfsp_owner_mapping(monkeypatch, fs):
 
 def test_run_fuse_posix_omits_owner_mapping(monkeypatch, fs):
     monkeypatch.setattr("sys.platform", "linux")
-    _run_fuse(_FUSE, fs, "/tmp/mp", foreground=True)
+    _run_fuse(_FUSE, fs, "/tmp/mp")
     assert "uid" not in _CaptureFuse.kwargs
     assert "gid" not in _CaptureFuse.kwargs
 
@@ -120,7 +120,7 @@ def test_fskit_mount_options_match_the_verified_recipe(fs):
     # with direct_io omitted. Pin all three: nothing in CI can exercise this
     # path (it needs macOS 15.4+, macFUSE 5.x, and a GUI-enabled FSKit
     # module), so a regression here would ship silently.
-    _run_fuse(_FUSE, fs, "/Volumes/mirage-abc", False, MountBackend.FSKIT)
+    _run_fuse(_FUSE, fs, "/Volumes/mirage-abc", MountBackend.FSKIT)
     assert _CaptureFuse.kwargs["backend"] == "fskit"
     assert _CaptureFuse.kwargs["volname"] == "mirage-abc"
     assert "direct_io" not in _CaptureFuse.kwargs
@@ -141,7 +141,7 @@ def test_an_existing_empty_dir_is_not_a_live_mount(tmp_path):
 def test_fuse_backend_keeps_direct_io(fs):
     # The kext path still needs direct_io: without it cat reads 0 bytes from
     # a size-unknown file on macOS (see the CLAUDE.md FUSE section).
-    _run_fuse(_FUSE, fs, "/tmp/mirage-abc", False, MountBackend.FUSE)
+    _run_fuse(_FUSE, fs, "/tmp/mirage-abc", MountBackend.FUSE)
     assert _CaptureFuse.kwargs["direct_io"] is True
     assert "backend" not in _CaptureFuse.kwargs
     assert "volname" not in _CaptureFuse.kwargs

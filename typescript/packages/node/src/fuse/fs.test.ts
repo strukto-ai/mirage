@@ -19,7 +19,9 @@ import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-co
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from './errors.ts'
-import { MirageFS, XATTR_CREATE, XATTR_REPLACE, type FuseAttr } from './fs.ts'
+import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
+import { MirageFS } from './fs.ts'
+import type { FuseAttr } from './types.ts'
 
 const ENOENT = -2
 const ENOTEMPTY = -POSITIVE_ENOTEMPTY

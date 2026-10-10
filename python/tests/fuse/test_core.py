@@ -23,6 +23,7 @@ import time
 import pytest
 import pytest_asyncio
 
+from mirage.errors import FsCondition, posix_errno
 from mirage.fuse.core import MountCore
 from mirage.observe import OpRecord
 from mirage.policy import Deny, Policy
@@ -287,11 +288,9 @@ async def test_xattrs_round_trip(seeded):
 
 @pytest.mark.asyncio
 async def test_getxattr_missing_raises_no_xattr(seeded):
-    from mirage.fuse.errors import NO_XATTR
-
     with pytest.raises(OSError) as exc:
         seeded.getxattr("/a.txt", "user.absent")
-    assert exc.value.errno == NO_XATTR
+    assert exc.value.errno == posix_errno(FsCondition.NO_XATTR)
 
 
 @pytest.mark.asyncio

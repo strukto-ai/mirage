@@ -12,21 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.document import DocumentAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.document.read import read
-from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
+import sys
 
-
-async def stat(
-    accessor: DocumentAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    data = await read(accessor, path, index)
-    return FileStat(
-        name=accessor.name,
-        type=FileType.FILE,
-        size=len(data),
-        extra={LIVE_KEY: True},
-    )
+# setxattr(2)'s flags as the kernel hands them over: linux numbers
+# XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
+# XATTR_NOFOLLOW, which the kernel has already applied).
+XATTR_CREATE, XATTR_REPLACE = (
+    (0x2, 0x4) if sys.platform == "darwin" else (0x1, 0x2)
+)

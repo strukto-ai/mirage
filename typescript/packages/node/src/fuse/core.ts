@@ -24,7 +24,7 @@ import {
 } from '@struktoai/mirage-core/runtime/handles/index'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { classify } from '@struktoai/mirage-core/errors/index'
-import { FileStat, FileType } from '@struktoai/mirage-core/types'
+import { FileStat, FileType, LIVE_KEY } from '@struktoai/mirage-core/types'
 import type { SetAttrFields } from '@struktoai/mirage-core/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -42,31 +42,9 @@ import {
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { errnoError } from './errors.ts'
+import { enoent, erofs } from '@struktoai/mirage-core/errors/fs'
 import { isMacosMetadata } from './platform/macos.ts'
-
-export interface FuseAttr {
-  mtime: Date
-  atime: Date
-  ctime: Date
-  nlink: number
-  size: number
-  mode: number
-  uid: number
-  gid: number
-  rdev: number
-}
-
-export interface Handle {
-  path: string
-  /** Where the path really points once namespace links are followed. */
-  key: string
-  data?: Uint8Array
-  writeBuf?: [number, Uint8Array][]
-  live?: boolean
-  /** A large file reads a chunk at a time rather than hydrating whole. */
-  chunked?: ChunkedHandle
-}
+import type { FuseAttr, Handle } from './types.ts'
 
 export interface MountCoreOptions {
   rootPrefix?: string
@@ -372,7 +350,7 @@ export class MountCore {
     // Reject early to avoid hitting the ops layer.
     const name = path.slice(path.lastIndexOf('/') + 1)
     if (isMacosMetadata(name)) {
-      throw errnoError('ENOENT', `no such file or directory: ${path}`)
+      throw enoent(path)
     }
     const virtual = this.resolve(path)
     let s: FileStat
@@ -496,7 +474,7 @@ export class MountCore {
     // The write routes through the dispatcher like every other FUSE op, so
     // session grants and admission policies refuse a scoped kernel
     // mount exactly like a scoped shell.
-    if (this.files.links === null) throw errnoError('EROFS', 'workspace has no namespace links')
+    if (this.files.links === null) throw erofs(dest)
     const stored = src.startsWith('/') ? this.resolve(src) : src
     await this.op(() => this.files.symlink(this.resolve(dest), stored))
   }
@@ -716,7 +694,7 @@ export class MountCore {
   async open(path: string, flags = 0): Promise<number> {
     await this.removals.get(this.identity(path))
     const s = await this.op(() => this.files.stat(this.resolve(path)))
-    const ctx: Handle = { path, key: this.identity(path), live: s.extra['mirage.live'] === true }
+    const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
     if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
     if ((flags & fsConstants.O_TRUNC) !== 0) {
       // libfuse 3 negotiates FUSE_CAP_ATOMIC_O_TRUNC by default, so the

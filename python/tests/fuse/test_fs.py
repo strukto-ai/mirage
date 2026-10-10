@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
-from mirage.fuse.fs import XATTR_CREATE, XATTR_REPLACE, MirageFS
+from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
+from mirage.fuse.fs import MirageFS
 from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace

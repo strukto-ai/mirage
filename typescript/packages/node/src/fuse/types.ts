@@ -12,17 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DocumentAccessor } from '../../accessor/document.ts'
-import { FileType, FileStat, LIVE_KEY, type PathSpec } from '../../types.ts'
-import { read } from './read.ts'
+import type { ChunkedHandle } from '@struktoai/mirage-core/runtime/handles/index'
 
-export async function stat(accessor: DocumentAccessor, path: PathSpec): Promise<FileStat> {
-  const data = await read(accessor, path)
-  return new FileStat({
-    name: accessor.name,
-    type: FileType.FILE,
-    size: data.byteLength,
-    modified: null,
-    extra: { [LIVE_KEY]: true },
-  })
+/** The attributes a kernel mount reports for one path. */
+export interface FuseAttr {
+  mtime: Date
+  atime: Date
+  ctime: Date
+  nlink: number
+  size: number
+  mode: number
+  uid: number
+  gid: number
+  rdev: number
+}
+
+/** One open file of a kernel mount. */
+export interface Handle {
+  path: string
+  /** Where the path really points once namespace links are followed. */
+  key: string
+  data?: Uint8Array
+  writeBuf?: [number, Uint8Array][]
+  live?: boolean
+  /** A large file reads a chunk at a time rather than hydrating whole. */
+  chunked?: ChunkedHandle
 }

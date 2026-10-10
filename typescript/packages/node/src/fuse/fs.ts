@@ -12,23 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { classify } from '@struktoai/mirage-core/errors/index'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { type FuseAttr, MountCore } from './core.ts'
+import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
+import { MountCore } from './core.ts'
+import type { FuseAttr } from './types.ts'
 import { classifyError } from './errors.ts'
-
-// setxattr(2)'s flags as the kernel hands them over: linux numbers
-// XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
-// XATTR_NOFOLLOW, which the kernel has already applied). Mirrors the
-// python adapter.
-const DARWIN = process.platform === 'darwin'
-export const XATTR_CREATE = DARWIN ? 0x2 : 0x1
-export const XATTR_REPLACE = DARWIN ? 0x4 : 0x2
-
-export type { FuseAttr }
 
 type Cb<T> = (code: number, result?: T) => void
 
@@ -94,22 +85,9 @@ export class MirageFS {
       removexattr: this.removexattr.bind(this),
       statfs: this.statfs.bind(this),
     }
-    const session = this.core.session
-    if (session === null) return table
-    // A session-bound tree enters the session context before every op,
-    // mirroring Python's MountCore session binding: the async work each
-    // callback starts inherits the context, so dispatch/Files enforce the
-    // session's mount grants for kernel-originated I/O too.
-    const bound: Record<string, unknown> = {}
-    for (const [name, fn] of Object.entries(table)) {
-      bound[name] = (...args: never[]) => {
-        void runWithSession(session, () => {
-          fn(...args)
-          return Promise.resolve()
-        })
-      }
-    }
-    return bound
+    // A session-bound tree needs no binding here: MountCore runs every op
+    // it sends under its session (`MountCore.op`), as Python's does.
+    return table
   }
 
   private getattr(path: string, cb: Cb<FuseAttr>): void {

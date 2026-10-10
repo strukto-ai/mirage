@@ -12,21 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.document import DocumentAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.document.read import read
-from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
+from dataclasses import dataclass, field
+
+from mirage.runtime.handles import ChunkedHandle
+
+WriteBuf = list[tuple[int, bytes]]
 
 
-async def stat(
-    accessor: DocumentAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    data = await read(accessor, path, index)
-    return FileStat(
-        name=accessor.name,
-        type=FileType.FILE,
-        size=len(data),
-        extra={LIVE_KEY: True},
-    )
+@dataclass(slots=True)
+class Handle:
+    """One open file of a kernel mount."""
+
+    path: str
+    # Where the path really points once namespace links are followed.
+    key: str
+    live: bool = False
+    data: bytes | None = None
+    write_buf: WriteBuf = field(default_factory=list)
+    # A large file reads a chunk at a time rather than hydrating whole.
+    chunked: ChunkedHandle | None = None
