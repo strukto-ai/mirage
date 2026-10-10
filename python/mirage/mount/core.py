@@ -583,9 +583,15 @@ class MountCore:
         """
         if mode is None:
             return
-        made = await self._op(self._files.stat(self.resolve(path)))
-        if posix_mode(made) & 0o7777 != mode & 0o7777:
-            await self.setattr(path, mode=mode)
+        try:
+            made = await self._op(self._files.stat(self.resolve(path)))
+            if posix_mode(made) & 0o7777 != mode & 0o7777:
+                await self.setattr(path, mode=mode)
+        except OSError as err:
+            # The entry exists: a policy that refuses the stat or the chmod
+            # leaves the mode it was made with rather than failing a create
+            # that landed.
+            logger.debug("mount: keeping the mode of %s failed: %r", path, err)
 
     async def readlink(self, path: str) -> str:
         """The target of a namespace link, read through the dispatcher.
@@ -861,9 +867,12 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        removal = self._removals.get(self.identity(path))
-        if removal is not None:
-            await asyncio.shield(removal)
+        # A removal is keyed by the name it takes, so an open through a link
+        # waits on the link's removal and then on its target's.
+        for follow in (False, True):
+            removal = self._removals.get(self.identity(path, follow=follow))
+            if removal is not None:
+                await asyncio.shield(removal)
         s = await self._op(self._files.stat(self.resolve(path)))
         ctx = Handle(
             path=path,

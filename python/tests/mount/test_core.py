@@ -976,3 +976,39 @@ async def test_a_create_keeps_its_mode_over_the_stores_own_umask():
     await core.mkdir("/d", 0o755)
     assert stat.S_IMODE((await core.getattr("/f")).mode) == 0o644
     assert stat.S_IMODE((await core.getattr("/d")).mode) == 0o755
+
+
+class _NoStats(Policy):
+    async def pre_vfs(self, ctx):
+        return Deny("no stat") if ctx.op == "stat" else None
+
+
+@pytest.mark.asyncio
+async def test_a_create_a_policy_refuses_to_stat_still_lands():
+    # The entry exists once the create returns: failing it then would make
+    # a retry find it there.
+    vfs = RAMVFS()
+    ws = Workspace({"/": vfs}, mode=MountMode.WRITE)
+    ws.policies.add(_NoStats())
+    core = MountCore(ws.vfs)
+    await core.mkdir("/d", 0o700)
+    await core.release(await core.create("/f", stat.S_IFREG | 0o600))
+    assert "/d" in vfs._store.dirs
+    assert "/f" in vfs._store.files
+
+
+@pytest.mark.asyncio
+async def test_an_open_through_a_link_waits_out_the_links_removal():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo body > /a.txt; ln -s a.txt /lk")
+    files = _Held(ws.vfs, "unlink")
+    core = MountCore(files)
+    removing = asyncio.create_task(core.unlink("/lk"))
+    await files.out.wait()
+    opening = asyncio.create_task(core.open("/lk"))
+    await asyncio.sleep(0.01)
+    assert not opening.done()
+    files.go.set()
+    await removing
+    with pytest.raises(FileNotFoundError):
+        await opening

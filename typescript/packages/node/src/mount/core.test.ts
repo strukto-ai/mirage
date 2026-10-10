@@ -18,6 +18,7 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { Action, Policy, VfsContext } from '@struktoai/mirage-core/policy/index'
 import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
 import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
@@ -935,4 +936,51 @@ it("keeps a create's mode over the store's own umask", async () => {
   await core.mkdir('/data/d', 0o755)
   expect((await core.getattr('/data/f')).mode & 0o7777).toBe(0o644)
   expect((await core.getattr('/data/d')).mode & 0o7777).toBe(0o755)
+})
+
+it('lands a create a policy refuses to stat', async () => {
+  // The entry exists once the create returns: failing it then would make a
+  // retry find it there.
+  const vfs = new RAMVFS()
+  const noStats: Policy = {
+    preVfs: (ctx: VfsContext): Action | null =>
+      ctx.op === 'stat' ? { kind: 'deny', reason: 'no stat' } : null,
+  }
+  const ws = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE, policies: [noStats] })
+  const core = new MountCore(ws.vfs)
+  await core.mkdir('/data/d', 0o700)
+  await core.release(await core.create('/data/f', 0o100600))
+  expect(vfs.store.dirs.has('/d')).toBe(true)
+  expect(vfs.store.files.has('/f')).toBe(true)
+})
+
+it("holds an open through a link back until the link's removal is done", async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.shell('echo body > /data/a.txt; ln -s a.txt /data/lk')
+  const core = new MountCore(ws.vfs)
+  const real = ws.vfs.unlink.bind(ws.vfs)
+  let release = (): void => undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let entered = (): void => undefined
+  const out = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  vi.spyOn(ws.vfs, 'unlink').mockImplementation(async (...args) => {
+    entered()
+    await gate
+    return real(...args)
+  })
+  const removing = core.unlink('/data/lk')
+  await out
+  let opened = false
+  const opening = core.open('/data/lk').finally(() => {
+    opened = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(opened).toBe(false)
+  release()
+  await removing
+  await expect(opening).rejects.toMatchObject({ code: 'ENOENT' })
 })

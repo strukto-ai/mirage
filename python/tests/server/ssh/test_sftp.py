@@ -413,7 +413,8 @@ class ListingCore:
         self.tasks = max(self.tasks, len(asyncio.all_tasks()))
         try:
             if self.calls <= LISTING_CONCURRENCY:
-                await asyncio.wait_for(self.started.wait(), 5)
+                async with asyncio.timeout(5):
+                    await self.started.wait()
             else:
                 await asyncio.sleep(0)
         finally:

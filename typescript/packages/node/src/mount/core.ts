@@ -483,8 +483,14 @@ export class MountCore {
    */
   private async keepMode(path: string, mode: number | null): Promise<void> {
     if (mode === null) return
-    const made = await this.op(() => this.files.stat(this.resolve(path)))
-    if ((posixMode(made) & 0o7777) !== (mode & 0o7777)) await this.setattr(path, mode)
+    try {
+      const made = await this.op(() => this.files.stat(this.resolve(path)))
+      if ((posixMode(made) & 0o7777) !== (mode & 0o7777)) await this.setattr(path, mode)
+    } catch (err) {
+      // The entry exists: a policy that refuses the stat or the chmod leaves
+      // the mode it was made with rather than failing a create that landed.
+      console.debug(`mount: keeping the mode of ${path} failed: ${String(err)}`)
+    }
   }
 
   /** The target of a namespace link, read through the dispatcher; EINVAL when not a link. */
@@ -753,6 +759,9 @@ export class MountCore {
   }
 
   async open(path: string, flags = 0): Promise<number> {
+    // A removal is keyed by the name it takes, so an open through a link
+    // waits on the link's removal and then on its target's.
+    await this.removals.get(this.identity(path, false))
     await this.removals.get(this.identity(path))
     const s = await this.op(() => this.files.stat(this.resolve(path)))
     const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
