@@ -307,6 +307,62 @@
         "stdout": "<>\n<>\n<>\n<>\n<🦊>\n<😀>\n<>\n<>\n<b>\n<a>\n<😀>\n<X>\n<𐐀a>\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "extglob_conditional_short_circuit",
+      "seq": 960822,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ x == x || -n <(printf unused >&2) ]]; echo $?; [[ x == x || -n >(true) ]]; echo $?; [[ x == y && -n <(printf unused >&2) ]]; echo $?; [[ x == y && -n >(true) ]]; echo $?; [[ x == y || -n <(printf used >&2) ]]; echo $?; [[ x == x || ${missing:?unused} ]]; echo $?; x=0; [[ x=5 -eq 5 && $x == 5 ]]; echo \"$? $x\"'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n1\n1\n0\n0\n0 5\n",
+        "stderr": "used"
+      }
+    },
+    {
+      "id": "extglob_case_skips_unused_patterns",
+      "seq": 960823,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case b in b) echo chosen;; @(<(printf unused >&2)|b)) :;; esac; case b in b) echo chosen;; @(>(true)|b)) :;; esac; case b in b|$(printf unused >&2)) echo chosen;; esac; case b in b|>(true)) echo chosen;; esac'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "chosen\nchosen\nchosen\nchosen\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_case_fallthrough_and_retest",
+      "seq": 960824,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case b in b) echo first;& @(<(printf unused >&2)|b)) echo second;; esac; p=x; case b in b) p=b; echo first;;& \"$p\") echo second;; esac'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "first\nsecond\nfirst\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "extglob_case_expands_tested_patterns",
+      "seq": 960825,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case b in @(b|$(printf used >&2))) echo chosen;; esac; wait; case b in <(printf used >&2)|b) echo chosen;; esac; wait; case b in b) printf body >&2;;& $(printf pattern >&2; printf b)) echo chosen;; esac'\"'\"''",
+      "expect": {
+        "exit": 0,
+        "stdout": "chosen\nchosen\nchosen\n",
+        "stderr": "usedusedbodypattern"
+      }
     }
   ]
 }

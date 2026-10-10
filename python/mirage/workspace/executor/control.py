@@ -549,8 +549,9 @@ async def handle_cfor(
 async def handle_case(
     run: BodyRun,
     word: str,
-    items: list[tuple[list[str], list[TSNodeLike], str]],
+    items: list[tuple[list[TSNodeLike], list[TSNodeLike], str]],
     session: SessionState,
+    expand: Callable[[TSNodeLike], Awaitable[str]],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the first arm whose pattern matches ``word``, and after it
     the arms its terminator reaches: ``;&`` falls into the next arm's
@@ -566,12 +567,15 @@ async def handle_case(
     for patterns, body, terminator in items:
         # An arm a `;;&` left can have turned extglob on for this one.
         extglob = bool(session.shopts.get("extglob"))
-        if not (
-            fallthrough
-            or any(fnmatch(word, p, extglob=extglob) for p in patterns)
-        ):
-            continue
         try:
+            matched = fallthrough
+            if not matched:
+                for pattern in patterns:
+                    if fnmatch(word, await expand(pattern), extglob=extglob):
+                        matched = True
+                        break
+            if not matched:
+                continue
             stdout, io, last_exec = await run(body, bound=bound)
         except UNWINDING as sig:
             raise await carried(sig, _chain_streams(all_stdout), merged_io)

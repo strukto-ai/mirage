@@ -971,7 +971,7 @@ export async function executeNode(
       }
       return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
     } catch (err) {
-      if (err instanceof ExitSignal || err instanceof ProcessSubError) {
+      if (err instanceof ExitSignal) {
         const extra = diagnosticStderr(node, context)
         const merged = new Uint8Array(extra.length + err.stderr.length)
         merged.set(extra)
@@ -987,7 +987,7 @@ export async function executeNode(
     // The node fails, as an unsupported command does; the line goes on.
     const stderr = err.stderr
     return [
-      null,
+      err.stdout,
       new IOResult({ exitCode: 2, stderr }),
       new ExecutionNode({ command: 'process_sub', exitCode: 2, stderr }),
     ]
@@ -997,9 +997,11 @@ export async function executeNode(
   }
 }
 
-/** An output process substitution, which mirage does not run. */
-class ProcessSubError extends Error {
-  stderr = encodeText('mirage: unsupported: process substitution >(...)\n')
+/** A node-local refusal; carry earlier output until executeNode catches it. */
+class ProcessSubError extends ExitSignal {
+  constructor() {
+    super(2, encodeText('mirage: unsupported: process substitution >(...)\n'))
+  }
 }
 
 /**
@@ -1516,15 +1518,9 @@ async function executeNodeBody(
 
   if (kind === NodeKind.CASE) {
     const word = await expandNode(getCaseWord(node), context, executeFn, callStack, view)
-    const items: [string[], TSNodeLike[], string][] = []
-    for (const [patternNodes, body, terminator] of getCaseItems(node)) {
-      const patterns: string[] = []
-      for (const patternNode of patternNodes) {
-        patterns.push(await expandPattern(patternNode, context, executeFn, callStack, view))
-      }
-      items.push([patterns, body, terminator])
-    }
-    return handleCase(run, word, items, session)
+    return handleCase(run, word, getCaseItems(node), session, (pattern) =>
+      expandPattern(pattern, context, executeFn, callStack, view),
+    )
   }
 
   if (kind === NodeKind.FUNCTION_DEF) {

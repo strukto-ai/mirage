@@ -1102,7 +1102,7 @@ async def execute_node(
                     err = _diagnostic_stderr(node, context)
                     io.stderr = err + await io.materialize_stderr()
                     exec_node.stderr = err + (exec_node.stderr or b"")
-            except (ExitSignal, _ProcessSubError) as exc:
+            except ExitSignal as exc:
                 exc.stderr = _diagnostic_stderr(node, context) + exc.stderr
                 raise
             finally:
@@ -1114,7 +1114,7 @@ async def execute_node(
         # The node fails, as an unsupported command does; the line goes on.
         err = exc.stderr
         return (
-            None,
+            exc.stdout,
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command="process_sub", exit_code=2, stderr=err),
         )
@@ -1124,12 +1124,13 @@ async def execute_node(
             dev.release_input(path, allocation)
 
 
-class _ProcessSubError(Exception):
-    """An output process substitution, which mirage does not run."""
+class _ProcessSubError(ExitSignal):
+    """A node-local refusal; carry earlier output until execute_node catches it."""
 
     def __init__(self) -> None:
-        super().__init__("unsupported: process substitution >(...)")
-        self.stderr = b"mirage: unsupported: process substitution >(...)\n"
+        super().__init__(
+            2, stderr=b"mirage: unsupported: process substitution >(...)\n"
+        )
 
 
 def _process_input(
@@ -1628,14 +1629,19 @@ async def _execute_node(
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, context, execute_fn, cs, view=view)
-        case_items = []
-        for pattern_nodes, body, terminator in get_case_items(node):
-            patterns = [
-                await expand_pattern(p, context, execute_fn, cs, view=view)
-                for p in pattern_nodes
-            ]
-            case_items.append((patterns, body, terminator))
-        return await handle_case(run_body, word, case_items, session)
+        return await handle_case(
+            run_body,
+            word,
+            get_case_items(node),
+            session,
+            partial(
+                expand_pattern,
+                context=context,
+                execute_fn=execute_fn,
+                call_stack=cs,
+                view=view,
+            ),
+        )
 
     if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)

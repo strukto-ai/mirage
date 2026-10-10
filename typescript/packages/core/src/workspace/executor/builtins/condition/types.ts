@@ -17,7 +17,13 @@ import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
+interface CondLazy {
+  kind: 'lazy'
+  expand: () => Promise<CondNode>
+}
+
 export type CondNode =
+  | CondLazy
   | { kind: 'word'; value: string }
   | { kind: 'unary'; op: string; operand: string }
   | { kind: 'binary'; left: string; op: string; right: string; rightLiteral: boolean }

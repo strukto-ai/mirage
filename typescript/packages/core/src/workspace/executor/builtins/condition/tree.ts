@@ -27,6 +27,7 @@ import type { CondContext, CondNode } from './types.ts'
 
 /** Evaluate a structured [[ ]] expression tree. */
 export async function evalCond(ctx: CondContext, node: CondNode): Promise<boolean> {
+  if (node.kind === 'lazy') return evalCond(ctx, await node.expand())
   if (node.kind === 'and') {
     return (await evalCond(ctx, node.left)) && (await evalCond(ctx, node.right))
   }

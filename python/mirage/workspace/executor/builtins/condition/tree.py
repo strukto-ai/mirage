@@ -37,6 +37,7 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondBinary,
     CondContext,
     CondError,
+    CondLazy,
     CondNode,
     CondNot,
     CondOr,
@@ -57,6 +58,8 @@ async def eval_cond(ctx: CondContext, node: CondNode) -> bool:
         ctx (CondContext): evaluation context.
         node (CondNode): parsed condition.
     """
+    if isinstance(node, CondLazy):
+        return await eval_cond(ctx, await node.expand())
     if isinstance(node, CondAnd):
         return await eval_cond(ctx, node.left) and await eval_cond(
             ctx, node.right
