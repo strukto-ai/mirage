@@ -527,6 +527,31 @@ it('a path-guarded command is still held at its write', async () => {
   }
 })
 
+it('runs a command registered for one filetype only on that filetype', async () => {
+  const ws = new Workspace(
+    { '/ram/': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+  )
+  try {
+    await ws.shell('echo hit > /ram/x.csv; echo hit > /ram/x.txt')
+    ws.mount('/ram/').registerCommands(
+      command({
+        name: 'summarize',
+        vfs: null,
+        spec: BASIC_SPEC,
+        fn: OK_CMD_STDOUT,
+        filetype: '.csv',
+      }),
+    )
+    const csv = await ws.shell('summarize /ram/x.csv')
+    const txt = await ws.shell('summarize /ram/x.txt')
+    expect([csv.exitCode, csv.stdoutText]).toEqual([0, 'ok'])
+    expect([txt.exitCode, txt.stderrText]).toEqual([127, 'summarize: command not found'])
+  } finally {
+    await ws.close()
+  }
+})
+
 it.each([false, true])(
   'closes native output and releases mount admission (started=%s)',
   async (started) => {

@@ -313,8 +313,8 @@ export class MountRegistry {
     // Through `registerCommands`, as python's `registry.mount` does, so a
     // family table that fans out over sibling VFS names registers only
     // this mount's entries instead of letting the last sibling win on a
-    // shared key. After the shared set, so a command the VFS was handed
-    // without a VFS name still wins over the shared one of that name.
+    // shared key. After the shared set, so a command the VFS replaces
+    // keeps its own spec, not the generic one of that name.
     m.registerCommands(commandsFor(init.vfs))
     return m
   }
