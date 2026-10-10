@@ -520,6 +520,35 @@ async def test_a_rename_replaces_a_link_at_the_destination():
 
 
 @pytest.mark.asyncio
+async def test_a_tree_copy_merges_beside_a_link_at_the_destination():
+    # Only a rename asks for an empty destination: a copy merges into
+    # the directory and the link already there stays.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e/d && echo hi > /ram/d/a.txt")
+        await ws.shell("ln -s gone /ram/e/d/stale")
+        assert (await ws.shell("cp -r /ram/d /ram/e")).exit_code == 0
+        assert (await ws.shell("cat /ram/e/d/a.txt")).stdout == b"hi\n"
+        assert ws._namespace.readlink("/ram/e/d/stale") == "gone"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_writes_through_a_link_at_the_destination():
+    # A copy writes its destination as a write does: the bytes land in
+    # the link's target and the link stays.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("echo tgt > /ram/t.txt")
+        await ws.shell("ln -s t.txt /ram/link")
+        await ws.dispatch(
+            "copy",
+            PathSpec.from_str_path("/ram/a.txt"),
+            dst=PathSpec.from_str_path("/ram/link"),
+        )
+        assert ws._namespace.readlink("/ram/link") == "t.txt"
+        assert (await ws.shell("cat /ram/t.txt")).stdout == b"hi\n"
+
+
+@pytest.mark.asyncio
 async def test_a_read_grant_refuses_link_writes_like_file_writes():
     # The mode gate on the table ops. A read grant refused a file's
     # unlink with EROFS while the same session deleted, created and

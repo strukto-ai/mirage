@@ -887,13 +887,25 @@ class Dispatcher:
 
         ``nofollow`` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts
         on a link entry itself (chown -h writing the link's own attrs)
-        keeps the typed path. Consumed here, never forwarded.
+        keeps the typed path. Consumed here, never forwarded. A copy
+        writes its destination as a write does, through a link at the
+        final name; a rename moves the name itself.
 
         Args:
             call (_Call): the walked op; its ``path`` becomes the target.
         """
         walked = call.path
         nofollow = call.kwargs.pop("nofollow", False)
+        if call.name in COPY_OPS and call.dst is not None and not nofollow:
+            dst = PathSpec.from_str_path(
+                _follow_or_loop(self._namespace, call.dst, True)
+            )
+            if dst.virtual != call.dst.virtual:
+                if not path_visible(call.vis, dst.virtual):
+                    raise hidden_refusal(call.vis, dst.virtual, True)
+                if call.rule_gate is not None:
+                    _judge(call.rule_gate, dst)
+                call.dst = call.kwargs["dst"] = dst
         if call.name not in NO_FOLLOW_OPS and not nofollow:
             followed = _follow_or_loop(self._namespace, call.path, True)
             if followed != call.path.virtual:

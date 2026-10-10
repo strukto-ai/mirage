@@ -279,6 +279,38 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
+  it('merges a tree copy beside a link at the destination', async () => {
+    // Only a rename asks for an empty destination: a copy merges into the
+    // directory and the link already there stays.
+    const ws = await linkWorkspace()
+    try {
+      await ws.shell('echo hi > /ram/d/a.txt')
+      await ws.shell('mkdir -p /ram/e/d')
+      await ws.shell('ln -s gone /ram/e/d/stale')
+      const res = await ws.shell('cp -r /ram/d /ram/e')
+      expect(res.exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /ram/e/d/a.txt')).stdout)).toBe('hi\n')
+      expect(DEC.decode((await ws.shell('readlink /ram/e/d/stale')).stdout)).toBe('gone\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('copies through a link at the destination', async () => {
+    // A copy writes its destination as a write does: the bytes land in the
+    // link's target and the link stays.
+    const ws = await linkWorkspace()
+    try {
+      await ws.shell('echo tgt > /ram/t.txt')
+      await ws.shell('ln -s t.txt /ram/to-t')
+      await ws.dispatch('copy', '/ram/a.txt', [PathSpec.fromStrPath('/ram/to-t')])
+      expect(DEC.decode((await ws.shell('readlink /ram/to-t')).stdout)).toBe('t.txt\n')
+      expect(DEC.decode((await ws.shell('cat /ram/t.txt')).stdout)).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('answers a no-follow stat with the link row', async () => {
     // lstat asks for the row only the node table holds; a following stat
     // arrives resolved to the target and must not see a link at all.

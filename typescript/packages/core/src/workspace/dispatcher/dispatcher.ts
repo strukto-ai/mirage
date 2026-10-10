@@ -390,7 +390,7 @@ interface Call {
   /** The path as the caller named it. */
   readonly typed: PathSpec
   /** A rename's walked destination. */
-  readonly dst: PathSpec | null
+  dst: PathSpec | null
   /** The op's positional arguments; the operand walk replaces path ones. */
   args: readonly unknown[] | undefined
   /** The op's arguments; `follow` consumes `nofollow`. */
@@ -711,7 +711,7 @@ export class Dispatcher {
    */
   private async refuseRename(call: Call): Promise<void> {
     const dst = call.dst
-    if (dst === null) return
+    if (call.name !== 'rename' || dst === null) return
     if (
       moveReveals(call.vis, call.path.virtual, dst.virtual) &&
       (await this.movedSourceIsDir(call.path, call.issuer))
@@ -726,8 +726,9 @@ export class Dispatcher {
    *
    * `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts on a
    * link entry itself (chown -h writing the link's own attrs) keeps the
-   * typed path. Consumed here, never forwarded. Mirrors Python's
-   * Dispatcher._follow.
+   * typed path. Consumed here, never forwarded. A copy writes its
+   * destination as a write does, through a link at the final name; a
+   * rename moves the name itself. Mirrors Python's Dispatcher._follow.
    */
   private follow(call: Call): void {
     const nofollow = call.kwargs?.nofollow === true
@@ -737,6 +738,15 @@ export class Dispatcher {
       call.kwargs = rest
     }
     const walked = call.path
+    if (COPY_OPS.has(call.name) && call.dst !== null && !nofollow) {
+      const dst = PathSpec.fromStrPath(followOrLoop(this.namespace, call.dst, true))
+      if (dst.virtual !== call.dst.virtual) {
+        if (!pathVisible(call.vis, dst.virtual)) throw hiddenRefusal(call.vis, dst.virtual, true)
+        if (call.ruleGate !== null) judge(call.ruleGate, dst)
+        call.dst = dst
+        call.args = [dst, ...(call.args ?? []).slice(1)]
+      }
+    }
     if (!NO_FOLLOW_OPS.has(call.name) && !nofollow) {
       const followed = followOrLoop(this.namespace, call.path, true)
       if (followed !== call.path.virtual) {
