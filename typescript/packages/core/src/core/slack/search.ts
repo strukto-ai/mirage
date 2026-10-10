@@ -107,11 +107,6 @@ const RECORD_KEYS: ReadonlySet<string> = new Set([
   'channel',
 ])
 
-interface SearchBlock {
-  matches?: Record<string, unknown>[]
-  paging?: { pages?: number }
-}
-
 export async function searchMessages(
   accessor: SlackAccessor,
   query: string,
@@ -185,7 +180,10 @@ async function matches(
       page: String(page),
       sort: 'timestamp',
     })
-    const block = (data[key] ?? {}) as SearchBlock
+    const block = (data[key] ?? {}) as {
+      matches?: Record<string, unknown>[]
+      paging?: { pages?: number }
+    }
     found.push(...(block.matches ?? []))
     if (page >= (block.paging?.pages ?? 1)) return found
     if (page >= MAX_PAGES) return null

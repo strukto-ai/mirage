@@ -241,7 +241,13 @@ async def _matches(
         page += 1
 
 
-async def _hits(
+def _ids_of(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+async def _hits_of(
     accessor: SlackAccessor,
     within: str,
     queries: list[str],
@@ -264,8 +270,8 @@ async def _hits(
                 day = _day_of(item.get("ts"))
             else:
                 ids = [
-                    *(item.get("channels") or []),
-                    *(item.get("groups") or []),
+                    *_ids_of(item.get("channels")),
+                    *_ids_of(item.get("groups")),
                 ]
                 ids = ids or ([channel_id] if channel_id else [])
                 day = _day_of(item.get("timestamp"))
@@ -346,7 +352,7 @@ async def _search(
             within, channel_id = f"in:#{entry.name} ", entry.id
         else:
             continue
-        hits = await _hits(accessor, within, queries, reaction, channel_id)
+        hits = await _hits_of(accessor, within, queries, reaction, channel_id)
         if hits is None:
             return None
         found.extend(

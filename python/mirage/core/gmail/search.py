@@ -152,13 +152,17 @@ RECORD_KEYS = frozenset(
 )
 
 
-def _child(directory: PathSpec, name: str) -> PathSpec:
+def _name_of(path: str) -> str:
+    return path.rsplit("/", 1)[-1]
+
+
+def _child_of(directory: PathSpec, name: str) -> PathSpec:
     return mounted_path(
         directory, f"{directory.mount_path.rstrip('/')}/{name}"
     )
 
 
-async def _messages(
+async def _messages_under(
     accessor: GmailAccessor, directory: PathSpec, index: IndexCacheStore
 ) -> dict[str, list[PathSpec]]:
     found: dict[str, list[PathSpec]] = {}
@@ -166,18 +170,18 @@ async def _messages(
     while pending:
         current = pending.pop()
         for listed in await readdir(accessor, current, index):
-            child = _child(current, listed.rsplit("/", 1)[-1])
+            child = _child_of(current, _name_of(listed))
             kind = detect_scope(child).kind
             if kind == "day":
                 pending.append(child)
             elif kind == "message":
-                name = child.mount_path.rsplit("/", 1)[-1]
+                name = _name_of(child.mount_path)
                 message_id = parse_id_name(name, suffix=MSG_SUFFIX)[1]
                 found.setdefault(message_id, []).append(child)
     return found
 
 
-async def _hits(
+async def _hits_under(
     accessor: GmailAccessor,
     directory: PathSpec,
     queries: list[str],
@@ -201,7 +205,7 @@ async def _hits(
         if len(stubs) >= MAX_HITS:
             return None
         ids.update(stub["id"] for stub in stubs)
-    files = await _messages(accessor, directory, index)
+    files = await _messages_under(accessor, directory, index)
     return [path for message_id in ids for path in files.get(message_id, [])]
 
 
@@ -239,13 +243,13 @@ async def files_containing(
             match = detect_scope(scope)
             if match.kind == ROOT:
                 listed = await readdir(accessor, scope, index)
-                labels = [_child(scope, p.rsplit("/", 1)[-1]) for p in listed]
+                labels = [_child_of(scope, _name_of(p)) for p in listed]
             elif match.kind in ("label", "day"):
                 labels = [scope]
             else:
                 continue
             for directory in labels:
-                hits = await _hits(accessor, directory, queries, index)
+                hits = await _hits_under(accessor, directory, queries, index)
                 if hits is None:
                     return None
                 found.extend(hits)
