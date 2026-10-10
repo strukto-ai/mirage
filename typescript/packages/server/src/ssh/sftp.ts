@@ -195,7 +195,7 @@ class MirageSFTPServer {
       this.serve(id, () => {
         const f = this.file(handle)
         // Its name now belongs to another file, or to none.
-        if (this.core?.handles.get(f.fd)?.detached === true) throw enoent(f.path)
+        if (this.core?.handles.get(f.fd)?.detached !== undefined) throw enoent(f.path)
         return this.setAttrs(id, f.path, attrs)
       })
     })

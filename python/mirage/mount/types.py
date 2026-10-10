@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.runtime.handles import ChunkedHandle
+from mirage.types import FileStat
 
 WriteBuf = list[tuple[int, bytes]]
 
@@ -65,5 +66,6 @@ class Handle:
     # Bumped whenever the file changes, so a first read that was out
     # meanwhile does not keep the bytes it fetched.
     generation: int = 0
-    # Its name was removed or replaced: the open file has no path left.
-    detached: bool = False
+    # The file's row as it was when its name was removed or replaced; the
+    # open file has no path left. None while it has one.
+    detached: FileStat | None = None

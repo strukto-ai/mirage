@@ -1076,8 +1076,8 @@ it('detaches the handles on a name an unlink or a rename takes', async () => {
   await core.write('/data/c.txt', -1, new TextEncoder().encode('new'), 0)
   const replaced = await core.open('/data/c.txt')
   await core.rename('/data/sub/inner.txt', '/data/c.txt')
-  expect(core.handles.get(gone)?.detached).toBe(true)
-  expect(core.handles.get(replaced)?.detached).toBe(true)
+  expect(core.handles.get(gone)?.detached).toBeDefined()
+  expect(core.handles.get(replaced)?.detached).toBeDefined()
   expect(core.handles.get(linked)?.detached).toBeUndefined()
 })
 
@@ -1120,4 +1120,17 @@ it('never lets a detached handle touch the file at its old name', async () => {
   expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('STALE-file')
   await core.release(fd)
   expect(new TextDecoder().decode(await ws.vfs.read('/data/b'))).toBe('fresh')
+})
+
+it('keeps the file a detached handle never read', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('stale-file'))
+  await ws.shell('chmod 600 /data/b')
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/b')
+  await core.rename('/data/a', '/data/b')
+  const attrs = await core.fgetattr('/data/b', fd)
+  expect([attrs.size, attrs.mode & 0o7777]).toEqual([10, 0o600])
+  expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('stale-file')
 })

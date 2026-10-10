@@ -432,7 +432,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
             ctx = core.handles.get(f.fh)
             if ctx is None:
                 raise asyncssh.SFTPFailure("invalid handle")
-            if ctx.detached:
+            if ctx.detached is not None:
                 # Its name now belongs to another file, or to none.
                 raise enoent(ctx.path)
             await set_attrs(core, ctx.path, attrs, True)

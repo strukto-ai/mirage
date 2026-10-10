@@ -1120,3 +1120,39 @@ async def test_a_detached_handle_never_touches_the_file_at_its_old_name():
     assert await core.read("/b", 100, 0, fh) == b"STALE-file"
     await core.release(fh)
     assert await ws.vfs.read("/b") == b"fresh"
+
+
+@pytest.mark.asyncio
+async def test_a_detached_handle_that_never_read_keeps_its_file():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf fresh > /a; printf stale-file > /b; chmod 600 /b")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/b")
+    await core.rename("/a", "/b")
+    attrs = await core.fgetattr("/b", fh)
+    assert (attrs.size, stat.S_IMODE(attrs.mode)) == (10, 0o600)
+    assert await core.read("/b", 100, 0, fh) == b"stale-file"
+
+
+@pytest.mark.asyncio
+async def test_a_read_waits_for_a_flush_a_rename_moved():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf abc > /a")
+    writes = _Held(ws.vfs, "pwrite")
+    files = _Held(writes, "rename")
+    core = MountCore(files)
+    fh = await core.open("/a", os.O_RDWR)
+    await core.read("/a", 100, 0, fh)
+    await core.write("/a", b"XYZW", 0, fh)
+    renaming = asyncio.create_task(core.rename("/a", "/b"))
+    await files.out.wait()
+    flushing = asyncio.create_task(core.flush("/a", fh))
+    await asyncio.sleep(0)
+    reading = asyncio.create_task(core.read("/b", 100, 0, fh))
+    await asyncio.sleep(0)
+    files.go.set()
+    await renaming
+    await writes.out.wait()
+    writes.go.set()
+    await flushing
+    assert await reading == b"XYZW"

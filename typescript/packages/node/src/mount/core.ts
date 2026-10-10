@@ -338,15 +338,17 @@ export class MountCore {
       throw enoent(path)
     }
     const virtual = this.resolve(path)
-    // An open descriptor keeps the bytes it had after its name goes; once
-    // the name is another file's, that file's row is not its.
-    const gone = new FileStat({ name, type: FileType.FILE })
-    let s: FileStat = gone
-    if (ctx?.detached !== true) {
+    let s: FileStat
+    if (ctx?.detached !== undefined) {
+      // Its name is gone: it stats by the row its file had then.
+      s = ctx.detached
+    } else {
       try {
         s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
       } catch (err) {
+        // An open descriptor keeps the bytes it had after an unlink.
         if (size === null || classify(err) !== 'ENOENT') throw err
+        s = new FileStat({ name, type: FileType.FILE })
       }
     }
     if (isLink(s)) {
@@ -379,7 +381,7 @@ export class MountCore {
     const ctx = this.handles.get(fd) ?? null
     // A flush still landing has taken the handle's buffer: wait for it, so
     // the size counts what it wrote.
-    if (ctx !== null) await this.pending.get(ctx.key)
+    if (ctx !== null) await this.settled(ctx)
     // The handle is open on the file a link led to, so its stat is the
     // target's.
     return this.getattr(ctx?.path ?? path, ctx !== null, ctx)
@@ -424,7 +426,7 @@ export class MountCore {
     const ctx = this.handles.get(fd)
     // A flush still landing has taken the handle's buffer and not yet
     // refreshed its bytes: wait for it, so the read sees what was written.
-    if (ctx !== undefined) await this.pending.get(ctx.key)
+    if (ctx !== undefined) await this.settled(ctx)
     if (ctx === undefined) {
       // Whole, as a handle's first read is: the read that fills the cache
       // and records the version a conditional write sends.
@@ -536,10 +538,10 @@ export class MountCore {
   async unlink(path: string): Promise<void> {
     await this.mutate(this.identity(path, false), async () => {
       await this.removing(path, async () => {
-        await this.hold(path)
         const named = this.named(path)
+        const row = await this.hold(path, named)
         await this.op(() => this.files.unlink(this.resolve(path)))
-        for (const ctx of named) ctx.detached = true
+        for (const ctx of named) ctx.detached = row
       })
       await this.changed(path, false)
     })
@@ -599,14 +601,14 @@ export class MountCore {
       const source = this.resolve(src)
       const target = this.resolve(dst)
       await this.removing(dst, async () => {
-        await this.hold(dst)
         const moved = this.identity(src, false)
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
+        const row = await this.hold(dst, replaced)
         await this.op(() => this.files.rename(source, target))
-        for (const ctx of replaced) ctx.detached = true
+        for (const ctx of replaced) ctx.detached = row
       })
       for (const ctx of this.handles.values()) {
-        if (ctx.detached === true) continue
+        if (ctx.detached !== undefined) continue
         if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
           ctx.key = target + ctx.key.slice(source.length)
           ctx.path = ctx.key.slice(this.root.length)
@@ -675,7 +677,7 @@ export class MountCore {
    * with no name left, whatever its key says.
    */
   private openOn(key: string): Handle[] {
-    return [...this.handles.values()].filter((ctx) => ctx.key === key && ctx.detached !== true)
+    return [...this.handles.values()].filter((ctx) => ctx.key === key && ctx.detached === undefined)
   }
 
   /** Land the buffered writes of every handle open on `key`. */
@@ -686,7 +688,8 @@ export class MountCore {
   private async persistBuffered(ctx: Handle): Promise<void> {
     // A detached handle keeps what it wrote, as writes to an unlinked file
     // stay with it: there is no name to land them on.
-    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0 || ctx.detached === true) return
+    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0 || ctx.detached !== undefined)
+      return
     const runs = writeRuns(ctx.writeBuf)
     ctx.writeBuf = []
     try {
@@ -836,30 +839,49 @@ export class MountCore {
   }
 
   /**
-   * Read the rest of the chunked handles on `path` before it goes. POSIX
-   * keeps an open descriptor on the bytes it had, and a chunked handle
-   * holds one chunk of them, so an unlink or a rename onto the file would
-   * leave the rest unreadable. One read serves every such handle; it runs
-   * under `removing`, so no handle opens on the file meanwhile. The
-   * handles are matched by the entry itself, so removing a link holds
-   * nothing: it takes the link, never its target's bytes. A read that
-   * fails (a policy may allow the removal and refuse the read) leaves them
-   * chunked rather than refusing a mutation the caller is allowed.
-   * Mirrors Python's `MountCore._hold`.
+   * Keep what the handles open on `path` need once it goes, and return the
+   * row they stat by from then on. POSIX keeps an open descriptor on the
+   * file it had, so an unlink or a rename onto it must not leave a handle
+   * reading or stat'ing the file at that name next. A handle holding no
+   * bytes yet (never read, or chunked and holding one chunk) gets them all
+   * from one read every such handle shares; it runs under `removing`, so no
+   * handle opens on the file meanwhile. The handles are matched by the
+   * entry itself, so removing a link holds nothing: it takes the link,
+   * never its target's bytes. A stat or read that fails (a policy may allow
+   * the removal and refuse the read) leaves them as they are rather than
+   * refusing a mutation the caller is allowed. Mirrors Python's
+   * `MountCore._hold`.
    */
-  private async hold(path: string): Promise<void> {
-    const held = this.named(path).filter((ctx) => ctx.chunked !== undefined)
-    if (held.length === 0) return
+  private async hold(path: string, named: Handle[]): Promise<FileStat> {
+    const bare = new FileStat({ name: path.slice(path.lastIndexOf('/') + 1), type: FileType.FILE })
+    if (named.length === 0) return bare
+    const virtual = this.resolve(path)
+    const lacking = named.filter((ctx) => ctx.data === undefined && ctx.live !== true)
+    let row: FileStat
     let data: Uint8Array
     try {
-      data = await this.op(() => this.files.read(this.resolve(path)))
+      row = await this.op(() => this.files.stat(virtual))
+      data = lacking.length > 0 ? await this.op(() => this.files.read(virtual)) : new Uint8Array()
     } catch (err) {
       console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
-      return
+      return bare
     }
-    for (const ctx of held) {
+    for (const ctx of lacking) {
       ctx.data = data
       delete ctx.chunked
+    }
+    return row
+  }
+
+  /**
+   * Wait for a flush or truncation of the handle's file still landing, into
+   * the queue a rename moved the handle to. Mirrors Python's `_settled`.
+   */
+  private async settled(ctx: Handle): Promise<void> {
+    let key: string | null = null
+    while (key !== ctx.key) {
+      key = ctx.key
+      await this.pending.get(key)
     }
   }
 

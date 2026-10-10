@@ -226,11 +226,19 @@ class MountCore:
             self._removals, self.identity(path, follow=False), fn
         )
 
-    async def _settled(self, key: str) -> None:
-        """Wait for a flush or truncation of ``key`` still landing."""
-        tail = self._pending.get(key)
-        if tail is not None:
-            await asyncio.shield(tail)
+    async def _settled(self, ctx: Handle) -> None:
+        """Wait for a flush or truncation of the handle's file still
+        landing, into the queue a rename moved the handle to.
+
+        Args:
+            ctx (Handle): the handle about to be read or stat'd.
+        """
+        key = None
+        while key != ctx.key:
+            key = ctx.key
+            tail = self._pending.get(key)
+            if tail is not None:
+                await asyncio.shield(tail)
 
     def resolve(self, path: str) -> str:
         """Map a mount path onto the workspace, honoring the mount root.
@@ -378,11 +386,9 @@ class MountCore:
         if is_macos_metadata(name):
             raise enoent(path)
         virtual = self.resolve(path)
-        # An open descriptor keeps the bytes it had after its name goes;
-        # once the name is another file's, that file's row is not its.
-        gone = FileStat(name=name, type=FileType.FILE)
-        if ctx is not None and ctx.detached:
-            s = gone
+        if ctx is not None and ctx.detached is not None:
+            # Its name is gone: it stats by the row its file had then.
+            s = ctx.detached
         else:
             try:
                 s = await self._op(
@@ -391,7 +397,8 @@ class MountCore:
             except FileNotFoundError:
                 if size is None:
                     raise
-                s = gone
+                # An open descriptor keeps the bytes it had after an unlink.
+                s = FileStat(name=name, type=FileType.FILE)
         if is_link(s):
             target = await self._op(self._files.readlink(virtual))
             return self.attrs(s, len(self.shown_target(path, target).encode()))
@@ -428,7 +435,7 @@ class MountCore:
             return await self.getattr(path)
         # A flush still landing has taken the handle's buffer: wait for it,
         # so the size counts what it wrote.
-        await self._settled(ctx.key)
+        await self._settled(ctx)
         # The handle is open on the file a link led to, so its stat is the
         # target's.
         return await self.getattr(ctx.path, True, ctx)
@@ -480,7 +487,7 @@ class MountCore:
         # A flush still landing has taken the handle's buffer and not yet
         # refreshed its bytes: wait for it, so the read sees what was
         # written.
-        await self._settled(ctx.key)
+        await self._settled(ctx)
         if ctx.live:
             stored = await self._op(
                 self._files.read(self.resolve(ctx.path), offset, size)
@@ -654,11 +661,11 @@ class MountCore:
         """
 
         async def remove() -> None:
-            await self._hold(path)
             named = self._named(path)
+            row = await self._hold(path, named)
             await self._op(self._files.unlink(self.resolve(path)))
             for ctx in named:
-                ctx.detached = True
+                ctx.detached = row
 
         async def run() -> None:
             await self._removing(path, remove)
@@ -680,17 +687,17 @@ class MountCore:
         source, target = self.resolve(old), self.resolve(new)
 
         async def replace() -> None:
-            await self._hold(new)
             moved = self.identity(old, follow=False)
             replaced = [c for c in self._named(new) if c.key != moved]
+            row = await self._hold(new, replaced)
             await self._op(self._files.rename(source, target))
             for ctx in replaced:
-                ctx.detached = True
+                ctx.detached = row
 
         async def run() -> None:
             await self._removing(new, replace)
             for ctx in self._handles.values():
-                if ctx.detached:
+                if ctx.detached is not None:
                     continue
                 if ctx.key == source or ctx.key.startswith(source + "/"):
                     ctx.key = target + ctx.key[len(source) :]
@@ -844,7 +851,7 @@ class MountCore:
         Args:
             ctx (Handle): the handle whose buffer to land.
         """
-        if not ctx.write_buf or ctx.detached:
+        if not ctx.write_buf or ctx.detached is not None:
             # A detached handle keeps what it wrote, as writes to an
             # unlinked file stay with it: there is no name to land them on.
             return
@@ -874,7 +881,7 @@ class MountCore:
         return [
             ctx
             for ctx in self._handles.values()
-            if ctx.key == key and not ctx.detached
+            if ctx.key == key and ctx.detached is None
         ]
 
     async def _land_buffered(self, key: str) -> None:
@@ -1038,35 +1045,48 @@ class MountCore:
         self._hydrations[key] = task
         return task
 
-    async def _hold(self, path: str) -> None:
-        """Read the rest of the chunked handles on ``path`` before it goes.
+    async def _hold(self, path: str, named: list[Handle]) -> FileStat:
+        """Keep what the handles open on ``path`` need once it goes, and
+        return the row they stat by from then on.
 
-        POSIX keeps an open descriptor on the bytes it had, and a chunked
-        handle holds one chunk of them, so an unlink or a rename onto the
-        file would leave the rest unreadable. One read serves every such
-        handle; it runs under ``_removing``, so no handle opens on the file
-        meanwhile. The handles are matched by the entry itself, so removing
-        a link holds nothing: it takes the link, never its target's bytes.
-        A read that fails (a policy may allow the removal and refuse the
-        read) leaves them chunked rather than refusing a mutation the
-        caller is allowed.
+        POSIX keeps an open descriptor on the file it had, so an unlink or
+        a rename onto it must not leave a handle reading or stat'ing the
+        file at that name next. A handle holding no bytes yet (never read,
+        or chunked and holding one chunk) gets them all from one read every
+        such handle shares; it runs under ``_removing``, so no handle opens
+        on the file meanwhile. The handles are matched by the entry itself,
+        so removing a link holds nothing: it takes the link, never its
+        target's bytes. A stat or read that fails (a policy may allow the
+        removal and refuse the read) leaves them as they are rather than
+        refusing a mutation the caller is allowed.
 
         Args:
             path (str): mount path about to be removed or replaced.
+            named (list[Handle]): the handles open on it.
+
+        Returns:
+            FileStat: the file's row, or a bare one when it could not be
+                read.
         """
-        held = [ctx for ctx in self._named(path) if ctx.chunked is not None]
-        if not held:
-            return
+        bare = FileStat(name=path.rsplit("/", 1)[-1], type=FileType.FILE)
+        if not named:
+            return bare
+        virtual = self.resolve(path)
+        lacking = [c for c in named if c.data is None and not c.live]
         try:
-            data = await self._op(self._files.read(self.resolve(path)))
+            row = await self._op(self._files.stat(virtual))
+            data = (
+                await self._op(self._files.read(virtual)) if lacking else b""
+            )
         except Exception as err:
             logger.warning(
                 "fuse: holding %s before it goes failed: %r", path, err
             )
-            return
-        for ctx in held:
+            return bare
+        for ctx in lacking:
             ctx.data = data
             ctx.chunked = None
+        return row
 
     async def release(self, fh: int) -> None:
         ctx = self._handles.get(fh)

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChunkedHandle } from '@struktoai/mirage-core/runtime/handles/index'
+import type { FileStat } from '@struktoai/mirage-core/types'
 
 /**
  * One entry's POSIX attributes, as every adapter over the core needs them:
@@ -43,6 +44,9 @@ export interface Handle {
   chunked?: ChunkedHandle
   /** Bumped whenever the file changes, so a first read that was out meanwhile does not keep its bytes. */
   generation?: number
-  /** Its name was removed or replaced: the open file has no path left. */
-  detached?: boolean
+  /**
+   * The file's row as it was when its name was removed or replaced; the open
+   * file has no path left. Unset while it has one.
+   */
+  detached?: FileStat
 }
