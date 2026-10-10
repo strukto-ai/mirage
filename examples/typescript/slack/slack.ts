@@ -227,9 +227,9 @@ async function main(): Promise<void> {
       // rg reads each blob under files/.
       console.log(`\n=== rg . ${filesDir}/ ===`)
       r = await ws.shell(`rg . "${filesDir}/"`)
-      const blobOut = r.stdoutText.trim()
-      const blobLines = blobOut === '' ? [] : blobOut.split('\n').slice(0, 5)
-      for (const line of blobLines) {
+      const rgOut = r.stdoutText.trim()
+      const rgLines = rgOut === '' ? [] : rgOut.split('\n').slice(0, 5)
+      for (const line of rgLines) {
         console.log(`  ${line.slice(0, 150)}`)
       }
     }
