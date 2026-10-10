@@ -420,6 +420,8 @@ async def search_reads(
             index,
         )
         return read_bytes, read_stream
+    if hits is not None and terms.reads_binary:
+        await _full_scan(io, name, accessor, dirs, ScanReason.BINARY, index)
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
     scan_asked = False
     refusal: Exception | None = None

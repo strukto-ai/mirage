@@ -446,7 +446,7 @@ it.each<[string, string, string | null, string, ScanReason | null]>([
   ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada', null],
   ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w', null],
   ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused', null],
-  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', null],
+  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', ScanReason.BINARY],
   ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada', null],
   ['grep -r ada /d', 'upper', 'a.txt sub/d.txt', 'ada', null],
   ['grep -r ada /d', 'resource', 'a.txt sub/d.txt', 'ada', null],

@@ -330,6 +330,9 @@ export async function searchReads<A extends Accessor>(
     await fullScan(io, name, accessor, dirs, reason, index)
     return stream
   }
+  if (hits !== null && asked.readsBinary) {
+    await fullScan(io, name, accessor, dirs, ScanReason.BINARY, index)
+  }
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
   const found = hits

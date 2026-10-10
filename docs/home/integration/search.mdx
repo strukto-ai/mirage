@@ -114,6 +114,7 @@ These flags scan every file and call `before_full_scan` with the reason:
 | `rg --files-without-match`; `rg -c` or `--count-matches` with `--include-zero`; not under `-q` | `EVERY_FILE` |
 | `-f`; no plain text of three characters in the pattern; under `-i`, a word with a non-ASCII letter, or with i, k or s under Unicode folding | `NO_TEXT` |
 | `rg -L` | `LINKS` |
+| `grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`, after a search answered | `BINARY` |
 | no search method, or a hide or path rule on the path | `NO_SEARCH` |
 | a search answered `None` | `UNANSWERED` |
 

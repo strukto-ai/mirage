@@ -515,9 +515,16 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
         ("grep -rc ada /d", "files", "a.txt sub/d.txt", "ada", None),
         ("rg -lw ada /d", "files", "a.txt sub/d.txt", "ada -w", None),
         ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused", None),
-        # -a reads the binary-extension file no search vouches for, and a
-        # named file is read whatever the search said (twice, as GNU does).
-        ("grep -ra ada /d", "files", "a.txt sub/d.txt w.bin", "ada", None),
+        # -a reads the binary-extension file no search vouches for, asking
+        # the mount first, and a named file is read whatever the search said
+        # (twice, as GNU does).
+        (
+            "grep -ra ada /d",
+            "files",
+            "a.txt sub/d.txt w.bin",
+            "ada",
+            ScanReason.BINARY,
+        ),
         (
             "grep -r ada /d /d/c.txt",
             "files",

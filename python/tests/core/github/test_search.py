@@ -594,6 +594,11 @@ async def test_a_scope_cheaper_to_read_is_not_searched():
             "narrow the path, or search a whole word with -w\n",
         ),
         ("grep -rwv import /gh", "grep: 5 files in scope, narrow the path\n"),
+        ("grep -rwa import /gh", "grep: 5 files in scope, narrow the path\n"),
+        (
+            "rg -w --binary import /gh",
+            "rg: 5 files in scope, narrow the path\n",
+        ),
         (
             "rg 'imp.rt' /gh",
             "rg: 5 files in scope and code search could not narrow them; "

@@ -281,6 +281,7 @@ with why:
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
 | `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`, without `-q`: rg leaves a binary file out of these |
 | `LINKS` | rg `-L` |
+| `BINARY` | `-a`, `--binary-files=text`, rg `-a`, `--binary` or `-uuu` after a search answered: every binary-extension file is read |
 | `UNANSWERED` | `files_containing` returned `None`, or `lines_containing` returned `None` for a file |
 
 Raise from it (or from `files_containing`) to refuse: the error's message is
