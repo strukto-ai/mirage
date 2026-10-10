@@ -35,18 +35,24 @@ function path(p: string = ROWS): PathSpec {
   return new PathSpec({ virtual: p, directory: p, vfsPath: p.replace(/^\/+/, '') })
 }
 
-// A driver that answers the column list and the bounded row query, recording
-// the SQL and parameters it was asked.
+const TABLE: Row[] = [{ relkind: 'r', relhassubclass: false }]
+
+// A driver that answers the relation, then its columns, then the bounded row
+// query, recording the SQL and parameters it was asked.
 function makeAccessor(
   cols: Row[],
   rows: Row[],
   config: { maxReadRows?: number; maxReadBytes?: number } = {},
   databaseBytes = 100,
+  relation: Row[] = TABLE,
 ): { accessor: PostgresAccessor; calls: [string, unknown[]][] } {
   const calls: [string, unknown[]][] = []
   const driver: PgDriver = {
     query: ((sql: string, params: unknown[] = []) => {
       calls.push([sql, params])
+      if (sql.includes('pg_class')) {
+        return Promise.resolve({ rows: relation, rowCount: relation.length })
+      }
       if (sql.includes('information_schema.columns')) {
         return Promise.resolve({ rows: cols, rowCount: cols.length })
       }
@@ -91,7 +97,7 @@ describe('linesContaining', () => {
   it('casts every column and takes escaped rows', async () => {
     const { accessor, calls } = makeAccessor(USERS, [])
     expect(await lines(accessor, 'user_id')).toBe('')
-    const [sql, params] = calls[1] ?? ['', []]
+    const [sql, params] = calls[2] ?? ['', []]
     // grep is case-sensitive by default, so the query uses LIKE; an integer
     // column is searched through its cast, which spells it the way the line
     // does; a string column holding a control character is a candidate,
@@ -104,12 +110,15 @@ describe('linesContaining', () => {
     // One past the ceiling, to tell a full answer from a cut one.
     expect(params).toEqual(['%user\\_id%', 10_001, 10 * 1024 * 1024])
     expect(sql).toContain('LEFT JOIN data ON budget.bytes <= $3')
+    // The order a plain read scans the heap in, whatever plan the filter gets:
+    // an index or a parallel scan would hand rows over otherwise.
+    expect(sql).toContain('ORDER BY ctid LIMIT $2')
   })
 
   it('uses ILIKE under ignore case', async () => {
     const { accessor, calls } = makeAccessor(USERS, [])
     await lines(accessor, 'ALI', true)
-    expect(calls[1]?.[0]).toContain('"name"::text ILIKE $1')
+    expect(calls[2]?.[0]).toContain('"name"::text ILIKE $1')
   })
 
   it.each<[Row[], string, string]>([
@@ -138,6 +147,19 @@ describe('linesContaining', () => {
   ])('declines when a LIKE cannot see every match: %#', async (cols, text, why) => {
     const { accessor, calls } = makeAccessor(cols, [])
     expect(await lines(accessor, text), why).toBeNull()
+    expect(calls).toHaveLength(2)
+  })
+
+  // A view runs its own query and a parent appends its children's rows, so
+  // ctid order is not the order reading the file returns.
+  it.each<[Row[]]>([
+    [[{ relkind: 'v', relhassubclass: false }]],
+    [[{ relkind: 'p', relhassubclass: true }]],
+    [[{ relkind: 'r', relhassubclass: true }]],
+    [[]],
+  ])('declines a relation read in another order: %j', async (relation) => {
+    const { accessor, calls } = makeAccessor(USERS, [], {}, 100, relation)
+    expect(await lines(accessor, 'ada')).toBeNull()
     expect(calls).toHaveLength(1)
   })
 

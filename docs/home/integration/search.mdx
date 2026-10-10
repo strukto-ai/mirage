@@ -137,7 +137,7 @@ instead, and grep exits 2.
 | Email | IMAP `SEARCH TEXT` | messages (`*/*/*.email.json`) | `content_search` |
 | Slack | `search.messages`, `search.files` | `-w`, channel days (`channels/*/*/chat.jsonl`) | `content_search` |
 | Gmail | messages search | `-w`, messages (`*/*/*.gmail.json`) | `content_search` |
-| PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a relation with text, integer, boolean and uuid columns | always |
+| PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a table with text, integer, boolean and uuid columns | always |
 
 A word a backend's search is known not to see reads every file: a key of the
 rendered JSON, a fixed word such as a file type, a user's name on Slack. Each

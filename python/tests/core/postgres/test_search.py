@@ -52,11 +52,15 @@ def _columns(*pairs: tuple[str, str]) -> list[dict[str, str]]:
     ]
 
 
-def _conn(columns, rows, size: int = 100) -> MagicMock:
+TABLE = [{"relkind": "r", "relhassubclass": False}]
+
+
+def _conn(columns, rows, size: int = 100, relation=TABLE) -> MagicMock:
+    # The relation, then its columns, then the bounded row query.
     conn = MagicMock()
     bounded = [{**row, "__mirage_bytes": size} for row in rows]
     conn.fetch = AsyncMock(
-        side_effect=[columns, bounded or [{"__mirage_bytes": 0}]]
+        side_effect=[relation, columns, bounded or [{"__mirage_bytes": 0}]]
     )
     return conn
 
@@ -93,7 +97,7 @@ async def test_keeps_unicode_separators_inside_a_line(separator):
 async def test_casts_every_column_and_takes_escaped_rows():
     conn = _conn(USERS, [])
     assert await _lines(conn, "user_id") == b""
-    sql, pattern, limit, max_bytes = conn.fetch.await_args_list[1].args
+    sql, pattern, limit, max_bytes = conn.fetch.await_args_list[2].args
     # grep is case-sensitive by default, so the query uses LIKE; an
     # integer column is searched through its cast, which spells it the
     # way the line does; a string column holding a control character is
@@ -108,13 +112,16 @@ async def test_casts_every_column_and_takes_escaped_rows():
     assert limit == 10_001
     assert max_bytes == 10 * 1024 * 1024
     assert "LEFT JOIN data ON budget.bytes <= $3" in sql
+    # The order a plain read scans the heap in, whatever plan the filter
+    # gets: an index or a parallel scan would hand rows over otherwise.
+    assert "ORDER BY ctid LIMIT $2" in sql
 
 
 @pytest.mark.asyncio
 async def test_ignore_case_uses_ilike():
     conn = _conn(USERS, [])
     await _lines(conn, "ALI", ignore_case=True)
-    assert '"name"::text ILIKE $1' in conn.fetch.await_args_list[1].args[0]
+    assert '"name"::text ILIKE $1' in conn.fetch.await_args_list[2].args[0]
 
 
 @pytest.mark.parametrize(
@@ -152,6 +159,24 @@ async def test_ignore_case_uses_ilike():
 async def test_declines_when_a_like_cannot_see_every_match(columns, text, why):
     conn = _conn(columns, [])
     assert await _lines(conn, text) is None, why
+    assert len(conn.fetch.await_args_list) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "relation",
+    [
+        [{"relkind": "v", "relhassubclass": False}],
+        [{"relkind": "p", "relhassubclass": True}],
+        [{"relkind": "r", "relhassubclass": True}],
+        [],
+    ],
+)
+async def test_declines_a_relation_read_in_another_order(relation):
+    # A view runs its own query and a parent appends its children's rows,
+    # so ctid order is not the order reading the file returns.
+    conn = _conn(USERS, [], relation=relation)
+    assert await _lines(conn, "ada") is None
     assert len(conn.fetch.await_args_list) == 1
 
 

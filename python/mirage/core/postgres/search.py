@@ -45,6 +45,15 @@ _STRING_TYPES = frozenset({"text", "character varying", "name"})
 _STRUCTURAL = frozenset('"\\:,{}')
 # How a NULL spells in the line; no LIKE over a NULL ever matches it.
 _NULL = "null"
+# Relations whose rows a plain read takes in ctid order: a table or a
+# materialized view with no child. A view runs its own query, and a
+# parent appends its children's rows after its own.
+_HEAP_KINDS = frozenset({"r", "m"})
+_RELATION = (
+    "SELECT c.relkind::text AS relkind, c.relhassubclass FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = $1 AND c.relname = $2"
+)
 
 
 def _escape_like(text: str) -> str:
@@ -92,16 +101,18 @@ def _answerable(
 async def lines_containing(
     accessor: PostgresAccessor, path: PathSpec, text: str, ignore_case: bool
 ) -> bytes | None:
-    """The lines of a table's or view's rows.jsonl that may hold ``text``.
+    """The lines of a table's rows.jsonl that may hold ``text``.
 
     A LIKE (ILIKE under -i) over every column picks the rows whose value
     holds ``text``, plus any row with a control character the line spells
-    as an escape; grep matches each line itself. The rows come in the
-    order the plain read returns them, a scan of the same relation. None
-    for any other file, when the columns or the text keep a LIKE from
-    seeing every match (``_answerable``), or past ``max_read_rows`` rows
-    or ``max_read_bytes`` bytes, where reading the file refuses it as
-    too large.
+    as an escape; grep matches each line itself. The rows come in ctid
+    order, the order the plain read scans the heap in, whatever plan the
+    filter gets (an index or a parallel scan returns them otherwise), so
+    only a relation in ``_HEAP_KINDS`` with no child is searched. None
+    for any other file or relation, when the columns or the text keep a
+    LIKE from seeing every match (``_answerable``), or past
+    ``max_read_rows`` rows or ``max_read_bytes`` bytes, where reading the
+    file refuses it as too large.
 
     Args:
         accessor (PostgresAccessor): backend handle.
@@ -116,6 +127,13 @@ async def lines_containing(
     cfg = accessor.config
     pool = await accessor.pool()
     async with pool.acquire() as conn:
+        relation = await conn.fetch(_RELATION, schema, entity)
+        if (
+            len(relation) != 1
+            or relation[0]["relkind"] not in _HEAP_KINDS
+            or relation[0]["relhassubclass"]
+        ):
+            return None
         columns = [
             (c["name"], c["type"])
             for c in await client.fetch_columns(conn, schema, entity)
@@ -131,7 +149,7 @@ async def lines_containing(
         ]
         sql = (
             f"SELECT * FROM {qualified(schema, entity)} "
-            f"WHERE {' OR '.join(clauses)} LIMIT $2"
+            f"WHERE {' OR '.join(clauses)} ORDER BY ctid LIMIT $2"
         )
         rows = await client.fetch_bounded_query(
             conn,

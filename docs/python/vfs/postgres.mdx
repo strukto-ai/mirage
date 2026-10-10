@@ -46,12 +46,13 @@ The metadata JSON files expose explicitly named row and storage estimates. Use `
 
 ## grep and rg
 
-For one plain text in a `rows.jsonl`, grep and rg ask Postgres for the rows
-that hold it, with a `LIKE` over every column (`ILIKE` under `-i`), and search
-those rows instead of the whole relation. This needs every column to be text,
-an integer, a boolean or a uuid, which a line spells as the column's cast
-does. The file is read as usual when another column type is present, when the
-text could match a key, `null` or the JSON between values, or when more than
-`max_read_rows` rows match. Since only the matching rows are fetched, a
+For one plain text in a table's `rows.jsonl`, grep and rg ask Postgres for the
+rows that hold it, with a `LIKE` over every column (`ILIKE` under `-i`), in the
+order the table stores them, and search those rows instead of the whole table.
+This needs every column to be text, an integer, a boolean or a uuid, which a
+line spells as the column's cast does. The file is read as usual for a view, a
+partitioned table or a table with children, when another column type is
+present, when the text could match a key, `null` or the JSON between values,
+or when more than `max_read_rows` rows match. Since only the matching rows are fetched, a
 relation too large to read can still be searched when the output shows no line
 numbers or context.

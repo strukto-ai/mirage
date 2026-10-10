@@ -82,15 +82,18 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
     })
   }
 
-  /** The lines of one page holding `text`, so grep and rg skip the read; declines under -i. */
+  /**
+   * The lines of one page holding `text`, so grep and rg skip the read. Declines
+   * under -i, or for a page holding a NUL byte, which grep reports as binary.
+   */
   override async linesContaining(
     path: PathSpec,
     text: string,
     opts: { ignoreCase: boolean },
   ): Promise<Uint8Array | null> {
     this.accessor.searchCalls += 1
-    if (opts.ignoreCase) return null
     const page = new TextDecoder().decode(pageBytes(this.accessor, path))
+    if (opts.ignoreCase || page.includes('\0')) return null
     const lines = page.split(/(?<=\n)/).filter((line) => line.includes(text))
     return ENC.encode(lines.join(''))
   }

@@ -44,6 +44,14 @@ const STRING_TYPES: ReadonlySet<string> = new Set(['text', 'character varying', 
 const STRUCTURAL: ReadonlySet<string> = new Set(['"', '\\', ':', ',', '{', '}'])
 // How a NULL spells in the line; no LIKE over a NULL ever matches it.
 const NULL = 'null'
+// Relations whose rows a plain read takes in ctid order: a table or a
+// materialized view with no child. A view runs its own query, and a parent
+// appends its children's rows after its own.
+const HEAP_KINDS: ReadonlySet<string> = new Set(['r', 'm'])
+const RELATION =
+  'SELECT c.relkind::text AS relkind, c.relhassubclass FROM pg_class c ' +
+  'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+  'WHERE n.nspname = $1 AND c.relname = $2'
 
 // Escape LIKE/ILIKE wildcards so the text matches as a literal: Postgres LIKE
 // treats % and _ as wildcards and \ as the default escape char, but grep's
@@ -75,15 +83,16 @@ function answerable(
 }
 
 /**
- * The lines of a table's or view's rows.jsonl that may hold `text`. A LIKE
- * (ILIKE under -i) over every column picks the rows whose value holds `text`,
- * plus any row with a control character the line spells as an escape; grep
- * matches each line itself. The rows come in the order the plain read returns
- * them, a scan of the same relation. Null for any other file, when the columns
- * or the text keep a LIKE from seeing every match (`answerable`), or past
- * `maxReadRows` rows or `maxReadBytes` bytes, where reading the file refuses
- * it as too large. Mirrors `lines_containing` in
- * `mirage/core/postgres/search.py`.
+ * The lines of a table's rows.jsonl that may hold `text`. A LIKE (ILIKE under
+ * -i) over every column picks the rows whose value holds `text`, plus any row
+ * with a control character the line spells as an escape; grep matches each
+ * line itself. The rows come in ctid order, the order the plain read scans the
+ * heap in, whatever plan the filter gets (an index or a parallel scan returns
+ * them otherwise), so only a relation in `HEAP_KINDS` with no child is
+ * searched. Null for any other file or relation, when the columns or the text
+ * keep a LIKE from seeing every match (`answerable`), or past `maxReadRows`
+ * rows or `maxReadBytes` bytes, where reading the file refuses it as too
+ * large. Mirrors `lines_containing` in `mirage/core/postgres/search.py`.
  */
 export async function linesContaining(
   accessor: PostgresAccessor,
@@ -96,6 +105,15 @@ export async function linesContaining(
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
   const { maxReadRows, maxReadBytes } = accessor.config
+  const relation = (
+    await accessor.store.query<{ relkind: string; relhassubclass: boolean }>(RELATION, [
+      schema,
+      entity,
+    ])
+  ).rows
+  const [only] = relation
+  if (relation.length !== 1 || only === undefined) return null
+  if (!HEAP_KINDS.has(only.relkind) || only.relhassubclass) return null
   const columns = (await fetchColumns(accessor, schema, entity)).map((c): [string, string] => [
     c.name,
     c.type,
@@ -106,7 +124,7 @@ export async function linesContaining(
   for (const [name, dataType] of columns) {
     if (STRING_TYPES.has(dataType)) clauses.push(`${quoteIdent(name)} ~ '[[:cntrl:]]'`)
   }
-  const sql = `SELECT * FROM ${qualified(schema, entity)} WHERE ${clauses.join(' OR ')} LIMIT $2`
+  const sql = `SELECT * FROM ${qualified(schema, entity)} WHERE ${clauses.join(' OR ')} ORDER BY ctid LIMIT $2`
   const rows = await fetchBoundedQuery(
     accessor,
     sql,

@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from mirage import (
     CLI,
@@ -95,7 +96,8 @@ class NotesVFS(BaseVFS):
     ) -> bytes | None:
         """The lines of one page holding ``text``, so grep and rg skip the read.
 
-        Declines (None) under -i, and grep and rg then read the page.
+        Declines (None) under -i, or for a page holding a NUL byte, which
+        grep reports as binary; grep and rg then read the page.
 
         Args:
             path (PathSpec): the page grep or rg would read.
@@ -104,9 +106,10 @@ class NotesVFS(BaseVFS):
             index (IndexCacheStore): the mount's metadata view.
         """
         self.accessor.search_calls += 1
-        if ignore_case:
+        page = page_bytes(self.accessor, path)
+        if ignore_case or b"\0" in page:
             return None
-        lines = page_bytes(self.accessor, path).splitlines(keepends=True)
+        lines = re.split(rb"(?<=\n)", page)
         return b"".join(line for line in lines if text.encode() in line)
 
 
