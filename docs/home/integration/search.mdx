@@ -18,6 +18,8 @@ from mirage.io.types import ByteSource
 
 
 class MyVFS(BaseVFS):
+    searchable: tuple[str, ...] | None = None
+
     async def files_containing(
         self,
         text: str,
@@ -51,6 +53,8 @@ import { BaseVFS, type PathSpec, type ScanReason } from '@struktoai/mirage-core'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 
 class MyVFS extends BaseVFS {
+  override readonly searchable: readonly string[] | null = null
+
   override filesContaining(
     text: string,
     under: PathSpec[],
@@ -82,6 +86,10 @@ class MyVFS extends BaseVFS {
 An extra file or line costs a read; a missing one is a wrong answer. A search
 that holds only keys names each file with `mounted_path(under[0], "/" + key)`
 from `mirage.utils.key_prefix` (`mountedPath` in TypeScript).
+
+`searchable` names the files `files_containing` answers for, as mount-relative
+globs where a directory covers what is under it. A walked file outside it is
+always read; `None` (`null`), the default, covers every file.
 
 ## Commands and flags
 
@@ -117,3 +125,20 @@ rules out a file named on the command line, or a binary-extension file under
 Raise from `before_full_scan` to refuse: the command prints `grep: <message>`
 and exits 1. A filesystem error raised at a file is that file's read error
 instead, and grep exits 2.
+
+## Backends
+
+| Backend | Search | Answers for | Opt-in |
+| --- | --- | --- | --- |
+| GitHub | code search | `-w`, on the default branch, over 100 files | always |
+| Box | `/search` | `-w` | `content_search` |
+| Dropbox | `/2/files/search_v2` | `-w` | `content_search` |
+| Email | IMAP `SEARCH TEXT` | messages (`*/*/*.email.json`) | `content_search` |
+| Slack | `search.messages`, `search.files` | `-w`, channel days (`channels/*/*/chat.jsonl`) | `content_search` |
+| Gmail | messages search | `-w`, messages (`*/*/*.gmail.json`) | `content_search` |
+
+A word a backend's search is known not to see reads every file: a key of the
+rendered JSON, a fixed word such as a file type, a user's name on Slack. Each
+backend's page lists what its search covers. Discord reads every file, since a
+reply carries the message it answers, which its search does not tie to the
+reply.

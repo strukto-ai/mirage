@@ -224,39 +224,38 @@ async function main(): Promise<void> {
       r = await ws.shell(`stat "${blobPath}"`)
       console.log(`  ${r.stdoutText.trim()}`)
 
-      // search.files push-down via rg on files/
-      console.log(`\n=== rg . ${filesDir}/ (search.files push-down) ===`)
+      // rg reads each blob under files/.
+      console.log(`\n=== rg . ${filesDir}/ ===`)
       r = await ws.shell(`rg . "${filesDir}/"`)
-      const pushdownOut = r.stdoutText.trim()
-      const pushdownLines = pushdownOut === '' ? [] : pushdownOut.split('\n').slice(0, 5)
-      for (const line of pushdownLines) {
+      const blobOut = r.stdoutText.trim()
+      const blobLines = blobOut === '' ? [] : blobOut.split('\n').slice(0, 5)
+      for (const line of blobLines) {
         console.log(`  ${line.slice(0, 150)}`)
       }
     }
 
-    // ── native search dispatch ─────────────────────────
-    // search.messages requires a user token (xoxp-) with search:read.
-    // Bot tokens get not_allowed_token_type. We probe these anyway to
-    // document behavior.
-    const nativeDispatch: { label: string; cmd: string }[] = [
+    // ── grep and rg at each scope ──────────────────────
+    // With contentSearch: true and a user token (xoxp-) with search:read,
+    // grep -w and rg -w read only the channel days Slack search names.
+    const scopes: { label: string; cmd: string }[] = [
       {
         label: `grep hello ${datePath}/chat.jsonl (date scope)`,
         cmd: `grep hello "${datePath}/chat.jsonl"`,
       },
       {
-        label: `grep hello ${base}/ (channel scope)`,
-        cmd: `grep hello "${base}/"`,
+        label: `grep -rw hello ${base}/ (channel scope)`,
+        cmd: `grep -rw hello "${base}/"`,
       },
       {
-        label: 'grep hello /slack/channels/ (workspace scope)',
-        cmd: 'grep hello /slack/channels/',
+        label: 'grep -rw hello /slack/channels/ (workspace scope)',
+        cmd: 'grep -rw hello /slack/channels/',
       },
       {
-        label: 'rg hello /slack/ (workspace scope)',
-        cmd: 'rg hello /slack/',
+        label: 'rg -w hello /slack/ (workspace scope)',
+        cmd: 'rg -w hello /slack/',
       },
     ]
-    for (const { label, cmd } of nativeDispatch) {
+    for (const { label, cmd } of scopes) {
       console.log(`\n=== ${label} ===`)
       r = await ws.shell(cmd)
       const out = r.stdoutText.trim()

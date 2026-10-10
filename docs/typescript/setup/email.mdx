@@ -42,6 +42,21 @@ await ws.shell('ls /mail/INBOX/')
 | `password` | required | App password. Redacted in snapshots. |
 | `useSsl` | `true` | Implicit TLS for both IMAP and SMTP. |
 | `maxMessages` | `1000` | Hard ceiling per folder listing. |
+| `contentSearch` | `false` | Narrow `grep -r` and `rg` with IMAP search ([below](#grep-and-rg)). |
+
+## grep and rg
+
+With `contentSearch: true` (YAML `content_search: true`), `grep -r` and `rg` read only the
+messages IMAP `SEARCH TEXT` names in each folder or day they walk, and print
+what reading every message would. IMAP matches the headers and body in any
+case; each hit's file is named from a header-only fetch. Attachments are always
+read.
+
+Every message is read when the text is a key of the message JSON or a flag
+name, holds anything but ASCII letters and spaces, or the search fails. It is
+off by default: a server that answers `SEARCH` from a full-text index (Dovecot
+with an FTS plugin, for one) matches words rather than substrings, so a
+narrowed scan could miss a message there.
 
 ## Mount mode
 

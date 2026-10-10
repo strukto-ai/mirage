@@ -159,6 +159,22 @@ Acting on Slack (sending, reacting, pins, member info, search) goes
 through the [slack CLI](/typescript/cli/slack) when installed; the
 mounted tree stays read-oriented.
 
+## grep and rg
+
+With `contentSearch: true` (YAML `content_search: true`) and a user token,
+`grep -rw` and `rg -w` read only the channel days Slack search names, and
+print what reading every day would. Search covers message text, file names
+and titles (`search.files`) and reactions (`has::name:`); listing a day already
+fetches its history, so this saves the second fetch of each day it rules out.
+DMs, users and file blobs are always read.
+
+Every day is read when the word is a key of the message JSON, a file-type or
+download-URL word, a join or leave message word, or part of a user's name, and
+when a search fails, returns more than 1,000 messages or finds nothing. It is
+off by default: Slack indexes a message some time after it is posted, and a
+word held only in another field of a message (a bot's username, an unfurled
+link) is not searched.
+
 ## Troubleshooting
 
 <AccordionGroup>
@@ -213,8 +229,8 @@ mounts:
 With a bound configured, channel listings cover the selected period rather
 than the default recent window. Day directories use UTC. Messages are selected
 by creation time, and attachments follow their parent messages. Direct paths,
-`stat`, date globs, and `grep`/`rg` cannot escape the scope. Scoped searches scan
-the filtered files instead of using unrestricted provider search. User/member
+`stat`, date globs, and `grep`/`rg` cannot escape the scope: a search only rules
+out files, so scoped searches scan the filtered files. User/member
 and channel/server metadata remain visible as context.
 
 These settings apply to the VFS, not to separately installed account CLIs.

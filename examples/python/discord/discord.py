@@ -160,9 +160,9 @@ async def main():
     r = await ws.shell(f'grep -c . "{file_path}"')
     print(f"  line count: {(await r.stdout_str()).strip()}")
 
-    # ── grep at CHANNEL level (Discord search push-down) ──
-    print(f"\n=== grep at CHANNEL level: grep . {base}/ ===")
-    r = await ws.shell(f'grep -m 5 . "{base}/"')
+    # ── grep at CHANNEL level ────────────────────────
+    print(f"\n=== grep at CHANNEL level: grep -r . {base}/ ===")
+    r = await ws.shell(f'grep -r -m 5 . "{base}/"')
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
     if out:
@@ -175,8 +175,8 @@ async def main():
         print(f"  stderr: {err[:200]}")
 
     # ── grep at GUILD level ──────────────────────────
-    print(f"\n=== grep at GUILD level: grep . /discord/{guild}/ ===")
-    r = await ws.shell(f'grep -m 5 . "/discord/{guild}/"')
+    print(f"\n=== grep at GUILD level: grep -r . /discord/{guild}/ ===")
+    r = await ws.shell(f'grep -r -m 5 . "/discord/{guild}/"')
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
     if out:

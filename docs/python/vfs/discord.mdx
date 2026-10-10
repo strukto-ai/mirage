@@ -102,23 +102,13 @@ Discord API.
 
 ## Smart Commands
 
-### grep / rg at different scopes
+### grep / rg
 
-When `grep` or `rg` target a channel or guild directory (not a specific file),
-they use the Discord search API instead of downloading every `.jsonl` file:
-
-```bash
-# FILE level - downloads the .jsonl, greps locally
-grep hello "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
-
-# CHANNEL level - uses Discord search API (GET /guilds/{id}/messages/search)
-grep hello "/discord/My Server__111222333444555666/channels/general__777888999000111222/"
-
-# GUILD level - searches across all channels
-grep hello "/discord/My Server__111222333444555666/"
-```
-
-Scope detection is handled by `mirage/core/discord/scope.py`.
+`grep -r` and `rg` read every day's `chat.jsonl` under the directory they walk,
+so a channel or guild costs one history fetch per day. Name a day directory or a
+date glob to search a large channel. Discord's own search is not used: a reply
+carries the message it answers (`referenced_message`), which that search does
+not tie to the reply's day, so it cannot say which days hold a word.
 
 ### head / tail
 
@@ -188,12 +178,12 @@ async def main():
     blob = await r.materialize_stdout()
     print(f"downloaded {len(blob)} bytes")
 
-    # Search across channel (uses Discord search API)
-    r = await ws.shell(f'grep hello "{base}/"')
+    # Search every day of the channel
+    r = await ws.shell(f'grep -r hello "{base}/"')
     print(await r.stdout_str())
 
-    # Search across guild
-    r = await ws.shell(f'grep hello "/discord/{guild}/"')
+    # Search across the guild
+    r = await ws.shell(f'grep -r hello "/discord/{guild}/"')
     print(await r.stdout_str())
 
     # Navigate with cd/pwd
@@ -251,8 +241,8 @@ wc -l "/discord/My Server__111222333444555666/channels/general__7778889990001112
 # Read only recent messages
 tail -n 10 "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 
-# Search uses Discord API at channel/guild level (no file download)
-grep "keyword" "/discord/My Server__111222333444555666/channels/general__777888999000111222/"
+# Search one day
+grep "keyword" "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 
 # Extract specific fields
 jq -r '"\(.author.username): \(.content)"' \
@@ -263,10 +253,6 @@ cat "/discord/My Server__111222333444555666/channels/general__777888999000111222
   | jq -r '.author.username' | sort | uniq -c
 ```
 
-Note: `grep`/`rg` at channel or guild level uses the Discord search
-API instead of downloading every `.jsonl` file, making it efficient
-even for large channels.
-
 ## Shell Commands
 
 Standard commands available on the mounted Discord tree:
@@ -276,7 +262,7 @@ Standard commands available on the mounted Discord tree:
 | `ls`            | List guilds, channels, members, dates, attachments             |
 | `cat`           | Read `chat.jsonl`, member `.json`, or download an attachment   |
 | `head` / `tail` | Smart: uses messages API for file scope                        |
-| `grep` / `rg`   | Smart: uses search API for channel/guild scope (with fallback) |
+| `grep` / `rg`   | Pattern search (file or directory level)                       |
 | `jq`            | Query JSON; runs once per line of a JSONL file (`-s` for all) |
 | `wc`            | Line/word/byte counts                                          |
 | `stat`          | File metadata (name, size, type, ID via `extra`)               |
@@ -312,7 +298,7 @@ With a bound configured, channel listings cover the selected period rather
 than the default recent window. Day directories use UTC. Messages are selected
 by creation time, and attachments follow their parent messages. Direct paths,
 `stat`, date globs, and `grep`/`rg` cannot escape the scope. Scoped searches scan
-the filtered files instead of using unrestricted provider search. User/member
+the filtered files. User/member
 and channel/server metadata remain visible as context.
 
 These settings apply to the VFS, not to separately installed account CLIs.

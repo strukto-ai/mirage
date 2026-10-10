@@ -232,27 +232,29 @@ async def main():
         r = await ws.shell(f'stat "{blob_path}"')
         print(f"  {(await r.stdout_str()).strip()}")
 
-        # search.files push-down — works on text-bearing blobs
-        # (PDFs, code, docs) without downloading bytes.
-        print(f"\n=== rg . {files_dir}/ (search.files push-down) ===")
+        # rg reads each blob under files/.
+        print(f"\n=== rg . {files_dir}/ ===")
         r = await ws.shell(f'rg . "{files_dir}/"')
         for line in (await r.stdout_str()).strip().splitlines()[:5]:
             print(f"  {line[:150]}")
 
-    # ── native search dispatch (search.messages requires user token) ──
-    # Note: Slack's search.messages API requires a user token (xoxp-)
-    # with search:read scope. Bot tokens (xoxb-) get not_allowed_token_type.
+    # ── grep and rg at each scope ──
+    # With content_search=True and a user token (xoxp-) with search:read,
+    # grep -w and rg -w read only the channel days Slack search names.
     for label, cmd in [
         (
             f"grep hello {date_path}/chat.jsonl (date scope)",
             f'grep hello "{date_path}/chat.jsonl"',
         ),
-        (f"grep hello {base}/ (channel scope)", f'grep hello "{base}/"'),
         (
-            "grep hello /slack/channels/ (workspace scope)",
-            "grep hello /slack/channels/",
+            f"grep -rw hello {base}/ (channel scope)",
+            f'grep -rw hello "{base}/"',
         ),
-        ("rg hello /slack/ (workspace scope)", "rg hello /slack/"),
+        (
+            "grep -rw hello /slack/channels/ (workspace scope)",
+            "grep -rw hello /slack/channels/",
+        ),
+        ("rg -w hello /slack/ (workspace scope)", "rg -w hello /slack/"),
     ]:
         print(f"\n=== {label} ===")
         r = await ws.shell(cmd)
