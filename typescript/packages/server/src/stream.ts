@@ -4,7 +4,8 @@ import type { FastifyReply } from 'fastify'
 import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
 import { CAPACITY, BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { StreamName } from '@struktoai/mirage-core/io/types'
-import type { JobEntry, JobTable } from './jobs.ts'
+import type { ExecutionTable } from './jobs.ts'
+import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { UploadStdin } from './stdin.ts'
 
 const PAYLOAD_SIZE = CHUNK_SIZE / 2
@@ -53,15 +54,16 @@ export class ShellOutput {
  */
 export function shellResponse(
   output: ShellOutput,
-  jobs: JobTable,
-  job: JobEntry,
+  jobs: ExecutionTable,
+  job: ExecutionRecord,
   reply: FastifyReply,
   failed: Promise<unknown>,
   stdin: UploadStdin | Uint8Array | undefined,
 ): FastifyReply {
+  const finished = jobs.wait(job.id)
   const completed = jobs
     .drain(job.id)
-    .then(() => jobs.wait(job.id))
+    .then(() => finished)
     .finally(() => {
       output.pipe.end()
     })

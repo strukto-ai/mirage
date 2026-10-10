@@ -3,7 +3,11 @@ import type { Readable } from 'node:stream'
 import type { FastifyReply } from 'fastify'
 import { expect, it, vi } from 'vitest'
 import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
-import { JobStatus, JobTable } from './jobs.ts'
+import { ExecutionTable } from './jobs.ts'
+import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
+import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import { MAX_FINISHED_JOBS } from './constants.ts'
 import { UploadStdin } from './stdin.ts'
 import { ShellOutput, shellResponse } from './stream.ts'
 
@@ -65,7 +69,7 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   const entered = gate(),
     cleanup = gate(),
     release = gate()
-  const table = new JobTable()
+  const table = new ExecutionTable()
   const output = new ShellOutput()
   const job = table.submit(
     'workspace',
@@ -122,13 +126,13 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   release.release()
   await reading
   expect(raw.listenerCount('close')).toBe(0)
-  expect(table.get(job.id)?.status).toBe(JobStatus.CANCELED)
+  expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
   await table.close()
 })
 
 it('the final record waits for the upload to end', async () => {
   const uploaded = gate()
-  const table = new JobTable()
+  const table = new ExecutionTable()
   const job = table.submit(
     'workspace',
     'true',
@@ -162,6 +166,43 @@ it('the final record waits for the upload to end', async () => {
   expect(records.join('')).not.toContain('"status"')
   uploaded.release()
   await reading
+  expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
+    status: 'done',
+  })
+  await table.close()
+})
+
+it('the final record survives its eviction', async () => {
+  const finish = gate()
+  const table = new ExecutionTable()
+  const work = async (_signal: AbortSignal, scope: ExecutionScope): Promise<JsonValue> => {
+    await scope.start()
+    await finish.wait
+    return { exit_code: 0 }
+  }
+  const job = table.submit('workspace', 'held', work, 'session')
+  let source: Readable | undefined
+  const reply = {
+    raw: new EventEmitter(),
+    log: { error: vi.fn(), debug: vi.fn() },
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  shellResponse(new ShellOutput(), table, job, reply, Promise.resolve(undefined), undefined)
+  for (let i = 0; i < MAX_FINISHED_JOBS; i++) table.submit('workspace', 'other', work, 'session')
+  if (source === undefined) throw new Error('response did not send a stream')
+  const body = source
+  const records: string[] = []
+  const reading = (async () => {
+    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+  })()
+  finish.release()
+  await reading
+  expect(table.get(job.id)).toBeNull()
   expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
     status: 'done',
   })

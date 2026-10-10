@@ -14,7 +14,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import { JobStatus, JobTable } from './jobs.ts'
+import { ExecutionTable } from './jobs.ts'
+import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import { MAX_FINISHED_JOBS } from './constants.ts'
 
 function gate() {
@@ -25,7 +26,7 @@ function gate() {
   return { wait, release }
 }
 
-function submit(table: JobTable, work: (signal: AbortSignal) => Promise<JsonValue>) {
+function submit(table: ExecutionTable, work: (signal: AbortSignal) => Promise<JsonValue>) {
   return table.submit(
     'ws',
     'probe',
@@ -40,7 +41,7 @@ function submit(table: JobTable, work: (signal: AbortSignal) => Promise<JsonValu
 
 describe('async execution ownership', () => {
   it('passes the persisted execution identity into admission scope', async () => {
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const job = table.submit(
       'ws',
       'probe',
@@ -58,7 +59,7 @@ describe('async execution ownership', () => {
     const entered = gate(),
       cleanup = gate(),
       release = gate()
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const job = submit(table, async (signal) => {
       entered.release()
       try {
@@ -78,15 +79,15 @@ describe('async execution ownership', () => {
       return null
     })
     await entered.wait
-    expect((await table.wait(job.id, 0)).status).toBe(JobStatus.RUNNING)
+    expect((await table.wait(job.id, 0)).status).toBe(ExecutionStatus.RUNNING)
     expect(table.cancel(job.id)).toBe(true)
     await cleanup.wait
     const stopping = await table.wait(job.id, 0.001)
-    expect(stopping.status).toBe(JobStatus.STOPPING)
+    expect(stopping.status).toBe(ExecutionStatus.STOPPING)
     expect(stopping.finishedAt).toBeNull()
     expect(table.cancel(job.id)).toBe(false)
     release.release()
-    expect((await table.wait(job.id)).status).toBe(JobStatus.CANCELED)
+    expect((await table.wait(job.id)).status).toBe(ExecutionStatus.CANCELED)
     expect(table.cancel(job.id)).toBe(false)
     await table.close()
   })
@@ -94,7 +95,7 @@ describe('async execution ownership', () => {
   it('cancel before session acquisition never calls the body', async () => {
     const acquired = gate()
     let invoked = false
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const job = table.submit(
       'ws',
       'probe',
@@ -106,22 +107,22 @@ describe('async execution ownership', () => {
       },
       'session',
     )
-    expect(job.status).toBe(JobStatus.PENDING)
+    expect(job.status).toBe(ExecutionStatus.PENDING)
     expect(table.cancel(job.id)).toBe(true)
     acquired.release()
     const finished = await table.wait(job.id)
-    expect(finished.status).toBe(JobStatus.CANCELED)
+    expect(finished.status).toBe(ExecutionStatus.CANCELED)
     expect(finished.startedAt).toBeNull()
     expect(invoked).toBe(false)
     await table.close()
   })
 
   it('distinguishes command outcomes from service failures', async () => {
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const command = submit(table, () => Promise.resolve({ exitCode: 1 }))
     const service = submit(table, () => Promise.reject(new Error('broken runtime')))
-    expect((await table.wait(command.id)).status).toBe(JobStatus.DONE)
-    expect((await table.wait(service.id)).status).toBe(JobStatus.FAILED)
+    expect((await table.wait(command.id)).status).toBe(ExecutionStatus.DONE)
+    expect((await table.wait(service.id)).status).toBe(ExecutionStatus.FAILED)
     expect(table.get(service.id)?.error).toContain('broken runtime')
     await table.close()
   })
@@ -129,7 +130,7 @@ describe('async execution ownership', () => {
   it('an aborted join cancels the work and waits for its cleanup', async () => {
     const entered = gate()
     let cleaned = false
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const job = submit(table, async (signal) => {
       entered.release()
       try {
@@ -148,7 +149,7 @@ describe('async execution ownership', () => {
     const joined = table.join(job.id, abort.signal)
     await entered.wait
     abort.abort()
-    expect((await joined).status).toBe(JobStatus.CANCELED)
+    expect((await joined).status).toBe(ExecutionStatus.CANCELED)
     expect(cleaned).toBe(true)
     await table.close()
   })
@@ -156,7 +157,7 @@ describe('async execution ownership', () => {
   it('close cancels running work and joins it', async () => {
     const entered = gate()
     let cleaned = false
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const job = submit(table, async (signal) => {
       entered.release()
       try {
@@ -173,12 +174,12 @@ describe('async execution ownership', () => {
     await entered.wait
     await table.close()
     expect(cleaned).toBe(true)
-    expect(table.get(job.id)?.status).toBe(JobStatus.CANCELED)
+    expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
     expect(() => submit(table, () => Promise.resolve(null))).toThrow('closed')
   })
 
   it('drops finished records after an hour', async () => {
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const job = submit(table, () => Promise.resolve(null))
     await table.wait(job.id)
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -193,7 +194,7 @@ describe('async execution ownership', () => {
   })
 
   it('keeps only the newest finished records', async () => {
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const jobs = Array.from({ length: MAX_FINISHED_JOBS + 1 }, () =>
       submit(table, () => Promise.resolve(null)),
     )
@@ -207,7 +208,7 @@ describe('async execution ownership', () => {
   })
 
   it('waits for a timeout past the timer limit', async () => {
-    const table = new JobTable()
+    const table = new ExecutionTable()
     const { wait, release } = gate()
     const job = submit(table, async () => {
       await wait
@@ -216,7 +217,7 @@ describe('async execution ownership', () => {
     const waited = table.wait(job.id, 2_592_000)
     await new Promise((resolve) => setTimeout(resolve, 20))
     release()
-    expect((await waited).status).toBe(JobStatus.DONE)
+    expect((await waited).status).toBe(ExecutionStatus.DONE)
     await table.close()
   })
 })

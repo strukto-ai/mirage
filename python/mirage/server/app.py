@@ -38,7 +38,7 @@ from mirage.server.host_validation import (
     HostHeaderMiddleware,
     resolve_allowed_hosts,
 )
-from mirage.server.jobs import JobTable
+from mirage.server.jobs import ExecutionTable
 from mirage.server.mcp.http import register_mcp_routes
 from mirage.server.paths import (
     mirage_home,
@@ -244,7 +244,7 @@ def build_app(
         accounts_required=auth.mode == AuthMode.JWT,
         owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
     )
-    app.state.jobs = JobTable()
+    app.state.jobs = ExecutionTable()
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

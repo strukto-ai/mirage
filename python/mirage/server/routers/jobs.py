@@ -15,7 +15,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, JsonValue
 
-from mirage.server.jobs import JobEntry
+from mirage.execution.types import ExecutionRecord
 
 router = APIRouter(prefix="/v1/jobs")
 
@@ -46,7 +46,7 @@ class CancelResponse(BaseModel):
     canceled: bool
 
 
-def _to_brief(entry: JobEntry) -> JobBrief:
+def _to_brief(entry: ExecutionRecord) -> JobBrief:
     return JobBrief(
         job_id=entry.id,
         workspace_id=entry.workspace_id,
@@ -60,7 +60,7 @@ def _to_brief(entry: JobEntry) -> JobBrief:
     )
 
 
-def _to_detail(entry: JobEntry) -> JobDetail:
+def _to_detail(entry: ExecutionRecord) -> JobDetail:
     return JobDetail(
         **_to_brief(entry).model_dump(),
         result=entry.result,
@@ -68,7 +68,7 @@ def _to_detail(entry: JobEntry) -> JobDetail:
     )
 
 
-async def _require_job(request: Request, job_id: str) -> JobEntry:
+async def _require_job(request: Request, job_id: str) -> ExecutionRecord:
     """The job, when its workspace is the caller's to reach.
 
     A job of another account's workspace, or of an earlier workspace

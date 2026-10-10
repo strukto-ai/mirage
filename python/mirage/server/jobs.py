@@ -21,8 +21,7 @@ import anyio
 
 from mirage.concurrency.limiter import settle
 from mirage.execution.context import new_execution_id
-from mirage.execution.types import ExecutionRecord as JobEntry
-from mirage.execution.types import ExecutionStatus as JobStatus
+from mirage.execution.types import ExecutionRecord, ExecutionStatus
 from mirage.server.constants import (
     FINISHED_JOB_RETENTION_SECONDS,
     MAX_FINISHED_JOBS,
@@ -35,14 +34,14 @@ logger = logging.getLogger(__name__)
 
 
 class _Run:
-    def __init__(self, record: JobEntry) -> None:
+    def __init__(self, record: ExecutionRecord) -> None:
         self.record = record
         self.work: asyncio.Task[JsonValue] | None = None
         self.completion: asyncio.Task[None] | None = None
         self.settled = asyncio.Event()
 
 
-class JobTable:
+class ExecutionTable:
     """The server's executions: each one's record and the work running it.
 
     A shell marks running only after acquiring its session. Cancel stops
@@ -55,11 +54,11 @@ class JobTable:
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
 
-    def get(self, job_id: str) -> JobEntry:
+    def get(self, job_id: str) -> ExecutionRecord:
         self._prune()
         return self._runs[job_id].record
 
-    def list(self, workspace_id: str | None = None) -> list[JobEntry]:
+    def list(self, workspace_id: str | None = None) -> list[ExecutionRecord]:
         self._prune()
         return [
             run.record
@@ -88,7 +87,7 @@ class JobTable:
         if run.record.cancel_requested:
             raise asyncio.CancelledError()
         run.record = replace(
-            run.record, status=JobStatus.RUNNING, started_at=time.time()
+            run.record, status=ExecutionStatus.RUNNING, started_at=time.time()
         )
 
     def submit(
@@ -98,12 +97,12 @@ class JobTable:
         factory: Callable[[ExecutionScope], Awaitable[JsonValue]],
         *,
         session_id: str,
-    ) -> JobEntry:
+    ) -> ExecutionRecord:
         if self._closed:
-            raise RuntimeError("job table is closed")
+            raise RuntimeError("execution table is closed")
         self._prune()
         run = _Run(
-            JobEntry(
+            ExecutionRecord(
                 new_execution_id(),
                 workspace_id,
                 session_id,
@@ -128,7 +127,7 @@ class JobTable:
                 asyncio.run_coroutine_threadsafe(self._started(job_id), owner)
             )
 
-        status, result, error = JobStatus.DONE, None, None
+        status, result, error = ExecutionStatus.DONE, None, None
         try:
             if run.record.cancel_requested:
                 raise asyncio.CancelledError()
@@ -140,15 +139,18 @@ class JobTable:
             # The job's own cancel arrives as CancelledError; the
             # workspace's (a session or workspace cancel) as the abort
             # the line raised.
-            status = JobStatus.CANCELED
+            status = ExecutionStatus.CANCELED
         except Exception as exc:
-            status, error = JobStatus.FAILED, f"{type(exc).__name__}: {exc}"
+            status, error = (
+                ExecutionStatus.FAILED,
+                f"{type(exc).__name__}: {exc}",
+            )
         if run.record.cancel_requested:
-            status, result = JobStatus.CANCELED, None
+            status, result = ExecutionStatus.CANCELED, None
         run.record = replace(
             run.record,
             status=status,
-            result=result if status == JobStatus.DONE else None,
+            result=result if status == ExecutionStatus.DONE else None,
             error=error,
             finished_at=time.time(),
         )
@@ -157,7 +159,7 @@ class JobTable:
 
     async def wait(
         self, job_id: str, timeout: float | None = None
-    ) -> JobEntry:
+    ) -> ExecutionRecord:
         """The execution once it finishes, or as it stands at the timeout.
 
         Args:
@@ -176,7 +178,7 @@ class JobTable:
             )
         return run.record
 
-    async def join(self, job_id: str) -> JobEntry:
+    async def join(self, job_id: str) -> ExecutionRecord:
         """Wait for an execution on behalf of the caller that started it.
 
         A caller cancelled while it waits cancels the execution and waits
@@ -212,7 +214,7 @@ class JobTable:
         ):
             return False
         run.record = replace(
-            run.record, cancel_requested=True, status=JobStatus.STOPPING
+            run.record, cancel_requested=True, status=ExecutionStatus.STOPPING
         )
         if run.work is not None:
             run.work.cancel()

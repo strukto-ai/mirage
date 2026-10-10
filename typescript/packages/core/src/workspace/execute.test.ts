@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command } from '../commands/config.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
@@ -410,6 +410,40 @@ describe('native output', () => {
       name: 'AbortError',
     })
     await ws.unmount('/ram')
+    await ws.close()
+  }, 3000)
+
+  it('closes output a canceled handler returns late', async () => {
+    const { ws } = buildWorkspace()
+    let closed = false
+    const source: AsyncIterableIterator<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return this
+      },
+      next: () => Promise.resolve({ done: true, value: undefined }),
+      return: () => {
+        closed = true
+        return Promise.resolve({ done: true, value: undefined })
+      },
+    }
+    ws.mount('/ram').registerCommands(
+      command({
+        name: 'late',
+        vfs: 'ram',
+        spec: new CommandSpec(),
+        fn: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 400))
+          return [source, new IOResult()]
+        },
+      }),
+    )
+    await ws.shell('cd /ram')
+    await expect(ws.shell('late', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await vi.waitFor(() => {
+      expect(closed).toBe(true)
+    })
     await ws.close()
   }, 3000)
 

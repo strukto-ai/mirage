@@ -8,10 +8,11 @@ from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from mirage.concurrency.limiter import settle
+from mirage.execution.types import ExecutionRecord
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.io.types import StreamName
-from mirage.server.jobs import JobEntry, JobTable
+from mirage.server.jobs import ExecutionTable
 from mirage.server.stdin import UploadStdin
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,8 @@ class ShellResponse(Response):
     def __init__(
         self,
         output: ShellOutput,
-        jobs: JobTable,
-        job: JobEntry,
+        jobs: ExecutionTable,
+        job: ExecutionRecord,
         request: Request,
         upload: asyncio.Task[None] | None,
         part: UploadStdin | None,
@@ -90,10 +91,11 @@ class ShellResponse(Response):
         self._upload = upload
         self._part = part
 
-    async def _completed(self) -> JobEntry:
+    async def _completed(self) -> ExecutionRecord:
         try:
+            finished = await self._jobs.wait(self._job.id)
             await self._jobs.drain(self._job.id)
-            return await self._jobs.wait(self._job.id)
+            return finished
         finally:
             self._output.pipe.end()
 
@@ -108,7 +110,7 @@ class ShellResponse(Response):
             pass
 
     async def _send(
-        self, send: Send, completed: asyncio.Task[JobEntry]
+        self, send: Send, completed: asyncio.Task[ExecutionRecord]
     ) -> None:
         await send(
             {
@@ -170,7 +172,7 @@ class ShellResponse(Response):
 
     async def _close(
         self,
-        completed: asyncio.Task[JobEntry],
+        completed: asyncio.Task[ExecutionRecord],
         sender: asyncio.Task[None],
         disconnected: asyncio.Task[None],
     ) -> None:

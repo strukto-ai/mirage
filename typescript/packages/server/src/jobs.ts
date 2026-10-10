@@ -13,19 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { newExecutionId } from '@struktoai/mirage-core/execution/context'
-import {
-  ExecutionStatus as JobStatus,
-  type ExecutionRecord as JobEntry,
-} from '@struktoai/mirage-core/execution/types'
+import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { sleep } from '@struktoai/mirage-core/utils/abort'
 import { FINISHED_JOB_RETENTION_SECONDS, MAX_FINISHED_JOBS } from './constants.ts'
 
-export { JobStatus, type JobEntry }
-
 interface Run {
-  record: JobEntry
+  record: ExecutionRecord
   controller: AbortController
   completion: Promise<void>
   settled: Promise<void>
@@ -38,17 +33,17 @@ interface Run {
  * work at once; the record finishes after the work and its cleanup settle.
  * Finished records are kept for an hour, the newest 1024 of them.
  */
-export class JobTable {
+export class ExecutionTable {
   private runs = new Map<string, Run>()
   private closed = false
   private closing: Promise<void> | undefined
 
-  get(id: string): JobEntry | null {
+  get(id: string): ExecutionRecord | null {
     this.prune()
     return this.runs.get(id)?.record ?? null
   }
 
-  list(workspaceId?: string): JobEntry[] {
+  list(workspaceId?: string): ExecutionRecord[] {
     this.prune()
     return [...this.runs.values()]
       .map((run) => run.record)
@@ -71,7 +66,7 @@ export class JobTable {
     if (run.record.cancelRequested) {
       return Promise.reject(new DOMException('execution canceled', 'AbortError'))
     }
-    run.record = { ...run.record, status: JobStatus.RUNNING, startedAt: Date.now() / 1000 }
+    run.record = { ...run.record, status: ExecutionStatus.RUNNING, startedAt: Date.now() / 1000 }
     return Promise.resolve()
   }
 
@@ -80,8 +75,8 @@ export class JobTable {
     command: string,
     factory: (signal: AbortSignal, scope: ExecutionScope) => Promise<JsonValue>,
     sessionId: string,
-  ): JobEntry {
-    if (this.closed) throw new Error('job table is closed')
+  ): ExecutionRecord {
+    if (this.closed) throw new Error('execution table is closed')
     this.prune()
     let settle!: () => void
     const run: Run = {
@@ -91,7 +86,7 @@ export class JobTable {
         sessionId,
         command,
         submittedAt: Date.now() / 1000,
-        status: JobStatus.PENDING,
+        status: ExecutionStatus.PENDING,
         cancelRequested: false,
         startedAt: null,
         finishedAt: null,
@@ -113,7 +108,7 @@ export class JobTable {
     run: Run,
     factory: (signal: AbortSignal, scope: ExecutionScope) => Promise<JsonValue>,
   ): Promise<void> {
-    let status: JobStatus = JobStatus.DONE
+    let status: ExecutionStatus = ExecutionStatus.DONE
     let result: JsonValue = null
     let error: string | null = null
     try {
@@ -126,17 +121,17 @@ export class JobTable {
       // The job's own cancel aborts its controller; the workspace's (a
       // session or workspace cancel) rejects the line with the abort error.
       if (err instanceof DOMException && err.name === 'AbortError') {
-        status = JobStatus.CANCELED
+        status = ExecutionStatus.CANCELED
       } else {
-        status = JobStatus.FAILED
+        status = ExecutionStatus.FAILED
         error = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       }
     }
-    if (run.record.cancelRequested) status = JobStatus.CANCELED
+    if (run.record.cancelRequested) status = ExecutionStatus.CANCELED
     run.record = {
       ...run.record,
       status,
-      result: status === JobStatus.DONE ? result : null,
+      result: status === ExecutionStatus.DONE ? result : null,
       error,
       finishedAt: Date.now() / 1000,
     }
@@ -144,7 +139,7 @@ export class JobTable {
   }
 
   /** The execution once it finishes, or as it stands at the timeout. */
-  async wait(id: string, timeoutSeconds?: number): Promise<JobEntry> {
+  async wait(id: string, timeoutSeconds?: number): Promise<ExecutionRecord> {
     const run = this.runs.get(id)
     if (run === undefined) throw new Error(`job not found: ${id}`)
     if (timeoutSeconds === undefined) {
@@ -163,7 +158,7 @@ export class JobTable {
    * that aborts cancels the execution, and the wait still lasts until its
    * cleanup settles, so the work never outlives the request that started it.
    */
-  async join(id: string, signal?: AbortSignal): Promise<JobEntry> {
+  async join(id: string, signal?: AbortSignal): Promise<ExecutionRecord> {
     const cancel = (): void => {
       this.cancel(id)
     }
@@ -181,7 +176,7 @@ export class JobTable {
     const run = this.runs.get(id)
     if (run === undefined) return false
     if (run.record.finishedAt !== null || run.record.cancelRequested) return false
-    run.record = { ...run.record, cancelRequested: true, status: JobStatus.STOPPING }
+    run.record = { ...run.record, cancelRequested: true, status: ExecutionStatus.STOPPING }
     run.controller.abort()
     return true
   }
@@ -208,14 +203,14 @@ export interface JobBriefDict {
   workspace_id: string
   session_id: string
   command: string
-  status: JobStatus
+  status: ExecutionStatus
   cancel_requested: boolean
   submitted_at: number
   started_at: number | null
   finished_at: number | null
 }
 
-export function toBriefDict(entry: JobEntry): JobBriefDict {
+export function toBriefDict(entry: ExecutionRecord): JobBriefDict {
   return {
     job_id: entry.id,
     workspace_id: entry.workspaceId,

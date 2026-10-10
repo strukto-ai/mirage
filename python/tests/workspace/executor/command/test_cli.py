@@ -373,16 +373,20 @@ async def test_a_canceled_write_still_drops_the_caches():
     assert dropped == [True]
 
 
+async def _body():
+    yield b"body"
+
+
+async def _cached_read(inv):
+    stream = _body()
+    return stream, IOResult(reads={"/f": stream}, cache=["/f"])
+
+
 @pytest.mark.asyncio
 async def test_a_cached_read_outlives_the_output_reading_it():
-    async def source():
-        yield b"body"
-
-    async def read(inv):
-        stream = source()
-        return stream, IOResult(reads={"/f": stream}, cache=["/f"])
-
-    cli = CLI(CommandSpec(name="reader"), handlers={"": CLIHandler(read)})
+    cli = CLI(
+        CommandSpec(name="reader"), handlers={"": CLIHandler(_cached_read)}
+    )
     stdout, io, _ = await handle_cli(
         CLIInstall(name="reader", cli=cli), ["reader"], SessionState("t")
     )

@@ -116,6 +116,10 @@ async def test_a_body_over_the_limit_is_refused():
         assert r.status_code == 413
 
 
+async def _ignore_sent(message):
+    return None
+
+
 async def _start_shell(app, wid: str):
     body = json.dumps({"command": "sleep 60"}).encode()
     path = f"/v1/workspaces/{wid}/tools/shell"
@@ -141,11 +145,7 @@ async def _start_shell(app, wid: str):
     await incoming.put(
         {"type": "http.request", "body": body, "more_body": False}
     )
-
-    async def send(message):
-        pass
-
-    calling = asyncio.create_task(app(scope, incoming.get, send))
+    calling = asyncio.create_task(app(scope, incoming.get, _ignore_sent))
     for _ in range(500):
         running = [
             j for j in app.state.jobs.list(wid) if j.status == "running"

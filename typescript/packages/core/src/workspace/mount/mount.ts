@@ -1129,14 +1129,20 @@ export class MountEntry {
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
         : cmdOpts
+    const running = Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts))
     try {
-      return await runWithTimeout(
-        joinOrAbort(Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts)), runSignal),
-        cmdTimeout,
-        cmdName,
-      )
+      return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
     } catch (err) {
       if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
+      // The caller has gone, so output the handler hands back later has no
+      // reader: close it. A later rejection has no one left to report to.
+      void running
+        .then(async (late) => {
+          if (late === null) return
+          await closeQuietly(late[0])
+          await closeQuietly(late[1].stderr)
+        })
+        .catch(() => undefined)
       throw err
     }
   }

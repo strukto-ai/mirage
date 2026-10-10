@@ -23,9 +23,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from mirage.execution.types import ExecutionStatus
 from mirage.server.inflight import InFlight
 from mirage.server.io_serde import io_result_to_dict
-from mirage.server.jobs import JobStatus, JobTable
+from mirage.server.jobs import ExecutionTable
 from mirage.server.mcp.http import McpEndpoint
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
@@ -60,7 +61,7 @@ class DaemonRpcServer(MirageRpcServer):
 
     Args:
         entry (WorkspaceEntry): the workspace.
-        jobs (JobTable): the daemon's job table.
+        jobs (ExecutionTable): the daemon's execution table.
         session_id (str): the session the methods act as.
         operations (MirageToolOperations): the session's tool table, the
             one MCP and the tool routes share.
@@ -69,7 +70,7 @@ class DaemonRpcServer(MirageRpcServer):
     def __init__(
         self,
         entry: WorkspaceEntry,
-        jobs: JobTable,
+        jobs: ExecutionTable,
         session_id: str,
         operations: MirageToolOperations,
     ) -> None:
@@ -122,9 +123,9 @@ class DaemonRpcServer(MirageRpcServer):
             session_id=session_id,
         )
         job = await self._jobs.join(job.id)
-        if job.status == JobStatus.CANCELED:
+        if job.status == ExecutionStatus.CANCELED:
             raise RpcError(RPC_REQUEST_CANCELLED, "job canceled")
-        if job.status == JobStatus.FAILED:
+        if job.status == ExecutionStatus.FAILED:
             raise RpcError(RPC_INTERNAL_ERROR, job.error or "shell failed")
         return job.result
 
@@ -153,12 +154,15 @@ class RpcEndpoint:
 
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
-        jobs (JobTable): the daemon's job table.
+        jobs (ExecutionTable): the daemon's execution table.
         mcp (McpEndpoint): the MCP endpoint, which owns the tool tables.
     """
 
     def __init__(
-        self, registry: WorkspaceRegistry, jobs: JobTable, mcp: McpEndpoint
+        self,
+        registry: WorkspaceRegistry,
+        jobs: ExecutionTable,
+        mcp: McpEndpoint,
     ) -> None:
         self._registry = registry
         self._jobs = jobs
@@ -294,7 +298,10 @@ class RpcEndpoint:
 
 
 def register_rpc_routes(
-    app: FastAPI, registry: WorkspaceRegistry, jobs: JobTable, mcp: McpEndpoint
+    app: FastAPI,
+    registry: WorkspaceRegistry,
+    jobs: ExecutionTable,
+    mcp: McpEndpoint,
 ) -> None:
     """Serve JSON-RPC at ``/v1/workspaces/{workspace_id}/rpc``.
 
@@ -304,7 +311,7 @@ def register_rpc_routes(
     Args:
         app (FastAPI): the daemon app.
         registry (WorkspaceRegistry): the daemon's workspaces.
-        jobs (JobTable): the daemon's job table.
+        jobs (ExecutionTable): the daemon's execution table.
         mcp (McpEndpoint): the MCP endpoint, which owns the tool tables.
     """
     endpoint = RpcEndpoint(registry, jobs, mcp)

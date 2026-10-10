@@ -1032,16 +1032,17 @@ it.each([
   }
 })
 
+async function* body(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new TextEncoder().encode('body'))
+}
+
 it('keeps a cached read whole after the output reads it', async () => {
-  async function* source(): AsyncGenerator<Uint8Array> {
-    yield await Promise.resolve(new TextEncoder().encode('body'))
-  }
   const cli = new CLI({
     spec: new CommandSpec({ name: 'reader' }),
     handlers: {
       '': new CLIHandler({
         fn: () => {
-          const stream = source()
+          const stream = body()
           return [stream, new IOResult({ reads: { '/f': stream }, cache: ['/f'] })]
         },
       }),

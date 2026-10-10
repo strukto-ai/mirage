@@ -18,13 +18,14 @@ import time
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.server.jobs import JobStatus, JobTable
+from mirage.execution.types import ExecutionStatus
+from mirage.server.jobs import ExecutionTable
 from mirage.vfs.ram import RAMVFS
 
 
 @pytest.mark.asyncio
 async def test_admitted_record_identity_reaches_workspace_history_and_process():
-    table = JobTable()
+    table = ExecutionTable()
     ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.WRITE)
     identities = []
 
@@ -39,7 +40,7 @@ async def test_admitted_record_identity_reaches_workspace_history_and_process():
         job = table.submit(
             "ws", "write", run, session_id=ws.default_session_id
         )
-        assert (await table.wait(job.id)).status == JobStatus.DONE
+        assert (await table.wait(job.id)).status == ExecutionStatus.DONE
         assert identities == [job.id]
         events = await ws.observer.events()
         assert events and all(
@@ -70,10 +71,10 @@ async def test_cancel_waits_for_coroutine_cleanup_and_waiter_does_not_own_work()
             cleanup.set()
             await release.wait()
 
-    table = JobTable()
+    table = ExecutionTable()
     job = submit(table, work)
     await asyncio.wait_for(entered.wait(), 2)
-    assert (await table.wait(job.id, 0)).status == JobStatus.RUNNING
+    assert (await table.wait(job.id, 0)).status == ExecutionStatus.RUNNING
     waiter = asyncio.create_task(table.wait(job.id))
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -81,11 +82,11 @@ async def test_cancel_waits_for_coroutine_cleanup_and_waiter_does_not_own_work()
     assert table.cancel(job.id)
     await asyncio.wait_for(cleanup.wait(), 2)
     current = await table.wait(job.id, 0.01)
-    assert current.status == JobStatus.STOPPING
+    assert current.status == ExecutionStatus.STOPPING
     assert current.cancel_requested and current.finished_at is None
     assert not table.cancel(job.id)
     release.set()
-    assert (await table.wait(job.id)).status == JobStatus.CANCELED
+    assert (await table.wait(job.id)).status == ExecutionStatus.CANCELED
     assert not table.cancel(job.id)
     await table.close()
 
@@ -97,12 +98,12 @@ async def test_cancel_before_start_never_calls_the_body():
     async def work():
         invoked.append(True)
 
-    table = JobTable()
+    table = ExecutionTable()
     job = submit(table, work)
-    assert job.status == JobStatus.PENDING
+    assert job.status == ExecutionStatus.PENDING
     assert table.cancel(job.id)
     finished = await table.wait(job.id)
-    assert finished.status == JobStatus.CANCELED
+    assert finished.status == ExecutionStatus.CANCELED
     assert finished.started_at is None
     assert not invoked
     await table.close()
@@ -113,11 +114,11 @@ async def test_command_failure_and_service_failure_are_distinct():
     async def fail():
         raise ValueError("broken runtime")
 
-    table = JobTable()
+    table = ExecutionTable()
     command = submit(table, lambda: asyncio.sleep(0, result={"exit_code": 1}))
     service = submit(table, fail)
-    assert (await table.wait(command.id)).status == JobStatus.DONE
-    assert (await table.wait(service.id)).status == JobStatus.FAILED
+    assert (await table.wait(command.id)).status == ExecutionStatus.DONE
+    assert (await table.wait(service.id)).status == ExecutionStatus.FAILED
     assert "broken runtime" in table.get(service.id).error
     await table.close()
 
@@ -134,7 +135,7 @@ async def test_a_cancelled_join_cancels_the_work_and_waits_for_cleanup():
             await asyncio.sleep(0)
             cleaned.set()
 
-    table = JobTable()
+    table = ExecutionTable()
     job = submit(table, work)
     joined = asyncio.create_task(table.join(job.id))
     await asyncio.wait_for(entered.wait(), 2)
@@ -142,7 +143,7 @@ async def test_a_cancelled_join_cancels_the_work_and_waits_for_cleanup():
     with pytest.raises(asyncio.CancelledError):
         await joined
     assert cleaned.is_set()
-    assert table.get(job.id).status == JobStatus.CANCELED
+    assert table.get(job.id).status == ExecutionStatus.CANCELED
     await table.close()
 
 
@@ -157,12 +158,12 @@ async def test_close_cancels_running_work_and_joins_it():
         finally:
             cleaned.set()
 
-    table = JobTable()
+    table = ExecutionTable()
     job = submit(table, work)
     await asyncio.wait_for(entered.wait(), 2)
     await table.close()
     assert cleaned.is_set()
-    assert table.get(job.id).status == JobStatus.CANCELED
+    assert table.get(job.id).status == ExecutionStatus.CANCELED
     with pytest.raises(RuntimeError, match="closed"):
         submit(table, work)
 
@@ -170,7 +171,7 @@ async def test_close_cancels_running_work_and_joins_it():
 @pytest.mark.asyncio
 async def test_only_the_newest_finished_records_are_kept(monkeypatch):
     monkeypatch.setattr("mirage.server.jobs.MAX_FINISHED_JOBS", 1)
-    table = JobTable()
+    table = ExecutionTable()
     first = submit(table, lambda: asyncio.sleep(0))
     await table.wait(first.id)
     second = submit(table, lambda: asyncio.sleep(0))
@@ -184,7 +185,7 @@ async def test_only_the_newest_finished_records_are_kept(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_finished_records_expire_after_an_hour(monkeypatch):
-    table = JobTable()
+    table = ExecutionTable()
     job = submit(table, lambda: asyncio.sleep(0))
     await table.wait(job.id)
     later = time.time() + 3601
