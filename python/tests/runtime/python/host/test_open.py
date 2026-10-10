@@ -60,8 +60,6 @@ class TestPatchedOpen:
         patched = make_open(ops)
         with pytest.raises(ValueError, match="closefd=False"):
             patched("/data/dir/f.txt", "r", closefd=False)
-        with pytest.raises(ValueError, match="opener is not supported"):
-            patched("/data/dir/f.txt", "r", opener=lambda _path, _flags: 0)
         with pytest.raises(ValueError, match="unbuffered text"):
             patched("/data/dir/f.txt", "r", 0)
 

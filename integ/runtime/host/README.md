@@ -13,8 +13,9 @@ program, and both answer alike.
 The dispatcher serves mounted paths only: a path no mount owns, the structure
 above the mounts and a relative path are the process's own. So the shared
 cases that pin a guest's view of those (`open/view.json`, the structure
-above mounts, `stat` of `/`, the working directory) do not list `host`, and
-neither do `os.pread` and `os.pwrite`, since the entry point has no descriptors.
+above mounts, `stat` of `/`, the working directory) do not list `host`.
+`os.open` hands a mounted file a descriptor of the entry point's own, which
+`os.read`, `os.pread`, `os.write`, `os.fsync` and `os.close` answer for.
 A mount made at `/` is the workspace's root, and both entry points serve every
 path under it; the root the workspace adds when nothing is mounted there
 stays the process's.

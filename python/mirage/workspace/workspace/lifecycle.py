@@ -26,7 +26,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
 from mirage.observe.store import ObserverStore
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.runtime.python.host.fs import make_rmtree, os_routing
+from mirage.runtime.python.host.fs import HostFs, make_rmtree, os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.shell.job_table import JobTable, cancel_job
 from mirage.workspace.files import Files
@@ -122,8 +122,9 @@ def patch_process(
     Returns:
         list[Patched]: what the block replaced, for ``unpatch_process``.
     """
-    opener = cast(Any, make_open(files, loop))
-    routing = os_routing(files, loop)
+    router = HostFs(files, loop)
+    opener = cast(Any, make_open(files, loop, router))
+    routing = os_routing(router)
     patched: list[Patched] = [
         (builtins, "open", builtins.open),
         (io, "open", io.open),

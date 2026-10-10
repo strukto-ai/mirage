@@ -22,7 +22,7 @@ class OpenMode:
     """What an fopen-style mode string says about a handle.
 
     One vocabulary for every dialect that opens by mode: monty's
-    ``path_open`` passes a CPython mode string, ``MirageFile`` takes one
+    ``path_open`` passes a CPython mode string, ``open_file`` takes one
     from embedding code, and preview1's oflags/rights/fdflags (which a
     QuickJS guest's ``std.open`` reaches as) translate onto the same
     facts in ``WasiFs.path_open``.

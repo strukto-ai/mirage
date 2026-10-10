@@ -17,6 +17,7 @@ import os
 import shutil
 import stat as stat_mod
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,12 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.context import set_current_session
 from mirage.errors.posix import posix_errno
-from mirage.runtime.python.host.constants import REFUSED_CALLS, ROUTED_CALLS
+from mirage.policy import Deny, Policy
+from mirage.runtime.python.host.constants import (
+    DESCRIPTOR_CALLS,
+    REFUSED_CALLS,
+    ROUTED_CALLS,
+)
 from mirage.runtime.python.host.fs import HostFs, make_os_module, os_routing
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.stat_view import DIR_SIZE
@@ -40,6 +46,11 @@ async def _shell(ws, line):
     return result.exit_code, await result.stdout_str()
 
 
+class _NoStats(Policy):
+    async def pre_vfs(self, ctx):
+        return Deny("no stat") if ctx.op == "stat" else None
+
+
 def seeded():
     """An ops facade over /data with one file and one subdirectory."""
     ops, _ = make_ops_with_dir()
@@ -52,7 +63,7 @@ def seeded():
 class TestTableInstall:
     def test_every_routed_verb_the_host_has_is_installed(self):
         ops, patched = seeded()
-        for verb in ROUTED_CALLS:
+        for verb in (*ROUTED_CALLS, *DESCRIPTOR_CALLS):
             if not hasattr(os, verb):
                 continue
             assert getattr(patched, verb) is not getattr(os, verb), verb
@@ -66,7 +77,7 @@ class TestTableInstall:
 
     def test_every_other_name_keeps_the_host_function(self):
         ops, patched = seeded()
-        installed = {*ROUTED_CALLS, *REFUSED_CALLS, "path"}
+        installed = {*ROUTED_CALLS, *REFUSED_CALLS, *DESCRIPTOR_CALLS, "path"}
         for name, value in vars(os).items():
             if name not in installed:
                 assert getattr(patched, name) is value, name
@@ -75,15 +86,15 @@ class TestTableInstall:
         # hasattr(os, ...) has to keep answering what it did, or code
         # that probes for a platform feature gets an OSError instead.
         ops, patched = seeded()
-        for verb in (*ROUTED_CALLS, *REFUSED_CALLS):
+        for verb in (*ROUTED_CALLS, *REFUSED_CALLS, *DESCRIPTOR_CALLS):
             assert hasattr(patched, verb) is hasattr(os, verb), verb
 
     def test_routing_covers_the_tables(self):
         ops, _ = seeded()
-        routed = os_routing(ops)
+        routed = os_routing(HostFs(ops, None))
         expected = {
             verb
-            for verb in (*ROUTED_CALLS, *REFUSED_CALLS)
+            for verb in (*ROUTED_CALLS, *REFUSED_CALLS, *DESCRIPTOR_CALLS)
             if hasattr(os, verb)
         }
         assert set(routed) == expected
@@ -240,6 +251,16 @@ class TestWrites:
         _, patched = seeded()
         with pytest.raises(FileExistsError):
             patched.makedirs("/data/dir/a.txt", exist_ok=True)
+
+    def test_makedirs_raises_what_a_stat_refused(self):
+        # A refused stat is not a missing directory: makedirs used to walk
+        # past it and answer EEXIST from a mkdir it should never have tried.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.vfs.mkdir("/data/dir"))
+        ws.policies.add(_NoStats())
+        patched = make_os_module(ws.vfs)
+        with pytest.raises(PermissionError):
+            patched.makedirs("/data/dir/x/y")
 
     def test_removedirs_prunes_the_parents_that_empty(self):
         _, patched = seeded()
@@ -484,8 +505,6 @@ class TestRefusals:
         target = tmp_path / "a.txt"
         target.write_text("host")
         assert patched.statvfs(str(tmp_path)).f_bsize > 0
-        fd = patched.open(str(target), os.O_RDONLY)
-        os.close(fd)
 
     def test_link_refuses_when_either_end_is_mounted(self, tmp_path):
         _, patched = seeded()
@@ -504,8 +523,56 @@ def _extra_args(verb):
         "link": ("/data/dir/hard",),
         "mkfifo": (),
         "mknod": (),
-        "open": (os.O_RDONLY,),
     }.get(verb, ())
+
+
+class TestDescriptors:
+    def test_writes_through_a_descriptor_land_at_close(self):
+        ops, patched = seeded()
+        fd = patched.open(
+            "/data/dir/new.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+        assert patched.write(fd, b"hello") == 5
+        assert patched.fstat(fd).st_size == 5
+        patched.close(fd)
+        assert run(ops.read("/data/dir/new.txt")) == b"hello"
+
+    def test_a_descriptor_reads_seeks_and_syncs(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR)
+        assert patched.read(fd, 2) == b"he"
+        assert patched.lseek(fd, 0, os.SEEK_END) == 5
+        patched.write(fd, b"!")
+        patched.fsync(fd)
+        assert run(ops.read("/data/dir/a.txt")) == b"hello!"
+        assert patched.pread(fd, 3, 1) == b"ell"
+        patched.close(fd)
+
+    def test_a_read_only_descriptor_refuses_a_write(self):
+        _, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDONLY)
+        with pytest.raises(OSError) as caught:
+            patched.write(fd, b"x")
+        assert caught.value.errno == errno.EBADF
+        patched.close(fd)
+
+    def test_fdopen_wraps_a_mounted_descriptor(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/b.txt", os.O_RDWR | os.O_CREAT)
+        with patched.fdopen(fd, "w") as f:
+            f.write("via fdopen")
+        assert run(ops.read("/data/dir/b.txt")) == b"via fdopen"
+        with pytest.raises(OSError) as caught:
+            patched.close(fd)
+        assert caught.value.errno == errno.EBADF
+
+    def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
+        _, patched = seeded()
+        target = tmp_path / "a.txt"
+        fd = patched.open(str(target), os.O_WRONLY | os.O_CREAT)
+        patched.write(fd, b"host")
+        patched.close(fd)
+        assert target.read_bytes() == b"host"
 
 
 class TestProcessPatch:
@@ -658,6 +725,19 @@ class TestProcessPatch:
             assert os.listdir(str(tmp_path)) == ["host.txt"]
             assert isinstance(os.stat(str(tmp_path)), os.stat_result)
             assert os.path.exists(str(tmp_path / "host.txt")) is True
+
+    def test_touch_mkstemp_and_a_named_temporary_file_reach_the_mount(self):
+        ws = Workspace({"/mem/": RAMVFS()}, mode=MountMode.WRITE)
+        with ws:
+            Path("/mem/touched").touch()
+            fd, name = tempfile.mkstemp(dir="/mem")
+            os.write(fd, b"stemp")
+            os.close(fd)
+            with tempfile.NamedTemporaryFile(dir="/mem", delete=False) as f:
+                f.write(b"named")
+            assert Path("/mem/touched").exists()
+            assert Path(name).read_bytes() == b"stemp"
+            assert Path(f.name).read_bytes() == b"named"
 
 
 class TestRmtree:

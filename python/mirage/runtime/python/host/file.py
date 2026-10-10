@@ -14,24 +14,22 @@
 
 import asyncio
 import codecs
+import functools
 import io
-import logging
-from collections.abc import Iterable, Iterator
-from types import TracebackType
-from typing import TYPE_CHECKING, Self
+from collections.abc import Callable
+from typing import IO, TYPE_CHECKING, Any, cast
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FileHandle
-from mirage.runtime.handles.mode import parse_mode
+from mirage.runtime.handles.mode import OpenMode, parse_mode
 from mirage.runtime.open import apply_open
-from mirage.runtime.python.host.fs import host_files, syscall
+from mirage.runtime.python.host.syscall import host_files, syscall
 from mirage.workspace.files import Files
 
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer, WriteableBuffer
-
-logger = logging.getLogger(__name__)
 # `io.open`'s own sentinel for "whatever the platform default is". It is
 # not a codec name, and pathlib passes it for every `read_text()` on an
 # interpreter that is not in UTF-8 mode (which is any interpreter whose
@@ -41,21 +39,77 @@ logger = logging.getLogger(__name__)
 LOCALE_ENCODING = "locale"
 
 
-class _HandleRaw(io.RawIOBase):
+def read_range(
+    adapter: RuntimeFiles,
+    path: str,
+    raw: bool,
+    offset: int,
+    size: int | None,
+) -> bytes:
+    """Read a range of a mounted file for a handle.
+
+    A handle that writes reads the stored bytes, since its writes land on
+    them; a read-only one sees the rendering.
+
+    Args:
+        adapter (RuntimeFiles): the file adapter.
+        path (str): the mounted path.
+        raw (bool): read the stored bytes rather than the rendering.
+        offset (int): where the range starts.
+        size (int | None): how many bytes; None reads to the end.
+    """
+    return syscall(adapter.read)(path, offset=offset, size=size, raw=raw)
+
+
+def raw_mode(facts: OpenMode) -> str:
+    """The mode ``io.FileIO`` reports for these facts.
+
+    Args:
+        facts (OpenMode): what the open's mode string said.
+    """
+    plus = "+" if facts.readable and facts.writable else ""
+    if facts.exclusive:
+        return "xb" + plus
+    if facts.append:
+        return "ab" + plus
+    if facts.readable:
+        return "rb" + plus
+    return "wb"
+
+
+class HandleRaw(io.RawIOBase):
     """A raw stream over a file handle, for CPython's buffered layers.
 
     The same layering CPython puts over a real file: a buffered stream
-    over this raw one, and a text stream over that for a text mode.
+    over this raw one, and a text stream over that for a text mode. Its
+    ``flush`` lands the handle's writes on the mount, which a close, and
+    a flush through the layers above, comes down to.
 
     Args:
+        adapter (RuntimeFiles): the file adapter writes land through.
         handle (FileHandle): the handle it reads and writes through.
         readable (bool): whether the mode reads.
+        mode (str): the mode ``io.FileIO`` would report.
+        release (Callable[[], None] | None): what a close gives back
+            once its writes landed, the descriptor a stream over one
+            owns; None for a plain open.
     """
 
-    def __init__(self, handle: FileHandle, readable: bool) -> None:
+    def __init__(
+        self,
+        adapter: RuntimeFiles,
+        handle: FileHandle,
+        readable: bool,
+        mode: str,
+        release: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__()
+        self._adapter = adapter
         self._handle = handle
         self._readable = readable
+        self._release = release
+        self.name = handle.path
+        self.mode = mode
 
     def readable(self) -> bool:
         return self._readable
@@ -93,205 +147,159 @@ class _HandleRaw(io.RawIOBase):
         self._handle.truncate(size)
         return size
 
-
-class MirageFile:
-    def __init__(
-        self,
-        files: Files,
-        path: str,
-        mode: str = "r",
-        loop: asyncio.AbstractEventLoop | None = None,
-        encoding: str | None = None,
-        errors: str | None = None,
-        newline: str | None = None,
-    ) -> None:
-        self._closed = True
-        self._adapter = host_files(files, loop)
-        self._path = path
-        self._mode = mode
-        self._facts = parse_mode(mode)
-        self._binary = self._facts.binary
-        self._readable = self._facts.readable
-        self._writable = self._facts.writable
-        if self._binary:
-            if encoding is not None:
-                raise ValueError(
-                    "binary mode doesn't take an encoding argument"
-                )
-            if errors is not None:
-                raise ValueError("binary mode doesn't take an errors argument")
-            if newline is not None:
-                raise ValueError("binary mode doesn't take a newline argument")
-        elif newline not in (None, "", "\n", "\r", "\r\n"):
-            raise ValueError(f"illegal newline value: {newline!r}")
-        # The sentinel resolves to mirage's own default rather than to
-        # `locale.getencoding()`, so `open(p).read()` and
-        # `Path(p).read_text()` agree about one file's bytes; a mount
-        # stores utf-8 whatever the host's locale happens to be.
-        if encoding is None or encoding == LOCALE_ENCODING:
-            encoding = "utf-8"
-        codecs.lookup(encoding)
-        # The open's effect lands now, by the rule every entry point shares; a
-        # refusal leaves the file closed, so nothing flushes behind it.
-        row = apply_open(self._adapter, path, self._facts)
-        # Nothing is read at open: the handle fetches what a read lands
-        # in, and keeps what was written until a flush.
-        self._handle = FileHandle.opened(
-            path,
-            None if row is None else self._read_range,
-            size=0 if row is None else row.size,
-            writable=self._writable,
-            append=self._facts.append,
-        )
-        # The buffered class CPython picks for the mode: a reader, a
-        # writer, or both for a `+` mode.
-        raw = _HandleRaw(self._handle, self._readable)
-        buffered: io.BufferedIOBase
-        if self._readable and self._writable:
-            buffered = io.BufferedRandom(raw)
-        elif self._writable:
-            buffered = io.BufferedWriter(raw)
-        else:
-            buffered = io.BufferedReader(raw)
-        self._buf: io.BufferedIOBase | io.TextIOWrapper = (
-            buffered
-            if self._binary
-            else io.TextIOWrapper(
-                buffered,
-                encoding=encoding,
-                errors=errors if errors is not None else "strict",
-                newline=newline,
-            )
-        )
-        self._closed = False
-
-    def _read_range(self, offset: int, size: int | None) -> bytes:
-        # A handle that writes reads the stored bytes, since its writes
-        # land on them; a read-only one sees the rendering.
-        return syscall(self._adapter.read)(
-            self._path, offset=offset, size=size, raw=self._writable
-        )
-
-    def _check_closed(self) -> None:
-        if self._closed:
-            raise ValueError("I/O operation on closed file")
-
-    def _read_buffer(self) -> io.BufferedIOBase | io.TextIOWrapper:
-        self._check_closed()
-        if not self.readable():
-            raise io.UnsupportedOperation("not readable")
-        return self._buf
-
-    def _write_buffer(self) -> io.BufferedIOBase | io.TextIOWrapper:
-        self._check_closed()
-        if not self.writable():
-            raise io.UnsupportedOperation("not writable")
-        return self._buf
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-    @property
-    def name(self) -> str:
-        return self._path
-
-    @property
-    def mode(self) -> str:
-        return self._mode
-
-    def readable(self) -> bool:
-        return self._readable
-
-    def writable(self) -> bool:
-        return self._writable
-
-    def read(self, size: int = -1) -> bytes | str:
-        return self._read_buffer().read(size)
-
-    def readline(self) -> bytes | str:
-        return self._read_buffer().readline()
-
-    def readlines(self) -> list[bytes] | list[str]:
-        return self._read_buffer().readlines()
-
-    def write(self, data: bytes | str) -> int:
-        buffer = self._write_buffer()
-        if isinstance(buffer, io.TextIOWrapper):
-            if not isinstance(data, str):
-                raise TypeError(
-                    f"write() argument must be str, not {type(data).__name__}"
-                )
-            return buffer.write(data)
-        if isinstance(data, str):
-            raise TypeError("a bytes-like object is required, not 'str'")
-        return buffer.write(data)
-
-    def writelines(self, lines: Iterable[bytes] | Iterable[str]) -> None:
-        for line in lines:
-            self.write(line)
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        self._check_closed()
-        return self._buf.seek(offset, whence)
-
-    def truncate(self, size: int | None = None) -> int:
-        return self._write_buffer().truncate(size)
-
-    def fileno(self) -> int:
-        # No descriptor backs a mounted file, so this answers as an
-        # in-memory stream does.
-        raise io.UnsupportedOperation("fileno")
-
-    def tell(self) -> int:
-        self._check_closed()
-        return self._buf.tell()
-
     def flush(self) -> None:
-        self._check_closed()
-        self._buf.flush()
+        super().flush()
         steps = self._handle.flush_plan()
         if not steps:
             return
-        syscall(self._adapter.flush)(self._path, steps)
-        self._handle.settle(self._read_range)
+        syscall(self._adapter.flush)(self.name, steps)
+        self._handle.settle(
+            functools.partial(read_range, self._adapter, self.name, True)
+        )
 
     def close(self) -> None:
-        if self._closed:
+        if self.closed:
             return
         try:
-            self.flush()
+            super().close()
         finally:
-            self._closed = True
-            self._buf.close()
+            if self._release is not None:
+                self._release()
 
-    def __del__(self) -> None:
-        try:
-            self.close()
-        except Exception:
-            logger.debug(
-                "failed to close mounted file %s", self._path, exc_info=True
-            )
 
-    def __enter__(self) -> Self:
-        return self
+class _LandingWriter(io.BufferedWriter):
+    """A buffered writer whose flush reaches the mount, as a flush of a
+    real file reaches the kernel; CPython's never calls ``raw.flush``."""
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        self.close()
+    def flush(self) -> None:
+        super().flush()
+        self.raw.flush()
 
-    def __iter__(self) -> Iterator[bytes] | Iterator[str]:
-        buffer = self._read_buffer()
-        if isinstance(buffer, io.TextIOWrapper):
-            return iter(buffer)
-        return iter(buffer)
 
-    def __next__(self) -> bytes | str:
-        buffer = self._read_buffer()
-        if isinstance(buffer, io.TextIOWrapper):
-            return next(buffer)
-        return next(buffer)
+class _LandingRandom(io.BufferedRandom):
+    """``_LandingWriter`` for a mode that reads and writes."""
+
+    def flush(self) -> None:
+        super().flush()
+        self.raw.flush()
+
+
+def text_encoding(
+    facts: OpenMode,
+    encoding: str | None,
+    errors: str | None,
+    newline: str | None,
+) -> str:
+    """Check a mode's text arguments as ``io.open`` does, and the
+    encoding a text stream uses.
+
+    Args:
+        facts (OpenMode): what the mode string said.
+        encoding (str | None): the encoding asked for.
+        errors (str | None): the error policy asked for.
+        newline (str | None): the newline translation asked for.
+    """
+    if facts.binary:
+        if encoding is not None:
+            raise ValueError("binary mode doesn't take an encoding argument")
+        if errors is not None:
+            raise ValueError("binary mode doesn't take an errors argument")
+        if newline is not None:
+            raise ValueError("binary mode doesn't take a newline argument")
+    elif newline not in (None, "", "\n", "\r", "\r\n"):
+        raise ValueError(f"illegal newline value: {newline!r}")
+    # The sentinel resolves to mirage's own default rather than to
+    # `locale.getencoding()`, so `open(p).read()` and
+    # `Path(p).read_text()` agree about one file's bytes; a mount
+    # stores utf-8 whatever the host's locale happens to be.
+    if encoding is None or encoding == LOCALE_ENCODING:
+        encoding = "utf-8"
+    codecs.lookup(encoding)
+    return encoding
+
+
+def layered(
+    raw: HandleRaw,
+    facts: OpenMode,
+    mode: str,
+    encoding: str | None = None,
+    errors: str | None = None,
+    newline: str | None = None,
+) -> IO[bytes] | IO[str]:
+    """The buffered stream CPython picks for the mode over ``raw``, and a
+    text stream over it for a text mode, as ``io.open`` builds them.
+
+    Args:
+        raw (HandleRaw): the raw stream.
+        facts (OpenMode): what the mode string said.
+        mode (str): the mode string, which a text stream reports.
+        encoding (str | None): the text encoding.
+        errors (str | None): the text error policy.
+        newline (str | None): the newline translation.
+    """
+    buffered: io.BufferedIOBase
+    if facts.readable and facts.writable:
+        buffered = _LandingRandom(raw)
+    elif facts.writable:
+        buffered = _LandingWriter(raw)
+    else:
+        buffered = io.BufferedReader(raw)
+    if facts.binary:
+        return buffered
+    text = io.TextIOWrapper(
+        buffered,
+        encoding=encoding,
+        errors=errors if errors is not None else "strict",
+        newline=newline,
+    )
+    cast(Any, text).mode = mode
+    return text
+
+
+def open_file(
+    files: Files,
+    path: str,
+    mode: str = "r",
+    loop: asyncio.AbstractEventLoop | None = None,
+    encoding: str | None = None,
+    errors: str | None = None,
+    newline: str | None = None,
+) -> IO[bytes] | IO[str]:
+    """Open a mounted file as ``open`` does a real one.
+
+    The result is CPython's own buffered or text stream over a raw one
+    on the mount, so everything a file object offers (``seekable``,
+    ``readline(size)``, ``readinto``, zipfile, a ``TextIOWrapper`` over a
+    binary open) behaves as on disk. Writes land on a flush or a close.
+
+    Args:
+        files (Files): the workspace's ``ws.vfs``.
+        path (str): the mounted path.
+        mode (str): the open mode.
+        loop (asyncio.AbstractEventLoop | None): the block's loop.
+        encoding (str | None): the text encoding; the ``locale``
+            sentinel and None take utf-8.
+        errors (str | None): the text error policy.
+        newline (str | None): the newline translation.
+    """
+    adapter = host_files(files, loop)
+    facts = parse_mode(mode)
+    encoding = text_encoding(facts, encoding, errors, newline)
+    # The open's effect lands now, by the rule every entry point shares; a
+    # refusal leaves nothing open, so nothing flushes behind it.
+    row = apply_open(adapter, path, facts)
+    # Nothing is read at open: the handle fetches what a read lands
+    # in, and keeps what was written until a flush.
+    handle = FileHandle.opened(
+        path,
+        None
+        if row is None
+        else functools.partial(read_range, adapter, path, facts.writable),
+        size=0 if row is None else row.size,
+        writable=facts.writable,
+        append=facts.append,
+    )
+    raw = HandleRaw(adapter, handle, facts.readable, raw_mode(facts))
+    if facts.binary:
+        return layered(raw, facts, mode)
+    return layered(raw, facts, mode, encoding, errors, newline)
