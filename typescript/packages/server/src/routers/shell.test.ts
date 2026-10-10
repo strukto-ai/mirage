@@ -133,7 +133,7 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.headers['x-mirage-job-id']).toMatch(/^job_/)
+    expect(res.headers['x-mirage-job-id']).toMatch(/^exec_/)
     const body = res.json<{ kind: string; stdout: string; exit_code: number }>()
     expect(body.kind).toBe('io')
     expect(body.stdout.trim()).toBe('hi')
@@ -250,7 +250,7 @@ describe('execute router', () => {
     })
     expect(res.statusCode).toBe(202)
     const body = res.json<{ job_id: string }>()
-    expect(body.job_id).toMatch(/^job_/)
+    expect(body.job_id).toMatch(/^exec_/)
     expect(res.headers['x-mirage-job-id']).toBe(body.job_id)
     await app.close()
   })
@@ -280,12 +280,12 @@ describe('execute router', () => {
         payload: { command: 'sleep 60' },
       })
       .then((reply) => reply)
-    const job = await vi.waitFor(async () => {
-      const [entry] = await app.jobs.list('ecancel')
+    const job = await vi.waitFor(() => {
+      const [entry] = app.jobs.list('ecancel')
       if (entry === undefined) throw new Error('execute did not register a job')
       return entry
     })
-    await app.jobs.cancel(job.id)
+    app.jobs.cancel(job.id)
     const res = await pending
     expect(res.statusCode).toBe(499)
     expect(res.json()).toEqual({ detail: 'job canceled' })

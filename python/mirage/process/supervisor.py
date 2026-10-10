@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable
 from threading import RLock
 
-from mirage.execution.context import current_execution, new_execution_id
+from mirage.execution.context import new_execution_id
 from mirage.process.config import ProcessPermissions, ProcessScope
 from mirage.process.handle import ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessRunner
@@ -82,22 +82,6 @@ class ProcessSupervisor:
                     "parent process is no longer accepting children"
                 )
             group_id = parent[1].info.group_id if parent is not None else pid
-            ambient = current_execution()
-            identity = execution_id or new_execution_id()
-            parent_identity = (
-                parent[1].info.execution_id
-                if parent is not None
-                else ambient.id
-                if ambient is not None
-                else None
-            )
-            root_identity = (
-                parent[1].info.root_execution_id
-                if parent is not None
-                else ambient.root_id
-                if ambient is not None
-                else identity
-            )
             handle = ProcessHandle(
                 ProcessInfo(
                     pid,
@@ -105,9 +89,7 @@ class ProcessSupervisor:
                     command,
                     cwd,
                     time.time(),
-                    execution_id=identity,
-                    parent_execution_id=parent_identity,
-                    root_execution_id=root_identity,
+                    execution_id=execution_id or new_execution_id(),
                     parent_pid=parent_pid,
                     group_id=group_id,
                 ),
@@ -172,11 +154,6 @@ class ProcessSupervisor:
                     if (info := visible(handle)) is not None
                 )
 
-        def get_visible(pid: int) -> ProcessInfo | None:
-            with self._lock:
-                entry = self._live.get(pid)
-                return visible(entry[1]) if entry is not None else None
-
         def check_spawn() -> None:
             if not valid():
                 raise PermissionError("process spawn is not permitted")
@@ -198,22 +175,11 @@ class ProcessSupervisor:
                 handle = signal_target(pid)
                 return handle is not None and handle.terminate()
 
-        async def wait(pid: int) -> ProcessInfo | None:
-            with self._lock:
-                entry = self._live.get(pid)
-                if entry is None or visible(entry[1]) is None:
-                    return None
-                handle = entry[1]
-            await handle.join()
-            return visible(handle)
-
         return ProcessView(
             list=list_visible,
-            get=get_visible,
             check_spawn=check_spawn,
             probe=probe,
             terminate=terminate,
-            wait=wait,
         )
 
     def revoke_session(self, session_id: str) -> None:

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -47,9 +47,8 @@ CommandOutput = tuple["ByteSource | None", "IOResult"]
 
 @dataclass(slots=True)
 class OutputState:
-    """Routing and settlement shared by a live handler's result and drain."""
+    """Settlement of a result whose fields fill in as its output drains."""
 
-    stderr: Callable[[bytes], Awaitable[None]] | None = None
     settled: bool = False
     callbacks: list[Callable[[], None]] = field(default_factory=list)
 
@@ -313,6 +312,3 @@ class IOResult:
         result.output_finalized = other.output_finalized
         result._stream_source = other
         return result
-
-
-HandlerResult = CommandOutput | IOResult | None

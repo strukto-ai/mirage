@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
+import anyio
 import jsonschema
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -37,6 +39,11 @@ class ToolResponse(BaseModel):
     is_error: bool
 
 
+async def _caller_gone(request: Request) -> None:
+    while (await request.receive())["type"] != "http.disconnect":
+        pass
+
+
 async def call_tool(
     request: Request,
     workspace_id: str,
@@ -49,7 +56,8 @@ async def call_tool(
     checked against the same schema MCP checks it against, so an input
     MCP takes is one this takes. The call goes to the table the MCP
     endpoint serves the session with, so a read over HTTP stamps the
-    file for an edit over MCP and back.
+    file for an edit over MCP and back. A caller that disconnects
+    cancels the call, as an MCP client's cancel does.
 
     Args:
         request (Request): the HTTP request, carrying the body and the
@@ -77,8 +85,21 @@ async def call_tool(
         raise HTTPException(status_code=404, detail=exc.args[0]) from exc
     if name not in await tools.offered():
         raise HTTPException(status_code=404, detail=f"Tool {name} not found")
+    call = asyncio.ensure_future(tools.call(name, arguments))
+    gone = asyncio.ensure_future(_caller_gone(request))
     try:
-        result = await tools.call(name, arguments)
+        await asyncio.wait({call, gone}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        gone.cancel()
+        canceled = not call.done()
+        if canceled:
+            call.cancel()
+            with anyio.CancelScope(shield=True):
+                await asyncio.wait({call})
+    if canceled:
+        return ToolResponse(text="tool canceled", is_error=True)
+    try:
+        result = call.result()
     except Exception as exc:
         logger.debug("tool %s failed", name, exc_info=True)
         return ToolResponse(text=str(exc), is_error=True)

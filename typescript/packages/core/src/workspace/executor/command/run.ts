@@ -320,7 +320,6 @@ export async function runOnMount(
     return await runClaiming(rstripSlash(mount.prefix), () =>
       mount.runCommand(cmdName, paths, texts, flags, {
         stdin: opts.stdin ?? null,
-        bufferBytes: registry.io.bufferBytes,
         cwd: session.cwd,
         dispatch,
         sessionId: session.sessionId,

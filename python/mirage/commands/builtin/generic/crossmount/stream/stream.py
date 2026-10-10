@@ -28,8 +28,13 @@ from mirage.commands.spec.usage import read_fail_exit_code_from_line
 from mirage.concurrency.limiter import settle
 from mirage.errors.render import revoice_fs_error_line
 from mirage.io import IOResult
-from mirage.io.stdio import OutputStream
-from mirage.io.stream import async_chain, close_quietly, drain, materialize
+from mirage.io.stream import (
+    OutputStream,
+    async_chain,
+    close_quietly,
+    drain,
+    materialize,
+)
 from mirage.io.types import ByteSource, OutputState
 from mirage.types import PathSpec
 

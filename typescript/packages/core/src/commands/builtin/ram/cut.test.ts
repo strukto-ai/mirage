@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
@@ -30,14 +29,12 @@ async function runCut(
   const vfs = new RAMVFS()
   const cmd = RAM_CUT[0]
   if (cmd === undefined) throw new Error('cut not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-      stdin,
-      flags,
-      io: commandIo(vfs),
-      cwd: '/',
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+    stdin,
+    flags,
+    io: commandIo(vfs),
+    cwd: '/',
+  })
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''
@@ -74,14 +71,12 @@ describe('cut', () => {
     const vfs = new RAMVFS()
     const cmd = RAM_CUT[0]
     if (cmd === undefined) throw new Error('cut not registered')
-    const result = await invoke(() =>
-      cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-        stdin: null,
-        flags: { fields: '1' },
-        io: commandIo(vfs),
-        cwd: '/',
-      }),
-    )
+    const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+      stdin: null,
+      flags: { fields: '1' },
+      io: commandIo(vfs),
+      cwd: '/',
+    })
     if (result === null) throw new Error('result null')
     const [out, ioResult] = result
     expect(ioResult.exitCode).toBe(0)

@@ -15,7 +15,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, JsonValue
 
-from mirage.server.jobs import JobEntry
+from mirage.execution.types import ExecutionRecord
 
 router = APIRouter(prefix="/v1/jobs")
 
@@ -26,7 +26,6 @@ class JobBrief(BaseModel):
     session_id: str
     command: str
     status: str
-    revision: int
     cancel_requested: bool
     submitted_at: float
     started_at: float | None = None
@@ -47,14 +46,13 @@ class CancelResponse(BaseModel):
     canceled: bool
 
 
-def _to_brief(entry: JobEntry) -> JobBrief:
+def _to_brief(entry: ExecutionRecord) -> JobBrief:
     return JobBrief(
         job_id=entry.id,
         workspace_id=entry.workspace_id,
         session_id=entry.session_id,
         command=entry.command,
         status=entry.status.value,
-        revision=entry.revision,
         cancel_requested=entry.cancel_requested,
         submitted_at=entry.submitted_at,
         started_at=entry.started_at,
@@ -62,7 +60,7 @@ def _to_brief(entry: JobEntry) -> JobBrief:
     )
 
 
-def _to_detail(entry: JobEntry) -> JobDetail:
+def _to_detail(entry: ExecutionRecord) -> JobDetail:
     return JobDetail(
         **_to_brief(entry).model_dump(),
         result=entry.result,
@@ -70,7 +68,7 @@ def _to_detail(entry: JobEntry) -> JobDetail:
     )
 
 
-async def _require_job(request: Request, job_id: str) -> JobEntry:
+async def _require_job(request: Request, job_id: str) -> ExecutionRecord:
     """The job, when its workspace is the caller's to reach.
 
     A job of another account's workspace, or of an earlier workspace
@@ -82,7 +80,7 @@ async def _require_job(request: Request, job_id: str) -> JobEntry:
     """
     table = request.app.state.jobs
     try:
-        entry = await table.get(job_id)
+        entry = table.get(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
     registry = request.app.state.registry
@@ -101,7 +99,7 @@ async def list_jobs(
     account = request.state.account
     return [
         _to_brief(j)
-        for j in await request.app.state.jobs.list(workspace_id=workspace_id)
+        for j in request.app.state.jobs.list(workspace_id=workspace_id)
         if await registry.allows(j.workspace_id, account, j.submitted_at)
     ]
 
@@ -127,9 +125,5 @@ async def wait_job(
 @router.delete("/{job_id}", response_model=CancelResponse)
 async def cancel_job(job_id: str, request: Request) -> CancelResponse:
     await _require_job(request, job_id)
-    table = request.app.state.jobs
-    try:
-        canceled = await table.cancel(job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
+    canceled = request.app.state.jobs.cancel(job_id)
     return CancelResponse(job_id=job_id, canceled=canceled)

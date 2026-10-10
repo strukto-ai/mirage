@@ -18,7 +18,6 @@ import type { TrelloTransport } from '../../../core/trello/client.ts'
 import type { CommandOpts, Command } from '../../config.ts'
 import { makeTrelloReadCommands } from './reads.ts'
 
-import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 
 const DEC = new TextDecoder()
@@ -55,7 +54,7 @@ function read(name: string): Command {
 }
 
 async function run(name: string, accessor: TrelloAccessor, texts: string[]): Promise<string> {
-  const result = await invoke(() => read(name).fn(accessor, [], texts, OPTS))
+  const result = await read(name).fn(accessor, [], texts, OPTS)
   if (result === null) throw new Error(`${name} returned nothing`)
   return DEC.decode(await materialize(result[0]))
 }

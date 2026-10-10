@@ -106,12 +106,11 @@ the OneDrive and S3 backends do:
 
 - **Fingerprint** is the driveItem `cTag`, so normal reads and `stat` reflect
   the current content without extra Graph calls.
-- **Snapshots** pin each path to a Graph driveItem version id. Replaying a
-  snapshot reads `/versions/{id}/content`, giving time-travel to the exact bytes
-  captured at snapshot time.
-- **Restore** writes a previous version back as the current one.
-
-This makes the SharePoint VFS `supports_snapshot = True`.
+- **Snapshots** pin each file the agent read to its driveItem version id.
+  Replaying a snapshot reads `/versions/{id}/content`, giving the exact bytes
+  captured at snapshot time. A file the agent wrote carries no version and is
+  not checked on replay. See the
+  [snapshot support matrix](/home/snapshot#vfs-support-matrix).
 
 ## Cache
 

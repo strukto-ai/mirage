@@ -18,14 +18,15 @@ import {
   type McpHttpHandler,
 } from '@modelcontextprotocol/server'
 import { ioToStr } from '@struktoai/mirage-core/workspace/tools/io_text'
-import { type ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { InFlight, rpcMessages } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
-import { JobStatus, type JobTable } from '../jobs.ts'
+import type { ExecutionTable } from '../jobs.ts'
+import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { McpToolOperations, collectExecution, type OutputProgress } from './progress.ts'
 import { createMirageMcpServer } from './server.ts'
@@ -35,7 +36,7 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
 /**
  * The tool table as the daemon serves it: through its own API.
  *
- * `shell` is a job, submitted to the daemon's job table the way
+ * `shell` is a job, submitted to the daemon's execution table the way
  * `POST /shell` submits one, so an MCP command is listed by `/v1/jobs`,
  * can be cancelled there, and is recorded like any other. The caller's
  * `signal` (an MCP client's cancel) cancels the job too. The other tools
@@ -45,7 +46,7 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
 export class DaemonToolOperations extends McpToolOperations {
   constructor(
     private readonly entry: WorkspaceEntry,
-    private readonly jobs: JobTable,
+    private readonly jobs: ExecutionTable,
     private readonly sessionId: string,
   ) {
     super(entry.runner.ws, sessionId)
@@ -67,7 +68,7 @@ export class DaemonToolOperations extends McpToolOperations {
   ): Promise<ToolResult> {
     const ws = this.entry.runner.ws
     let answer: ToolResult | undefined
-    let job = await this.jobs.submit(
+    const submitted = this.jobs.submit(
       this.entry.id,
       command,
       async (signal, executionScope) => {
@@ -85,20 +86,11 @@ export class DaemonToolOperations extends McpToolOperations {
       },
       this.sessionId,
     )
-    const jobId = job.id
-    const cancel = (): void => void this.jobs.cancel(jobId)
-    signal?.addEventListener('abort', cancel, { once: true })
-    if (signal?.aborted === true) cancel()
-    try {
-      job = await this.jobs.wait(jobId)
-    } finally {
-      signal?.removeEventListener('abort', cancel)
-      if (signal?.aborted === true) await this.jobs.drain(jobId)
-    }
-    if (job.status === JobStatus.CANCELED) {
+    const job = await this.jobs.join(submitted.id, signal)
+    if (job.status === ExecutionStatus.CANCELED) {
       return { content: [{ type: 'text', text: 'job canceled' }], isError: true }
     }
-    if (job.status === JobStatus.FAILED || answer === undefined) {
+    if (job.status === ExecutionStatus.FAILED || answer === undefined) {
       return { content: [{ type: 'text', text: job.error ?? 'shell failed' }], isError: true }
     }
     return answer
@@ -132,7 +124,7 @@ export class McpEndpoint {
 
   constructor(
     private readonly registry: WorkspaceRegistry,
-    private readonly jobs: JobTable,
+    private readonly jobs: ExecutionTable,
   ) {}
 
   private async fetch(
@@ -334,7 +326,7 @@ export class McpEndpoint {
 export function registerMcpRoutes(
   app: FastifyInstance,
   registry: WorkspaceRegistry,
-  jobs: JobTable,
+  jobs: ExecutionTable,
 ): McpEndpoint {
   const endpoint = new McpEndpoint(registry, jobs)
   app.route({

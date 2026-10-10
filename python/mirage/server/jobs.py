@@ -11,19 +11,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import asyncio
 import logging
-import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
+import anyio
+
 from mirage.concurrency.limiter import settle
-from mirage.execution.base import ExecutionStore
-from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import ExecutionRecord as JobEntry
-from mirage.execution.types import ExecutionStatus as JobStatus
+from mirage.execution.context import new_execution_id
+from mirage.execution.types import ExecutionRecord, ExecutionStatus
+from mirage.server.constants import (
+    FINISHED_JOB_RETENTION_SECONDS,
+    MAX_FINISHED_JOBS,
+)
 from mirage.types import JsonValue
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.execution import ExecutionScope
@@ -31,230 +33,202 @@ from mirage.workspace.execution import ExecutionScope
 logger = logging.getLogger(__name__)
 
 
-def new_job_id() -> str:
-    return f"job_{secrets.token_hex(8)}"
-
-
 class _Run:
-    def __init__(self) -> None:
-        self.aborted = False
+    def __init__(self, record: ExecutionRecord) -> None:
+        self.record = record
         self.work: asyncio.Task[JsonValue] | None = None
         self.completion: asyncio.Task[None] | None = None
-        self.publication_error: Exception | None = None
         self.settled = asyncio.Event()
 
-    def abort(self) -> None:
-        if self.aborted:
-            return
-        self.aborted = True
-        if self.work is not None:
-            self.work.cancel()
 
+class ExecutionTable:
+    """The server's executions: each one's record and the work running it.
 
-class JobTable:
-    """Local execution owner over an asynchronous record store.
-
-    Submit persists admission before any work starts. A shell marks running
-    only after acquiring its session. Cancellation is an intent; completion
-    is published after the work and its cleanup settle.
+    A shell marks running only after acquiring its session. Cancel stops
+    the work at once; the record finishes after the work and its cleanup
+    settle. Finished records are kept for an hour, the newest 1024 of them.
     """
 
-    def __init__(self, store: ExecutionStore | None = None) -> None:
-        self.store = store if store is not None else RAMExecutionStore()
-        self._owns_store = store is None
-        self._live: dict[str, _Run] = {}
+    def __init__(self) -> None:
+        self._runs: dict[str, _Run] = {}
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
 
-    async def get(self, job_id: str) -> JobEntry:
-        entry = await self.store.get(job_id)
-        if entry is None:
-            raise KeyError(job_id)
-        return entry
+    def get(self, job_id: str) -> ExecutionRecord:
+        self._prune()
+        return self._runs[job_id].record
 
-    async def list(self, workspace_id: str | None = None) -> list[JobEntry]:
-        return await self.store.list(workspace_id)
+    def list(self, workspace_id: str | None = None) -> list[ExecutionRecord]:
+        self._prune()
+        return [
+            run.record
+            for run in self._runs.values()
+            if workspace_id is None or run.record.workspace_id == workspace_id
+        ]
 
-    async def _change(
-        self, job_id: str, update: Callable[[JobEntry], JobEntry | None]
-    ) -> tuple[JobEntry, bool]:
-        for _ in range(32):
-            current = await self.get(job_id)
-            replacement = update(current)
-            if replacement is None or current.finished_at is not None:
-                return current, False
-            replacement = replace(replacement, revision=current.revision + 1)
-            if await self.store.compare_and_set(replacement, current.revision):
-                return replacement, True
-        raise RuntimeError("execution record changed too often")
+    def _prune(self) -> None:
+        finished = sorted(
+            (
+                r
+                for r in self._runs.values()
+                if r.record.finished_at is not None
+            ),
+            key=lambda r: r.record.finished_at or 0,
+        )
+        cutoff = time.time() - FINISHED_JOB_RETENTION_SECONDS
+        excess = len(finished) - MAX_FINISHED_JOBS
+        for index, run in enumerate(finished):
+            if index >= excess and (run.record.finished_at or 0) > cutoff:
+                break
+            del self._runs[run.record.id]
 
     async def _started(self, job_id: str) -> None:
-        record, _ = await self._change(
-            job_id,
-            lambda r: (
-                None
-                if r.cancel_requested
-                else replace(
-                    r, status=JobStatus.RUNNING, started_at=time.time()
-                )
-            ),
-        )
-        if record.cancel_requested or record.finished_at is not None:
+        run = self._runs[job_id]
+        if run.record.cancel_requested:
             raise asyncio.CancelledError()
+        run.record = replace(
+            run.record, status=ExecutionStatus.RUNNING, started_at=time.time()
+        )
 
-    async def submit(
+    def submit(
         self,
         workspace_id: str,
         command: str,
         factory: Callable[[ExecutionScope], Awaitable[JsonValue]],
         *,
         session_id: str,
-    ) -> JobEntry:
+    ) -> ExecutionRecord:
         if self._closed:
-            raise RuntimeError("job table is closed")
-        record = JobEntry(
-            new_job_id(), workspace_id, session_id, command, time.time()
-        )
-        if not await self.store.create(record):
-            raise RuntimeError("duplicate execution id")
-        if self._closed:
-            await self._change(
-                record.id,
-                lambda r: replace(
-                    r,
-                    status=JobStatus.CANCELED,
-                    cancel_requested=True,
-                    finished_at=time.time(),
-                ),
+            raise RuntimeError("execution table is closed")
+        self._prune()
+        run = _Run(
+            ExecutionRecord(
+                new_execution_id(),
+                workspace_id,
+                session_id,
+                command,
+                time.time(),
             )
-            raise RuntimeError("job table is closed")
-        control = _Run()
-        self._live[record.id] = control
-        control.completion = asyncio.create_task(
-            self._run(record.id, control, factory)
         )
-        return record
+        self._runs[run.record.id] = run
+        run.completion = asyncio.create_task(self._run(run, factory))
+        return run.record
 
     async def _run(
         self,
-        job_id: str,
-        control: _Run,
+        run: _Run,
         factory: Callable[[ExecutionScope], Awaitable[JsonValue]],
     ) -> None:
         owner = asyncio.get_running_loop()
+        job_id = run.record.id
 
         async def started() -> None:
             await asyncio.wrap_future(
                 asyncio.run_coroutine_threadsafe(self._started(job_id), owner)
             )
 
-        status, result, error = JobStatus.DONE, None, None
+        status, result, error = ExecutionStatus.DONE, None, None
         try:
-            if control.aborted:
+            if run.record.cancel_requested:
                 raise asyncio.CancelledError()
-            control.work = asyncio.ensure_future(
+            run.work = asyncio.ensure_future(
                 factory(ExecutionScope(started, execution_id=job_id))
             )
-            result = await control.work
+            result = await run.work
         except (asyncio.CancelledError, MirageAbortError):
             # The job's own cancel arrives as CancelledError; the
             # workspace's (a session or workspace cancel) as the abort
             # the line raised.
-            status = JobStatus.CANCELED
+            status = ExecutionStatus.CANCELED
         except Exception as exc:
-            status, error = JobStatus.FAILED, f"{type(exc).__name__}: {exc}"
-        try:
-            await self._change(
-                job_id,
-                lambda r: replace(
-                    r,
-                    status=JobStatus.CANCELED
-                    if r.cancel_requested or control.aborted
-                    else status,
-                    result=result
-                    if status == JobStatus.DONE
-                    and not r.cancel_requested
-                    and not control.aborted
-                    else None,
-                    error=error,
-                    cancel_requested=r.cancel_requested or control.aborted,
-                    finished_at=time.time(),
-                ),
+            status, error = (
+                ExecutionStatus.FAILED,
+                f"{type(exc).__name__}: {exc}",
             )
-        except Exception as exc:
-            control.publication_error = exc
-            logger.exception("could not publish completion of %s", job_id)
-        else:
-            self._live.pop(job_id, None)
-        finally:
-            control.settled.set()
+        if run.record.cancel_requested:
+            status, result = ExecutionStatus.CANCELED, None
+        run.record = replace(
+            run.record,
+            status=status,
+            result=result if status == ExecutionStatus.DONE else None,
+            error=error,
+            finished_at=time.time(),
+        )
+        run.settled.set()
+        self._prune()
 
     async def wait(
         self, job_id: str, timeout: float | None = None
-    ) -> JobEntry:
-        deadline = (
-            None if timeout is None else time.monotonic() + max(0, timeout)
-        )
-        entry = await self.get(job_id)
-        control = self._live.get(job_id)
-        while entry.finished_at is None:
-            if control is not None and control.publication_error is not None:
-                raise RuntimeError(
-                    "execution completion could not be published"
-                ) from control.publication_error
-            remaining = (
-                None if deadline is None else deadline - time.monotonic()
-            )
-            if remaining is not None and remaining <= 0:
-                break
-            changed = await self.store.wait_for_change(
-                job_id,
-                entry.revision,
-                remaining,
-                None if control is None else control.settled,
-            )
-            if changed is None:
-                raise KeyError(job_id)
-            entry = changed
-        return entry
+    ) -> ExecutionRecord:
+        """The execution once it finishes, or as it stands at the timeout.
 
-    async def cancel(self, job_id: str) -> bool:
-        """Stop locally owned work, then record the intent.
+        Args:
+            job_id (str): the execution.
+            timeout (float | None): seconds to wait; None waits for good.
+        """
+        run = self._runs[job_id]
+        try:
+            await asyncio.wait_for(
+                run.settled.wait(),
+                None if timeout is None else max(0, timeout),
+            )
+        except TimeoutError:
+            logger.debug(
+                "execution %s still running after %ss", job_id, timeout
+            )
+        return run.record
 
-        The local stop comes first so a stalled record store cannot keep
-        the work running.
+    async def join(self, job_id: str) -> ExecutionRecord:
+        """Wait for an execution on behalf of the caller that started it.
+
+        A caller cancelled while it waits cancels the execution and waits
+        for its cleanup before giving up, so the work never outlives the
+        request that started it.
+
+        Args:
+            job_id (str): the execution.
+        """
+        try:
+            return await self.wait(job_id)
+        except asyncio.CancelledError:
+            with anyio.CancelScope(shield=True):
+                self.cancel(job_id)
+                await self.drain(job_id)
+            raise
+
+    def cancel(self, job_id: str) -> bool:
+        """Stop an execution and record that it was asked to stop.
 
         Args:
             job_id (str): execution to cancel.
 
         Returns:
-            bool: whether this call cancelled the execution.
+            bool: whether this call cancelled the execution; False for one
+            already finished, or finished and evicted.
         """
-        control = self._live.get(job_id)
-        stopped = control is not None and not control.aborted
-        if control is not None:
-            control.abort()
-        record, accepted = await self._change(
-            job_id,
-            lambda r: (
-                None
-                if r.cancel_requested
-                else replace(
-                    r, cancel_requested=True, status=JobStatus.STOPPING
-                )
-            ),
+        run = self._runs.get(job_id)
+        if (
+            run is None
+            or run.record.finished_at is not None
+            or run.record.cancel_requested
+        ):
+            return False
+        run.record = replace(
+            run.record, cancel_requested=True, status=ExecutionStatus.STOPPING
         )
-        return accepted or (stopped and record.status == JobStatus.CANCELED)
+        if run.work is not None:
+            run.work.cancel()
+        return True
 
     async def drain(self, job_id: str) -> None:
-        """Join locally owned cleanup independently of record-store health.
+        """Wait for an execution's work and cleanup to settle.
 
         Args:
-            job_id (str): execution whose local owner must finish.
+            job_id (str): the execution.
         """
-        control = self._live.get(job_id)
-        if control is not None and control.completion is not None:
-            await settle(control.completion)
+        run = self._runs.get(job_id)
+        if run is not None and run.completion is not None:
+            await settle(run.completion)
 
     async def close(self) -> None:
         self._closed = True
@@ -263,21 +237,9 @@ class JobTable:
         await settle(self._closing)
 
     async def _finish_close(self) -> None:
-        controls = list(self._live.items())
-        errors: list[Exception] = []
-        for _, control in controls:
-            control.abort()
-        for job_id, control in controls:
-            try:
-                await self.cancel(job_id)
-            except Exception as exc:
-                errors.append(exc)
+        runs = list(self._runs.values())
+        for run in runs:
+            self.cancel(run.record.id)
         await asyncio.gather(
-            *(c.completion for _, c in controls if c.completion is not None)
+            *(run.completion for run in runs if run.completion is not None)
         )
-        if self._owns_store:
-            await self.store.close()
-        if errors:
-            raise ExceptionGroup(
-                "could not record shutdown cancellation", errors
-            )

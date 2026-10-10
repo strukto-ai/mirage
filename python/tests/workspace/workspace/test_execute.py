@@ -21,7 +21,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
-from mirage.execution.context import current_execution
+from mirage.execution.context import current_execution_id
 from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
@@ -39,7 +39,7 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
     seen = []
 
     def probe(inv):
-        seen.append(current_execution())
+        seen.append(current_execution_id())
         return b"tracked\n", IOResult()
 
     ws.register_cli(
@@ -54,10 +54,7 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
             execution_scope=ExecutionScope(execution_id="exec-request"),
         )
         assert await result.stdout_str() == "tracked\n"
-        identity = seen[0]
-        assert identity is not None
-        assert identity.id != "exec-request"
-        assert identity.parent_id == identity.root_id == "exec-request"
+        assert seen[0] is not None and seen[0] != "exec-request"
         events = await ws.observer.events()
         assert events[-1]["execution_id"] == "exec-request"
         ops = [event for event in events if event["type"] == "op"]

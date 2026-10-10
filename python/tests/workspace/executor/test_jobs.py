@@ -1125,9 +1125,8 @@ async def test_kill_zero_respects_signal_permissions_without_cancelling():
         assert (
             await ws.shell(f"kill -0 {pid}", session_id="owner")
         ).exit_code == 0
-        assert (
-            ws.processes.view("owner").get(pid).cancellation_requested is False
-        )
+        [info] = [i for i in ws.processes.view("owner").list() if i.pid == pid]
+        assert info.cancellation_requested is False
     finally:
         await ws.close()
 

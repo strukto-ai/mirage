@@ -26,10 +26,8 @@ from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import OWN_OPTION_LOOP
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.io.pipe import CAPACITY
-from mirage.io.stdio import Stdio
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, CommandOutput, HandlerResult, IOResult
+from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
@@ -88,7 +86,6 @@ class ExecContext:
 
     limit_override: Limit | None = None
     stdin: ByteSource | None = None
-    buffer_bytes: int = CAPACITY
     cwd: str = "/"
     dispatch: DispatchFn | None = None
     session_id: str | None = None
@@ -216,8 +213,6 @@ class CommandOpts:
     """
 
     stdin: ByteSource | None = None
-    buffer_bytes: int = CAPACITY
-    stdio: Stdio | None = None
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     cwd: PathSpec = ROOT_CWD
     mount_prefix: str = ""
@@ -257,7 +252,7 @@ class CommandFn(Protocol):
         paths: list[PathSpec],
         texts: list[str],
         opts: CommandOpts,
-    ) -> Awaitable[HandlerResult]: ...
+    ) -> Awaitable[CommandFnResult]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,7 +327,7 @@ def _answer_standard_options(
         paths: list[PathSpec],
         texts: list[str],
         opts: CommandOpts,
-    ) -> HandlerResult:
+    ) -> CommandFnResult:
         if not own_help and opts.flags.get("help") is True:
             return yield_bytes(help_text), IOResult()
         if not own_version and opts.flags.get("version") is True:

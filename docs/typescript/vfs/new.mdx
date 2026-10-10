@@ -108,7 +108,7 @@ availability check. `vfs.supports('write')` says whether a class defines a
 function. The escape hatches remain:
 
 - `overrides` drops a generic command you replace, and `commands` supplies the replacement (or any bespoke verb) from `command({...})`.
-- `sizesAlwaysKnown` declares that `stat` sizes every file without fetching it, which is also what makes the mount legal on FSKit. `supportsSnapshot` declares that `stat` fills `FileStat.fingerprint`; setting it without that is not drift detection.
+- `sizesAlwaysKnown` declares that `stat` sizes every file without fetching it, which is also what makes the mount legal on FSKit. `supportsSnapshot` declares the drift contract of section 6; setting it without that is not drift detection.
 
 The dispatcher reaches the same functions by name (`ws.dispatch('read', path)`)
 and wraps them the same way for every backend: a read takes a window, `append`
@@ -248,7 +248,7 @@ A relative path resolves against the config file's directory, not the server's w
 
 When mounting a driver built with `buildVfs` in code, preserve its loader name on the placement: `new Mount(await buildVfs('jira', config), { vfsRef: 'jira' })`. Config loading does this automatically. Snapshots also preserve the mount’s effective index settings. An index URL containing credentials is redacted; pass a `new Mount(vfs, { index })` override with fresh credentials when loading it.
 
-Snapshots and versions reach the registry too: `Workspace.load` rebuilds a saved mount through the registered name (or the `./jira.mjs:JiraVFS` reference config named), the same way Python's loader does. What comes back depends on what the VFS owns. Content the VFS holds itself (an in-memory store) is mirage-owned state: override `getState` and `loadState` to carry it, and a snapshot or a version restores the mount with that content and no override. Content that lives in a remote service is only observed: keep the default state, which says `needs_override`, set `supportsSnapshot` and fill `FileStat.fingerprint`, and a snapshot pins what it read while `Workspace.load` asks for the live VFS back through its overrides (`Workspace.load(state, {}, { '/jira/': new JiraVFS(cfg) })`). A forgotten override is a refusal to load, never a mount that comes back empty. `Workspace.copy` needs nothing, since it passes the live VFS through. `examples/typescript/other/custom_vfs.ts` shows both halves: a wiki page is written, the workspace is snapshotted, the page is changed, and the loaded workspace serves the page as it was, while a feed mount that keeps the default state is refused until the load hands it back through its overrides.
+Snapshots and versions reach the registry too: `Workspace.load` rebuilds a saved mount through the registered name (or the `./jira.mjs:JiraVFS` reference config named), the same way Python's loader does. What comes back depends on what the VFS owns. Content the VFS holds itself (an in-memory store) is mirage-owned state: override `getState` and `loadState` to carry it, and a snapshot or a version restores the mount with that content and no override. Content that lives in a remote service is only observed: keep the default state, which says `needs_override`, set `supportsSnapshot`, fill `FileStat.fingerprint` and record the same token on every read and write (see section 6), and a snapshot pins what it read while `Workspace.load` asks for the live VFS back through its overrides (`Workspace.load(state, {}, { '/jira/': new JiraVFS(cfg) })`). A forgotten override is a refusal to load, never a mount that comes back empty. `Workspace.copy` needs nothing, since it passes the live VFS through. `examples/typescript/other/custom_vfs.ts` shows both halves: a wiki page is written, the workspace is snapshotted, the page is changed, and the loaded workspace serves the page as it was, while a feed mount that keeps the default state is refused until the load hands it back through its overrides.
 
 See `examples/typescript/other/custom_vfs.ts` for a complete runnable backend in one file, and `examples/python/other/custom_vfs.py` for its Python twin. Both are asserted against the same truth file, so the two SDKs cannot drift.
 
@@ -431,10 +431,10 @@ A file extension the VFS lists in `renderers` is never served from or kept in th
 Leave `supportsSnapshot` unset unless the complete drift contract is implemented:
 
 1. `stat()` returns a stable `FileStat.fingerprint`.
-1. Every read record includes the fingerprint that produced those bytes.
+1. Every read record includes the fingerprint that produced those bytes, and every write record the token the write reply names (a write with none drops the file's version).
 1. If the backend supports immutable revisions, reads consult the resolved revision and record it.
 
-Setting the flag without recording fingerprints does not provide drift detection.
+Setting the flag without recording fingerprints does not provide drift detection. A backend with no immutable revisions skips step 3; drift detection still works on the fingerprint alone.
 
 ## 7. Verification
 

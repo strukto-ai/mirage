@@ -45,14 +45,7 @@ import {
   CODEX_TERMINATED,
 } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
-import {
-  keyProfile,
-  loginEntry,
-  loginEnv,
-  newSessionId,
-  openSession,
-  type ChannelRequest,
-} from './session.ts'
+import { openLogin, type ChannelRequest } from './session.ts'
 import { ChannelInput, ChannelOutput, Mark, deliver } from './stream.ts'
 
 type Message = Record<string, JsonValue>
@@ -885,36 +878,18 @@ class CodexChannel {
   }
 }
 
-function refuse(channel: ServerChannel, message: string): void {
-  channel.stderr.write(`mirage: ${message}\n`)
-  channel.exit(1)
-  channel.end()
-}
-
 /**
- * Serve one codex-exec channel in the workspace the login names, as a
- * fresh session under the login key's profile, else the workspace's
- * default, with the environment an `ssh` login gets.
+ * Serve one codex-exec channel in the workspace the login names, in a
+ * fresh session as `openLogin` opens it.
  */
 export async function serveCodex(
   registry: WorkspaceRegistry,
   channel: ServerChannel,
   request: ChannelRequest,
 ): Promise<void> {
-  const entry = loginEntry(registry, request.username, request.account)
-  if (entry === null) {
-    refuse(channel, `no such workspace: ${request.username}`)
-    return
-  }
-  const sessionId = newSessionId()
-  try {
-    await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.warn(`codex: cannot open a session on ${request.username}: ${message}`)
-    refuse(channel, `cannot open a session: ${message}`)
-    return
-  }
+  const opened = await openLogin(registry, channel, request, 'codex')
+  if (opened === null) return
+  const [entry, sessionId] = opened
   const status = await new CodexChannel(registry, entry, sessionId, channel).serve()
   channel.exit(status)
   channel.end()

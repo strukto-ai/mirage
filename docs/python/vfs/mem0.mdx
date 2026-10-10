@@ -26,7 +26,7 @@ vfs = Mem0VFS(config=config)
 ws = Workspace({"/memory/": vfs}, mode=MountMode.READ)
 ```
 
-The VFS is read-only and does not support snapshots. Set exactly one of
+The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so restored cache entries are served as saved and other reads reach the live backend. Set exactly one of
 `user_id`, `agent_id`, or `run_id` (see [Setup](/home/setup/mem0)).
 
 ## Filesystem Layout

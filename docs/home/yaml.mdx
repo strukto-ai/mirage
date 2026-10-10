@@ -75,10 +75,10 @@ through 9007199254740991. Unknown keys are rejected. Chunks remain at most
 A larger value, such as 256 KiB or 1 MiB, absorbs longer bursts at the cost
 of more memory per active queue. It does not guarantee faster execution.
 
-The immutable workspace setting applies to shell pipes, command output,
-process stdin/stdout/stderr, SDK events and HTTP upload/output queues.
+The immutable workspace setting applies to shell pipes, process
+stdin/stdout/stderr, SDK events and HTTP upload/output queues.
 HTTP output counts encoded NDJSON bytes, including base64 overhead; its
-raw payload records remain at most 8 KiB. SDK and handler queues count raw bytes.
+raw payload records remain at most 8 KiB. SDK queues count raw bytes.
 CLI and MCP calls use their workspace's setting, including MCP over SSE
 and stdio. Configure it when creating the workspace; shell calls and MCP
 tool arguments do not override it. Snapshots and copies preserve it.
@@ -183,7 +183,8 @@ An unset `read:` is a different thing and is fine: it takes the default.
 
 A snapshot records each mount's policy and bound, and a restore keeps them --
 but only for a mount the loader rebuilds from the saved state itself. A mount
-handed back through `mounts=` takes the default (`bounded`, 600s) instead.
+handed back through `mounts=` takes the default (`bounded`, 600s) instead,
+unless the override is a `Mount` that declares its own `read:`.
 
 That is deliberate: a mount saved with redacted credentials *has* to be handed
 back, and what comes back may be a different backend entirely. Replaying a saved
@@ -306,7 +307,7 @@ A kernel mount (`backend: fuse` or `fskit`) and an SFTP or `scp` session write t
 
 A snapshot records each mount's write policy and the workspace's default, and a restore or `copy()` keeps them, also for a mount handed back through `mounts=`. Unlike `read:`, a saved `conditional` is not dropped there: a stand-in that cannot refuse a stale write is refused at load, rather than restored writing blind, and an override `Mount` that names a different `write:` is refused rather than ignored, as is (in TypeScript, whose `fromState` takes options) a `write` option naming a different workspace default.
 
-A restore that pins a file to its saved revision (a versioned bucket) reads that revision, so a write sends the saved version; if the live file has changed since, every write to it is refused, even after a read, for as long as the workspace runs: nothing lifts a pin.
+Under `write: conditional`, a restore that pins a file to its saved revision (a versioned bucket) reads that revision, so a write sends the saved version and is refused if the live file has changed since.
 
 A snapshot keeps the versions of the cached copies it holds, but not a version kept without its bytes: after a restore such a file has no version, so its next write goes out plain until it is read again.
 

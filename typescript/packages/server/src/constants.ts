@@ -12,18 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ChildProcess } from './child.ts'
-import type { ProcessInfo, SpawnRequest } from './types.ts'
-
-/**
- * Profile-scoped operations. Seeing a process grants no streams; invisible
- * PIDs are not found. Stopping one the view sees but may not stop throws EPERM.
- */
-export interface ProcessView {
-  readonly list: () => readonly ProcessInfo[]
-  readonly checkSpawn: () => void
-  readonly probe: (pid: number) => boolean
-  readonly terminate: (pid: number) => boolean
-  readonly depth?: number
-  readonly spawn?: (request: SpawnRequest) => ChildProcess
-}
+export const MAX_FINISHED_JOBS = 1024
+export const FINISHED_JOB_RETENTION_SECONDS = 3600
