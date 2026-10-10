@@ -20,7 +20,6 @@ import {
   share,
   SharedInput,
 } from './async_line_iterator.ts'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { chunks } from './cooperative.ts'
 import { DeviceInput, materialize } from './types.ts'
 
@@ -157,23 +156,6 @@ describe('AsyncLineIterator under a stalled source', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     // A signal already fired is refused before the buffer is consulted.
     await expect(reader.readline(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
-  })
-
-  it('does not wait for a cache discard queued behind the stalled pull', async () => {
-    // An async generator queues `return()` behind its pending `next()`,
-    // so the cache wrapper's discard can only settle once the pull does.
-    async function* stalled(): AsyncGenerator<Uint8Array> {
-      await new Promise<never>(() => undefined)
-      yield new Uint8Array(0)
-    }
-    const input = new CachableAsyncIterator(stalled())
-    const reader = new AsyncLineIterator(input)
-    const controller = new AbortController()
-    setTimeout(() => {
-      controller.abort()
-    }, 20)
-    await expect(reader.readline(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
-    expect(input.discarded).toBe(true)
   })
 })
 

@@ -21,10 +21,8 @@ from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
 from mirage.commands.builtin.generic_bind.adapter import (
     mount_io,
-    scoped_io,
     with_command_guards,
     with_dir_guard,
-    with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.config import CommandIO, CommandOpts, command
@@ -93,7 +91,7 @@ def scan_io(
     scoped = ns.scoped if ns is not None else None
     if scoped is None or not scoped(prefix.rstrip("/") or "/"):
         return ops, False
-    return with_command_guards(with_policy_guard(with_stat_cache(ops))), True
+    return with_command_guards(with_stat_cache(ops)), True
 
 
 async def _slash_checked_write(
@@ -254,18 +252,15 @@ async def _run_with_namespace_globs(
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
     )
-    # Command path restrictions speak first, then the coded pre_vfs
-    # hooks, both outside the stat and slash wraps (`finish`). Content
-    # reads are the dispatcher's (`dispatched_io` on the mount's table),
-    # which judges them itself before a warm serve. A probe answer is
-    # served below the guards (`with_probe_answers` on the raw table),
-    # so they still judge every path before it. Under a hide or a path
-    # rule the native subtree ops are set aside (`scoped_io`), so every
-    # entry passes through the guarded walk.
-    bound = with_dir_guard(
-        with_command_guards(with_policy_guard(finish(stamped)))
-    )
-    bound = scoped_io(bound, opts.ns, paths or [opts.cwd], opts.mount_prefix)
+    # The command's path checks speak outside the stat and slash wraps
+    # (`finish`), for the slots that still reach the backend past the
+    # dispatcher (stat, exists, readdir). Reads, writes and one-call
+    # walks are the dispatcher's (`dispatched_io` on the mount's table),
+    # which judges each itself and declines a one-call walk whose subtree
+    # the caller's view restricts. A probe answer is served below the
+    # guards (`with_probe_answers` on the raw table), so they still judge
+    # every path before it.
+    bound = with_dir_guard(with_command_guards(finish(stamped)))
     return await fn(bound, accessor, paths, texts, opts)
 
 

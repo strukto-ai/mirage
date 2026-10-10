@@ -46,7 +46,7 @@ import {
   SIGSTOP,
   STOP_SIGNALS,
 } from './constants.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.rg import (
     filters_files,
@@ -36,6 +38,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.view.namespace_view import paths_scoped
 
 
 async def rg(
@@ -47,6 +50,10 @@ async def rg(
 ) -> tuple[ByteSource | None, IOResult]:
     if ops.search is not None:
         return await run_search(ops, "rg", accessor, paths, texts, opts)
+    # The service's index answers for every file under a scope, so a
+    # narrowing whose scope the caller's view restricts is not taken.
+    if paths_scoped(opts.ns, paths, opts.mount_prefix):
+        ops = replace(ops, content_search=None)
     if paths and ops.is_mounted(accessor) and ops.content_search is None:
         paths = await ops.resolve_glob(accessor, paths, opts.index)
     elif paths and ops.is_mounted(accessor):

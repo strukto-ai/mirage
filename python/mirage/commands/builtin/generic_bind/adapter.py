@@ -14,7 +14,7 @@
 
 import functools
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, NoReturn, Protocol, overload
@@ -62,9 +62,7 @@ from mirage.vfs.types import (
     OperationFn,
     SearchOps,
 )
-from mirage.view.namespace_view import paths_scoped
 from mirage.view.types import (
-    NamespaceView,
     StatOverlay,
 )
 
@@ -423,10 +421,14 @@ async def _dispatched_stream(
         await close_quietly(source)
 
 
-async def _dispatched_call(
-    dispatch: DispatchFn, name: str, path: PathSpec, **kwargs: Any
+async def dispatched_call(
+    dispatch: DispatchFn, name: str, path: PathSpec, /, **kwargs: Any
 ) -> Any:
-    """A command's write, at the dispatcher, its answer handed back.
+    """Send one call to the dispatcher and hand back its answer.
+
+    The one way a command's slot, a cross-mount run and a relayed command
+    reach a mount: the dispatcher finds the mount and judges the call on
+    its way there.
 
     Args:
         dispatch (DispatchFn): the command's dispatcher.
@@ -438,108 +440,89 @@ async def _dispatched_call(
     return result
 
 
-def _dispatched_writes(ops: CommandIO, dispatch: DispatchFn) -> dict[str, Any]:
-    """The write slots a backend has, each sent to the dispatcher.
+# Each slot the dispatcher answers: the function it sends and what a
+# command's positional arguments after the path are called there.
+# ``index`` is the mount's own at the dispatcher, so it is dropped.
+_DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "write": ("write", ("data", "index")),
+    "append": ("append", ("data", "index")),
+    "pwrite": ("pwrite", ("data", "offset", "index")),
+    "create": ("create", ()),
+    "mkdir": ("mkdir", ("parents",)),
+    "unlink": ("unlink", ("index",)),
+    "rmdir": ("rmdir", ("index",)),
+    "rm_r": ("rm_r", ()),
+    "rename": ("rename", ("dst",)),
+    "copy": ("copy", ("dst",)),
+    "dir_copy": ("dir_copy", ("dst",)),
+    "truncate": ("truncate", ("length", "no_create")),
+    "set_attrs": ("setattr", ()),
+    "find": ("find", ("index",)),
+}
+
+# The slots that change the mount: with no dispatcher there is nowhere to
+# judge and settle them.
+_DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {"find"}
+
+
+async def _slot_call(
+    dispatch: DispatchFn,
+    name: str,
+    names: tuple[str, ...],
+    accessor: Accessor | None,
+    path: PathSpec,
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """A command's slot call, sent to the dispatcher.
 
     Args:
-        ops (CommandIO): the mount's table.
         dispatch (DispatchFn): the command's dispatcher.
+        name (str): the dispatcher function.
+        names (tuple[str, ...]): what the positionals after the path are
+            called there.
+        accessor (Accessor | None): unused; the dispatcher finds the mount.
+        path (PathSpec): the path the call acts on.
+        *args: the call's positionals after the path.
+        **kwargs: its keywords.
     """
-    call = functools.partial(_dispatched_call, dispatch)
+    if len(args) > len(names):
+        raise TypeError(f"{name}: takes {len(names)} arguments after the path")
+    named = {**dict(zip(names, args)), **kwargs}
+    named.pop("index", None)
+    return await dispatched_call(dispatch, name, path, **named)
 
-    async def write(
-        accessor: Accessor | None,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await call("write", path, data=data)
 
-    async def append(
-        accessor: Accessor | None,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await call("append", path, data=data)
+def dispatched_slots(
+    dispatch: DispatchFn, slots: Collection[str]
+) -> dict[str, Any]:
+    """``slots``, each sent to the dispatcher.
 
-    async def pwrite(
-        accessor: Accessor | None,
-        path: PathSpec,
-        data: bytes,
-        offset: int,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await call("pwrite", path, data=data, offset=offset)
-
-    async def create(accessor: Accessor | None, path: PathSpec) -> None:
-        await call("create", path)
-
-    async def mkdir(
-        accessor: Accessor | None, path: PathSpec, parents: bool = False
-    ) -> None:
-        await call("mkdir", path, parents=parents)
-
-    async def unlink(accessor: Accessor | None, path: PathSpec) -> None:
-        await call("unlink", path)
-
-    async def rmdir(
-        accessor: Accessor | None,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await call("rmdir", path)
-
-    async def rename(
-        accessor: Accessor | None, src: PathSpec, dst: PathSpec
-    ) -> None:
-        await call("rename", src, dst=dst)
-
-    async def truncate(
-        accessor: Accessor | None,
-        path: PathSpec,
-        length: int,
-        no_create: bool = False,
-    ) -> None:
-        await call("truncate", path, length=length, no_create=no_create)
-
-    async def set_attrs(
-        accessor: Accessor | None, path: PathSpec, **fields: Any
-    ) -> dict[str, int | str]:
-        stored: dict[str, int | str] = await call("setattr", path, **fields)
-        return stored
-
-    writes: dict[str, Any] = {
-        "write": write,
-        "append": append,
-        "pwrite": pwrite,
-        "create": create,
-        "mkdir": mkdir,
-        "unlink": unlink,
-        "rmdir": rmdir,
-        "rename": rename,
-        "truncate": truncate,
-        "set_attrs": set_attrs,
-    }
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        slots (Collection[str]): slot names from the dispatched table.
+    """
     return {
-        slot: fn
-        for slot, fn in writes.items()
-        if getattr(ops, slot) is not None
+        slot: functools.partial(_slot_call, dispatch, *_DISPATCHED_SLOTS[slot])
+        for slot in slots
     }
 
 
 def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
-    """Return ``ops`` whose content reads and writes go through the
+    """Return ``ops`` whose reads, writes and one-call walks go through the
     dispatcher.
 
     The dispatcher checks hides, the command's path rule, the mount's mode and
-    policy, serves a warm copy and fills a cold one, and settles a write's
-    caches and receipt under its name's hold, so a command's read or write
-    answers what the same call through ``ws.vfs`` or FUSE answers. A slot
-    the backend does not have stays absent. With no dispatcher (a host
-    running a command straight on its mount) the reads stay the backend's
-    and each write is refused as one the backend does not have: the
-    dispatcher is where a write is judged and settled.
+    policy, serves a warm copy and fills a cold one, settles a write's
+    caches and receipt under its name's hold, and declines a one-call walk
+    (find, du, search, a tree copy or removal) whose subtree the caller's
+    view restricts, so a command's call answers what the same call
+    through ``ws.vfs`` or FUSE answers. A slot the backend does not have
+    stays absent. With no dispatcher (a host running a command straight
+    on its mount) the reads stay the backend's and each write is refused
+    as one the backend does not have: the dispatcher is where a write is
+    judged and settled.
 
     Args:
         ops (CommandIO): the mount's table.
@@ -560,7 +543,32 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
         read_bytes=reader,
         read_stream=functools.partial(_dispatched_stream, dispatch),
         read_range=reader if ops.read_range is not None else None,
-        **_dispatched_writes(ops, dispatch),
+        du=(
+            DuOps(
+                size=functools.partial(
+                    _slot_call, dispatch, "du_size", ("index",)
+                ),
+                entries=functools.partial(
+                    _slot_call, dispatch, "du_entries", ("index",)
+                ),
+            )
+            if ops.du is not None
+            else None
+        ),
+        search=(
+            replace(
+                ops.search,
+                search=functools.partial(
+                    _slot_call, dispatch, "search", ("query", "index")
+                ),
+            )
+            if ops.search is not None
+            else None
+        ),
+        **dispatched_slots(
+            dispatch,
+            [s for s in _DISPATCHED_SLOTS if getattr(ops, s) is not None],
+        ),
     )
 
 
@@ -664,21 +672,6 @@ def _is_namespace_dir(opts: CommandOpts, path: PathSpec) -> bool:
 
 
 _READ_SLOTS = ("read_bytes", "read_stream", "read_range")
-
-# The write slots ``dispatched_io`` sends to the dispatcher, which judges
-# them itself.
-_DISPATCHED_WRITES = (
-    "write",
-    "append",
-    "pwrite",
-    "create",
-    "mkdir",
-    "unlink",
-    "rmdir",
-    "set_attrs",
-    "rename",
-    "truncate",
-)
 
 
 async def _read_hit_a_dir(
@@ -1021,24 +1014,6 @@ def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
         raise eacces(src.virtual)
 
 
-async def _guarded_pair(fn: OperationFn, *args: Any, **kwargs: Any) -> Any:
-    """Dir-copy guard: per-path visibility checks, then the subtree
-    reveal check on the (src, dst) pair.
-
-    Args:
-        fn (OperationFn): the raw backend op.
-        *args: the call's positionals, source then destination among
-            them.
-        **kwargs: forwarded untouched.
-    """
-    specs = [arg for arg in args if isinstance(arg, PathSpec)]
-    for position, spec in enumerate(specs):
-        _refuse_hidden(spec, create=position > 0)
-    if len(specs) >= 2:
-        refuse_reveal(specs[0], specs[1])
-    return await fn(*args, **kwargs)
-
-
 async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
     """Exists that answers False for a hidden path, never a refusal.
 
@@ -1141,32 +1116,11 @@ def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
     )
 
 
-# Every op slot that takes a path: the kernel resolves a path before
-# the op sees it, whatever the op then does, so presence facts (stat,
-# exists, the native find) are walked too. `du` is a bundle of ops a
-# du generic reaches only after it has stat-ed its operand.
-_WALK_SLOTS = (
-    "read_bytes",
-    "read_stream",
-    "read_range",
-    "stat",
-    "exists",
-    "readdir",
-    "find",
-    "write",
-    "append",
-    "pwrite",
-    "create",
-    "truncate",
-    "set_attrs",
-    "mkdir",
-    "unlink",
-    "rmdir",
-    "rm_r",
-    "rename",
-    "copy",
-    "dir_copy",
-)
+# The slots that take a path and still reach the backend past the
+# dispatcher, or whose failed walk a reader words itself: the kernel
+# resolves a path before the op sees it, whatever the op then does, so
+# presence facts (stat, exists) are walked too.
+_WALK_SLOTS = ("read_bytes", "read_range", "stat", "exists", "readdir")
 
 
 async def _walk_admit(
@@ -1265,35 +1219,24 @@ def _walked_call(
     return _walked_await(admit, result)
 
 
-def with_write_guards(fn: OperationFn) -> OperationFn:
-    """Guard one bare backend write the way the adapter guards a slot.
-
-    For a bespoke command wired from loose functions rather than a
-    ``CommandIO`` (the google ``rm`` family binds an index-threaded
-    unlink): the same chain in the same order, judging the call's
-    PathSpec positionals. A hidden path answers ENOENT, the flavor of
-    the flat mutation slots; the command's path restrictions speak
-    before the coded pre_vfs hooks, as ``with_policy_guard`` orders
-    them for a ``CommandIO``.
-
-    Args:
-        fn (OperationFn): the raw backend write.
-    """
-    return _with_operation_guards(fn, "unlink")
-
-
 def with_command_guards(ops: CommandIO) -> CommandIO:
-    """Bind command path restrictions around backend capabilities.
+    """Bind the command's path checks around the slots the dispatcher
+    does not run.
+
+    Reads, writes and one-call walks go through the dispatcher
+    (``dispatched_io``), which judges each itself. ``stat``, ``exists``
+    and ``readdir`` still reach the backend past it, so here a hidden
+    path answers as a missing one, a listing drops the names the session
+    hides, and a listed directory meets the command's path rule and the
+    coded pre_vfs hooks. Every slot's operand dots are walked, a read's
+    as it starts, so a reader that words a failed open itself gets the
+    walk's refusal.
 
     Args:
-        ops (CommandIO): backend operations, including cache handling.
+        ops (CommandIO): the mount's table.
     """
     walk = get_walk_probe()
-    special: dict[str, OperationFn] = {
-        "readdir": functools.partial(_guarded_readdir, ops.readdir),
-    }
-    if ops.dir_copy is not None:
-        special["dir_copy"] = functools.partial(_guarded_pair, ops.dir_copy)
+    scope = _op_policy_scope()
     read_stream = ops.read_stream
 
     def guarded_stream(
@@ -1318,31 +1261,20 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
 
     changes: dict[str, Any] = {"read_stream": guarded_stream}
     for slot in _WALK_SLOTS:
-        fn = special.get(slot, getattr(ops, slot))
-        if fn is None or slot == "read_stream":
+        fn = getattr(ops, slot)
+        if fn is None:
             continue
-        guarded = (
-            fn
-            if slot in _READ_SLOTS or slot in _DISPATCHED_WRITES
-            else functools.partial(_command_call, fn, slot)
-        )
+        guarded = fn
+        if slot == "readdir":
+            guarded = functools.partial(
+                _guarded_readdir,
+                functools.partial(_policy_readdir, scope, fn),
+            )
+        if slot not in _READ_SLOTS:
+            guarded = functools.partial(_command_call, guarded, slot)
         if slot == "exists":
             guarded = functools.partial(_guarded_exists, guarded)
-        changes[slot] = functools.partial(
-            _walked_call, walk, slot == "mkdir", guarded
-        )
-    if ops.du is not None:
-        changes["du"] = DuOps(
-            functools.partial(_command_call, ops.du.size, "du"),
-            functools.partial(_command_call, ops.du.entries, "du"),
-        )
-    if ops.search is not None:
-        changes["search"] = replace(
-            ops.search,
-            search=functools.partial(
-                _command_call, ops.search.search, "search"
-            ),
-        )
+        changes[slot] = functools.partial(_walked_call, walk, False, guarded)
     return replace(ops, **changes)
 
 
@@ -1514,71 +1446,3 @@ async def _policy_readdir(
         )
     entries: list[str] = await fn(*args, **kwargs)
     return entries
-
-
-def with_policy_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose mutation slots and readdir admit each
-    PathSpec through the workspace's coded pre_vfs hooks.
-
-    The coded-policy arm of the guard chain. The surface is every
-    mutation slot and the directory a readdir lists; content reads go
-    through the dispatcher, which admits them itself
-    (``dispatched_io``). stat/exists stay unguarded as
-    presence facts, the mode-000 shape the path rules already take, so
-    a denied entry still lists and stats while the read of it is what
-    fails; ``scoped_io`` drops the native find/du slots, so the walk
-    meets the guarded readdir. Ops are named by slot; a
-    policy portable across the tiers keys on ``write`` and ``path``.
-    Inert unless a dispatched command bound policies overriding
-    pre_vfs (``_op_policy_scope``, with the mount prefix and session
-    identity captured at wrap time so a lazily drained reader still
-    answers as the command that bound it, see ``_live_policy_scope``).
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    scope = _op_policy_scope()
-    changes: dict[str, Any] = {
-        "readdir": functools.partial(_policy_readdir, scope, ops.readdir),
-    }
-    for slot in _MUTATIONS:
-        access = _MUTATIONS.get(slot)
-        fn = getattr(ops, slot)
-        if fn is not None and slot not in _DISPATCHED_WRITES:
-            changes[slot] = functools.partial(
-                _policy_call,
-                scope,
-                fn,
-                slot,
-                access is not None,
-                access.first_source if access else False,
-            )
-    return replace(ops, **changes)
-
-
-def scoped_io(
-    ops: CommandIO,
-    ns: NamespaceView | None,
-    paths: list[PathSpec],
-    prefix: str,
-) -> CommandIO:
-    """Drop the native walks when a hide, a path rule or a coded
-    pre_vfs policy judges the command's paths.
-
-    Args:
-        ops (CommandIO): command-guarded backend capabilities.
-        ns (NamespaceView | None): the command's namespace view.
-        paths (list[PathSpec]): invocation roots, including a default cwd.
-        prefix (str): owning mount prefix.
-    """
-    if not paths_scoped(ns, paths, prefix):
-        return ops
-    return replace(
-        ops,
-        find=None,
-        du=None,
-        search=None,
-        content_search=None,
-        copy=None,
-        dir_copy=None,
-    )

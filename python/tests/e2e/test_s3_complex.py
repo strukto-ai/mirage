@@ -334,7 +334,6 @@ async def test_cat_multifile_prints_each_file_in_order():
             CommandOpts(io=command_io(backend), index=NULL_INDEX),
         )
 
-        assert io.reads == {}
         combined = b"".join([chunk async for chunk in source])
         assert combined == b"alpha report\nbeta report\ndeep archive\n"
 
@@ -354,4 +353,3 @@ async def test_cat_single_file_streams():
             CommandOpts(io=command_io(backend), index=NULL_INDEX),
         )
         assert not isinstance(source, bytes)
-        assert io.reads == {}

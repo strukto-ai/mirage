@@ -15,8 +15,6 @@
 import pytest
 
 from mirage.io import IOResult
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import async_chain
 from mirage.io.types import materialize
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -32,44 +30,6 @@ class FakeNode:
         self.text = text
         self.is_named = True
         self.type = "command"
-
-
-@pytest.mark.asyncio
-async def test_cache_read_remains_drainable_after_early_pipeline_exit():
-    closed = False
-
-    async def source():
-        nonlocal closed
-        try:
-            yield b"first"
-            yield b"rest"
-        finally:
-            closed = True
-
-    stream = CachableAsyncIterator(source())
-
-    async def execute_node(nd, _session, stdin, _call_stack=None, **kwargs):
-        if nd.text == "cat":
-            return (
-                async_chain([stream]),
-                IOResult(reads={"/remote": stream}, cache=["/remote"]),
-                ExecutionNode(command="cat"),
-            )
-        await anext(stdin)
-        return b"first", IOResult(), ExecutionNode(command="head")
-
-    session = SessionState(session_id="test")
-    session.shell_options["pipefail"] = True
-    _, io, _ = await handle_pipe(
-        execute_node,
-        [FakeNode("cat"), FakeNode("head")],
-        [],
-        EvaluationContext(session),
-    )
-    assert io.exit_code == 0
-    assert not closed
-    assert await stream.drain() == b"firstrest"
-    assert closed
 
 
 @pytest.mark.asyncio

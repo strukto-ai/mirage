@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { abortable } from '../utils/abort.ts'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
 import { type ByteSource, DeviceInput } from './types.ts'
@@ -176,13 +175,6 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     if (closing !== undefined) {
       if (this.pulling) void closing.catch(() => undefined)
       else await closing
-    }
-    // The discard closes the same producer, so behind a stalled pull it
-    // is not awaited either; `discard` never rejects.
-    if (this.input instanceof CachableAsyncIterator) {
-      const discarding = this.input.discard()
-      if (this.pulling) void discarding
-      else await discarding
     }
   }
 

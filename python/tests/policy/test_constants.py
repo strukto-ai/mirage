@@ -21,12 +21,11 @@ _CALLS = declared_calls(BaseVFS)
 
 
 def test_subtree_ops_are_what_the_functions_declare():
-    # A rename and a directory removal take everything under them along;
-    # rm_r is the command tier's, which no VFS function declares.
+    # A rename and a directory removal take everything under them along.
     declared = call_names(_CALLS, effects={Effect.RENAME}) | call_names(
         _CALLS, effects={Effect.REMOVE}, targets={Target.DIR}
     )
-    assert SUBTREE_OPS == declared | {"rm_r"}
+    assert SUBTREE_OPS == declared
 
 
 def test_metadata_ops_are_what_the_functions_declare():

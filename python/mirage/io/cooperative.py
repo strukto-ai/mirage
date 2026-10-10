@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 from collections.abc import AsyncGenerator, AsyncIterator
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.yield_budget import YieldBudget
 
 CHUNK_SIZE = 16 * 1024
@@ -38,11 +37,7 @@ async def chunks(
             for offset in range(0, len(data), CHUNK_SIZE):
                 await budget.run()
                 yield data[offset : offset + CHUNK_SIZE]
-    except BaseException as exc:
-        if isinstance(source, CachableAsyncIterator) and not isinstance(
-            exc, GeneratorExit
-        ):
-            await source.discard()
+    except BaseException:
         close = getattr(source, "aclose", None)
         if close is not None:
             await close()

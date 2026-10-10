@@ -19,7 +19,10 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
-from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
+from mirage.commands.builtin.generic.rm_cmd import (
+    remove_tree,
+    rm_without_operands,
+)
 from mirage.commands.builtin.generic_bind.adapter import (
     Operation,
     over_mount_io,
@@ -36,8 +39,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
+from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.view.types import LinkView
 
 
 def _build(io: CommandIO) -> Callable[..., Any]:
@@ -66,8 +71,9 @@ def _build(io: CommandIO) -> Callable[..., Any]:
         verbose: bool = False,
         *,
         index: IndexCacheStore,
-    ) -> tuple[str | None, list[str]]:
-        """Remove one operand, returning a GNU stderr line on failure.
+        links: LinkView | None,
+    ) -> tuple[list[str], list[str]]:
+        """Remove one operand, returning GNU stderr lines on failure.
 
         Args:
             accessor (Accessor): Backend handle.
@@ -80,10 +86,12 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                 entry.
             index (IndexCacheStore): Cache index threaded into the core
                 ops.
+            links (LinkView | None): the namespace's symlinks, removed
+                with a tree removed entry by entry.
 
         Returns:
-            tuple[str | None, list[str]]: A ``rm: cannot remove ...``
-            line (or None when removed / skipped under ``-f``) and the
+            tuple[list[str], list[str]]: The ``rm: cannot remove ...``
+            lines (none when removed or skipped under ``-f``) and the
             verbose lines.
         """
         label = path.raw_path
@@ -93,51 +101,62 @@ def _build(io: CommandIO) -> Callable[..., Any]:
             if force and isinstance(
                 exc, (FileNotFoundError, NotADirectoryError)
             ):
-                return None, []
-            return f"rm: cannot remove '{label}': {fs_strerror(exc)}", []
+                return [], []
+            return [f"rm: cannot remove '{label}': {fs_strerror(exc)}"], []
         except ValueError:
             if force:
-                return None, []
-            return (
+                return [], []
+            return [
                 f"rm: cannot remove '{label}': No such file or directory"
-            ), []
+            ], []
         try:
             if s.type == FileType.DIRECTORY:
                 if recursive:
+                    listing = functools.partial(readdir, accessor, index=index)
+                    probe = functools.partial(stat, accessor, index=index)
                     lines = (
-                        removal_lines(
-                            await walk(
-                                functools.partial(
-                                    readdir, accessor, index=index
-                                ),
-                                functools.partial(stat, accessor, index=index),
-                                path,
-                            ),
-                            path,
-                        )
+                        removal_lines(await walk(listing, probe, path), path)
                         if verbose
                         else []
                     )
-                    await rm_r(accessor, path)
-                    return None, lines
+                    try:
+                        await rm_r(accessor, path)
+                    except OperationNotSupportedError:
+                        # The dispatcher declines a tree removal the
+                        # caller's view restricts: each entry's own
+                        # removal is judged instead.
+                        gone, failures = await remove_tree(
+                            path,
+                            readdir=listing,
+                            stat=probe,
+                            unlink=functools.partial(unlink, accessor),
+                            rmdir=functools.partial(rmdir, accessor),
+                            links=links,
+                        )
+                        return [
+                            f"rm: cannot remove '{entry.raw_path}': "
+                            f"{fs_strerror(exc)}"
+                            for entry, exc in failures
+                        ], (removal_lines(gone, path) if verbose else [])
+                    return [], lines
                 if remove_dir:
                     children = await readdir(accessor, path, index)
                     if children:
-                        return (
+                        return [
                             f"rm: cannot remove '{label}': Directory not empty"
-                        ), []
+                        ], []
                     await rmdir(accessor, path)
-                    return None, (
+                    return [], (
                         [f"removed directory '{label}'"] if verbose else []
                     )
-                return f"rm: cannot remove '{label}': Is a directory", []
+                return [f"rm: cannot remove '{label}': Is a directory"], []
             await unlink(accessor, path)
         except FS_ERRORS as exc:
             # A refused removal (a read-only region) is GNU's line for
             # the operand, and rm goes on to the rest.
             label = with_inner(label, inner_suffix(path, exc))
-            return f"rm: cannot remove '{label}': {fs_strerror(exc)}", []
-        return None, [f"removed '{label}'"] if verbose else []
+            return [f"rm: cannot remove '{label}': {fs_strerror(exc)}"], []
+        return [], [f"removed '{label}'"] if verbose else []
 
     async def rm(
         accessor: Accessor,
@@ -155,7 +174,6 @@ def _build(io: CommandIO) -> Callable[..., Any]:
         paths = await resolve_glob(accessor, paths, opts.index)
         verbose_parts: list[str] = []
         errors: list[str] = []
-        removed: dict[str, ByteSource] = {}
         links = opts.ns.links if opts.ns is not None else None
         for p in paths:
             # A link typed with a trailing slash is refused, never
@@ -167,7 +185,7 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                     errors.append(refusal)
                 continue
             # GNU rm reports the operand and keeps removing the rest.
-            error, entry_lines = await _rm(
+            failed, entry_lines = await _rm(
                 accessor,
                 p,
                 recursive=r,
@@ -175,17 +193,13 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                 remove_dir=d,
                 verbose=v,
                 index=opts.index,
+                links=links,
             )
-            if error is not None:
-                errors.append(error)
-                continue
-            removed[p.mount_path] = b""
+            errors.extend(failed)
             verbose_parts.extend(entry_lines)
         output = format_optional_records(verbose_parts) if v else None
         stderr = ("\n".join(errors) + "\n").encode() if errors else None
-        return output, IOResult(
-            writes=removed, stderr=stderr, exit_code=1 if errors else 0
-        )
+        return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
     return rm
 

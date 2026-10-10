@@ -57,7 +57,7 @@ import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { optionError, parseFlags } from './flags.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 // A textual rest operand is a CLI node's pass-through form: parsed under

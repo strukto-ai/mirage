@@ -301,7 +301,6 @@ export async function makeLink(
   target: PathSpec,
   text: string,
   policy: TransferPolicy,
-  writes: Record<string, ByteSource>,
   errors: string[],
   lines: string[] | undefined,
 ): Promise<boolean> {
@@ -321,7 +320,6 @@ export async function makeLink(
     stat,
     copies.relay.readdir,
     target,
-    writes,
     errors,
     undefined,
     copies,
@@ -337,7 +335,6 @@ export async function makeLink(
     )
     return false
   }
-  writes[target.mountPath] = new Uint8Array()
   lines?.push(transferLine(src, target, made.backup))
   return true
 }
@@ -360,7 +357,6 @@ export async function copyTreeLinks(
   errors: string[],
   lines: string[] | undefined,
   policy: TransferPolicy,
-  writes: Record<string, ByteSource>,
   seen: readonly string[] = [],
 ): Promise<void> {
   const base = rstripSlash(src.virtual) || '/'
@@ -382,7 +378,6 @@ export async function copyTreeLinks(
         respelled(PathSpec.fromStrPath(landing), `${shownDst}/${rel}`),
         text,
         policy,
-        writes,
         errors,
         lines,
       )
@@ -412,7 +407,7 @@ export async function copyTreeLinks(
         [{ path: entry.virtual, isDir: false }],
         errors,
         undefined,
-        { policy, writes, lines, copies },
+        { policy, lines, copies },
       )
       continue
     }
@@ -443,7 +438,6 @@ export async function copyTreeLinks(
       undefined,
       {
         policy,
-        writes,
         ...(lines !== undefined ? { lines } : {}),
         copies,
       },
@@ -456,7 +450,6 @@ export async function copyTreeLinks(
       errors,
       lines,
       policy,
-      writes,
       [...seen, base],
     )
   }
@@ -680,7 +673,7 @@ async function duplicateForBackup(
       return true
     }
     const entries = await cpWalk(strategy.readdir, stat, target, index)
-    const { copiedAll } = await copyEntries(
+    const copiedAll = await copyEntries(
       cmdName,
       strategy,
       stat,
@@ -732,7 +725,6 @@ export async function makeBackup(
   stat: StatFn,
   readdir: ReaddirFn | undefined,
   target: PathSpec,
-  writes: Record<string, ByteSource>,
   errors: string[],
   index?: IndexCacheStore,
   copies?: TransferLinks,
@@ -775,7 +767,6 @@ export async function makeBackup(
     }
   }
   if (!made) return { backup: null, ok: false }
-  writes[backup.mountPath] = new Uint8Array()
   return { backup, ok: true }
 }
 
@@ -842,7 +833,6 @@ async function mirrorDirs(
   target: PathSpec,
   srcBase: string,
   dstBase: string,
-  writes: Record<string, ByteSource>,
   errors: string[],
   intoItself: boolean,
   index?: IndexCacheStore,
@@ -872,7 +862,6 @@ async function mirrorDirs(
       errors.push(`cp: cannot create directory '${entryDst.rawPath}': ${String(fsStrerror(err))}`)
       return false
     }
-    writes[entryDst.mountPath] = new Uint8Array()
     if (lines !== undefined) {
       const entry = spelledFrom(mountedPath(src, entryMount), src)
       lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
@@ -942,9 +931,8 @@ export async function cpWalk(
 // missing the needed op reports `Operation not supported` instead of
 // aborting the command. `policy` applies -n/--update/--backup per file
 // entry, like GNU during a recursive merge (null overwrites
-// unconditionally); `writes`/`lines` are optional per-entry sinks.
-// Returns whether every entry landed and whether the destination changed
-// at all.
+// unconditionally); `lines` is an optional per-entry sink. Returns whether
+// every entry landed.
 export async function copyEntries(
   cmdName: string,
   strategy: PrimitiveCopy | PrimitiveMove,
@@ -956,15 +944,13 @@ export async function copyEntries(
   index?: IndexCacheStore,
   opts: {
     policy?: TransferPolicy
-    writes?: Record<string, ByteSource>
     lines?: string[] | undefined
     copies?: TransferLinks | undefined
   } = {},
-): Promise<{ copiedAll: boolean; wroteAny: boolean }> {
+): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
   const dstBase = rstripSlash(target.virtual)
   let copiedAll = true
-  let wroteAny = false
   for (const { path: entry, isDir } of entries) {
     const entrySpec = descendantPath(src, entry)
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
@@ -972,8 +958,6 @@ export async function copyEntries(
       try {
         if (!(await isDirectory(stat, entryDstSpec, index))) {
           await strategy.mkdir(entryDstSpec)
-          wroteAny = true
-          if (opts.writes !== undefined) opts.writes[entryDstSpec.mountPath] = new Uint8Array()
           if (opts.lines !== undefined) {
             opts.lines.push(`'${entrySpec.rawPath}' -> '${entryDstSpec.rawPath}'`)
           }
@@ -985,7 +969,7 @@ export async function copyEntries(
         errors.push(
           `${cmdName}: cannot create directory '${entryDstSpec.rawPath}': ${String(fsStrerror(err))}`,
         )
-        return { copiedAll: false, wroteAny }
+        return false
       }
       continue
     }
@@ -993,7 +977,7 @@ export async function copyEntries(
     if (opts.copies !== undefined && link != null) {
       const errorCount = errors.length
       const raw = link.extra[LINK_TARGET_KEY]
-      const made = await makeLink(
+      await makeLink(
         opts.copies,
         entrySpec,
         entryDstSpec,
@@ -1005,11 +989,9 @@ export async function copyEntries(
           backup: null,
           suffix: DEFAULT_BACKUP_SUFFIX,
         },
-        opts.writes ?? {},
         errors,
         opts.lines,
       )
-      wroteAny = wroteAny || made
       if (errors.length > errorCount) copiedAll = false
       continue
     }
@@ -1022,7 +1004,6 @@ export async function copyEntries(
         stat,
         strategy.readdir,
         entryDstSpec,
-        opts.writes ?? {},
         errors,
         index,
         opts.copies,
@@ -1053,11 +1034,9 @@ export async function copyEntries(
       copiedAll = false
       continue
     }
-    wroteAny = true
-    if (opts.writes !== undefined) opts.writes[entryDstSpec.mountPath] = new Uint8Array()
     if (opts.lines !== undefined) opts.lines.push(transferLine(entrySpec, entryDstSpec, backup))
   }
-  return { copiedAll, wroteAny }
+  return copiedAll
 }
 
 // Copy sources to a destination, fanning out into a directory. NativeCopy
@@ -1125,7 +1104,6 @@ export async function cpGeneric(
     flags.interactive ||
     updateGates(flags.update) ||
     backupDisplaces(flags.backup)
-  const writes: Record<string, ByteSource> = {}
   const lines: string[] = []
   let warned = 0
   const seen = new Set<string>()
@@ -1171,7 +1149,6 @@ export async function cpGeneric(
         respelled(PathSpec.fromStrPath(landing), target.rawPath),
         text,
         policy,
-        writes,
         errors,
         flags.verbose ? lines : undefined,
       )
@@ -1253,7 +1230,6 @@ export async function cpGeneric(
           : walked
         await copyEntries('cp', strategy, stat, src, target, entries, errors, index, {
           policy,
-          writes,
           lines: flags.verbose ? lines : undefined,
           copies,
         })
@@ -1266,7 +1242,6 @@ export async function cpGeneric(
             errors,
             flags.verbose ? lines : undefined,
             policy,
-            writes,
           )
         }
         continue
@@ -1276,10 +1251,6 @@ export async function cpGeneric(
           lines.push(...(await treeLines(strategy, stat, src, target, srcBase, dstBase, index)))
         }
         await strategy.dirCopy(src, target)
-        for (const entryMount of await strategy.find(src, { type: 'f' })) {
-          const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
-          writes[entryDst.mountPath] = new Uint8Array()
-        }
         if (copies !== undefined) {
           await copyTreeLinks(
             copies,
@@ -1289,7 +1260,6 @@ export async function cpGeneric(
             errors,
             flags.verbose ? lines : undefined,
             policy,
-            writes,
           )
         }
         continue
@@ -1304,7 +1274,6 @@ export async function cpGeneric(
         target,
         srcBase,
         dstBase,
-        writes,
         errors,
         intoItself,
         index,
@@ -1325,14 +1294,12 @@ export async function cpGeneric(
           stat,
           versionReaddir,
           entryDst,
-          writes,
           errors,
           index,
           copies,
         )
         if (!made.ok) continue
         await strategy.copy(entry, entryDst)
-        writes[entryDst.mountPath] = new Uint8Array()
         if (flags.verbose) lines.push(transferLine(entry, entryDst, made.backup))
       }
       if (copies !== undefined) {
@@ -1344,7 +1311,6 @@ export async function cpGeneric(
           errors,
           flags.verbose ? lines : undefined,
           policy,
-          writes,
         )
       }
       continue
@@ -1363,7 +1329,6 @@ export async function cpGeneric(
       stat,
       versionReaddir,
       target,
-      writes,
       errors,
       index,
       copies,
@@ -1399,7 +1364,6 @@ export async function cpGeneric(
         continue
       }
     }
-    writes[target.mountPath] = new Uint8Array()
     created.add(keyOf(target))
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
   }
@@ -1407,7 +1371,6 @@ export async function cpGeneric(
   return [
     output,
     new IOResult({
-      writes,
       stderr: stderrOf(errors),
       exitCode: errors.length > warned + accepted.length ? 1 : 0,
     }),

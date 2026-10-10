@@ -522,9 +522,6 @@ async def _run_pipeline(
         io = IOResult(
             exit_code=0 if io.exit_code != 0 else 1,
             stderr=io.stderr,
-            reads=io.reads,
-            writes=io.writes,
-            cache=io.cache,
             refusal=io.refusal,
         )
         exec_node.exit_code = io.exit_code
@@ -602,9 +599,6 @@ async def _negated(
     io = IOResult(
         exit_code=0 if io.exit_code != 0 else 1,
         stderr=io.stderr,
-        reads=io.reads,
-        writes=io.writes,
-        cache=io.cache,
         refusal=io.refusal,
     )
     exec_node.exit_code = io.exit_code

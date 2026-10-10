@@ -14,16 +14,20 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  COPY_OPS,
+  DESTINATION_OPS,
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
   ENTRY_CREATE_OPS,
   FILE_CREATE_OPS,
   HIDDEN_CREATE_OPS,
   NAMESPACE_TABLE_OPS,
+  NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
   SERIAL_WRITE_OPS,
   STAMP_WRITE_OPS,
+  SUBTREE_OPS,
 } from './constants.ts'
 
 const sorted = (names: ReadonlySet<string>): string[] => [...names].sort()
@@ -37,17 +41,31 @@ describe('dispatcher op sets', () => {
     const writes = ['append', 'create', 'pwrite', 'truncate', 'write']
     expect(sorted(DISPATCH_READ_OPS)).toEqual(['read'])
     expect(sorted(DISPATCH_WRITE_OPS)).toEqual(
-      [...writes, 'mkdir', 'rename', 'rmdir', 'unlink'].sort(),
+      [...writes, 'copy', 'dir_copy', 'mkdir', 'rename', 'rm_r', 'rmdir', 'unlink'].sort(),
     )
     expect(sorted(POLICY_WRITE_OPS)).toEqual(
       [...DISPATCH_WRITE_OPS, 'removexattr', 'setattr', 'setxattr', 'symlink'].sort(),
     )
     expect(sorted(NAMESPACE_TABLE_OPS)).toEqual(['readlink', 'symlink'])
-    expect(sorted(SERIAL_WRITE_OPS)).toEqual([...writes, 'rename', 'unlink'].sort())
+    expect(sorted(SERIAL_WRITE_OPS)).toEqual([...writes, 'copy', 'rename', 'unlink'].sort())
     expect(sorted(FILE_CREATE_OPS)).toEqual(writes)
     expect(sorted(ENTRY_CREATE_OPS)).toEqual(['mkdir', 'symlink'])
     expect(sorted(HIDDEN_CREATE_OPS)).toEqual([...writes, 'mkdir', 'symlink'].sort())
-    expect(sorted(NO_FOLLOW_OPS)).toEqual(['readlink', 'rename', 'rmdir', 'symlink', 'unlink'])
+    expect(sorted(NO_FOLLOW_OPS)).toEqual([
+      'readlink',
+      'rename',
+      'rm_r',
+      'rmdir',
+      'symlink',
+      'unlink',
+    ])
     expect(sorted(STAMP_WRITE_OPS)).toEqual([...writes, 'mkdir'].sort())
+    expect(sorted(COPY_OPS)).toEqual(['copy', 'dir_copy'])
+    expect(sorted(DESTINATION_OPS)).toEqual(['copy', 'dir_copy', 'rename'])
+    const subtree = ['dir_copy', 'du_entries', 'du_size', 'find', 'rename', 'rm_r', 'search']
+    expect(sorted(SUBTREE_OPS)).toEqual(subtree)
+    expect(sorted(NATIVE_WALK_OPS)).toEqual(
+      [...subtree.filter((name) => name !== 'rename'), 'copy'].sort(),
+    )
   })
 })

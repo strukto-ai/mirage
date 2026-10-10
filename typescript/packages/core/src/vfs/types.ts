@@ -26,10 +26,11 @@ export type DuEntries = [entries: [string, number][], total: number]
  * What a dispatchable VFS function does to the mount. READ returns content
  * and METADATA an entry's metadata; neither changes the mount. WRITE changes
  * a file's bytes, CREATE makes a name that must not exist yet, REMOVE drops a
- * name, RENAME moves one with everything under it, and ATTR changes an
- * entry's metadata. Every effect but READ and METADATA is a write: a
- * read-only mount refuses the call and admission judges it as one. Mirrors
- * Python's `Effect`.
+ * name, RENAME moves one with everything under it, COPY makes its `dst` hold
+ * what its path holds, and ATTR changes an entry's metadata. Every effect but
+ * READ and METADATA is a write: a read-only mount refuses the call and
+ * admission judges it as one. A COPY reads its path and writes only its
+ * `dst`. Mirrors Python's `Effect`.
  */
 export const Effect = Object.freeze({
   READ: 'read',
@@ -38,6 +39,7 @@ export const Effect = Object.freeze({
   CREATE: 'create',
   REMOVE: 'remove',
   RENAME: 'rename',
+  COPY: 'copy',
   ATTR: 'attr',
 } as const)
 
@@ -62,6 +64,8 @@ export interface Declaration {
   readonly effect: Effect
   readonly target: Target
   readonly creates: boolean
+  /** The call reaches everything below its paths, as a rename, a tree removal or a tree copy does. */
+  readonly subtree: boolean
 }
 
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<

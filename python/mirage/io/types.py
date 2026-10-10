@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec, Producer, Refusal
 
@@ -66,20 +65,7 @@ async def materialize(stream: ByteSource | None) -> bytes:
         return b""
     if isinstance(stream, bytes):
         return stream
-    if isinstance(stream, CachableAsyncIterator):
-        return await stream.drain()
     return b"".join([chunk async for chunk in chunks(stream)])
-
-
-def settled(source: ByteSource) -> bool:
-    """Whether a read is over: bytes, or a stream drained to its end.
-
-    Args:
-        source (ByteSource): what a command recorded as a read.
-    """
-    if isinstance(source, CachableAsyncIterator):
-        return source.exhausted
-    return isinstance(source, bytes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +152,8 @@ class OpReport:
 
 
 class IOResult:
-    """Returned by commands to tell workspace how to update cache.
+    """What a command returns beside its output: its status, its stderr
+    and the facts it reports for later actions.
 
     ``exit_code`` is a delegating read, not a plain field, because a
     streaming command's status can depend on its content: grep returns
@@ -199,12 +186,6 @@ class IOResult:
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
-        reads (dict[str, ByteSource] | None): Paths read with content
-            or streams.
-        writes (dict[str, ByteSource] | None): Paths written with
-            content or streams.
-        cache (list[str] | None): Paths worth caching (from reads or
-            writes).
         producer (Producer | None): provenance of this result (which
             command, spanning which mounts); merge keeps the rightmost
             producer, for attribution, not ownership of aggregate output. The
@@ -224,9 +205,6 @@ class IOResult:
         stdout: ByteSource | None = None,
         stderr: ByteSource | None = None,
         exit_code: int = 0,
-        reads: dict[str, ByteSource] | None = None,
-        writes: dict[str, ByteSource] | None = None,
-        cache: list[str] | None = None,
         producer: Producer | None = None,
         refusal: Refusal | None = None,
         matched_runs: list[list[PathSpec]] | None = None,
@@ -239,11 +217,6 @@ class IOResult:
         self.counted_runs = counted_runs
         self.stderr = stderr
         self._exit_code = exit_code
-        self.reads: dict[str, ByteSource] = reads if reads is not None else {}
-        self.writes: dict[str, ByteSource] = (
-            writes if writes is not None else {}
-        )
-        self.cache: list[str] = cache if cache is not None else []
         self.output: OutputState | None = None
         self.output_finalized = False
         self.producer = producer
@@ -291,19 +264,6 @@ class IOResult:
             sized_runs=other.sized_runs,
             counted_runs=other.counted_runs,
             stderr=merged_stderr,
-            # A later write voids earlier claims on its path, and a read
-            # that is over; a running one stays for the drain to close.
-            reads={
-                **{
-                    p: v
-                    for p, v in self.reads.items()
-                    if p not in other.writes or not settled(v)
-                },
-                **other.reads,
-            },
-            writes={**self.writes, **other.writes},
-            cache=[p for p in self.cache if p not in other.writes]
-            + other.cache,
             producer=other.producer,
             refusal=(
                 other.refusal if other.refusal is not None else self.refusal

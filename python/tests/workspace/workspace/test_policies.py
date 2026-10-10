@@ -19,7 +19,6 @@ import pytest
 
 from mirage import Action, CommandContext, Deny, Policy, Workspace
 from mirage.commands.errors import LimitExceededError
-from mirage.io import IOResult
 from mirage.policy import (
     CommandRule,
     ExecuteResultContext,
@@ -363,12 +362,7 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
     try:
         await ws.shell("mkdir -p /data/prod")
         await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        await ws.apply_io(
-            IOResult(
-                reads={"/data/prod/x.txt": b"0123456789"},
-                cache=["/data/prod/x.txt"],
-            )
-        )
+        await ws.vfs.read("/data/prod/x.txt")
         ws.vfs.records.clear()
         ws.policies.add(SuppressProdReads())
         with pytest.raises(PermissionError):
@@ -424,12 +418,7 @@ async def test_a_hard_capped_warm_read_is_not_network_traffic():
     try:
         await ws.shell("mkdir -p /data/prod")
         await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        await ws.apply_io(
-            IOResult(
-                reads={"/data/prod/x.txt": b"0123456789"},
-                cache=["/data/prod/x.txt"],
-            )
-        )
+        await ws.vfs.read("/data/prod/x.txt")
         ws.vfs.records.clear()
         ws.policies.add(HardCapProdReads())
         with pytest.raises(LimitExceededError):
@@ -507,7 +496,7 @@ class SealedPaths(Policy):
 async def test_pre_vfs_binds_dispatcher_and_command_tier_io():
     # The documented boundary (Policy.pre_vfs): coded op hooks fire at
     # the dispatcher AND for the backend I/O inside a mount command's
-    # handler (with_policy_guard). Both tiers are pinned so a move of
+    # handler (with_command_guards). Both tiers are pinned so a move of
     # the boundary is loud.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -632,9 +621,9 @@ class OpRecorder(Policy):
 @pytest.mark.asyncio
 async def test_shell_rm_r_admits_through_pre_vfs():
     # The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
-    # admitted per deletion while a shell rm -r admitted nothing. The
-    # shell tree removal now admits the op the backend performs (the
-    # native rm_r here), and a write-deny refuses it outright.
+    # admitted per deletion while a shell rm -r admitted nothing. Under a
+    # coded pre_vfs policy the one-call rm_r is declined, so the tree goes
+    # entry by entry, each removal admitted, and a write-deny refuses it.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("mkdir -p /data/prod/sub")
@@ -645,7 +634,9 @@ async def test_shell_rm_r_admits_through_pre_vfs():
         removed = await ws.shell("rm -r /data/prod")
         assert removed.exit_code == 0
         writes = [a for a in rec.asked if a[2]]
-        assert ("rm_r", "/data/prod", True) in writes
+        assert ("unlink", "/data/prod/sub/b.txt", True) in writes
+        assert ("rmdir", "/data/prod", True) in writes
+        assert not any(op == "rm_r" for op, _, _ in writes)
     finally:
         await ws.close()
 

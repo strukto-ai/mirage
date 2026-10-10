@@ -16,12 +16,11 @@ import asyncio
 
 import pytest
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.workspace.mount.activity import VFSActivity
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("finish", ["eof", "error", "close", "discard"])
+@pytest.mark.parametrize("finish", ["eof", "error", "close"])
 async def test_vfs_usage_ends_with_its_stream(finish):
     activity = VFSActivity()
 
@@ -30,18 +29,13 @@ async def test_vfs_usage_ends_with_its_stream(finish):
         if finish == "error":
             raise ValueError("read failed")
 
-    source = chunks()
-    if finish == "discard":
-        source = CachableAsyncIterator(source)
-    source = activity.hold(source)
+    source = activity.hold(chunks())
     waiting = asyncio.create_task(activity.wait())
     await asyncio.sleep(0)
     assert not waiting.done()
     if finish == "close":
         await source.aclose()
         await source.aclose()
-    elif finish == "discard":
-        await source.discard()
     elif finish == "error":
         with pytest.raises(ValueError, match="read failed"):
             async for _ in source:
@@ -55,20 +49,6 @@ async def test_vfs_usage_ends_with_its_stream(finish):
     assert not waiting.done()
     release()
     await asyncio.wait_for(waiting, 5)
-
-
-@pytest.mark.asyncio
-async def test_exhausted_cache_stream_does_not_keep_a_vfs_active():
-    content = b"value"
-
-    async def chunks():
-        yield content
-
-    cached = CachableAsyncIterator(chunks())
-    assert await cached.drain() == content
-    activity = VFSActivity()
-    activity.hold(cached)
-    await asyncio.wait_for(activity.wait(), 1)
 
 
 @pytest.mark.asyncio

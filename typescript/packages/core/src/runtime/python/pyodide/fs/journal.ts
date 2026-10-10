@@ -14,7 +14,7 @@
 
 import { type RuntimeFiles } from '../../../files.ts'
 import type { SetAttrFields } from '../../../../types.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 
 /**
  * One guest mutation, recorded in the order the script performed it.

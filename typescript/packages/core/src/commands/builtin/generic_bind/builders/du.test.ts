@@ -16,13 +16,10 @@ import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { eacces, enoent } from '../../../../errors/fs.ts'
-import { runWithAdmission } from '../../../../context/session_context.ts'
+import { eacces, enoent, enotsup } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import type { EntryGate } from '../../../../policy/types.ts'
-import { scopedIo } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
-import type { MountView, NamespaceView } from '../../../../view/types.ts'
+import type { MountView } from '../../../../view/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -90,32 +87,17 @@ describe('du walk fallback (no native du op)', () => {
   })
 })
 
-// A gate that scopes the line but refuses nothing, which is what a `du`
-// run under any path rule looks like: the gate is scoped, so `scopedIo`
-// sets the native du op aside and the builder walks through the guarded
-// readdir instead.
-const SCOPED_GATE: EntryGate = {
-  scoped: true,
-  scopes: () => true,
-  granted: [],
-  check: () => undefined,
-  refuses: () => false,
-}
-
-// The command's view as admission builds it for a scoped gate.
-const SCOPED_VIEW: NamespaceView = { scoped: () => true }
-
 const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
   status: 429,
 })
 
-// A native du op that would answer instantly, and wrongly: any total
-// coming from here proves the walk was skipped.
+// A native du op the dispatcher declines, as it does when a path rule or
+// a hide reaches below the operand: the builder walks instead.
 const NATIVE: CommandIO = {
   ...OPS,
   du: {
-    size: () => Promise.resolve(999),
-    entries: () => Promise.resolve([[['/native', 999]] as [string, number][], 999]),
+    size: (_a, p) => Promise.reject(enotsup('ram', 'du_size', p)),
+    entries: (_a, p) => Promise.reject(enotsup('ram', 'du_entries', p)),
   },
 } as CommandIO
 
@@ -123,19 +105,16 @@ async function runScoped(
   ops: CommandIO,
   paths: PathSpec[],
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
-  const result = await runWithAdmission(SCOPED_GATE, async () =>
-    BUILDER.fn(scopedIo(ops, SCOPED_VIEW, paths, ''), ACCESSOR, paths, [], {
-      stdin: null,
-      flags: {},
-      cwd: '/',
-      ns: SCOPED_VIEW,
-    }),
-  )
+  const result = await BUILDER.fn(ops, ACCESSOR, paths, [], {
+    stdin: null,
+    flags: {},
+    cwd: '/',
+  })
   return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
 }
 
 describe('du walk fallback under a path rule', () => {
-  it('sets the native du op aside, so every entry passes the gate', async () => {
+  it('walks when the native du op declines', async () => {
     const [out] = await runScoped(NATIVE, [PathSpec.fromStrPath('/db')])
     expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
   })

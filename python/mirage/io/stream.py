@@ -16,7 +16,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterable
 
-from mirage.io import CachableAsyncIterator, IOResult
+from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize  # noqa: F401
 
@@ -60,25 +60,6 @@ class SharedStdin:
             return chunk
 
 
-def wrap_cachable_streams(
-    stdout: ByteSource | None,
-    io: IOResult,
-) -> tuple[ByteSource | None, IOResult]:
-    for path in io.cache:
-        stream = io.reads.get(path) or io.writes.get(path)
-        if stream is not None and not isinstance(
-            stream, (bytes, CachableAsyncIterator)
-        ):
-            ci = CachableAsyncIterator(stream)
-            if path in io.reads:
-                io.reads[path] = ci
-            elif path in io.writes:
-                io.writes[path] = ci
-            if stdout is stream:
-                stdout = ci
-    return stdout, io
-
-
 async def exit_on_empty(
     stream: AsyncIterator[bytes],
     io: IOResult,
@@ -93,9 +74,6 @@ async def exit_on_empty(
 
 async def drain(stream: ByteSource | None) -> None:
     if stream is None or isinstance(stream, bytes):
-        return
-    if isinstance(stream, CachableAsyncIterator):
-        await stream.drain()
         return
     async for _ in stream:
         pass
@@ -124,16 +102,14 @@ async def close_quietly(stream: ByteSource | None) -> None:
 async def discard_streams(*streams: ByteSource | None) -> None:
     """Discard failed reads without changing normal early-close behavior."""
     for stream in streams:
-        if isinstance(stream, (CachableAsyncIterator, SharedInput)):
+        if isinstance(stream, SharedInput):
             await stream.discard()
         else:
             await close_quietly(stream)
 
 
 async def discard_io(io: IOResult) -> None:
-    await discard_streams(
-        *io.reads.values(), *io.writes.values(), io.stdout, io.stderr
-    )
+    await discard_streams(io.stdout, io.stderr)
 
 
 async def async_chain(

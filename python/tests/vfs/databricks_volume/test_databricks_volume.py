@@ -547,7 +547,6 @@ async def test_workspace_execute_databricks_volume_touch_and_rm():
     assert files.delete_calls == [f"{root}/created.txt"]
     assert f"{root}/created.txt" not in files.downloads
     assert rm_io.exit_code == 0
-    assert rm_io.writes == {"/dbx/created.txt": b""}
 
 
 @pytest.mark.asyncio
@@ -567,10 +566,6 @@ async def test_workspace_execute_databricks_volume_rm_resolves_glob():
     assert f"{root}/one.txt" not in files.downloads
     assert f"{root}/two.txt" not in files.downloads
     assert files.downloads[f"{root}/keep.md"] == b"keep"
-    assert io.writes == {
-        "/dbx/one.txt": b"",
-        "/dbx/two.txt": b"",
-    }
 
 
 @pytest.mark.asyncio

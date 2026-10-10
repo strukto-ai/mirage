@@ -27,6 +27,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gdocsReaddir } from '../../core/gdocs/readdir.ts'
 import { read as gdocsRead } from '../../core/gdocs/read.ts'
 import { stat as gdocsStat } from '../../core/gdocs/stat.ts'
+import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
 
 export interface GDocsVFSState {
   type: string
@@ -70,6 +71,10 @@ export class GDocsVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return gdocsStat(this.accessor, path, index)
+  }
+
+  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
+    return gdocsUnlink(this.accessor, path, index)
   }
 
   override getState(): Promise<GDocsVFSState> {

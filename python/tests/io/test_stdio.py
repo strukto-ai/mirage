@@ -2,7 +2,6 @@ import asyncio
 
 import pytest
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.stdio import Stdio, invoke
 from mirage.io.types import CountedRun, IOResult, materialize
@@ -18,7 +17,7 @@ async def test_interleaved_writers_are_bounded_and_settle_late_status():
         await stdio.stderr.write(b"error" * (CHUNK_SIZE * 2))
         await stdio.stdout.write(b"z")
         done.set()
-        return IOResult(exit_code=7, writes={"/a": b"data"}, cache=["/a"])
+        return IOResult(exit_code=7, counted_runs=[CountedRun((1,), "/a")])
 
     source, io = await invoke(run)
     assert not done.is_set()
@@ -32,7 +31,7 @@ async def test_interleaved_writers_are_bounded_and_settle_late_status():
         events.append(("stdout", data))
     assert done.is_set()
     assert io.exit_code == 7
-    assert io.writes == {"/a": b"data"}
+    assert io.counted_runs == [CountedRun((1,), "/a")]
     assert (
         b"".join(data for channel, data in events if channel == "stdout")
         == b"a" * (CHUNK_SIZE * 8) + b"z"
@@ -228,35 +227,6 @@ async def test_native_and_returned_output_share_order_and_late_status():
 
 
 @pytest.mark.asyncio
-async def test_returned_cache_source_is_lazy_and_remains_drainable_after_close():
-    pulled = []
-    outcome = IOResult(cache=["/file"])
-
-    async def returned():
-        for i in range(10):
-            pulled.append(i)
-            yield bytes([i]) * CHUNK_SIZE
-        outcome.exit_code = 4
-
-    async def run(stdio):
-        source = returned()
-        outcome.reads["/file"] = source
-        return source, outcome
-
-    source, io = await invoke(run)
-    cached = io.reads["/file"]
-    assert isinstance(cached, CachableAsyncIterator)
-    assert not pulled
-    assert await anext(source) == bytes(CHUNK_SIZE)
-    assert pulled == [0]
-    await source.aclose()
-    assert await materialize(cached) == b"".join(
-        bytes([i]) * CHUNK_SIZE for i in range(10)
-    )
-    assert io.exit_code == 4
-
-
-@pytest.mark.asyncio
 async def test_eager_failure_and_decline_finish_before_publication():
     async def fail(stdio):
         raise ValueError("eager")
@@ -271,14 +241,12 @@ async def test_eager_failure_and_decline_finish_before_publication():
 
 @pytest.mark.asyncio
 async def test_returned_generator_publishes_late_diagnostics_and_metadata_once():
-    outcome = IOResult(reads={"early": b"before"}, cache=["early"])
+    outcome = IOResult(counted_runs=[CountedRun((1,), "early")])
     finalized = []
 
     async def returned():
         yield b"prefix"
         outcome.stderr = b"late diagnostic"
-        outcome.writes["late"] = b"after"
-        outcome.cache.append("late")
         outcome.counted_runs = [CountedRun((3,), "late")]
         outcome.exit_code = 5
 
@@ -286,15 +254,13 @@ async def test_returned_generator_publishes_late_diagnostics_and_metadata_once()
         return returned(), outcome
 
     source, io = await invoke(run)
-    assert io.reads == {"early": b"before"}
-    io.output.callbacks.append(lambda: finalized.append(dict(io.writes)))
+    assert io.counted_runs == [CountedRun((1,), "early")]
+    io.output.callbacks.append(lambda: finalized.append(io.counted_runs))
     assert await materialize(source) == b"prefix"
     assert await materialize(io.stderr) == b"late diagnostic"
-    assert io.writes == {"late": b"after"}
-    assert io.cache == ["early", "late"]
     assert io.counted_runs == [CountedRun((3,), "late")]
     assert io.exit_code == 5
-    assert finalized == [{"late": b"after"}]
+    assert finalized == [[CountedRun((3,), "late")]]
     await source.aclose()
     assert len(finalized) == 1
 
@@ -326,19 +292,19 @@ async def test_early_close_retains_cleanup_diagnostic_and_finalizes_once():
             yield b"second"
         finally:
             outcome.stderr = b"finished"
-            outcome.writes["cleanup"] = b"done"
+            outcome.counted_runs = [CountedRun((1,), "cleanup")]
             outcome.exit_code = 0
 
     async def run(stdio):
         return returned(), outcome
 
     source, io = await invoke(run)
-    io.output.callbacks.append(lambda: finalized.append(dict(io.writes)))
+    io.output.callbacks.append(lambda: finalized.append(io.counted_runs))
     assert await anext(source) == b"first"
     await source.aclose()
     assert io.stderr == b"finished"
     assert io.exit_code == 0
-    assert finalized == [{"cleanup": b"done"}]
+    assert finalized == [[CountedRun((1,), "cleanup")]]
 
 
 @pytest.mark.asyncio

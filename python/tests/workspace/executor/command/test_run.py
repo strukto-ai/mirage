@@ -12,21 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import importlib
 import inspect
 
 import pytest
 
-from mirage.cache import context as cache_context
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.observe.record import OpRecord
-from mirage.policy.builtin import output_cap
-from mirage.types import Limit, MountMode, PathSpec
+from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.run import drop_mount_caches
-from tests.fixtures.apply_marks import caching_ram_workspace
 
 
 @pytest.mark.parametrize("cmd", ["ls", "stat", "find", "du", "file"])
@@ -91,130 +86,3 @@ async def test_a_cli_write_drops_every_mount(tmp_path):
     # the executor says the one thing it knows: a write happened.
     _body, _listing, other = await _cli_write_case(tmp_path)
     assert other == "v2\n"
-
-
-@pytest.fixture
-def restore_command_limits():
-    snapshot = dict(output_cap.DEFAULT_COMMAND_LIMITS)
-    yield
-    output_cap.DEFAULT_COMMAND_LIMITS.clear()
-    output_cap.DEFAULT_COMMAND_LIMITS.update(snapshot)
-
-
-def _writes_of(ws: Workspace, path: str) -> list[OpRecord]:
-    return [r for r in ws.vfs.records if r.op == "write" and r.path == path]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("line", "exit_code"),
-    [("echo a | tee /r/f", 0), ("echo a | tee /r/f; sleep 2", 124)],
-    ids=["finished", "timed-out"],
-)
-async def test_no_record_keeps_its_mark_after_the_line(
-    restore_command_limits, line, exit_code
-):
-    output_cap.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.1)
-    ws = caching_ram_workspace()
-    try:
-        result = await ws.shell(line)
-        assert result.exit_code == exit_code
-        assert _writes_of(ws, "/r/f")
-        assert all(r.claimed is None for r in ws.vfs.records)
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_failed_session_save_still_clears_and_seals_the_marks():
-    ws = caching_ram_workspace()
-    applied: list[list[OpRecord]] = []
-    orig_apply = ws._dispatcher.apply_io
-
-    async def keep_records(result, records=None, **kwargs):
-        applied.append(records)
-        await orig_apply(result, records=records, **kwargs)
-
-    async def failing_flush(session_id: str) -> None:
-        raise OSError("session store down")
-
-    ws._dispatcher.apply_io = keep_records
-    ws._session_mgr.flush = failing_flush
-    try:
-        with pytest.raises(OSError, match="session store down"):
-            await ws.shell("echo a | tee /r/f")
-    finally:
-        await ws.close()
-    [records] = applied
-    assert [r for r in records if r.op == "write"]
-    assert all(r.claimed is None and r.sealed for r in records)
-
-
-@pytest.mark.asyncio
-async def test_a_background_write_marked_during_the_session_save_is_cleared():
-    ws = caching_ram_workspace()
-    applied: list[list[OpRecord]] = []
-    orig_apply = ws._dispatcher.apply_io
-    orig_flush = ws._session_mgr.flush
-
-    async def keep_records(result, records=None, **kwargs):
-        applied.append(records)
-        await orig_apply(result, records=records, **kwargs)
-
-    async def flush_after_the_mark(session_id: str) -> None:
-        if len(applied) == 1:
-            for _ in range(500):
-                if any(r.claimed is not None for r in applied[0]):
-                    break
-                await asyncio.sleep(0.01)
-        await orig_flush(session_id)
-
-    ws._dispatcher.apply_io = keep_records
-    ws._session_mgr.flush = flush_after_the_mark
-    try:
-        assert (await ws.shell("echo a | tee /r/f &")).exit_code == 0
-        assert (await ws.shell("wait")).exit_code == 0
-        assert _writes_of(ws, "/r/f")
-        assert all(r.claimed is None and r.sealed for r in ws.vfs.records)
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_background_claimer_ending_after_the_line_marks_nothing(
-    monkeypatch,
-):
-    # The background tee's write records while the line still runs (RAM
-    # stores the bytes and records before it invalidates, with no await
-    # between, so the loop sees the record once it sees the bytes), and the
-    # line persists that record; the tee itself returns only after the gate
-    # opens, past the line's end, when its scope is sealed.
-    real = cache_context.invalidate_after_write
-    gate = asyncio.Event()
-    returned = asyncio.Event()
-
-    async def gated_invalidate(path: PathSpec) -> None:
-        await gate.wait()
-        await real(path)
-        returned.set()
-
-    monkeypatch.setattr(
-        "mirage.core.ram.write.invalidate_after_write", gated_invalidate
-    )
-    ws = caching_ram_workspace()
-    try:
-        result = await asyncio.wait_for(
-            ws.shell(
-                "echo a | tee /r/f & until [ -s /r/f ]; do sleep 0.01; done"
-            ),
-            timeout=5,
-        )
-        assert result.exit_code == 0
-        assert _writes_of(ws, "/r/f")
-        gate.set()
-        assert (await ws.shell("wait")).exit_code == 0
-        assert returned.is_set()
-        assert all(r.claimed is None for r in ws.vfs.records)
-    finally:
-        gate.set()
-        await ws.close()

@@ -558,13 +558,15 @@ async def test_a_read_grant_refuses_link_writes_like_file_writes():
 # mkdir looks its name up first (test_a_read_only_mkdir_answers_what_its_name_holds).
 @pytest.mark.parametrize("op", sorted(POLICY_WRITE_OPS - {"mkdir"}))
 async def test_read_only_admission_precedes_backend_support_and_io(op):
+    # A copy reads its path and writes its destination.
+    dst = {"dst": PathSpec.from_str_path("/ro/copy")} if "copy" in op else {}
     with Workspace({"/ro": (RAMVFS(), MountMode.READ)}) as ws:
         mount = ws.namespace.mount_for("/ro/file")
         mount.ensure_ready = AsyncMock(
             side_effect=AssertionError("backend reached")
         )
         with pytest.raises(ReadOnlyError) as exc:
-            await ws.dispatch(op, PathSpec.from_str_path("/ro/file"))
+            await ws.dispatch(op, PathSpec.from_str_path("/ro/file"), **dst)
         assert exc.value.errno == errno.EROFS
         mount.ensure_ready.assert_not_awaited()
         assert not ws.namespace.is_link("/ro/file")

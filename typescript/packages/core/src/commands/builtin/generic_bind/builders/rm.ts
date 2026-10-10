@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
 import { cpWalk } from '../../generic/cp.ts'
-import { rmWithoutOperands } from '../../generic/rm_cmd.ts'
+import { removeTree, rmWithoutOperands } from '../../generic/rm_cmd.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { mountPoints } from '../../utils/operands.ts'
 import { removalLines } from '../../utils/verbose.ts'
@@ -74,18 +74,31 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
         // rmR/rmdir are resolved lazily so object stores without a real
         // directory-remove op still unlink plain files (mirrors Python).
         if (recursive) {
-          if (verbose) {
-            entryLines = removalLines(
-              await cpWalk(
-                (dir) => ops.readdir(accessor, dir, idx),
-                (spec) => ops.stat(accessor, spec, idx),
-                p,
-                idx,
-              ),
-              p,
-            )
+          const listing = (dir: PathSpec): Promise<string[]> => ops.readdir(accessor, dir, idx)
+          const probe = (spec: PathSpec): Promise<FileStat> => ops.stat(accessor, spec, idx)
+          if (verbose) entryLines = removalLines(await cpWalk(listing, probe, p, idx), p)
+          try {
+            await rmR(accessor, p)
+          } catch (err) {
+            // The dispatcher declines a tree removal the caller's view
+            // restricts: each entry's own removal is judged instead.
+            if (ops.rmR === undefined || (err as { code?: string }).code !== 'ENOTSUP') throw err
+            const { removed, failures } = await removeTree(p, {
+              readdir: listing,
+              stat: probe,
+              unlink: (spec) => unlink(accessor, spec),
+              rmdir: (spec) => rmdir(accessor, spec, idx),
+              links,
+            })
+            entryLines = verbose ? removalLines(removed, p) : []
+            for (const [entry, why] of failures) {
+              errors.push(`rm: cannot remove '${entry.rawPath}': ${fsStrerror(why) ?? String(why)}`)
+            }
+            if (failures.length > 0) {
+              if (verbose) lines.push(...entryLines)
+              continue
+            }
           }
-          await rmR(accessor, p)
           // A removal never crosses into a mount below, so it says so as
           // GNU's --one-file-system does.
           for (const root of mountPoints(opts.ns?.mounts, p.virtual))

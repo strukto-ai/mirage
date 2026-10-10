@@ -22,6 +22,7 @@ from mirage.core.google.client import TokenManager
 from mirage.core.gsheets.read import read as _read
 from mirage.core.gsheets.readdir import readdir as _readdir
 from mirage.core.gsheets.stat import stat as _stat
+from mirage.core.gsheets.unlink import unlink as _unlink
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -80,6 +81,11 @@ class GSheetsVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def unlink(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        await _unlink(self.accessor, path, index)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

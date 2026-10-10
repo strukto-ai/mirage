@@ -25,7 +25,7 @@ import { sessionView, visibleArrays, visibleAssocs } from '../../../session/stat
 import { ExecutionNode } from '../../../types.ts'
 import { fail, recordDelimiter, requireView } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { concat } from '../../../../io/cachable_iterator.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 
 const USAGE =

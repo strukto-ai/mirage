@@ -25,7 +25,6 @@ from mirage.commands.builtin.generic.find import (
 from mirage.commands.builtin.generic_bind.adapter import (
     mount_io,
     with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths
@@ -173,7 +172,7 @@ def make_find(
         # readdir/stat, the same fork the factory builder takes (rung 0).
         if paths_scoped(opts.ns, paths):
             walk_io = with_command_guards(
-                with_policy_guard(io if full else replace(io, stat=stat_light))
+                io if full else replace(io, stat=stat_light)
             )
             stdout, result = await find_walk_generic(
                 paths,

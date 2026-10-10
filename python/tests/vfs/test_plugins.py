@@ -227,9 +227,9 @@ async def test_search_capability_distinguishes_decline_from_no_matches(
         assert result.exit_code == (1 if answer == [] else 0)
         assert vfs.read.await_count == (1 if answer is None else 0)
         vfs.search.assert_awaited_once()
-        args = vfs.search.await_args.args
-        assert args[0].vfs_path == "a.txt"
-        assert args[1] == SearchQuery(
+        called = vfs.search.await_args
+        assert called.args[0].vfs_path == "a.txt"
+        assert called.kwargs["query"] == SearchQuery(
             query="hello",
             options={
                 "grep": {

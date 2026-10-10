@@ -184,23 +184,46 @@ export async function walkEntries<A extends Accessor>(
   return [entries, total]
 }
 
+/**
+ * The native answer, or the walk's where the dispatcher declines it. Mirrors
+ * Python's `_native_or_walk`.
+ */
+async function nativeOrWalk<T>(native: () => Promise<T>, walk: () => Promise<T>): Promise<T> {
+  try {
+    return await native()
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'ENOTSUP') throw err
+    return walk()
+  }
+}
+
 const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  // Hides and path rules turn the native du off upstream (scopedIo),
-  // so the walk is what reports a directory a rule refuses to open.
+  // The dispatcher declines a native du whose tree a hide or a path rule
+  // reaches, and the walk is what reports a directory a rule refuses to open.
   const native = ops.du
   const budget = new WalkBudget(
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
     opts.ns?.mounts,
   )
+  const walkedSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, p)
+  const walkedEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, p)
   const computeSize: ComputeSize =
     native === undefined
-      ? (p) => walkSize(ops, accessor, idx, budget, p)
-      : (p) => native.size(accessor, p, idx)
+      ? walkedSize
+      : (p) =>
+          nativeOrWalk(
+            () => native.size(accessor, p, idx),
+            () => walkedSize(p),
+          )
   const computeEntries: ComputeEntries =
     native === undefined
-      ? (p) => walkEntries(ops, accessor, idx, budget, p)
-      : (p) => native.entries(accessor, p, idx)
+      ? walkedEntries
+      : (p) =>
+          nativeOrWalk(
+            () => native.entries(accessor, p, idx),
+            () => walkedEntries(p),
+          )
 
   return duGeneric(
     paths,

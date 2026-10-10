@@ -4,7 +4,7 @@ import pytest
 
 from mirage import ShellExecution, Workspace
 from mirage.io.cooperative import CHUNK_SIZE
-from mirage.io.types import IOResult
+from mirage.io.types import CountedRun, IOResult
 from mirage.policy import Action, ExecuteResultContext, Policy
 from mirage.shell.console import JobConsole
 from mirage.shell.console.types import Channel
@@ -23,7 +23,7 @@ async def test_events_bound_output_and_keep_final_status_separate():
         await output.emit(Channel.STDERR, b"warning")
         await output.emit(Channel.STDOUT, b"tail")
         finished.set()
-        return IOResult(exit_code=7, writes={"/a": b"saved"})
+        return IOResult(exit_code=7, counted_runs=[CountedRun((1,), "/a")])
 
     execution = ShellExecution(run, ExecutionScope())
     await started.wait()
@@ -34,7 +34,7 @@ async def test_events_bound_output_and_keep_final_status_separate():
     )
     assert await result.materialize_stderr() == b"warning"
     assert result.exit_code == 7
-    assert result.writes == {"/a": b"saved"}
+    assert result.counted_runs == [CountedRun((1,), "/a")]
     assert await (await execution.wait()).materialize_stdout() == b""
 
 
@@ -47,7 +47,7 @@ async def test_collect_awaits_event_observer_and_preserves_output():
         await output.emit(Channel.STDOUT, b"a" * (CHUNK_SIZE * 8))
         await output.emit(Channel.STDERR, b"warning")
         finished.set()
-        return IOResult(exit_code=7, writes={"/a": b"saved"})
+        return IOResult(exit_code=7, counted_runs=[CountedRun((1,), "/a")])
 
     async def observe(event):
         seen.append(event.stream)
@@ -67,7 +67,7 @@ async def test_collect_awaits_event_observer_and_preserves_output():
         assert result.stdout == b"a" * (CHUNK_SIZE * 8)
         assert result.stderr == b"warning"
         assert result.exit_code == 7
-        assert result.writes == {"/a": b"saved"}
+        assert result.counted_runs == [CountedRun((1,), "/a")]
         assert seen == ["stdout"] * 8 + ["stderr"]
         assert await (await execution.wait()).materialize_stdout() == b""
     finally:

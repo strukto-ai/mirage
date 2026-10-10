@@ -18,7 +18,10 @@ from typing import cast
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    dispatched_slots,
+)
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
@@ -101,32 +104,6 @@ def dispatch_io(
         async for chunk in ensure_stream(data):
             yield chunk
 
-    async def write(
-        accessor: Accessor,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await dispatch("write", path, data=data)
-
-    async def pwrite(
-        accessor: Accessor, path: PathSpec, data: bytes, offset: int
-    ) -> None:
-        await dispatch("pwrite", path, data=data, offset=offset)
-
-    async def unlink(accessor: Accessor, path: PathSpec) -> None:
-        await dispatch("unlink", path)
-
-    async def mkdir(
-        accessor: Accessor, path: PathSpec, parents: bool = False
-    ) -> None:
-        await dispatch("mkdir", path, parents=parents)
-
-    async def truncate(
-        accessor: Accessor, path: PathSpec, size: int, no_create: bool = False
-    ) -> None:
-        await dispatch("truncate", path, length=size, no_create=no_create)
-
     return CommandIO(
         readdir=readdir,
         stat=stat,
@@ -136,11 +113,9 @@ def dispatch_io(
         # No cap of its own: a du walk charges each entry to the mount
         # serving it, at that mount's cap (see WalkBudget).
         max_du_entries=None,
-        write=write,
-        pwrite=pwrite,
-        unlink=unlink,
-        mkdir=mkdir,
-        truncate=truncate,
+        **dispatched_slots(
+            dispatch, ("write", "pwrite", "unlink", "mkdir", "truncate")
+        ),
     )
 
 

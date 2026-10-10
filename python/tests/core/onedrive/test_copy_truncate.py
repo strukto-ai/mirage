@@ -342,7 +342,6 @@ async def test_cp_recursive_uses_server_side_folder_copy():
                 flags={"r": True},
             ),
         )
-    assert set(io.writes) == {"/dst/a.txt", "/dst/sub/b.txt"}
 
 
 @pytest.mark.asyncio

@@ -16,10 +16,13 @@ import functools
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
-from mirage.commands.builtin.generic.crossmount.utils import flat_scopes, relay
+from mirage.commands.builtin.generic.crossmount.utils import flat_scopes
 from mirage.commands.builtin.generic.ls import Stat, ls_options
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
+from mirage.commands.builtin.generic_bind.adapter import (
+    dispatched_call,
+    overlaid_stat,
+)
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
@@ -50,7 +53,7 @@ async def relayed_readdir(
         path (PathSpec): Directory addressed by its full virtual path.
         index (IndexCacheStore | None): Unused, see above.
     """
-    names: list[str] = await relay(dispatch, "readdir", path)
+    names: list[str] = await dispatched_call(dispatch, "readdir", path)
     if links is None:
         return names
     return [n for n in names if links.stat_at(n.rstrip("/")) is None]
@@ -74,7 +77,7 @@ async def relayed_stat(
         path (PathSpec): Entry addressed by its full virtual path.
         index (IndexCacheStore | None): Unused, see ``relayed_readdir``.
     """
-    info: FileStat = await relay(dispatch, "stat", path)
+    info: FileStat = await dispatched_call(dispatch, "stat", path)
     name = gnu_basename(path.virtual)
     if name in ("", "/") or info.name == name:
         return info

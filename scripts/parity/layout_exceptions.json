@@ -52,6 +52,7 @@
     "tz_abbrevs": "The tzdata abbreviation table `date` renders %Z from, generated from zoneinfo by scripts/gen_tz_abbrevs.py. Python reads zoneinfo itself and has nothing to mirror; Intl offers no tzdata names, so typescript ships the data.",
     "async_context": "What Python's standard library already provides: AsyncLocalStorage, with a fallback for a runtime without it; Python has contextvars.",
     "base64": "What Python's standard library already provides: Base64 over Uint8Array for every runtime; Python has the base64 module.",
+    "bytes": "concat for Uint8Array chunks, which commands and streams join in many places; Python joins bytes with b''.join.",
     "hash": "What Python's standard library already provides: SHA digests over WebCrypto or node:crypto; Python has hashlib.",
     "hex": "What Python's standard library already provides: Bytes to hex; Python has bytes.hex().",
     "mime": "What Python's standard library already provides: A byte-exact port of the corners of Python's email package (EmailMessage with policy.SMTP) that the himalaya builder rides; Python calls the email package itself.",

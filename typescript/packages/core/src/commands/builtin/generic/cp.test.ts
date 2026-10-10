@@ -223,48 +223,6 @@ describe('cpGeneric guards', () => {
       "cp: will not overwrite just-created '/d/a.txt' with '/y/a.txt'\n",
     )
   })
-
-  it('records writes keyed by destination path', async () => {
-    const files = new Map([
-      ['/a.txt', new Uint8Array([1])],
-      ['/b.txt', new Uint8Array([2])],
-    ])
-    const [, io] = await run(files, new Set(['/d']), ['/a.txt', '/b.txt', '/d'])
-    expect(new Set(Object.keys(io.writes))).toEqual(new Set(['/d/a.txt', '/d/b.txt']))
-  })
-
-  it('a native copy records no reads', async () => {
-    const files = new Map([['/a.txt', new Uint8Array([1])]])
-    const [, io] = await run(files, new Set(), ['/a.txt', '/copy.txt'])
-    expect(Object.keys(io.reads)).toEqual([])
-    expect(io.cache).toEqual([])
-  })
-
-  it('a primitive copy reports no reads', async () => {
-    // Its reads went through the dispatcher, which keeps what it fetched.
-    const files = new Map<string, Uint8Array>([['/a.txt', new Uint8Array([1])]])
-    const { stat } = makeBackend(files, new Set())
-    const readBytes = (p: PathSpec): Promise<Uint8Array> => {
-      const data = files.get(key(p))
-      if (data === undefined) return Promise.reject(enoent(key(p)))
-      return Promise.resolve(data)
-    }
-    const write = (p: PathSpec, data: Uint8Array): Promise<void> => {
-      files.set(key(p), data)
-      return Promise.resolve()
-    }
-    const mkdir = (): Promise<void> => Promise.resolve()
-    const readdir = (): Promise<string[]> => Promise.resolve([])
-    const [, io] = await cpGeneric(
-      [spec('/a.txt'), spec('/copy.txt')],
-      stat,
-      { readBytes, write, mkdir, readdir },
-      cpFlags(),
-    )
-    expect(files.get('/copy.txt')).toEqual(new Uint8Array([1]))
-    expect(io.reads).toEqual({})
-    expect(io.cache).toEqual([])
-  })
 })
 
 interface PrimitiveFails {
@@ -350,8 +308,6 @@ describe('cpGeneric primitive transfer errors', () => {
       "cp: cannot create regular file '/d/a.txt': Operation not supported\n",
     )
     expect(files.get('/src/a.txt')).toEqual(new Uint8Array([1]))
-    expect(Object.keys(io.writes)).toEqual([])
-    expect(Object.keys(io.reads)).toEqual([])
   })
 
   it('recursive read failure still copies the rest of the tree', async () => {
@@ -445,17 +401,6 @@ describe('cpGeneric --backup', () => {
       })
     },
   )
-
-  it('records the backup write', async () => {
-    const files = new Map([
-      ['/a.txt', new Uint8Array([1])],
-      ['/b.txt', new Uint8Array([2])],
-    ])
-    const [, io] = await run(files, new Set(), ['/a.txt', '/b.txt'], {
-      flags: cpFlags({ backup: 'simple' }),
-    })
-    expect(new Set(Object.keys(io.writes))).toEqual(new Set(['/b.txt', '/b.txt~']))
-  })
 
   it('a recursive merge backs up per file entry', async () => {
     const files = new Map([
@@ -854,7 +799,6 @@ for (const native of [false, true]) {
         )
         expect(io.exitCode).toBe(1)
         expect(await io.stderrStr()).toBe("cp: cannot backup '/dst': Permission denied\n")
-        expect(io.writes).toEqual({})
         expect(links).toEqual(new Map([['/dst~', referent]]))
         expect(files).toEqual(original)
       },

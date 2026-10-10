@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/require-await -- Immediately ready producers reproduce event-loop starvation. */
-import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { describe, expect, it } from 'vitest'
 import { AsyncLineIterator } from './async_line_iterator.ts'
 import { chunks } from './cooperative.ts'
@@ -120,7 +119,7 @@ it.each(['mapfile values', 'read -N 131072 value'])(
       ).rejects.toMatchObject({ name: 'AbortError' })
       // Polled rather than read once, because the producer is allowed to
       // close on a later turn than the abort that rejected above:
-      // `CachableIterator.discard` fires the source's `return()` without
+      // `chunks` fires the source's `return()` without
       // awaiting it while a pull is still outstanding, deliberately, so
       // cleanup cannot hang behind a pull that never settles. Reading
       // `closed` right here made the case a race, and CI lost it under
@@ -154,105 +153,6 @@ it('uses the current read signal when reusing buffered stdin', async () => {
   current.abort()
   await expect(reader.readUntil(10, current.signal)).rejects.toMatchObject({ name: 'AbortError' })
   expect(closed).toBe(true)
-})
-
-it('discards cacheable input when a chunk yield aborts', async () => {
-  const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
-  const { chunks } = await import('./cooperative.ts')
-  let closed = false
-  async function* source() {
-    try {
-      yield new Uint8Array(100_000)
-    } finally {
-      closed = true
-    }
-  }
-  const input = new CachableAsyncIterator(source())
-  const controller = new AbortController()
-  await expect(
-    (async () => {
-      for await (const part of chunks(input, controller.signal)) {
-        expect(part.length).toBeGreaterThan(0)
-        controller.abort()
-      }
-    })(),
-  ).rejects.toMatchObject({ name: 'AbortError' })
-  expect(closed).toBe(true)
-  expect(input.bufferedChunks).toHaveLength(0)
-})
-
-it.each(['mapfile values', 'read -N 131072 value', 'cat | wc -l'])(
-  'discards cacheable stdin on %s cancellation',
-  async (command) => {
-    const { Workspace } = await import('../workspace/workspace/workspace.ts')
-    const { getTestParser } = await import('../workspace/fixtures/workspace_fixture.ts')
-    const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
-    const ws = new Workspace({}, { shellParser: await getTestParser() })
-    const controller = new AbortController()
-    let closed = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    async function* source() {
-      try {
-        timer = setTimeout(() => {
-          controller.abort()
-        }, 0)
-        yield ENC.encode('line\n'.repeat(command.startsWith('cat') ? 4_000_000 : 200_000))
-      } finally {
-        closed = true
-      }
-    }
-    const input = new CachableAsyncIterator(source())
-    try {
-      await expect(
-        ws.shell(command, { stdin: input, signal: controller.signal }),
-      ).rejects.toMatchObject({ name: 'AbortError' })
-      expect(closed).toBe(true)
-      expect(input.bufferedChunks).toHaveLength(0)
-    } finally {
-      clearTimeout(timer)
-      await ws.close()
-    }
-  },
-)
-
-it('never caches partial content after a producer fails', async () => {
-  const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
-  const { applyIo } = await import('../cache/file/io.ts')
-  const { IOResult } = await import('./types.ts')
-  async function* source() {
-    yield ENC.encode('partial')
-    throw new Error('read failed')
-  }
-  const input = new CachableAsyncIterator(source())
-  await input.next()
-  await expect(input.next()).rejects.toThrow('read failed')
-  const cache = new RAMFileCacheStore()
-  await applyIo(cache, new IOResult({ reads: { '/bad': input }, cache: ['/bad'] }))
-  expect(await cache.get('/bad')).toBeNull()
-})
-
-it('discards hidden cache reads when a value barrier fails', async () => {
-  const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
-  const { IOResult } = await import('./types.ts')
-  const { applyBarrier, BarrierPolicy } = await import('../shell/barrier.ts')
-  let closed = false
-  async function* source() {
-    try {
-      yield ENC.encode('partial')
-    } finally {
-      closed = true
-    }
-  }
-  const input = new CachableAsyncIterator(source())
-  async function* output() {
-    const step = await input.next()
-    if (!step.done) yield step.value
-    throw new Error('consumer failed')
-  }
-  const io = new IOResult({ reads: { '/remote': input }, cache: ['/remote'] })
-  await expect(applyBarrier(output(), io, BarrierPolicy.VALUE)).rejects.toThrow('consumer failed')
-  expect(closed).toBe(true)
-  expect(input.bufferedChunks).toHaveLength(0)
 })
 
 it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader', async (kind) => {
@@ -346,24 +246,6 @@ describe('chunks under a stalled source', () => {
     await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
     // Landed during the run, not after it had been pulled to its end.
     expect(pulls).toBeLessThan(2_000_000)
-  })
-
-  it('does not wait for a cache discard queued behind the stalled pull', async () => {
-    const { CachableAsyncIterator } = await import('./cachable_iterator.ts')
-    // An async generator queues `return()` behind its pending `next()`, so
-    // the discard of the cache wrapper can only settle once the pull does.
-    async function* stalled(): AsyncGenerator<Uint8Array> {
-      await new Promise<never>(() => undefined)
-      yield new Uint8Array(0)
-    }
-    const input = new CachableAsyncIterator(stalled())
-    const controller = new AbortController()
-    setTimeout(() => {
-      controller.abort()
-    }, 20)
-    const reader = chunks(input, controller.signal)
-    await expect(reader.next()).rejects.toMatchObject({ name: 'AbortError' })
-    expect(input.discarded).toBe(true)
   })
 })
 

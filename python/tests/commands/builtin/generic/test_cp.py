@@ -123,13 +123,6 @@ async def test_duplicate_basenames_keep_the_first_copy():
 
 
 @pytest.mark.asyncio
-async def test_records_writes_by_strip_prefix():
-    files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/d/keep": b"K"}
-    _, io = await _run(files, {"/d"}, ["/a.txt", "/b.txt", "/d"])
-    assert set(io.writes) == {"/d/a.txt", "/d/b.txt"}
-
-
-@pytest.mark.asyncio
 async def test_same_file_via_directory_target_errors():
     files = {"/d/a.txt": b"AAA", "/d/keep": b"K"}
     _, io = await _run(files, {"/d"}, ["/d/a.txt", "/d"])
@@ -147,39 +140,6 @@ async def test_recursive_into_nested_subtree_refused():
     assert io.exit_code == 1
     assert b"into itself" in io.stderr
     assert set(files) == {"/d/a.txt", "/d/sub/d/a.txt"}
-
-
-@pytest.mark.asyncio
-async def test_primitive_copy_reports_no_reads():
-    # Its reads went through the dispatcher, which keeps what it fetched.
-    files = {"/a.txt": b"AAA"}
-    stat, _, _ = _make_backend(files, set())
-
-    async def read_bytes(p) -> bytes:
-        return files[_key(p)]
-
-    async def write(p, data: bytes) -> None:
-        files[_key(p)] = data
-
-    _, io = await cp_generic(
-        [_spec("/a.txt"), _spec("/copy.txt")],
-        stat=stat,
-        strategy=PrimitiveCopy(
-            read_bytes=read_bytes, write=write, mkdir=write, readdir=write
-        ),
-        flags=CpFlags(),
-    )
-    assert files["/copy.txt"] == b"AAA"
-    assert io.reads == {}
-    assert io.cache == []
-
-
-@pytest.mark.asyncio
-async def test_native_copy_records_no_reads():
-    files = {"/a.txt": b"AAA"}
-    _, io = await _run(files, set(), ["/a.txt", "/copy.txt"])
-    assert io.reads == {}
-    assert io.cache == []
 
 
 def _make_primitive(
@@ -268,7 +228,6 @@ async def test_primitive_write_failure_reports_cannot_create():
         b"cp: cannot create regular file '/d/a.txt': Operation not supported\n"
     )
     assert files["/src/a.txt"] == b"AAA"
-    assert io.reads == {}
 
 
 @pytest.mark.asyncio
@@ -352,15 +311,6 @@ async def test_backup_existing_follows_the_numbered_versions(before, backups):
         flags=CpFlags(backup="existing"),
     )
     assert files == {"/a.txt": b"SRC", "/b.txt": b"SRC", **backups}
-
-
-@pytest.mark.asyncio
-async def test_backup_records_write():
-    files = {"/a.txt": b"SRC", "/b.txt": b"DST"}
-    _, io = await _run(
-        files, set(), ["/a.txt", "/b.txt"], flags=CpFlags(backup="simple")
-    )
-    assert set(io.writes) == {"/b.txt", "/b.txt~"}
 
 
 @pytest.mark.asyncio
@@ -728,7 +678,6 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
     )
     assert io.exit_code == 1
     assert io.stderr == b"cp: cannot backup '/dst': Permission denied\n"
-    assert io.writes == {}
     assert links == {"/dst~": referent}
     assert files == {"/src": b"new", "/dst": b"old", "/safe": b"safe"}
 

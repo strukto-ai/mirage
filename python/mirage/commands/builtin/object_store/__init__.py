@@ -17,7 +17,6 @@ from typing import Any
 
 from mirage.commands.builtin.generic_bind.adapter import (
     with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.generic_bind.factory import (
     with_probe_answers,
@@ -37,13 +36,11 @@ OBJECT_STORE_OVERRIDES = {"stat", "rm", "mkdir", "tee", "touch"}
 
 
 def _guarded(io: CommandIO) -> CommandIO:
-    return with_command_guards(with_policy_guard(with_slash_guard(io)))
+    return with_command_guards(with_slash_guard(io))
 
 
 def _answered(io: CommandIO) -> CommandIO:
-    return with_command_guards(
-        with_policy_guard(with_slash_guard(with_probe_answers(io)))
-    )
+    return with_command_guards(with_slash_guard(with_probe_answers(io)))
 
 
 def make_object_store_commands(vfs: str) -> list[Callable[..., Any]]:

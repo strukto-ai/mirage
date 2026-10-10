@@ -1,5 +1,5 @@
-import { closeQuietly, wrapCachableStreams } from './stream.ts'
-import { concat } from './cachable_iterator.ts'
+import { closeQuietly } from './stream.ts'
+import { concat } from '../utils/bytes.ts'
 import { abortable, joinOrAbort } from '../utils/abort.ts'
 import { chunks } from './cooperative.ts'
 import { OutputPipe } from './output.ts'
@@ -98,9 +98,6 @@ export class OutputStream implements AsyncIterableIterator<Uint8Array> {
 
 function copyResult(io: IOResult, outcome: IOResult): void {
   io.streamSource = outcome
-  Object.assign(io.reads, outcome.reads)
-  Object.assign(io.writes, outcome.writes)
-  io.cache.splice(0, io.cache.length, ...outcome.cache)
   io.matchedRuns = outcome.matchedRuns
   io.sizedRuns = outcome.sizedRuns
   io.countedRuns = outcome.countedRuns
@@ -149,7 +146,7 @@ export async function invoke(
       const [returned, resultIO] =
         result instanceof IOResult ? [result.stdout, result] : (result ?? [null, new IOResult()])
       outcome = resultIO
-      ;[source] = wrapCachableStreams(returned, outcome)
+      source = returned
       stderr = outcome.stderr
       copyResult(io, outcome)
       if (

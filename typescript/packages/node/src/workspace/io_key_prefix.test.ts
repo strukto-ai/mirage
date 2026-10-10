@@ -13,35 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { IOResult } from '@struktoai/mirage-core/io/types'
-import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '../workspace.ts'
-
-type ApplyIoFn = (io: IOResult, records?: readonly OpRecord[]) => Promise<void>
-
-function captureIo(ws: Workspace): IOResult[] {
-  const captured: IOResult[] = []
-  const dispatcher = (ws as unknown as { dispatcher: { applyIo: ApplyIoFn } }).dispatcher
-  const orig = dispatcher.applyIo.bind(dispatcher)
-  dispatcher.applyIo = async (io: IOResult, records?: readonly OpRecord[]) => {
-    captured.push(io)
-    return orig(io, records)
-  }
-  return captured
-}
-
-function assertSinglePrefix(captured: IOResult[]): void {
-  for (const io of captured) {
-    const keys = [...Object.keys(io.writes), ...Object.keys(io.reads), ...io.cache]
-    for (const key of keys) {
-      if (key.startsWith('/dev/')) continue
-      expect(key.startsWith('/data/'), key).toBe(true)
-      expect(key.startsWith('/data/data/'), key).toBe(false)
-    }
-  }
-}
 
 describe('io key prefix convention', () => {
   it.each([
@@ -55,27 +29,24 @@ describe('io key prefix convention', () => {
     ['grep x /data/seed.txt > /data/red.txt', null],
     ['cat /data/seed.txt >> /data/app.txt', null],
     ['cat /data/seed.txt | tee /data/piped.txt > /dev/null', null],
-  ])('records mount-relative keys for %s', async (cmd, stdin) => {
+  ])('writes inside the mount for %s', async (cmd, stdin) => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('tee /data/seed.txt > /dev/null', {
       stdin: new TextEncoder().encode('x\ny\n'),
     })
-    const captured = captureIo(ws)
     const result = await ws.shell(
       cmd,
       stdin !== null ? { stdin: new TextEncoder().encode(stdin) } : undefined,
     )
     expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0)
-    assertSinglePrefix(captured)
+    expect(await ws.vfs.exists('/data/data')).toBe(false)
     await ws.close()
   })
 
-  it('2> records a mount-relative key even when the command fails', async () => {
+  it('2> writes inside the mount even when the command fails', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-    const captured = captureIo(ws)
     const result = await ws.shell('cat /data/missing.txt 2> /data/err.txt')
     expect(result.exitCode).not.toBe(0)
-    assertSinglePrefix(captured)
     const back = await ws.shell('cat /data/err.txt')
     expect(back.exitCode).toBe(0)
     expect(new TextDecoder().decode(back.stdout)).toContain('missing.txt')

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import { CHUNK_SIZE } from './cooperative.ts'
 import { invoke } from './stdio.ts'
 import { IOResult, materialize } from './types.ts'
@@ -20,7 +19,7 @@ describe('handler stdio', () => {
       await stdio.stderr.write(new Uint8Array(CHUNK_SIZE * 8).fill(101))
       await stdio.stdout.write(enc.encode('z'))
       done = true
-      return new IOResult({ exitCode: 7, writes: { '/a': enc.encode('data') }, cache: ['/a'] })
+      return new IOResult({ exitCode: 7, countedRuns: [{ values: [1], label: '/a' }] })
     })
     const [source, io] = present(result)
     expect(done).toBe(false)
@@ -34,7 +33,7 @@ describe('handler stdio', () => {
     }
     expect(done).toBe(true)
     expect(io.exitCode).toBe(7)
-    expect(io.writes['/a']).toEqual(enc.encode('data'))
+    expect(io.countedRuns).toEqual([{ values: [1], label: '/a' }])
     expect(
       events
         .filter(([channel]) => channel === 'stdout')
@@ -215,36 +214,6 @@ it('orders native and returned output and delegates lazy exit status', async () 
   expect(io.exitCode).toBe(9)
 })
 
-it('keeps returned cached output lazy and drainable after closing', async () => {
-  const pulled: number[] = []
-  const outcome = new IOResult({ cache: ['/file'] })
-  async function* returned(): AsyncGenerator<Uint8Array> {
-    for (let i = 0; i < 10; i++) {
-      pulled.push(i)
-      yield await Promise.resolve(new Uint8Array(CHUNK_SIZE).fill(i))
-    }
-    outcome.exitCode = 4
-  }
-  const [source, io] = present(
-    await invoke(() => {
-      const returnedSource = returned()
-      outcome.reads['/file'] = returnedSource
-      return [returnedSource, outcome]
-    }),
-  )
-  const cached = io.reads['/file']
-  expect(cached).toBeInstanceOf(CachableAsyncIterator)
-  expect(pulled).toEqual([])
-  const iterator = source as AsyncIterableIterator<Uint8Array>
-  expect((await iterator.next()).value).toEqual(new Uint8Array(CHUNK_SIZE))
-  expect(pulled).toEqual([0])
-  await iterator.return?.()
-  const all = await materialize(present(cached))
-  expect(all.byteLength).toBe(CHUNK_SIZE * 10)
-  expect([...all.subarray(CHUNK_SIZE * 9)]).toEqual(Array<number>(CHUNK_SIZE).fill(9))
-  expect(io.exitCode).toBe(4)
-})
-
 it('finishes eager failures and declined handlers before publication', async () => {
   await expect(
     invoke(() => {
@@ -255,28 +224,24 @@ it('finishes eager failures and declined handlers before publication', async () 
 })
 
 it('publishes late returned diagnostics and metadata once', async () => {
-  const outcome = new IOResult({ reads: { early: enc.encode('before') }, cache: ['early'] })
-  const finalized: Record<string, unknown>[] = []
+  const outcome = new IOResult({ countedRuns: [{ values: [1], label: 'early' }] })
+  const finalized: unknown[] = []
   async function* returned(): AsyncGenerator<Uint8Array> {
     yield await Promise.resolve(enc.encode('prefix'))
     outcome.stderr = enc.encode('late diagnostic')
-    outcome.writes.late = enc.encode('after')
-    outcome.cache.push('late')
     outcome.countedRuns = [{ values: [3], label: 'late' }]
     outcome.exitCode = 5
   }
   const [source, io] = present(await invoke(() => [returned(), outcome]))
-  expect(io.reads).toEqual({ early: enc.encode('before') })
+  expect(io.countedRuns).toEqual([{ values: [1], label: 'early' }])
   present(io.output).callbacks.push(() => {
-    finalized.push({ ...io.writes })
+    finalized.push(io.countedRuns)
   })
   expect(await materialize(source)).toEqual(enc.encode('prefix'))
   expect(await materialize(io.stderr)).toEqual(enc.encode('late diagnostic'))
-  expect(io.writes).toEqual({ late: enc.encode('after') })
-  expect(io.cache).toEqual(['early', 'late'])
   expect(io.countedRuns).toEqual([{ values: [3], label: 'late' }])
   expect(io.exitCode).toBe(5)
-  expect(finalized).toEqual([{ late: enc.encode('after') }])
+  expect(finalized).toEqual([[{ values: [3], label: 'late' }]])
   await (source as AsyncIterableIterator<Uint8Array>).return?.()
   expect(finalized).toHaveLength(1)
 })
@@ -297,27 +262,27 @@ it('retains returned stderr when stdout fails', async () => {
 
 it('retains cleanup diagnostics and finalizes once on early close', async () => {
   const outcome = new IOResult({ exitCode: 1 })
-  const finalized: Record<string, unknown>[] = []
+  const finalized: unknown[] = []
   async function* returned(): AsyncGenerator<Uint8Array> {
     try {
       yield await Promise.resolve(enc.encode('first'))
       yield enc.encode('second')
     } finally {
       outcome.stderr = enc.encode('finished')
-      outcome.writes.cleanup = enc.encode('done')
+      outcome.countedRuns = [{ values: [1], label: 'cleanup' }]
       outcome.exitCode = 0
     }
   }
   const [source, io] = present(await invoke(() => [returned(), outcome]))
   present(io.output).callbacks.push(() => {
-    finalized.push({ ...io.writes })
+    finalized.push(io.countedRuns)
   })
   const iterator = source as AsyncIterableIterator<Uint8Array>
   expect((await iterator.next()).value).toEqual(enc.encode('first'))
   await iterator.return?.()
   expect(io.stderr).toEqual(enc.encode('finished'))
   expect(io.exitCode).toBe(0)
-  expect(finalized).toEqual([{ cleanup: enc.encode('done') }])
+  expect(finalized).toEqual([[{ values: [1], label: 'cleanup' }]])
 })
 
 it('cancels returned output without waiting for a stderr reader', async () => {

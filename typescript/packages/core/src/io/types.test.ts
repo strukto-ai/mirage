@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CachableAsyncIterator } from './cachable_iterator.ts'
 import type { Refusal } from '../types.ts'
 import { type ByteSource, IOResult, materialize } from './types.ts'
 
@@ -37,22 +36,6 @@ describe('materialize', () => {
     const source: ByteSource = toAsync([new Uint8Array([1, 2]), new Uint8Array([3])])
     expect(await materialize(source)).toEqual(new Uint8Array([1, 2, 3]))
   })
-
-  it('actively drains a CachableAsyncIterator (Python parity)', async () => {
-    const ci = new CachableAsyncIterator(
-      toAsync([new TextEncoder().encode('he'), new TextEncoder().encode('llo')]),
-    )
-    expect(new TextDecoder().decode(await materialize(ci))).toBe('hello')
-    expect(ci.exhausted).toBe(true)
-  })
-
-  it('returns buffered bytes for an already-drained CachableAsyncIterator', async () => {
-    const ci = new CachableAsyncIterator(
-      toAsync([new TextEncoder().encode('he'), new TextEncoder().encode('llo')]),
-    )
-    await ci.drain()
-    expect(new TextDecoder().decode(await materialize(ci))).toBe('hello')
-  })
 })
 
 describe('IOResult', () => {
@@ -61,9 +44,6 @@ describe('IOResult', () => {
     expect(io.stdout).toBeNull()
     expect(io.stderr).toBeNull()
     expect(io.exitCode).toBe(0)
-    expect(io.reads).toEqual({})
-    expect(io.writes).toEqual({})
-    expect(io.cache).toEqual([])
     expect(io.streamSource).toBeNull()
   })
 
@@ -94,38 +74,9 @@ describe('IOResult', () => {
     const io = new IOResult({ stdout: new Uint8Array([0xff, 0xfe, 0xfd]) })
     await expect(io.stdoutStr('strict')).rejects.toThrow()
   })
-
-  it('materializeStdout actively drains a CachableAsyncIterator', async () => {
-    const ci = new CachableAsyncIterator(
-      toAsync([new TextEncoder().encode('ab'), new TextEncoder().encode('cd')]),
-    )
-    const io = new IOResult({ stdout: ci })
-    const bytes = await io.materializeStdout()
-    expect(new TextDecoder().decode(bytes)).toBe('abcd')
-    expect(io.stdout).toEqual(bytes)
-  })
 })
 
 describe('IOResult.merge', () => {
-  it('combines reads/writes/cache', async () => {
-    const a = new IOResult({
-      reads: { '/a': new Uint8Array([1]) },
-      writes: { '/x': new Uint8Array([2]) },
-      cache: ['/a'],
-    })
-    const b = new IOResult({
-      reads: { '/b': new Uint8Array([3]) },
-      writes: { '/y': new Uint8Array([4]) },
-      cache: ['/b'],
-      exitCode: 1,
-    })
-    const merged = await a.merge(b)
-    expect(Object.keys(merged.reads).sort()).toEqual(['/a', '/b'])
-    expect(Object.keys(merged.writes).sort()).toEqual(['/x', '/y'])
-    expect(merged.cache).toEqual(['/a', '/b'])
-    expect(merged.exitCode).toBe(1)
-  })
-
   it('concatenates stderr from both sides', async () => {
     const a = new IOResult({ stderr: new TextEncoder().encode('A:') })
     const b = new IOResult({ stderr: new TextEncoder().encode('B') })

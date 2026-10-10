@@ -304,90 +304,38 @@ describe('handleSubshell', () => {
   })
 })
 
-it.each(['abort', 'timeout'])(
-  'discards pipeline cache reads on %s through wrappers',
-  async (kind) => {
-    const { CachableAsyncIterator } = await import('../../io/cachable_iterator.ts')
-    const { asyncChain } = await import('../../io/stream.ts')
-    let closed = false
-    async function* source() {
-      await Promise.resolve()
-      try {
-        yield encode('first')
-        yield encode('rest')
-      } finally {
-        closed = true
-      }
-    }
-    const input = new CachableAsyncIterator(source())
-    const failure =
-      kind === 'abort'
-        ? new DOMException('cancelled', 'AbortError')
-        : new CommandTimeoutError('wc', 1)
-    const execute: ExecuteNodeFn = async (nd, _session, stdin) => {
-      if (nd.text === 'cat')
-        return [
-          asyncChain([input]),
-          new IOResult({ reads: { '/remote': input }, cache: ['/remote'] }),
-          new ExecutionNode({ command: 'cat' }),
-        ]
-      if (stdin === null || stdin instanceof Uint8Array) throw new Error('expected stream')
-      await stdin[Symbol.asyncIterator]().next()
-      throw failure
-    }
-    await expect(
-      handlePipe(
-        execute,
-        [node('cat'), node('wc')],
-        [],
-        new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      ),
-    ).rejects.toBe(failure)
-    expect(closed).toBe(true)
-    expect(input.bufferedChunks).toHaveLength(0)
-  },
-)
-
-it('keeps a cache read drainable after a normal early pipeline exit', async () => {
-  const { CachableAsyncIterator } = await import('../../io/cachable_iterator.ts')
+it.each(['abort', 'timeout'])('closes a pipeline source on %s through wrappers', async (kind) => {
   const { asyncChain } = await import('../../io/stream.ts')
   let closed = false
-  let readSignal: AbortSignal | null = null
   async function* source() {
     await Promise.resolve()
     try {
       yield encode('first')
       yield encode('rest')
-      readSignal?.throwIfAborted()
     } finally {
       closed = true
     }
   }
-  const input = new CachableAsyncIterator(source())
-  const execute: ExecuteNodeFn = async (nd, child, stdin) => {
-    if (nd.text === 'cat') {
-      readSignal = child.frame.abortSignal
-      return [
-        asyncChain([input]),
-        new IOResult({ reads: { '/remote': input }, cache: ['/remote'] }),
-        new ExecutionNode({ command: 'cat' }),
-      ]
-    }
+  const input = source()
+  const failure =
+    kind === 'abort'
+      ? new DOMException('cancelled', 'AbortError')
+      : new CommandTimeoutError('wc', 1)
+  const execute: ExecuteNodeFn = async (nd, _session, stdin) => {
+    if (nd.text === 'cat')
+      return [asyncChain([input]), new IOResult(), new ExecutionNode({ command: 'cat' })]
     if (stdin === null || stdin instanceof Uint8Array) throw new Error('expected stream')
     await stdin[Symbol.asyncIterator]().next()
-    return [encode('first'), new IOResult(), new ExecutionNode({ command: 'head' })]
+    throw failure
   }
-  const session = new SessionState({ sessionId: 'test' })
-  session.shellOptions.pipefail = true
-  const [, io] = await handlePipe(
-    execute,
-    [node('cat'), node('head')],
-    [],
-    new EvaluationContext(session),
-  )
-  expect(io.exitCode).toBe(0)
-  expect(closed).toBe(false)
-  expect(decode(await input.drain())).toBe('firstrest')
+  await expect(
+    handlePipe(
+      execute,
+      [node('cat'), node('wc')],
+      [],
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+    ),
+  ).rejects.toBe(failure)
   expect(closed).toBe(true)
 })
 

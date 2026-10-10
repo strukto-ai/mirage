@@ -7,7 +7,7 @@ from mirage.concurrency.limiter import settle
 from mirage.io.cooperative import chunks
 from mirage.io.output import OutputPipe
 from mirage.io.pipe import CAPACITY
-from mirage.io.stream import close_quietly, wrap_cachable_streams
+from mirage.io.stream import close_quietly
 from mirage.io.types import (
     ByteSource,
     CommandOutput,
@@ -120,9 +120,6 @@ class OutputStream:
 
 def _copy_result(io: IOResult, outcome: IOResult) -> None:
     io._stream_source = outcome
-    io.reads.update(outcome.reads)
-    io.writes.update(outcome.writes)
-    io.cache[:] = outcome.cache
     io.matched_runs = outcome.matched_runs
     io.sized_runs = outcome.sized_runs
     io.counted_runs = outcome.counted_runs
@@ -177,7 +174,6 @@ async def invoke(
                 if result is not None
                 else (None, IOResult())
             )
-            source, outcome = wrap_cachable_streams(source, outcome)
             stderr = outcome.stderr
             _copy_result(io, outcome)
             if (source is None or isinstance(source, bytes)) and (

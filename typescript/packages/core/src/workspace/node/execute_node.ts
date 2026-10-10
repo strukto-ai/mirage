@@ -110,7 +110,7 @@ import type { JobConsole } from '../../shell/console/index.ts'
 import { drained } from '../executor/jobs.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { endShell } from '../executor/traps.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
@@ -448,9 +448,6 @@ async function runPipeline(
   const flipped = new IOResult({
     exitCode: io.exitCode !== 0 ? 0 : 1,
     stderr: io.stderr,
-    reads: io.reads,
-    writes: io.writes,
-    cache: io.cache,
     refusal: io.refusal,
   })
   execNode.exitCode = flipped.exitCode
@@ -483,9 +480,6 @@ async function negated(
   const flipped = new IOResult({
     exitCode: io.exitCode !== 0 ? 0 : 1,
     stderr: io.stderr,
-    reads: io.reads,
-    writes: io.writes,
-    cache: io.cache,
     refusal: io.refusal,
   })
   execNode.exitCode = flipped.exitCode

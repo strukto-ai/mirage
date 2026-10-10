@@ -78,12 +78,32 @@ LINK_ENTRY_OPS = frozenset({"unlink", "rename", "stat"})
 # the file and writing it back whole, so two of these on one path at
 # once could each put back bytes the other had just replaced; the
 # dispatcher runs them one at a time per path, as a kernel's inode lock
-# orders writers to one file.
+# orders writers to one file. A file copy holds both its names, so it
+# never copies a file another writer is halfway through.
 SERIAL_WRITE_OPS = call_names(
     _VFS_CALLS,
-    effects={Effect.WRITE, Effect.REMOVE, Effect.RENAME},
+    effects={Effect.WRITE, Effect.REMOVE, Effect.RENAME, Effect.COPY},
     targets={Target.FILE, Target.ANY},
 )
+
+# Ops whose ``dst`` holds a copy of what their path holds: the path is
+# read and only the ``dst`` written.
+COPY_OPS = call_names(_VFS_CALLS, effects={Effect.COPY})
+
+# Ops whose ``dst`` keyword is a name they create: walked as a create,
+# judged as a write, and on the mount that serves the path.
+DESTINATION_OPS = frozenset({"rename"}) | COPY_OPS
+
+# Ops that reach everything below their paths: a read-only region or a
+# path rule anywhere under one is theirs to answer for.
+SUBTREE_OPS = frozenset(name for name, mark in _CALLS.items() if mark.subtree)
+
+# Ops a backend answers in one call for what a walk does entry by entry.
+# When a hide, the command's path rules or a coded policy reach below
+# the path, the dispatcher declines them (ENOTSUP; a search answers
+# None) and the caller walks, so every entry passes the checks a walk's
+# own calls pass.
+NATIVE_WALK_OPS = SUBTREE_OPS - {"rename"} | COPY_OPS
 
 # Ops that open the regular file they name with O_CREAT, which answers
 # a slash-terminated name (`x/`, only ever a directory) with EISDIR.

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { Recorder } from '../descriptors.ts'
 import { Channel, JobConsole, Tee, Terminal } from './index.ts'
 

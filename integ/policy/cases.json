@@ -177,7 +177,13 @@
     {"op": "explain", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "reason": "blocked line", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "blocked line"}], "refusal": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/locked"}, "expect": {"errno": "EACCES", "reason": "locked file"}},
     {"op": "unregister_policy", "id": "cmd", "expect": {"value": true}},
-    {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}}
+    {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "command": "mkdir -p /data/tree/sub; echo a > /data/tree/a; echo b > /data/tree/sub/b; echo k > /data/tree/keep", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "register_policy", "id": "keep", "paths": ["/data/tree/keep"], "reason": "kept file"},
+    {"op": "exec", "command": "cp -r /data/tree /data/copy", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot open '/data/tree/keep' for reading: Permission denied\n", "refusal": "kept file"}}},
+    {"op": "exec", "command": "find /data/copy | sort", "expect": {"value": {"exit_code": 0, "stdout": "/data/copy\n/data/copy/a\n/data/copy/sub\n/data/copy/sub/b\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "command": "rm -r /data/tree", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '/data/tree/keep': Permission denied\n", "refusal": "kept file"}}},
+    {"op": "exec", "command": "find /data/tree | sort", "expect": {"value": {"exit_code": 0, "stdout": "/data/tree\n/data/tree/keep\n", "stderr": "", "refusal": null}}}
    ]
   },
   {

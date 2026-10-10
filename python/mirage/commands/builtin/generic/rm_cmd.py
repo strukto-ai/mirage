@@ -16,8 +16,13 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import with_write_guards
+from mirage.commands.builtin.generic_bind.adapter import (
+    Operation,
+    mount_io,
+    require_op,
+)
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.utils.paths import descendant_path
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -25,7 +30,8 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import LinkView
 
 
 def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
@@ -46,72 +52,143 @@ def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
     )
 
 
-def make_rm(
+async def remove_tree(
+    root: PathSpec,
     *,
-    vfs: str,
-    unlink: Callable[..., Awaitable[None]],
-) -> Callable[..., Any]:
-    """Build a file-only ``rm`` over an index-threaded unlink.
+    readdir: Callable[[PathSpec], Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    unlink: Callable[[PathSpec], Awaitable[None]],
+    rmdir: Callable[[PathSpec], Awaitable[None]],
+    links: LinkView | None,
+) -> tuple[list[tuple[PathSpec, bool]], list[tuple[PathSpec, OSError]]]:
+    """Remove a directory tree entry by entry, as GNU ``rm -r`` does.
 
-    For backends whose unlink resolves ids through the cache index; the
-    factory rm builder calls ``ops.unlink(path)`` without an
-    index, so those backends bind this wrapper instead. The unlink is
-    wrapped with the same hidden/rule/mode chain the factory gives the
-    generic rm's slots, so this family enforces the session's path
-    axis like the command it stands in for.
+    For a tree whose one-call removal the dispatcher declined, so each
+    removal is judged on its own. An entry that cannot be removed, or a
+    directory that cannot be opened, is a failure, and the directories
+    above it stay without a line of their own, since they are not empty
+    (coreutils 9.7). The links a directory holds go with it.
+
+    Args:
+        root (PathSpec): the directory operand.
+        readdir (Callable): lists a directory's full child paths.
+        stat (Callable): stats a path.
+        unlink (Callable): removes a file or a link.
+        rmdir (Callable): removes an empty directory.
+        links (LinkView | None): the namespace's symlinks.
+
+    Returns:
+        tuple: the removed entries as ``(path, is_dir)``, children
+        first, and each failure with its error.
+    """
+    removed: list[tuple[PathSpec, bool]] = []
+    failures: list[tuple[PathSpec, OSError]] = []
+
+    async def remove(path: PathSpec, is_dir: bool) -> bool:
+        try:
+            if not is_dir:
+                await unlink(path)
+                removed.append((path, False))
+                return True
+            names = await readdir(path)
+        except FS_ERRORS as exc:
+            failures.append((path, exc))
+            return False
+        base = path.virtual.rstrip("/")
+        cleared = True
+        for name in names:
+            child = descendant_path(root, name.rstrip("/"))
+            if links is not None and links.stat_at(child.virtual) is not None:
+                continue
+            try:
+                info = await stat(child)
+            except FileNotFoundError:
+                continue
+            except FS_ERRORS as exc:
+                failures.append((child, exc))
+                cleared = False
+                continue
+            gone = await remove(child, info.type == FileType.DIRECTORY)
+            cleared = cleared and gone
+        for row in links.children(base) if links is not None else []:
+            gone = await remove(
+                descendant_path(root, f"{base}/{row.name}"), False
+            )
+            cleared = cleared and gone
+        if not cleared:
+            return False
+        try:
+            await rmdir(path)
+        except FS_ERRORS as exc:
+            failures.append((path, exc))
+            return False
+        removed.append((path, True))
+        return True
+
+    await remove(root, True)
+    return removed, failures
+
+
+async def _file_rm(
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+) -> tuple[ByteSource | None, IOResult]:
+    """``rm`` over the mount's ``unlink``, for files only.
+
+    Args:
+        accessor (Accessor): Backend handle.
+        paths (list[PathSpec]): The operands.
+        texts (list[str]): Text arguments, unused.
+        opts (CommandOpts): The invocation's options.
+    """
+    fl = FlagView(opts.flags, spec=SPECS["rm"])
+    f = fl.as_bool("f")
+    v = fl.as_bool("v")
+    if not paths:
+        return rm_without_operands(f)
+    io = mount_io(opts)
+    unlink = require_op(io, Operation.UNLINK)
+    paths = await io.resolve_glob(accessor, paths, opts.index)
+    verbose_parts: list[str] = []
+    errors: list[str] = []
+    for p in paths:
+        try:
+            await unlink(accessor, p)
+        except FS_ERRORS as exc:
+            if f and isinstance(exc, (FileNotFoundError, NotADirectoryError)):
+                continue
+            # GNU rm reports the operand and keeps removing the rest.
+            errors.append(
+                f"rm: cannot remove '{p.raw_path}': {fs_strerror(exc)}"
+            )
+            continue
+        except ValueError:
+            if f:
+                continue
+            errors.append(
+                f"rm: cannot remove '{p.raw_path}': No such file or directory"
+            )
+            continue
+        if v:
+            verbose_parts.append(f"removed '{p.raw_path}'")
+    output = format_optional_records(verbose_parts) if v else None
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
+
+
+def make_rm(*, vfs: str) -> Callable[..., Any]:
+    """Build a file-only ``rm`` over the mount's ``unlink``.
+
+    For backends with files and no directories of their own to remove.
+    The unlink goes through the dispatcher, which judges each path and
+    settles the removal.
 
     Args:
         vfs (str): VFS name the command registers under.
-        unlink (Callable): backend unlink ``(accessor, path, index)``.
     """
-    unlink = with_write_guards(unlink)
-
-    @command("rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True)
-    async def rm(
-        accessor: Accessor,
-        paths: list[PathSpec],
-        texts: list[str],
-        opts: CommandOpts,
-    ) -> tuple[ByteSource | None, IOResult]:
-        fl = FlagView(opts.flags, spec=SPECS["rm"])
-        f = fl.as_bool("f")
-        v = fl.as_bool("v")
-        if not paths:
-            return rm_without_operands(f)
-        if opts.io is None:
-            raise TypeError("rm: ran without its mount's table")
-        paths = await opts.io.resolve_glob(accessor, paths, opts.index)
-        verbose_parts: list[str] = []
-        errors: list[str] = []
-        removed: dict[str, ByteSource] = {}
-        for p in paths:
-            try:
-                await unlink(accessor, p, opts.index)
-            except FS_ERRORS as exc:
-                if f and isinstance(
-                    exc, (FileNotFoundError, NotADirectoryError)
-                ):
-                    continue
-                # GNU rm reports the operand and keeps removing the rest.
-                errors.append(
-                    f"rm: cannot remove '{p.raw_path}': {fs_strerror(exc)}"
-                )
-                continue
-            except ValueError:
-                if f:
-                    continue
-                errors.append(
-                    f"rm: cannot remove '{p.raw_path}': "
-                    "No such file or directory"
-                )
-                continue
-            removed[p.mount_path] = b""
-            if v:
-                verbose_parts.append(f"removed '{p.raw_path}'")
-        output = format_optional_records(verbose_parts) if v else None
-        stderr = ("\n".join(errors) + "\n").encode() if errors else None
-        return output, IOResult(
-            writes=removed, stderr=stderr, exit_code=1 if errors else 0
-        )
-
+    rm: Callable[..., Any] = command(
+        "rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True
+    )(_file_rm)
     return rm

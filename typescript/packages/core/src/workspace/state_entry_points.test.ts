@@ -662,7 +662,7 @@ describe('op hooks bind at the dispatcher and the command tier', () => {
   it('preVfs refuses the entry points and handler I/O alike', async () => {
     // The documented boundary (Policy.preVfs): coded op hooks fire at
     // the dispatcher AND for the backend I/O inside a mount command's
-    // handler (withPolicyGuard). Both tiers are pinned so a move of
+    // handler (withCommandGuards). Both tiers are pinned so a move of
     // the boundary is loud.
     const ws = await makeSealedWs([new SealedPaths()])
 
@@ -752,16 +752,17 @@ describe('op hooks bind at the dispatcher and the command tier', () => {
 
   it('shell rm -r admits through preVfs', async () => {
     // The cascade asymmetry closed: a `ws.vfs` rmdir cascade always
-    // admitted per deletion while a shell rm -r admitted nothing. The
-    // shell tree removal now admits the op the backend performs, and
-    // the subtree write-deny refuses it outright.
+    // admitted per deletion while a shell rm -r admitted nothing. Under a
+    // coded preVfs policy the one-call rm_r is declined, so the tree goes
+    // entry by entry, each removal admitted, and a write-deny refuses it.
     const recorder = new OpRecorder()
     const ws = await makeSealedWs([recorder])
     const removed = await ws.shell('rm -r /a/prod')
     expect(removed.exitCode).toBe(0)
-    expect(
-      recorder.asked.some(([op, path, write]) => write && path === '/a/prod' && op === 'rm_r'),
-    ).toBe(true)
+    const writes = recorder.asked.filter(([, , write]) => write)
+    expect(writes).toContainEqual(['unlink', '/a/prod/keep.txt', true])
+    expect(writes).toContainEqual(['rmdir', '/a/prod', true])
+    expect(writes.some(([op]) => op === 'rm_r')).toBe(false)
 
     const sealed = await makeSealedWs([new SealedPaths()])
     const refused = await sealed.shell('rm -r /a/prod')

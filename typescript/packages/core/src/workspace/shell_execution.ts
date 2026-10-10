@@ -1,5 +1,5 @@
 import { makeAbortError } from '../utils/abort.ts'
-import { concat } from '../io/cachable_iterator.ts'
+import { concat } from '../utils/bytes.ts'
 import { OutputPipe } from '../io/output.ts'
 import { CAPACITY } from '../io/pipe.ts'
 import type { OutputEvent } from '../io/types.ts'

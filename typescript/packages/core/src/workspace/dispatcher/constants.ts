@@ -21,12 +21,12 @@ import { type Declaration, Effect, Target } from '../../vfs/types.ts'
 // a VFS function: a link and an extended attribute live on the path's node,
 // never in a backend.
 export const NAMESPACE_CALLS: ReadonlyMap<string, Declaration> = new Map([
-  ['symlink', { effect: Effect.CREATE, target: Target.LINK, creates: false }],
-  ['readlink', { effect: Effect.READ, target: Target.LINK, creates: false }],
-  ['getxattr', { effect: Effect.READ, target: Target.ANY, creates: false }],
-  ['listxattr', { effect: Effect.READ, target: Target.ANY, creates: false }],
-  ['setxattr', { effect: Effect.ATTR, target: Target.ANY, creates: false }],
-  ['removexattr', { effect: Effect.ATTR, target: Target.ANY, creates: false }],
+  ['symlink', { effect: Effect.CREATE, target: Target.LINK, creates: false, subtree: false }],
+  ['readlink', { effect: Effect.READ, target: Target.LINK, creates: false, subtree: false }],
+  ['getxattr', { effect: Effect.READ, target: Target.ANY, creates: false, subtree: false }],
+  ['listxattr', { effect: Effect.READ, target: Target.ANY, creates: false, subtree: false }],
+  ['setxattr', { effect: Effect.ATTR, target: Target.ANY, creates: false, subtree: false }],
+  ['removexattr', { effect: Effect.ATTR, target: Target.ANY, creates: false, subtree: false }],
 ])
 
 // The built-in functions every mount answers, as `BaseVFS` declares them;
@@ -88,10 +88,36 @@ export const SETATTR_KEYS = ['mode', 'uid', 'gid', 'atime', 'mtime'] as const
 // and writing it back whole, so two of these on one path at once could each
 // put back bytes the other had just replaced; the dispatcher runs them one
 // at a time per path, as a kernel's inode lock orders writers to one file.
+// A file copy holds both its names, so it never copies a file another
+// writer is halfway through.
 export const SERIAL_WRITE_OPS = callNames(VFS_CALLS, {
-  effects: [Effect.WRITE, Effect.REMOVE, Effect.RENAME],
+  effects: [Effect.WRITE, Effect.REMOVE, Effect.RENAME, Effect.COPY],
   targets: [Target.FILE, Target.ANY],
 })
+
+// Ops whose `dst` holds a copy of what their path holds: the path is read
+// and only the `dst` written.
+export const COPY_OPS = callNames(VFS_CALLS, { effects: [Effect.COPY] })
+
+// Ops whose `dst` is a name they create: walked as a create, judged as a
+// write, and on the mount that serves the path.
+export const DESTINATION_OPS: ReadonlySet<string> = new Set(['rename', ...COPY_OPS])
+
+// Ops that reach everything below their paths: a read-only region or a
+// path rule anywhere under one is theirs to answer for.
+export const SUBTREE_OPS: ReadonlySet<string> = new Set(
+  [...CALLS].filter(([, mark]) => mark.subtree).map(([name]) => name),
+)
+
+// Ops a backend answers in one call for what a walk does entry by entry.
+// When a hide, the command's path rules or a coded policy reach below the
+// path, the dispatcher declines them (ENOTSUP; a search answers null) and
+// the caller walks, so every entry passes the checks a walk's own calls
+// pass.
+export const NATIVE_WALK_OPS: ReadonlySet<string> = new Set([
+  ...[...SUBTREE_OPS].filter((name) => name !== 'rename'),
+  ...COPY_OPS,
+])
 
 // Ops that open the regular file they name with O_CREAT, which answers a
 // slash-terminated name (`x/`, only ever a directory) with EISDIR.

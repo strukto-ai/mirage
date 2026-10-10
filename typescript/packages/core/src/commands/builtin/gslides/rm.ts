@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { unlink } from '../../../core/gslides/unlink.ts'
 import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
 
-export const GSLIDES_RM = makeRm(VFSName.GSLIDES, unlink)
+export const GSLIDES_RM = makeRm(VFSName.GSLIDES)

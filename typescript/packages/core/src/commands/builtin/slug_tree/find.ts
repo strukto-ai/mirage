@@ -34,12 +34,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { treeHasMtime } from '../../../core/generic/find_eval.ts'
 import { parseFindExpression, type FindExpr } from '../find_parse.ts'
 import { findGeneric } from '../generic/find.ts'
-import {
-  mountIo,
-  resolveGlobOf,
-  withCommandGuards,
-  withPolicyGuard,
-} from '../generic_bind/adapter.ts'
+import { mountIo, resolveGlobOf, withCommandGuards } from '../generic_bind/adapter.ts'
 import { findWalk } from '../generic_bind/builders/find.ts'
 
 const ENC = new TextEncoder()
@@ -141,7 +136,7 @@ export function makeFind<A extends Accessor>(
       // the factory builder takes.
       const result = pathsScoped(opts.ns, resolved)
         ? await findWalk(
-            withCommandGuards(withPolicyGuard(full ? io : { ...io, stat: statLight })),
+            withCommandGuards(full ? io : { ...io, stat: statLight }),
             accessor,
             resolved,
             words,

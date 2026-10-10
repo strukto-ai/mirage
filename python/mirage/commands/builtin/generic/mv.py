@@ -165,7 +165,7 @@ async def _remove_entries(
     stat: StatFn,
     entries: list[tuple[PathSpec, bool]],
     errors: list[str],
-) -> tuple[bool, bool]:
+) -> bool:
     """Remove copied source entries children first, GNU rm style.
 
     A failed removal is reported per entry (``mv: cannot remove ...``) and
@@ -183,11 +183,9 @@ async def _remove_entries(
         errors (list[str]): Collected stderr lines, appended in place.
 
     Returns:
-        tuple[bool, bool]: ``(removed_any, removed_all)`` — whether the
-        source changed at all, and whether it is fully gone.
+        bool: Whether the source is fully gone.
     """
     failed: list[str] = []
-    removed_any = False
     for entry, is_dir in reversed(entries):
         base = entry.virtual.rstrip("/")
         if is_dir and any(f.startswith(base + "/") for f in failed):
@@ -197,15 +195,13 @@ async def _remove_entries(
             await (strategy.rmdir if is_dir else strategy.unlink)(entry)
         except FS_ERRORS as exc:
             if await _entry_gone(strategy, stat, entry, is_dir):
-                removed_any = True
                 continue
             errors.append(
                 f"mv: cannot remove '{entry.raw_path}': {fs_strerror(exc)}"
             )
             failed.append(base)
             continue
-        removed_any = True
-    return removed_any, not failed
+    return not failed
 
 
 async def _holding_path(stat: StatFn, target: PathSpec) -> PathSpec | None:
@@ -268,7 +264,6 @@ async def _exchange_pair(
     src: PathSpec,
     target: PathSpec,
     errors: list[str],
-    writes: dict[str, ByteSource],
     lines: list[str] | None,
 ) -> None:
     """Swap two entries through a staging name (``--exchange``).
@@ -289,7 +284,6 @@ async def _exchange_pair(
         src (PathSpec): First operand of the swap.
         target (PathSpec): Second operand of the swap.
         errors (list[str]): Collected stderr lines, appended in place.
-        writes (dict[str, ByteSource]): Recorded writes, updated in place.
         lines (list[str] | None): Verbose sink; None keeps the swap silent.
     """
     if isinstance(strategy, PrimitiveMove):
@@ -328,14 +322,11 @@ async def _exchange_pair(
             f"'{target.raw_path}': {fs_strerror(exc)}"
         )
         if not restored:
-            writes[holding.mount_path] = b""
             errors.append(
                 f"mv: '{src.raw_path}' left at "
                 f"'{holding.raw_path}' after a failed exchange"
             )
         return
-    writes[src.mount_path] = b""
-    writes[target.mount_path] = b""
     if lines is not None:
         lines.append(f"exchanged '{src.raw_path}' <-> '{target.raw_path}'")
 
@@ -387,8 +378,8 @@ async def mv_generic(
         stdin (ByteSource | None): where ``-i`` reads its answers.
 
     Returns:
-        tuple[ByteSource | None, IOResult]: Verbose output and recorded
-        writes, with per-source coreutils errors on stderr and exit code 1
+        tuple[ByteSource | None, IOResult]: Verbose output, with
+        per-source coreutils errors on stderr and exit code 1
         when any source failed.
     """
     if copies is not None:
@@ -426,7 +417,6 @@ async def mv_generic(
             else None
         ),
     )
-    writes: dict[str, ByteSource] = {}
     lines: list[str] = []
     created: set[str] = set()
     for src, target in copy_targets(
@@ -462,7 +452,6 @@ async def mv_generic(
                 src,
                 target,
                 errors,
-                writes,
                 lines if flags.verbose else None,
             )
             continue
@@ -601,7 +590,6 @@ async def mv_generic(
             stat,
             readdir,
             target,
-            writes,
             errors,
             copies,
         )
@@ -616,11 +604,9 @@ async def mv_generic(
                     f"'{target.raw_path}': {fs_strerror(exc)}"
                 )
                 continue
-            writes[src.mount_path] = b""
-            writes[target.mount_path] = b""
         elif isinstance(strategy, PrimitiveMove):
             entries = await walk(strategy.readdir, stat, src)
-            copied_all, wrote_any = await copy_entries(
+            copied_all = await copy_entries(
                 "mv",
                 strategy,
                 stat,
@@ -630,17 +616,13 @@ async def mv_generic(
                 errors,
                 copies=copies,
             )
-            if wrote_any:
-                writes[target.mount_path] = b""
             if not copied_all:
                 # GNU keeps the whole source tree when any copy failed;
                 # the destination keeps the entries that landed.
                 continue
-            removed_any, removed_all = await _remove_entries(
+            removed_all = await _remove_entries(
                 strategy, stat, entries, errors
             )
-            if removed_any:
-                writes[src.mount_path] = b""
             if not removed_all:
                 # GNU leaves the copied destination in place and reports
                 # the source entries it could not remove.
@@ -662,7 +644,6 @@ async def mv_generic(
                     errors.append(
                         f"mv: cannot remove '{shown_src}': {fs_strerror(exc)}"
                     )
-                    writes[target.mount_path] = b""
                     if not src_is_dir:
                         created.add(key_of(target))
                     continue
@@ -681,8 +662,6 @@ async def mv_generic(
                     f"{changed}{fs_strerror(exc)}"
                 )
                 continue
-            writes[src.mount_path] = b""
-            writes[target.mount_path] = b""
         if not src_is_dir:
             created.add(key_of(target))
         if flags.verbose:
@@ -692,7 +671,6 @@ async def mv_generic(
             lines.append(line)
     output = "\n".join(lines) + "\n" if lines else None
     return output.encode() if output else None, IOResult(
-        writes=writes,
         stderr=stderr_of(errors),
         exit_code=1 if len(errors) > len(accepted) else 0,
     )

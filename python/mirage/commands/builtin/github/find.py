@@ -22,7 +22,6 @@ from mirage.commands.builtin.generic.find import (
 from mirage.commands.builtin.generic_bind.adapter import (
     mount_io,
     with_command_guards,
-    with_policy_guard,
 )
 from mirage.commands.builtin.github.pushdown import resolve_glob
 from mirage.commands.config import CommandOpts, command
@@ -53,7 +52,7 @@ async def find(
     # A truncated tree names only some paths and is never refetched, so it
     # takes the same folder-by-folder walk, which readdir answers per folder.
     if accessor.truncated or paths_scoped(opts.ns, paths):
-        walk = with_command_guards(with_policy_guard(mount_io(opts)))
+        walk = with_command_guards(mount_io(opts))
         return await find_walk_generic(
             paths,
             list(texts),

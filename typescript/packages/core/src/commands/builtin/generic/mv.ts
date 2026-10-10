@@ -171,17 +171,15 @@ async function entryGone(
 // removal is reported per entry ('mv: cannot remove ...') and the remaining
 // entries are still attempted; directories with a failed descendant are
 // skipped silently like GNU, which never reports the not-empty ancestors of
-// a file it could not remove. Returns whether the source changed at all and
-// whether it is fully gone.
+// a file it could not remove. Returns whether the source is fully gone.
 async function removeEntries(
   strategy: PrimitiveMove,
   stat: StatFn,
   src: PathSpec,
   entries: { path: string; isDir: boolean }[],
   errors: string[],
-): Promise<{ removedAny: boolean; removedAll: boolean }> {
+): Promise<boolean> {
   const failed: string[] = []
-  let removedAny = false
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const node = entries[i]
     if (node === undefined) continue
@@ -196,17 +194,13 @@ async function removeEntries(
       else await strategy.unlink(spec)
     } catch (err) {
       if (!isFsError(err)) throw err
-      if (await entryGone(strategy, stat, spec, node.isDir)) {
-        removedAny = true
-        continue
-      }
+      if (await entryGone(strategy, stat, spec, node.isDir)) continue
       errors.push(`mv: cannot remove '${node.path}': ${String(fsStrerror(err))}`)
       failed.push(base)
       continue
     }
-    removedAny = true
   }
-  return { removedAny, removedAll: failed.length === 0 }
+  return failed.length === 0
 }
 
 // An unused sibling of `target` to stage a swap through. The name is probed
@@ -258,7 +252,6 @@ async function exchangePair(
   src: PathSpec,
   target: PathSpec,
   errors: string[],
-  writes: Record<string, ByteSource>,
   lines: string[] | undefined,
 ): Promise<void> {
   if (isPrimitiveMove(strategy)) {
@@ -293,13 +286,10 @@ async function exchangePair(
       `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': ${String(fsStrerror(err))}`,
     )
     if (!restored) {
-      writes[holding.mountPath] = new Uint8Array()
       errors.push(`mv: '${src.rawPath}' left at '${holding.rawPath}' after a failed exchange`)
     }
     return
   }
-  writes[src.mountPath] = new Uint8Array()
-  writes[target.mountPath] = new Uint8Array()
   if (lines !== undefined) lines.push(`exchanged '${src.rawPath}' <-> '${target.rawPath}'`)
 }
 
@@ -367,7 +357,6 @@ export async function mvGeneric(
     suffix: flags.suffix,
     ask: flags.interactive ? prompter('mv', stdin ?? null, errors, accepted) : null,
   }
-  const writes: Record<string, ByteSource> = {}
   const lines: string[] = []
   const created = new Set<string>()
   for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr)) {
@@ -392,15 +381,7 @@ export async function mvGeneric(
       continue
     }
     if (flags.exchange) {
-      await exchangePair(
-        strategy,
-        stat,
-        src,
-        target,
-        errors,
-        writes,
-        flags.verbose ? lines : undefined,
-      )
+      await exchangePair(strategy, stat, src, target, errors, flags.verbose ? lines : undefined)
       continue
     }
     if (keyOf(target).startsWith(keyOf(src) + '/')) {
@@ -511,7 +492,6 @@ export async function mvGeneric(
       stat,
       versionReaddir,
       target,
-      writes,
       errors,
       index,
       copies,
@@ -527,11 +507,9 @@ export async function mvGeneric(
         )
         continue
       }
-      writes[src.mountPath] = new Uint8Array()
-      writes[target.mountPath] = new Uint8Array()
     } else if (isPrimitiveMove(strategy)) {
       const entries = await cpWalk(strategy.readdir, stat, src, index)
-      const { copiedAll, wroteAny } = await copyEntries(
+      const copiedAll = await copyEntries(
         'mv',
         strategy,
         stat,
@@ -542,12 +520,10 @@ export async function mvGeneric(
         index,
         { copies },
       )
-      if (wroteAny) writes[target.mountPath] = new Uint8Array()
       // GNU keeps the whole source tree when any copy failed; the
       // destination keeps the entries that landed.
       if (!copiedAll) continue
-      const { removedAny, removedAll } = await removeEntries(strategy, stat, src, entries, errors)
-      if (removedAny) writes[src.mountPath] = new Uint8Array()
+      const removedAll = await removeEntries(strategy, stat, src, entries, errors)
       // GNU leaves the copied destination in place and reports the source
       // entries it could not remove.
       if (!removedAll) continue
@@ -563,7 +539,6 @@ export async function mvGeneric(
         if (isLandedMove(err)) {
           // Copy landed, source delete lost: GNU's cross-device unlink failure.
           errors.push(`mv: cannot remove '${from}': ${String(fsStrerror(err))}`)
-          writes[target.mountPath] = new Uint8Array()
           if (!srcIsDir) created.add(keyOf(target))
           continue
         }
@@ -579,8 +554,6 @@ export async function mvGeneric(
         errors.push(`mv: cannot move '${from}' to '${to}': ${changed}${String(fsStrerror(err))}`)
         continue
       }
-      writes[src.mountPath] = new Uint8Array()
-      writes[target.mountPath] = new Uint8Array()
     }
     if (!srcIsDir) created.add(keyOf(target))
     if (flags.verbose) {
@@ -593,7 +566,6 @@ export async function mvGeneric(
   return [
     output,
     new IOResult({
-      writes,
       stderr: stderrOf(errors),
       exitCode: errors.length > accepted.length ? 1 : 0,
     }),

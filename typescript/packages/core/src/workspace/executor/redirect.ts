@@ -66,7 +66,7 @@ import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
-import { concat } from '../../io/cachable_iterator.ts'
+import { concat } from '../../utils/bytes.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
 /** Host diagnostics stay separate from redirected shell output. */

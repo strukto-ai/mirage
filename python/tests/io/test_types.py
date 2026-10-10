@@ -14,29 +14,12 @@
 
 import asyncio
 
-from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import IOResult, OpReport
 
 
 async def _async_source(*chunks):
     for chunk in chunks:
         yield chunk
-
-
-def test_ioresult_reads_accepts_bytes():
-    io = IOResult(reads={"/a": b"hello"})
-    assert io.reads["/a"] == b"hello"
-
-
-def test_ioresult_reads_accepts_async_iterator():
-    ait = _async_source(b"chunk")
-    io = IOResult(reads={"/a": ait})
-    assert io.reads["/a"] is ait
-
-
-def test_ioresult_cache_default_empty():
-    io = IOResult()
-    assert io.cache == []
 
 
 def test_op_report_defaults_say_nothing_ran():
@@ -66,36 +49,6 @@ def test_op_report_served_defaults_to_the_owning_mount():
     assert report.bytes is None
 
 
-def test_ioresult_cache_set():
-    io = IOResult(
-        reads={"/a": _async_source(b"x")},
-        cache=["/a"],
-    )
-    assert io.cache == ["/a"]
-
-
-def test_ioresult_merge_combines_cache():
-    async def _run():
-        left = IOResult(cache=["/a"])
-        right = IOResult(cache=["/b"])
-        merged = await left.merge(right)
-        assert merged.cache == ["/a", "/b"]
-
-    asyncio.run(_run())
-
-
-def test_ioresult_merge_mixed_reads():
-    async def _run():
-        left = IOResult(reads={"/a": b"hello"})
-        ait = _async_source(b"x")
-        right = IOResult(reads={"/b": ait})
-        merged = await left.merge(right)
-        assert merged.reads["/a"] == b"hello"
-        assert merged.reads["/b"] is ait
-
-    asyncio.run(_run())
-
-
 def test_ioresult_stdout_defaults_none():
     io = IOResult()
     assert io.stdout is None
@@ -107,17 +60,6 @@ def test_ioresult_materialize_stdout_bytes():
     async def _run():
         io = IOResult(stdout=b"hello")
         assert await io.materialize_stdout() == b"hello"
-
-    asyncio.run(_run())
-
-
-def test_ioresult_materialize_stdout_exhausted_async():
-    async def _run():
-        ci = CachableAsyncIterator(_async_source(b"he", b"llo"))
-        await ci.drain()
-        io = IOResult(stdout=ci)
-        assert await io.materialize_stdout() == b"hello"
-        assert io.stdout == b"hello"
 
     asyncio.run(_run())
 

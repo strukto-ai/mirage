@@ -27,6 +27,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gslidesReaddir } from '../../core/gslides/readdir.ts'
 import { read as gslidesRead } from '../../core/gslides/read.ts'
 import { stat as gslidesStat } from '../../core/gslides/stat.ts'
+import { unlink as gslidesUnlink } from '../../core/gslides/unlink.ts'
 
 export interface GSlidesVFSState {
   type: string
@@ -70,6 +71,10 @@ export class GSlidesVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return gslidesStat(this.accessor, path, index)
+  }
+
+  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
+    return gslidesUnlink(this.accessor, path, index)
   }
 
   override getState(): Promise<GSlidesVFSState> {

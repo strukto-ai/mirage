@@ -211,10 +211,10 @@ describe('object-store write fingerprint (mocked S3)', () => {
   })
 
   it('read-then-write on one line keeps the read token', async () => {
-    // `IOResult.merge` unions a line's reads and writes, and applyIo
-    // caches the read's bytes. If those bytes were stamped with the
-    // write's token the entry would read as fresh forever and the stale
-    // bytes would serve; the next read must see the written content.
+    // A line that reads a file and then writes it caches the read's bytes
+    // first. If those bytes kept the write's token the entry would read as
+    // fresh forever and the stale bytes would serve; the next read must
+    // see the written content instead.
     mock.store.set(BUCKET, 'f.txt', ENC.encode('old\n'))
     const ws = makeWorkspace(FRESH)
     try {

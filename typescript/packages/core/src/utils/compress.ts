@@ -28,7 +28,7 @@ import {
   gzip as pakoGzip,
 } from 'pako'
 import { yieldBytes } from '../io/stream.ts'
-import { concat } from '../io/cachable_iterator.ts'
+import { concat } from './bytes.ts'
 import { CHUNK_SIZE, chunks } from '../io/cooperative.ts'
 
 /**

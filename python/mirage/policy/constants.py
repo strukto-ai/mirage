@@ -40,11 +40,10 @@ WILDCARD = "*"
 
 # Ops that act on a whole subtree at once, so a pure path rule refuses
 # them on the directory that holds its scope or on any ancestor: moving
-# or removing ``/x`` takes ``/x/locked/*`` along. ``rename`` is the
-# dispatcher's; ``rmdir`` removes the scope's own directory; ``rm_r`` is
-# the command tier's recursive remove. The VFS ops here are pinned to
-# what the functions declare by tests/policy/test_constants.py: policy
-# sits below vfs, so it cannot read the declarations itself.
+# or removing ``/x`` takes ``/x/locked/*`` along. ``rmdir`` removes the
+# scope's own directory; ``rm_r`` removes a tree in one call. They are
+# pinned to what the functions declare by tests/policy/test_constants.py:
+# policy sits below vfs, so it cannot read the declarations itself.
 SUBTREE_OPS = frozenset({"rename", "rmdir", "rm_r"})
 
 # Commands whose operand is a whole subtree they move or remove, so a

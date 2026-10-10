@@ -20,9 +20,7 @@ import { createShellParser } from '../shell/parse/index.ts'
 import { ops } from '../test-utils.ts'
 import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { IOResult } from '../io/types.ts'
 import { Mount } from './mount/spec.ts'
-import type { Dispatcher } from './dispatcher/dispatcher.ts'
 
 function boundOf(ws: Workspace, key: string): number | null | undefined {
   const store = ws.cache as unknown as {
@@ -159,35 +157,6 @@ describe('the mount bound reaches the cache through a shell read', () => {
       await ws.shell('cat /slow/a.txt')
       expect(boundOf(ws, '/fast/a.txt')).toBe(30)
       expect(boundOf(ws, '/slow/a.txt')).toBe(90)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  // `applyIo` with no captured function is the embedder's entry point
-  // (`cacheFactsFor`, resolved live). Only `captureCacheFacts`, reached
-  // through a shell line, is exercised by the tests above.
-  it('reads the mount bound at the live cache-facts entry point too', async () => {
-    const ram = new RAMVFS()
-    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace(
-      {
-        '/r': new Mount(ram, {
-          mode: MountMode.WRITE,
-          read: { policy: ReadPolicy.BOUNDED, ttl: 45 },
-        }),
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      // `dispatcher` is private; the embedder reaches this entry point through
-      // `applyIo`, which defaults to `cacheFactsFor`.
-      const disp = (ws as unknown as { dispatcher: Dispatcher }).dispatcher
-      await disp.applyIo(
-        new IOResult({ reads: { '/r/f.txt': ENC.encode('x') }, cache: ['/r/f.txt'] }),
-      )
-      expect(boundOf(ws, '/r/f.txt')).toBe(45)
-      expect(disp.cacheFactsFor('/nowhere/f.txt').cacheable).toBe(false)
     } finally {
       await ws.close()
     }

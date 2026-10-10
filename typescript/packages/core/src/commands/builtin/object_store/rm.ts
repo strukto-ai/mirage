@@ -14,14 +14,15 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, type PathSpec } from '../../../types.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { fsStrerror, innerSuffix, isFsError, withInner } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type CommandOpts, type CommandFn } from '../../config.ts'
 import type { Command, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { cpWalk } from '../generic/cp.ts'
-import { rmWithoutOperands } from '../generic/rm_cmd.ts'
+import { removeTree, rmWithoutOperands } from '../generic/rm_cmd.ts'
 import { requireOp, overMountIo } from '../generic_bind/adapter.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -46,14 +47,15 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
   const rmdir = requireOp(io.rmdir, 'rmdir')
   const rmR = requireOp(io.rmR, 'rmR')
 
-  // Remove one operand, returning a GNU stderr line on failure (null when
+  // Remove one operand, returning GNU stderr lines on failure (none when
   // removed, or skipped under -f) alongside the verbose lines.
   async function rmOne(
     accessor: A,
     path: PathSpec,
     opts: RmOpts,
     index: CommandOpts['index'],
-  ): Promise<[string | null, string[]]> {
+    links: LinkView | null,
+  ): Promise<[string[], string[]]> {
     const label = path.rawPath
     let isDir = false
     try {
@@ -62,35 +64,51 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     } catch (err) {
       if (!isFsError(err)) throw err
       const code = (err as { code?: string }).code
-      if (opts.force && (code === 'ENOENT' || code === 'ENOTDIR')) return [null, []]
-      return [`rm: cannot remove '${label}': ${String(fsStrerror(err))}`, []]
+      if (opts.force && (code === 'ENOENT' || code === 'ENOTDIR')) return [[], []]
+      return [[`rm: cannot remove '${label}': ${String(fsStrerror(err))}`], []]
     }
     try {
       if (isDir) {
         if (opts.recursive) {
+          const listing = (dir: PathSpec): Promise<string[]> =>
+            readdir(accessor, dir, index ?? undefined)
+          const probe = (spec: PathSpec): Promise<FileStat> =>
+            stat(accessor, spec, index ?? undefined)
           const lines = opts.verbose
-            ? removalLines(
-                await cpWalk(
-                  (dir) => readdir(accessor, dir, index ?? undefined),
-                  (spec) => stat(accessor, spec, index ?? undefined),
-                  path,
-                  index ?? undefined,
-                ),
-                path,
-              )
+            ? removalLines(await cpWalk(listing, probe, path, index ?? undefined), path)
             : []
-          await rmR(accessor, path)
-          return [null, lines]
+          try {
+            await rmR(accessor, path)
+          } catch (err) {
+            // The dispatcher declines a tree removal the caller's view
+            // restricts: each entry's own removal is judged instead.
+            if ((err as { code?: string }).code !== 'ENOTSUP') throw err
+            const { removed, failures } = await removeTree(path, {
+              readdir: listing,
+              stat: probe,
+              unlink: (spec) => unlink(accessor, spec),
+              rmdir: (spec) => rmdir(accessor, spec),
+              links,
+            })
+            return [
+              failures.map(
+                ([entry, why]) =>
+                  `rm: cannot remove '${entry.rawPath}': ${String(fsStrerror(why))}`,
+              ),
+              opts.verbose ? removalLines(removed, path) : [],
+            ]
+          }
+          return [[], lines]
         }
         if (opts.removeDir) {
           const children = await readdir(accessor, path, index ?? undefined)
           if (children.length > 0) {
-            return [`rm: cannot remove '${label}': Directory not empty`, []]
+            return [[`rm: cannot remove '${label}': Directory not empty`], []]
           }
           await rmdir(accessor, path)
-          return [null, opts.verbose ? [`removed directory '${label}'`] : []]
+          return [[], opts.verbose ? [`removed directory '${label}'`] : []]
         }
-        return [`rm: cannot remove '${label}': Is a directory`, []]
+        return [[`rm: cannot remove '${label}': Is a directory`], []]
       }
       await unlink(accessor, path)
     } catch (err) {
@@ -98,9 +116,9 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
       // operand, and rm goes on to the rest.
       if (!isFsError(err)) throw err
       const named = withInner(label, innerSuffix(path, err))
-      return [`rm: cannot remove '${named}': ${String(fsStrerror(err))}`, []]
+      return [[`rm: cannot remove '${named}': ${String(fsStrerror(err))}`], []]
     }
-    return [null, opts.verbose ? [`removed '${label}'`] : []]
+    return [[], opts.verbose ? [`removed '${label}'`] : []]
   }
 
   async function rmCommand(
@@ -118,7 +136,6 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
     const verboseParts: string[] = []
     const errors: string[] = []
-    const writes: Record<string, Uint8Array> = {}
     const links = opts.ns?.links ?? null
     for (const p of resolved) {
       // A link typed with a trailing slash is refused, never followed: the
@@ -129,17 +146,14 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
         continue
       }
       // GNU rm reports the operand and keeps removing the rest.
-      const [error, entryLines] = await rmOne(
+      const [failed, entryLines] = await rmOne(
         accessor,
         p,
         { recursive, force, removeDir, verbose },
         opts.index,
+        links,
       )
-      if (error !== null) {
-        errors.push(error)
-        continue
-      }
-      writes[p.mountPath] = new Uint8Array()
+      errors.push(...failed)
       if (verbose) verboseParts.push(...entryLines)
     }
     const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
@@ -147,7 +161,6 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
     return [
       output,
       new IOResult({
-        writes,
         exitCode: errors.length > 0 ? 1 : 0,
         ...(stderr !== undefined ? { stderr } : {}),
       }),

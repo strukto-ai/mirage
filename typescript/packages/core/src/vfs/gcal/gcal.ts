@@ -28,6 +28,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
 import { read as gcalRead } from '../../core/gcal/read.ts'
 import { stat as gcalStat } from '../../core/gcal/stat.ts'
+import { unlink as gcalUnlink } from '../../core/gcal/unlink.ts'
 
 const EXAMPLE_DAY = '2026-08-11'
 
@@ -83,6 +84,10 @@ export class GCalVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return gcalStat(this.accessor, path, index)
+  }
+
+  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
+    return gcalUnlink(this.accessor, path, index)
   }
 
   override getState(): Promise<GCalVFSState> {

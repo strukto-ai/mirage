@@ -485,7 +485,9 @@ describe('the turf mode gates the node table', () => {
       try {
         const mount = ws.namespace.mountFor('/ro/file')
         const ready = vi.spyOn(mount, 'ensureReady').mockRejectedValue(new Error('backend reached'))
-        await expect(ws.dispatch(op, '/ro/file')).rejects.toMatchObject({ code: 'EROFS' })
+        // A copy reads its path and writes its destination.
+        const dst = op.includes('copy') ? [PathSpec.fromStrPath('/ro/copy')] : undefined
+        await expect(ws.dispatch(op, '/ro/file', dst)).rejects.toMatchObject({ code: 'EROFS' })
         expect(ready).not.toHaveBeenCalled()
         expect(ws.namespace.isLink('/ro/file')).toBe(false)
       } finally {

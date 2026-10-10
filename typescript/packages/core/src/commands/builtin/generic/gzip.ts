@@ -36,7 +36,7 @@ import {
   replaceOutput,
   suffixRefusal,
 } from './decompress.ts'
-import { concat } from '../../../io/cachable_iterator.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 interface GzipFlags {
   readonly decompress: boolean
