@@ -87,10 +87,8 @@ class ShellExecution:
         *,
         buffer_bytes: int = CAPACITY,
     ) -> None:
-        self.id = scope.id
         self._cancel = asyncio.Event()
         self._output = ShellOutput(buffer_bytes)
-        self._output.bind_execution(self.id)
         self.events = ShellEvents(self, self._output)
         self._closing: asyncio.Task[None] | None = None
         self._task = asyncio.create_task(self._run(run, scope, cancel))

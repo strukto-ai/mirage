@@ -76,12 +76,10 @@ ETag entries that `stat` reads via a fast path, so a `readdir` followed
 by per-entry `stat` calls (which is what `ls`, FUSE `getattr`, and most
 shell commands trigger) costs one HTTP request instead of N.
 
-## Fingerprinting and Snapshots
+## Snapshots
 
-`supports_snapshot = True`. Per-file fingerprints come from the WebDAV
-`getetag` property, so snapshot drift detection works automatically:
-when a remote file changes, its ETag changes, and Mirage notices on the
-next access.
+A snapshot restores a Nextcloud mount's settings (hand it back at load when it has a
+password, which is not saved); its files are not checked for drift. See the [snapshot support matrix](/home/snapshot#vfs-support-matrix).
 
 ## Example
 

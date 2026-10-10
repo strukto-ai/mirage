@@ -1,5 +1,5 @@
 {
- "baseline": 3902,
+  "baseline": 3900,
  "modules": {
   "execution/context": {
    "typescript_only": {

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
@@ -77,16 +76,14 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
     )
 
     // Now: ls (no args) with cwd = the channel directory, mountPrefix = /slack
-    const out = await invoke(() =>
-      cmd.fn(vfs.accessor, [], [], {
-        stdin: null,
-        flags: {},
-        io: commandIo(vfs),
-        cwd: '/slack/channels/general__C1',
-        mountPrefix: '/slack',
-        index: idx,
-      }),
-    )
+    const out = await cmd.fn(vfs.accessor, [], [], {
+      stdin: null,
+      flags: {},
+      io: commandIo(vfs),
+      cwd: '/slack/channels/general__C1',
+      mountPrefix: '/slack',
+      index: idx,
+    })
     expect(out).not.toBeNull()
     const [bytes] = out as [Uint8Array, unknown]
     const stdout =

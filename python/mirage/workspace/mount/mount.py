@@ -69,8 +69,7 @@ from mirage.core.generic.rewrite import (
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
-from mirage.io.stdio import OutputStream, invoke
-from mirage.io.stream import close_quietly
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     push_mount_context,
@@ -942,7 +941,6 @@ class MountEntry:
         return CommandOpts(
             command=cmd_name,
             stdin=context.stdin,
-            buffer_bytes=context.buffer_bytes,
             flags=flags,
             cwd=PathSpec(
                 virtual=cwd,
@@ -1089,19 +1087,10 @@ class MountEntry:
             else None
         )
         with host_io():
-            return await invoke(
-                lambda stdio: run_with_timeout(
-                    cmd.fn(
-                        self.vfs.accessor,
-                        paths,
-                        texts,
-                        dataclasses.replace(opts, stdio=stdio),
-                    ),
-                    cmd_timeout,
-                    cmd_name,
-                ),
-                opts.stdin,
-                buffer_bytes=context.buffer_bytes,
+            return await run_with_timeout(
+                cmd.fn(self.vfs.accessor, paths, texts, opts),
+                cmd_timeout,
+                cmd_name,
             )
 
     def _wrap_output(

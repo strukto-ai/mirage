@@ -126,23 +126,11 @@ async def drained(
         io (IOResult): its result, its stderr emptied once written.
         exec_node (ExecutionNode): its record.
     """
-    output = io.output
-    previous = output.stderr if output is not None else None
-
-    async def emit_stderr(data: bytes) -> None:
-        exec_node.stderr = (exec_node.stderr or b"") + data
-        await sink.emit(Channel.STDERR, data)
-
-    if output is not None:
-        output.stderr = emit_stderr
     try:
         await pump(sink, Channel.STDOUT, stdout)
     except OSError as exc:
         await failed_read(io, exc, exec_node)
-    finally:
-        if output is not None:
-            output.stderr = previous
-    if output is not None:
+    if io.output is not None:
         exec_node.exit_code = io.exit_code
     stderr = await io.materialize_stderr()
     if stderr:

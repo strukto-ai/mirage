@@ -344,6 +344,36 @@ async def test_a_timed_out_write_still_drops_the_caches():
 
 
 @pytest.mark.asyncio
+async def test_a_canceled_write_still_drops_the_caches():
+    dropped = []
+    entered = asyncio.Event()
+
+    async def drop():
+        dropped.append(True)
+
+    async def send(inv):
+        entered.set()
+        await asyncio.Event().wait()
+
+    spec = CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
+        handlers={"run": CLIHandler(fn=send, write=True)},
+        config_model=TokenConfig,
+    )
+    install = CLIInstall(name="prog", cli=spec, config=TokenConfig(token="t"))
+    calling = asyncio.create_task(
+        handle_cli(
+            install, ["prog", "run"], SessionState("t"), drop_caches=drop
+        )
+    )
+    await entered.wait()
+    calling.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await calling
+    assert dropped == [True]
+
+
+@pytest.mark.asyncio
 async def test_stdin_rides_the_invocation_record():
     # stdin is a field of the one CLIInvocation, never a synthetic
     # flag: a leaf declaring its own --stdin option can no longer be
@@ -1282,55 +1312,18 @@ async def test_argparse_required_positionals_refuse_before_the_handler(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["cli", "mount"])
-async def test_native_writer_routes_interleaved_channels_and_late_status(kind):
-    async def write(stdio):
-        await stdio.stdout.write(b"a" * 100000)
-        await stdio.stderr.write(b"e" * 100000)
-        await stdio.stdout.write(b"z")
-        return IOResult(exit_code=7)
-
-    async def leaf(inv):
-        return await write(inv.stdio)
-
-    @command("writer", vfs="ram", spec=CommandSpec())
-    async def builtin(accessor, paths, texts, opts):
-        return await write(opts.stdio)
-
-    with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
-        if kind == "cli":
-            ws.register_cli(
-                "writer",
-                CLI(
-                    CommandSpec(name="writer"), handlers={"": CLIHandler(leaf)}
-                ),
-            )
-        else:
-            ws.mount("/ram").register_commands([builtin])
-        await ws.shell("cd /ram")
-        result = await ws.shell("writer")
-        assert result.stdout == b"a" * 100000 + b"z"
-        assert result.stderr == b"e" * 100000
-        assert result.exit_code == 7
-        result = await ws.shell("writer 2>&1")
-        assert result.stdout == b"a" * 100000 + b"e" * 100000 + b"z"
-        assert not result.stderr
-        assert result.exit_code == 7
-        await ws.shell("writer > /ram/log 2>&1")
-        result = await ws.shell("cat /ram/log")
-        assert result.stdout == b"a" * 100000 + b"e" * 100000 + b"z"
-
-
-@pytest.mark.asyncio
-async def test_native_writer_closes_on_early_pipeline_consumer_exit():
+async def test_native_output_closes_on_early_pipeline_consumer_exit():
     closed = asyncio.Event()
 
-    async def writer(inv):
+    async def source():
         try:
             while True:
-                await inv.stdio.stdout.write(b"x" * 16384)
+                yield b"x" * 16384
         finally:
             closed.set()
+
+    async def writer(inv):
+        return source(), IOResult()
 
     with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
         ws.register_cli(
@@ -1349,12 +1342,7 @@ async def test_native_cli_unstarted_output_close_joins_producer(timeout):
     closed = asyncio.Event()
 
     async def writer(inv):
-        try:
-            await inv.stdio.stdout.write(b"prefix")
-            await inv.stdio.wait_cancelled()
-            return IOResult()
-        finally:
-            closed.set()
+        return _HeldSource(b"prefix", closed.set), IOResult()
 
     cli = CLI(
         CommandSpec(name="writer"),
@@ -1372,3 +1360,58 @@ async def test_native_cli_unstarted_output_close_joins_producer(timeout):
     )
     await asyncio.wait_for(output.aclose(), 1)
     assert closed.is_set()
+
+
+class _HeldSource:
+    """Yields its bytes once, then waits until it is closed, once."""
+
+    def __init__(self, data, on_close):
+        self._data = data
+        self._on_close = on_close
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._data:
+            data, self._data = self._data, b""
+            return data
+        await asyncio.Event().wait()
+
+    async def aclose(self):
+        if self._on_close is not None:
+            self._on_close()
+            self._on_close = None
+
+
+async def _warning():
+    yield b"warn\n"
+
+
+async def _warns_leaf(inv):
+    return b"out\n", IOResult(stderr=_warning())
+
+
+@command("warns", vfs="ram", spec=CommandSpec())
+async def _warns_builtin(accessor, paths, texts, opts):
+    return b"out\n", IOResult(stderr=_warning())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["cli", "mount"])
+async def test_the_streamed_stderr_of_a_handler_reaches_the_caller(kind):
+    with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
+        if kind == "cli":
+            ws.register_cli(
+                "warns",
+                CLI(
+                    CommandSpec(name="warns"),
+                    handlers={"": CLIHandler(_warns_leaf)},
+                ),
+            )
+        else:
+            ws.mount("/ram").register_commands([_warns_builtin])
+        await ws.shell("cd /ram")
+        result = await ws.shell("warns")
+        assert result.stdout == b"out\n"
+        assert result.stderr == b"warn\n"

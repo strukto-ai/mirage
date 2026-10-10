@@ -81,3 +81,11 @@ export const SUBTREE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'mv
  * tier's probe; `stat` is pinned like SUBTREE_OPS's VFS ops.
  */
 export const METADATA_OPS: ReadonlySet<string> = new Set(['stat', 'exists'])
+
+/**
+ * How much of each stream's start and end a text surface keeps to tell
+ * whether a refusal already says why: the refused command's own diagnostic
+ * sits near the start of a line refused early and near the end of one
+ * refused late, so both ends hold it without the whole output.
+ */
+export const REFUSAL_WINDOW = 4096

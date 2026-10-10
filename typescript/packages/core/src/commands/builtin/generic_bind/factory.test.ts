@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 
 import { describe, expect, it } from 'vitest'
@@ -83,13 +82,13 @@ describe('genericCommands', () => {
         io,
       }
       const paths = name === 'cp' ? [spec('/data'), spec('/copy')] : [spec('/data')]
-      const cold = await invoke(() => command.fn(accessor, paths, [], opts))
+      const cold = await command.fn(accessor, paths, [], opts)
       const coldOut = await materialize(cold?.[0] ?? null)
       expect((await index.get('/mnt/data/a.txt')).entry?.size).toBe(3)
       if (name === 'cp') expect(copied).toEqual(['/mnt/copy/a.txt'])
       else {
         store.connects = 0
-        const warm = await invoke(() => command.fn(accessor, paths, [], opts))
+        const warm = await command.fn(accessor, paths, [], opts)
         expect(await materialize(warm?.[0] ?? null)).toEqual(coldOut)
         expect(store.connects).toBe(0)
       }
@@ -344,7 +343,7 @@ describe('a command with its own stat', () => {
       const command = commands.find((c) => c.name === name)
       if (command === undefined) throw new Error('command missing')
       const opts = { stdin: null, flags: {}, cwd: '/mnt', io: base }
-      const out = await invoke(() => command.fn(new FakeAccessor(), [spec('/a.txt')], [], opts))
+      const out = await command.fn(new FakeAccessor(), [spec('/a.txt')], [], opts)
       return new TextDecoder().decode(await materialize(out?.[0] ?? null))
     }
     const manager = new CacheManager(new RAMFileCacheStore(), null, '/mnt/', true)

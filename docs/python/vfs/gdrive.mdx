@@ -147,7 +147,9 @@ file's Drive revision (`headRevisionId`), and a loaded snapshot pins
 reads to that revision via the Drive Revisions API, so replay serves
 the exact bytes the agent saw. A path the agent wrote carries its write's
 token and no revision: loading checks the live file against that token,
-and replay reads the live file rather than a pinned revision.
+and replay reads the live file rather than a pinned revision. Google Docs,
+Sheets and Slides files carry no revision: loading checks them against the
+live file instead.
 
 ## Cache
 

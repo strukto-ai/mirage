@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer'
 import type { Writable } from 'node:stream'
+import type { Refusal } from '@struktoai/mirage-core/types'
+import { SaidWindow } from '@struktoai/mirage-core/workspace/tools/io_text'
 import type { DaemonClient } from './client.ts'
 import { exitCodeFromResponse, handleResponse } from './output.ts'
 
@@ -76,7 +78,33 @@ export async function consumeStream(
   return terminal
 }
 
-/** Upload stdin and drain output concurrently, retaining cancellation through the final record. */
+/** The refusal record off a completion's result, in core's shape. */
+function refusalOf(result: Record<string, unknown> | null): Refusal | null {
+  const raw = result?.refusal as
+    | {
+        kind: Refusal['kind']
+        reason: string
+        policy: string
+        scope: Refusal['scope']
+        ask_id: string | null
+      }
+    | null
+    | undefined
+  if (raw === null || raw === undefined) return null
+  return {
+    kind: raw.kind,
+    reason: raw.reason,
+    policy: raw.policy,
+    scope: raw.scope,
+    askId: raw.ask_id,
+  }
+}
+
+/**
+ * Upload stdin and drain output concurrently, retaining cancellation through
+ * the final record. When a policy refused part of the line, its reason
+ * follows the output as one line on stderr, as the SSH door prints it.
+ */
 export async function streamShell(
   client: DaemonClient,
   path: string,
@@ -115,21 +143,30 @@ export async function streamShell(
     if (response.body === null) throw new Error('daemon stream ended without a completion record')
     const capturedStdout: Uint8Array[] = []
     const capturedStderr: Uint8Array[] = []
+    const said = new SaidWindow()
     const terminal = await consumeStream(
       response.body,
       (data) => {
-        if (!jsonOutput) return write(process.stdout, data, stop.signal)
-        capturedStdout.push(data)
-        return Promise.resolve()
+        if (jsonOutput) {
+          capturedStdout.push(data)
+          return Promise.resolve()
+        }
+        said.add(data, false)
+        return write(process.stdout, data, stop.signal)
       },
       (data) => {
-        if (!jsonOutput) return write(process.stderr, data, stop.signal)
-        capturedStderr.push(data)
-        return Promise.resolve()
+        if (jsonOutput) {
+          capturedStderr.push(data)
+          return Promise.resolve()
+        }
+        said.add(data, true)
+        return write(process.stderr, data, stop.signal)
       },
     )
     if (terminal.status === 'failed') throw new Error(`shell failed: ${String(terminal.error)}`)
     if (terminal.status === 'canceled') return 130
+    const line = jsonOutput ? '' : said.refusalLine(refusalOf(terminal.result))
+    if (line !== '') await write(process.stderr, Buffer.from(line), stop.signal)
     if (jsonOutput) {
       const result = {
         ...terminal.result,

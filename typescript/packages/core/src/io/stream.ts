@@ -72,6 +72,25 @@ export async function closeQuietly(stream: ByteSource | null): Promise<void> {
   }
 }
 
+/** Own producer cleanup even when its byte iterator was never started. */
+export class OutputStream implements AsyncIterableIterator<Uint8Array> {
+  constructor(
+    private readonly source: AsyncIterator<Uint8Array>,
+    private readonly close: () => Promise<void>,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+  next(): Promise<IteratorResult<Uint8Array>> {
+    return this.source.next()
+  }
+  async return(): Promise<IteratorResult<Uint8Array>> {
+    await this.close()
+    return (await this.source.return?.()) ?? { done: true, value: undefined }
+  }
+}
+
 /** Discard failed reads without changing normal early-consumer close semantics. */
 export async function discardStreams(...streams: (ByteSource | null)[]): Promise<void> {
   for (const stream of new Set(streams)) {

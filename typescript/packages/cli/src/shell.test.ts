@@ -50,7 +50,7 @@ describe('mirage shell', () => {
           res.writeHead(200, { 'content-type': 'application/x-ndjson' }).end(
             [
               { stream: 'stdout', data: Buffer.from([0xe2]).toString('base64') },
-              { stream: 'stderr', data: Buffer.from('diagnostic').toString('base64') },
+              { stream: 'stderr', data: Buffer.from('diagnostic\n').toString('base64') },
               { stream: 'stdout', data: Buffer.from([0x82, 0xac, 0xff, 0]).toString('base64') },
               {
                 status: 'done',
@@ -100,12 +100,12 @@ describe('mirage shell', () => {
             exit_code: 7,
             refusal: { reason: 'test' },
             stdout: '€�\0',
-            stderr: 'diagnostic',
+            stderr: 'diagnostic\n',
           })
           expect(Buffer.concat(err).length).toBe(0)
         } else {
           expect(Buffer.concat(out)).toEqual(Buffer.from([0xe2, 0x82, 0xac, 0xff, 0]))
-          expect(Buffer.concat(err).toString()).toBe('diagnostic')
+          expect(Buffer.concat(err).toString()).toBe('diagnostic\npolicy denied: test\n')
         }
       } finally {
         vi.restoreAllMocks()

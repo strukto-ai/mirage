@@ -58,4 +58,4 @@ const pg = new PostgresVFS({
 
 ## Snapshot behavior
 
-The DSN is redacted on snapshot. Loading a snapshot back requires a config file that supplies a fresh DSN.
+The DSN is redacted on snapshot. Hand the mount back at load (the third argument of `Workspace.load`, or a config over the server and CLI).

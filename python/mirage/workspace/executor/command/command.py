@@ -294,7 +294,6 @@ async def handle_command(
                     else None
                 ),
                 command_limits=registry.command_limits,
-                buffer_bytes=registry.io.buffer_bytes,
                 entries=registry.runtime_entries,
                 dispatch=dispatch,
                 stat_path=(

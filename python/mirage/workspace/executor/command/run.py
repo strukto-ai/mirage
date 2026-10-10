@@ -22,7 +22,6 @@ from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
-from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
@@ -59,10 +58,11 @@ async def exec_node(
     """
     # The node is a recorded artifact (compared by value, serialized via a
     # sync to_dict, sometimes read twice), so the live lazy io.stderr is
-    # materialized to concrete bytes here. On the cross-mount path it is bytes.
+    # materialized to concrete bytes here, and the bytes stay on io so the
+    # caller still reads them. On the cross-mount path it is bytes.
     return ExecutionNode(
         command=cmd_str,
-        stderr=await materialize(io.stderr),
+        stderr=await io.materialize_stderr(),
         exit_code=io.exit_code,
         paths=paths,
     )
@@ -311,7 +311,6 @@ async def run_on_mount(
                     or registry.command_limits.get(cmd_name)
                 ),
                 stdin=stdin,
-                buffer_bytes=registry.io.buffer_bytes,
                 cwd=session.cwd,
                 dispatch=dispatch,
                 session_id=session.session_id,

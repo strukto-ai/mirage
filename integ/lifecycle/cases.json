@@ -4195,191 +4195,6 @@
       ]
     },
     {
-      "id": "native_stream_cli_preserves_stdin_stderr_and_deferred_status",
-      "settings": {
-        "mounts": {
-          "/data": {
-            "vfs": "tracked-stream",
-            "config": {
-              "files": {
-                "/log.txt": "first\nlast\n"
-              },
-              "chunk_size": 6
-            }
-          }
-        },
-        "mode": "read"
-      },
-      "steps": [
-        {
-          "op": "register_stream_cli",
-          "name": "stream-copy",
-          "exit_code": 7,
-          "stderr": "diagnostic\n",
-          "writer": true
-        },
-        {
-          "op": "exec",
-          "command": "cat /data/log.txt | stream-copy",
-          "expect": {
-            "value": {
-              "stdout": "first\nlast\n",
-              "stderr": "diagnostic\n",
-              "exit_code": 7
-            }
-          }
-        },
-        {
-          "op": "stream_cli_stats",
-          "name": "stream-copy",
-          "expect": {
-            "value": {
-              "pulls": 2,
-              "closed": 1
-            }
-          }
-        },
-        {
-          "op": "stream_stats",
-          "path": "/data",
-          "expect": {
-            "value": {
-              "pulls": 2,
-              "closed": 1
-            }
-          }
-        }
-      ]
-    },
-    {
-      "id": "native_stream_cli_pipeline_stops_on_early_consumer_exit",
-      "settings": {
-        "mounts": {
-          "/data": {
-            "vfs": "tracked-stream",
-            "config": {
-              "files": {
-                "/log.txt": "first\nlater\n"
-              },
-              "chunk_size": 6,
-              "repeat": 100000
-            }
-          }
-        },
-        "mode": "read"
-      },
-      "steps": [
-        {
-          "op": "register_stream_cli",
-          "name": "stream-copy",
-          "writer": true
-        },
-        {
-          "op": "exec",
-          "command": "cat /data/log.txt | stream-copy | head -n 1",
-          "expect": {
-            "value": {
-              "stdout": "first\n",
-              "stderr": "",
-              "exit_code": 0
-            }
-          }
-        },
-        {
-          "op": "drain_processes"
-        },
-        {
-          "op": "stream_cli_stats",
-          "name": "stream-copy",
-          "expect": {
-            "value": {
-              "closed": 1
-            }
-          }
-        },
-        {
-          "op": "stream_stats",
-          "path": "/data",
-          "expect": {
-            "value": {
-              "closed": 1
-            }
-          }
-        },
-        {
-          "op": "cached",
-          "path": "/data/log.txt",
-          "expect": {
-            "value": null
-          }
-        }
-      ]
-    },
-    {
-      "id": "native_stream_cli_pipeline_cancels_stalled_backend",
-      "settings": {
-        "mounts": {
-          "/data": {
-            "vfs": "tracked-stream",
-            "config": {
-              "files": {
-                "/log.txt": "first\nlast\n"
-              },
-              "chunk_size": 6,
-              "stall_after": 1
-            }
-          }
-        },
-        "mode": "read"
-      },
-      "steps": [
-        {
-          "op": "register_stream_cli",
-          "name": "stream-copy",
-          "writer": true
-        },
-        {
-          "op": "exec",
-          "command": "cat /data/log.txt | stream-copy | cat",
-          "cancel_after_ms": 30,
-          "expect": {
-            "value": {
-              "aborted": true
-            }
-          }
-        },
-        {
-          "op": "drain_processes"
-        },
-        {
-          "op": "stream_cli_stats",
-          "name": "stream-copy",
-          "expect": {
-            "value": {
-              "closed": 1
-            }
-          }
-        },
-        {
-          "op": "stream_stats",
-          "path": "/data",
-          "expect": {
-            "value": {
-              "pulls": 2,
-              "closed": 1
-            }
-          }
-        },
-        {
-          "op": "cached",
-          "path": "/data/log.txt",
-          "expect": {
-            "value": null
-          }
-        }
-      ]
-    },
-    {
       "id": "sdk_stream_orders_streams_and_keeps_final_status",
       "settings": {
         "mounts": {
@@ -4395,7 +4210,6 @@
           "command": "printf out; printf err >&2; printf 'hé\\000世界'; exit 7",
           "expect": {
             "value": {
-              "has_id": true,
               "bounded": true,
               "events": [
                 {
@@ -4460,7 +4274,6 @@
           "command": "mkdir /work; cd /work; export MARK=kept; echo ready",
           "expect": {
             "value": {
-              "has_id": true,
               "bounded": true,
               "events": [
                 {
@@ -4498,7 +4311,6 @@
           "command": "export QUIET=also-kept",
           "expect": {
             "value": {
-              "has_id": true,
               "bounded": true,
               "events": [],
               "exit_code": 0,
@@ -4544,7 +4356,6 @@
           "stop": "cancel",
           "expect": {
             "value": {
-              "has_id": true,
               "bounded": true,
               "events": [
                 {
@@ -4616,7 +4427,6 @@
           "stop": "close",
           "expect": {
             "value": {
-              "has_id": true,
               "bounded": true,
               "events": [
                 {
@@ -4688,7 +4498,6 @@
           "consume_delay_ms": 1,
           "expect": {
             "value": {
-              "has_id": true,
               "bounded": true,
               "stdout_bytes": 80000,
               "stderr_bytes": 6,

@@ -15,9 +15,8 @@
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
-import type { ExecutionStore } from '@struktoai/mirage-core/execution/base'
 import { OWNERS_PREFIX, WorkspaceRegistry } from './registry.ts'
-import { JobTable } from './jobs.ts'
+import { ExecutionTable } from './jobs.ts'
 import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
@@ -61,8 +60,6 @@ export interface BuildAppOptions {
    * TCP endpoint stays shut unless a port is set.
    */
   sshConfig?: SSHConfig
-  /** Borrowed record storage; the caller closes it. Records do not resume work. */
-  executionStore?: ExecutionStore
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -85,7 +82,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     accountsRequired: authConfig.mode === AuthMode.Jwt,
     owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
   })
-  const jobs = new JobTable(options.executionStore)
+  const jobs = new ExecutionTable()
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {

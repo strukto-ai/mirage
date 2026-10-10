@@ -411,12 +411,7 @@ async def test_native_output_close_joins_producer_and_releases_mount(started):
 
     @command("writer", vfs="ram", spec=CommandSpec())
     async def writer(accessor, paths, texts, opts):
-        try:
-            await opts.stdio.stdout.write(b"prefix")
-            await opts.stdio.wait_cancelled()
-            return IOResult()
-        finally:
-            closed.set()
+        return _HeldSource(b"prefix", closed.set), IOResult()
 
     mount = MountEntry("/", RAMVFS(), MountMode.WRITE)
     mount.register_commands([writer])
@@ -426,3 +421,25 @@ async def test_native_output_close_joins_producer_and_releases_mount(started):
     await asyncio.wait_for(output.aclose(), 1)
     assert closed.is_set()
     await asyncio.wait_for(mount.activity.wait(), 1)
+
+
+class _HeldSource:
+    """Yields its bytes once, then waits until it is closed, once."""
+
+    def __init__(self, data, on_close):
+        self._data = data
+        self._on_close = on_close
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._data:
+            data, self._data = self._data, b""
+            return data
+        await asyncio.Event().wait()
+
+    async def aclose(self):
+        if self._on_close is not None:
+            self._on_close()
+            self._on_close = None

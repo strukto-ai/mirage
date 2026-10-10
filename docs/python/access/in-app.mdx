@@ -131,7 +131,7 @@ restored = await Workspace.load("run.tar")
 await ws.copy() -> Workspace
 ```
 
-A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history and profiles come along. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policies are not copied.
+A deep copy, without a tar in between. RAM and disk mounts are copied, so a write in the copy never reaches the original; a disk mount's copy lives in a new temporary directory. Sessions, history, profiles, workspace-level command limits, secrets declarations and CLIs come along; command limits set on a mount are not copied. Remote backends such as S3 or Redis are shared, so a write through the copy reaches the same bucket. Policy objects and the route policy are not copied.
 
 ```python
 fork = await ws.copy()

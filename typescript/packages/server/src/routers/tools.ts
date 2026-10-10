@@ -39,7 +39,8 @@ interface ToolResponse {
  * tool's input, checked against the same schema MCP checks it against,
  * and the call goes to the table the MCP endpoint serves the session
  * with, so a read over HTTP stamps the file for an edit over MCP and
- * back. Answers the status and body to send.
+ * back. A caller that disconnects cancels the call, as an MCP client's
+ * cancel does. Answers the status and body to send.
  */
 async function callTool(
   mcp: McpEndpoint,
@@ -49,6 +50,7 @@ async function callTool(
   args: unknown,
   sessionId: string | null,
   account: string | null,
+  signal: AbortSignal,
 ): Promise<{ status: number; body: ToolResponse | { detail: string } }> {
   const checked = await fromJsonSchema(input)['~standard'].validate(args)
   if (checked.issues !== undefined) {
@@ -61,7 +63,7 @@ async function callTool(
     return { status: 404, body: { detail: `Tool ${name} not found` } }
   }
   try {
-    const result = await tools.call(name, args as Record<string, unknown>)
+    const result = await tools.call(name, args as Record<string, unknown>, signal)
     return {
       status: 200,
       body: { text: result.content[0]?.text ?? '', is_error: result.isError === true },
@@ -84,6 +86,11 @@ export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps)
       `/v1/workspaces/:wsId/tools/${name}`,
       { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
       async (req, reply) => {
+        const abort = new AbortController()
+        const gone = (): void => {
+          if (!reply.raw.writableFinished) abort.abort()
+        }
+        reply.raw.once('close', gone)
         const { status, body } = await callTool(
           deps.mcp,
           req.params.wsId,
@@ -92,7 +99,10 @@ export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps)
           req.body,
           req.query.session_id ?? null,
           req.account,
-        )
+          abort.signal,
+        ).finally(() => {
+          reply.raw.off('close', gone)
+        })
         return reply.status(status).send(body)
       },
     )

@@ -2,11 +2,12 @@ import { EventEmitter } from 'node:events'
 import type { Readable } from 'node:stream'
 import type { FastifyReply } from 'fastify'
 import { expect, it, vi } from 'vitest'
-import { RAMExecutionStore } from '@struktoai/mirage-core/execution/ram'
-import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
-import { Channel } from '@struktoai/mirage-core/shell/console/types'
-import { JobTable } from './jobs.ts'
+import { ExecutionTable } from './jobs.ts'
+import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
+import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import { MAX_FINISHED_JOBS } from './constants.ts'
 import { UploadStdin } from './stdin.ts'
 import { ShellOutput, shellResponse } from './stream.ts'
 
@@ -21,7 +22,7 @@ function gate() {
 it('a larger output buffer accepts more without a reader', async () => {
   const output = new ShellOutput(CAPACITY * 2)
   const data = Uint8Array.from({ length: CAPACITY }, (_, i) => i % 256)
-  await output.emit(Channel.STDOUT, data)
+  await output.emit('stdout', data)
   output.pipe.end()
   const encoded: Uint8Array[] = []
   for await (const chunk of output.pipe.stream()) encoded.push(chunk)
@@ -37,12 +38,11 @@ it('a larger output buffer accepts more without a reader', async () => {
   expect(Buffer.concat(records.map((record) => Buffer.from(record.data, 'base64')))).toEqual(
     Buffer.from(data),
   )
-  await output.close()
 })
 
 it('ending a blocked write leaves only complete wire records', async () => {
   const output = new ShellOutput()
-  const writing = output.emit(Channel.STDOUT, new Uint8Array(65536).fill(120))
+  const writing = output.emit('stdout', new Uint8Array(65536).fill(120))
   const interrupted = expect(writing).rejects.toThrow()
   await new Promise((resolve) => setTimeout(resolve, 0))
   output.pipe.end()
@@ -63,30 +63,20 @@ it('ending a blocked write leaves only complete wire records', async () => {
   expect(prefix.byteLength).toBeGreaterThan(0)
   expect(prefix.byteLength).toBeLessThan(65536)
   expect(prefix).toEqual(Buffer.alloc(prefix.byteLength, 120))
-  await output.close()
 })
 
-it('disconnect joins cleanup and closes transport even when the record store fails', async () => {
+it('disconnect cancels the job and joins its cleanup before closing the transport', async () => {
   const entered = gate(),
     cleanup = gate(),
     release = gate()
-  class BrokenStore extends RAMExecutionStore {
-    offline = false
-    override async get(id: string): Promise<ExecutionRecord | null> {
-      if (this.offline) throw new Error('storage unavailable')
-      return super.get(id)
-    }
-  }
-  const store = new BrokenStore()
-  const table = new JobTable(store)
+  const table = new ExecutionTable()
   const output = new ShellOutput()
-  const closed = vi.spyOn(output, 'close')
-  const job = await table.submit(
+  const job = table.submit(
     'workspace',
     'held',
     async (signal, scope) => {
       await scope.start()
-      await output.emit(Channel.STDOUT, new TextEncoder().encode('prefix'))
+      await output.emit('stdout', new TextEncoder().encode('prefix'))
       entered.release()
       try {
         await new Promise<void>((_, reject) => {
@@ -123,28 +113,27 @@ it('disconnect joins cleanup and closes transport even when the record store fai
   shellResponse(output, table, job, reply, Promise.resolve(undefined), undefined)
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
+  let ended = false
   const reading = (async () => {
     for await (const chunk of body) expect(chunk).toBeDefined()
-  })()
-  const failed = expect(reading).rejects.toThrow('storage unavailable')
-  store.offline = true
+  })().finally(() => {
+    ended = true
+  })
   raw.emit('close')
   await cleanup.wait
-  expect(closed).not.toHaveBeenCalled()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(ended).toBe(false)
   release.release()
-  await failed
-  expect(closed).toHaveBeenCalledOnce()
+  await reading
   expect(raw.listenerCount('close')).toBe(0)
-  expect(log.error).toHaveBeenCalled()
-  store.offline = false
+  expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
   await table.close()
-  await store.close()
 })
 
 it('the final record waits for the upload to end', async () => {
   const uploaded = gate()
-  const table = new JobTable(new RAMExecutionStore())
-  const job = await table.submit(
+  const table = new ExecutionTable()
+  const job = table.submit(
     'workspace',
     'true',
     async (_signal, scope) => {
@@ -177,6 +166,43 @@ it('the final record waits for the upload to end', async () => {
   expect(records.join('')).not.toContain('"status"')
   uploaded.release()
   await reading
+  expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
+    status: 'done',
+  })
+  await table.close()
+})
+
+it('the final record survives its eviction', async () => {
+  const finish = gate()
+  const table = new ExecutionTable()
+  const work = async (_signal: AbortSignal, scope: ExecutionScope): Promise<JsonValue> => {
+    await scope.start()
+    await finish.wait
+    return { exit_code: 0 }
+  }
+  const job = table.submit('workspace', 'held', work, 'session')
+  let source: Readable | undefined
+  const reply = {
+    raw: new EventEmitter(),
+    log: { error: vi.fn(), debug: vi.fn() },
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  shellResponse(new ShellOutput(), table, job, reply, Promise.resolve(undefined), undefined)
+  for (let i = 0; i < MAX_FINISHED_JOBS; i++) table.submit('workspace', 'other', work, 'session')
+  if (source === undefined) throw new Error('response did not send a stream')
+  const body = source
+  const records: string[] = []
+  const reading = (async () => {
+    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+  })()
+  finish.release()
+  await reading
+  expect(table.get(job.id)).toBeNull()
   expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
     status: 'done',
   })

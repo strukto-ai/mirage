@@ -6,7 +6,6 @@ from dataclasses import replace
 from threading import RLock
 
 from mirage.execution.context import run_with_execution
-from mirage.execution.types import ExecutionIdentity
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 
 logger = logging.getLogger(__name__)
@@ -33,14 +32,7 @@ class ProcessHandle:
         self._cancel_children = cancel_children
         self._completion: Future[ProcessInfo] = Future()
         self.task = asyncio.create_task(
-            run_with_execution(
-                ExecutionIdentity(
-                    info.execution_id,
-                    info.parent_execution_id,
-                    info.root_execution_id,
-                ),
-                run,
-            )
+            run_with_execution(info.execution_id, run)
         )
         self.task.add_done_callback(self._settle)
 

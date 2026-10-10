@@ -67,12 +67,6 @@ jobs:
             # Shared utils/abort primitives stay in both whole-host filters
             # and runtime; workspace/abort owns only line orchestration.
             core:
-              # Shared execution stores also feed hosted request tracking.
-              - 'python/mirage/execution/**'
-              - 'python/mirage/workspace/shell_execution.py'
-              - 'python/mirage/io/output.py'
-              - 'python/mirage/io/config.py'
-              - 'python/mirage/server/mcp/progress.py'
               - 'integ/**'
               - 'data/**'
               - 'python/**'
@@ -81,11 +75,6 @@ jobs:
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             ts:
-              - 'typescript/packages/node/src/execution/**'
-              - 'typescript/packages/core/src/workspace/shell_execution.ts'
-              - 'typescript/packages/core/src/io/output.ts'
-              - 'typescript/packages/core/src/io/config.ts'
-              - 'typescript/packages/server/src/mcp/progress.ts'
               - 'integ/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'

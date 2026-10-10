@@ -16,7 +16,6 @@
 // python/tests/commands/builtin/github/test_rg_search.py, at the seam
 // between narrowScope and the generic scan.
 
-import { invoke } from '../../../io/stdio.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as RgModule from '../generic/rg.ts'
 
@@ -83,7 +82,7 @@ async function runRg(
   const cmd = GITHUB_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
   const opts: CommandOpts = { stdin: null, flags, cwd: '/' }
-  const result = await invoke(() => cmd.fn(makeAccessor(), [scope()], ['needle'], opts))
+  const result = await cmd.fn(makeAccessor(), [scope()], ['needle'], opts)
   return result === null ? null : [await materialize(result[0]), result[1]]
 }
 
@@ -92,7 +91,7 @@ async function exactFileSet(flags: CommandOpts['flags']): Promise<unknown> {
   if (cmd === undefined) throw new Error('rg not registered')
   const root = new PathSpec({ virtual: '/', directory: '/', vfsPath: '' })
   const opts: CommandOpts = { stdin: null, flags, cwd: '/', index: null }
-  const result = await invoke(() => cmd.fn(makeAccessor(), [root], ['import'], opts))
+  const result = await cmd.fn(makeAccessor(), [root], ['import'], opts)
   await materialize(result?.[0] ?? null)
   return narrow.mock.calls[0]?.[7]
 }

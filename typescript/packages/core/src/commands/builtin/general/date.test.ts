@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
@@ -30,13 +29,11 @@ async function runDate(
   const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-      stdin: null,
-      flags,
-      cwd: '/',
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+    stdin: null,
+    flags,
+    cwd: '/',
+  })
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''
@@ -51,13 +48,11 @@ async function runDateIo(
   const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-      stdin: null,
-      flags,
-      cwd: '/',
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+    stdin: null,
+    flags,
+    cwd: '/',
+  })
   if (result === null) return ['', '', 0]
   const [out, io] = result
   const buf =
@@ -116,14 +111,12 @@ async function runDateEnv(
   const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-      stdin: null,
-      flags,
-      cwd: '/',
-      env,
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+    stdin: null,
+    flags,
+    cwd: '/',
+    env,
+  })
   if (result === null) return ['', '', 0]
   const [out, io] = result
   const buf =
@@ -185,13 +178,11 @@ async function runDateStderr(d: string): Promise<[string, number]> {
   const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-      stdin: null,
-      flags: { date: d },
-      cwd: '/',
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+    stdin: null,
+    flags: { date: d },
+    cwd: '/',
+  })
   if (result === null) throw new Error('date returned no result')
   await materialize(result[0])
   const [, io] = result

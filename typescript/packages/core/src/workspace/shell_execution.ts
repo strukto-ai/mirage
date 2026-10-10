@@ -72,7 +72,6 @@ class ShellEvents implements AsyncIterableIterator<OutputEvent> {
 
 /** A shell invocation and bounded single-reader events. Drain events before wait(). */
 export class ShellExecution {
-  readonly id: string
   readonly events: ShellEvents
   private readonly controller = new AbortController()
   private readonly output: ShellOutput
@@ -86,9 +85,7 @@ export class ShellExecution {
     signal?: AbortSignal,
     bufferBytes = CAPACITY,
   ) {
-    this.id = scope.id
     this.output = new ShellOutput(bufferBytes)
-    this.output.bindExecution(this.id)
     this.events = new ShellEvents(this, this.output)
     const combined =
       signal === undefined

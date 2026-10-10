@@ -455,6 +455,52 @@ class ShellChannel:
         return status
 
 
+async def open_login(
+    registry: WorkspaceRegistry,
+    process: asyncssh.SSHServerProcess[str],
+    door: str,
+) -> tuple[WorkspaceEntry, str] | None:
+    """The login's workspace and a fresh session opened in it.
+
+    The session runs under the login key's profile, else the workspace's
+    default, with the environment an ``ssh`` login gets. A login whose
+    workspace is out of reach, or whose session cannot open, is told why
+    and its channel exits 1.
+
+    Args:
+        registry (WorkspaceRegistry): the daemon's workspaces.
+        process (asyncssh.SSHServerProcess[str]): the channel's process.
+        door (str): the channel's kind, for the log.
+
+    Returns:
+        tuple[WorkspaceEntry, str] | None: the workspace and the session
+        id, or None once the channel has exited.
+    """
+    workspace_id = process.get_extra_info("username")
+    entry = login_entry(
+        registry, process.channel.get_connection(), workspace_id
+    )
+    if entry is None:
+        process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
+        process.exit(1)
+        return None
+    session_id = new_session_id()
+    runner = entry.runner
+    try:
+        profile = key_profile(process.channel.get_connection())
+        await runner.call(
+            open_session(runner.ws, session_id, login_env(process), profile)
+        )
+    except Exception as exc:
+        logger.warning(
+            "%s: cannot open a session on %s: %r", door, workspace_id, exc
+        )
+        process.stderr.write(f"mirage: cannot open a session: {exc}\n")
+        process.exit(1)
+        return None
+    return entry, session_id
+
+
 async def handle_process(
     registry: WorkspaceRegistry, process: asyncssh.SSHServerProcess[str]
 ) -> None:
@@ -467,33 +513,15 @@ async def handle_process(
         registry (WorkspaceRegistry): the daemon's workspaces.
         process (asyncssh.SSHServerProcess[str]): the channel's process.
     """
-    workspace_id = process.get_extra_info("username")
     if process.subsystem is not None:
         process.stderr.write(
             f"mirage: unsupported subsystem: {process.subsystem}\n"
         )
         process.exit(1)
         return
-    entry = login_entry(
-        registry, process.channel.get_connection(), workspace_id
-    )
-    if entry is None:
-        process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
-        process.exit(1)
+    opened = await open_login(registry, process, "ssh")
+    if opened is None:
         return
-    session_id = new_session_id()
-    runner = entry.runner
-    try:
-        profile = key_profile(process.channel.get_connection())
-        await runner.call(
-            open_session(runner.ws, session_id, login_env(process), profile)
-        )
-    except Exception as exc:
-        logger.warning(
-            "ssh: cannot open a session on %s: %r", workspace_id, exc
-        )
-        process.stderr.write(f"mirage: cannot open a session: {exc}\n")
-        process.exit(1)
-        return
+    entry, session_id = opened
     status = await ShellChannel(registry, entry, session_id, process).serve()
     process.exit(status)

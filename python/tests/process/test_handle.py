@@ -29,8 +29,6 @@ def _info() -> ProcessInfo:
         cwd=PathSpec.from_str_path("/"),
         started_at=0.0,
         execution_id="exec_test",
-        parent_execution_id=None,
-        root_execution_id="exec_test",
     )
 
 

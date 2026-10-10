@@ -13,14 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Writable } from 'node:stream'
-import type { StreamName } from '@struktoai/mirage-core/io/types'
 import { Channel } from '@struktoai/mirage-core/shell/console/types'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { ServerChannel } from 'ssh2'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
-import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
-import { REFUSAL_WINDOW } from './constants.ts'
+import { SaidWindow } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 // How far the client may type or pipe ahead of whoever reads it before
 // the channel is paused and SSH flow control pushes back.
@@ -414,20 +412,6 @@ export async function* channelStdin(source: ChannelInput): AsyncGenerator<Uint8A
   }
 }
 
-/**
- * A stream's first `REFUSAL_WINDOW` bytes, then on to the end of the line
- * that window cuts (at most a window more), whole lines only unless the
- * stream ends inside them. `prefix` is the stream's first two windows and
- * `total` its whole length. Mirrors Python's `head_window`.
- */
-function headWindow(prefix: Uint8Array, total: number): Uint8Array {
-  if (total <= REFUSAL_WINDOW) return prefix
-  const end = prefix.indexOf(10, REFUSAL_WINDOW - 1)
-  if (end !== -1) return prefix.subarray(0, end + 1)
-  if (total <= 2 * REFUSAL_WINDOW) return prefix
-  return prefix.subarray(0, prefix.subarray(0, REFUSAL_WINDOW).lastIndexOf(10) + 1)
-}
-
 /** Where a line's output goes: `send(data, stderr)`. */
 export type Send = (data: Uint8Array, stderr: boolean) => Promise<void>
 
@@ -435,43 +419,20 @@ export type Send = (data: Uint8Array, stderr: boolean) => Promise<void>
  * A line's output through `send` as the line produces it, then the
  * refusal's line on stderr when a policy refused part of it. The
  * terminal's output goes out as the line printed it; the policy's reason
- * is the one line `refusalLine` appends, read once the line has ended,
+ * is the one line `SaidWindow` appends, read once the line has ended,
  * since an op a streaming command reads late is refused only then.
- * Whether the output already says why is read off each stream's first
- * and last `REFUSAL_WINDOW` bytes: the first runs on to the end of the
- * line it cuts (at most a window more) and keeps whole lines only, so a
- * line split at a cut can neither pose as the diagnostic nor hide one. A
- * diagnostic deep inside a long output may be missed, which repeats the
- * reason and never drops it. Resolves to the line's final status, its
- * output already sent. Mirrors Python's `deliver`.
+ * Resolves to the line's final status, its output already sent. Mirrors
+ * Python's `deliver`.
  */
 export async function deliver(execution: ShellExecution, send: Send): Promise<ExecuteResult> {
-  const prefix: Record<StreamName, Uint8Array> = {
-    stdout: new Uint8Array(0),
-    stderr: new Uint8Array(0),
-  }
-  const tail: Record<StreamName, Uint8Array> = {
-    stdout: new Uint8Array(0),
-    stderr: new Uint8Array(0),
-  }
-  const total: Record<StreamName, number> = { stdout: 0, stderr: 0 }
+  const said = new SaidWindow()
   for await (const { stream, data } of execution.events) {
     if (data.byteLength === 0) continue
-    total[stream] += data.byteLength
-    if (prefix[stream].byteLength < 2 * REFUSAL_WINDOW) {
-      const room = 2 * REFUSAL_WINDOW - prefix[stream].byteLength
-      prefix[stream] = concat([prefix[stream], data.subarray(0, room)])
-    }
-    tail[stream] = concat([tail[stream], data.subarray(-REFUSAL_WINDOW)]).subarray(-REFUSAL_WINDOW)
+    said.add(data, stream === Channel.STDERR)
     await send(data, stream === Channel.STDERR)
   }
   const result = await execution.wait()
-  const dec = new TextDecoder()
-  const said = (Object.keys(prefix) as StreamName[])
-    .flatMap((stream) => [headWindow(prefix[stream], total[stream]), tail[stream]])
-    .map((bytes) => dec.decode(bytes))
-    .join('\n')
-  const line = refusalLine(said, result.refusal)
+  const line = said.refusalLine(result.refusal)
   if (line !== '') await send(new TextEncoder().encode(line), true)
   return result
 }

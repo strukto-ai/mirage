@@ -282,7 +282,6 @@ export async function handleCommand(
             : {}),
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
-          bufferBytes: registry.io.bufferBytes,
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path) => pathStat(dispatch, path, null),
@@ -808,7 +807,7 @@ export async function handleCommand(
       : null
   stdout = maybeWithTimeout(stdout, resolved, cmdName)
   io.stderr = maybeWithTimeout(io.stderr, resolved, cmdName)
-  const stderrBytes = await materialize(io.stderr)
+  const stderrBytes = await io.materializeStderr()
   const exec = new ExecutionNode({
     command: cmdStr,
     stderr: stderrBytes,

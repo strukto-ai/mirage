@@ -63,3 +63,9 @@ SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
 # ``exists`` is the command tier's probe; ``stat`` is pinned like
 # SUBTREE_OPS's VFS ops.
 METADATA_OPS = frozenset({"stat", "exists"})
+
+# How much of each stream's start and end a text surface keeps to tell
+# whether a refusal already says why: the refused command's own
+# diagnostic sits near the start of a line refused early and near the end
+# of one refused late, so both ends hold it without the whole output.
+REFUSAL_WINDOW = 4096

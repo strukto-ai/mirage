@@ -1040,16 +1040,12 @@ it.each([null, 1])(
       handlers: {
         '': new CLIHandler({
           limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-          fn: async (inv) => {
-            if (inv.stdio === undefined) throw new Error('missing stdio')
-            try {
-              await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
-              await inv.stdio.waitCancelled()
-              return new IOResult()
-            } finally {
+          fn: () => [
+            new HeldSource(new TextEncoder().encode('prefix'), () => {
               closed = true
-            }
-          },
+            }),
+            new IOResult(),
+          ],
         }),
       },
     })
@@ -1063,31 +1059,40 @@ it.each([null, 1])(
   },
 )
 
-it.each([0.05, null])(
-  'releases a native writer that ignores cancellation (timeout=%s)',
-  async (timeout) => {
-    const cli = new CLI({
-      spec: new CommandSpec({ name: 'writer' }),
-      handlers: {
-        '': new CLIHandler({
-          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-          fn: async (inv) => {
-            if (inv.stdio === undefined) throw new Error('missing stdio')
-            await inv.stdio.stdout.write(new TextEncoder().encode('prefix'))
-            return new Promise<never>(() => undefined)
-          },
-        }),
-      },
-    })
-    const [output] = await handleCli(
-      { name: 'writer', cli, config: null },
-      ['writer'],
-      new SessionState({ sessionId: 'test' }),
-    )
-    const iterator = output as AsyncIterableIterator<Uint8Array>
-    expect((await iterator.next()).value).toEqual(new TextEncoder().encode('prefix'))
-    if (timeout === null) await iterator.return?.()
-    else await expect(iterator.next()).rejects.toThrow(/writer: timed out after 0.05s/)
-  },
-  2000,
-)
+/** Yields its bytes once, then waits until it is closed, once. */
+class HeldSource implements AsyncIterableIterator<Uint8Array> {
+  private sent = false
+  private closed = false
+  private release: (() => void) | null = null
+
+  constructor(
+    private readonly data: Uint8Array,
+    private readonly onClose: () => void,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+
+  async next(): Promise<IteratorResult<Uint8Array>> {
+    if (!this.sent) {
+      this.sent = true
+      return { done: false, value: this.data }
+    }
+    if (!this.closed) {
+      await new Promise<void>((resolve) => {
+        this.release = resolve
+      })
+    }
+    return { done: true, value: undefined }
+  }
+
+  return(): Promise<IteratorResult<Uint8Array>> {
+    if (!this.closed) {
+      this.closed = true
+      this.onClose()
+    }
+    this.release?.()
+    return Promise.resolve({ done: true, value: undefined })
+  }
+}
