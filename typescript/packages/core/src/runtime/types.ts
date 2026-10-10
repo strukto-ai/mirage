@@ -322,7 +322,7 @@ export interface VFSEntry {
   path: string
   size: number
   isDir: boolean
-  // A namespace symlink. Marked so a whole-tree preload can skip it:
+  // A namespace symlink. Marked so a guest walking a tree can skip it:
   // stat follows links, so a directory link would otherwise read as a
   // plain directory and a cyclic one would recurse the walk forever.
   isLink?: boolean
@@ -331,8 +331,8 @@ export interface VFSEntry {
   // which is the whole point of the mark, and so is an entry the
   // listing did not classify, so the row says "not known" rather than
   // inventing a default the guest cannot tell from an answer. A row
-  // that did stat carries both, so a guest seeding a whole tree from
-  // one listing needs no second stat per file.
+  // that did stat carries both, so a guest placing a directory's nodes
+  // from one listing needs no second stat per file.
   mode?: number
   mtimeMs?: number
   // Encoded logical major:minor; present only for a character device.

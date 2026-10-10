@@ -99,7 +99,6 @@ export interface FSNode {
   children?: Map<string, FSNode>
   contents?: Uint8Array
   usedBytes?: number
-  unreadable?: boolean
   /** Placed from an unclassified listing row; `getattr` asks the mount first. */
   unclassified?: boolean
   /** A directory whose children came from a listing of the mount. */

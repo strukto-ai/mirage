@@ -122,7 +122,7 @@ export class RuntimeFiles {
 
   constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
     // One cap on every request the file adapter sends, held for that request
-    // alone, so the stats of listings that run together (a preload
+    // alone, so the stats of listings that run together (a guest
     // walking a tree) share it with the walk's own reads.
     const limiter = new ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
     this.dispatch = async (...args) => {
@@ -312,8 +312,9 @@ export class RuntimeFiles {
    * degraded.
    *
    * A row that did stat carries its mode and stamp too, since the
-   * struct is already in hand: a guest that seeds a whole tree from
-   * one listing (Emscripten does) then needs no second stat per file.
+   * struct is already in hand: a guest that places a directory's nodes
+   * from one listing (Emscripten does) then needs no second stat per
+   * file.
    * The slash-marked and unclassified rows report neither, which is
    * the honest answer for a listing that never learned them.
    *
