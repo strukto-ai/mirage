@@ -502,10 +502,10 @@ class MountEntry:
         self,
         cmd: Command,
     ) -> None:
-        """Register a general command (vfs=None).
+        """Register a command every mount shares (vfs=None).
 
-        General commands work on any VFS (e.g. echo, pwd).
-        They are the last fallback in resolve_command().
+        The generic coreutils and the general commands (e.g. echo, pwd)
+        work on any VFS. They are the last fallback in resolve_command().
         """
         self._general_cmds[cmd.name] = cmd
         if cmd.spec is not None:
@@ -522,7 +522,11 @@ class MountEntry:
         Lookup order:
         1. (cmd_name, extension) -- filetype-specific
         2. (cmd_name, None) -- VFS-specific
-        3. general_cmds[cmd_name] -- general fallback
+        3. general_cmds[cmd_name] -- the generic and general commands
+           every mount shares
+        4. any filetype variant, so a caller without an extension still
+           finds a command registered only for some filetypes;
+           run_command picks the handler from the operand
         """
         if extension:
             cmd = self._cmds.get((cmd_name, extension))
@@ -531,7 +535,13 @@ class MountEntry:
         cmd = self._cmds.get((cmd_name, None))
         if cmd is not None:
             return cmd
-        return self._general_cmds.get(cmd_name)
+        cmd = self._general_cmds.get(cmd_name)
+        if cmd is not None:
+            return cmd
+        for (name, _filetype), rc in self._cmds.items():
+            if name == cmd_name:
+                return rc
+        return None
 
     def longest_command_match(self, words: list[str]) -> int:
         """How many leading words form a registered command name here.

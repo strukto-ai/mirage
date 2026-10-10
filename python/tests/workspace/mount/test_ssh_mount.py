@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.generic_bind import generic
 from mirage.types import MountMode
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.workspace.mount.registry import MountRegistry
@@ -34,6 +35,7 @@ def test_ssh_mount_command_resolution():
     registry.mount("/remote/", vfs, mode=MountMode.WRITE)
     mount = registry.mount_for("/remote/test.py")
     assert mount is not None
-    cmd = mount.resolve_command("cat", None)
-    assert cmd is not None
-    assert cmd.vfs == "ssh"
+    assert mount.resolve_command("cat", None) is generic("cat")
+    find = mount.resolve_command("find", None)
+    assert find is not None
+    assert find.vfs == "ssh"

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.mongodb import COMMANDS
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
 from mirage.core.mongodb.types import EntityKind
 from mirage.io.types import materialize
@@ -31,11 +31,7 @@ MOUNT = "/mongo"
 
 
 def _find_command():
-    for fn in COMMANDS:
-        for rc in getattr(fn, "_registered_commands", []):
-            if rc.name == "find" and rc.filetype is None:
-                return fn
-    raise AssertionError("factory find not registered for mongodb")
+    return generic("find").fn
 
 
 def _spec(virtual: str) -> PathSpec:

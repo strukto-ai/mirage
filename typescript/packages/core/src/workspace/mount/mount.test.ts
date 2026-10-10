@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { commandsFor } from '../../commands/builtin/backends.ts'
+import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
@@ -107,6 +107,23 @@ describe('Mount.resolveCommand fallback chain', () => {
   it('returns null when nothing matches', () => {
     const m = makeMount()
     expect(m.resolveCommand('nope')).toBeNull()
+  })
+
+  it('keeps the shared command for other files when a filetype command is added', () => {
+    const m = makeMount()
+    const shared = generic('cat')
+    m.registerGeneral(shared)
+    const [csv] = command({
+      name: 'cat',
+      vfs: null,
+      spec: BASIC_SPEC,
+      fn: OK_CMD,
+      filetype: '.csv',
+    })
+    if (csv === undefined) throw new Error('missing')
+    m.registerCommands([csv])
+    expect(m.resolveCommand('cat', '.csv')).toBe(csv)
+    expect(m.resolveCommand('cat', '.txt')).toBe(shared)
   })
 })
 
@@ -226,9 +243,7 @@ describe('Mount.runCommand', () => {
     // running a command straight on its mount, with none, cannot write.
     const vfs = new RAMVFS()
     const m = new MountEntry({ prefix: '/rw/', vfs, mode: MountMode.WRITE })
-    const tee = commandsFor(vfs).find((cmd) => cmd.name === 'tee')
-    if (tee === undefined) throw new Error('missing tee')
-    m.register(tee)
+    m.register(generic('tee'))
     const [stdout, io] = await m.runCommand(
       'tee',
       [PathSpec.fromStrPath('/rw/f')],
@@ -493,9 +508,7 @@ describe('ExecContext parity with CommandOpts', () => {
 it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
-  const cmd = commandsFor(vfs).find((cmd) => cmd.name === 'gzip')
-  if (cmd === undefined) throw new Error('missing gzip')
-  expect(cmd.pathGuarded).toBe(true)
+  expect(generic('gzip').pathGuarded).toBe(true)
   const ws = new Workspace(
     { '/ram/': [vfs, MountMode.READ] },
     { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
@@ -509,6 +522,31 @@ it('a path-guarded command is still held at its write', async () => {
       '\ngzip: /ram/a.gz: Read-only file system\n',
     ])
     expect([...vfs.store.files.entries()]).toEqual([['/a', new TextEncoder().encode('original')]])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('runs a command registered for one filetype only on that filetype', async () => {
+  const ws = new Workspace(
+    { '/ram/': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+  )
+  try {
+    await ws.shell('echo hit > /ram/x.csv; echo hit > /ram/x.txt')
+    ws.mount('/ram/').registerCommands(
+      command({
+        name: 'summarize',
+        vfs: null,
+        spec: BASIC_SPEC,
+        fn: OK_CMD_STDOUT,
+        filetype: '.csv',
+      }),
+    )
+    const csv = await ws.shell('summarize /ram/x.csv')
+    const txt = await ws.shell('summarize /ram/x.txt')
+    expect([csv.exitCode, csv.stdoutText]).toEqual([0, 'ok'])
+    expect([txt.exitCode, txt.stderrText]).toEqual([127, 'summarize: command not found'])
   } finally {
     await ws.close()
   }

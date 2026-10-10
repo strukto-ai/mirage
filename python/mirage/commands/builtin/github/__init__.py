@@ -12,17 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.github.du import du
 from mirage.commands.builtin.github.find import find
 
-_GITHUB_OVERRIDES = {"du", "find"}
-
 COMMANDS = [
-    *generic_commands(
-        "github",
-        overrides=_GITHUB_OVERRIDES,
-    ),
     du,
     find,
 ]

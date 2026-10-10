@@ -13,15 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.gdocs.rm import rm
-from mirage.commands.builtin.generic_bind import generic_commands
 
 # Docs verbs and API passthroughs live in the gws CLI
 # (mirage.commands.cli.builtin.gws), installed by name; the mount only
 # serves the filesystem surface.
 COMMANDS = [
-    *generic_commands(
-        "gdocs",
-        overrides={"rm"},
-    ),
     rm,
 ]

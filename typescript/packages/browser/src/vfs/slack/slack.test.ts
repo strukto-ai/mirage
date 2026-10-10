@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
@@ -58,9 +57,9 @@ describe('SlackVFS (browser)', () => {
     expect(r.config.getHeaders).toBe(headers)
   })
 
-  it('serves SLACK_COMMANDS', () => {
+  it('serves no commands of its own', () => {
     const r = new SlackVFS({ proxyUrl: '/api/slack' })
-    expect(commandsFor(r)).toEqual(SLACK_COMMANDS)
+    expect(commandsFor(r)).toEqual([])
   })
 
   it('getState() redacts getHeaders but keeps proxyUrl visible', async () => {

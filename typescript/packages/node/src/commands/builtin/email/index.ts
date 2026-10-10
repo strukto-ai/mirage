@@ -12,18 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { Command } from '@struktoai/mirage-core/commands/config'
-import { VFSName } from '@struktoai/mirage-core/types'
 import { EMAIL_FIND } from './find.ts'
-
-const EMAIL_OVERRIDES = new Set(['find'])
 
 // Mail verbs live in the himalaya CLI (commands/cli/builtin/himalaya),
 // installed by name; the mount only serves the filesystem surface.
-export const EMAIL_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.EMAIL, {
-    overrides: EMAIL_OVERRIDES,
-  }),
-  ...EMAIL_FIND,
-]
+export const EMAIL_COMMANDS: readonly Command[] = [...EMAIL_FIND]

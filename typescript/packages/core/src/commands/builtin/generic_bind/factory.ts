@@ -19,12 +19,23 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { ChildMounts, LinkView, NamespaceView } from '../../../view/types.ts'
-import { type CommandFn, type Command, command, type CommandIO } from '../../config.ts'
+import {
+  type CommandFn,
+  type Command,
+  CommandCatalog,
+  command,
+  type CommandIO,
+} from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { mountIo, withAbortGuard, withCommandGuards, withDirGuard } from './adapter.ts'
+import {
+  type GenericCommand,
+  mountIo,
+  withAbortGuard,
+  withCommandGuards,
+  withDirGuard,
+} from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
-import { compareCodePoints } from '../../../utils/sort.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
@@ -134,24 +145,6 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(ops)
 }
 
-export interface GenericCommandsOptions {
-  /** Command names to skip: the backend ships its own wrapper for these. */
-  overrides?: ReadonlySet<string>
-  /**
-   * A change to the mount's table for every command (disk sets its native
-   * `find` and `du` aside, so a shell walk reports partial results and
-   * per-directory errors).
-   */
-  table?: (io: CommandIO) => CommandIO
-  /**
-   * Per-command changes to the mount's table, for a command that needs a
-   * cheaper backend operation (dify's light `ls`).
-   */
-  adapt?: Readonly<Record<string, (io: CommandIO) => CommandIO>>
-  /** Whether the backend's data lives on the host, which lets a command aggregate there. */
-  local?: boolean
-}
-
 // The namespace facts a glob resolver reads, stamped on the adapter per
 // invocation: the child names the namespace owes a directory, and the
 // stat of what such a name points at, so a trailing slash follows a link
@@ -171,8 +164,8 @@ function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView
 /**
  * A mount's table with its native `find` and `du` set aside. Shell traversals
  * need partial results and per-directory errors, which the shared readdir/stat
- * walker owns; the VFS's own aggregate methods stay strict. Disk and ssh pass
- * this as their `table`. Mirrors Python's `walked`.
+ * walker owns; the VFS's own aggregate methods stay strict. Disk and ssh run
+ * `cp`, `du` and `find` over it. Mirrors Python's `walked`.
  */
 export function walked(io: CommandIO): CommandIO {
   const rest = { ...io }
@@ -181,105 +174,111 @@ export function walked(io: CommandIO): CommandIO {
   return rest
 }
 
-/**
- * Generate the default command set for a backend. Each command runs over
- * the table of the mount it runs on (`opts.io`), so the set is built once
- * per backend name. Mirrors Python's `generic_commands`.
- */
-export function genericCommands(vfs: string, options: GenericCommandsOptions = {}): Command[] {
-  const skip = options.overrides ?? new Set<string>()
-  const changes = options.adapt ?? {}
-  const table = options.table
-  // A name no builder has does nothing at all, so a misspelled override left
-  // the generic registered beside the bespoke one, and an override for a
-  // command the table never had (mem0's `search`) read as if it displaced
-  // something. Refused at registration, which is import time. Mirrors
-  // `generic_commands` in `generic_bind/factory.py`.
-  const known = new Set(BUILDERS.map((b) => b.name))
-  const unknown = [...new Set([...skip, ...Object.keys(changes)])]
-    .filter((name) => !known.has(name))
-    .sort(compareCodePoints)
-  if (unknown.length > 0) {
-    throw new Error(`genericCommands('${vfs}'): no generic builder named ${unknown.join(', ')}`)
-  }
-  const commands: Command[] = []
-  for (const b of BUILDERS) {
-    if (skip.has(b.name)) continue
-    const change = changes[b.name]
-    // Path guards are applied per invocation, over the stamped adapter,
-    // inside the command closure below. The mount's table stays untouched
-    // for the dispatcher, which does its own enforcement.
-    const finish = b.write === true && b.read !== true ? writeWraps : statWraps
-    // A nested mount's keys live in another VFS and no VFS
-    // stores a symlink, so a glob resolved by one backend's readdir
-    // misses both. The names are session-scoped, so the fact is stamped
-    // per invocation, and the whole guard chain is applied on top of
-    // the stamped copy: every guard that consumes a namespace fact
-    // simply reads it off the adapter it wraps (glob resolution derives
-    // from globChildren, the dir guard closes over it, the hidden
-    // guard's rmdir captures it for its emptiness judgment). Binding
-    // the guards at registration instead would strand them behind
-    // closures built before any invocation exists, which is exactly the
-    // wiring that made the rmdir guard blind to a mounted child. The
-    // guards read the current session at call time, so per-invocation
-    // binding changes cost, not behavior.
-    // The conditional spread is not a leftover: exactOptionalPropertyTypes
-    // refuses an explicit `undefined` for an optional field, so an absent
-    // namespace has to mean an absent key rather than an undefined value.
-    // Python's `glob_children` is `| None` and takes the uniform path.
-    // The command's path checks speak outside the stat and slash wraps
-    // (`finish`), for the slots that still reach the backend past the
-    // dispatcher (stat, exists, readdir). Reads, writes and one-call walks
-    // are the dispatcher's (dispatchedIo on the mount's table), which
-    // judges each itself and declines a one-call walk whose subtree the
-    // caller's view restricts. A probe answer is served below the guards
-    // (withProbeAnswers on the raw adapter), so they still judge every path
-    // before it. The invocation's mount prefix rides into its wrap-time
-    // scope for readers drained after the gate scopes return. The abort
-    // guard sits outermost: once the invocation's signal has fired no slot
-    // starts, so a handler the caller was released from begins no further
-    // read or write between its operands.
-    const fn: CommandFn = (accessor, paths, texts, opts) => {
-      const io = table === undefined ? mountIo(opts) : table(mountIo(opts))
-      const raw = change === undefined ? io : change(io)
-      // A per-command table with its own stat (dify's light ls) would
-      // otherwise print the probe's full stat under fresh only.
-      const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
-      const guarded = withAbortGuard(
-        withDirGuard(
-          withCommandGuards(
-            finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
-            opts.mountPrefix,
-          ),
+function bind(
+  b: GenericCommand,
+  vfs: string | null,
+  table: ((io: CommandIO) => CommandIO) | undefined,
+): Command[] {
+  // Path guards are applied per invocation, over the stamped adapter,
+  // inside the command closure below. The mount's table stays untouched
+  // for the dispatcher, which does its own enforcement.
+  const finish = b.write === true && b.read !== true ? writeWraps : statWraps
+  // A nested mount's keys live in another VFS and no VFS
+  // stores a symlink, so a glob resolved by one backend's readdir
+  // misses both. The names are session-scoped, so the fact is stamped
+  // per invocation, and the whole guard chain is applied on top of
+  // the stamped copy: every guard that consumes a namespace fact
+  // simply reads it off the adapter it wraps (glob resolution derives
+  // from globChildren, the dir guard closes over it, the hidden
+  // guard's rmdir captures it for its emptiness judgment). Binding
+  // the guards at registration instead would strand them behind
+  // closures built before any invocation exists, which is exactly the
+  // wiring that made the rmdir guard blind to a mounted child. The
+  // guards read the current session at call time, so per-invocation
+  // binding changes cost, not behavior.
+  // The conditional spread is not a leftover: exactOptionalPropertyTypes
+  // refuses an explicit `undefined` for an optional field, so an absent
+  // namespace has to mean an absent key rather than an undefined value.
+  // Python's `glob_children` is `| None` and takes the uniform path.
+  // The command's path checks speak outside the stat and slash wraps
+  // (`finish`), for the slots that still reach the backend past the
+  // dispatcher (stat, exists, readdir). Reads, writes and one-call walks
+  // are the dispatcher's (dispatchedIo on the mount's table), which
+  // judges each itself and declines a one-call walk whose subtree the
+  // caller's view restricts. A probe answer is served below the guards
+  // (withProbeAnswers on the raw adapter), so they still judge every path
+  // before it. The invocation's mount prefix rides into its wrap-time
+  // scope for readers drained after the gate scopes return. The abort
+  // guard sits outermost: once the invocation's signal has fired no slot
+  // starts, so a handler the caller was released from begins no further
+  // read or write between its operands.
+  const fn: CommandFn = (accessor, paths, texts, opts) => {
+    const io = mountIo(opts)
+    const raw = table === undefined ? io : table(io)
+    // A per-command table with its own stat (dify's light ls) would
+    // otherwise print the probe's full stat under fresh only.
+    const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
+    const guarded = withAbortGuard(
+      withDirGuard(
+        withCommandGuards(
+          finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
+          opts.mountPrefix,
         ),
-        opts.signal,
-      )
-      return b.fn(
-        {
-          ...guarded,
-          readStream: (acc, path, index) => guardInput(guarded.readStream(acc, path, index), opts),
-        },
-        accessor,
-        paths,
-        texts,
-        {
-          ...opts,
-          stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts),
-        },
-      )
-    }
-    const aggregate = options.local === true ? (b.aggregate ?? null) : null
-    commands.push(
-      ...command({
-        name: b.name,
-        vfs,
-        spec: specOf(b.name),
-        fn,
-        aggregate,
-        write: b.write === true,
-        pathGuarded: true,
-      }),
+      ),
+      opts.signal,
+    )
+    return b.fn(
+      {
+        ...guarded,
+        readStream: (acc, path, index) => guardInput(guarded.readStream(acc, path, index), opts),
+      },
+      accessor,
+      paths,
+      texts,
+      {
+        ...opts,
+        stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts),
+      },
     )
   }
-  return commands
+  return command({
+    name: b.name,
+    vfs,
+    spec: specOf(b.name),
+    fn,
+    aggregate: b.aggregate ?? null,
+    write: b.write === true,
+    pathGuarded: true,
+  })
+}
+
+const BY_NAME = new Map(BUILDERS.map((b) => [b.name, b]))
+
+/**
+ * Every mount falls back to these after its VFS's own commands. Each runs
+ * over the table of the mount it runs on (`opts.io`), so one set serves the
+ * whole workspace. Mirrors Python's `GENERIC_COMMANDS`.
+ */
+export const GENERIC_COMMANDS = new CommandCatalog(
+  BUILDERS.flatMap((b) => bind(b, null, undefined)),
+)
+
+/**
+ * The default command `name`, which a mount runs when its VFS has no command
+ * of that name. A VFS that replaces a command hands what the replacement does
+ * not support to this one: `generic('grep').fn(accessor, paths, texts, opts)`.
+ * With `vfs`, the same command registered for that backend, over the mount's
+ * table changed by `table` (dify's light `ls`, disk's walks). Mirrors
+ * Python's `generic`.
+ */
+export function generic(
+  name: string,
+  options: { vfs?: string; table?: (io: CommandIO) => CommandIO } = {},
+): Command {
+  const b = BY_NAME.get(name)
+  if (b === undefined) throw new Error(`no generic command named '${name}'`)
+  if (options.vfs === undefined && options.table === undefined) {
+    return GENERIC_COMMANDS.require(name)
+  }
+  return new CommandCatalog(bind(b, options.vfs ?? null, options.table)).require(name)
 }

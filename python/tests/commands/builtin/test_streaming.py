@@ -16,15 +16,15 @@ import pytest
 
 from mirage.accessor import NOOPAccessor
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.ram import COMMANDS
-from mirage.commands.config import CommandCatalog, CommandOpts
+from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.driver_ops import ops
 
 _ps = PathSpec.from_str_path
 
-_CMDS = CommandCatalog(COMMANDS)
+_CMDS = GENERIC_COMMANDS
 cat = _CMDS.require("cat").fn
 cut = _CMDS.require("cut").fn
 grep = _CMDS.require("grep").fn

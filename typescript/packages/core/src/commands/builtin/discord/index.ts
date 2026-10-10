@@ -12,16 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { DISCORD_HEAD } from './head.ts'
 
-const DISCORD_OVERRIDES = new Set(['head'])
-
-export const DISCORD_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.DISCORD, {
-    overrides: DISCORD_OVERRIDES,
-  }),
-  ...DISCORD_HEAD,
-]
+export const DISCORD_COMMANDS: readonly Command[] = [...DISCORD_HEAD]

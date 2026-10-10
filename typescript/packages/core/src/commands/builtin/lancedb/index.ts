@@ -15,9 +15,5 @@
 import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
 import { makeSearch } from '../generic/search.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 
-export const LANCEDB_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.LANCEDB),
-  ...makeSearch(VFSName.LANCEDB),
-]
+export const LANCEDB_COMMANDS: readonly Command[] = [...makeSearch(VFSName.LANCEDB)]

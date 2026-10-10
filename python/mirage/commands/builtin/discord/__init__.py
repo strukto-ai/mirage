@@ -13,12 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.discord.head import head
-from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
-    *generic_commands(
-        "discord",
-        overrides={"head"},
-    ),
     head,
 ]

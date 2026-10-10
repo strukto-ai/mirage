@@ -15,13 +15,13 @@
 import asyncio
 
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.ram import COMMANDS
-from mirage.commands.config import CommandCatalog, CommandOpts
+from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.ram.stream import read_stream
 from mirage.core.ram.write import write
 from mirage.types import PathSpec
 
-_CMDS = CommandCatalog(COMMANDS)
+_CMDS = GENERIC_COMMANDS
 cp_cmd = _CMDS.require("cp").fn
 
 
