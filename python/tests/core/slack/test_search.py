@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 
 from mirage.core.slack.config import SlackConfig
@@ -75,8 +77,8 @@ async def test_search_files_calls_correct_endpoint():
         ("grep -rlw rocket /slack/channels/general__C1", ["C1/2025-11-04"]),
         ("grep -rlw Launch /slack/channels/general__C1", ["C1/2025-11-05"]),
         (
-            "grep -rlw deploy /slack/channels/general__C1/2025-11-06",
-            ["C1/2025-11-06"],
+            "grep -rlw Launch /slack/channels",
+            ["C1/2025-11-05", "C2/2025-11-07"],
         ),
         (
             "grep -rlw deploy /slack",
@@ -90,10 +92,27 @@ async def test_search_files_calls_correct_endpoint():
     ],
 )
 async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
+    # A file hit names every day a message shares it, not its upload.
     full = await slack(line, content_search=False)
     out, code, read, _ = await slack(line)
     assert (out, code) == full[:2]
     assert read == reads
+
+
+@pytest.mark.asyncio
+async def test_a_day_is_read_rather_than_searched(slack):
+    line = "grep -rlw deploy /slack/channels/general__C1/2025-11-06"
+    full = await slack(line, content_search=False)
+    out, code, read, searches = await slack(line)
+    assert (out, code, read) == full[:3]
+    assert searches == []
+
+
+@pytest.mark.asyncio
+async def test_the_patterns_of_one_grep_share_one_user_listing(slack):
+    fake = FakeSlack()
+    await slack("grep -rlw -e deploy -e lunch /slack/channels", fake)
+    assert fake.user_lists == 1
 
 
 @pytest.mark.asyncio
@@ -116,7 +135,20 @@ async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
         ("grep -rlw Lima /slack/channels", FakeSlack()),
         ("grep -rlw nothing /slack/channels", FakeSlack()),
         ("grep -rlw deploy /slack/channels", FakeSlack(pages=MAX_PAGES + 1)),
-        ("grep -rlw deploy /slack/channels", FakeSlack(fails=True)),
+        ("grep -rlw acme /slack/channels", FakeSlack()),
+        ("grep -rlw Launch /slack/channels", FakeSlack(shares=False)),
+        (
+            "grep -rlw deploy /slack/channels",
+            FakeSlack(fails=RuntimeError("Slack API error: ratelimited")),
+        ),
+        (
+            "grep -rlw deploy /slack/channels",
+            FakeSlack(fails=aiohttp.ClientConnectionError("reset")),
+        ),
+        (
+            "grep -rlw deploy /slack/channels",
+            FakeSlack(fails=asyncio.TimeoutError()),
+        ),
         ("grep -rlw deploy /slack/dms", FakeSlack()),
     ],
 )

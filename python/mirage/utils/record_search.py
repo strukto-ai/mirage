@@ -34,7 +34,8 @@ def record_queries(
     whole-word matching a text inside a key is refused too. A text
     starting with a letter an escape ends with may start inside one, so
     the rest of it is searched as well (alone without whole-word
-    matching, where it is the wider search).
+    matching, where it is the wider search); such a letter alone is
+    refused.
 
     Args:
         text (str): what grep or rg searches for.
@@ -51,7 +52,9 @@ def record_queries(
         return None
     if not whole_word and len(words) == 1 and any(words[0] in k for k in keys):
         return None
-    rest = text[1:].strip()
-    if text[0].lower() not in _ESCAPE_LETTERS or not rest:
+    if text[0].lower() not in _ESCAPE_LETTERS:
         return [text]
+    rest = text[1:].strip()
+    if not rest:
+        return None
     return [text, rest] if whole_word else [rest]

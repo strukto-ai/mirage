@@ -117,15 +117,25 @@ def _header(message: dict[str, Any], name: str) -> str:
     return next((h["value"] for h in headers if h["name"] == name), "")
 
 
+RATE_LIMITED = aiohttp.ClientResponseError(
+    aiohttp.RequestInfo(
+        URL("https://gmail.test"), "GET", CIMultiDictProxy(CIMultiDict())
+    ),
+    (),
+    status=429,
+)
+
+
 class FakeGmail:
     """The Gmail API a label walk and its search reach.
 
     A bare word matches whole words of the From, To, Cc and Subject
     headers and the body in any case, ``filename:`` an attachment name,
-    and ``after:``/``before:`` take epoch seconds, as Gmail does.
+    and ``after:``/``before:`` take epoch seconds, as Gmail does. A
+    search raises ``fails`` when set.
     """
 
-    def __init__(self, fails: bool = False) -> None:
+    def __init__(self, fails: Exception | None = None) -> None:
         self.fails = fails
         self.searches: list[str] = []
 
@@ -137,16 +147,8 @@ class FakeGmail:
     ):
         if query is not None and not query.startswith("after:"):
             self.searches.append(query)
-            if self.fails:
-                raise aiohttp.ClientResponseError(
-                    aiohttp.RequestInfo(
-                        URL("https://gmail.test"),
-                        "GET",
-                        CIMultiDictProxy(CIMultiDict()),
-                    ),
-                    (),
-                    status=429,
-                )
+            if self.fails is not None:
+                raise self.fails
         found = [
             {"id": m["id"], "threadId": m["threadId"]}
             for m in MESSAGES

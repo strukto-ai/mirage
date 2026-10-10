@@ -204,22 +204,32 @@ async def files_containing(
     (``search_safe``), and an answer that is the whole set
     (``narrow_paths``, which adds back every file the search never
     indexes). An empty answer is not trusted either: the index trails
-    a push.
+    a push. Each file is one blob request, so an answer of more than
+    ``SCOPE_ERROR`` files is refused as a scan that large would be.
 
     Args:
         accessor (GitHubAccessor): backend handle.
         index (IndexCacheStore): the mount's index.
         text (str): the whole word grep searches for.
         under (list[PathSpec]): the directories walked.
+
+    Raises:
+        ValueError: the answer names more than ``SCOPE_ERROR`` files.
     """
     if (
-        accessor.truncated
-        or not search_safe(text)
+        not search_safe(text)
         or await _scope_files(accessor, index, under) <= SCOPE_WARN
+        or accessor.truncated
         or await ensure_ref(accessor) != await ensure_default_branch(accessor)
     ):
         return None
-    return await narrow_paths(accessor, text, under) or None
+    narrowed = await narrow_paths(accessor, text, under)
+    if narrowed and len(narrowed) > SCOPE_ERROR:
+        raise ValueError(
+            f"{len(narrowed)} files in scope and code search could not "
+            "narrow them; narrow the path"
+        )
+    return narrowed or None
 
 
 async def before_full_scan(

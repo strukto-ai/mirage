@@ -207,7 +207,7 @@ async function hitsUnder(
  * label is searched on its own, since an account search leaves out spam and
  * trash; a day adds its UTC bounds. Hits map to files by the message id the
  * listing names them with. null when `text` could match the JSON around
- * those fields (`recordQueries`), on an API error, at `MAX_HITS` hits, or
+ * those fields (`recordQueries`), on an API or connection error, at `MAX_HITS` hits, or
  * with no hit at all, since Gmail indexes a message some time after it
  * arrives. Mirrors Python's `files_containing`.
  */
@@ -236,7 +236,13 @@ export async function filesContaining(
       }
     }
   } catch (err) {
-    if (!(err instanceof GoogleApiError)) throw err
+    // fetch rejects with a TypeError when the connection fails and a
+    // DOMException when its timeout aborts it
+    if (
+      !(err instanceof GoogleApiError || err instanceof TypeError || err instanceof DOMException)
+    ) {
+      throw err
+    }
     console.warn(`gmail search failed (${String(err)}); reading every file`)
     return null
   }

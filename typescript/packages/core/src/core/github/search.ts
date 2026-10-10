@@ -96,7 +96,8 @@ async function scopeFiles(
  * word the search grammar reads as plain terms (`searchSafe`), and an
  * answer that is the whole set (`narrowPaths`, which adds back every file
  * the search never indexes). An empty answer is not trusted either: the
- * index trails a push.
+ * index trails a push. Each file is one blob request, so an answer of more
+ * than `SCOPE_ERROR` files is refused as a scan that large would be.
  */
 export async function filesContaining(
   accessor: GitHubAccessor,
@@ -105,14 +106,20 @@ export async function filesContaining(
   index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   if (
-    accessor.truncated ||
     !searchSafe(text) ||
     (await scopeFiles(accessor, under, index)) <= SCOPE_WARN ||
+    accessor.truncated ||
     !accessor.isDefaultBranch
   ) {
     return null
   }
   const narrowed = await narrowPaths(accessor, text, under)
+  if (narrowed !== null && narrowed.length > SCOPE_ERROR) {
+    throw new Error(
+      `${String(narrowed.length)} files in scope and code search could not narrow them; ` +
+        'narrow the path',
+    )
+  }
   return narrowed !== null && narrowed.length > 0 ? narrowed : null
 }
 

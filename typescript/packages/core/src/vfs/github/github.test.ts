@@ -296,4 +296,15 @@ describe('grep and rg over code search', () => {
     const [got] = await onGithub(line)
     expect(got).toEqual(await run(ram(), line))
   })
+
+  it('refuses a narrowed scan past the scope cap', async () => {
+    scope.error = 2
+    const [got, hub] = await onGithub('grep -rw import /gh')
+    expect(got).toEqual([
+      '',
+      'grep: 3 files in scope and code search could not narrow them; narrow the path\n',
+      1,
+    ])
+    expect(hub.count('blob')).toBe(0)
+  })
 })

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from mirage.accessor.base import SessionAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.time_range import TimeRange
@@ -24,3 +26,6 @@ class SlackAccessor(SessionAccessor):
         super().__init__()
         self.config = config
         self.time_range = time_range
+        # The words of the workspace's names while a search fetches them,
+        # so the patterns of one grep share one users.list.
+        self.name_words: asyncio.Future[frozenset[str]] | None = None

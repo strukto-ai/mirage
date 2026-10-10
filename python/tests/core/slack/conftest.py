@@ -43,6 +43,7 @@ PLAN = {
     "size": 5,
     "timestamp": START + 2 * DAY + 60,
     "url_private_download": "https://files.slack.com/files-pri/T1-F1/download/plan.txt",
+    "permalink": "https://acme.slack.com/files/U1/F1/plan.txt",
 }
 
 
@@ -57,7 +58,7 @@ def _message(at: int, text: str, **extra: Any) -> dict[str, Any]:
 
 MESSAGES = {
     "C1": [
-        _message(START + 60, "the deploy is done"),
+        _message(START + 60, "the deploy is done at acme"),
         _message(
             START + DAY + 60,
             "lunch at noon",
@@ -66,7 +67,10 @@ MESSAGES = {
         _message(START + 2 * DAY + 60, "", files=[PLAN]),
         _message(START + 3 * DAY + 60, "deploy again", user_profile=PROFILE),
     ],
-    "C2": [_message(START + DAY + 60, "a random deploy in Lima")],
+    "C2": [
+        _message(START + DAY + 60, "a random deploy in Lima"),
+        _message(START + 4 * DAY + 60, "", files=[PLAN]),
+    ],
     "D1": [_message(START + 60, "deploy in a dm")],
 }
 
@@ -85,14 +89,22 @@ class FakeSlack:
 
     Search matches whole words in any case, as Slack does: message text
     (``search.messages``), a reaction name (``has::name:``) and a file's
-    name or title (``search.files``), scoped by ``in:#name``. Every page
-    answers ``pages`` as its page count.
+    name or title (``search.files``, naming every message that shares it
+    unless ``shares`` is off), scoped by ``in:#name``. Every page answers
+    ``pages`` as its page count; a search raises ``fails`` when set.
     """
 
-    def __init__(self, pages: int = 1, fails: bool = False) -> None:
+    def __init__(
+        self,
+        pages: int = 1,
+        fails: Exception | None = None,
+        shares: bool = True,
+    ) -> None:
         self.pages = pages
         self.fails = fails
+        self.shares = shares
         self.searches: list[str] = []
+        self.user_lists = 0
 
     async def get(self, config, method, params=None, session=None):
         params = params or {}
@@ -102,7 +114,10 @@ class FakeSlack:
                 "channels": DMS if "im" in params["types"] else CHANNELS,
             }
         if method == "users.list":
+            self.user_lists += 1
             return {"ok": True, "members": USERS}
+        if method == "auth.test":
+            return {"ok": True, "url": "https://acme.slack.com/"}
         if method == "conversations.history":
             oldest = float(params.get("oldest", 0))
             latest = float(params.get("latest", "inf"))
@@ -113,8 +128,8 @@ class FakeSlack:
             ]
             return {"ok": True, "messages": found[: int(params["limit"])]}
         self.searches.append(params["query"])
-        if self.fails:
-            raise RuntimeError(f"Slack API error ({method}): ratelimited")
+        if self.fails is not None:
+            raise self.fails
         return {
             "ok": True,
             method.removeprefix("search."): self._search(
@@ -150,15 +165,24 @@ class FakeSlack:
                     matches.append({"ts": m["ts"], "channel": {"id": cid}})
                 if method == "search.files" and not reaction:
                     matches.extend(
-                        {
-                            "id": f["id"],
-                            "timestamp": f["timestamp"],
-                            "channels": [cid],
-                        }
+                        self._file(f)
                         for f in m.get("files", [])
                         if _holds(f["name"], text) or _holds(f["title"], text)
                     )
         return {"matches": matches, "paging": {"pages": self.pages}}
+
+    def _file(self, file: dict[str, Any]) -> dict[str, Any]:
+        found = {"id": file["id"], "timestamp": file["timestamp"]}
+        if not self.shares:
+            return found
+        shares: dict[str, dict[str, list[dict[str, str]]]] = {}
+        for cid, messages in MESSAGES.items():
+            for m in messages:
+                if any(f["id"] == file["id"] for f in m.get("files", [])):
+                    kind = "private" if cid.startswith("D") else "public"
+                    rows = shares.setdefault(kind, {}).setdefault(cid, [])
+                    rows.append({"ts": m["ts"]})
+        return found | {"shares": shares}
 
     async def download(self, config, url, offset=0, size=None, session=None):
         return b"plan\n"

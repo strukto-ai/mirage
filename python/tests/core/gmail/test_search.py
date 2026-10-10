@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
+import aiohttp
 import pytest
 
-from tests.core.gmail.conftest import FakeGmail
+from tests.core.gmail.conftest import RATE_LIMITED, FakeGmail
 
 
 @pytest.mark.asyncio
@@ -53,7 +56,12 @@ async def test_a_label_day_is_searched_within_its_bounds(gmail):
         ("grep -rlw inbox /gmail", FakeGmail()),
         ("grep -rlw Jan /gmail", FakeGmail()),
         ("grep -rlw nothing /gmail", FakeGmail()),
-        ("grep -rlw deploy /gmail", FakeGmail(fails=True)),
+        ("grep -rlw deploy /gmail", FakeGmail(fails=RATE_LIMITED)),
+        (
+            "grep -rlw deploy /gmail",
+            FakeGmail(fails=aiohttp.ClientConnectionError("reset")),
+        ),
+        ("grep -rlw deploy /gmail", FakeGmail(fails=asyncio.TimeoutError())),
     ],
 )
 async def test_every_message_is_read_when_search_cannot_answer(

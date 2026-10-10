@@ -27,6 +27,7 @@ KEYS = frozenset({"subject", "body_text", "flags", "true", "seen"})
         ("nice", True, ["nice", "ice"]),
         ("budget", False, ["udget"]),
         ("n cat", True, ["n cat", "cat"]),
+        ("n", True, None),
         ("subject", True, None),
         ("ject", False, None),
         ("ject", True, ["ject"]),
@@ -47,5 +48,5 @@ def test_a_search_covers_every_record_the_text_may_match(
     # JSON escape; a key, a fixed value or a hex run can match outside the
     # text the provider searches, and so can a substring of a key. A text
     # starting with a letter an escape ends with (\n, \b, \u001b) is
-    # searched without that letter too.
+    # searched without that letter too, and that letter alone is refused.
     assert record_queries(text, KEYS, whole_word) == queries

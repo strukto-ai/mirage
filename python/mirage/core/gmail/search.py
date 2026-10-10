@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 
 import aiohttp
@@ -223,9 +224,9 @@ async def files_containing(
     search leaves out spam and trash; a day adds its UTC bounds. Hits map
     to files by the message id the listing names them with. None when
     ``text`` could match the JSON around those fields
-    (``record_queries``), on an API error, at ``MAX_HITS`` hits, or with
-    no hit at all, since Gmail indexes a message some time after it
-    arrives.
+    (``record_queries``), on an API or connection error, at ``MAX_HITS``
+    hits, or with no hit at all, since Gmail indexes a message some time
+    after it arrives.
 
     Args:
         accessor (GmailAccessor): the account.
@@ -253,7 +254,7 @@ async def files_containing(
                 if hits is None:
                     return None
                 found.extend(hits)
-    except aiohttp.ClientResponseError as exc:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
         logger.warning("gmail search failed (%s); reading every file", exc)
         return None
     return found or None

@@ -120,11 +120,12 @@ function header(m: Message, name: string): string {
  * The Gmail API a label walk and its search reach. A bare word matches whole
  * words of the From, To, Cc and Subject headers and the body in any case,
  * `filename:` an attachment name, and `after:`/`before:` take epoch seconds,
- * as Gmail does. Mirrors Python's `FakeGmail`.
+ * as Gmail does. A search answers 429 when `fails` is 'status' and rejects
+ * with it when it is an error. Mirrors Python's `FakeGmail`.
  */
 class FakeGmail {
   readonly searches: string[] = []
-  constructor(private readonly fails = false) {}
+  constructor(private readonly fails: 'status' | Error | null = null) {}
 
   readonly fetch = (input: string | URL | Request): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input))
@@ -150,7 +151,8 @@ class FakeGmail {
     const query = params.get('q') ?? ''
     if (query !== '' && !query.startsWith('after:')) {
       this.searches.push(query)
-      if (this.fails) return this.json({ error: { message: 'rate limited' } }, 429)
+      if (this.fails === 'status') return this.json({ error: { message: 'rate limited' } }, 429)
+      if (this.fails !== null) return Promise.reject(this.fails)
     }
     const label = params.get('labelIds')
     const found = MESSAGES.filter(
@@ -241,7 +243,9 @@ describe('filesContaining', () => {
     ['grep -rlw inbox /gmail', () => new FakeGmail()],
     ['grep -rlw Jan /gmail', () => new FakeGmail()],
     ['grep -rlw nothing /gmail', () => new FakeGmail()],
-    ['grep -rlw deploy /gmail', () => new FakeGmail(true)],
+    ['grep -rlw deploy /gmail', () => new FakeGmail('status')],
+    ['grep -rlw deploy /gmail', () => new FakeGmail(new TypeError('fetch failed'))],
+    ['grep -rlw deploy /gmail', () => new FakeGmail(new DOMException('timed out', 'TimeoutError'))],
   ])('reads every message when search cannot answer %s', async (line, fake) => {
     const full = await onGmail(line, new FakeGmail(), false)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)

@@ -159,6 +159,7 @@ const PLAN = {
   size: 5,
   timestamp: START + 2 * DAY + 60,
   url_private_download: 'https://files.slack.com/files-pri/T1-F1/download/plan.txt',
+  permalink: 'https://acme.slack.com/files/U1/F1/plan.txt',
 }
 
 interface Message {
@@ -177,14 +178,17 @@ function message(at: number, text: string, extra: Partial<Message> = {}): Messag
 
 const MESSAGES: Record<string, Message[]> = {
   C1: [
-    message(START + 60, 'the deploy is done'),
+    message(START + 60, 'the deploy is done at acme'),
     message(START + DAY + 60, 'lunch at noon', {
       reactions: [{ name: 'rocket', users: ['U1'], count: 1 }],
     }),
     message(START + 2 * DAY + 60, '', { files: [PLAN] }),
     message(START + 3 * DAY + 60, 'deploy again', { user_profile: PROFILE }),
   ],
-  C2: [message(START + DAY + 60, 'a random deploy in Lima')],
+  C2: [
+    message(START + DAY + 60, 'a random deploy in Lima'),
+    message(START + 4 * DAY + 60, '', { files: [PLAN] }),
+  ],
   D1: [message(START + 60, 'deploy in a dm')],
 }
 
@@ -197,14 +201,17 @@ function holds(text: string, word: string): boolean {
  * The Slack Web API a channel walk and its search reach. Search matches
  * whole words in any case, as Slack does: message text (`search.messages`),
  * a reaction name (`has::name:`) and a file's name or title
- * (`search.files`), scoped by `in:#name`. Every page answers `pages` as its
- * page count. Mirrors Python's `FakeSlack`.
+ * (`search.files`, naming every message that shares it unless `shares` is
+ * off), scoped by `in:#name`. Every page answers `pages` as its page count;
+ * a search rejects with `fails` when set. Mirrors Python's `FakeSlack`.
  */
 class FakeSlack implements SlackTransport {
   readonly searches: string[] = []
+  userLists = 0
   constructor(
     private readonly pages = 1,
-    private readonly fails = false,
+    private readonly fails: Error | null = null,
+    private readonly shares = true,
   ) {}
 
   call(endpoint: string, params: Record<string, string> = {}): Promise<SlackResponse> {
@@ -214,7 +221,12 @@ class FakeSlack implements SlackTransport {
         channels: (params.types ?? '').includes('im') ? DMS : CHANNELS,
       })
     }
-    if (endpoint === 'users.list') return Promise.resolve({ ok: true, members: USERS })
+    if (endpoint === 'users.list') {
+      this.userLists += 1
+      return Promise.resolve({ ok: true, members: USERS })
+    }
+    if (endpoint === 'auth.test')
+      return Promise.resolve({ ok: true, url: 'https://acme.slack.com/' })
     if (endpoint === 'conversations.history') {
       const oldest = Number(params.oldest ?? 0)
       const latest = params.latest === undefined ? Infinity : Number(params.latest)
@@ -225,7 +237,7 @@ class FakeSlack implements SlackTransport {
     }
     const query = params.query ?? ''
     this.searches.push(query)
-    if (this.fails) return Promise.reject(new SlackApiError(endpoint, 'ratelimited'))
+    if (this.fails !== null) return Promise.reject(this.fails)
     return Promise.resolve({
       ok: true,
       [endpoint.slice('search.'.length)]: this.search(endpoint, query),
@@ -253,14 +265,28 @@ class FakeSlack implements SlackTransport {
         }
         if (endpoint === 'search.files' && reaction.length === 0) {
           for (const f of m.files ?? []) {
-            if (holds(f.name, text) || holds(f.title, text)) {
-              matches.push({ id: f.id, timestamp: f.timestamp, channels: [id] })
-            }
+            if (holds(f.name, text) || holds(f.title, text)) matches.push(this.file(f))
           }
         }
       }
     }
     return { matches, paging: { pages: this.pages } }
+  }
+
+  private file(file: typeof PLAN): Record<string, unknown> {
+    const found = { id: file.id, timestamp: file.timestamp }
+    if (!this.shares) return found
+    const shares: Record<string, Record<string, { ts: string }[]>> = {}
+    for (const [id, messages] of Object.entries(MESSAGES)) {
+      for (const m of messages) {
+        if ((m.files ?? []).some((f) => f.id === file.id)) {
+          const kind = id.startsWith('D') ? 'private' : 'public'
+          const rows = ((shares[kind] ??= {})[id] ??= [])
+          rows.push({ ts: m.ts })
+        }
+      }
+    }
+    return { ...found, shares }
   }
 
   downloadFile(): Promise<Uint8Array> {
@@ -306,16 +332,31 @@ describe('filesContaining', () => {
     ['grep -rlw deploy /slack/channels', ['C1/2025-11-03', 'C1/2025-11-06', 'C2/2025-11-04']],
     ['grep -rlw rocket /slack/channels/general__C1', ['C1/2025-11-04']],
     ['grep -rlw Launch /slack/channels/general__C1', ['C1/2025-11-05']],
-    ['grep -rlw deploy /slack/channels/general__C1/2025-11-06', ['C1/2025-11-06']],
+    ['grep -rlw Launch /slack/channels', ['C1/2025-11-05', 'C2/2025-11-07']],
     [
       'grep -rlw deploy /slack',
       ['C1/2025-11-03', 'C1/2025-11-06', 'C2/2025-11-04', 'D1/2025-11-03'],
     ],
   ])('reads only the days search names for %s', async (line, reads) => {
+    // A file hit names every day a message shares it, not its upload.
     const full = await onSlack(line, new FakeSlack(), false)
     const [out, code, read] = await onSlack(line)
     expect([out, code]).toEqual(full.slice(0, 2))
     expect(read).toEqual(reads)
+  })
+
+  it('reads a day rather than searching it', async () => {
+    const line = 'grep -rlw deploy /slack/channels/general__C1/2025-11-06'
+    const full = await onSlack(line, new FakeSlack(), false)
+    const [out, code, read, searches] = await onSlack(line)
+    expect([out, code, read]).toEqual(full.slice(0, 3))
+    expect(searches).toEqual([])
+  })
+
+  it('shares one user listing among the patterns of one grep', async () => {
+    const fake = new FakeSlack()
+    await onSlack('grep -rlw -e deploy -e lunch /slack/channels', fake)
+    expect(fake.userLists).toBe(1)
   })
 
   it('searches a channel by name and its reactions too', async () => {
@@ -334,7 +375,17 @@ describe('filesContaining', () => {
     ['grep -rlw Lima /slack/channels', () => new FakeSlack()],
     ['grep -rlw nothing /slack/channels', () => new FakeSlack()],
     ['grep -rlw deploy /slack/channels', () => new FakeSlack(MAX_PAGES + 1)],
-    ['grep -rlw deploy /slack/channels', () => new FakeSlack(1, true)],
+    ['grep -rlw acme /slack/channels', () => new FakeSlack()],
+    ['grep -rlw Launch /slack/channels', () => new FakeSlack(1, null, false)],
+    [
+      'grep -rlw deploy /slack/channels',
+      () => new FakeSlack(1, new SlackApiError('search.messages', 'ratelimited')),
+    ],
+    ['grep -rlw deploy /slack/channels', () => new FakeSlack(1, new TypeError('fetch failed'))],
+    [
+      'grep -rlw deploy /slack/channels',
+      () => new FakeSlack(1, new DOMException('timed out', 'TimeoutError')),
+    ],
     ['grep -rlw deploy /slack/dms', () => new FakeSlack()],
   ])('reads every day when search cannot answer %s', async (line, fake) => {
     const full = await onSlack(line, new FakeSlack(), false)

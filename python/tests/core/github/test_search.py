@@ -17,10 +17,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.github import GitHubAccessor
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.api.client import ApiResponse
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.search import (
     SearchResult,
+    files_containing,
     narrow_paths,
     search,
     search_code,
@@ -612,6 +614,41 @@ async def test_a_narrowed_scan_is_not_refused(monkeypatch):
     line = "grep -rw import /gh"
     got, _ = await _on_github(line, monkeypatch)
     assert got == await _run(_ram(), line)
+
+
+@pytest.mark.asyncio
+async def test_a_narrowed_scan_past_the_scope_cap_is_refused(monkeypatch):
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 2)
+    (out, err, code), hub = await _on_github(
+        "grep -rw import /gh", monkeypatch
+    )
+    assert (out, err.decode(), code) == (
+        b"",
+        "grep: 3 files in scope and code search could not narrow them; "
+        "narrow the path\n",
+        1,
+    )
+    assert hub.count("blob") == 0
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
+async def test_files_containing_judges_the_tree_it_loads(
+    mock_search, config, monkeypatch
+):
+    # A cold mount learns its tree is truncated only once it loads it.
+    async def load(accessor, index, prefix):
+        accessor.tree = {"src/a.py": _blob("src/a.py", 10)}
+        accessor.truncated = True
+
+    monkeypatch.setattr("mirage.core.github.search.ensure_tree", load)
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
+    accessor = _accessor(config, {})
+    out = await files_containing(
+        accessor, RAMIndexCacheStore(), "needle", [PathSpec.from_str_path("/")]
+    )
+    assert out is None
+    mock_search.assert_not_awaited()
 
 
 @pytest.mark.asyncio

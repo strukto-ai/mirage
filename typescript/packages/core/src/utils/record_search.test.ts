@@ -21,7 +21,8 @@ const KEYS = new Set(['subject', 'body_text', 'flags', 'true', 'seen'])
 // quotes, escapes and non-ASCII can match an id, a count or a JSON escape; a
 // key, a fixed value or a hex run can match outside the text the provider
 // searches, and so can a substring of a key. A text starting with a letter an
-// escape ends with (\n, \b, \u001b) is searched without that letter too.
+// escape ends with (\n, \b, \u001b) is searched without that letter too, and
+// that letter alone is refused.
 describe('recordQueries', () => {
   it.each<[string, boolean, string[] | null]>([
     ['plan', false, ['plan']],
@@ -29,6 +30,7 @@ describe('recordQueries', () => {
     ['nice', true, ['nice', 'ice']],
     ['budget', false, ['udget']],
     ['n cat', true, ['n cat', 'cat']],
+    ['n', true, null],
     ['subject', true, null],
     ['ject', false, null],
     ['ject', true, ['ject']],

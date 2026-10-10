@@ -31,7 +31,7 @@ const ESCAPE_LETTERS = new Set('abcdefnrt')
  * id can hold. Without whole-word matching a text inside a key is refused
  * too. A text starting with a letter an escape ends with may start inside
  * one, so the rest of it is searched as well (alone without whole-word
- * matching, where it is the wider search).
+ * matching, where it is the wider search); such a letter alone is refused.
  */
 export function recordQueries(
   text: string,
@@ -48,7 +48,8 @@ export function recordQueries(
   if (!wholeWord && words.length === 1 && [...keys].some((key) => key.includes(only))) {
     return null
   }
+  if (!ESCAPE_LETTERS.has(text.charAt(0).toLowerCase())) return [text]
   const rest = text.slice(1).trim()
-  if (!ESCAPE_LETTERS.has(text.charAt(0).toLowerCase()) || rest === '') return [text]
+  if (rest === '') return null
   return wholeWord ? [text, rest] : [rest]
 }

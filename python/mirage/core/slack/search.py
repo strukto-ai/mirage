@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+import aiohttp
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexCacheStore
@@ -39,82 +42,332 @@ PAGE_SIZE = 100
 MAX_PAGES = 10
 
 # What a channel day's chat.jsonl holds besides the message text, file
-# names and titles and reaction names Slack search covers: key names,
-# JSON literals, file types, download URLs and the wording of a join or
-# leave message.
+# names and titles and reaction names Slack search covers, spelled as
+# whole words (a key with an underscore is never one): the keys of a
+# message, its blocks, files and attachments, their fixed values, file
+# and MIME types, URL words and the wording of a join or leave message.
 RECORD_KEYS = frozenset(
     {
-        "type",
-        "message",
-        "subtype",
-        "user",
-        "text",
-        "ts",
-        "reactions",
-        "name",
-        "users",
-        "count",
-        "files",
-        "file",
-        "id",
-        "title",
-        "mimetype",
-        "filetype",
-        "size",
-        "timestamp",
-        "team",
-        "blocks",
-        "elements",
-        "edited",
+        "accessory",
+        "acrobat",
+        "actions",
+        "adobe",
+        "ai",
+        "apk",
+        "app",
+        "apple",
+        "applescript",
+        "application",
+        "apps",
+        "archive",
+        "archives",
         "attachments",
-        "username",
-        "permalink",
-        "true",
+        "audio",
+        "auto",
+        "avatar",
+        "avatars",
+        "basic",
+        "binary",
+        "blocks",
+        "bmp",
+        "bold",
+        "border",
+        "box",
+        "boxnote",
+        "broadcast",
+        "bullet",
+        "button",
+        "c",
+        "canvas",
+        "cfm",
+        "channel",
+        "channels",
+        "checkboxes",
+        "clojure",
+        "code",
+        "coffeescript",
+        "color",
+        "com",
+        "comma",
+        "comment",
+        "complete",
+        "compressed",
+        "content",
+        "context",
+        "count",
+        "cpp",
+        "created",
+        "csharp",
+        "csrc",
+        "css",
+        "csv",
+        "d",
+        "dart",
+        "date",
+        "datepicker",
+        "deanimate",
+        "deleted",
+        "diff",
+        "divider",
+        "doc",
+        "dockerfile",
+        "docs",
+        "document",
+        "docx",
+        "dotx",
+        "download",
+        "dropbox",
+        "edge",
+        "edit",
+        "editable",
+        "edited",
+        "element",
+        "elements",
+        "email",
+        "emoji",
+        "enterprise",
+        "eps",
+        "epub",
+        "erlang",
+        "everyone",
+        "excel",
+        "external",
+        "fallback",
         "false",
-        "null",
+        "fields",
+        "file",
+        "files",
+        "filetype",
+        "fla",
+        "flash",
+        "flv",
+        "footer",
+        "format",
+        "fortran",
+        "fsharp",
+        "gdoc",
+        "gdrive",
+        "gif",
+        "go",
+        "google",
+        "gpres",
+        "gravatar",
+        "groovy",
+        "groups",
+        "gsheet",
+        "gzip",
+        "handlebars",
+        "has",
+        "haskell",
+        "haxe",
+        "header",
+        "heic",
+        "here",
+        "hidden",
+        "highlight",
+        "hls",
+        "hosted",
+        "html",
         "http",
         "https",
-        "slack",
-        "com",
-        "pri",
-        "download",
-        "plain",
-        "csv",
-        "markdown",
-        "html",
-        "json",
+        "icons",
+        "id",
+        "illustrator",
         "image",
-        "png",
+        "img",
+        "ims",
+        "indd",
+        "indent",
+        "indesign",
+        "input",
+        "inviter",
+        "italic",
+        "java",
+        "javascript",
+        "joined",
         "jpeg",
         "jpg",
-        "gif",
-        "video",
-        "audio",
-        "application",
-        "pdf",
-        "zip",
-        "octet",
-        "stream",
-        "vnd",
-        "openxmlformats",
-        "officedocument",
-        "presentationml",
-        "presentation",
-        "spreadsheetml",
-        "sheet",
-        "wordprocessingml",
-        "document",
-        "docs",
-        "pptx",
-        "xlsx",
-        "docx",
-        "quip",
-        "binary",
-        "has",
-        "joined",
+        "json",
+        "keynote",
+        "kotlin",
+        "label",
+        "latex",
         "left",
+        "lines",
+        "link",
+        "lisp",
+        "list",
+        "locale",
+        "lua",
+        "markdown",
+        "matlab",
+        "message",
+        "metadata",
+        "mhtml",
+        "mimetype",
+        "mkv",
+        "mode",
+        "mov",
+        "mpeg",
+        "mpg",
+        "mrkdwn",
+        "ms",
+        "msword",
+        "mumps",
+        "name",
+        "null",
+        "numbers",
+        "nzb",
+        "objc",
+        "objective",
+        "ocaml",
+        "octet",
+        "odg",
+        "odi",
+        "odp",
+        "ods",
+        "odt",
+        "officedocument",
+        "offset",
+        "ogg",
+        "ogv",
+        "onedrive",
+        "openxmlformats",
+        "options",
+        "ordered",
+        "overflow",
+        "pages",
+        "pascal",
+        "pdf",
+        "perl",
+        "permalink",
+        "photoshop",
+        "php",
+        "pig",
+        "placeholder",
+        "plain",
+        "png",
+        "post",
+        "powerpoint",
+        "powershell",
+        "ppt",
+        "pptx",
+        "presentation",
+        "presentationml",
+        "pretext",
+        "preview",
+        "pri",
+        "private",
+        "processing",
+        "psd",
+        "public",
+        "puppet",
+        "purpose",
+        "python",
+        "qtz",
+        "quicktime",
+        "quip",
+        "r",
+        "range",
+        "reactions",
+        "replies",
+        "root",
+        "rtf",
+        "ruby",
+        "rust",
+        "s",
+        "sass",
+        "scala",
+        "scheme",
+        "script",
+        "section",
+        "secure",
+        "separated",
+        "sh",
+        "shares",
+        "sheet",
+        "sheets",
+        "shell",
+        "short",
+        "size",
+        "sketch",
+        "slack",
+        "slides",
+        "smalltalk",
+        "snippet",
+        "source",
+        "space",
+        "spreadsheet",
+        "spreadsheetml",
+        "sql",
+        "state",
+        "status",
+        "stream",
+        "strike",
+        "style",
+        "subscribed",
+        "subtype",
+        "svg",
+        "swf",
+        "swift",
+        "tab",
+        "tar",
+        "tarball",
+        "team",
+        "text",
         "the",
-        "channel",
+        "tiff",
+        "timepicker",
+        "timestamp",
+        "title",
+        "tmb",
+        "tombstone",
+        "toml",
+        "topic",
+        "transcription",
+        "true",
+        "ts",
+        "tsv",
+        "type",
+        "typescript",
+        "unicode",
+        "unknown",
+        "unlink",
+        "updated",
+        "upload",
+        "url",
+        "user",
+        "usergroup",
+        "username",
+        "users",
+        "value",
+        "values",
+        "vb",
+        "vbscript",
+        "vcard",
+        "velocity",
+        "verbatim",
+        "verilog",
+        "video",
+        "visible",
+        "visual",
+        "vnd",
+        "vtt",
+        "wav",
+        "webm",
+        "webp",
+        "wmv",
+        "word",
+        "wordprocessingml",
+        "x",
+        "xls",
+        "xlsb",
+        "xlsm",
+        "xlsx",
+        "xltx",
+        "xml",
+        "yaml",
+        "zip",
     }
 )
 
@@ -185,8 +438,8 @@ async def search_files(
     return compact_json_bytes(data)
 
 
-async def _name_words(accessor: SlackAccessor) -> set[str]:
-    words: set[str] = set()
+async def _fetch_name_words(accessor: SlackAccessor) -> frozenset[str]:
+    names: list[Any] = []
     async for page in cursor_pages(
         accessor.config,
         "users.list",
@@ -196,15 +449,44 @@ async def _name_words(accessor: SlackAccessor) -> set[str]:
     ):
         for user in page:
             profile = user.get("profile") or {}
-            for name in (
+            names += [
                 user.get("name"),
                 user.get("real_name"),
                 profile.get("real_name"),
                 profile.get("display_name"),
-            ):
-                if isinstance(name, str):
-                    words.update(re.findall(r"[a-z]+", name.lower()))
-    return words
+                profile.get("first_name"),
+            ]
+    auth = await slack_get(accessor.config, "auth.test", session=accessor.pool)
+    names.append(auth.get("url"))
+    words: set[str] = set()
+    for name in names:
+        if isinstance(name, str):
+            words.update(re.findall(r"[a-z]+", name.lower()))
+    return frozenset(words)
+
+
+async def _name_words(accessor: SlackAccessor) -> frozenset[str]:
+    """The words of every user's name and of the workspace's domain.
+
+    A message may carry its author's profile and a file its permalink on
+    the workspace's domain. The patterns of one grep ask at once, so they
+    share the fetch in flight; a later command fetches again and sees a
+    user added since.
+
+    Args:
+        accessor (SlackAccessor): the workspace.
+    """
+    pending = accessor.name_words
+    if pending is None or pending.get_loop() is not asyncio.get_running_loop():
+        pending = asyncio.ensure_future(_fetch_name_words(accessor))
+        accessor.name_words = pending
+
+        def forget(done: asyncio.Future[frozenset[str]]) -> None:
+            if accessor.name_words is done:
+                accessor.name_words = None
+
+        pending.add_done_callback(forget)
+    return await asyncio.shield(pending)
 
 
 def _day_of(ts: Any) -> str | None:
@@ -241,10 +523,31 @@ async def _matches(
         page += 1
 
 
-def _ids_of(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
+def _shares_of(value: Any) -> list[tuple[str, str]] | None:
+    """The channel and UTC day of every message that shares a file.
+
+    A file's ``timestamp`` is its upload, and a share on a later day puts
+    the file in that day's history; ``shares`` names each one. None when
+    the file names no shares.
+
+    Args:
+        value (Any): the file's ``shares``.
+    """
+    if not isinstance(value, dict):
+        return None
+    found: list[tuple[str, str]] = []
+    for channels in value.values():
+        if not isinstance(channels, dict):
+            return None
+        for cid, rows in channels.items():
+            if not isinstance(rows, list):
+                return None
+            for row in rows:
+                day = _day_of(row.get("ts") if isinstance(row, dict) else None)
+                if day is None:
+                    return None
+                found.append((cid, day))
+    return found
 
 
 async def _hits_of(
@@ -252,7 +555,6 @@ async def _hits_of(
     within: str,
     queries: list[str],
     reaction: str | None,
-    channel_id: str | None,
 ) -> list[tuple[str, str]] | None:
     hits: list[tuple[str, str]] = []
     searches = [("search.messages", within + query) for query in queries]
@@ -265,19 +567,16 @@ async def _hits_of(
         if found is None:
             return None
         for item in found:
-            if key == "messages":
-                ids = [(item.get("channel") or {}).get("id", "")]
-                day = _day_of(item.get("ts"))
-            else:
-                ids = [
-                    *_ids_of(item.get("channels")),
-                    *_ids_of(item.get("groups")),
-                ]
-                ids = ids or ([channel_id] if channel_id else [])
-                day = _day_of(item.get("timestamp"))
-            if day is None or not ids:
+            if key == "files":
+                shared = _shares_of(item.get("shares"))
+                if shared is None:
+                    return None
+                hits.extend(shared)
+                continue
+            day = _day_of(item.get("ts"))
+            if day is None:
                 return None
-            hits.extend((cid, day) for cid in ids)
+            hits.append(((item.get("channel") or {}).get("id", ""), day))
     return hits
 
 
@@ -291,16 +590,16 @@ async def files_containing(
 
     Slack matches whole words of message text, of file names and titles
     (``search.files``) and of reaction names (``has::name:``), so each hit
-    names the UTC day its message or file was posted. The root and
-    ``channels`` are searched across the workspace, a channel or a day
-    with ``in:#name`` (``on:`` would read the day in the searcher's time
-    zone); hits map to dirnames through the channel ids the listing
-    holds. A scope with no channel day in it adds nothing. None
-    when ``text`` could match the JSON around those fields
-    (``record_queries``) or a user's name (a message may carry its
-    author's profile), on an API error, past ``MAX_PAGES`` pages, or
-    with no hit at all, since Slack indexes a message some time after it
-    is posted.
+    names the UTC day its message was posted, or each day a file was
+    shared. The root and ``channels`` are searched across the workspace,
+    a channel with ``in:#name`` (``on:`` would read the day in the
+    searcher's time zone); hits map to dirnames through the channel ids
+    the listing holds. A scope with no channel day in it adds nothing,
+    and a day is cheaper to read than to search. None when ``text`` could
+    match the JSON around those fields (``record_queries``), a user's
+    name or the workspace's domain (``_name_words``), on an API or
+    connection error, past ``MAX_PAGES`` pages, or with no hit at all,
+    since Slack indexes a message some time after it is posted.
 
     Args:
         accessor (SlackAccessor): the workspace.
@@ -313,7 +612,7 @@ async def files_containing(
         return None
     try:
         return await _search(accessor, text, queries, under, index)
-    except RuntimeError as exc:
+    except (RuntimeError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
         logger.warning("slack search failed (%s); reading every file", exc)
         return None
 
@@ -338,21 +637,23 @@ async def _search(
             )
             names = [path.rsplit("/", 1)[-1] for path in listed]
             dirs = {parse_id_name(name)[1]: name for name in names}
-            within, channel_id = "", None
+            within = ""
         elif (
             match.kind in ("channel", "day")
             and match.slots["container"] == "channels"
         ):
+            if match.kind == "day":
+                return None
             dirname = scope.mount_path.strip("/").split("/")[1]
             channel = mounted_path(scope, f"/channels/{dirname}")
             entry = await resolve_entry(readdir, accessor, channel, index)
             if entry is None:
                 return None
             dirs = {entry.id: dirname}
-            within, channel_id = f"in:#{entry.name} ", entry.id
+            within = f"in:#{entry.name} "
         else:
             continue
-        hits = await _hits_of(accessor, within, queries, reaction, channel_id)
+        hits = await _hits_of(accessor, within, queries, reaction)
         if hits is None:
             return None
         found.extend(

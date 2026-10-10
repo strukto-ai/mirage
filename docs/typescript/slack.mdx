@@ -166,14 +166,15 @@ With `contentSearch: true` (YAML `content_search: true`) and a user token,
 print what reading every day would. Search covers message text, file names
 and titles (`search.files`) and reactions (`has::name:`); listing a day already
 fetches its history, so this saves the second fetch of each day it rules out.
-DMs, users and file blobs are always read.
+A file hit names each day the file was shared. DMs, users, file blobs and a day
+searched on its own are always read.
 
-Every day is read when the word is a key of the message JSON, a file-type or
-download-URL word, a join or leave message word, or part of a user's name, and
-when a search fails, returns more than 1,000 messages or finds nothing. It is
-off by default: Slack indexes a message some time after it is posted, and a
-word held only in another field of a message (a bot's username, an unfurled
-link) is not searched.
+Every day is read when the word is a key or fixed value of the message JSON, a
+file-type or URL word, a join or leave message word, or part of a user's name
+or of the workspace's domain, and when a search fails, returns more than 1,000
+messages or finds nothing. It is off by default: Slack indexes a message some
+time after it is posted, and a word held only in another field of a message (a
+bot's username, an unfurled link) is not searched.
 
 ## Troubleshooting
 
