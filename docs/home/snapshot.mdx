@@ -1,83 +1,60 @@
 ---
 title: Snapshot & Replay
-description: Freeze an agent run, restore it later, and detect when the underlying world has drifted.
+description: Freeze an agent run into one tar, restore it later, and detect when the files it read have changed.
 icon: camera
 ---
 
 ## What It Does
 
-A snapshot captures a workspace as a single tar file: mount configs, sessions, history, finished jobs, RAM file-cache bytes, and one fingerprint per remote path the agent read or wrote. Loading a snapshot reconstructs the workspace and verifies that the underlying sources have not drifted since capture.
+A snapshot saves a workspace as one tar file: its mounts (with secret config fields redacted), sessions, history, finished jobs, the RAM file cache, and the version of the remote files the agent read or wrote, where a [supported backend](#vfs-support-matrix) reports one. A version is the backend's own marker of a file's content, such as an S3 ETag or a Drive md5. Loading the tar rebuilds the workspace. Under the default `STRICT` policy, files with a saved revision are read at that revision, and the other recorded files are checked for changes before the first command runs.
 
-When the backend exposes a stable per-object revision marker (S3 `VersionId`, Drive `revisionId`, Git commit SHA), the snapshot also records that revision. At load time, reads pin to the recorded revision and serve the exact bytes the original agent saw, even if the live object has since been overwritten.
-
-```mermaid
-flowchart TD
-    Load["Workspace.load(tar)"] --> Inject{Manifest carries<br/>revision for path?}
-    Inject -->|yes| Pin["mount.revisions[path] = revision"]
-    Inject -->|no| Mark[Queue (mount, path, fingerprint)<br/>for drift check]
-    Pin --> Ready[Workspace ready]
-    Mark --> Ready
-    Ready --> First[First dispatch / execute]
-    First --> Gather[asyncio.gather drift checks<br/>pinned paths never queued]
-    Gather --> Read[Read at path]
-    Read --> Pinned{revision_for path<br/>set?}
-    Pinned -->|yes| Versioned[GET path with VersionId<br/>= original bytes]
-    Pinned -->|no| Live[GET path live]
-    Live --> Match{Fingerprint<br/>matches snapshot?}
-    Match -->|yes| Serve[Serve current bytes]
-    Match -->|"no, STRICT"| Raise[raise ContentDriftError]
-    Match -->|"no, OFF"| Evict[Evict cache, serve live]
-```
+When a backend keeps old revisions (S3 object versions, Google Drive, OneDrive and SharePoint versions, GridFS), the snapshot also records which revision the agent read. A restored workspace reads that revision, so it sees the exact bytes the original run saw even after the live file was overwritten. This page calls that a *revision pin*.
 
 ## The API
+
+The examples assume an existing workspace `ws`.
 
 <CodeGroup>
 
 ```python Python
 from mirage import DriftPolicy, Workspace
+from mirage.vfs.s3 import S3Config, S3VFS
 
-# capture — async; serializes state plus fingerprints recorded during reads
 await ws.snapshot("run.tar")
 await ws.snapshot("run.tar.gz", compress="gz")
 
-# replay — drift check fires on first dispatch/execute
-restored = await Workspace.load("run.tar")                    # STRICT default
-restored = await Workspace.load("run.tar", drift_policy=DriftPolicy.OFF)
+mounts = {"/s3": S3VFS(S3Config(bucket="my-bucket"))}
+restored = await Workspace.load("run.tar", mounts=mounts)
+current = await Workspace.load("run.tar", mounts=mounts, drift_policy=DriftPolicy.OFF)
 
-# in-process duplicate (shares remote VFS, restores local content fresh)
 cp = await ws.copy()
 ```
 
 ```typescript TypeScript
-import { DriftPolicy, Workspace } from '@struktoai/mirage-node'
+import { DriftPolicy, S3VFS, Workspace } from '@struktoai/mirage-node'
 
-// capture to a tar file, or as the tar's bytes
 await ws.snapshot('run.tar')
 const tar = await ws.snapshot()
 
-// replay with strict drift detection (default)
-const restored = await Workspace.load('run.tar')
+const mounts = { '/s3': new S3VFS({ bucket: 'my-bucket' }) }
+const restored = await Workspace.load('run.tar', {}, mounts)
+const current = await Workspace.load('run.tar', { driftPolicy: DriftPolicy.OFF }, mounts)
 
-// or restore the structure while reading current remote content
-const current = await Workspace.load('run.tar', {
-  driftPolicy: DriftPolicy.OFF,
-})
-
-// in-process duplicate
 const copy = await ws.copy()
 ```
 
 </CodeGroup>
 
-TypeScript file-path snapshot I/O is available in Node. In the browser, `ws.snapshot()` answers the tar as a `Uint8Array`, `Workspace.load(snapshotBytes)` takes it back, and `Workspace.fromState(...)` restores a state object; saving the bytes to a file or download target is the application's responsibility.
-
-Both `snapshot` and `copy` are async because they serialize workspace state and collect recorded fingerprints.
-
-`copy` also keeps the workspace's profiles, default profile, and command limits. Policy objects and the route policy are not copied; add them to the copy again if it needs them.
+- **Hand back every mount the tar cannot rebuild.** Config fields declared as secret are redacted from the tar, and some backends always ask for the live mount, so such a mount must be passed again at load: `mounts=` in Python, the third argument in TypeScript. Loading without one fails and names the prefix. CLIs whose config was redacted come back the same way (`clis=`, the fourth argument), and the `secrets:` block that secret-backed environment values point to through `secrets=` in Python or the `secrets` option in TypeScript. A CLI you registered in code is saved by name: register its spec with `register_cli_spec` (Python) or `registerCliSpec` (TypeScript) before loading, or hand it back with its config through `clis=` or the fourth argument.
+- **Policies on a handed-back mount.** It takes the default read policy unless the override is a `Mount` that declares its own; its `write:` policy is kept, and a load that cannot keep it is refused ([the read policy](/home/yaml#the-read-policy), [the write policy](/home/yaml#the-write-policy)).
+- **Compression.** Python can compress the tar (`compress="gz"`, `"bz2"` or `"xz"`); TypeScript writes it uncompressed.
+- **The browser** has no file path: `ws.snapshot()` returns the tar as a `Uint8Array` and `Workspace.load(bytes)` takes it back; `Workspace.fromState(state)` restores from a state object.
+- **Snapshot waits for running commands.** Running lines and writes get 30 seconds to finish, after which the snapshot fails with `EBUSY` ([Python](/python/access/in-app), [TypeScript](/typescript/access/in-app)). In the browser only running lines are waited for, so await file writes before taking a snapshot.
+- **`copy()`** duplicates a workspace in-process, without a tar: RAM and Disk mounts are copied and other mounts shared ([Python](/python/access/in-app), [TypeScript](/typescript/access/in-app)).
 
 ## An S3-like store
 
-A snapshot can go to an S3-like store instead of a file. Pass an `S3Config`, the one the [S3 mount](/python/vfs/s3) takes, so S3, R2, MinIO and other S3-compatible stores all work; the key becomes the object key, under the config's `key_prefix`.
+A snapshot can go to an S3-like store instead of a file. Pass an `S3Config`, the one the [S3 mount](/python/vfs/s3) takes, so S3, R2, MinIO and other S3-compatible stores all work; the first argument (`run.tar`) becomes the object key, under the config's `key_prefix`.
 
 <CodeGroup>
 
@@ -86,7 +63,7 @@ from mirage.vfs.s3 import S3Config
 
 store = S3Config(bucket="snapshots", key_prefix="team/")
 await ws.snapshot("run.tar", s3=store)
-restored = await Workspace.load("run.tar", s3=store)
+restored = await Workspace.load("run.tar", s3=store, mounts=mounts)
 ```
 
 ```typescript TypeScript
@@ -94,148 +71,114 @@ import { type S3Config, Workspace } from '@struktoai/mirage-node'
 
 const store: S3Config = { bucket: 'snapshots', keyPrefix: 'team/' }
 await ws.snapshot('run.tar', { s3: store })
-const restored = await Workspace.load('run.tar', { s3: store })
+const restored = await Workspace.load('run.tar', { s3: store }, mounts)
 ```
 
 </CodeGroup>
 
-A server never writes a snapshot to its own disk. Over [HTTP](/home/access/http#snapshot-a-workspace) and the [CLI](/home/access/cli#workspaces) the tar goes back to the caller, whether the server runs on the same machine or another, or into the store its operator gave it (`build_app(snapshot_store=...)`, `buildApp({ snapshotStore })`), named by a key.
+A server never writes a snapshot to its own disk. Over [HTTP](/home/access/http#snapshot-a-workspace) and the [CLI](/home/access/cli#workspaces) the tar goes back to the caller, or into the store its operator gave it (an `S3Config` passed as `build_app(snapshot_store=...)` or `buildApp({ snapshotStore })`; see [server options](/python/access/server)), named by a key.
 
-## What Is And Isn't Captured
+## What A Snapshot Captures
 
 <Columns cols={2}>
   <Card title="Captured" icon="check">
-    - Mount configs (creds redacted; restore via `mounts=` override)
-    - Sessions, history, finished jobs
-    - RAM file-cache bytes for touched paths
-    - One fingerprint per remote read or write (ETag-equivalent)
-    - Optional per-path `revision` when the backend exposes one
+    - Each mount's config (secret fields redacted), mode, `read:`, `ttl:`, `write:` and index settings
+    - The files in RAM and Disk mounts, and the keys in a Redis mount
+    - Sessions (working directory, environment, permissions), history and finished jobs
+    - The workspace environment, with secret-backed values kept as references
+    - CLIs (secret config fields redacted; a script CLI's config is kept as given)
+    - The RAM file cache's cached bytes
+    - The version of each file the agent last read or wrote on a supported backend, where the backend reports one, and its revision where the backend keeps one
   </Card>
   <Card title="Not captured" icon="xmark">
-    - Live state of mounts with `supports_snapshot=False` (Gmail, Slack, Linear, Notion, …)
-    - Files the agent never touched
-    - Raw bytes of remote objects (recoverable only via revision pin)
+    - Secret config fields and secret-backed values
+    - The contents of other remote backends: files the agent never read, and live state of SaaS mounts (Gmail, Slack, Linear, Notion, ...)
+    - A Redis file cache, and the index of listings
+    - The workspace's profile and command-limit tables, policy objects, runtimes and the route policy
+    - Running jobs
   </Card>
 </Columns>
 
 ## Drift Detection
 
-On the first `dispatch` or `shell` after `load`, Mirage stats every fingerprinted path against the live source in parallel. If any path's live fingerprint differs from the recorded one, the workspace raises `ContentDriftError`:
+On the first command after `load` (a `shell()`, `dispatch()` or file operation), mirage checks every recorded file that has no revision pin, once, before the command runs. If a file's version differs from the recorded one, or the file is gone, the command raises `ContentDriftError`:
 
-```python
+<CodeGroup>
+
+```python Python
+from mirage.workspace.snapshot import ContentDriftError
+
 try:
-    await ws.shell("cat /s3/data.csv")
+    await restored.shell("cat /s3/data.csv")
 except ContentDriftError as exc:
     print(exc.path, exc.snapshot_fingerprint, exc.live_fingerprint)
 ```
 
-Paths that carry a revision pin are skipped — the pinned read serves the exact original bytes, so a fingerprint mismatch is expected and harmless.
+```typescript TypeScript
+import { ContentDriftError } from '@struktoai/mirage-node'
+
+try {
+  await restored.shell('cat /s3/data.csv')
+} catch (err) {
+  if (err instanceof ContentDriftError) {
+    console.log(err.path, err.snapshotFingerprint, err.liveFingerprint)
+  } else {
+    throw err
+  }
+}
+```
+
+</CodeGroup>
+
+The error names the file and carries the recorded and current versions.
+
+What is checked:
+
+- **Only files the agent read or wrote.** Files it only listed or `stat`ed carry no version and are not checked.
+- **A written file** is checked against what the agent wrote, on backends whose write reply names a version (not OneDrive or SharePoint; see below).
+- **A file with a revision pin is not checked**: it reads its saved revision, so a change made to the live file elsewhere does not matter.
+
+The check makes the first command after load slower than the rest, since each checked file is looked up on its backend (a few requests on backends that resolve a path folder by folder, such as Google Drive); later commands run at normal speed. `DriftPolicy.OFF` skips the check.
 
 ## Drift Policies
 
-| Policy | Behavior on mismatch | Use when |
+| Policy | After loading | Use when |
 | --- | --- | --- |
-| `STRICT` *(default)* | Raise `ContentDriftError` on first mismatch. | Reproducing an agent run; you want to know the world moved. |
-| `OFF` | Skip drift checks entirely. Evict snapshot cache for fingerprinted paths so reads serve current. | You only wanted the workspace skeleton, not the bytes. |
+| `STRICT` *(default)* | Pinned files read their saved revision; other recorded files are checked on the first command, and a change raises `ContentDriftError`. | Reproducing an agent run, and you want to know if the world moved. |
+| `OFF` | No check and no pins; restored cache entries for recorded files are dropped, so those files are read live. | You want the workspace's structure and sessions, not the original bytes. |
 
-Pass via `await Workspace.load(..., drift_policy=DriftPolicy.OFF)`.
+Pass it as `drift_policy=` in Python and `driftPolicy` in TypeScript.
 
-## How It Composes With Caching
-
-Snapshots interact with two existing caches:
-
-| Cache | Holds | Snapshotted? |
-| --- | --- | --- |
-| **File cache** | raw bytes per virtual path | ✅ on a RAM cache, bytes for touched paths are serialized into the tar; a Redis cache is not captured. Restored bytes keep their original expiry. |
-| **Index cache** | `FileStat` entries for listings | ❌ rebuilt lazily after load |
-
-**Only files the agent actually read or wrote are fingerprinted.** Capture walks the workspace's op records in time order and keeps, per path, the token of the newest read or write. A write pins the token its upload reply names, with no revision: S3 and the object stores and Google Drive record one, so a path read and then written replays against the written bytes, not the pre-write revision. A write that records no token drops the path's pin. OneDrive and SharePoint writes record none, because Graph's `cTag` can move after the upload reply when SharePoint promotes document properties into an Office file, so a written OneDrive or SharePoint path carries no pin. A path pinned by a token alone, every written path among them, costs one live stat in the drift check on the first command after load, so a workspace that wrote many files pays one stat per written file there; a read pinned to a revision replays that revision and costs no stat. Files that were listed but never opened, or touched only by `stat` / `readdir`, do not carry a fingerprint or a revision.
-
-At load time, three pieces of restored state cooperate per read:
-
-1. **Cache is consulted first.** Snapshot bytes go back into the file cache; under `read: bounded`, within the mount's `ttl:`, a warm read returns them with no network round-trip, and under `read: fresh` it costs one check.
-2. **Fingerprint verifies the cache.** Under STRICT, the eager drift check stats every recorded path against live and raises before any read fires if anything moved. The cache is therefore trusted as authoritative until proven stale.
-3. **Revision pin is the cold-path recovery.** When the cache misses and the backend supports pinning, reads fetch the exact recorded revision (S3 `GetObject(VersionId=...)`) so you still get original bytes, not the live head.
-
-The same three states under each policy:
-
-| Scenario | Cache | Pin | Drift check | Net effect |
-| --- | --- | --- | --- | --- |
-| STRICT, fingerprint matches, cache warm | served | n/a | passes | Original bytes from cache; the read itself sends no request under `bounded` |
-| STRICT, fingerprint matches, cache cold | miss | n/a | passes | Live GET, current bytes (= original) |
-| STRICT, no pin, fingerprint differs | (n/a) | (n/a) | raises `ContentDriftError` | Caller informed before reading |
-| STRICT + pin (versioned backend) | served (matches recorded) | installed | skipped for pinned paths | Original bytes from cache or pinned GET |
-| OFF, any state | evicted for fingerprinted paths | not installed | skipped | Live GET, current bytes |
-
-The cache is the optimization, the fingerprint is the verifier, and the pin is the recovery — three independent guarantees that "what you replay equals what you captured."
+`STRICT` checks only the backends in the [support matrix](#vfs-support-matrix); files on other remote backends are not checked, and runtimes, policy objects and profile tables are not restored.
 
 ## VFS Support Matrix
 
-Remote drift detection is opt-in per VFS through `supports_snapshot` in Python and `supportsSnapshot` in TypeScript. A working adapter must also attach a fingerprint to each read record; a revision is optional and enables pinned replay.
+Drift detection and revision pins work on the backends below. Every other remote mount is restored with its config (handed back at load when it holds credentials or its backend asks for it) and has no drift check. RAM and Disk mounts restore their files and need no check; in the browser, OPFS mounts are restored the same way.
 
-Legend: ✅ = implemented · 🟡 = VFS opts in, but recorded reads do not yet carry the fingerprint · ❌ = live-only · — = unavailable in that runtime.
+| VFS | Python | TS Node | TS Browser | Version checked | Revision pin |
+| --- | :---: | :---: | :---: | --- | :---: |
+| S3 and S3-compatible stores | ✅ | ✅ | ✅ | ETag | ✅ when the bucket keeps object versions |
+| Google Drive | ✅ | ✅ | ✅ | md5, else the head revision (modified time for native Google files) | ✅ (not for native Google files) |
+| OneDrive | ✅ | ✅ | ✅ | `cTag` | ✅ |
+| SharePoint | ✅ | ✅ | ✅ | `cTag` | ✅ |
+| GridFS | ✅ | ✅ | — | file id | ✅ |
+| GitHub | ✅ | ✅ | ✅ | blob sha | ❌ |
+| Hugging Face models, datasets and spaces | ✅ | ✅ | — | the Hub's file hash | ❌ |
+| Hugging Face buckets | ✅ | ✅ | — | the bucket's file hash | ❌ |
+| Everything else (Box, Dropbox, Nextcloud, Google Docs/Sheets/Slides mounts, Gmail, Slack, SSH, databases, ...) | ❌ | ❌ | ❌ | none | none |
 
-### Remote VFS
+Legend: ✅ supported · ❌ not supported · — backend unavailable in that runtime.
 
-| VFS family | Python | TS Node | TS Browser | Revision pin | Notes |
-| --- | :---: | :---: | :---: | :---: | --- |
-| S3 and S3-compatible object stores | ✅ | ✅ | ✅ | When `VersionId` is available | Uses `ETag`; compatible providers without object versions still get drift detection. |
-| OneDrive | ✅ | — | — | ✅ | Uses Microsoft Graph `cTag` plus the current version id. |
-| SharePoint | ✅ | — | — | ✅ | Same Microsoft Graph version flow as OneDrive. |
-| Hugging Face mounts | 🟡 | 🟡 | — | ❌ | mounts opt in, but read records do not yet include the stat fingerprint. |
-| Nextcloud | 🟡 | — | — | ❌ | The VFS opts in, but read records do not yet include the WebDAV ETag. |
-| GitHub | ✅ | ✅ | ✅ | ❌ | Uses the git blob sha; a commit pin is not wired. |
-| Google Drive | ✅ | ✅ | ✅ | ✅ | Uses the md5 (else the head revision) plus the head revision id; a write pins its upload reply's token with no revision. |
-| Other remote mounts | ❌ | ❌ | ❌ | ❌ | Snapshot restores their config/state, then reads current remote content. |
+A file the agent wrote on OneDrive or SharePoint carries no version, because the service can change an Office file after the upload, so it is not checked on replay.
 
-### Local State
+To add snapshot support to your own backend, see [Build a VFS](/python/vfs/new#6-snapshot-support) ([TypeScript](/typescript/vfs/new#6-snapshot-support)).
 
-RAM, Disk, and Redis serialize their VFS state into the snapshot. They do not need a remote drift check or revision pin: replay restores the captured state directly. Credentials and connection details remain redacted and may require a VFS override at load time.
+## How It Composes With Caching
 
-## Extending To A New Backend
-
-Three steps in Python:
-
-```python
-from mirage.observe.context import record, revision_for
-from mirage.vfs.base import BaseVFS
-from mirage.types import FileStat
-
-
-class MyVFS(BaseVFS):
-    supports_snapshot = True  # 1. opt in
-
-    async def stat(self, ...) -> FileStat:
-        return FileStat(
-            ...,
-            fingerprint=my_etag_equivalent,        # 2. for drift
-            revision=my_revision_marker_or_None,   # 3. optional, for pin
-        )
-```
-
-And in your read function, look up the active pin and pass both the
-fingerprint and the revision through to ``record`` so the snapshot
-captures whatever the backend served:
-
-```python
-async def read_bytes(accessor, virtual_path, ...):
-    pinned = revision_for(virtual_path)  # 4. None if no pin installed
-    response = backend_get(virtual_path, revision=pinned)
-    record(
-        "read", virtual_path, "my-backend", len(response.body), start_ms,
-        fingerprint=response.etag,        # 5. for drift detection
-        revision=response.revision,       # 6. for pinning on replay
-    )
-    return response.body
-```
-
-At load time the workspace writes each manifest entry straight into
-``mount.revisions`` — no per-VFS hook required. If your backend
-has no stable revision, skip steps 3 and 6; drift detection still
-works on the fingerprint alone.
+The RAM file cache travels in the tar and is restored as it was, with its original expiry: under `read: bounded` a restored file is served without a request while its entry is still inside the `ttl:` it was cached under, and under `read: fresh` it costs one check. Entries older than the `ttl:` are fetched again. A Redis file cache and the index are not captured; listings are rebuilt on first use. See [the cache](/home/cache).
 
 ## Caveats
 
-- **Revision longevity.** Pinned reads only work as long as the source still retains the recorded revision. S3 bucket lifecycle rules can age out old versions; Drive keeps revisions for 30 days on non-Workspace files. Treat pins as best-effort.
-- **A snapshot in another format is refused.** Each mount now records its [`write:` policy](/home/yaml#the-write-policy), and the loader refuses a snapshot from before it rather than guessing one, and a snapshot in a newer format rather than dropping keys it does not know. Take the snapshot again.
-- **First read after load is slower than the rest.** `Workspace.load()` returns immediately, but the first `execute()` or `dispatch()` afterwards pauses while Mirage verifies that nothing has drifted upstream. Concretely, it asks the live source "is this path still the bytes I remember?" once per recorded read, in parallel. Tiny for short sessions (tens of milliseconds); a few hundred milliseconds to a couple of seconds for sessions with hundreds of recorded reads. The pause happens once per loaded workspace; subsequent calls are normal speed. Pass `drift_policy=DriftPolicy.OFF` if you want to skip the check entirely.
+- **A snapshot can hold sensitive data.** Only secrets are redacted. A script CLI's config, plain environment variables, files, cached bytes and history are saved as they are, so treat the tar as sensitive and keep credentials in secrets rather than in a script CLI's config.
+- **Revisions do not last forever.** A pin works only while the backend still holds that revision. S3 lifecycle rules can expire old object versions, and Drive keeps old revisions of non-Google files for 30 days unless they are marked keep-forever; OneDrive and SharePoint keep versions per their library's version-history settings. Treat pins on old snapshots as best-effort.
+- **A snapshot from another format is refused.** A snapshot taken by a release with a different snapshot format (older or newer) is refused; take it again with the current release.

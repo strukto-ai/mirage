@@ -134,9 +134,8 @@ or local-only utilities).
 
 ## Snapshot behavior
 
-`token` is redacted in VFS state. Loading a snapshot back requires an
-override config that provides fresh credentials if the runtime auth chain does
-not already supply them.
+`token` is redacted in VFS state. A load needs the mount handed back through
+`mounts=`.
 
 ## Databricks Apps
 
