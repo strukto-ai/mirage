@@ -46,7 +46,7 @@ async def tally_cat(accessor, paths, *texts, **kwargs):
     size = struct.unpack("<I", raw[len(MAGIC) : len(MAGIC) + 4])[0]
     body = json.loads(raw[len(MAGIC) + 4 : len(MAGIC) + 4 + size])
     out = "".join(f"{k} {v}\n" for k, v in body.items())
-    return out.encode(), IOResult(cache=[path.mount_path])
+    return out.encode(), IOResult()
 
 
 async def main() -> None:
