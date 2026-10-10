@@ -62,3 +62,8 @@ class Handle:
     write_buf: WriteBuf = field(default_factory=list)
     # A large file reads a chunk at a time rather than hydrating whole.
     chunked: ChunkedHandle | None = None
+    # Bumped whenever the file changes, so a first read that was out
+    # meanwhile does not keep the bytes it fetched.
+    generation: int = 0
+    # Its name was removed or replaced: the open file has no path left.
+    detached: bool = False

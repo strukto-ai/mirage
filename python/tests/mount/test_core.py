@@ -1012,3 +1012,69 @@ async def test_an_open_through_a_link_waits_out_the_links_removal():
     await removing
     with pytest.raises(FileNotFoundError):
         await opening
+
+
+@pytest.mark.asyncio
+async def test_a_direct_write_still_out_lands_before_a_truncate():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf abc > /f")
+    files = _Held(ws.vfs, "pwrite")
+    core = MountCore(files)
+    writing = asyncio.create_task(core.write("/f", b"0123456789", 0, None))
+    await files.out.wait()
+    truncating = asyncio.create_task(core.truncate("/f", 0))
+    await asyncio.sleep(0.01)
+    files.go.set()
+    await writing
+    await truncating
+    assert await ws.vfs.read("/f") == b""
+
+
+@pytest.mark.asyncio
+async def test_a_first_read_a_change_raced_keeps_nothing():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf 'old bytes' > /f")
+    files = _Held(ws.vfs, "read", answered=True)
+    core = MountCore(files)
+    fh = await core.open("/f", os.O_RDWR)
+    reading = asyncio.create_task(core.read("/f", 100, 0, fh))
+    await files.out.wait()
+    await core.truncate("/f", 0)
+    files.go.set()
+    assert await reading == b"old bytes"
+    assert await core.read("/f", 100, 0, fh) == b""
+
+
+@pytest.mark.asyncio
+async def test_a_flush_waits_for_the_one_still_landing():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf abc > /f")
+    files = _Held(ws.vfs, "pwrite")
+    core = MountCore(files)
+    fh = await core.open("/f", os.O_WRONLY)
+    await core.write("/f", b"X", 0, fh)
+    first = asyncio.create_task(core.flush("/f", fh))
+    await files.out.wait()
+    releasing = asyncio.create_task(core.release(fh))
+    await asyncio.sleep(0.01)
+    assert not releasing.done()
+    files.go.set()
+    await first
+    await releasing
+    assert fh not in core.handles
+    assert await ws.vfs.read("/f") == b"Xbc"
+
+
+@pytest.mark.asyncio
+async def test_unlink_and_rename_detach_the_handles_on_the_name(seeded):
+    gone = await seeded.open("/a.txt")
+    linked = await seeded.open("/sub/b.txt")
+    await seeded.symlink("/lk", "sub/b.txt")
+    await seeded.unlink("/a.txt")
+    await seeded.unlink("/lk")
+    await seeded.write("/c.txt", b"new", 0, None)
+    replaced = await seeded.open("/c.txt")
+    await seeded.rename("/sub/b.txt", "/c.txt")
+    assert seeded.handles.get(gone).detached
+    assert seeded.handles.get(replaced).detached
+    assert not seeded.handles.get(linked).detached

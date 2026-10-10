@@ -376,6 +376,29 @@ describe('sftp', () => {
     )
   })
 
+  it('refuses an fsetstat once the handle has lost its name', async () => {
+    // The name now belongs to another file: the change must not land there.
+    const client = await connect(await startHarness())
+    await run(client, 'echo old > /b')
+    const sftp = await sftpOf(client)
+    const handle = await call<Buffer>((cb) => {
+      sftp.open('/b', 'r+', cb)
+    })
+    await done((cb) => {
+      sftp.unlink('/b', cb)
+    })
+    await done((cb) => {
+      sftp.writeFile('/b', 'new\n', cb)
+    })
+    await expect(
+      done((cb) => {
+        sftp.fsetstat(handle, { mode: 0o600 }, cb)
+      }),
+    ).rejects.toSatisfy((err) => codeOf(err) === STATUS.NO_SUCH_FILE)
+    // writeFile creates with 0666, which the new file keeps.
+    expect(await run(client, 'stat -c %a /b; cat /b')).toBe('666\nnew\n')
+  })
+
   it('keeps the permissions an open and a mkdir create with', async () => {
     const client = await connect(await startHarness())
     const sftp = await sftpOf(client)

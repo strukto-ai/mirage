@@ -41,4 +41,8 @@ export interface Handle {
   live?: boolean
   /** A large file reads a chunk at a time rather than hydrating whole. */
   chunked?: ChunkedHandle
+  /** Bumped whenever the file changes, so a first read that was out meanwhile does not keep its bytes. */
+  generation?: number
+  /** Its name was removed or replaced: the open file has no path left. */
+  detached?: boolean
 }

@@ -166,6 +166,20 @@ async def test_setstat_follows_a_link_and_lsetstat_does_not(ssh):
 
 
 @pytest.mark.asyncio
+async def test_fsetstat_on_a_file_whose_name_was_replaced_is_refused(ssh):
+    # The handle's file has no name left; the name now belongs to another.
+    async with ssh.connect() as conn:
+        await conn.run("echo old > /b; echo new > /a")
+        async with conn.start_sftp_client() as sftp:
+            async with sftp.open("/b", "r+") as f:
+                await sftp.posix_rename("/a", "/b")
+                with pytest.raises(asyncssh.SFTPNoSuchFile):
+                    await f.chmod(0o600)
+        result = await conn.run("stat -c %a /b; cat /b")
+        assert result.stdout == "644\nnew\n"
+
+
+@pytest.mark.asyncio
 async def test_create_and_mkdir_keep_the_permissions_asked_for(ssh):
     async with ssh.connect() as conn:
         async with conn.start_sftp_client() as sftp:

@@ -482,11 +482,15 @@ class MountCore:
         elif ctx.chunked is not None and ctx.data is None:
             stored = await self._read_chunk(ctx, ctx.chunked, offset, size)
         else:
-            if ctx.data is None:
-                ctx.data = await self._op(
-                    self._files.read(self.resolve(ctx.path))
-                )
-            stored = ctx.data[offset : offset + size]
+            held = ctx.data
+            if held is None:
+                # A change landing while this read is out keeps it from
+                # holding what it fetched.
+                generation = ctx.generation
+                held = await self._op(self._files.read(self.resolve(ctx.path)))
+                if ctx.generation == generation:
+                    ctx.data = held
+            stored = held[offset : offset + size]
         if not ctx.write_buf:
             return stored
         return overlaid(stored, offset, size, ctx.write_buf)
@@ -536,7 +540,10 @@ class MountCore:
         if ctx is not None:
             ctx.write_buf.append((offset, data))
             return len(data)
-        await self._apply_writes(path, [(offset, data)])
+        await self._mutate(
+            self.identity(path),
+            lambda: self._apply_writes(path, [(offset, data)]),
+        )
         return len(data)
 
     async def create(self, path: str, mode: int | None = None) -> int:
@@ -642,7 +649,10 @@ class MountCore:
 
         async def remove() -> None:
             await self._hold(path)
+            named = self._named(path)
             await self._op(self._files.unlink(self.resolve(path)))
+            for ctx in named:
+                ctx.detached = True
 
         async def run() -> None:
             await self._removing(path, remove)
@@ -665,7 +675,11 @@ class MountCore:
 
         async def replace() -> None:
             await self._hold(new)
+            moved = self.identity(old, follow=False)
+            replaced = [c for c in self._named(new) if c.key != moved]
             await self._op(self._files.rename(source, target))
+            for ctx in replaced:
+                ctx.detached = True
 
         async def run() -> None:
             await self._removing(new, replace)
@@ -832,6 +846,15 @@ class MountCore:
             ctx.write_buf = [*runs, *ctx.write_buf]
             raise
 
+    def _named(self, path: str) -> list[Handle]:
+        """The handles open on the entry at ``path`` itself.
+
+        Args:
+            path (str): mount path of the entry.
+        """
+        key = self.identity(path, follow=False)
+        return [ctx for ctx in self._handles.values() if ctx.key == key]
+
     async def _land_buffered(self, key: str) -> None:
         """Land the buffered writes of every handle open on ``key``.
 
@@ -849,8 +872,11 @@ class MountCore:
             fh (int | None): the handle whose buffer to drain.
         """
         ctx = self._handles.get(fh) if fh is not None else None
-        if ctx is None or not ctx.write_buf:
+        if ctx is None:
             return
+        # Queued with nothing buffered too: a flush still landing has taken
+        # the buffer, and this one waits for it and retries what it puts
+        # back, rather than reporting the file settled.
         await self._mutate(ctx.key, lambda: self._persist_buffered(ctx))
 
     async def open(self, path: str, flags: int = 0) -> int:
@@ -995,12 +1021,7 @@ class MountCore:
         Args:
             path (str): mount path about to be removed or replaced.
         """
-        key = self.identity(path, follow=False)
-        held = [
-            ctx
-            for ctx in self._handles.values()
-            if ctx.key == key and ctx.chunked is not None
-        ]
+        held = [ctx for ctx in self._named(path) if ctx.chunked is not None]
         if not held:
             return
         try:
@@ -1016,7 +1037,7 @@ class MountCore:
 
     async def release(self, fh: int) -> None:
         ctx = self._handles.get(fh)
-        if ctx is not None and ctx.write_buf:
+        if ctx is not None:
             # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH
             # in between (the kext always flushes on close), so a handle can
             # still hold buffered writes here. Dropping them would silently
@@ -1096,8 +1117,10 @@ class MountCore:
         if not rehydrate:
             return
         for ctx in self._handles.values():
-            if ctx.key == key and ctx.chunked is not None:
-                ctx.chunked.drop()
+            if ctx.key == key:
+                ctx.generation += 1
+                if ctx.chunked is not None:
+                    ctx.chunked.drop()
         hydrated = [
             ctx
             for ctx in self._handles.values()

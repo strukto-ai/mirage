@@ -192,7 +192,12 @@ class MirageSFTPServer {
       this.serve(id, () => this.setAttrs(id, workspacePath(path), attrs))
     })
     s.on('FSETSTAT', (id, handle, attrs) => {
-      this.serve(id, () => this.setAttrs(id, this.file(handle).path, attrs))
+      this.serve(id, () => {
+        const f = this.file(handle)
+        // Its name now belongs to another file, or to none.
+        if (this.core?.handles.get(f.fd)?.detached === true) throw enoent(f.path)
+        return this.setAttrs(id, f.path, attrs)
+      })
     })
     s.on('OPENDIR', (id, path) => {
       this.serve(id, () => this.opendir(id, path))

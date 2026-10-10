@@ -984,3 +984,99 @@ it("holds an open through a link back until the link's removal is done", async (
   await removing
   await expect(opening).rejects.toMatchObject({ code: 'ENOENT' })
 })
+
+/**
+ * Hold the first call of `op` on `ws.vfs` until `go`: before it reaches the
+ * store, or with `answered` after, its answer in flight. `out` settles once
+ * it is held.
+ */
+function holdFirst(
+  ws: Workspace,
+  op: 'pwrite' | 'read',
+  answered = false,
+): { out: Promise<void>; go: () => void } {
+  let go = (): void => undefined
+  const gate = new Promise<void>((resolve) => {
+    go = resolve
+  })
+  let entered = (): void => undefined
+  const out = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const real = (ws.vfs[op] as (...a: unknown[]) => Promise<unknown>).bind(ws.vfs)
+  let calls = 0
+  vi.spyOn(ws.vfs, op).mockImplementation((async (...args: unknown[]) => {
+    calls += 1
+    if (calls > 1) return real(...args)
+    const answer = answered ? await real(...args) : undefined
+    entered()
+    await gate
+    return answered ? answer : real(...args)
+  }) as never)
+  return { out, go }
+}
+
+it('lands a direct write still out before a truncate', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/f', new TextEncoder().encode('abc'))
+  const held = holdFirst(ws, 'pwrite')
+  const core = new MountCore(ws.vfs)
+  const writing = core.write('/data/f', -1, new TextEncoder().encode('0123456789'), 0)
+  await held.out
+  const truncating = core.truncate('/data/f', 0)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  held.go()
+  await writing
+  await truncating
+  expect((await ws.vfs.read('/data/f')).byteLength).toBe(0)
+})
+
+it('keeps nothing from a first read a change raced', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/f', new TextEncoder().encode('old bytes'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/f', fsConstants.O_RDWR)
+  const held = holdFirst(ws, 'read', true)
+  const reading = core.read('/data/f', fd, 0, 100)
+  await held.out
+  await core.truncate('/data/f', 0)
+  held.go()
+  expect(new TextDecoder().decode(await reading)).toBe('old bytes')
+  expect((await core.read('/data/f', fd, 0, 100)).byteLength).toBe(0)
+})
+
+it('holds a release back until a flush still landing is done', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/f', new TextEncoder().encode('abc'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+  await core.write('/data/f', fd, new TextEncoder().encode('X'), 0)
+  const held = holdFirst(ws, 'pwrite')
+  const first = core.flush('/data/f', fd)
+  await held.out
+  let released = false
+  const releasing = core.release(fd).then(() => {
+    released = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(released).toBe(false)
+  held.go()
+  await first
+  await releasing
+  expect(new TextDecoder().decode(await ws.vfs.read('/data/f'))).toBe('Xbc')
+})
+
+it('detaches the handles on a name an unlink or a rename takes', async () => {
+  const core = await mkCore()
+  const gone = await core.open('/data/greeting.txt')
+  const linked = await core.open('/data/sub/inner.txt')
+  await core.symlink('sub/inner.txt', '/data/lk')
+  await core.unlink('/data/greeting.txt')
+  await core.unlink('/data/lk')
+  await core.write('/data/c.txt', -1, new TextEncoder().encode('new'), 0)
+  const replaced = await core.open('/data/c.txt')
+  await core.rename('/data/sub/inner.txt', '/data/c.txt')
+  expect(core.handles.get(gone)?.detached).toBe(true)
+  expect(core.handles.get(replaced)?.detached).toBe(true)
+  expect(core.handles.get(linked)?.detached).toBeUndefined()
+})

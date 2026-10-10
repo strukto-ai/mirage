@@ -437,8 +437,15 @@ export class MountCore {
     } else if (ctx.chunked !== undefined && ctx.data === undefined) {
       stored = await ctx.chunked.pread(pos, len)
     } else {
-      ctx.data ??= await this.op(() => this.files.read(this.resolve(ctx.path)))
-      stored = ctx.data.subarray(pos, pos + len)
+      let held = ctx.data
+      if (held === undefined) {
+        // A change landing while this read is out keeps it from holding
+        // what it fetched.
+        const generation = ctx.generation ?? 0
+        held = await this.op(() => this.files.read(this.resolve(ctx.path)))
+        if ((ctx.generation ?? 0) === generation) ctx.data = held
+      }
+      stored = held.subarray(pos, pos + len)
     }
     if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return stored
     return overlaid(stored, pos, len, ctx.writeBuf)
@@ -452,7 +459,7 @@ export class MountCore {
       ctx.writeBuf.push([pos, data])
       return
     }
-    await this.applyWrites(path, [[pos, data]])
+    await this.mutate(this.identity(path), () => this.applyWrites(path, [[pos, data]]))
   }
 
   /**
@@ -528,7 +535,9 @@ export class MountCore {
     await this.mutate(this.identity(path, false), async () => {
       await this.removing(path, async () => {
         await this.hold(path)
+        const named = this.named(path)
         await this.op(() => this.files.unlink(this.resolve(path)))
+        for (const ctx of named) ctx.detached = true
       })
       await this.changed(path, false)
     })
@@ -556,7 +565,9 @@ export class MountCore {
     }
     if (!rehydrate) return
     for (const ctx of this.handles.values()) {
-      if (ctx.key === key) ctx.chunked?.drop()
+      if (ctx.key !== key) continue
+      ctx.generation = (ctx.generation ?? 0) + 1
+      ctx.chunked?.drop()
     }
     const hydrated = [...this.handles.values()].filter(
       (ctx) => ctx.key === key && ctx.data !== undefined,
@@ -589,7 +600,10 @@ export class MountCore {
       const target = this.resolve(dst)
       await this.removing(dst, async () => {
         await this.hold(dst)
+        const moved = this.identity(src, false)
+        const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         await this.op(() => this.files.rename(source, target))
+        for (const ctx of replaced) ctx.detached = true
       })
       for (const ctx of this.handles.values()) {
         if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
@@ -634,8 +648,16 @@ export class MountCore {
    * flush to retry.
    */
   private settle(ctx: Handle): Promise<void> {
-    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return Promise.resolve()
+    // Queued with nothing buffered too: a flush still landing has taken the
+    // buffer, and this one waits for it and retries what it puts back,
+    // rather than reporting the file settled.
     return this.mutate(ctx.key, () => this.persistBuffered(ctx))
+  }
+
+  /** The handles open on the entry at `path` itself. */
+  private named(path: string): Handle[] {
+    const key = this.identity(path, false)
+    return [...this.handles.values()].filter((ctx) => ctx.key === key)
   }
 
   /** Land the buffered writes of every handle open on `key`. */
@@ -808,10 +830,7 @@ export class MountCore {
    * Mirrors Python's `MountCore._hold`.
    */
   private async hold(path: string): Promise<void> {
-    const key = this.identity(path, false)
-    const held = [...this.handles.values()].filter(
-      (ctx) => ctx.key === key && ctx.chunked !== undefined,
-    )
+    const held = this.named(path).filter((ctx) => ctx.chunked !== undefined)
     if (held.length === 0) return
     let data: Uint8Array
     try {
@@ -828,7 +847,7 @@ export class MountCore {
 
   async release(fd: number): Promise<void> {
     const ctx = this.handles.get(fd)
-    if (ctx?.writeBuf !== undefined && ctx.writeBuf.length > 0) {
+    if (ctx !== undefined) {
       // The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
       // between (the kext always flushes on close), so a handle can still
       // hold buffered writes here. Dropping them would silently lose data
