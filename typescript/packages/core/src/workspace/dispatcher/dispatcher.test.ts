@@ -311,6 +311,38 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
+  it('refuses a copy onto a link to its own source', async () => {
+    // Followed, both ends name one file, and a backend that replaces its
+    // destination would delete the source before copying it.
+    const ws = await linkWorkspace()
+    try {
+      await expect(
+        ws.dispatch('copy', '/ram/a.txt', [PathSpec.fromStrPath('/ram/link')]),
+      ).rejects.toMatchObject({ code: 'EINVAL' })
+      expect(DEC.decode((await ws.shell('cat /ram/a.txt')).stdout)).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('declines a tree copy over a link below its destination', async () => {
+    // The backend writes each child name as it is, so the bytes would land
+    // behind the link; the caller's walk copies through it instead.
+    const ws = await linkWorkspace()
+    try {
+      await ws.shell('echo new > /ram/d/x')
+      await ws.shell('mkdir -p /ram/e/d')
+      await ws.shell('echo old > /ram/t && ln -s /ram/t /ram/e/d/x')
+      await expect(
+        ws.dispatch('dir_copy', '/ram/d', [PathSpec.fromStrPath('/ram/e/d')]),
+      ).rejects.toMatchObject({ declined: true })
+      expect((await ws.shell('cp -r /ram/d /ram/e')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('cat /ram/t')).stdout)).toBe('new\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('answers a no-follow stat with the link row', async () => {
     // lstat asks for the row only the node table holds; a following stat
     // arrives resolved to the target and must not see a link at all.

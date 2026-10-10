@@ -728,7 +728,9 @@ export class Dispatcher {
    * link entry itself (chown -h writing the link's own attrs) keeps the
    * typed path. Consumed here, never forwarded. A copy writes its
    * destination as a write does, through a link at the final name; a
-   * rename moves the name itself. Mirrors Python's Dispatcher._follow.
+   * rename moves the name itself. A copy whose two ends then name one file
+   * is refused: a backend that replaces its destination would delete the
+   * source first. Mirrors Python's Dispatcher._follow.
    */
   private follow(call: Call): void {
     const nofollow = call.kwargs?.nofollow === true
@@ -758,6 +760,7 @@ export class Dispatcher {
     }
     if (call.ruleGate !== null && !call.noFollow)
       judge(call.ruleGate, call.typed, walked, call.path)
+    if (COPY_OPS.has(call.name) && call.dst?.virtual === call.path.virtual) throw einval(call.dst)
   }
 
   /**
@@ -813,10 +816,19 @@ export class Dispatcher {
    * preVfs policy reach below one of its paths, it is declined and the
    * caller walks, entry by entry, through calls that are each judged. A file
    * copy is declined the same way: the bytes it moves never pass through a
-   * read. Mirrors Python's Dispatcher._declines.
+   * read. A tree copy is declined too when a link stands below its
+   * destination: the backend writes each child name as it is, where the
+   * walk's copies follow the link. Mirrors Python's Dispatcher._declines.
    */
   private async declines(call: Call): Promise<boolean> {
     if (!NATIVE_WALK_OPS.has(call.name)) return false
+    if (
+      call.name === 'dir_copy' &&
+      call.dst !== null &&
+      this.namespace.linkStatsBelow(call.dst.virtual).length > 0
+    ) {
+      return true
+    }
     const paths = call.dst === null ? [call.path] : [call.path, call.dst]
     if (paths.some((p) => hiddenUnder(call.vis, p.virtual))) return true
     if (call.ruleGate !== null) return paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)

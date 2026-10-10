@@ -24,7 +24,11 @@ from mirage.commands.errors import LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
-from mirage.errors.types import CommandTimeoutError, ReadOnlyError
+from mirage.errors.types import (
+    CommandTimeoutError,
+    ReadOnlyError,
+    WalkDeclinedError,
+)
 from mirage.io import OpReport
 from mirage.policy import (
     Action,
@@ -546,6 +550,40 @@ async def test_a_copy_writes_through_a_link_at_the_destination():
         )
         assert ws._namespace.readlink("/ram/link") == "t.txt"
         assert (await ws.shell("cat /ram/t.txt")).stdout == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_onto_a_link_to_its_source_is_refused():
+    # Followed, both ends name one file, and a backend that replaces
+    # its destination would delete the source before copying it.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("ln -s a.txt /ram/self")
+        with pytest.raises(OSError) as caught:
+            await ws.dispatch(
+                "copy",
+                PathSpec.from_str_path("/ram/a.txt"),
+                dst=PathSpec.from_str_path("/ram/self"),
+            )
+        assert caught.value.errno == errno.EINVAL
+        assert (await ws.shell("cat /ram/a.txt")).stdout == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tree_copy_over_a_link_below_its_destination_declines():
+    # The backend writes each child name as it is, so the bytes would
+    # land behind the link; the caller's walk copies through it instead.
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e/d && echo new > /ram/d/x")
+        await ws.shell("echo old > /ram/t && ln -s /ram/t /ram/e/d/x")
+        with pytest.raises(WalkDeclinedError):
+            await ws.dispatch(
+                "dir_copy",
+                PathSpec.from_str_path("/ram/d"),
+                dst=PathSpec.from_str_path("/ram/e/d"),
+            )
+        assert (await ws.shell("cp -r /ram/d /ram/e")).exit_code == 0
+        assert (await ws.shell("cat /ram/t")).stdout == b"new\n"
 
 
 @pytest.mark.asyncio

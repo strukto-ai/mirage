@@ -889,7 +889,9 @@ class Dispatcher:
         on a link entry itself (chown -h writing the link's own attrs)
         keeps the typed path. Consumed here, never forwarded. A copy
         writes its destination as a write does, through a link at the
-        final name; a rename moves the name itself.
+        final name; a rename moves the name itself. A copy whose two ends
+        then name one file is refused: a backend that replaces its
+        destination would delete the source first.
 
         Args:
             call (_Call): the walked op; its ``path`` becomes the target.
@@ -918,6 +920,12 @@ class Dispatcher:
                     )
         if call.rule_gate is not None and not call.no_follow:
             _judge(call.rule_gate, call.typed, walked, call.path)
+        if (
+            call.name in COPY_OPS
+            and call.dst is not None
+            and call.dst.virtual == call.path.virtual
+        ):
+            raise einval(call.dst)
 
     async def _walk_operands(self, call: _Call) -> None:
         """Walk and follow each other path argument as the path is.
@@ -1001,13 +1009,21 @@ class Dispatcher:
         rules or a coded pre_vfs policy reach below one of its paths, it
         is declined and the caller walks, entry by entry, through calls
         that are each judged. A file copy is declined the same way: the
-        bytes it moves never pass through a read.
+        bytes it moves never pass through a read. A tree copy is declined
+        too when a link stands below its destination: the backend writes
+        each child name as it is, where the walk's copies follow the link.
 
         Args:
             call (_Call): the followed op.
         """
         if call.name not in NATIVE_WALK_OPS:
             return False
+        if (
+            call.name == "dir_copy"
+            and call.dst is not None
+            and self._namespace.link_stats_below(call.dst.virtual)
+        ):
+            return True
         paths = [call.path] if call.dst is None else [call.path, call.dst]
         if any(hidden_under(call.vis, p.virtual) for p in paths):
             return True
