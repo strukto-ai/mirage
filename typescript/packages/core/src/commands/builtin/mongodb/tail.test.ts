@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -83,15 +82,13 @@ async function run(
 ): Promise<AsyncIterable<Uint8Array> | Uint8Array | null> {
   const cmd = MONGODB_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')
-  const result = await invoke(() =>
-    cmd.fn(accessor, paths, [], {
-      stdin: null,
-      flags,
-      io: ioFor(MongoDBVFSBase, accessor),
-      cwd: '/',
-      ...(signal === undefined ? {} : { signal }),
-    }),
-  )
+  const result = await cmd.fn(accessor, paths, [], {
+    stdin: null,
+    flags,
+    io: ioFor(MongoDBVFSBase, accessor),
+    cwd: '/',
+    ...(signal === undefined ? {} : { signal }),
+  })
   if (result === null) throw new Error('tail returned nothing')
   return result[0] as AsyncIterable<Uint8Array> | Uint8Array | null
 }

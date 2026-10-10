@@ -48,13 +48,7 @@ from mirage.server.rpc.constants import (
 )
 from mirage.server.ssh import constants
 from mirage.server.ssh.errors import CodexRPCError
-from mirage.server.ssh.session import (
-    key_profile,
-    login_entry,
-    login_env,
-    new_session_id,
-    open_session,
-)
+from mirage.server.ssh.session import open_login
 from mirage.server.ssh.stream import (
     ChannelInput,
     Mark,
@@ -1094,35 +1088,15 @@ async def serve_codex(
 ) -> None:
     """Serve one codex-exec channel in the workspace the login names.
 
-    The channel runs as a fresh session under the login key's profile,
-    else the workspace's default, with the environment an ``ssh`` login
-    gets.
+    The channel runs in a fresh session, as ``open_login`` opens it.
 
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
         process (asyncssh.SSHServerProcess[str]): the channel's process.
     """
-    workspace_id = process.get_extra_info("username")
-    entry = login_entry(
-        registry, process.channel.get_connection(), workspace_id
-    )
-    if entry is None:
-        process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
-        process.exit(1)
+    opened = await open_login(registry, process, "codex")
+    if opened is None:
         return
-    session_id = new_session_id()
-    runner = entry.runner
-    try:
-        profile = key_profile(process.channel.get_connection())
-        await runner.call(
-            open_session(runner.ws, session_id, login_env(process), profile)
-        )
-    except Exception as exc:
-        logger.warning(
-            "codex: cannot open a session on %s: %r", workspace_id, exc
-        )
-        process.stderr.write(f"mirage: cannot open a session: {exc}\n")
-        process.exit(1)
-        return
+    entry, session_id = opened
     status = await CodexChannel(registry, entry, session_id, process).serve()
     process.exit(status)

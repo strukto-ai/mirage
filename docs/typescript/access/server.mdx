@@ -37,11 +37,8 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `allowedHosts` | `MIRAGE_ALLOWED_HOSTS`, else loopback | `Host` names the app answers. `['*']` turns the check off, safe only behind a trusted proxy. |
 | `sshConfig` | from the `ssh_*` settings | The SSH server, opened when the app is ready; off unless a port is set, and `null` keeps it off. |
 | `snapshotStore` | none | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
-| `executionStore` | owned RAM store | An `ExecutionStore` for job status, cancellation intent and final metadata. An injected store remains owned by the caller. |
 | `stateRoot` | under `$MIRAGE_HOME` | Where live state is kept. |
 | `onIdleExit` | a no-op | Called when the last workspace has been gone `idleGraceSeconds` (30), or on `POST /v1/shutdown`. |
-
-For shared execution records, pass `new RedisExecutionStore(url)` from `@struktoai/mirage-node/execution/redis/store` as `executionStore`. Python and TypeScript use the same Redis schema and atomic revisions. Close the injected store after `app.close()`. Running work remains owned by this server: the store provides persistence and status observation, not worker failover or remote cancellation delivery. Console replay storage is configured separately; the live HTTP stream applies backpressure and retains no replay log.
 
 ## Started by the CLI
 
@@ -79,7 +76,6 @@ const answer = await server.handle({
 
 The protocol is the same on both servers. These are the differences in how this one serves it:
 
-- **SSH output is sent whole.** A line's output over SSH is sent when the line finishes, as HTTP sends it. The Python server streams it.
 - **No legacy `scp -O`.** Modern `scp` uses SFTP, which is served; the old SCP protocol is not.
 - **`authorized_keys` options.** Only `mirage-profile` is read, which binds the key to a [profile](/home/access/ssh#bind-a-key-to-a-profile). A key line carrying any other option (`from=`, `command=`, ...) is skipped with a warning, rather than accepted as if it had none.
 - **Terminal line limit.** 1024 bytes.

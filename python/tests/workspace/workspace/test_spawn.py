@@ -53,8 +53,8 @@ async def test_profile_process_views_and_revocation():
         child = ws.spawn(SpawnRequest(("sleep", "30")), "a")
         child.stdin.close()
         view = ws._process_view(a)
-        assert view.get(child.pid) is not None
-        assert ws.processes.view("b").get(child.pid) is None
+        assert [i.pid for i in view.list()] == [child.pid]
+        assert ws.processes.view("b").list() == ()
         await ws.set_session_profile("a", {"processes": {"max": 1}})
         assert view.list() == ()
         assert view.spawn is not None

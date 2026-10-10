@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
@@ -36,14 +35,12 @@ async function runMktemp(
   for (const dir of dirs) vfs.store.dirs.add(dir)
   const cmd = RAM_MKTEMP[0]
   if (cmd === undefined) throw new Error('mktemp not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
-      stdin: null,
-      flags,
-      io: commandIo(vfs),
-      cwd: '/',
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
+    stdin: null,
+    flags,
+    io: commandIo(vfs),
+    cwd: '/',
+  })
   if (result === null) return { out: '', vfs }
   const [out] = result
   if (out === null) return { out: '', vfs }

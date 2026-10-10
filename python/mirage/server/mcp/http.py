@@ -16,7 +16,6 @@ import asyncio
 from collections.abc import Coroutine, Mapping
 from typing import Any, TypeVar
 
-import anyio
 from fastapi import FastAPI
 from mcp.server import Server, ServerRequestContext
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -35,9 +34,10 @@ from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
 from mirage import __version__
+from mirage.execution.types import ExecutionStatus
 from mirage.server.inflight import InFlight, rpc_messages
 from mirage.server.io_serde import io_result_to_dict
-from mirage.server.jobs import JobStatus, JobTable
+from mirage.server.jobs import ExecutionTable
 from mirage.server.mcp.progress import (
     McpToolOperations,
     OutputProgress,
@@ -61,7 +61,7 @@ T = TypeVar("T")
 class DaemonToolOperations(McpToolOperations):
     """The tool table as the daemon serves it: through its own API.
 
-    ``shell`` is a job, submitted to the daemon's job table the way
+    ``shell`` is a job, submitted to the daemon's execution table the way
     ``POST /shell`` submits one, so an MCP command is listed by
     ``/v1/jobs``, can be cancelled there, and is recorded like any other.
     A caller cancelled while it waits (an MCP client's cancel) cancels
@@ -72,12 +72,12 @@ class DaemonToolOperations(McpToolOperations):
 
     Args:
         entry (WorkspaceEntry): the workspace the tools act on.
-        jobs (JobTable): the daemon's job table.
+        jobs (ExecutionTable): the daemon's execution table.
         session_id (str): the session the tools act as.
     """
 
     def __init__(
-        self, entry: WorkspaceEntry, jobs: JobTable, session_id: str
+        self, entry: WorkspaceEntry, jobs: ExecutionTable, session_id: str
     ) -> None:
         super().__init__(entry.runner.ws, session_id)
         self._entry = entry
@@ -114,22 +114,16 @@ class DaemonToolOperations(McpToolOperations):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(run_line(scope))
 
-        job = await self._jobs.submit(
+        job = self._jobs.submit(
             workspace_id=self._entry.id,
             command=command,
             factory=run,
             session_id=self._session_id,
         )
-        try:
-            job = await self._jobs.wait(job.id)
-        except asyncio.CancelledError:
-            with anyio.CancelScope(shield=True):
-                await self._jobs.cancel(job.id)
-                await self._jobs.drain(job.id)
-            raise
-        if job.status == JobStatus.CANCELED:
+        job = await self._jobs.join(job.id)
+        if job.status == ExecutionStatus.CANCELED:
             return ToolResult("job canceled", True)
-        if job.status == JobStatus.FAILED or not answers:
+        if job.status == ExecutionStatus.FAILED or not answers:
             return ToolResult(job.error or "shell failed", True)
         return answers[0]
 
@@ -223,10 +217,12 @@ class McpEndpoint:
 
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
-        jobs (JobTable): the daemon's job table, which runs ``shell``.
+        jobs (ExecutionTable): the daemon's execution table, which runs ``shell``.
     """
 
-    def __init__(self, registry: WorkspaceRegistry, jobs: JobTable) -> None:
+    def __init__(
+        self, registry: WorkspaceRegistry, jobs: ExecutionTable
+    ) -> None:
         self._registry = registry
         self._jobs = jobs
         self._served: dict[
@@ -579,7 +575,7 @@ class McpEndpoint:
 
 
 def register_mcp_routes(
-    app: FastAPI, registry: WorkspaceRegistry, jobs: JobTable
+    app: FastAPI, registry: WorkspaceRegistry, jobs: ExecutionTable
 ) -> McpEndpoint:
     """Serve MCP at ``/v1/workspaces/{workspace_id}/mcp``.
 
@@ -589,7 +585,7 @@ def register_mcp_routes(
     Args:
         app (FastAPI): the daemon app.
         registry (WorkspaceRegistry): the daemon's workspaces.
-        jobs (JobTable): the daemon's job table.
+        jobs (ExecutionTable): the daemon's execution table.
 
     Returns:
         McpEndpoint: the endpoint, whose ``close`` the app's lifespan

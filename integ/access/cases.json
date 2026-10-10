@@ -222,7 +222,8 @@
     {"id": "lists_without_the_hidden_mount", "input": {"command": "ls /"}, "expect": {"text": "dev\nopen.txt\nusr\n", "is_error": false}},
     {"id": "reads_what_it_may", "input": {"command": "cat /open.txt"}, "expect": {"text": "open\n", "is_error": false}},
     {"id": "has_no_unlisted_command", "input": {"command": "sort /open.txt"}, "expect": {"text": "sort: command not found\n", "is_error": true}},
-    {"id": "is_refused_a_denied_line", "input": {"command": "rm /open.txt"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "mcp_stdio": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "ssh": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}}}
+    {"id": "is_refused_a_denied_line", "input": {"command": "rm /open.txt"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "mcp_stdio": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "ssh": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}}},
+    {"id": "streams_the_refusal_after_the_output", "input": {"command": "rm /open.txt", "output_stream": true}, "expect": {"text": "rm: Permission denied\n", "is_error": true}, "expect_by_access": {"cli": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "mcp": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "mcp_stdio": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}, "ssh": {"text": "rm: Permission denied\npolicy denied: no deletes here\n", "is_error": true}}}
    ]
   },
   {

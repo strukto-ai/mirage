@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { invoke } from '../../../io/stdio.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The SEARCHERS map is rebuilt over the mocked searchEntity: the real map
@@ -137,17 +136,15 @@ describe('postgres grep push-down and globs', () => {
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
     const accessor = makeAccessor()
-    const result = await invoke(() =>
-      cmd.fn(accessor, [globPath()], ['ada'], {
-        stdin: null,
-        // `args_l`, not a bare `l`: flagKwargName maps the ambiguous short
-        // `-l` onto `args_l` in both languages, so the dispatcher never emits
-        // `l` and a spec-bound FlagView refuses to read one.
-        flags: { args_l: true },
-        io: ioFor(PostgresVFSBase, accessor),
-        cwd: '/',
-      }),
-    )
+    const result = await cmd.fn(accessor, [globPath()], ['ada'], {
+      stdin: null,
+      // `args_l`, not a bare `l`: flagKwargName maps the ambiguous short
+      // `-l` onto `args_l` in both languages, so the dispatcher never emits
+      // `l` and a spec-bound FlagView refuses to read one.
+      flags: { args_l: true },
+      io: ioFor(PostgresVFSBase, accessor),
+      cwd: '/',
+    })
 
     expect(result).not.toBeNull()
     expect(vi.mocked(searchModule.searchEntity)).not.toHaveBeenCalled()

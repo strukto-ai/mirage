@@ -18,8 +18,7 @@ import { CLI } from '../../commands/cli/types.ts'
 import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { currentExecution } from '../../execution/context.ts'
-import type { ExecutionIdentity } from '../../execution/types.ts'
+import { currentExecutionId } from '../../execution/context.ts'
 import { ExecutionScope } from '../execution.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../../types.ts'
@@ -42,7 +41,7 @@ const open: Workspace[] = []
 
 it('links a pipeline CLI and operation history to the admitted execution', async () => {
   const ws = await makeWs()
-  const seen: (ExecutionIdentity | null)[] = []
+  const seen: (string | null)[] = []
   ws.registerCli(
     'probe',
     new CLI({
@@ -50,7 +49,7 @@ it('links a pipeline CLI and operation history to the admitted execution', async
       handlers: {
         '': new CLIHandler({
           fn: () => {
-            seen.push(currentExecution())
+            seen.push(currentExecutionId())
             return [ENC.encode('tracked\n'), new IOResult()]
           },
         }),
@@ -61,8 +60,8 @@ it('links a pipeline CLI and operation history to the admitted execution', async
     executionScope: new ExecutionScope(undefined, 'exec-request'),
   })
   expect(result.stdoutText).toBe('tracked\n')
-  expect(seen[0]).toMatchObject({ parentId: 'exec-request', rootId: 'exec-request' })
-  expect(seen[0]?.id).not.toBe('exec-request')
+  expect(seen[0]).not.toBeNull()
+  expect(seen[0]).not.toBe('exec-request')
   const events = await ws.observer.events()
   expect(events.at(-1)?.execution_id).toBe('exec-request')
   const ops = events.filter((event) => event.type === 'op')

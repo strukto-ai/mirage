@@ -308,7 +308,6 @@ async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions()
         )
         assert one.list() == (process.info,)
         assert two.list() == ()
-        assert two.get(process.info.pid) is None
         await ws.close_session("one")
         ws.create_session("one", profile="agent")
         assert one.list() == ()

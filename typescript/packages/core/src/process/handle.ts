@@ -17,12 +17,7 @@ export class ProcessHandle {
   ) {
     this.current = Object.freeze(info)
     // Register identity before executing even a synchronous runner prelude.
-    this.task = Promise.resolve().then(() =>
-      runWithExecution(
-        { id: info.executionId, parentId: info.parentExecutionId, rootId: info.rootExecutionId },
-        run,
-      ),
-    )
+    this.task = Promise.resolve().then(() => runWithExecution(info.executionId, run))
     this.completion = this.task.then(
       (code) => this.settle(code, null, finished),
       (error: unknown) => {

@@ -13,12 +13,49 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { invoke } from '../../../io/stdio.ts'
 import { materialize } from '../../../io/types.ts'
 import { Limit, OnExceed } from '../../../types.ts'
 import { applyLimit, maybeWithTimeout } from './limit.ts'
 
 const ENC = new TextEncoder()
+
+/** Yields its bytes once, then waits until it is closed, once. */
+class HeldSource implements AsyncIterableIterator<Uint8Array> {
+  private sent = false
+  private closed = false
+  private release: (() => void) | null = null
+
+  constructor(
+    private readonly data: Uint8Array,
+    private readonly onClose: () => void,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+
+  async next(): Promise<IteratorResult<Uint8Array>> {
+    if (!this.sent) {
+      this.sent = true
+      return { done: false, value: this.data }
+    }
+    if (!this.closed) {
+      await new Promise<void>((resolve) => {
+        this.release = resolve
+      })
+    }
+    return { done: true, value: undefined }
+  }
+
+  return(): Promise<IteratorResult<Uint8Array>> {
+    if (!this.closed) {
+      this.closed = true
+      this.onClose()
+    }
+    this.release?.()
+    return Promise.resolve({ done: true, value: undefined })
+  }
+}
 const DEC = new TextDecoder()
 const TEN = ENC.encode(Array.from({ length: 10 }, (_, i) => `line${String(i)}\n`).join(''))
 
@@ -103,18 +140,11 @@ it.each([false, true])(
   'timeout wrapper retains owned producer close (pending=%s)',
   async (pendingPull) => {
     let closed = false
-    const result = await invoke(async (stdio) => {
-      try {
-        await stdio.stdout.write(ENC.encode('prefix'))
-        await stdio.waitCancelled()
-        return null
-      } finally {
-        closed = true
-      }
+    const source = new HeldSource(ENC.encode('prefix'), () => {
+      closed = true
     })
-    if (result === null) throw new Error('handler declined')
     const wrapped = maybeWithTimeout(
-      result[0],
+      source,
       new Limit({ timeoutSeconds: 30 }),
       'writer',
     ) as AsyncIterableIterator<Uint8Array>

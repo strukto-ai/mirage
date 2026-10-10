@@ -84,7 +84,7 @@ async def _settle(run: JobRunner, job: Job) -> int:
         job (Job): the job being run.
     """
     try:
-        io_result, exec_node = await run(job)
+        io_result, _ = await run(job)
     except asyncio.CancelledError:
         if job.status != JobStatus.RUNNING:
             raise
@@ -119,8 +119,6 @@ async def _settle(run: JobRunner, job: Job) -> int:
         return 1
     if job.status != JobStatus.RUNNING:
         return io_result.exit_code
-    job.io_result = io_result
-    job.execution_node = exec_node
     job.exit_code = io_result.exit_code
     job.status = JobStatus.COMPLETED
     await job.console.finish(exit_outcome(job.exit_code))

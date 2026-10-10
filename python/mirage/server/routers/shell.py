@@ -21,15 +21,15 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from mirage.execution.types import ExecutionRecord, ExecutionStatus
 from mirage.io.types import ByteSource
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
-from mirage.server.jobs import JobEntry, JobStatus, JobTable
+from mirage.server.jobs import ExecutionTable
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
-from mirage.shell.console.types import Channel
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.workspace import Workspace
@@ -86,7 +86,7 @@ async def _invoke_shell(
             **kwargs, execution_scope=scope, stream=True
         ) as execution:
             async for chunk in execution.events:
-                await output.emit(Channel(chunk.stream), chunk.data)
+                await output.emit(chunk.stream, chunk.data)
             result = await execution.wait()
     return await io_result_to_dict(result)
 
@@ -108,7 +108,7 @@ async def shell(
         )
     if explain:
         return await _explained(entry, request, session_id, background)
-    job_table = request.app.state.jobs
+    jobs = request.app.state.jobs
     content_type = request.headers.get("content-type", "")
     upload: asyncio.Task[None] | None = None
     part: UploadStdin | None = None
@@ -139,22 +139,20 @@ async def shell(
     output = ShellOutput(entry.runner.ws.io.buffer_bytes) if stream else None
 
     async def run(scope: ExecutionScope) -> JsonValue:
-        if output is not None:
-            output.bind_execution(scope.id)
         return await entry.runner.call(
             _invoke_shell(entry.runner.ws, kwargs, scope, output)
         )
 
     if background and upload is not None:
         await upload
-    job = await job_table.submit(
+    job = jobs.submit(
         workspace_id=workspace_id,
         command=req_obj.command,
         factory=run,
         session_id=session_id,
     )
     if output is not None:
-        return ShellResponse(output, job_table, job, request, upload, part)
+        return ShellResponse(output, jobs, job, request, upload, part)
     if background:
         return Response(
             content=BackgroundResponse(
@@ -166,12 +164,12 @@ async def shell(
             status_code=202,
             headers={"X-Mirage-Job-Id": job.id},
         )
-    job = await wait_attended(job_table, job.id, request, upload)
+    job = await wait_attended(jobs, job.id, request, upload)
     if upload is not None:
         await _finish_upload(upload, part)
-    if job.status == JobStatus.CANCELED:
+    if job.status == ExecutionStatus.CANCELED:
         raise HTTPException(status_code=499, detail="job canceled")
-    if job.status == JobStatus.FAILED:
+    if job.status == ExecutionStatus.FAILED:
         raise HTTPException(
             status_code=500, detail=job.error or "shell failed"
         )
@@ -218,11 +216,11 @@ async def _explained(
 
 
 async def wait_attended(
-    job_table: JobTable,
+    jobs: ExecutionTable,
     job_id: str,
     request: Request,
     upload: asyncio.Task[None] | None = None,
-) -> JobEntry:
+) -> ExecutionRecord:
     """Wait for a foreground job while its caller stays connected.
 
     A caller that drops the request is gone for good, so its job is
@@ -232,14 +230,14 @@ async def wait_attended(
     the body bad, cancels the job the same way.
 
     Args:
-        job_table (JobTable): the daemon's job table.
+        jobs (ExecutionTable): the daemon's execution table.
         job_id (str): the job the request submitted.
         request (Request): the request waiting on it.
         upload (asyncio.Task[None] | None): the task still reading the
             request body, if any.
 
     Returns:
-        JobEntry: the settled job.
+        ExecutionRecord: the settled job.
     """
 
     async def caller_gone() -> None:
@@ -252,12 +250,12 @@ async def wait_attended(
         while (await request.receive())["type"] != "http.disconnect":
             pass
 
-    waiter = asyncio.ensure_future(job_table.wait(job_id))
+    waiter = asyncio.ensure_future(jobs.wait(job_id))
     gone = asyncio.ensure_future(caller_gone())
     try:
         await asyncio.wait({waiter, gone}, return_when=asyncio.FIRST_COMPLETED)
         if gone.done() and not waiter.done():
-            await job_table.cancel(job_id)
+            jobs.cancel(job_id)
         return await waiter
     finally:
         gone.cancel()

@@ -46,8 +46,6 @@ class Job:
     status: JobStatus = JobStatus.RUNNING
     exit_code: int = 0
     console: JobConsole = field(default_factory=JobConsole)
-    execution_node: ExecutionNode | None = None
-    io_result: IOResult | None = None
     created_at: float = field(default_factory=time.time)
     agent: str = "unknown"
     session_id: str = ""

@@ -12,6 +12,8 @@ import aiohttp
 from mirage.cli.client import DaemonClient
 from mirage.cli.output import exit_code_from_response
 from mirage.io.cooperative import CHUNK_SIZE
+from mirage.types import Refusal
+from mirage.workspace.tools.io_text import SaidWindow
 
 MAX_RECORD_BYTES = 1024 * 1024
 
@@ -135,6 +137,16 @@ async def consume_stream(
     return terminal
 
 
+def refusal_of(result: dict[str, Any] | None) -> Refusal | None:
+    """The refusal record off a completion's result.
+
+    Args:
+        result (dict[str, Any] | None): the completion's result.
+    """
+    refusal = (result or {}).get("refusal")
+    return Refusal(**refusal) if isinstance(refusal, dict) else None
+
+
 async def stream_shell(
     client: DaemonClient,
     path: str,
@@ -144,6 +156,9 @@ async def stream_shell(
     json_output: bool = False,
 ) -> int:
     """Run a shell line while uploading stdin and draining output together.
+
+    When a policy refused part of the line, its reason follows the output
+    as one line on stderr, as the SSH door prints it.
 
     Args:
         client (DaemonClient): The configured daemon client.
@@ -175,17 +190,20 @@ async def stream_shell(
 
     captured_stdout = bytearray()
     captured_stderr = bytearray()
+    said = SaidWindow()
 
     async def stdout(data: bytes) -> None:
         if json_output:
             captured_stdout.extend(data)
         else:
+            said.add(data, False)
             await _write(stdout_fd, data)
 
     async def stderr(data: bytes) -> None:
         if json_output:
             captured_stderr.extend(data)
         else:
+            said.add(data, True)
             await _write(stderr_fd, data)
 
     try:
@@ -214,6 +232,13 @@ async def stream_shell(
         raise RuntimeError(f"shell failed: {terminal['error']}")
     if terminal["status"] == "canceled":
         return 130
+    line = (
+        ""
+        if json_output
+        else said.refusal_line(refusal_of(terminal["result"]))
+    )
+    if line:
+        await _write(stderr_fd, line.encode())
     if json_output:
         result = {
             **(terminal["result"] or {}),

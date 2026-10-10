@@ -73,8 +73,6 @@ async def test_execution_ancestry_does_not_grant_cancellation_ownership():
     )
     await started.wait()
     child_handle = children[0]
-    assert child_handle.info.parent_execution_id == "request"
-    assert child_handle.info.root_execution_id == "request"
     assert child_handle.info.parent_pid is None
     root.terminate()
     await root.join()
@@ -112,8 +110,8 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
     assert process.terminate()
     assert not process.terminate()
     await cleaning.wait()
-    info = view.get(process.info.pid)
-    assert info is not None and info.state == ProcessState.STOPPING
+    [info] = view.list()
+    assert info.state == ProcessState.STOPPING
     assert info.exit_code is None
     waiter = asyncio.create_task(process.join())
     await asyncio.sleep(0)
@@ -134,7 +132,7 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
     result = await process.join()
     assert result.state == ProcessState.EXITED
     assert result.exit_code == 137 and result.cancellation_requested
-    assert view.get(result.pid) is None
+    assert result.pid not in [i.pid for i in view.list()]
     assert not process.terminate()
 
 
@@ -155,8 +153,6 @@ async def test_views_are_immutable_scoped_and_revoked_on_session_reuse():
     )
     old_view = supervisor.view("a")
     assert old_view.list() == (a.info,)
-    assert old_view.get(b.info.pid) is None
-    assert old_view.get(9999) is None
     with pytest.raises(FrozenInstanceError):
         a.info.command = "changed"
     supervisor.revoke_session("a")
@@ -290,18 +286,16 @@ async def test_workspace_list_does_not_grant_kill():
     )
     grants = ProcessPermissions(list="workspace")
     view = supervisor.view("observer", lambda: grants)
-    info = view.get(child.info.pid)
-    assert info is not None and info.command == "secret argument"
+    [info] = view.list()
+    assert info.pid == child.info.pid and info.command == "secret argument"
     with pytest.raises(PermissionError) as denied:
         view.terminate(child.info.pid)
     assert denied.value.errno == errno.EPERM
-    waiter = asyncio.create_task(view.wait(child.info.pid))
-    await asyncio.sleep(0)
     supervisor.revoke_session("observer")
     with pytest.raises(PermissionError):
         view.check_spawn()
+    assert view.list() == ()
     release.set()
-    assert await waiter is None
     await child.join()
 
 

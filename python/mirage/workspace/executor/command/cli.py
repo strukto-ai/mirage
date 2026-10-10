@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import inspect
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (
@@ -46,10 +47,13 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks
-from mirage.io.pipe import CAPACITY
-from mirage.io.stdio import OutputStream, Stdio, invoke
-from mirage.io.stream import close_quietly, materialize
-from mirage.io.types import ByteSource, CommandOutput, HandlerResult
+from mirage.io.stream import (
+    OutputStream,
+    close_quietly,
+    materialize,
+    wrap_cachable_streams,
+)
+from mirage.io.types import ByteSource, CommandOutput
 from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
@@ -286,7 +290,6 @@ class CLIContext:
 
     shell: Callable[[str], Awaitable[IOResult]] | None = None
     command_limits: Mapping[str, Limit] | None = None
-    buffer_bytes: int = CAPACITY
     entries: list[Runtime] | None = None
     dispatch: DispatchFn | None = None
     stat_path: StatPath | None = None
@@ -588,32 +591,13 @@ async def handle_cli(
             raise RuntimeError(
                 f"walk returned a leaf without a handler for {prog!r}"
             )
-
-        async def run(stdio: Stdio) -> HandlerResult:
-            nonlocal active
-            try:
-                return cast(
-                    HandlerResult,
-                    await run_with_timeout(
-                        call_leaf(fn, replace(inv, stdio=stdio)), timeout, prog
-                    ),
-                )
-            finally:
-                active = False
-                if binding.write and drop_caches is not None:
-                    await drop_caches()
-
-        body = invoke(run, stdin, buffer_bytes=context.buffer_bytes)
+        body = call_leaf(fn, inv)
     # The leaf's declared limit bounds the handler body and its
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own
     # limits.
     try:
-        out = (
-            await body
-            if native
-            else await run_with_timeout(body, timeout, prog)
-        )
+        out = await run_with_timeout(body, timeout, prog)
     except UsageError as exc:
         # Leaf-raised usage errors (a malformed --json) keep the bare
         # message and exit 2, matching the refusal branch above.
@@ -631,7 +615,12 @@ async def handle_cli(
         # (exit 124), not here. The cancelled leaf may already have sent
         # its request, and a service that accepted it will not roll it
         # back, so the mounts stop trusting their caches now.
-        if not native and binding.write and drop_caches is not None:
+        if binding.write and drop_caches is not None:
+            await drop_caches()
+        raise
+    except asyncio.CancelledError:
+        # A canceled leaf may already have sent its write too.
+        if binding.write and drop_caches is not None:
             await drop_caches()
         raise
     except Exception as exc:
@@ -643,7 +632,7 @@ async def handle_cli(
         # request (a PUT whose --jq program fails filters a response the
         # service already applied); without the drop a github mount keeps
         # serving its pre-write bytes.
-        if not native and binding.write and drop_caches is not None:
+        if binding.write and drop_caches is not None:
             await drop_caches()
         err_stderr = encode_text(f"{prog}: {exc}\n")
         err_io = IOResult(exit_code=1, stderr=err_stderr)
@@ -654,16 +643,15 @@ async def handle_cli(
             ExecutionNode(command=cmd_str, exit_code=1, stderr=err_stderr),
         )
     finally:
-        if not native:
-            active = False
+        active = False
     if out is None:
         stdout, io = None, IOResult()
     else:
-        stdout, io = out
+        stdout, io = wrap_cachable_streams(*out)
     # The spec's `write` is the one answer: what policy calls a write,
     # the cache does too, so a verb that can mutate (`gh api` under any
     # method) costs the mounts a reload rather than a stale read.
-    if not native and binding.write and drop_caches is not None:
+    if binding.write and drop_caches is not None:
         await drop_caches()
     io.producer = Producer(command=prog, declared=binding.limit)
 
@@ -672,7 +660,7 @@ async def handle_cli(
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn + existing
 
-    owned = stdout if io.output is not None else None
+    owned = stdout if native else None
     if owned is not None:
         stdout = _cli_output(owned, io, prog)
     stdout = maybe_with_timeout(stdout, limit, prog)

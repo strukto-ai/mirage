@@ -5,19 +5,18 @@ import json
 import pytest
 from starlette.requests import Request
 
-from mirage.execution.ram import RAMExecutionStore
+from mirage.execution.types import ExecutionStatus
 from mirage.io.pipe import CAPACITY
-from mirage.server.jobs import JobTable
+from mirage.server.jobs import ExecutionTable
 from mirage.server.stdin import UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
-from mirage.shell.console.types import Channel
 
 
 @pytest.mark.asyncio
 async def test_a_larger_output_buffer_accepts_more_without_a_reader():
     output = ShellOutput(CAPACITY * 2)
     data = bytes(range(256)) * (CAPACITY // 256)
-    await asyncio.wait_for(output.emit(Channel.STDOUT, data), 1)
+    await asyncio.wait_for(output.emit("stdout", data), 1)
     output.pipe.end()
     encoded = b"".join([chunk async for chunk in output.pipe.stream()])
     records = [json.loads(line) for line in encoded.splitlines()]
@@ -27,13 +26,12 @@ async def test_a_larger_output_buffer_accepts_more_without_a_reader():
         b"".join(base64.b64decode(record["data"]) for record in records)
         == data
     )
-    await output.close()
 
 
 @pytest.mark.asyncio
 async def test_canceling_a_blocked_write_leaves_only_complete_wire_records():
     output = ShellOutput()
-    writing = asyncio.create_task(output.emit(Channel.STDOUT, b"x" * 65536))
+    writing = asyncio.create_task(output.emit("stdout", b"x" * 65536))
     await asyncio.sleep(0)
     assert not writing.done()
     writing.cancel()
@@ -48,21 +46,12 @@ async def test_canceling_a_blocked_write_leaves_only_complete_wire_records():
     prefix = b"".join(base64.b64decode(record["data"]) for record in records)
     assert 0 < len(prefix) < 65536
     assert prefix == b"x" * len(prefix)
-    await output.close()
 
 
 @pytest.mark.asyncio
-async def test_disconnect_joins_cleanup_when_the_record_store_is_unavailable():
+async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
     entered, cleanup, release, headers = (asyncio.Event() for _ in range(4))
     incoming = asyncio.Queue()
-
-    class BrokenStore(RAMExecutionStore):
-        offline = False
-
-        async def get(self, execution_id):
-            if self.offline:
-                raise OSError("storage unavailable")
-            return await super().get(execution_id)
 
     async def receive():
         return await incoming.get()
@@ -75,7 +64,7 @@ async def test_disconnect_joins_cleanup_when_the_record_store_is_unavailable():
 
     async def run(scope):
         await scope.start()
-        await output.emit(Channel.STDOUT, b"prefix")
+        await output.emit("stdout", b"prefix")
         entered.set()
         try:
             await asyncio.Event().wait()
@@ -83,26 +72,21 @@ async def test_disconnect_joins_cleanup_when_the_record_store_is_unavailable():
             cleanup.set()
             await release.wait()
 
-    store = BrokenStore()
-    table = JobTable(store)
-    job = await table.submit("workspace", "held", run, session_id="session")
+    table = ExecutionTable()
+    job = table.submit("workspace", "held", run, session_id="session")
     await entered.wait()
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
     request = Request(scope, receive)
     response = ShellResponse(output, table, job, request, None, None)
     sending = asyncio.create_task(response(scope, receive, send))
     await headers.wait()
-    store.offline = True
     await incoming.put({"type": "http.disconnect"})
     await asyncio.wait_for(cleanup.wait(), 1)
     assert not sending.done()
     release.set()
-    with pytest.raises(OSError, match="storage unavailable"):
-        await asyncio.wait_for(sending, 1)
-    assert output.store.closed
-    store.offline = False
+    await asyncio.wait_for(sending, 1)
+    assert table.get(job.id).status == ExecutionStatus.CANCELED
     await table.close()
-    await store.close()
 
 
 @pytest.mark.asyncio
@@ -121,8 +105,8 @@ async def test_the_final_record_waits_for_the_upload_to_end():
         await scope.start()
         return {"exit_code": 0}
 
-    table = JobTable(RAMExecutionStore())
-    job = await table.submit("workspace", "true", run, session_id="session")
+    table = ExecutionTable()
+    job = table.submit("workspace", "true", run, session_id="session")
     await table.wait(job.id)
     upload = asyncio.create_task(uploaded.wait())
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -137,5 +121,42 @@ async def test_the_final_record_waits_for_the_upload_to_end():
     uploaded.set()
     await asyncio.wait_for(sending, 1)
     assert sent[-1]["more_body"] is False
+    assert json.loads(sent[-1]["body"])["status"] == "done"
+    await table.close()
+
+
+@pytest.mark.asyncio
+async def test_the_final_record_survives_its_eviction(monkeypatch):
+    monkeypatch.setattr("mirage.server.jobs.MAX_FINISHED_JOBS", 1)
+    finish, headers = asyncio.Event(), asyncio.Event()
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+        if message["type"] == "http.response.start":
+            headers.set()
+
+    async def run(scope):
+        await scope.start()
+        await finish.wait()
+        return {"exit_code": 0}
+
+    table = ExecutionTable()
+    job = table.submit("workspace", "held", run, session_id="session")
+    table.submit("workspace", "other", run, session_id="session")
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    response = ShellResponse(
+        ShellOutput(), table, job, Request(scope, receive), None, None
+    )
+    sending = asyncio.create_task(response(scope, receive, send))
+    await headers.wait()
+    finish.set()
+    await asyncio.wait_for(sending, 1)
+    with pytest.raises(KeyError):
+        table.get(job.id)
     assert json.loads(sent[-1]["body"])["status"] == "done"
     await table.close()

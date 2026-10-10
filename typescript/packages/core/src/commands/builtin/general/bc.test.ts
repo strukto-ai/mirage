@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invoke } from '../../../io/stdio.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -29,14 +28,12 @@ async function runBc(
   const vfs = new RAMVFS()
   const cmd = GENERAL_BC[0]
   if (cmd === undefined) throw new Error('bc not registered')
-  const result = await invoke(() =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-      stdin: ENC.encode(stdin),
-      flags,
-      cwd: '/',
-      ...(env === undefined ? {} : { env }),
-    }),
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+    stdin: ENC.encode(stdin),
+    flags,
+    cwd: '/',
+    ...(env === undefined ? {} : { env }),
+  })
   if (result === null) return { out: '', err: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =

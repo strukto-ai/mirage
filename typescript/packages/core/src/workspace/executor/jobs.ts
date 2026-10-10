@@ -1,4 +1,3 @@
-import { concat } from '../../io/cachable_iterator.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,22 +91,12 @@ export async function drained(
   io: IOResult,
   execNode: ExecutionNode,
 ): Promise<[null, IOResult, ExecutionNode]> {
-  const output = io.output
-  const previous = output?.stderr ?? null
-  if (output !== null) {
-    output.stderr = async (data) => {
-      execNode.stderr = concat([execNode.stderr, data])
-      await sink.emit(Channel.STDERR, data)
-    }
-  }
   try {
     await pump(sink, Channel.STDOUT, stdout)
   } catch (err) {
     await failedRead(io, err, execNode)
-  } finally {
-    if (output !== null) output.stderr = previous
   }
-  if (output !== null) execNode.exitCode = io.exitCode
+  if (io.output !== null) execNode.exitCode = io.exitCode
   const stderr = await io.materializeStderr()
   if (stderr.byteLength > 0) {
     await sink.emit(Channel.STDERR, stderr)

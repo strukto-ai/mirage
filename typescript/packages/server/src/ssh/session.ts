@@ -327,6 +327,36 @@ function refuse(channel: ServerChannel, message: string): void {
 }
 
 /**
+ * The login's workspace and a fresh session opened in it, under the login
+ * key's profile, else the workspace's default, with the environment an
+ * `ssh` login gets. A login whose workspace is out of reach, or whose
+ * session cannot open, is told why and its channel exits 1: null.
+ * Mirrors Python's `open_login`.
+ */
+export async function openLogin(
+  registry: WorkspaceRegistry,
+  channel: ServerChannel,
+  request: ChannelRequest,
+  door: string,
+): Promise<[WorkspaceEntry, string] | null> {
+  const entry = loginEntry(registry, request.username, request.account)
+  if (entry === null) {
+    refuse(channel, `no such workspace: ${request.username}`)
+    return null
+  }
+  const sessionId = newSessionId()
+  try {
+    await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`${door}: cannot open a session on ${request.username}: ${message}`)
+    refuse(channel, `cannot open a session: ${message}`)
+    return null
+  }
+  return [entry, sessionId]
+}
+
+/**
  * Serve one session channel: a command, or an interactive shell. The SSH
  * username names the workspace. `started` receives the running channel,
  * so the server can hand it the client's signal requests; a refused
@@ -338,20 +368,9 @@ export async function handleChannel(
   request: ChannelRequest,
   started: (shell: ShellChannel) => void,
 ): Promise<void> {
-  const entry = loginEntry(registry, request.username, request.account)
-  if (entry === null) {
-    refuse(channel, `no such workspace: ${request.username}`)
-    return
-  }
-  const sessionId = newSessionId()
-  try {
-    await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.warn(`ssh: cannot open a session on ${request.username}: ${message}`)
-    refuse(channel, `cannot open a session: ${message}`)
-    return
-  }
+  const opened = await openLogin(registry, channel, request, 'ssh')
+  if (opened === null) return
+  const [entry, sessionId] = opened
   const shell = new ShellChannel(registry, entry, sessionId, channel, request)
   started(shell)
   const status = await shell.serve()

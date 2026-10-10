@@ -15,6 +15,7 @@
 from mirage.errors.fs import error_path, fs_strerror
 from mirage.io.types import IOResult
 from mirage.policy import PolicyDenied, describe_refusal, says_why
+from mirage.policy.constants import REFUSAL_WINDOW
 from mirage.types import Refusal
 
 
@@ -39,6 +40,75 @@ def refusal_line(text: str, refusal: Refusal | None) -> str:
     if refusal is None or says_why(text, refusal):
         return ""
     return describe_refusal(refusal) + "\n"
+
+
+def head_window(prefix: bytes, total: int) -> bytes:
+    """A stream's first ``REFUSAL_WINDOW`` bytes, then on to the end of
+    the line that window cuts (at most a window more), whole lines only
+    unless the stream ends inside them.
+
+    Args:
+        prefix (bytes): the stream's first ``2 * REFUSAL_WINDOW`` bytes.
+        total (int): the stream's whole length.
+    """
+    if total <= REFUSAL_WINDOW:
+        return prefix
+    end = prefix.find(b"\n", REFUSAL_WINDOW - 1)
+    if end != -1:
+        return prefix[: end + 1]
+    if total <= 2 * REFUSAL_WINDOW:
+        return prefix
+    return prefix[: prefix.rfind(b"\n", 0, REFUSAL_WINDOW) + 1]
+
+
+class SaidWindow:
+    """What a streamed line said, as far as its refusal's line needs.
+
+    Each stream keeps its first and last ``REFUSAL_WINDOW`` bytes. The
+    first runs on to the end of the line it cuts and keeps whole lines
+    only, so a line split at a cut can neither pose as the diagnostic
+    nor hide one. A diagnostic deep inside a long output may be missed,
+    which repeats the reason and never drops it.
+    """
+
+    def __init__(self) -> None:
+        self._prefix = [b"", b""]
+        self._tail = [b"", b""]
+        self._total = [0, 0]
+
+    def add(self, data: bytes, stderr: bool) -> None:
+        """Note bytes a stream sent.
+
+        Args:
+            data (bytes): the bytes.
+            stderr (bool): whether they went to stderr.
+        """
+        stream = int(stderr)
+        self._total[stream] += len(data)
+        prefix = self._prefix[stream]
+        if len(prefix) < 2 * REFUSAL_WINDOW:
+            self._prefix[stream] = (
+                prefix + data[: 2 * REFUSAL_WINDOW - len(prefix)]
+            )
+        self._tail[stream] = (self._tail[stream] + data[-REFUSAL_WINDOW:])[
+            -REFUSAL_WINDOW:
+        ]
+
+    def refusal_line(self, refusal: Refusal | None) -> str:
+        """The line to append after the output, as ``refusal_line``.
+
+        Args:
+            refusal (Refusal | None): the record off the result.
+        """
+        said = [
+            part
+            for stream in (0, 1)
+            for part in (
+                head_window(self._prefix[stream], self._total[stream]),
+                self._tail[stream],
+            )
+        ]
+        return refusal_line(decode(b"\n".join(said)), refusal)
 
 
 def with_refusal(text: str, refusal: Refusal | None) -> str:

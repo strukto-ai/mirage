@@ -25,8 +25,6 @@ function info(): ProcessInfo {
     cwd: PathSpec.fromStrPath('/'),
     startedAt: 0,
     executionId: 'exec_test',
-    parentExecutionId: null,
-    rootExecutionId: 'exec_test',
     state: 'running',
     cancellationRequested: false,
     exitCode: null,
