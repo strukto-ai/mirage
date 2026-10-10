@@ -34,7 +34,7 @@ import { BoxApiError, type BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import type { BoxSearchItem } from './api.ts'
 import * as resolve from './resolve.ts'
-import { narrowPaths } from './search.ts'
+import { filesContaining } from './search.ts'
 
 const STUB_TM = {} as BoxTokenManager
 const search = vi.mocked(api.searchContent)
@@ -71,43 +71,25 @@ beforeEach(() => {
   resolveItem.mockReset()
 })
 
-describe('narrowPaths', () => {
-  it('maps path_collection to mount paths', async () => {
+describe('filesContaining', () => {
+  it('names each hit from its path_collection', async () => {
     search.mockResolvedValueOnce({
-      items: [file('2', 'x.txt', ROOT), file('3', 'y.txt', [...ROOT, ['100', 'Sub']])],
+      items: [
+        file('2', 'x.txt', ROOT),
+        file('3', 'y.txt', [...ROOT, ['100', 'Sub']]),
+        file('4', 'out.txt', [['7', 'Elsewhere']]),
+      ],
       truncated: false,
     })
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
+    const out = await filesContaining(makeAccessor(), 'needle', [mountRoot()])
     expect(search.mock.calls[0]?.[2]).toBe('0')
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/Sub/y.txt', '/data/x.txt'])
-    expect(out?.[1]?.vfsPath).toBe('x.txt')
-    expect(out?.[1]?.resolved).toBe(true)
+    expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([
+      ['/data/x.txt', 'x.txt'],
+      ['/data/Sub/y.txt', 'Sub/y.txt'],
+    ])
   })
 
-  it('sorts results in sorted-readdir walk order', async () => {
-    // A sorted readdir walk descends into foo/ before visiting foo.txt;
-    // plain lexicographic path order would put foo.txt first ('.' < '/').
-    search.mockResolvedValueOnce({
-      items: [file('2', 'foo.txt', ROOT), file('3', 'inner.txt', [...ROOT, ['100', 'foo']])],
-      truncated: false,
-    })
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/foo/inner.txt', '/data/foo.txt'])
-  })
-
-  it('rebases rawPath onto the scope spelling', async () => {
-    const scope = new PathSpec({
-      virtual: '/data',
-      directory: '/data',
-      vfsPath: '',
-      rawPath: '.',
-    })
-    search.mockResolvedValueOnce({ items: [file('2', 'x.txt', ROOT)], truncated: false })
-    const out = await narrowPaths(makeAccessor(), 'needle', [scope])
-    expect(out?.[0]?.rawPath).toBe('./x.txt')
-  })
-
-  it('resolves a subfolder scope id and trims the key', async () => {
+  it('searches a subfolder scope under its folder id', async () => {
     const scope = new PathSpec({
       virtual: '/data/docs',
       directory: '/data/docs',
@@ -118,31 +100,31 @@ describe('narrowPaths', () => {
       items: [file('5', 'in.txt', [...ROOT, ['100', 'docs']])],
       truncated: false,
     })
-    const out = await narrowPaths(makeAccessor(), 'needle', [scope])
+    const out = await filesContaining(makeAccessor(), 'needle', [scope])
     expect(search.mock.calls[0]?.[2]).toBe('100')
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/docs/in.txt'])
+    expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([['/data/docs/in.txt', 'docs/in.txt']])
   })
 
-  it('returns null for a non-folder scope', async () => {
+  // No hit is distrusted too: Box indexes a write after it lands.
+  it.each([
+    ['an API failure', () => search.mockRejectedValueOnce(new BoxApiError('boom', 500))],
+    [
+      'a truncated answer',
+      () => search.mockResolvedValueOnce({ items: [file('2', 'x.txt', ROOT)], truncated: true }),
+    ],
+    ['no hit', () => search.mockResolvedValueOnce({ items: [], truncated: false })],
+  ])('is null for %s', async (_name, arrange) => {
+    arrange()
+    expect(await filesContaining(makeAccessor(), 'needle', [mountRoot()])).toBeNull()
+  })
+
+  it('is null for a scope that is no folder', async () => {
     const scope = new PathSpec({
       virtual: '/data/a.txt',
       directory: '/data/a.txt',
       vfsPath: 'a.txt',
     })
     resolveItem.mockResolvedValueOnce({ id: '9', type: 'file', name: 'a.txt' })
-    const out = await narrowPaths(makeAccessor(), 'needle', [scope])
-    expect(out).toBeNull()
-  })
-
-  it('returns null on an API failure', async () => {
-    search.mockRejectedValueOnce(new BoxApiError('boom', 500))
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(out).toBeNull()
-  })
-
-  it('returns null for truncated results', async () => {
-    search.mockResolvedValueOnce({ items: [file('2', 'x.txt', ROOT)], truncated: true })
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(out).toBeNull()
+    expect(await filesContaining(makeAccessor(), 'needle', [scope])).toBeNull()
   })
 })

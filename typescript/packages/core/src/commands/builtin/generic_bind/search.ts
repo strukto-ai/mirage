@@ -16,26 +16,36 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
-import type { SearchQuery } from '../../../vfs/types.ts'
-import { IOResult } from '../../../io/types.ts'
-import { utf8Locale } from '../../../shell/bytes.ts'
+import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
+import { ensureStream } from '../../../io/stream.ts'
+import { type ByteSource, IOResult } from '../../../io/types.ts'
+import { byteView, utf8Locale } from '../../../shell/bytes.ts'
+import { getExtension } from '../../../utils/filetype.ts'
 import { isEfbig, isFsError } from '../../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
-import { grepGeneric } from '../generic/grep.ts'
-import { foldsCase, parseFlags as parseRgFlags, rgGeneric, rgSyntax } from '../generic/rg.ts'
+import { BINARY_EXTENSIONS } from '../constants.ts'
+import { grepGeneric, parseFlags as parseGrepFlags } from '../generic/grep.ts'
+import {
+  foldsCase,
+  parseFlags as parseRgFlags,
+  rgGeneric,
+  rgMatcher,
+  rgSyntax,
+} from '../generic/rg.ts'
 import {
   grepSearchMeta,
-  textCandidates,
   textSearchResults,
   literalPushdownOperand,
   pushdownOperand,
-  wholeWordLiteral,
+  searchTerms,
 } from '../grep_pushdown.ts'
-import { PATTERN_KEYS, matcherSyntax, patternArg } from '../grep_pattern.ts'
+import { PATTERN_KEYS, compilePattern, matcherSyntax, patternArg } from '../grep_pattern.ts'
+import type { SearchTerms } from '../types.ts'
 import { formatRecords } from '../utils/output.ts'
 import { resolveGlobOf } from './adapter.ts'
 
@@ -88,6 +98,276 @@ async function* nativeOrBytes<A extends Accessor>(
   }
 }
 
+type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
+
+/**
+ * What a grep line asks the mount's search, or why it cannot ask. Throws the
+ * refusal grep itself would print for a bad flag or pattern. Mirrors Python's
+ * `grep_terms`.
+ */
+export function grepTerms(
+  bag: Record<string, FlagValue>,
+  texts: string[],
+  utf8: boolean,
+): SearchTerms | ScanReason {
+  const fl = new FlagView(bag, specOf('grep'))
+  const f = parseGrepFlags(fl)
+  const pattern = patternArg(texts, bag, PATTERN_KEYS.grep)
+  if (f.invert) return ScanReason.EVERY_LINE
+  if (pattern === null || fl.raw('file') !== undefined) return ScanReason.NO_TEXT
+  const matcher = compilePattern(
+    byteView(pattern, utf8),
+    f.ignoreCase,
+    f.fixedString,
+    f.wholeWord,
+    f.syntax,
+    utf8,
+    f.lineRegexp,
+  )
+  const found = searchTerms(
+    pattern,
+    matcher,
+    f.fixedString,
+    f.wholeWord,
+    f.lineRegexp,
+    f.ignoreCase,
+  )
+  if (found === null) return ScanReason.NO_TEXT
+  return {
+    texts: found[0],
+    wholeWord: found[1],
+    ignoreCase: f.ignoreCase,
+    lineOutput: !(f.lineNumbers || f.byteOffsets || f.afterContext > 0 || f.beforeContext > 0),
+    readsBinary: f.filters.text,
+  }
+}
+
+/**
+ * What an rg line asks the mount's search, or why it cannot ask; null when the
+ * line reads no file content (--files, --type-list). Throws the refusal rg
+ * itself would print for a bad flag or pattern. Mirrors Python's `rg_terms`.
+ */
+export function rgTerms(
+  bag: Record<string, FlagValue>,
+  texts: string[],
+): SearchTerms | ScanReason | null {
+  const fl = new FlagView(bag, specOf('rg'))
+  const f = parseRgFlags(fl)
+  if (f.listFiles || f.typeList) return null
+  const pattern = patternArg(texts, bag, PATTERN_KEYS.rg)
+  if (f.invert || f.passthru) return ScanReason.EVERY_LINE
+  if (!f.quiet && (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches)))) {
+    return ScanReason.EVERY_FILE
+  }
+  if (f.follow) return ScanReason.LINKS
+  if (pattern === null || fl.raw('file') !== undefined) return ScanReason.NO_TEXT
+  const ignoreCase = foldsCase(pattern, f.fixedString, f)
+  const found = searchTerms(
+    pattern,
+    rgMatcher(pattern, false, f),
+    f.fixedString,
+    f.wholeWord,
+    f.lineRegexp,
+    ignoreCase,
+  )
+  if (found === null) return ScanReason.NO_TEXT
+  return {
+    texts: found[0],
+    wholeWord: found[1],
+    ignoreCase,
+    lineOutput: !(
+      f.lineNumbers ||
+      f.byteOffsets ||
+      f.column ||
+      f.vimgrep ||
+      f.contextAfter > 0 ||
+      f.contextBefore > 0 ||
+      f.stopOnNonmatch ||
+      f.nullData
+    ),
+    readsBinary: f.binary,
+  }
+}
+
+/**
+ * Reads that search what `narrowed` answers for a file. The walk still lists,
+ * filters, orders and labels every file; a file `narrowed` answers empty
+ * prints exactly what one with no match would (-c counts 0, -L lists it), one
+ * it answers with lines is searched over them, and null reads the file.
+ * Mirrors Python's `candidate_reads`.
+ */
+export function candidateReads(
+  stream: Reads,
+  narrowed: (p: PathSpec) => Promise<ByteSource | null>,
+): Reads {
+  return async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+    const data = await narrowed(p)
+    for await (const chunk of data === null ? stream(p) : ensureStream(data)) {
+      if (chunk.length > 0) yield chunk
+    }
+  }
+}
+
+// Whether a `linesContaining` answer holds a line; a stream is pulled to its
+// first non-empty chunk and closed.
+async function holdsLine(found: ByteSource): Promise<boolean> {
+  if (found instanceof Uint8Array) return found.length > 0
+  for await (const chunk of found) {
+    if (chunk.length > 0) return true
+  }
+  return false
+}
+
+// The operands that stat as directories, the scopes a walk covers.
+async function directories<A extends Accessor>(
+  io: CommandIO<A>,
+  accessor: A,
+  paths: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+): Promise<PathSpec[]> {
+  const found: PathSpec[] = []
+  for (const path of paths) {
+    let info: FileStat
+    try {
+      info = await io.stat(accessor, path, index)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`search scope ${path.virtual}: ${String(err)}`)
+      continue
+    }
+    if (info.type === FileType.DIRECTORY) found.push(path)
+  }
+  return found
+}
+
+// Let the mount refuse a walk that will read every file.
+async function fullScan<A extends Accessor>(
+  io: CommandIO<A>,
+  name: string,
+  accessor: A,
+  dirs: PathSpec[],
+  reason: ScanReason,
+  index: IndexCacheStore | undefined,
+): Promise<void> {
+  if (dirs.length > 0 && io.beforeFullScan !== undefined) {
+    await io.beforeFullScan(accessor, name, dirs, reason, index)
+  }
+}
+
+/**
+ * grep's or rg's reads, narrowed by the mount's search where it can.
+ * `filesContaining` rules out walked files no match can be in, and
+ * `linesContaining` hands a file's matching lines in its place when the
+ * output shows nothing else, or tells whether it is worth reading. An operand
+ * named on the line is never ruled out by a search asked about directories.
+ * Neither is asked when a hide, a path rule or a preVfs policy judges a path,
+ * since a search sees the raw tree.
+ * When neither can stand in for a walk, `beforeFullScan` may refuse it.
+ * `read` is the plain stream narrowed, the mount's `readStream` by default.
+ * Mirrors Python's `search_reads`.
+ */
+export async function searchReads<A extends Accessor>(
+  io: CommandIO<A>,
+  name: 'grep' | 'rg',
+  accessor: A,
+  paths: PathSpec[],
+  texts: string[],
+  opts: CommandOpts,
+  read?: Reads,
+): Promise<Reads> {
+  const index = opts.index ?? undefined
+  const stream: Reads = read ?? ((p) => io.readStream(accessor, p, index))
+  const scoped = pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')
+  const files = scoped ? undefined : io.filesContaining
+  const lines = scoped ? undefined : io.linesContaining
+  if (
+    paths.length === 0 ||
+    (files === undefined && lines === undefined && io.beforeFullScan === undefined)
+  ) {
+    return stream
+  }
+  let terms: SearchTerms | ScanReason | null
+  try {
+    terms =
+      name === 'rg'
+        ? rgTerms(opts.flags, texts)
+        : grepTerms(opts.flags, texts, utf8Locale(opts.env))
+  } catch (err) {
+    if (!(err instanceof Error)) throw err
+    console.debug(`${name} search left to the scan: ${err.message}`)
+    return stream
+  }
+  if (terms === null) return stream
+  const fl = new FlagView(opts.flags, specOf(name))
+  const walked = name === 'rg' || fl.asBool('r') || fl.asBool('R')
+  const dirs = walked ? await directories(io, accessor, paths, index) : []
+  if (typeof terms === 'string') {
+    await fullScan(io, name, accessor, dirs, terms, index)
+    return stream
+  }
+  const asked = terms
+  let hits: Set<string> | null = null
+  if (files !== undefined && dirs.length > 0) {
+    const answers = await Promise.all(
+      asked.texts.map((text) =>
+        files(
+          accessor,
+          text,
+          dirs,
+          { wholeWord: asked.wholeWord, ignoreCase: asked.ignoreCase },
+          index,
+        ),
+      ),
+    )
+    if (answers.every((answer) => answer !== null)) {
+      hits = new Set(answers.flatMap((answer) => answer.map((hit) => hit.vfsPath.toLowerCase())))
+    }
+  }
+  if (hits === null && lines === undefined) {
+    const reason = files === undefined ? ScanReason.NO_SEARCH : ScanReason.UNANSWERED
+    await fullScan(io, name, accessor, dirs, reason, index)
+    return stream
+  }
+  const dirNames = new Set(dirs.map((p) => p.virtual))
+  const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
+  const found = hits
+  // Asked once; a refusal then stands for every file no search answered.
+  let scan: Promise<void> | null = null
+  const readUnanswered = (): Promise<void> => {
+    if (found !== null) return Promise.resolve()
+    scan ??= fullScan(io, name, accessor, dirs, ScanReason.UNANSWERED, index)
+    return scan
+  }
+  const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
+    if (
+      found !== null &&
+      !named.has(path.virtual) &&
+      !(asked.readsBinary && BINARY_EXTENSIONS.has(getExtension(path.virtual) ?? '')) &&
+      !found.has(path.vfsPath.toLowerCase())
+    ) {
+      return new Uint8Array(0)
+    }
+    if (lines === undefined) return null
+    const ignoreCase = { ignoreCase: asked.ignoreCase }
+    const [only] = asked.texts
+    if (asked.lineOutput && asked.texts.length === 1 && only !== undefined) {
+      const answer = await lines(accessor, path, only, ignoreCase, index)
+      if (answer === null) await readUnanswered()
+      return answer
+    }
+    for (const text of asked.texts) {
+      const answer = await lines(accessor, path, text, ignoreCase, index)
+      if (answer === null) {
+        await readUnanswered()
+        return null
+      }
+      if (await holdsLine(answer)) return null
+    }
+    return new Uint8Array(0)
+  }
+  return candidateReads(stream, narrowed)
+}
+
 // How a native search matches the pushed-down pattern. `utf8` is grep under a
 // UTF-8 locale; ripgrep matches text under any.
 export function searchOptions(
@@ -114,7 +394,11 @@ export function searchOptions(
   }
 }
 
-/** Execute an adapter's qualified search; null requests the generic scan. */
+/**
+ * Execute an adapter's qualified search, or scan for an unsupported request.
+ * The scan reads through `searchReads`, so `filesContaining`,
+ * `linesContaining` and `beforeFullScan` still apply.
+ */
 export async function runSearch<A extends Accessor>(
   io: CommandIO<A>,
   name: 'grep' | 'rg',
@@ -164,78 +448,8 @@ export async function runSearch<A extends Accessor>(
     meta === null || meta.stream
       ? nativeOrBytes(io, accessor, p, opts.index ?? undefined)
       : bytesStream(io, accessor, p, opts.index ?? undefined)
+  const reads = await searchReads(io, name, accessor, resolved, texts, opts, stream)
   const generic = GENERICS[name]
   if (generic === undefined) throw new Error(`runSearch: no generic for ${name}`)
-  return generic(resolved, texts, opts, stat, readdir, stream)
-}
-
-export interface NarrowResult {
-  resolved: PathSpec[]
-  usedSearch: boolean
-}
-
-// Whether every scope operand stats as a directory: file operands keep the
-// exact single-file output shape and missing operands must surface the
-// walk's error message, so both fall back to the generic scan.
-async function allDirectories<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  paths: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
-): Promise<boolean> {
-  for (const path of paths) {
-    let info: FileStat
-    try {
-      info = await ops.stat(accessor, path, index)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      return false
-    }
-    if (info.type !== FileType.DIRECTORY) return false
-  }
-  return true
-}
-
-/**
- * Resolve grep/rg scope paths, narrowing through the content index.
- *
- * Push-down needs every gate to hold: the mount opted in, the scan is
- * recursive, a whole-word literal can be pushed down (which is what makes a
- * word-based search complete), the output mode tolerates a narrowed superset
- * (`exactFileSet` covers flags such as -v that must see every file), and
- * every scope operand is a directory. There is no scope-size gate: one
- * search call plus targeted reads beats a full walk at every size.
- * Binary-extension candidates are dropped, since the walk they replace skips
- * them, so a narrowed set may be empty, which is not a stdin run. Mirrors
- * Python's `narrow_scope`.
- */
-export async function narrowScope<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  paths: PathSpec[],
-  pattern: string | null,
-  opts: {
-    fixedString: boolean
-    recursive: boolean
-    wholeWord: boolean
-    exactFileSet: boolean
-    index: IndexCacheStore | undefined
-  },
-): Promise<NarrowResult> {
-  const search = ops.contentSearch
-  const query = wholeWordLiteral(pattern, opts.fixedString, opts.wholeWord)
-  if (
-    search !== undefined &&
-    query !== null &&
-    opts.recursive &&
-    !opts.exactFileSet &&
-    search.enabled(accessor) &&
-    (await allDirectories(ops, accessor, paths, opts.index))
-  ) {
-    const narrowed = await search.narrowPaths(accessor, query, paths)
-    if (narrowed !== null && narrowed.length > 0) {
-      return { resolved: textCandidates(narrowed), usedSearch: true }
-    }
-  }
-  return { resolved: await resolveGlobOf(ops)(accessor, paths, opts.index), usedSearch: false }
+  return generic(resolved, texts, opts, stat, readdir, reads)
 }

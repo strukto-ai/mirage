@@ -235,6 +235,11 @@ function foldRegexSource(source: string, unicode: boolean): string {
   })
 }
 
+/** Whether `pattern` ignores case for ASCII letters only, as POSIX grep does. */
+export function foldsAsciiOnly(pattern: RegExp): boolean {
+  return pattern instanceof AsciiIgnoreCaseRegex
+}
+
 /**
  * Match folded text so backreferences also ignore ASCII case. Recover every
  * capture from its original span: grep -o and sed replacements must preserve

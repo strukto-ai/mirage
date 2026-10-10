@@ -61,6 +61,22 @@ export interface GrepSearchOptions {
   readonly utf8: boolean
 }
 
+/**
+ * What grep or rg asks a mount's search, read off the line once: plain texts,
+ * one held by every match; whether each is needed only as a whole word;
+ * whether the match folds case; whether the output shows matching lines and
+ * nothing positional, so a file's matching lines can stand in for it; and
+ * whether the walk also reads binary-extension files. Mirrors Python's
+ * `SearchTerms`.
+ */
+export interface SearchTerms {
+  readonly texts: readonly string[]
+  readonly wholeWord: boolean
+  readonly ignoreCase: boolean
+  readonly lineOutput: boolean
+  readonly readsBinary: boolean
+}
+
 /** Declared search dialect and fallback scan strategy for grep/rg. */
 export interface GrepSearchMeta {
   readonly mode: 'literal' | 'regex'

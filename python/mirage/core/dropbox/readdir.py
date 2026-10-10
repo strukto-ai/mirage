@@ -111,6 +111,7 @@ async def readdir(
         )
         entries.append((filename, entry, is_dir))
 
+    entries.sort(key=lambda listed: listed[0])
     await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
     path_prefix = f"/{key}/" if key else "/"
     out: list[str] = []

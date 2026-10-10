@@ -21,6 +21,7 @@ import { BINARY_EXTENSIONS, PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
 import { breSource, ereSource, perlRegex, rustSource } from './grep_pattern.ts'
+import { UNICODE_FOLDED, foldsByUnicode, requiredNeedles } from './grep_prefilter.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import { type FlagValue } from '../spec/types.ts'
 
@@ -28,7 +29,7 @@ import { type FlagValue } from '../spec/types.ts'
 export function classifyPattern(pattern: string, fixedString: boolean): PatternType {
   if (pattern.includes('\n')) return PatternType.REGEX
   if (fixedString) return PatternType.EXACT
-  if (/^[\w\s\-_.]+$/.test(pattern)) return PatternType.SIMPLE
+  if (/^[\p{L}\p{N}_\s\-.]+$/u.test(pattern)) return PatternType.SIMPLE
   return PatternType.REGEX
 }
 
@@ -178,6 +179,57 @@ export function wholeWordLiteral(
 ): string | null {
   if (pattern === null || !wholeWord || pattern.includes('\n')) return null
   return isLiteralPattern(pattern, fixedString) ? pattern : null
+}
+
+/**
+ * The terms a whole-word search index may narrow a scan on, or null.
+ *
+ * The list form of `wholeWordLiteral`. A newline-joined pattern list (several
+ * -e, or the lines of -f) matches a line when any one alternative does, so one
+ * search per alternative, unioned, is complete when every alternative is
+ * itself a whole-word literal. -x narrows as -w does: a line that is the
+ * literal entire is a word match of it. An empty alternative matches every
+ * line, which no search can stand in for. Mirrors Python's
+ * `whole_word_literals`.
+ */
+export function wholeWordLiterals(
+  pattern: string | null,
+  fixedString: boolean,
+  wholeWord: boolean,
+  lineRegexp = false,
+): string[] | null {
+  if (pattern === null || !(wholeWord || lineRegexp)) return null
+  const terms = pattern.split('\n')
+  if (terms.some((t) => t === '' || !isLiteralPattern(t, fixedString))) return null
+  return [...new Set(terms)]
+}
+
+/**
+ * The texts a mount's search is asked for, and whether as whole words.
+ * Literals under -w or -x are asked as whole words, which a word index can
+ * answer; any other pattern is narrowed on the needles one of which every
+ * match contains, asked anywhere. Under -i a literal with a non-ASCII letter,
+ * or with k or s when case folds by Unicode (`ſ` matches `s`), is left to
+ * the scan, since a mount's case folding need not be grep's. Mirrors Python's
+ * `search_terms`.
+ */
+export function searchTerms(
+  pattern: string | null,
+  matcher: RegExp,
+  fixedString: boolean,
+  wholeWord: boolean,
+  lineRegexp: boolean,
+  ignoreCase: boolean,
+): [string[], boolean] | null {
+  const words = wholeWordLiterals(pattern, fixedString, wholeWord, lineRegexp)
+  const untrusted = (w: string): boolean =>
+    /[\u0080-\uffff]/.test(w) || (foldsByUnicode(matcher) && UNICODE_FOLDED.test(w.toLowerCase()))
+  if (words !== null && !(ignoreCase && words.some(untrusted))) {
+    return [words, true]
+  }
+  const needles = requiredNeedles(matcher)
+  if (needles === null || needles.some((n) => n.length < MIN_SEARCH_LITERAL)) return null
+  return [needles, false]
 }
 
 // Drop the candidates a recursive walk would never have read. A narrowing

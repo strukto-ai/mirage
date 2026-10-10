@@ -89,6 +89,7 @@ Every other function is optional, and each stands alone:
 | `readStream`, `exists`, `find`, `duSize` with `duEntries` | Optional equivalent fast paths. |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setattr` | Individually supported mutations. |
 | `search`, `searchMany` | Optional resource search. |
+| `filesContaining`, `linesContaining`, `beforeFullScan` | Optional: let grep and rg skip what your search rules out. |
 
 `pwrite` receives `(path, data, offset)` and keeps every byte outside the
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
@@ -191,34 +192,91 @@ static capability metadata. Regex support and grep compatibility are not
 required. Leaving `search` undefined also works: MIRAGE implements grep and rg
 by reading files.
 
-A resource search is not automatically used by grep or rg. Opt into that
-integration with `override readonly searchMeta = { grep: { mode: 'literal' } }`,
-or use `mode: 'regex'` when the backend honors regex semantics. Only that
-integration interprets the `grep` namespace. Requests put `ignore_case`,
-`fixed_string`, `whole_word`, and `basic` booleans in `query.options.grep`;
-these JSON keys are snake_case in both languages. Other options and metadata
-belong to your resource.
+`search` returns text records: `[]` means no matches and `null` declines the
+request. Errors propagate, and a truncated result is never a complete answer.
+Expose semantic or service-specific queries through a custom command that calls
+the same function with its own options. grep and rg do not read `search`
+results; PostgreSQL, MongoDB and Langfuse still answer them through
+`searchMeta.grep`, which is being retired. A new VFS lets them use its search
+through the functions below. Native traversal (`find`) and size enumeration
+(`duSize` with `duEntries`) remain independent functions.
 
-Return text records: `[]` means no matches and `null` declines the request.
-Errors propagate. Under the grep integration, records must be complete rendered
-output lines, including path prefixes. A new filesystem search accelerator must
-match scanning rendered files. Existing backends retain their declared output
-semantics, including Langfuse's summary search. Never report truncated results
-as complete.
+### Let grep and rg use your search
 
-MIRAGE scans for unsupported flags, multiple operands, declined requests, and
-visibility restrictions. Set `searchMeta = { grep: { mode: 'regex', stream: true } }`
-to enable native streaming for fallback scans. The hierarchy kit's
-`makeSearchOp(detectScope, SEARCHERS, stat?)` adapts scope-specific callbacks;
-PostgreSQL, MongoDB and Langfuse use it. Custom resources can implement `search`
-directly. Expose semantic or service-specific queries through a custom command
-that calls the same function with its own options. Native traversal (`find`)
-and size enumeration (`duSize` with `duEntries`) remain independent functions.
+grep and rg always walk, filter, order and label the files themselves. Your
+search only tells them what they can skip, so their output never changes.
 
-`examples/typescript/other/basevfs_views.ts` defines one literal `search` for
-both commands. Its counters verify that `grep -F` and `rg -F` avoid file reads,
-line numbers and regexes scan, and `-i` scans after `search` returns `null`.
-The example accelerates single-page searches; directory searches also decline.
+| Function | Asked | Answer |
+| --- | --- | --- |
+| `filesContaining(text, under, { wholeWord, ignoreCase }, index?)` | which files under the walked directories may hold `text` | a `PathSpec[]`, or `null` |
+| `linesContaining(path, text, { ignoreCase }, index?)` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `null` |
+| `beforeFullScan(command, under, reason, index?)` | nothing can narrow, so every file is about to be read | resolve to scan, reject to refuse |
+
+The arguments come from the command line:
+
+| Argument | grep | rg |
+| --- | --- | --- |
+| `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds | the same |
+| `under` | directory operands under `-r` or `-R` | directory operands, the cwd when none |
+| `wholeWord: true` | `-w` or `-x` with plain-text patterns | the same |
+| `wholeWord: false` | any other pattern; `text` may sit inside a word | the same |
+| `ignoreCase` | `-i` | `-i`, or `-S` with a lowercase pattern |
+
+Answer more than needed, never less: an extra file costs a read, a missing one
+is a wrong answer. Files are matched on `vfsPath` without case; a search that holds only
+keys names each with `mountedPath(under[0], '/' + key)` from
+`@struktoai/mirage-core/utils/key_prefix`. Return `null` when the answer may be
+incomplete (an error, a truncated result, an index that lags writes) and every
+file is read. A word-based index answers `wholeWord: true` and returns `null`
+otherwise.
+
+```ts
+import { BaseVFS, type PathSpec, type ScanReason } from '@struktoai/mirage-core'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+
+class WikiVFS extends BaseVFS {
+  override async filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[] | null> {
+    const [scope] = under
+    if (!opts.wholeWord || scope === undefined) return null
+    const hits = await this.api.search(text, under.map((p) => p.vfsPath))
+    return hits.truncated ? null : hits.map((hit) => mountedPath(scope, `/${hit.key}`))
+  }
+
+  override beforeFullScan(command: string, under: PathSpec[], reason: ScanReason): Promise<void> {
+    return Promise.reject(new Error(`${reason}; narrow the path`))
+  }
+}
+```
+
+`linesContaining` suits row stores, and may stream its rows. Its lines replace
+the file when the output shows no line numbers, byte offsets or context;
+otherwise the file is read only when the answer holds a line, and a stream is
+pulled no further than its first one. Answer `null` for a file that may hold a
+NUL byte: grep and rg call such a file binary from bytes outside its matching
+lines. A file named on the line, a binary-extension file read under `-a`, and
+any path under a hide or path rule are always read.
+
+`beforeFullScan` is called once, before the first file no search answered is read,
+with why:
+
+| `ScanReason` | When |
+| --- | --- |
+| `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
+| `NO_TEXT` | `-f`, or no plain text of three characters every match holds (under `-i`, a word with a non-ASCII letter, or with k or s, counts as none) |
+| `EVERY_LINE` | `-v`, or rg `--passthru` |
+| `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`, without `-q`: rg leaves a binary file out of these |
+| `LINKS` | rg `-L` |
+| `UNANSWERED` | `filesContaining` resolved `null`, or `linesContaining` resolved `null` for a file |
+
+Reject from it (or from `filesContaining`) to refuse: the error's message is
+what the command prints (a filesystem error rejected at a file is that file's read error), and each reason's value is a sentence
+to put in it.
+`examples/typescript/other/custom_vfs.ts` defines `filesContaining` for its
+wiki.
 
 To make the backend constructible by name (workspace config, snapshots, the daemon), register a factory:
 
@@ -345,7 +403,7 @@ marks already.
 
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name replaces the generic on that backend; `generic('<name>')` hands the replacement the default command for what it does not support, and `generic('<name>', { vfs, table })` registers the default over a changed table (dify's light `ls`). Export a backend's own commands as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in the package's `commands/builtin/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
 
-- Declare native text search by defining `search` on the VFS. Generic grep/rg builders use it only when `searchMeta.grep` opts in; semantic search does not opt in. The hierarchy kit supplies `makeSearchOp` for scope-based core functions; unsupported requests fall back to scanning.
+- Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command. The hierarchy kit supplies `makeSearchOp` for scope-based core functions.
 - A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
 

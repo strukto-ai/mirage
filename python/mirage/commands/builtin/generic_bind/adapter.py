@@ -57,7 +57,6 @@ from mirage.utils.hidden import move_reveals, path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.types import (
-    ContentSearchOps,
     DuOps,
     OperationFn,
     SearchOps,
@@ -361,14 +360,9 @@ def command_io(vfs: BaseVFS) -> CommandIO:
             if vfs.supports("search")
             else None
         ),
-        content_search=(
-            ContentSearchOps(
-                narrow_paths=_without_accessor(vfs.narrow_paths),
-                enabled=_without_accessor(vfs.content_search_enabled),
-            )
-            if vfs.supports("narrow_paths")
-            else None
-        ),
+        files_containing=slot("files_containing"),
+        lines_containing=slot("lines_containing"),
+        before_full_scan=slot("before_full_scan"),
     )
 
 
