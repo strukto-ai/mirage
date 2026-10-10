@@ -561,6 +561,26 @@ async def test_close_is_idempotent_with_a_job_running():
         await asyncio.sleep(0)
 
 
+async def _leave_a_job_running() -> JobStatus:
+    with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("sleep 30 &")
+        job = ws.job_table.all_running_jobs()[0]
+    return job.status
+
+
+def test_a_with_block_exits_inside_a_loop_with_a_job_running():
+    # The job runs on the loop the block exits inside, which runs nothing
+    # until the exit returns, so the close cannot wait for it.
+    statuses: list[JobStatus] = []
+    worker = threading.Thread(
+        target=lambda: statuses.append(asyncio.run(_leave_a_job_running())),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=10)
+    assert statuses == [JobStatus.KILLED]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("blocked_phase", ["runtime", "vfs"])
 async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(

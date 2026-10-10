@@ -1305,7 +1305,13 @@ class Workspace:
     ) -> None:
         unpatch_process(self._patched)
         self._patched = []
-        run_async_from_sync(self.close(), self._vfs_loop)
+        try:
+            caller = asyncio.get_running_loop()
+        except RuntimeError:
+            caller = None
+        run_async_from_sync(
+            self._close(drop_state=False, blocked_loop=caller), self._vfs_loop
+        )
         # Closed after the workspace close, which ran on it.
         loop, self._vfs_loop = self._vfs_loop, None
         if loop is not None:
@@ -1411,7 +1417,11 @@ class Workspace:
                 "workspace was closed before delete; its state is kept"
             )
 
-    async def _close(self, drop_state: bool) -> None:
+    async def _close(
+        self,
+        drop_state: bool,
+        blocked_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
         """Release everything the workspace owns, exactly once
         (``close_workspace``); a later call answers as the first did.
 
@@ -1419,6 +1429,10 @@ class Workspace:
             drop_state (bool): delete the workspace's state from its
                 store once nothing writes it any more, before the store
                 closes.
+            blocked_loop (asyncio.AbstractEventLoop | None): the loop a
+                sync ``with`` block is exiting inside; its runners are
+                cancelled but not joined, since they cannot run until
+                this returns.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -1434,7 +1448,9 @@ class Workspace:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
-            failures = await close_workspace(self._close_deps(drop_state))
+            failures = await close_workspace(
+                self._close_deps(drop_state, blocked_loop)
+            )
             self._closed = True
             self._async_closed = True
             if failures:
@@ -1447,11 +1463,17 @@ class Workspace:
                 )
                 raise self._close_error
 
-    def _close_deps(self, drop_state: bool) -> CloseDeps:
+    def _close_deps(
+        self,
+        drop_state: bool,
+        blocked_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> CloseDeps:
         """What closing releases (``close_workspace``).
 
         Args:
             drop_state (bool): delete the workspace's state too.
+            blocked_loop (asyncio.AbstractEventLoop | None): the loop a
+                sync ``with`` block is exiting inside.
         """
         return CloseDeps(
             sessions=self._session_mgr,
@@ -1468,6 +1490,7 @@ class Workspace:
             drop_state=drop_state,
             workspace_id=self.workspace_id,
             planes=self._planes,
+            blocked_loop=blocked_loop,
         )
 
     # ── snapshot / load / copy ─────────────────────────────────────────────

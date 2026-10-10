@@ -571,7 +571,7 @@ export async function handleCommand(
     )
     const csExec = new ExecutionNode({
       command: cmdStr,
-      stderr: await materialize(csIo.stderr),
+      stderr: await csIo.materializeStderr(),
       exitCode: csIo.exitCode,
     })
     let csStdout = csStdout0
@@ -591,7 +591,7 @@ export async function handleCommand(
         mergeSignals(signal, context.frame.abortSignal),
       )
       csExec.exitCode = csIo.exitCode
-      csExec.stderr = await materialize(csIo.stderr)
+      csExec.stderr = await csIo.materializeStderr()
     }
     if (csParsed.warnings.length > 0) {
       const csWarn = encodeText(csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''))
