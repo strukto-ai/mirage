@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic.cp import (
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.fs import enotsup
+from mirage.errors.fs import enotsup, walk_declined
 from mirage.io.types import IOResult
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -433,6 +433,30 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
         )
         assert io.exit_code == 0
         assert used["dir_copy"], flags
+
+
+@pytest.mark.asyncio
+async def test_a_declined_dir_copy_copies_entry_by_entry():
+    # The dispatcher may turn a one-call tree copy down (a link below the
+    # destination); the copy then goes per entry, directories included.
+    files = {"/t/f.txt": b"F"}
+    dirs = {"/t", "/t/empt"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+
+    async def dir_copy(src, dst) -> None:
+        raise walk_declined("ram", "dir_copy", dst)
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(
+            copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
+        ),
+        stat=stat,
+        flags=CpFlags(recursive=True, verbose=True),
+    )
+    assert io.exit_code == 0
+    assert files["/c/f.txt"] == b"F"
+    assert {"/c", "/c/empt"} <= dirs
 
 
 @pytest.mark.asyncio

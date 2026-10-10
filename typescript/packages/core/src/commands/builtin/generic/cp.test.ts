@@ -26,7 +26,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
-import { eacces, enoent, enotsup } from '../../../errors/fs.ts'
+import { eacces, enoent, enotsup, walkDeclined } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
   cpFlags,
@@ -548,6 +548,25 @@ describe('per-entry policy still materializes directories', () => {
       expect(io.exitCode).toBe(0)
       expect(used).toBe(true)
     }
+  })
+
+  it('copies entry by entry when the dirCopy is declined', async () => {
+    // The dispatcher may turn a one-call tree copy down (a link below the
+    // destination); the copy then goes per entry, directories included.
+    const files = new Map([['/t/f.txt', new Uint8Array([70])]])
+    const dirs = new Set(['/t', '/t/empt'])
+    const { stat, copy, find, mkdir } = typedBackend(files, dirs)
+    const dirCopy = (_src: PathSpec, dst: PathSpec): Promise<void> =>
+      Promise.reject(walkDeclined('ram', 'dir_copy', dst))
+    const [, io] = await cpGeneric(
+      ['/t', '/c'].map(spec),
+      stat,
+      { copy, find, dirCopy, mkdir },
+      cpFlags({ recursive: true, verbose: true }),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(files.get('/c/f.txt')).toEqual(new Uint8Array([70]))
+    expect(dirs.has('/c/empt')).toBe(true)
   })
 })
 

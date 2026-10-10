@@ -40,7 +40,12 @@ from mirage.commands.spec.usage import argmatch_error, extra_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import DotWalkLoop, DotWalkMissing, FsCondition
+from mirage.errors.types import (
+    DotWalkLoop,
+    DotWalkMissing,
+    FsCondition,
+    WalkDeclinedError,
+)
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -1630,27 +1635,35 @@ async def cp_generic(
                 and not per_entry_native
                 and not into_itself
             ):
-                if flags.verbose:
-                    lines.extend(
-                        await _tree_lines(
-                            strategy, stat, src, target, src_base, dst_base
+                tree = (
+                    await _tree_lines(
+                        strategy, stat, src, target, src_base, dst_base
+                    )
+                    if flags.verbose
+                    else []
+                )
+                copied = True
+                try:
+                    await strategy.dir_copy(src, target)
+                except WalkDeclinedError:
+                    copied = False
+                if copied:
+                    lines.extend(tree)
+                    if copies is not None:
+                        await copy_tree_links(
+                            copies,
+                            flags.dereference,
+                            src,
+                            target,
+                            errors,
+                            lines if flags.verbose else None,
+                            policy,
                         )
-                    )
-                await strategy.dir_copy(src, target)
-                if copies is not None:
-                    await copy_tree_links(
-                        copies,
-                        flags.dereference,
-                        src,
-                        target,
-                        errors,
-                        lines if flags.verbose else None,
-                        policy,
-                    )
-                continue
-            # Per-entry policy forfeits dir_copy, so the tree's directories
-            # are recreated here: a files-only pass would drop every
-            # directory that holds no files (GNU keeps them).
+                    continue
+            # Per-entry policy forfeits dir_copy, as does a tree copy the
+            # dispatcher declines, so the tree's directories are recreated
+            # here: a files-only pass would drop every directory that
+            # holds no files (GNU keeps them).
             if not await _mirror_dirs(
                 strategy,
                 stat,

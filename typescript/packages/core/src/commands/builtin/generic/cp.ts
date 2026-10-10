@@ -64,7 +64,7 @@ import type { LinkView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
-import type { FsCondition } from '../../../errors/types.ts'
+import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -1247,26 +1247,36 @@ export async function cpGeneric(
         continue
       }
       if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself) {
-        if (flags.verbose) {
-          lines.push(...(await treeLines(strategy, stat, src, target, srcBase, dstBase, index)))
+        const tree = flags.verbose
+          ? await treeLines(strategy, stat, src, target, srcBase, dstBase, index)
+          : []
+        let copied = true
+        try {
+          await strategy.dirCopy(src, target)
+        } catch (err) {
+          if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+          copied = false
         }
-        await strategy.dirCopy(src, target)
-        if (copies !== undefined) {
-          await copyTreeLinks(
-            copies,
-            flags.dereference,
-            src,
-            target,
-            errors,
-            flags.verbose ? lines : undefined,
-            policy,
-          )
+        if (copied) {
+          lines.push(...tree)
+          if (copies !== undefined) {
+            await copyTreeLinks(
+              copies,
+              flags.dereference,
+              src,
+              target,
+              errors,
+              flags.verbose ? lines : undefined,
+              policy,
+            )
+          }
+          continue
         }
-        continue
       }
-      // Per-entry policy forfeits dirCopy, so the tree's directories are
-      // recreated here: a files-only pass would drop every directory that
-      // holds no files (GNU keeps them).
+      // Per-entry policy forfeits dirCopy, as does a tree copy the
+      // dispatcher declines, so the tree's directories are recreated here: a
+      // files-only pass would drop every directory that holds no files (GNU
+      // keeps them).
       const mirrored = await mirrorDirs(
         strategy,
         stat,
