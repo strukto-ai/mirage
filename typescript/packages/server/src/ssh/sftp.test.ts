@@ -346,6 +346,76 @@ describe('sftp', () => {
     ).toBe('abc')
   })
 
+  it('stores the permissions, owner and times a setstat sends', async () => {
+    // sftp chmod, chown and `put -p`'s times land where a shell stat reads.
+    const client = await connect(await startHarness())
+    const sftp = await sftpOf(client)
+    await done((cb) => {
+      sftp.writeFile('/f', 'x', cb)
+    })
+    await done((cb) => {
+      sftp.setstat('/f', { mode: 0o640, uid: 1234, gid: 5678 }, cb)
+    })
+    await done((cb) => {
+      sftp.setstat('/f', { atime: 1_000_000_000, mtime: 1_100_000_000 }, cb)
+    })
+    expect(await run(client, "stat -c '%a %u %g %X %Y' /f")).toBe(
+      '640 1234 5678 1000000000 1100000000\n',
+    )
+  })
+
+  it('follows a link on a setstat, as chown(2) and utimes(2) do', async () => {
+    const client = await connect(await startHarness())
+    await run(client, 'echo target > /real; ln -s real /link')
+    const sftp = await sftpOf(client)
+    await done((cb) => {
+      sftp.setstat('/link', { uid: 1234, gid: 5678, atime: 1e9, mtime: 1.1e9 }, cb)
+    })
+    expect(await run(client, "stat -c '%u %Y' /real; stat -c %u /link")).toBe(
+      '1234 1100000000\n-\n',
+    )
+  })
+
+  it('refuses an fsetstat once the handle has lost its name', async () => {
+    // The name now belongs to another file: the change must not land there.
+    const client = await connect(await startHarness())
+    await run(client, 'echo old > /b')
+    const sftp = await sftpOf(client)
+    const handle = await call<Buffer>((cb) => {
+      sftp.open('/b', 'r+', cb)
+    })
+    await done((cb) => {
+      sftp.unlink('/b', cb)
+    })
+    await done((cb) => {
+      sftp.writeFile('/b', 'new\n', cb)
+    })
+    await expect(
+      done((cb) => {
+        sftp.fsetstat(handle, { mode: 0o600 }, cb)
+      }),
+    ).rejects.toSatisfy((err) => codeOf(err) === STATUS.NO_SUCH_FILE)
+    // writeFile creates with 0666, which the new file keeps.
+    expect(await run(client, 'stat -c %a /b; cat /b')).toBe('666\nnew\n')
+  })
+
+  it('keeps the permissions an open and a mkdir create with', async () => {
+    const client = await connect(await startHarness())
+    const sftp = await sftpOf(client)
+    const handle = await call<Buffer>((cb) => {
+      sftp.open('/secret', 'w', { mode: 0o600 }, cb)
+    })
+    await done((cb) => {
+      sftp.close(handle, cb)
+    })
+    await done((cb) => {
+      sftp.mkdir('/private', { mode: 0o700 }, cb)
+    })
+    expect(await run(client, "stat -c '%a %n' /secret /private")).toBe(
+      '600 /secret\n700 /private\n',
+    )
+  })
+
   it('round-trips a symlink', async () => {
     const client = await connect(await startHarness())
     await run(client, 'echo target > /real')

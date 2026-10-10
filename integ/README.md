@@ -191,7 +191,7 @@ flowchart LR
     D["data/**"] --> core
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
-    FS["fuse modules, workspace fuse wiring<br/>integ/fuse, check_json.py"] --> fuse
+    FS["fuse and mount core modules,<br/>workspace fuse wiring<br/>integ/fuse, check_json.py"] --> fuse
     RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
     core --> J1["integ"]
     ts --> J2["integ-ts"]
@@ -218,7 +218,7 @@ No per-verb allowlist is needed. The following paths select additional jobs:
 | the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                             | database                |
 | the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds | observability           |
 | `integ/runners/`, `integ/targets.json`                                                                       | database, observability |
-| the FUSE modules and the workspace's FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py`    | fuse                    |
+| the FUSE and mount core modules and the FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                    |
 | generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language       | fuse                    |
 | `data/`                                                                                                      | core only               |
 | `test_integ.yml`                                                                                             | every filter            |

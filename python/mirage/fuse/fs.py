@@ -12,15 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
+import inspect
 import logging
 import os
+import threading
+import time
 from typing import Any, Callable
 
+from mirage.bridge.sync import run_async_from_sync
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
-from mirage.fuse.core import MountCore
 from mirage.fuse.darwin import rename_flags_check
-from mirage.fuse.errors import classify_error
+from mirage.mount.core import MountCore
+from mirage.mount.errors import classify_error
+from mirage.mount.types import MountAttrs
 from mirage.types import JsonValue
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
@@ -28,13 +34,34 @@ from mirage.workspace.session.session import SessionState
 logger = logging.getLogger(__name__)
 
 
+def stat_dict(attrs: MountAttrs) -> dict[str, Any]:
+    """One entry's attributes in libfuse's ``st_*`` spelling.
+
+    Args:
+        attrs (MountAttrs): what the core answered.
+    """
+    return {
+        "st_mode": attrs.mode,
+        "st_nlink": attrs.nlink,
+        "st_uid": attrs.uid,
+        "st_gid": attrs.gid,
+        "st_size": attrs.size,
+        "st_rdev": attrs.rdev,
+        "st_atime": attrs.atime,
+        "st_mtime": attrs.mtime,
+        "st_ctime": attrs.ctime,
+    }
+
+
 class MirageFS:
     """libfuse adapter over MountCore.
 
     Owns exactly the FUSE-specific concerns: the mfusepy callback method
-    signatures and the translation of mirage-native exceptions into
-    ``OSError``. All filesystem semantics live in MountCore, so an FSKit or
-    File Provider adapter can reuse them unchanged.
+    signatures, the sync bridge libfuse's callbacks force (a loop thread
+    of its own that every core op runs on), and the translation of
+    mirage-native exceptions into ``OSError``. All filesystem semantics
+    live in MountCore, so an FSKit or File Provider adapter can reuse them
+    unchanged.
 
     Args:
         files (Files): the workspace's ``ws.vfs`` every callback routes to.
@@ -52,6 +79,8 @@ class MirageFS:
         session: SessionState | None = None,
     ) -> None:
         self.core = MountCore(files, root_prefix=root_prefix, session=session)
+        self._loop = asyncio.new_event_loop()
+        threading.Thread(target=self._loop.run_forever, daemon=True).start()
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run a core call, translating failures into FUSE error codes.
@@ -70,7 +99,10 @@ class MirageFS:
             Any: whatever the core method returns.
         """
         try:
-            return fn(*args)
+            result = fn(*args)
+            if inspect.isawaitable(result):
+                return run_async_from_sync(result, self._loop)
+            return result
         except Exception as err:
             code = classify_error(err)
             if code == errno.EIO and not isinstance(
@@ -81,11 +113,8 @@ class MirageFS:
                 )
             raise OSError(code, os.strerror(code)) from err
 
-    def drain_ops(self) -> list[dict[str, Any]]:
-        return self.core.drain_ops()
-
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
-        return self._call(self.core.getattr, path, fh)
+        return stat_dict(self._call(self.core.fgetattr, path, fh))
 
     def readdir(self, path: str, fh: int) -> list[Any]:
         return self._call(self.core.readdir, path)
@@ -97,10 +126,10 @@ class MirageFS:
         return self._call(self.core.write, path, data, offset, fh)
 
     def create(self, path: str, mode: int, fi: Any = None) -> int:
-        return self._call(self.core.create, path)
+        return self._call(self.core.create, path, mode)
 
     def mkdir(self, path: str, mode: int) -> None:
-        self._call(self.core.mkdir, path)
+        self._call(self.core.mkdir, path, mode)
 
     def readlink(self, path: str) -> str:
         return self._call(self.core.readlink, path)
@@ -120,7 +149,7 @@ class MirageFS:
         # RENAME op, so without this method mv fails with ENOSYS before
         # reaching userspace.
         try:
-            self.core.getattr(new)
+            run_async_from_sync(self.core.getattr(new), self._loop)
             new_exists = True
         except (FileNotFoundError, ValueError):
             new_exists = False
@@ -136,18 +165,17 @@ class MirageFS:
         # depends on it: createItem/createDirectory finalize the new item
         # with a SETATTR (mode|uid|gid|crtime|flags), which used to hit a
         # NULL slot and fail the whole create with ENOSYS after the file
-        # had already landed. Size changes route to truncate, mode and
-        # owner to setattr as chmod/chown do; times are accepted if the
-        # path exists, as utimens does.
+        # had already landed. Size changes route to truncate, mode, owner
+        # and times to setattr as chmod, chown and utimens do.
         size = changes.get("size")
         if isinstance(size, int):
             self._call(self.core.truncate, path, size)
-        mode, uid, gid = (
+        fields = [
             value if isinstance(value := changes.get(key), int) else None
-            for key in ("mode", "uid", "gid")
-        )
-        if (mode, uid, gid) != (None, None, None):
-            self._call(self.core.setattr, path, mode, uid, gid)
+            for key in ("mode", "uid", "gid", "acctime", "modtime")
+        ]
+        if any(field is not None for field in fields):
+            self._call(self.core.setattr, path, *fields)
         elif not isinstance(size, int):
             self._call(self.core.getattr, path)
         return 0
@@ -176,11 +204,20 @@ class MirageFS:
             None if gid == -1 else gid,
         )
 
-    def utimens(self, path: str, times: Any = None) -> None:
-        # Accepted, not stored: libfuse marks "now" and "leave it" in the
-        # nanosecond field, and the binding folds that into one number,
-        # so the two cannot be told from a real time.
-        self._call(self.core.getattr, path)
+    def utimens(
+        self, path: str, times: tuple[int | None, int | None] | None = None
+    ) -> None:
+        # (atime, mtime) in epoch nanoseconds, None for one left as it is
+        # (load_fuse's marshaller reads utimensat's markers); no times at
+        # all is utimes(path, NULL), both now.
+        if times is None:
+            now = time.time_ns()
+            times = (now, now)
+        atime, mtime = times
+        if atime is None and mtime is None:
+            self._call(self.core.getattr, path)
+            return
+        self._call(self.core.setattr, path, None, None, None, atime, mtime)
 
     def access(self, path: str, amode: int) -> None:
         self._call(self.core.getattr, path)

@@ -79,7 +79,7 @@ const MESSAGE_ERRNO: [string[], number][] = [
 /**
  * Map a mirage-native error onto a positive POSIX errno.
  *
- * Mirrors Python's `mirage.fuse.errors.classify_error` so both languages
+ * Mirrors Python's `mirage.mount.errors.classify_error` so both languages
  * report the same errno for the same backend failure. The naming lives in
  * core's `classify` (shared with the wasi shim and the monty encoders);
  * this adapter only renders the condition in host numbers. A stamped code

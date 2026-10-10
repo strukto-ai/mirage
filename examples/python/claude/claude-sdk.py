@@ -33,7 +33,6 @@ import tempfile
 import anyio
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
-from mirage.fuse.fs import MirageFS
 from mirage.fuse.mount import mount_background
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -92,15 +91,14 @@ def main() -> None:
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
     with tempfile.TemporaryDirectory() as mountpoint:
-        fs = MirageFS(ws.vfs)
-        t = mount_background(ws, mountpoint)
+        t = mount_background(ws.vfs, mountpoint)
         print(f"Mounted memory workspace at {mountpoint}")
         print(f"Prompt: {args.prompt}\n")
 
         try:
             anyio.run(run_agent, mountpoint, args.prompt)
         finally:
-            ops = fs.drain_ops()
+            ops = [r.to_dict() for r in ws.vfs.records]
             unmount(mountpoint)
             t.join(timeout=3)
 

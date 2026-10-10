@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChunkedHandle } from '@struktoai/mirage-core/runtime/handles/index'
+import type { FileStat } from '@struktoai/mirage-core/types'
 
-/** The attributes a kernel mount reports for one path. */
-export interface FuseAttr {
+/**
+ * One entry's POSIX attributes, as every adapter over the core needs them:
+ * the libfuse adapter hands them to fuse-native, SFTP and codex-exec read
+ * the fields. Mirrors Python's `MountAttrs`.
+ */
+export interface MountAttrs {
   mtime: Date
   atime: Date
   ctime: Date
@@ -37,4 +42,11 @@ export interface Handle {
   live?: boolean
   /** A large file reads a chunk at a time rather than hydrating whole. */
   chunked?: ChunkedHandle
+  /** Bumped whenever the file changes, so a first read that was out meanwhile does not keep its bytes. */
+  generation?: number
+  /**
+   * The file's row as it was when its name was removed or replaced; the open
+   * file has no path left. Unset while it has one.
+   */
+  detached?: FileStat
 }

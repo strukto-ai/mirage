@@ -14,7 +14,18 @@
 
 import { execFile } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { chmod, lstat, open, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  stat,
+  unlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -408,6 +419,24 @@ async function main(): Promise<void> {
     } finally {
       await held.close()
     }
+    // A create and a mkdir keep the mode they ask for, and utime, touch and
+    // cp -p keep the times they set.
+    await (await open(`${dataMp}/secret`, 'w', 0o600)).close()
+    await mkdir(`${dataMp}/private`, { mode: 0o700 })
+    result.kernel_create_keeps_mode =
+      ((await stat(`${dataMp}/secret`)).mode & 0o7777) === 0o600 &&
+      ((await stat(`${dataMp}/private`)).mode & 0o7777) === 0o700
+    await utimes(`${dataMp}/a.txt`, 981173106, 981173107)
+    const timed = await stat(`${dataMp}/a.txt`)
+    result.kernel_utime_kept =
+      Math.floor(timed.atimeMs / 1000) === 981173106 &&
+      Math.floor(timed.mtimeMs / 1000) === 981173107
+    await promisify(execFile)('cp', ['-p', `${dataMp}/a.txt`, `${dataMp}/kept.txt`])
+    result.kernel_cp_p_keeps_mtime =
+      Math.floor((await stat(`${dataMp}/kept.txt`)).mtimeMs / 1000) === 981173107
+    await promisify(execFile)('touch', [`${dataMp}/kept.txt`])
+    result.kernel_touch_is_now =
+      Math.abs((await stat(`${dataMp}/kept.txt`)).mtimeMs - Date.now()) < 600_000
     result.data_pinned = dataMp === pinned
     result.distinct_mounts = dataMp !== logsMp
 

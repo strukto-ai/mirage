@@ -18,6 +18,7 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { Action, Policy, VfsContext } from '@struktoai/mirage-core/policy/index'
 import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
 import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
@@ -496,6 +497,21 @@ describe('MountCore', () => {
     expect((await new MountCore(ws.vfs).getattr('/')).mode & 0o170000).toBe(0o040000)
   })
 
+  it('keeps times set on an open file over its buffered writes', async () => {
+    // cp -p writes the copy, sets its times on the file it still holds
+    // open, then closes it: the writes precede the times in POSIX order.
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("echo 'hello world' > /data/f")
+    const core = new MountCore(ws.vfs)
+    const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+    await core.write('/data/f', fd, new TextEncoder().encode('copied'), 0)
+    const when = new Date('2001-09-09T01:46:40.000Z')
+    await core.setattr('/data/f', null, null, null, null, when)
+    await core.release(fd)
+    expect((await core.getattr('/data/f')).mtime.getTime()).toBe(when.getTime())
+    expect(new TextDecoder().decode(await core.read('/data/f', -1, 0, 100))).toBe('copiedworld\n')
+  })
+
   it('reads what a handle wrote while its flush is still landing', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'hello world' > /data/f")
@@ -871,4 +887,319 @@ it('refreshes generated documents through an already open handle', async () => {
   await expect(core.read('/VFS.md', fd, 0, 100000)).rejects.toThrow()
   await core.release(fd)
   await ws.close()
+})
+
+it('renames and removes a link that loops, as rename(2) and unlink(2) act on the name', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const core = new MountCore(ws.vfs)
+  await core.symlink('loop', '/data/loop')
+  await core.rename('/data/loop', '/data/spin')
+  await core.symlink('loop', '/data/loop')
+  await core.unlink('/data/loop')
+  expect(ws.namespace.isLink('/data/loop')).toBe(false)
+  expect(ws.namespace.isLink('/data/spin')).toBe(true)
+})
+
+it("stats what an unlinked file's handle wrote", async () => {
+  const core = await mkCore()
+  const fd = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+  await core.read('/data/greeting.txt', fd, 0, 100)
+  const longer = new TextEncoder().encode('a longer replacement')
+  await core.write('/data/greeting.txt', fd, longer, 0)
+  await core.unlink('/data/greeting.txt')
+  expect((await core.fgetattr('/data/greeting.txt', fd)).size).toBe(longer.byteLength)
+})
+
+it('changes the target, not the link, when setattr follows', async () => {
+  const core = await mkCore()
+  await core.symlink('greeting.txt', '/data/lnk')
+  await core.setattr('/data/lnk', null, 1234, null, null, new Date(1e12), true)
+  const target = await core.getattr('/data/greeting.txt')
+  expect([target.uid, target.mtime.getTime()]).toEqual([1234, 1e12])
+  expect((await core.getattr('/data/lnk')).uid).not.toBe(1234)
+})
+
+/** A store that makes entries the way a disk mount under umask 077 does. */
+class UmaskRAM extends RAMVFS {
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
+    if (row.mode !== null) return row
+    return row.with({ mode: row.type === FileType.DIRECTORY ? 0o700 : 0o600 })
+  }
+}
+
+it("keeps a create's mode over the store's own umask", async () => {
+  const core = new MountCore(
+    new Workspace({ '/data/': new UmaskRAM() }, { mode: MountMode.WRITE }).vfs,
+  )
+  await core.release(await core.create('/data/f', 0o100644))
+  await core.mkdir('/data/d', 0o755)
+  expect((await core.getattr('/data/f')).mode & 0o7777).toBe(0o644)
+  expect((await core.getattr('/data/d')).mode & 0o7777).toBe(0o755)
+})
+
+it('lands a create a policy refuses to stat', async () => {
+  // The entry exists once the create returns: failing it then would make a
+  // retry find it there.
+  const vfs = new RAMVFS()
+  const noStats: Policy = {
+    preVfs: (ctx: VfsContext): Action | null =>
+      ctx.op === 'stat' ? { kind: 'deny', reason: 'no stat' } : null,
+  }
+  const ws = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE, policies: [noStats] })
+  const core = new MountCore(ws.vfs)
+  await core.mkdir('/data/d', 0o700)
+  await core.release(await core.create('/data/f', 0o100600))
+  expect(vfs.store.dirs.has('/d')).toBe(true)
+  expect(vfs.store.files.has('/f')).toBe(true)
+})
+
+it("holds an open through a link back until the link's removal is done", async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.shell('echo body > /data/a.txt; ln -s a.txt /data/lk')
+  const core = new MountCore(ws.vfs)
+  const real = ws.vfs.unlink.bind(ws.vfs)
+  let release = (): void => undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let entered = (): void => undefined
+  const out = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  vi.spyOn(ws.vfs, 'unlink').mockImplementation(async (...args) => {
+    entered()
+    await gate
+    return real(...args)
+  })
+  const removing = core.unlink('/data/lk')
+  await out
+  let opened = false
+  const opening = core.open('/data/lk').finally(() => {
+    opened = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(opened).toBe(false)
+  release()
+  await removing
+  await expect(opening).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+/**
+ * Hold the first call of `op` on `ws.vfs` until `go`: before it reaches the
+ * store, or with `answered` after, its answer in flight. `out` settles once
+ * it is held, and `calls` counts the calls of `op`.
+ */
+function holdFirst(
+  ws: Workspace,
+  op: 'pwrite' | 'read' | 'rename' | 'stat',
+  answered = false,
+): { out: Promise<void>; go: () => void; calls: () => number } {
+  let go = (): void => undefined
+  const gate = new Promise<void>((resolve) => {
+    go = resolve
+  })
+  let entered = (): void => undefined
+  const out = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const real = (ws.vfs[op] as (...a: unknown[]) => Promise<unknown>).bind(ws.vfs)
+  let calls = 0
+  vi.spyOn(ws.vfs, op).mockImplementation((async (...args: unknown[]) => {
+    calls += 1
+    if (calls > 1) return real(...args)
+    const answer = answered ? await real(...args) : undefined
+    entered()
+    await gate
+    return answered ? answer : real(...args)
+  }) as never)
+  return { out, go, calls: () => calls }
+}
+
+it('lands a direct write still out before a truncate', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/f', new TextEncoder().encode('abc'))
+  const held = holdFirst(ws, 'pwrite')
+  const core = new MountCore(ws.vfs)
+  const writing = core.write('/data/f', -1, new TextEncoder().encode('0123456789'), 0)
+  await held.out
+  const truncating = core.truncate('/data/f', 0)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  held.go()
+  await writing
+  await truncating
+  expect((await ws.vfs.read('/data/f')).byteLength).toBe(0)
+})
+
+it('keeps nothing from a first read a change raced', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/f', new TextEncoder().encode('old bytes'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/f', fsConstants.O_RDWR)
+  const held = holdFirst(ws, 'read', true)
+  const reading = core.read('/data/f', fd, 0, 100)
+  await held.out
+  await core.truncate('/data/f', 0)
+  held.go()
+  expect(new TextDecoder().decode(await reading)).toBe('old bytes')
+  expect((await core.read('/data/f', fd, 0, 100)).byteLength).toBe(0)
+})
+
+it('holds a release back until a flush still landing is done', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/f', new TextEncoder().encode('abc'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+  await core.write('/data/f', fd, new TextEncoder().encode('X'), 0)
+  const held = holdFirst(ws, 'pwrite')
+  const first = core.flush('/data/f', fd)
+  await held.out
+  let released = false
+  const releasing = core.release(fd).then(() => {
+    released = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(released).toBe(false)
+  held.go()
+  await first
+  await releasing
+  expect(new TextDecoder().decode(await ws.vfs.read('/data/f'))).toBe('Xbc')
+})
+
+it('detaches the handles on a name an unlink or a rename takes', async () => {
+  const core = await mkCore()
+  const gone = await core.open('/data/greeting.txt')
+  const linked = await core.open('/data/sub/inner.txt')
+  await core.symlink('sub/inner.txt', '/data/lk')
+  await core.unlink('/data/greeting.txt')
+  await core.unlink('/data/lk')
+  await core.write('/data/c.txt', -1, new TextEncoder().encode('new'), 0)
+  const replaced = await core.open('/data/c.txt')
+  await core.rename('/data/sub/inner.txt', '/data/c.txt')
+  expect(core.handles.get(gone)?.detached).toBeDefined()
+  expect(core.handles.get(replaced)?.detached).toBeDefined()
+  expect(core.handles.get(linked)?.detached).toBeUndefined()
+})
+
+it('queues a flush a rename moved under the new name', async () => {
+  // Queued under /a, the flush would write /b outside /b's queue, and a
+  // truncate of /b could finish under it and be undone.
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('abc'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/a', fsConstants.O_WRONLY)
+  await core.write('/data/a', fd, new TextEncoder().encode('0123456789'), 0)
+  const writes = holdFirst(ws, 'pwrite')
+  const renames = holdFirst(ws, 'rename')
+  const renaming = core.rename('/data/a', '/data/b')
+  await renames.out
+  const flushing = core.flush('/data/a', fd)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  renames.go()
+  await renaming
+  await writes.out
+  const truncating = core.truncate('/data/b', 0)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  writes.go()
+  await flushing
+  await truncating
+  expect((await ws.vfs.read('/data/b')).byteLength).toBe(0)
+})
+
+it('never lets a detached handle touch the file at its old name', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('stale-file'))
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/b', fsConstants.O_RDWR)
+  await core.read('/data/b', fd, 0, 100)
+  await core.write('/data/b', fd, new TextEncoder().encode('STALE'), 0)
+  await core.rename('/data/a', '/data/b')
+  await core.setattr('/data/b', null, null, null, null, new Date(1e12))
+  expect((await core.fgetattr('/data/b', fd)).mtime.getTime()).not.toBe(1e12)
+  expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('STALE-file')
+  await core.release(fd)
+  expect(new TextDecoder().decode(await ws.vfs.read('/data/b'))).toBe('fresh')
+})
+
+it('keeps the file a detached handle never read', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('stale-file'))
+  await ws.shell('chmod 600 /data/b')
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/b')
+  await core.rename('/data/a', '/data/b')
+  const attrs = await core.fgetattr('/data/b', fd)
+  expect([attrs.size, attrs.mode & 0o7777]).toEqual([10, 0o600])
+  expect(new TextDecoder().decode(await core.read('/data/b', fd, 0, 100))).toBe('stale-file')
+})
+
+it('holds the bytes of a removed file when only its stat is refused', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const body = Uint8Array.from({ length: 3 * READ_CHUNK }, (_, i) => i % 251)
+  await ws.vfs.write('/data/big.bin', body)
+  const core = new MountCore(ws.vfs)
+  const fd = await core.open('/data/big.bin')
+  await core.read('/data/big.bin', fd, 0, 3)
+  vi.spyOn(ws.vfs, 'stat').mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  await core.unlink('/data/big.bin')
+  const far = 2 * READ_CHUNK + 5
+  expect(await core.read('/data/big.bin', fd, far, 4)).toEqual(body.slice(far, far + 4))
+})
+
+it('makes a rename wait for an open already out', async () => {
+  // The open has truncated and is reading the file back when a rename onto
+  // its name starts: the rename takes the file the open made, and an open
+  // replayed after it would truncate the file it put there.
+  const vfs = new UnsizedRAM()
+  vfs.store.files.set('/a', new TextEncoder().encode('fresh'))
+  vfs.store.files.set('/b', new TextEncoder().encode('old'))
+  const ws = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
+  const core = new MountCore(ws.vfs)
+  const reads = holdFirst(ws, 'read', true)
+  const opening = core.open('/data/b', fsConstants.O_RDWR | fsConstants.O_TRUNC)
+  await reads.out
+  let renamed = false
+  const renaming = core.rename('/data/a', '/data/b').finally(() => {
+    renamed = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(renamed).toBe(false)
+  reads.go()
+  const fd = await opening
+  await renaming
+  const dec = new TextDecoder()
+  expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('fresh')
+  expect((await core.read('/data/b', fd, 0, 100)).byteLength).toBe(0)
+})
+
+it('makes a flush onto a name a rename replaces wait for it', async () => {
+  // Landing under the rename's hold would make what it read stale, and
+  // reading again for as long as the file kept being written never ends.
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
+  await ws.vfs.write('/data/b', new TextEncoder().encode('old-body'))
+  const core = new MountCore(ws.vfs)
+  const reader = await core.open('/data/b')
+  const writer = await core.open('/data/b', fsConstants.O_WRONLY)
+  await core.write('/data/b', writer, new TextEncoder().encode('NEW'), 0)
+  const reads = holdFirst(ws, 'read', true)
+  const renaming = core.rename('/data/a', '/data/b')
+  await reads.out
+  let flushed = false
+  const flushing = core.flush('/data/b', writer).finally(() => {
+    flushed = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(flushed).toBe(false)
+  reads.go()
+  await renaming
+  await flushing
+  expect(reads.calls()).toBe(1)
+  const dec = new TextDecoder()
+  expect(dec.decode(await core.read('/data/b', reader, 0, 100))).toBe('old-body')
+  expect(dec.decode(await core.read('/data/b', writer, 0, 100))).toBe('NEW-body')
+  expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('fresh')
 })
