@@ -63,3 +63,5 @@ file read in full, with why:
 | `UNANSWERED` | a search answered none |
 
 Raise from it to refuse: the command prints `grep: <message>` and exits 1.
+A filesystem error raised at a file, after `lines_containing` declined it, is
+that file's read error instead: each such file reports it and grep exits 2.
