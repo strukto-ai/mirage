@@ -51,6 +51,7 @@ import {
   appendByRewrite,
   expectOffset,
   pwriteByRewrite,
+  truncateByRewrite,
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
 import { declared } from '../../vfs/call.ts'
@@ -644,6 +645,13 @@ export class MountEntry {
     if (name === 'glob') {
       return vfs.supports('readdir') ? [(scope, _args, kw) => this.glob(scope, kw.index)] : []
     }
+    if (name === 'truncate' && !vfs.supports(name)) {
+      if (!vfs.supports('write')) return []
+      return [
+        (scope, args, kw) =>
+          this.truncateByRewrite(scope, lengthArg(args[0]), kw.no_create === true, kw.index),
+      ]
+    }
     if ((name === 'append' || name === 'pwrite') && !vfs.supports(name)) {
       if (!vfs.supports('write')) return []
       return name === 'append'
@@ -731,6 +739,21 @@ export class MountEntry {
       path,
       data,
       offset,
+    )
+  }
+
+  private truncateByRewrite(
+    path: PathSpec,
+    length: number,
+    noCreate: boolean,
+    index?: IndexCacheStore,
+  ): Promise<void> {
+    return truncateByRewrite(
+      (p) => this.vfs.read(p, index),
+      (p, d) => this.vfs.write(p, d),
+      path,
+      length,
+      noCreate,
     )
   }
 

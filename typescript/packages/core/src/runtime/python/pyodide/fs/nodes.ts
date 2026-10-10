@@ -12,11 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DIR_MODE, FILE_MODE, LINK_MODE } from './constants.ts'
-import { fsError } from './errors.ts'
-import type { PyodideFsSeed } from './seed.ts'
+import { DIR_MODE } from './constants.ts'
 import type { FSNode, NodeHost, NodeOps, StreamOps } from './types.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
 
 /**
  * The node table for one mount prefix.
@@ -53,80 +50,6 @@ export class NodeTable {
   mount(): FSNode {
     this.root = this.makeNode(null, '/', DIR_MODE)
     return this.root
-  }
-
-  /**
-   * Populate the tree from a collected seed.
-   *
-   * Must run after `FS.mount`, never inside it: `FSNode` copies `mount`
-   * from its parent, and Emscripten assigns the root's only once
-   * `type.mount()` has returned. Seeding early leaves every nested node
-   * with an undefined mount, and two undefined mounts compare equal,
-   * which silently defeats the kernel's cross-mount rename check.
-   *
-   * Args:
-   *   seed: tree collected from the bridge before the run.
-   */
-  seed(seed: PyodideFsSeed): void {
-    for (const dir of seed.dirs) {
-      const rel = this.relative(dir)
-      if (rel !== null) this.stamp(seed, dir, this.ensureDir(rel))
-    }
-    for (const path of seed.unreadable) {
-      const node = this.placeFile(path)
-      if (node !== null) {
-        node.unreadable = true
-        this.stamp(seed, path, node)
-      }
-    }
-    for (const path of seed.unclassified) {
-      const node = this.placeFile(path)
-      if (node !== null) {
-        node.unreadable = true
-        node.unclassified = true
-      }
-    }
-    for (const [path, bytes] of seed.files) {
-      const node = this.placeFile(path)
-      if (node === null) continue
-      node.contents = bytes
-      node.usedBytes = bytes.length
-      this.stamp(seed, path, node)
-    }
-    for (const [path, device] of seed.devices) {
-      const node = this.placeFile(path, device.mode, device.rdev)
-      if (node !== null) this.stamp(seed, path, node)
-    }
-    for (const [path, target] of seed.links) {
-      const node = this.placeFile(path, LINK_MODE)
-      if (node !== null) node.link = target
-    }
-  }
-
-  /**
-   * Put the mount's own mode and stamp on a node the seed just placed.
-   *
-   * Without it a seeded node carries `makeNode`'s defaults: 0o644
-   * whatever the mount holds, and the moment the node was built, so a
-   * chmod the shell made was invisible and every file the guest stats
-   * looked modified this second. Only seeded nodes are restamped: a
-   * file the guest creates during the run really was modified now.
-   *
-   * Args:
-   *   seed: the collected tree, holding what the rows reported.
-   *   path: guest-absolute path of the node.
-   *   node: the node just placed for it.
-   */
-  private stamp(seed: PyodideFsSeed, path: string, node: FSNode): void {
-    const mode = seed.modes.get(path)
-    // Permission bits only: the kind is the tree's own decision, and a
-    // row that disagreed would otherwise turn a file into a directory.
-    if (mode !== undefined) node.mode = (node.mode & ~0o7777) | (mode & 0o7777)
-    const at = seed.stamps.get(path)
-    if (at !== undefined) {
-      node.atime = at.atimeMs
-      node.mtime = node.ctime = at.mtimeMs
-    }
   }
 
   /**
@@ -235,46 +158,5 @@ export class NodeTable {
       cur = cur.parent
     }
     return parts.length === 0 ? this.prefix : this.prefix + '/' + parts.join('/')
-  }
-
-  private rootNode(): FSNode {
-    // Only reachable from seed(), which the host calls: a guest syscall
-    // always arrives on a node, and no node exists before mount().
-    if (this.root === null) throw fsError('EIO', 'mirage fs: seeded before it was mounted')
-    return this.root
-  }
-
-  private relative(path: string): string | null {
-    if (path === this.prefix) return ''
-    if (!path.startsWith(this.prefix + '/')) return null
-    return rstripSlash(path.slice(this.prefix.length + 1))
-  }
-
-  private ensureDir(rel: string): FSNode {
-    let cur = this.rootNode()
-    if (rel === '') return cur
-    for (const part of rel.split('/')) {
-      if (part === '') continue
-      const next = cur.children?.get(part)
-      cur = next ?? this.makeNode(cur, part, DIR_MODE)
-    }
-    return cur
-  }
-
-  /**
-   * Create a leaf node at `path`, building the directories above it.
-   *
-   * Args:
-   *   path: guest-absolute path of the leaf.
-   *   mode: type and permission bits, a regular file by default.
-   */
-  private placeFile(path: string, mode: number = FILE_MODE, rdev = 0): FSNode | null {
-    const rel = this.relative(path)
-    if (rel === null) return null
-    const cut = rel.lastIndexOf('/')
-    const name = cut < 0 ? rel : rel.slice(cut + 1)
-    if (name === '') return null
-    const parent = cut <= 0 ? this.rootNode() : this.ensureDir(rel.slice(0, cut))
-    return this.makeNode(parent, name, mode, rdev)
   }
 }

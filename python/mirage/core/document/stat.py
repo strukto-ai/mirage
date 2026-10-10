@@ -15,7 +15,7 @@
 from mirage.accessor.document import DocumentAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.document.read import read
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 
 
 async def stat(
@@ -28,5 +28,5 @@ async def stat(
         name=accessor.name,
         type=FileType.FILE,
         size=len(data),
-        extra={"mirage.live": True},
+        extra={LIVE_KEY: True},
     )

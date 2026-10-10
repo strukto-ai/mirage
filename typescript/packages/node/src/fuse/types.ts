@@ -12,9 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { planFlush } from './flush.ts'
-export type { FlushKind, FlushStep } from './types.ts'
-export { parseMode, type OpenMode } from './mode.ts'
-export { FileHandle, overlaid, writeRuns } from './file_handle.ts'
-export { FileTable } from './file_table.ts'
-export { ChunkedHandle } from './chunked.ts'
+import type { ChunkedHandle } from '@struktoai/mirage-core/runtime/handles/index'
+
+/** The attributes a kernel mount reports for one path. */
+export interface FuseAttr {
+  mtime: Date
+  atime: Date
+  ctime: Date
+  nlink: number
+  size: number
+  mode: number
+  uid: number
+  gid: number
+  rdev: number
+}
+
+/** One open file of a kernel mount. */
+export interface Handle {
+  path: string
+  /** Where the path really points once namespace links are followed. */
+  key: string
+  data?: Uint8Array
+  writeBuf?: [number, Uint8Array][]
+  live?: boolean
+  /** A large file reads a chunk at a time rather than hydrating whole. */
+  chunked?: ChunkedHandle
+}

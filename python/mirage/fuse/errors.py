@@ -15,13 +15,10 @@
 import errno
 import logging
 
-from mirage.errors import FsCondition, classify, posix_errno
+from mirage.errors import classify, posix_errno
 from mirage.policy.errors import PolicyDenied
 
 logger = logging.getLogger(__name__)
-
-# "attribute not found" errno: ENOATTR on macOS, ENODATA on Linux.
-NO_XATTR = posix_errno(FsCondition.NO_XATTR)
 
 # Genuine last resort, for an error whose only signal is its message.
 # The repo's own backends no longer need it -- every rmdir refusal is

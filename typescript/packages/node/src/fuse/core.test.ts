@@ -13,18 +13,47 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { constants as fsConstants } from 'node:fs'
-import { getCurrentSession, runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
-import { enotsup } from '@struktoai/mirage-core/errors/fs'
+import type { PathSpec } from '@struktoai/mirage-core/types'
+import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
 import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MountCore } from './core.ts'
-import { errnoError } from './errors.ts'
 
 const NAIVE_STAMP = '2026-01-02T03:04:05'
+const PAYLOAD = new TextEncoder().encode('payload-bytes')
+
+/** A store with no partial write: it keeps the base's truncate. */
+class NoTruncateRAM extends RAMVFS {
+  override truncate = Reflect.get(BaseVFS.prototype, 'truncate')
+}
+
+/** A caching mount whose backend names no size, as an API mount does. */
+class UnsizedRAM extends RAMVFS {
+  override readonly cachesReads = true
+  reads = 0
+
+  constructor() {
+    super()
+    this.store.dirs.add('/')
+    this.store.files.set('/u.json', PAYLOAD)
+  }
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
+    return row.type === FileType.DIRECTORY ? row : row.with({ size: null })
+  }
+
+  override read(...args: Parameters<RAMVFS['read']>): ReturnType<RAMVFS['read']> {
+    this.reads += 1
+    return super.read(...args)
+  }
+}
 
 async function mkCore(): Promise<MountCore> {
   const ws = new Workspace(
@@ -37,46 +66,14 @@ async function mkCore(): Promise<MountCore> {
 }
 
 describe('MountCore', () => {
-  it.each([
-    [0, ''],
-    [2, 'he'],
-    [8, 'hello\n\0\0'],
-  ])('resizes to %i under its session when truncate falls back', async (size, expected) => {
+  it('refuses a truncate the mount cannot do and keeps the bytes', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'hello' > /data/f.txt")
-    const sess = ws.createSession('agent', { profile: {} })
-    vi.spyOn(ws.vfs, 'truncate').mockRejectedValue(enotsup('ram', 'truncate', '/data/f.txt'))
-    const realRead = ws.vfs.read.bind(ws.vfs)
-    const readers: (string | null)[] = []
-    vi.spyOn(ws.vfs, 'read').mockImplementation((...args) => {
-      readers.push(getCurrentSession()?.sessionId ?? null)
-      return realRead(...args)
-    })
-    await new MountCore(ws.vfs, { session: sess }).truncate('/data/f.txt', size)
-    expect(readers).toEqual(['agent'])
-    expect(new TextDecoder().decode(await realRead('/data/f.txt'))).toBe(expected)
+    const refused = enotsup('ram', 'truncate', '/data/f.txt')
+    vi.spyOn(ws.vfs, 'truncate').mockRejectedValue(refused)
+    await expect(new MountCore(ws.vfs).truncate('/data/f.txt', 2)).rejects.toBe(refused)
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/f.txt'))).toBe('hello\n')
   })
-
-  it.each(['EACCES', 'EIO', 'ENOENT'] as const)(
-    'preserves bytes when the truncate fallback read fails with %s',
-    async (code) => {
-      const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-      await ws.shell("echo 'hello' > /data/f.txt")
-      const sess = ws.createSession('agent', { profile: {} })
-      const core = new MountCore(ws.vfs, { session: sess })
-      const realRead = ws.vfs.read.bind(ws.vfs)
-      const write = vi.spyOn(ws.vfs, 'write')
-      const error = errnoError(code, 'fallback read failed')
-      vi.spyOn(ws.vfs, 'truncate').mockRejectedValue(enotsup('ram', 'truncate', '/data/f.txt'))
-      vi.spyOn(ws.vfs, 'read').mockRejectedValueOnce(error)
-
-      await expect(core.truncate('/data/f.txt', 2)).rejects.toBe(error)
-      expect(write).not.toHaveBeenCalled()
-      expect(new TextDecoder().decode(await realRead('/data/f.txt'))).toBe('hello\n')
-      await core.truncate('/data/f.txt', 2)
-      expect(new TextDecoder().decode(await realRead('/data/f.txt'))).toBe('he')
-    },
-  )
 
   it('runs every op under its session with no adapter binding it', async () => {
     // The SFTP entry point drives MountCore directly, with no FUSE adapter to
@@ -184,7 +181,7 @@ describe('MountCore', () => {
     const realPwrite = ws.vfs.pwrite.bind(ws.vfs)
     vi.spyOn(ws.vfs, 'pwrite')
       .mockImplementationOnce(realPwrite)
-      .mockRejectedValueOnce(errnoError('EACCES', 'denied'))
+      .mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     const dec = new TextDecoder()
     const enc = new TextEncoder()
@@ -205,7 +202,7 @@ describe('MountCore', () => {
     const pwrite = vi
       .spyOn(ws.vfs, 'pwrite')
       .mockImplementationOnce(realPwrite)
-      .mockRejectedValueOnce(errnoError('EACCES', 'denied'))
+      .mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     const enc = new TextEncoder()
     const fd = await core.open('/data/f', fsConstants.O_WRONLY)
@@ -221,7 +218,7 @@ describe('MountCore', () => {
   it('keeps the errno of a failed direct write', async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('printf abcdefgh > /data/f')
-    vi.spyOn(ws.vfs, 'pwrite').mockRejectedValueOnce(errnoError('EACCES', 'denied'))
+    vi.spyOn(ws.vfs, 'pwrite').mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     await expect(core.write('/data/f', -1, new TextEncoder().encode('X'), 0)).rejects.toMatchObject(
       { code: 'EACCES' },
@@ -418,41 +415,129 @@ describe('MountCore', () => {
     expect(new TextDecoder().decode(body)).toBe('BB\n')
   })
 
-  it('an O_TRUNC open through a link drops the cached bytes of its target', async () => {
-    // The target was opened and released as greeting.txt, leaving its
-    // bytes in the TTL cache; truncating through the link must drop that
-    // entry too, or the next stat of the target serves the old length.
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    await ws.shell("echo 'hello world' | tee /data/greeting.txt")
-    await ws.shell('ln -s greeting.txt /data/lk')
-    const realStat = ws.vfs.stat.bind(ws.vfs)
-    vi.spyOn(ws.vfs, 'stat').mockImplementation(async (path) => {
-      const s = await realStat(path)
-      return s.type === FileType.FILE
-        ? new FileStat({ name: s.name, type: s.type, content: s.content })
-        : s
-    })
-    const core = new MountCore(ws.vfs)
-    const fh = await core.open('/data/greeting.txt')
+  it("takes a released file's size from the workspace cache", async () => {
+    const vfs = new UnsizedRAM()
+    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE }).vfs)
+    expect((await core.getattr('/data/u.json')).size).toBe(0)
+    let fh = await core.open('/data/u.json')
+    expect(await core.read('/data/u.json', fh, 0, 1024)).toEqual(PAYLOAD)
     await core.release(fh)
-    expect((await core.getattr('/data/greeting.txt')).size).toBe(12)
-    const writer = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
-    await core.release(writer)
-    expect((await core.getattr('/data/greeting.txt')).size).toBe(0)
+    expect((await core.getattr('/data/u.json')).size).toBe(PAYLOAD.byteLength)
+    fh = await core.open('/data/u.json')
+    await core.release(fh)
+    expect(vfs.reads).toBe(1)
   })
 
-  it('keeps no prefetch generation once the prefetch has settled', async () => {
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    await ws.shell("echo 'hello world' | tee /data/greeting.txt")
+  it('an O_TRUNC open through a link leaves no stale size for its target', async () => {
+    // The target was opened and released as u.json, leaving its bytes in
+    // the workspace cache; truncating through the link must not leave the
+    // old length for the next stat of the target.
+    const ws = new Workspace({ '/data/': new UnsizedRAM() }, { mode: MountMode.WRITE })
+    await ws.shell('ln -s u.json /data/lk')
     const core = new MountCore(ws.vfs)
-    const generations = (core as unknown as { prefetchGen: Map<string, number> }).prefetchGen
-    for (const name of ['a', 'b', 'c']) {
-      const fh = await core.create(`/data/${name}.txt`)
-      await core.write(`/data/${name}.txt`, fh, new TextEncoder().encode(name), 0)
+    const fh = await core.open('/data/u.json')
+    await core.release(fh)
+    expect((await core.getattr('/data/u.json')).size).toBe(PAYLOAD.byteLength)
+    const writer = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.release(writer)
+    expect((await core.getattr('/data/u.json')).size).toBe(0)
+  })
+
+  it('keeps no hydration generation once the hydration has settled', async () => {
+    const ws = new Workspace({ '/data/': new UnsizedRAM() }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs)
+    const generations = (core as unknown as { hydrationGen: Map<string, number> }).hydrationGen
+    for (let i = 0; i < 3; i++) {
+      const fh = await core.open('/data/u.json')
+      await core.write('/data/u.json', fh, new TextEncoder().encode('x'), 0)
       await core.release(fh)
-      await core.truncate(`/data/${name}.txt`, 0)
+      await core.truncate('/data/u.json', 4)
     }
     expect(generations.size).toBe(0)
+  })
+
+  it('replaces a file through a truncating open on a store that cannot truncate', async () => {
+    const ws = new Workspace({ '/d/': new NoTruncateRAM() }, { mode: MountMode.WRITE })
+    await ws.shell('echo hello > /d/f')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/d/f', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.write('/d/f', fh, new TextEncoder().encode('new'), 0)
+    await core.release(fh)
+    expect(new TextDecoder().decode(await ws.vfs.read('/d/f'))).toBe('new')
+    await core.truncate('/d/f', 1)
+    expect(new TextDecoder().decode(await ws.vfs.read('/d/f'))).toBe('n')
+  })
+
+  it('stats the target through a handle opened on a link', async () => {
+    const core = await mkCore()
+    await core.files.symlink('/data/lnk', 'greeting.txt')
+    const fh = await core.open('/data/lnk')
+    const attr = await core.fgetattr('/data/lnk', fh)
+    expect(attr.mode & 0o170000).toBe(0o100000)
+    expect(attr.size).toBe('hello world\n'.length)
+  })
+
+  it('lands metadata made through a link path on the link itself', async () => {
+    const core = await mkCore()
+    await core.files.symlink('/data/lnk', 'greeting.txt')
+    await core.files.symlink('/data/gone', 'missing.txt')
+    await core.setattr('/data/lnk', null, 1234)
+    await core.setattr('/data/gone', null, 4321)
+    expect((await core.getattr('/data/lnk')).uid).toBe(1234)
+    expect((await core.getattr('/data/gone')).uid).toBe(4321)
+    expect((await core.getattr('/data/greeting.txt')).uid).not.toBe(1234)
+  })
+
+  it('shows a scoped mount root its own mode', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs, { rootPrefix: '/data' })
+    await core.setattr('/', 0o700)
+    expect((await core.getattr('/')).mode & 0o7777).toBe(0o700)
+    expect((await new MountCore(ws.vfs).getattr('/')).mode & 0o170000).toBe(0o040000)
+  })
+
+  it('reads what a handle wrote while its flush is still landing', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("echo 'hello world' > /data/f")
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/f', fsConstants.O_RDWR)
+    await core.read('/data/f', fh, 0, 100)
+    await core.write('/data/f', fh, new TextEncoder().encode('HELLO'), 0)
+    const realPwrite = ws.vfs.pwrite.bind(ws.vfs)
+    let landed = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      landed = resolve
+    })
+    let sent = (): void => undefined
+    const inFlight = new Promise<void>((resolve) => {
+      sent = resolve
+    })
+    vi.spyOn(ws.vfs, 'pwrite').mockImplementation(async (...args) => {
+      sent()
+      await gate
+      return realPwrite(...args)
+    })
+    const flushing = core.flush('/data/f', fh)
+    // The flush has taken the buffer and its write is out.
+    await inFlight
+    const reading = core.read('/data/f', fh, 0, 100)
+    landed()
+    await flushing
+    expect(new TextDecoder().decode(await reading)).toBe('HELLO world\n')
+  })
+
+  it('reads its own unflushed writes through a handle', async () => {
+    const core = await mkCore()
+    const fh = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+    const dec = new TextDecoder()
+    expect(dec.decode(await core.read('/data/greeting.txt', fh, 0, 100))).toBe('hello world\n')
+    await core.write('/data/greeting.txt', fh, new TextEncoder().encode('HELLO'), 0)
+    await core.write('/data/greeting.txt', fh, new TextEncoder().encode('!'), 14)
+    const want = 'HELLO world\n\0\0!'
+    expect(dec.decode(await core.read('/data/greeting.txt', fh, 0, 100))).toBe(want)
+    expect((await core.fgetattr('/data/greeting.txt', fh)).size).toBe(15)
+    await core.release(fh)
+    expect(dec.decode(await core.read('/data/greeting.txt', -1, 0, 100))).toBe(want)
   })
 
   it("keeps the other handle's buffer when the settlement flush is refused", async () => {
@@ -506,13 +591,7 @@ describe('MountCore', () => {
 
   it('throws EINVAL from readlink on a regular file', async () => {
     const core = await mkCore()
-    let code: string | undefined
-    try {
-      core.readlink('/data/greeting.txt')
-    } catch (err) {
-      code = (err as { code?: string }).code
-    }
-    expect(code).toBe('EINVAL')
+    await expect(core.readlink('/data/greeting.txt')).rejects.toMatchObject({ code: 'EINVAL' })
   })
 
   it('signals ENOTEMPTY for a non-empty directory', async () => {
@@ -564,7 +643,7 @@ describe('MountCore', () => {
   })
 })
 
-describe('applyStatAttrs', () => {
+describe('attrs', () => {
   it('reads an offset-less overlay stamp as UTC', async () => {
     // The R6 acceptance pin: this translator answers the same epoch as
     // core's stat view for a naive stamp, instead of `new Date`'s
@@ -583,26 +662,16 @@ describe('applyStatAttrs', () => {
       content: ContentType.TEXT,
       modified: `${NAIVE_STAMP}+00:00`,
     })
-    const base = {
-      mtime: new Date(0),
-      atime: new Date(0),
-      ctime: new Date(0),
-      nlink: 1,
-      size: 0,
-      mode: 0o100644,
-      uid: 0,
-      gid: 0,
-    }
-    const gotNaive = core.applyStatAttrs({ ...base }, naive)
-    const gotAware = core.applyStatAttrs({ ...base }, aware)
+    const gotNaive = core.attrs(naive)
+    const gotAware = core.attrs(aware)
     expect(gotNaive.mtime.getTime()).toBe(gotAware.mtime.getTime())
     expect(gotNaive.mtime.getTime()).toBe(mtimeMs(naive))
   })
 
   it('lands an epoch-zero stamp instead of reading it as unknown', async () => {
     // 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
-    // fold keys on null, so epoch zero overwrites the construction-time
-    // default instead of leaving it in place.
+    // translator keys on null, so epoch zero replaces the mount's start
+    // time instead of reading as unknown.
     const core = await mkCore()
     const epoch = new FileStat({
       name: 'f',
@@ -610,17 +679,7 @@ describe('applyStatAttrs', () => {
       content: ContentType.TEXT,
       modified: '1970-01-01T00:00:00Z',
     })
-    const base = {
-      mtime: new Date(12345),
-      atime: new Date(12345),
-      ctime: new Date(12345),
-      nlink: 1,
-      size: 0,
-      mode: 0o100644,
-      uid: 0,
-      gid: 0,
-    }
-    const got = core.applyStatAttrs({ ...base }, epoch)
+    const got = core.attrs(epoch)
     expect(got.mtime.getTime()).toBe(0)
     expect(got.ctime.getTime()).toBe(0)
   })

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import os
 import subprocess
 import sys
@@ -32,6 +33,8 @@ from mirage.fuse.mount import (
 )
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
+
+logger = logging.getLogger(__name__)
 
 
 class FuseManager:
@@ -134,9 +137,13 @@ class FuseManager:
                 # Empty-directory cleanup only. If the mount is still live or
                 # the directory has contents, leave it for the caller/admin.
                 os.rmdir(self._mountpoint)
-            except OSError:
-                # non-empty or busy mountpoint: leave it for the caller/admin
-                pass
+            except OSError as err:
+                # Non-empty or busy: leave it for the caller or an admin.
+                logger.debug(
+                    "fuse: removing mountpoint %s failed: %r",
+                    self._mountpoint,
+                    err,
+                )
         self._mountpoint = None
         self._kernel_mountpoint = None
         self._owns_mountpoint = False

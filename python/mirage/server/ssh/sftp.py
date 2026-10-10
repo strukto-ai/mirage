@@ -375,7 +375,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     async def stat(self, path: bytes) -> asyncssh.SFTPAttrs:
         p = self._path(path)
         return to_attrs(
-            await self._call(lambda core: core.getattr(core.identity(p)))
+            await self._call(lambda core: core.getattr(p, follow=True))
         )
 
     async def lstat(self, path: bytes) -> asyncssh.SFTPAttrs:

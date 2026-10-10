@@ -19,47 +19,37 @@ import os
 import posixpath
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
-from mirage.errors.fs import einval, enoent, erofs
+from mirage.errors.fs import enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
+from mirage.fuse.types import Handle, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
-from mirage.runtime.handles import ChunkedHandle, FileTable, write_runs
+from mirage.runtime.handles import (
+    ChunkedHandle,
+    FileTable,
+    overlaid,
+    write_runs,
+)
 from mirage.runtime.handles.constants import READ_CHUNK
-from mirage.types import FileStat, FileType
+from mirage.types import LIVE_KEY, FileStat, FileType
 from mirage.utils.stat_view import (
     DIR_MODE,
     DIR_SIZE,
-    FILE_MODE,
-    LINK_MODE,
+    atime_ns,
+    content_size,
+    device_rdev,
+    is_dir,
+    is_link,
     mtime_ns,
+    posix_mode,
 )
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
-# How long prefetched bytes for size-unknown files outlive their handle, so a
-# release-then-stat burst (ls right after cat) neither refetches nor reports
-# an unknown size. Mirrors the TS PREFETCH_TTL_MS.
-PREFETCH_TTL = 30.0
-
 logger = logging.getLogger(__name__)
-
-WriteBuf = list[tuple[int, bytes]]
-
-
-@dataclass(slots=True)
-class Handle:
-    path: str
-    # Where the path really points once namespace links are followed.
-    key: str
-    live: bool = False
-    data: bytes | None = None
-    write_buf: WriteBuf = field(default_factory=list)
-    # A large file reads a chunk at a time rather than hydrating whole.
-    chunked: ChunkedHandle | None = None
 
 
 class MountCore:
@@ -115,11 +105,9 @@ class MountCore:
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()
-        # Prefetched content for size-unknown files: path -> (data, expiry).
-        self._prefetch: dict[str, tuple[bytes, float]] = {}
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
-        # as owned by the mounting user (see mount.py). Mirrors fs.ts.
+        # as owned by the mounting user (see mount.py). Mirrors core.ts.
         self._uid = os.getuid() if hasattr(os, "getuid") else 0
         self._gid = os.getgid() if hasattr(os, "getgid") else 0
         if loop is None:
@@ -195,54 +183,52 @@ class MountCore:
             "st_ctime": self._now,
         }
 
-    def file_stat(self, size: int) -> dict[str, Any]:
-        return {
-            "st_mode": FILE_MODE,
-            "st_nlink": 1,
-            "st_uid": self._uid,
-            "st_gid": self._gid,
-            "st_size": size,
-            "st_atime": self._now,
-            "st_mtime": self._now,
-            "st_ctime": self._now,
-        }
+    def attrs(self, s: FileStat, size: int | None = None) -> dict[str, Any]:
+        """The POSIX attrs for one stat row, the way a guest's stat reads
+        it (``runtime/files.py:stat_row``).
 
-    def _apply_stat_attrs(
-        self, entry: dict[str, Any], s: FileStat
-    ) -> dict[str, Any]:
-        """Fold merged stat attributes into a POSIX attr dict.
-
-        ``Files.stat`` already carries the namespace overlay (chmod bits,
-        chown ids, touched mtime), so honoring these fields here is what
-        makes metadata ops visible through a mount. String uid/gid (names)
-        are skipped: the kernel wants numeric ids and there is no user db
-        to map against.
+        The row carries the namespace overlay (chmod bits, chown ids, a
+        touched mtime), so what a metadata op stored is what the mount
+        shows. A device keeps its type and numbers. String uid/gid
+        (names) fall back to the mounting user: the kernel wants numbers
+        and there is no user db to map against. A missing stamp falls
+        back to the mount's start time; epoch zero is a real time and
+        lands.
 
         Args:
-            entry (dict): base attr dict from dir_stat/file_stat.
-            s (FileStat): the merged stat returned by ``ws.vfs``.
-
-        Returns:
-            dict: the attr dict with overlay fields applied.
+            s (FileStat): the row the dispatcher answered with.
+            size (int | None): the size to report instead of the row's,
+                from an open handle or a link's shown target.
         """
-        if s.mode is not None:
-            entry["st_mode"] = (entry["st_mode"] & ~0o7777) | (s.mode & 0o7777)
-        if isinstance(s.uid, int):
-            entry["st_uid"] = s.uid
-        if isinstance(s.gid, int):
-            entry["st_gid"] = s.gid
-        if s.modified is not None:
-            # One translator per language: the naive-stamp-is-UTC rule
-            # lives in stat_view, never re-parsed here. None means the
-            # stamp did not parse; epoch zero is a real time and lands.
-            ns = mtime_ns(s)
-            if ns is not None:
-                entry["st_mtime"] = ns
-                entry["st_ctime"] = ns
-        return entry
+        mtime = mtime_ns(s)
+        when = self._now if mtime is None else mtime
+        atime = atime_ns(s)
+        return {
+            "st_mode": posix_mode(s),
+            "st_nlink": 2 if is_dir(s) else 1,
+            "st_uid": s.uid if isinstance(s.uid, int) else self._uid,
+            "st_gid": s.gid if isinstance(s.gid, int) else self._gid,
+            "st_size": content_size(s) if size is None else size,
+            "st_rdev": device_rdev(s),
+            "st_atime": when if atime is None else atime,
+            "st_mtime": when,
+            "st_ctime": when,
+        }
 
-    def link_target(self, path: str) -> str | None:
-        """The target to present for a namespace link at a mount path.
+    def root_attrs(self) -> dict[str, Any]:
+        """The mount root's attrs: its own row through the dispatcher, so a
+        chmod made on it shows, or a plain directory when nothing answers
+        for it (a workspace with no mount at ``/``).
+        """
+        try:
+            s = self._run(self._files.stat(self.resolve("/")))
+        except FileNotFoundError as err:
+            logger.debug("fuse: the mount root has no row of its own: %r", err)
+            return self.dir_stat()
+        return self.attrs(s)
+
+    def shown_target(self, path: str, target: str) -> str:
+        """The target to present for a link at a mount path.
 
         Relative targets are stored verbatim and returned as-is. Absolute
         targets name virtual paths, so they are rewritten relative to the
@@ -250,17 +236,9 @@ class MountCore:
         against the host root and escape the mountpoint.
 
         Args:
-            path (str): mount path to inspect.
-
-        Returns:
-            str | None: displayable target, or None when not a link.
+            path (str): mount path of the link.
+            target (str): the stored target, as the dispatcher read it.
         """
-        links = self._files.links
-        if links is None:
-            return None
-        target = links.readlink(self.resolve(path))
-        if target is None:
-            return None
         if not target.startswith("/"):
             return target
         virtual_target = target
@@ -276,108 +254,42 @@ class MountCore:
         parent = path.rsplit("/", 1)[0] or "/"
         return posixpath.relpath(virtual_target, parent)
 
-    def link_stat(self, target: str, virtual: str) -> dict[str, Any]:
-        """The attrs a namespace link reports, from its own node row.
-
-        Built from the target string alone, every link over a mount
-        answered the mount's construction time and the mounting user, so
-        what ``chown -h`` and ``touch -h`` wrote was invisible through
-        the kernel. The row is the same one the dispatcher answers a no-follow
-        stat with. Size stays the displayable target's length (what this
-        mount's readlink returns), and the mode is always lrwxrwxrwx: a
-        symlink's permission bits are not consulted by any POSIX system.
-
-        Args:
-            target (str): the target as this mount presents it.
-            virtual (str): the link's virtual path, for the node row.
-        """
-        entry = self.file_stat(len(target.encode()))
-        links = self._files.links
-        row = None if links is None else links.link_stat_at(virtual)
-        if row is not None:
-            entry = self._apply_stat_attrs(entry, row)
-        entry["st_mode"] = LINK_MODE
-        return entry
-
     def drain_ops(self) -> list[dict[str, Any]]:
         records = [r.to_dict() for r in self._files.records]
         self._files.records.clear()
         return records
 
-    def cached_data(self, path: str) -> bytes | None:
-        """Return prefetched bytes from open handles or the TTL cache.
+    def held_size(self, path: str) -> int | None:
+        """The length of the bytes an open handle on the file holds.
+
+        A size-unknown file is read whole when it opens, so while a handle
+        is open its length answers a stat by path too (``ls -l`` beside a
+        ``cat``). Once every handle is released, the dispatcher answers
+        from the workspace cache instead.
 
         Args:
             path (str): mount path to look up.
-
-        Returns:
-            bytes | None: cached content, or None when nothing fresh is held.
         """
         key = self.identity(path)
         for ctx in self._handles.values():
             if ctx.key == key and ctx.data is not None:
-                return ctx.data
-        entry = self._prefetch.get(key)
-        if entry is None:
-            return None
-        data, expires = entry
-        if time.monotonic() >= expires:
-            del self._prefetch[key]
-            return None
-        return data
+                return len(ctx.data)
+        return None
 
-    def cached_size(self, path: str) -> int | None:
-        """Return the real size of prefetched data, if any is cached.
-
-        Args:
-            path (str): mount path to look up.
-
-        Returns:
-            int | None: byte length of cached content, or None.
-        """
-        data = self.cached_data(path)
-        return len(data) if data is not None else None
-
-    def prefetch_read(self, path: str) -> bytes | None:
-        """Fetch and cache the bytes of a size-unknown file.
-
-        Args:
-            path (str): mount path being opened.
-
-        Returns:
-            bytes | None: file content, or None when the backend read fails
-            for any reason (open() stays permissive, as the TypeScript core
-            does; the subsequent read() surfaces the error to the caller).
-            This matters most after an O_TRUNC, whose truncation has
-            already committed by the time this runs: failing the open then
-            would erase the old body and refuse the replacement.
-        """
-        data = self.cached_data(path)
-        if data is not None:
-            return data
-        try:
-            data = self._run(self._files.read(self.resolve(path)))
-        except Exception as err:
-            logger.debug(
-                "fuse: hydration read of %s failed, deferring to read(): %r",
-                path,
-                err,
-            )
-            return None
-        # No inflight dedup: FUSE mounts run nothreads=True, so callbacks are
-        # serialized and two opens cannot race (TS needs the dedup map).
-        self._prefetch[self.identity(path)] = (
-            data,
-            time.monotonic() + PREFETCH_TTL,
-        )
-        return data
-
-    def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
+    def getattr(
+        self, path: str, fh: int | None = None, follow: bool = False
+    ) -> dict[str, Any]:
         """POSIX attributes for a path, optionally through an open handle.
+
+        One stat through the dispatcher answers: a link the session cannot
+        see is absent, as it is to the shell, and a visible one reports
+        its own row with its target read through the dispatcher too.
 
         Args:
             path (str): mount path to stat.
             fh (int | None): open handle, when the caller is fstat-ing.
+            follow (bool): report a trailing link's target rather than
+                the link (stat rather than lstat).
 
         Returns:
             dict: ``st_*`` attribute dict.
@@ -385,43 +297,52 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        # fstat(fd) after open: answer with the hydrated handle's real byte
-        # length. attr_timeout=0 on FUSE mounts makes the kernel actually ask
-        # here instead of trusting the cached pre-open size, which is what
-        # keeps wc -c, BSD cp, and tail -c correct for size-unknown files.
-        if fh is not None:
-            ctx = self._handles.get(fh)
-            if ctx is not None:
-                path = ctx.path
-                if ctx.data is not None:
-                    return self.file_stat(len(ctx.data))
+        # fstat(fd) after open: the hydrated handle knows the real byte
+        # length, and what the handle wrote and has not flushed counts.
+        # attr_timeout=0 on FUSE mounts makes the kernel actually ask here
+        # instead of trusting the cached pre-open size, which is what keeps
+        # wc -c, BSD cp, and tail -c correct for size-unknown files.
+        ctx = self._handles.get(fh) if fh is not None else None
+        size = None
+        if ctx is not None:
+            path = ctx.path
+            # The handle is open on the file a link led to, so its stat
+            # is the target's.
+            follow = True
+            if ctx.data is not None:
+                size = len(ctx.data)
         if path == "/":
-            return self.dir_stat()
+            return self.root_attrs()
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
         # Reject early to avoid hitting the ops layer.
         name = path.rsplit("/", 1)[-1]
         if is_macos_metadata(name):
             raise enoent(path)
-        # Link check must precede `Files.stat`: `ws.vfs` follows
-        # namespace links, so stat on a link path reports the target.
-        target = self.link_target(path)
-        if target is not None:
-            return self.link_stat(target, self.resolve(path))
-        s = self._run(self._files.stat(self.resolve(path)))
-        if s.type == FileType.DIRECTORY:
-            return self._apply_stat_attrs(self.dir_stat(), s)
-        size = s.size
-        if size is None:
-            size = self.cached_size(path)
-        if size is None:
-            # Unopened size-unknown files stat as 0, matching mirage's own
-            # find semantics. Reads stay correct anyway: direct_io makes the
-            # kernel ignore st_size, and the fh branch above serves the real
-            # size to fstat-based tools after open. Never report a fake size
-            # and never fetch content here: getattr runs once per entry on
-            # every ls -l.
-            size = 0
-        return self._apply_stat_attrs(self.file_stat(size), s)
+        virtual = self.resolve(path)
+        try:
+            s = self._run(self._files.stat(virtual, nofollow=not follow))
+        except FileNotFoundError:
+            if size is None:
+                raise
+            # An open descriptor keeps the bytes it had after an unlink.
+            s = FileStat(name=name, type=FileType.FILE)
+        if is_link(s):
+            target = self._run(self._files.readlink(virtual))
+            return self.attrs(s, len(self.shown_target(path, target).encode()))
+        if is_dir(s):
+            return self.attrs(s)
+        if size is None and s.size is None:
+            # A size-unknown file the cache has not seen stats as 0,
+            # matching mirage's own find semantics. Reads stay correct
+            # anyway: direct_io makes the kernel ignore st_size, and the fh
+            # branch above serves the real size to fstat-based tools after
+            # open. Never report a fake size and never fetch content here:
+            # getattr runs once per entry on every ls -l.
+            size = self.held_size(path)
+        if ctx is not None and ctx.write_buf:
+            stored = content_size(s) if size is None else size
+            size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
+        return self.attrs(s, size)
 
     def readdir(self, path: str) -> list[str]:
         """Entry names under a directory, including "." and "..".
@@ -460,22 +381,24 @@ class MountCore:
             bytes: the requested slice, possibly short at EOF.
         """
         ctx = self._ctx(fh)
-        if ctx is not None and ctx.live:
-            return self._run(
+        if ctx is None:
+            # Whole, as a handle's first read is: the read that fills the
+            # cache and records the version a conditional write sends.
+            data = self._run(self._files.read(self.resolve(path)))
+            return data[offset : offset + size]
+        if ctx.live:
+            stored = self._run(
                 self._files.read(self.resolve(ctx.path), offset, size)
             )
-        if ctx is not None and ctx.data is not None:
-            return ctx.data[offset : offset + size]
-        if ctx is not None and ctx.chunked is not None:
-            return ctx.chunked.pread(offset, size)
-        if ctx is not None:
-            path = ctx.path
-        data = self.cached_data(path)
-        if data is None:
-            data = self._run(self._files.read(self.resolve(path)))
-        if ctx is not None:
-            ctx.data = data
-        return data[offset : offset + size]
+        elif ctx.chunked is not None:
+            stored = ctx.chunked.pread(offset, size)
+        else:
+            if ctx.data is None:
+                ctx.data = self._run(self._files.read(self.resolve(ctx.path)))
+            stored = ctx.data[offset : offset + size]
+        if not ctx.write_buf:
+            return stored
+        return overlaid(stored, offset, size, ctx.write_buf)
 
     def _apply_writes(self, path: str, runs: WriteBuf) -> None:
         """Land write runs on the mount, one pwrite each, in order.
@@ -542,21 +465,19 @@ class MountCore:
         self._run(self._files.mkdir(self.resolve(path)))
 
     def readlink(self, path: str) -> str:
-        """The stored target of a namespace link.
+        """The target of a namespace link, read through the dispatcher.
 
         Args:
             path (str): mount path to read.
 
         Returns:
-            str: the link target.
+            str: the link target, as this mount shows it.
 
         Raises:
             OSError: EINVAL when the path is not a link.
         """
-        target = self.link_target(path)
-        if target is None:
-            raise einval(path)
-        return target
+        target = self._run(self._files.readlink(self.resolve(path)))
+        return self.shown_target(path, target)
 
     def symlink(self, target: str, source: str) -> None:
         """Create namespace link ``target -> source`` (ln -s source target).
@@ -595,7 +516,6 @@ class MountCore:
         """
         self._hold(path)
         self._run(self._files.unlink(self.resolve(path)))
-        self._forget(path)
 
     def rename(self, old: str, new: str) -> None:
         source, target = self.resolve(old), self.resolve(new)
@@ -605,8 +525,6 @@ class MountCore:
             if ctx.key == source or ctx.key.startswith(source + "/"):
                 ctx.key = target + ctx.key[len(source) :]
                 ctx.path = ctx.key[len(self._root) :]
-        self._changed(old, rehydrate=False)
-        self._changed(new, rehydrate=False)
 
     def rmdir(self, path: str) -> None:
         self._run(self._files.rmdir(self.resolve(path)))
@@ -623,6 +541,37 @@ class MountCore:
             "f_favail": 1000000,
             "f_namemax": 255,
         }
+
+    def setattr(
+        self,
+        path: str,
+        mode: int | None = None,
+        uid: int | None = None,
+        gid: int | None = None,
+    ) -> None:
+        """Store metadata through the dispatcher.
+
+        The backend keeps what it can and the namespace overlay the rest,
+        so a chmod or chown through the mount is what ``stat`` in a shell
+        reads back, on a backend with no permission bits of its own too.
+        The kernel has already resolved any link the call follows, so the
+        path names the entry to change, a link itself for ``chown -h``.
+
+        Args:
+            path (str): mount path to change.
+            mode (int | None): permission bits; None leaves them.
+            uid (int | None): owner id; None leaves it.
+            gid (int | None): group id; None leaves it.
+        """
+        self._run(
+            self._files.setattr(
+                self.resolve(path),
+                mode=None if mode is None else mode & 0o7777,
+                uid=uid,
+                gid=gid,
+                nofollow=True,
+            )
+        )
 
     def setxattr(
         self,
@@ -710,7 +659,7 @@ class MountCore:
         ctx = Handle(
             path=path,
             key=self.identity(path),
-            live=s.extra.get("mirage.live") is True,
+            live=s.extra.get(LIVE_KEY) is True,
         )
         if s.type == FileType.DIRECTORY:
             return self._handles.add(ctx)
@@ -730,8 +679,10 @@ class MountCore:
             # the TTL cache keeps release-then-stat bursts from refetching.
             # This holds after an O_TRUNC too: the read follows the rendered
             # path, so an extension whose renderer gives an empty file a body
-            # is honored rather than shadowed by literal raw emptiness.
-            ctx.data = self.prefetch_read(path)
+            # is honored rather than shadowed by literal raw emptiness. The
+            # read goes through the dispatcher, so a caching mount keeps the
+            # bytes for the next open and for a stat once this one closes.
+            ctx.data = self._hydrate(path)
         elif s.size > READ_CHUNK and not flags & os.O_TRUNC:
             # A file larger than a chunk is read a chunk at a time: the
             # kernel asks in small pieces, and fetching the whole file on
@@ -742,6 +693,29 @@ class MountCore:
                 fetch=functools.partial(self._read_chunk, ctx),
             )
         return self._handles.add(ctx)
+
+    def _hydrate(self, path: str) -> bytes | None:
+        """Read a size-unknown file whole for the handle opening it.
+
+        Returns None when the read fails for any reason: open() stays
+        permissive, as the TypeScript core does, and the read() that
+        follows surfaces the error. This matters most after an O_TRUNC,
+        whose truncation has already committed by the time this runs:
+        failing the open then would erase the old body and refuse the
+        replacement.
+
+        Args:
+            path (str): mount path being opened.
+        """
+        try:
+            return self._run(self._files.read(self.resolve(path)))
+        except Exception as err:
+            logger.debug(
+                "fuse: hydration read of %s failed, deferring to read(): %r",
+                path,
+                err,
+            )
+            return None
 
     def _read_chunk(self, ctx: Handle, offset: int, size: int) -> bytes:
         # The handle's path as it is now: a rename moves it.
@@ -833,29 +807,24 @@ class MountCore:
         self._run(self._files.truncate(self.resolve(path), length))
         self._changed(path)
 
-    def _changed(self, path: str, rehydrate: bool = True) -> None:
+    def _changed(self, path: str) -> None:
         """The one function every mutation of a file's bytes goes through.
 
-        Every cache the core keeps for a file is keyed by its identity
-        (the mount path with namespace links followed), and this is the
-        only place they are invalidated, so a new mutating op cannot
-        forget one of them and a link alias cannot slip past. The TTL
-        entry is dropped; hydrated handles on the file are refreshed
-        from the backend in one read, so fstat and read through any of
-        them, including the handle that wrote, see the new bytes. A
-        removal or rename passes ``rehydrate=False``: POSIX keeps an
-        open descriptor on the bytes it had.
+        The open handles on a file are matched by its identity (the
+        mount path with namespace links followed), and this is the only
+        place their bytes are refreshed, so a new mutating op cannot
+        forget one of them and a link alias cannot slip past. Hydrated
+        handles on the file are refreshed in one read through the
+        dispatcher, so fstat and read through any of them, including the
+        handle that wrote, see the new bytes. A refresh that fails is
+        logged and leaves the handles unhydrated rather than failing the
+        committed mutation. A removal or rename refreshes nothing: POSIX
+        keeps an open descriptor on the bytes it had.
 
         Args:
             path (str): mount path whose bytes changed.
-            rehydrate (bool): refresh hydrated handles from the backend; a
-                refresh that fails is logged and leaves the handles
-                unhydrated rather than failing the committed mutation.
         """
         key = self.identity(path)
-        self._prefetch.pop(key, None)
-        if not rehydrate:
-            return
         for ctx in self._handles.values():
             if ctx.key == key and ctx.chunked is not None:
                 ctx.chunked.drop()
@@ -883,6 +852,3 @@ class MountCore:
             return
         for ctx in hydrated:
             ctx.data = data
-
-    def _forget(self, path: str) -> None:
-        self._changed(path, rehydrate=False)

@@ -16,10 +16,13 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import { RuntimeFiles } from '../../../files.ts'
-import { applyMutation, createJournal, type MutationJournal } from './journal.ts'
-import { preloadInto } from './preload.ts'
+import {
+  applyMutation,
+  createJournal,
+  type MirageMutation,
+  type MutationJournal,
+} from './journal.ts'
 import { changedAttrs, PyodideFs } from './fs.ts'
-import { PyodideFsSeed } from './seed.ts'
 import type { BridgeDispatchFn, VFSEntry, VFSStat } from '../../../types.ts'
 import { DIR_MODE, FILE_MODE } from './constants.ts'
 import type { FSNode, SyncVFS } from './types.ts'
@@ -46,31 +49,115 @@ describe('PyodideFs', () => {
   const calls: Call[] = []
   const mounts: string[] = []
   const store = new Map<string, Uint8Array>()
-  const unreadable = new Set<string>()
-  // Paths whose stat and read fail the way an upstream 5xx does, always
-  // or only on the first stat.
-  const broken = new Set<string>()
-  const brokenOnce = new Set<string>()
   const links = new Map<string, string>()
   const attrs: [string, SetAttrFields][] = []
+  const flushed: MirageMutation[] = []
+  // The test mount's store, answered synchronously: the bridge wraps it in
+  // a promise, and the worker double's flush calls it directly, as the
+  // host applies what a worker flushes before it answers.
+  let serve: (...args: Parameters<BridgeDispatchFn>) => unknown
   let counter = 0
 
-  // Mirrors what PyodideRuntime.syncMounts does, including collecting the
-  // seed through preloadInto rather than hand-building one, so the tests
-  // exercise the real producer of every node they then read. Seeding after
-  // the mount is load-bearing (an FSNode copies `mount` from its parent,
-  // and Emscripten assigns the root's only once type.mount() returned).
+  // Mounts as PyodideRuntime.syncMounts does in its worker, over a
+  // synchronous view of the same store the bridge serves. What the guest
+  // flushes lands on the store at once and is kept, in order, for a test
+  // to read back (`recorded`).
   async function mountPrefix(prefix: string): Promise<void> {
-    mounts.push(prefix)
-    const seed = new PyodideFsSeed()
-    await preloadInto(seed, files, prefix)
-    const mountpoint = prefix.slice(0, -1)
-    const fs = new PyodideFs(py.FS, py.ERRNO_CODES, journal, mountpoint, (path) =>
-      files.mountOf(path),
-    )
-    py.FS.mkdirTree(mountpoint)
-    py.FS.mount(fs.type, {}, mountpoint)
-    fs.seed(seed)
+    mountOver(prefix, storeSync())
+    await Promise.resolve()
+  }
+
+  function serveMutation(mutation: MirageMutation): void {
+    switch (mutation.kind) {
+      case 'append':
+        serve('append', mutation.path, mutation.bytes)
+        return
+      case 'pwrite':
+        serve('pwrite', mutation.path, mutation.bytes, undefined, { offset: mutation.offset })
+        return
+      case 'truncate':
+        serve('truncate', mutation.path, undefined, undefined, { length: mutation.length })
+        return
+      case 'rename':
+        serve('rename', mutation.path, undefined, mutation.dst)
+        return
+      case 'symlink':
+        serve('symlink', mutation.path, undefined, mutation.target)
+        return
+      case 'setattr':
+        serve('setattr', mutation.path, undefined, undefined, mutation.attrs)
+        return
+      default:
+        serve(mutation.kind, mutation.path)
+    }
+  }
+
+  // Every mutation the guest made, flushed or still journaled, in order.
+  function recorded(): MirageMutation[] {
+    return [...flushed.splice(0), ...journal.takeMutations()]
+  }
+
+  function storeSync(): SyncVFS {
+    const stat = (path: string): VFSStat => {
+      const found = store.get(path)
+      if (found !== undefined) {
+        return {
+          size: found.length,
+          isDir: false,
+          mode: 0o100000 | STORE_MODE,
+          mtimeMs: STORE_MTIME_S * 1000,
+        }
+      }
+      const target = links.get(path)
+      if (target !== undefined) {
+        return { size: target.length, isDir: false, isLink: true, mode: 0o120777 }
+      }
+      const inside = [...store.keys(), ...links.keys()].some((k) => k.startsWith(`${path}/`))
+      if (inside) return { size: 0, isDir: true, mode: DIR_MODE }
+      throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
+    }
+    return {
+      read: (path) => {
+        const found = store.get(path)
+        if (found === undefined) {
+          throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
+        }
+        return found
+      },
+      stat,
+      readdir: (dir) => {
+        const names = new Set<string>()
+        for (const key of [...store.keys(), ...links.keys()]) {
+          if (!key.startsWith(dir)) continue
+          names.add(key.slice(dir.length).split('/')[0] ?? '')
+        }
+        return [...names]
+          .filter((name) => name !== '')
+          .map((name) => {
+            const row = stat(dir + name)
+            return {
+              path: row.isDir ? `${dir}${name}/` : dir + name,
+              size: row.size,
+              isDir: row.isDir,
+              ...(row.isLink === true ? { isLink: true } : {}),
+              mode: row.mode,
+            }
+          })
+      },
+      readlink: (path) => {
+        const target = links.get(path)
+        if (target === undefined) throw new Error(`not a link: ${path}`)
+        return target
+      },
+      flush: (mutations) => {
+        for (const mutation of mutations) {
+          flushed.push(mutation)
+          serveMutation(mutation)
+        }
+        return undefined
+      },
+      xattr: () => undefined,
+    }
   }
 
   // The worker shape: nothing is seeded, and every lookup, listing and
@@ -125,14 +212,12 @@ describe('PyodideFs', () => {
 
   beforeAll(async () => {
     py = await loadPyodideRuntime()
-    const dispatch: BridgeDispatchFn = (op, path, bytes, dst, fields) => {
+    serve = (op, path, bytes, dst, fields) => {
       calls.push(bytes ? { op, path, bytes: new Uint8Array(bytes) } : { op, path })
       if (op === 'read') {
-        if (unreadable.has(path)) return Promise.reject(new Error('backend unavailable'))
-        if (broken.has(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
         const found = store.get(path)
-        if (found === undefined) return Promise.reject(new Error(`no such file: ${path}`))
-        return Promise.resolve(found)
+        if (found === undefined) throw new Error(`no such file: ${path}`)
+        return found
       }
       if (op === 'write' && bytes !== undefined) store.set(path, new Uint8Array(bytes))
       if (op === 'append' && bytes !== undefined) {
@@ -159,49 +244,47 @@ describe('PyodideFs', () => {
       if (op === 'unlink') store.delete(path)
       if (op === 'rename' && dst !== undefined) {
         const moved = store.get(path)
-        if (moved === undefined) return Promise.reject(new Error(`no such file: ${path}`))
+        if (moved === undefined) throw new Error(`no such file: ${path}`)
         store.delete(path)
         store.set(dst, moved)
       }
       if (op === 'readdir') {
         const listed = [...store.keys(), ...links.keys()].filter((k) => k.startsWith(path))
-        return Promise.resolve(listed)
+        return listed
       }
       if (op === 'stat') {
-        if (broken.has(path) || brokenOnce.delete(path)) {
-          return Promise.reject(new Error('upstream 502 Bad Gateway'))
-        }
         const found = store.get(path)
         if (found === undefined) {
           // A link, whose mark rides the resolver, or a path that went
           // away between the listing and the stat.
-          return Promise.reject(
-            Object.assign(new Error(`no such file: ${path}`), {
-              code: 'ENOENT',
-            }),
-          )
+          throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
         }
-        return Promise.resolve(
-          new FileStat({
-            name: path,
-            size: found.length,
-            type: FileType.FILE,
-            content: ContentType.TEXT,
-            // Deliberately not the tree's own defaults, so a test can
-            // tell which of the two a guest's stat answered from.
-            mode: STORE_MODE,
-            modified: STORE_MTIME,
-          }),
-        )
+        return new FileStat({
+          name: path,
+          size: found.length,
+          type: FileType.FILE,
+          content: ContentType.TEXT,
+          // Deliberately not the tree's own defaults, so a test can
+          // tell which of the two a guest's stat answered from.
+          mode: STORE_MODE,
+          modified: STORE_MTIME,
+        })
       }
       if (op === 'symlink' && dst !== undefined) links.set(path, dst)
       if (op === 'readlink') {
         const target = links.get(path)
-        if (target === undefined) return Promise.reject(new Error(`not a link: ${path}`))
-        return Promise.resolve(target)
+        if (target === undefined) throw new Error(`not a link: ${path}`)
+        return target
       }
       if (op === 'setattr' && fields !== undefined) attrs.push([path, fields])
-      return Promise.resolve(undefined)
+      return undefined
+    }
+    const dispatch: BridgeDispatchFn = (op, path, bytes, dst, fields) => {
+      try {
+        return Promise.resolve(serve(op, path, bytes, dst, fields))
+      } catch (error) {
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)))
+      }
     }
     // The link source is the double's own name plane, which is what a
     // workspace hands its runtimes: link names per directory.
@@ -224,11 +307,9 @@ describe('PyodideFs', () => {
     calls.length = 0
     mounts.length = 0
     store.clear()
-    unreadable.clear()
-    broken.clear()
-    brokenOnce.clear()
     links.clear()
     attrs.length = 0
+    flushed.length = 0
     journal.takeMutations()
     counter += 1
   })
@@ -236,42 +317,6 @@ describe('PyodideFs', () => {
   function prefix(): string {
     return `/m${String(counter)}/`
   }
-
-  // Emscripten's MEMFS makes /dev/stdin, /dev/stdout and /dev/stderr at
-  // startup, and pyodide's own capture reopens /dev/stderr when a run ends.
-  // Mounting mirage's /dev over MEMFS's used to hide them, and that reopen
-  // threw ENOENT out of a callback nobody catches: an unhandled rejection,
-  // which Node turns into a dead process.
-  it('keeps the standard stream devices when it takes over /dev', async () => {
-    await mountPrefix('/dev/')
-    const fs = py.FS as unknown as {
-      stat: (p: string) => { mode: number }
-      open: (p: string, flags: string) => unknown
-      readFile: (p: string) => Uint8Array
-      createDevice: (dir: string, name: string, i?: unknown, o?: unknown) => unknown
-      chmod: (p: string, m: number) => void
-    }
-    for (const name of ['stdin', 'stdout', 'stderr']) {
-      expect((fs.stat(`/dev/${name}`).mode & 0o170000) === 0o020000).toBe(true)
-    }
-    // The reopen itself, which is the call that used to throw.
-    expect(fs.open('/dev/stderr', 'w')).toBeTruthy()
-    // And they have to read as empty. A character device here answers with an
-    // endless run of zeroes unless told otherwise, which is /dev/zero's job; a
-    // stream doing the same would hang `open('/dev/stdin').read()` forever
-    // rather than reach EOF.
-    for (const name of ['stdin', 'stdout', 'stderr']) {
-      expect(fs.readFile(`/dev/${name}`).length).toBe(0)
-    }
-    // And nothing about a device reaches the journal. pyodide makes one at
-    // runtime (API.capture_stderr calls FS.createDevice) and chmods it right
-    // after; replaying either wrote a device path against the real mount,
-    // which is what failed during teardown.
-    fs.createDevice('/dev', 'probe_dev', undefined, () => true)
-    fs.chmod('/dev/probe_dev', 0o600)
-    const touched = journal.takeMutations().map((m) => m.path)
-    expect(touched.filter((path) => path.includes('probe_dev'))).toEqual([])
-  })
 
   it('records only the tail for an append, and does not clobber the mount', async () => {
     const p = prefix()
@@ -281,7 +326,7 @@ describe('PyodideFs', () => {
 with open('${p}log.txt', 'a') as f:
     f.write('+more')
 `)
-    const mutations = journal.takeMutations()
+    const mutations = recorded()
     expect(mutations).toHaveLength(1)
     const only = mutations[0]
     if (only?.kind !== 'append') throw new Error(`expected an append, got ${String(only?.kind)}`)
@@ -348,7 +393,7 @@ with open('${p}log.txt', 'a') as f:
 import shutil
 shutil.rmtree('${p}tree')
 `)
-    const kinds = journal.takeMutations().map((m) => `${m.kind} ${m.path.slice(p.length)}`)
+    const kinds = recorded().map((m) => `${m.kind} ${m.path.slice(p.length)}`)
     expect(kinds).toEqual([
       'unlink tree/a.txt',
       'unlink tree/b/c.txt',
@@ -376,7 +421,7 @@ except OSError as e:
     _res = 'EXDEV' if e.errno == errno.EXDEV else f'wrong errno {e.errno}'
 `)
     expect(py.globals.get('_res')).toBe('EXDEV')
-    expect(journal.takeMutations()).toEqual([])
+    expect(recorded()).toEqual([])
   })
 
   it('refuses a rename across a nested mount boundary inside one mountpoint', async () => {
@@ -398,7 +443,7 @@ except OSError as e:
     _res2 = 'EXDEV' if e.errno == errno.EXDEV else f'wrong errno {e.errno}'
 `)
     expect(py.globals.get('_res2')).toBe('EXDEV')
-    expect(journal.takeMutations()).toEqual([])
+    expect(recorded()).toEqual([])
     // The refused source is still readable in place.
     await py.runPythonAsync(`_kept = open('${p}x.txt').read()`)
     expect(py.globals.get('_kept')).toBe('X')
@@ -431,47 +476,6 @@ with open('${p}../escaped.txt', 'w') as f:
     await drain()
     expect([...store.keys()]).toEqual([])
     expect(calls.filter((c) => c.op === 'write')).toEqual([])
-  })
-
-  it('refuses to open a listed file the mount would not hand over', async () => {
-    const p = prefix()
-    // The mount lists it, so it exists; it just will not serve it. The
-    // unreadable mark has to come from preloadInto reacting to that, not
-    // from the test setting it by hand.
-    store.set(`${p}locked.txt`, enc.encode('SECRET'))
-    unreadable.add(`${p}locked.txt`)
-    await mountPrefix(p)
-    await py.runPythonAsync(`
-import errno
-try:
-    open('${p}locked.txt', 'a').write('tail')
-    _errno = 0
-except OSError as e:
-    _errno = e.errno
-`)
-    // EIO, not ENOENT: absence and unreadable must stay distinguishable,
-    // since only absence makes an empty base safe to build a write on.
-    expect(py.globals.get('_errno')).toBe(py.ERRNO_CODES.EIO)
-    expect(journal.takeMutations()).toEqual([])
-  })
-
-  // The preload is the guest's only chance to ask, so an entry whose stat
-  // failed once is asked again, and an answer seeds it as usual.
-  it('seeds an entry whose first stat failed from the second', async () => {
-    const p = prefix()
-    store.set(`${p}late.json`, enc.encode('{"id": 7}'))
-    brokenOnce.add(`${p}late.json`)
-    await mountPrefix(p)
-    await py.runPythonAsync(`
-import os
-_st = os.stat('${p}late.json')
-_perm = _st.st_mode & 0o7777
-_size = _st.st_size
-_body = open('${p}late.json').read()
-`)
-    expect(py.globals.get('_body')).toBe('{"id": 7}')
-    expect(py.globals.get('_perm')).toBe(STORE_MODE)
-    expect(py.globals.get('_size')).toBe(9)
   })
 
   // Over a worker the node is placed from the listing and its stat is the

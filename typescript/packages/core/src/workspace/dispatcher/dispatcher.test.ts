@@ -1903,6 +1903,32 @@ describe('a command reads at the dispatcher', () => {
   })
 })
 
+class UnsizedRAM extends RAMVFS {
+  override readonly cachesReads = true
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    return (await super.stat(path)).with({ size: null })
+  }
+}
+
+describe('a stat with no size', () => {
+  it('takes the cached length once a read kept the bytes', async () => {
+    // An API mount cannot size a file without fetching it; once a read kept
+    // its bytes, every caller of the dispatcher sees their length.
+    const vfs = new UnsizedRAM()
+    vfs.store.dirs.add('/')
+    vfs.store.files.set('/f', new TextEncoder().encode('hello\n'))
+    const ws = new Workspace({ '/api': vfs }, { mode: MountMode.WRITE })
+    try {
+      expect((await ws.vfs.stat('/api/f')).size).toBeNull()
+      await ws.vfs.read('/api/f')
+      expect((await ws.vfs.stat('/api/f')).size).toBe('hello\n'.length)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('a whole write keeps its bytes', () => {
   it('as a copy, so the caller can reuse its buffer', async () => {
     class Kept extends RAMVFS {

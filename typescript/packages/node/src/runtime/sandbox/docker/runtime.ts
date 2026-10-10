@@ -57,9 +57,9 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
       this.config.container,
     ])
     if (result.code !== 0) {
-      throw new Error(`docker inspect failed: ${decode(result.stderr).trim()}`)
+      throw new Error(`docker inspect failed: ${DECODER.decode(result.stderr).trim()}`)
     }
-    if (decode(result.stdout).trim() !== 'true') {
+    if (DECODER.decode(result.stdout).trim() !== 'true') {
       throw new Error(`container ${this.config.container} is not running`)
     }
   }
@@ -80,9 +80,5 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
 }
 
 const DECODER = new TextDecoder()
-
-function decode(bytes: Uint8Array): string {
-  return DECODER.decode(bytes)
-}
 
 registerRuntime('docker', DockerRuntime)

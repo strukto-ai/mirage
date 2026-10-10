@@ -20,6 +20,7 @@ import threading
 import asyncssh
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.server.ssh.constants import LISTING_CONCURRENCY
 from mirage.server.ssh.sftp import (
     MirageSFTPServer,
@@ -324,6 +325,26 @@ async def test_sftp_runs_under_the_key_profile(tmp_path):
     finally:
         await stop_harness(harness)
     assert content == b"token\n"
+
+
+@pytest.mark.asyncio
+async def test_a_stat_does_not_follow_a_hidden_link(tmp_path):
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"hiding": {"paths": {"hide": ["/lnk"]}}},
+    )
+    await ws.shell("echo body > /a.txt && ln -s /a.txt /lnk")
+    harness = await start_harness(tmp_path, ws)
+    hiding = bind_key(harness, 'mirage-profile="hiding"')
+    try:
+        async with harness.connect() as conn, conn.start_sftp_client() as sftp:
+            assert (await sftp.stat("/lnk")).size == len(b"body\n")
+        async with harness.connect(key=hiding) as conn:
+            async with conn.start_sftp_client() as sftp:
+                with pytest.raises(asyncssh.SFTPNoSuchFile):
+                    await sftp.stat("/lnk")
+    finally:
+        await stop_harness(harness)
 
 
 class ListingCore:

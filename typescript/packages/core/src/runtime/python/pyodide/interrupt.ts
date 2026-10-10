@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isNode } from './loader.ts'
+
 /**
  * Deadline interruption for pyodide, which executes on THIS thread: a
  * busy guest loop blocks the event loop, so no timer here can ever
@@ -92,11 +94,6 @@ const BROWSER_WATCHDOG = `${WATCHDOG_BODY}
 self.onmessage = (event) => { onMessage(event.data); };
 self.postMessage('ready');
 `
-
-function isNode(): boolean {
-  const proc = (globalThis as { process?: { versions?: Record<string, string> } }).process
-  return typeof proc?.versions?.node === 'string'
-}
 
 async function createNodeWatchdog(): Promise<WatchdogPort | null> {
   try {
