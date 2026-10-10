@@ -1,7 +1,7 @@
 import type { RedisClientType } from 'redis'
 import { ExecutionStore } from '@struktoai/mirage-core/execution/base'
 import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
-import { connectRedis } from '../../optional_peer.ts'
+import { RedisConnection } from '../../optional_peer.ts'
 import { POLL_SECONDS, STORE_LUA } from './constants.ts'
 
 function encode(record: ExecutionRecord): [string, string] {
@@ -62,7 +62,7 @@ function decode(raw: string, result: string | null = null): ExecutionRecord {
  * restart recovery. A Redis Cluster keyPrefix needs a shared hash tag.
  */
 export class RedisExecutionStore extends ExecutionStore {
-  private clientPromise: Promise<RedisClientType> | null = null
+  private readonly redis: RedisConnection
   private closed = false
   private readonly listeners = new Set<() => void>()
   private readonly keys: string[]
@@ -82,17 +82,12 @@ export class RedisExecutionStore extends ExecutionStore {
     )
       throw new Error('execution retention limits must be positive')
     this.keys = [`${keyPrefix}records`, `${keyPrefix}completed`, `${keyPrefix}results`]
+    this.redis = new RedisConnection(url, 'RedisExecutionStore')
   }
 
   private async client(): Promise<RedisClientType> {
     if (this.closed) throw new Error('execution store is closed')
-    if (this.clientPromise === null) {
-      const pending = connectRedis(this.url, 'RedisExecutionStore', () => {
-        if (this.clientPromise === pending) this.clientPromise = null
-      })
-      this.clientPromise = pending
-    }
-    return this.clientPromise
+    return this.redis.client()
   }
 
   private async call(
@@ -175,8 +170,6 @@ export class RedisExecutionStore extends ExecutionStore {
   async close(): Promise<void> {
     this.closed = true
     for (const listener of this.listeners) listener()
-    const pending = this.clientPromise
-    this.clientPromise = null
-    if (pending !== null) await (await pending).quit()
+    await this.redis.close()
   }
 }

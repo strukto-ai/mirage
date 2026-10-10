@@ -36,7 +36,7 @@ from mirage.utils.hidden import (
     show_head,
     shown_mode,
 )
-from mirage.utils.path import parent
+from mirage.utils.path import norm, parent
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.session.session import SessionState
 
@@ -190,11 +190,6 @@ def get_current_session_unless_foreign(
     return binding.session
 
 
-def _norm_prefix(mount_prefix: str) -> str:
-    stripped = mount_prefix.strip("/")
-    return "/" + stripped if stripped else "/"
-
-
 def _session_mode(mount_prefix: str) -> MountMode:
     """The current session's mode cap for this mount.
 
@@ -211,7 +206,7 @@ def _session_mode(mount_prefix: str) -> MountMode:
     sess = get_current_session()
     if sess is None or sess.mount_modes is None:
         return MountMode.EXEC
-    return sess.mount_modes.get(_norm_prefix(mount_prefix), MountMode.EXEC)
+    return sess.mount_modes.get(norm(mount_prefix), MountMode.EXEC)
 
 
 DEFAULT_UMASK = 0o022
@@ -687,7 +682,7 @@ def effective_path_mode(
     sess = get_current_session()
     if sess is None:
         return mount_mode
-    prefix = _norm_prefix(mount_prefix)
+    prefix = norm(mount_prefix)
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
@@ -736,7 +731,7 @@ def strongest_under_session(
         mount_mode (MountMode): the mount's configured mode.
     """
     cap = (
-        sess.mount_modes.get(_norm_prefix(mount_prefix), MountMode.EXEC)
+        sess.mount_modes.get(norm(mount_prefix), MountMode.EXEC)
         if sess.mount_modes is not None
         else MountMode.EXEC
     )
@@ -744,7 +739,7 @@ def strongest_under_session(
     shown = sess.visibility.shown
     if shown is None:
         return best
-    prefix = _norm_prefix(mount_prefix)
+    prefix = norm(mount_prefix)
     for entry in shown.entries:
         if entry.mode is None:
             continue

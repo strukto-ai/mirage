@@ -37,7 +37,6 @@ from mirage.workspace.snapshot.utils import (
     BLOB_REF_KEY,
     FORMAT_VERSION,
     is_safe_blob_path,
-    norm_mount_prefix,
 )
 
 __all__ = [
@@ -55,7 +54,6 @@ __all__ = [
     "BLOB_REF_KEY",
     "FORMAT_VERSION",
     "is_safe_blob_path",
-    "norm_mount_prefix",
     "ContentDriftError",
     "DriftQueue",
     "capture_fingerprints",

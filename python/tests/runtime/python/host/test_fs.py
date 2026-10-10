@@ -24,11 +24,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.context import set_current_session
 from mirage.errors.posix import posix_errno
-from mirage.runtime.python.host.constants import (
-    PASSTHROUGH_CALLS,
-    REFUSED_CALLS,
-    ROUTED_CALLS,
-)
+from mirage.runtime.python.host.constants import REFUSED_CALLS, ROUTED_CALLS
 from mirage.runtime.python.host.fs import HostFs, make_os_module, os_routing
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.stat_view import DIR_SIZE
@@ -68,12 +64,12 @@ class TestTableInstall:
                 continue
             assert getattr(patched, verb) is not getattr(os, verb), verb
 
-    def test_passthrough_verbs_keep_the_host_function(self):
+    def test_every_other_name_keeps_the_host_function(self):
         ops, patched = seeded()
-        for verb in PASSTHROUGH_CALLS:
-            if not hasattr(os, verb):
-                continue
-            assert getattr(patched, verb) is getattr(os, verb), verb
+        installed = {*ROUTED_CALLS, *REFUSED_CALLS, "path"}
+        for name, value in vars(os).items():
+            if name not in installed:
+                assert getattr(patched, name) is value, name
 
     def test_a_name_this_platform_lacks_is_not_invented(self):
         # hasattr(os, ...) has to keep answering what it did, or code

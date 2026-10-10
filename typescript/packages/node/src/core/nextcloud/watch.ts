@@ -17,8 +17,6 @@ import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { OpendalWalk } from '../opendal/watch.ts'
 
-export const NextcloudWalk = OpendalWalk
-
 // One recursive PROPFIND per pull. The WebDAV ETag leads the fingerprint but
 // does not stand alone: Nextcloud has served an unchanged one for content it
 // reported the new size of, so mtime and size ride along (see

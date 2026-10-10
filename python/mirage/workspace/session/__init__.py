@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from mirage.workspace.session.state import (
         ensure_var_visible,
         env_snapshot,
-        exported_names,
         session_view,
         visible_arrays,
         visible_env,
@@ -57,7 +56,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.session.state": (
         "ensure_var_visible",
         "env_snapshot",
-        "exported_names",
         "session_view",
         "visible_arrays",
         "visible_env",
@@ -82,7 +80,6 @@ __all__ = [
     "SessionStore",
     "ensure_var_visible",
     "env_snapshot",
-    "exported_names",
     "get_current_session",
     "get_current_session_for",
     "reset_current_session",

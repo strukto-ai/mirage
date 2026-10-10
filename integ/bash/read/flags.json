@@ -203,6 +203,40 @@
         "stdout": "[\u00e9][x]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "read_n_and_N_refuse_a_non_ascii_count",
+      "seq": 940068,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | { read -n \u00b2 rnx; echo \"rc=$? rnx=[$rnx]\"; cat; }; printf 'abc\\n' | { read -N \u0663 rnx; echo \"rc=$? rnx=[$rnx]\"; cat; }",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1 rnx=[]\nabc\nrc=1 rnx=[]\nabc\n",
+        "stderr": "bash: read: \u00b2: invalid number\nbash: read: \u0663: invalid number\n"
+      }
     }
   ]
 }

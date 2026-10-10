@@ -107,7 +107,7 @@ def test_grep_dash_f_frees_positional_and_routes_pattern_file():
     assert parsed.flags["--file"] == ["/data/pats.txt"]
     assert parsed.texts() == []
     assert parsed.paths() == ["/data/a.txt"]
-    assert "/data/pats.txt" in parsed.routing_paths()
+    assert parsed.path_flag_values == ["/data/pats.txt"]
 
 
 def test_optional_long_path_value_routes_attached_argument():
@@ -133,8 +133,7 @@ def test_grep_repeated_dash_f_accumulates_and_routes_each_file():
     )
     assert parsed.flags["--file"] == ["/data/p1.txt", "/data/p2.txt"]
     assert parsed.paths() == ["/data/a.txt"]
-    assert "/data/p1.txt" in parsed.routing_paths()
-    assert "/data/p2.txt" in parsed.routing_paths()
+    assert parsed.path_flag_values == ["/data/p1.txt", "/data/p2.txt"]
 
 
 def test_rg_dash_e_frees_positional_and_accumulates():

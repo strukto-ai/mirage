@@ -14,17 +14,12 @@
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
-import { enoent } from '../../errors/fs.ts'
-import { contentTypeForPath } from '../../utils/filetype.ts'
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { makeStat } from '../hierarchy/stat.ts'
+import { entryStat, makeStat } from '../hierarchy/stat.ts'
+import { dayStat } from '../time_range.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 function labelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
@@ -32,37 +27,6 @@ function labelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): File
     type: FileType.DIRECTORY,
     extra: { label_id: entry.id },
   })
-}
-
-/**
- * Stat a day directory, which resolves beyond the listed window.
- *
- * The label listing groups a bounded number of recent messages into day dirs,
- * but the date query answers for any well-formed day, so a day under a label
- * that exists is a directory whether or not the recent window lists it. A
- * bogus label is ENOENT.
- */
-async function statDay(
-  accessor: GmailAccessor,
-  match: ScopeMatch,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
-  if (entry !== null) {
-    return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-  }
-  const virtual = rstripSlash(path.virtual).split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const labelSpec = new PathSpec({
-    virtual,
-    directory: virtual,
-    vfsPath: mountKey(virtual, prefix),
-  })
-  if ((await resolveEntry(readdir, accessor, labelSpec, index)) === null) {
-    throw enoent(path)
-  }
-  return new FileStat({ name: match.slots.day ?? '', type: FileType.DIRECTORY })
 }
 
 function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
@@ -83,22 +47,12 @@ function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntr
   })
 }
 
-function attachmentStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: contentTypeForPath(entry.vfsName),
-    size: entry.size,
-    extra: { attachment_id: entry.id },
-  })
-}
-
 export const stat = makeStat<GmailAccessor>(detectScope, readdir, {
   entryStats: {
     label: labelStat,
     message: messageStat,
     attachment_dir: attachmentDirStat,
-    attachment: attachmentStat,
+    attachment: entryStat('attachment_id'),
   },
-  overrides: { day: statDay },
+  overrides: { day: dayStat(readdir) },
 })

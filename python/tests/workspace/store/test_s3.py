@@ -40,8 +40,8 @@ async def test_meta_roundtrip_and_layout():
     with patch_record_s3(client):
         store = S3WorkspaceStateStore(_config())
         assert await store.load_meta("ws1") is None
-        await store.set_meta(
-            "ws1", {"workspace_id": "ws1", "default_session_id": "main"}
+        await store.cas_set_meta(
+            "ws1", {"workspace_id": "ws1", "default_session_id": "main"}, 0
         )
         meta = await store.load_meta("ws1")
         await store.close()
@@ -70,9 +70,10 @@ async def test_replace_meta_retries_over_competing_writer():
     client = FakeConditionalS3Client()
     with patch_record_s3(client):
         store = S3WorkspaceStateStore(_config())
-        await store.set_meta(
+        await store.cas_set_meta(
             "ws1",
             {"workspace_id": "ws1", "created_at": 111.0, "generation": 4},
+            0,
         )
         written = await store.replace_meta(
             "ws1", {"workspace_id": "ws1", "default_session_id": "restored"}
@@ -116,7 +117,7 @@ async def test_workspace_group_override_routes_to_s3():
         store.namespace("ws1")
         store.observer("ws1")
         await store.sessions("ws1").set("main", {"session_id": "main"})
-        await store.set_meta("ws1", {"workspace_id": "ws1"})
+        await store.cas_set_meta("ws1", {"workspace_id": "ws1"}, 0)
         await store.close()
     assert (BUCKET, "mirage/ws1/sessions/main.json") in client.objects
     assert (BUCKET, "mirage/workspaces/ws1.json") in client.objects
@@ -130,7 +131,7 @@ async def test_drop_deletes_the_sessions_and_meta_objects():
             workspace=S3WorkspaceStateStore(_config())
         )
         await store.sessions("ws1").set("main", {"session_id": "main"})
-        await store.set_meta("ws1", {"workspace_id": "ws1"})
+        await store.cas_set_meta("ws1", {"workspace_id": "ws1"}, 0)
         await store.drop("ws1")
         assert await store.load_meta("ws1") is None
         await store.close()

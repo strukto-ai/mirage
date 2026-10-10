@@ -465,7 +465,7 @@ describe('jobs are scoped to the session that launched them', () => {
     }
   })
 
-  it("closing every session keeps the default one's jobs", async () => {
+  it("closing the other sessions keeps the default one's jobs", async () => {
     const ws = buildWs()
     ws.createSession('a')
     ws.createSession('b')
@@ -473,7 +473,8 @@ describe('jobs are scoped to the session that launched them', () => {
       await ws.shell('sleep 30 &')
       await ws.shell('sleep 30 &', { sessionId: 'a' })
       await ws.shell('sleep 30 &', { sessionId: 'b' })
-      await ws.closeAllSessions()
+      await ws.closeSession('a')
+      await ws.closeSession('b')
       expect(ws.jobTable.listJobs('a')).toEqual([])
       expect(ws.jobTable.listJobs('b')).toEqual([])
       const kept = ws.jobTable.get(1, ws.sessionManager.defaultId)

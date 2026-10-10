@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,60 +20,17 @@ from mirage.accessor.gridfs import GridFSAccessor
 from mirage.vfs.gridfs.config import GridFSConfig
 
 
-@pytest.fixture
-def accessor():
-    return GridFSAccessor(
+@pytest.mark.asyncio
+async def test_client_connects_to_the_configured_uri():
+    accessor = GridFSAccessor(
         config=GridFSConfig(
             uri="mongodb://localhost:27017", database="db", bucket="data"
         )
     )
-
-
-@pytest.mark.asyncio
-async def test_client_constructs_async_mongo_client(accessor):
     sentinel = MagicMock()
     with patch(
-        "mirage.accessor.gridfs.AsyncMongoClient", return_value=sentinel
+        "mirage.accessor.mongodb.AsyncMongoClient", return_value=sentinel
     ) as ctor:
         client = accessor.client
     assert client is sentinel
     ctor.assert_called_once_with("mongodb://localhost:27017")
-
-
-@pytest.mark.asyncio
-async def test_client_is_cached_per_event_loop(accessor):
-    with patch(
-        "mirage.accessor.gridfs.AsyncMongoClient",
-        side_effect=lambda *a, **k: MagicMock(),
-    ) as ctor:
-        first = accessor.client
-        second = accessor.client
-    assert first is second
-    ctor.assert_called_once()
-
-
-def test_client_built_outside_event_loop_uses_loopless_key(accessor):
-    with patch(
-        "mirage.accessor.gridfs.AsyncMongoClient",
-        side_effect=lambda *a, **k: MagicMock(),
-    ) as ctor:
-        first = accessor.client
-        second = accessor.client
-    assert first is second
-    ctor.assert_called_once()
-    assert 0 in accessor._clients
-
-
-@pytest.mark.asyncio
-async def test_close_releases_all_clients(accessor):
-    first = MagicMock()
-    first.close = AsyncMock()
-    second = MagicMock()
-    second.close = AsyncMock()
-    accessor._clients = {1: first, 2: second}
-
-    await accessor.close()
-
-    first.close.assert_awaited_once_with()
-    second.close.assert_awaited_once_with()
-    assert accessor._clients == {}

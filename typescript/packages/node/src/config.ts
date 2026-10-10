@@ -836,7 +836,8 @@ export interface WorkspaceConfigRaw {
   secrets?: Record<string, unknown> | null
 }
 
-function readProcessEnv(): Record<string, string> {
+/** The process environment with its unset entries dropped. */
+export function readProcessEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v === 'string') out[k] = v

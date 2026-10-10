@@ -20,7 +20,7 @@ from mirage.policy.match.rule import (
     match_io,
     match_op,
     match_rule,
-    op_refusal,
+    op_ruling,
     rule_reach,
     rule_scope,
     skipped_at_dispatch,
@@ -172,7 +172,7 @@ def test_match_op_only_for_pure_path_rules():
     assert not match_op(CommandRule(reason="x", commands=("rm",)), None, op)
 
 
-def test_op_refusal_reads_depth_before_verb_and_honours_a_grant():
+def test_op_ruling_reads_depth_before_verb_and_honours_a_grant():
     broad = CommandRule(reason="repo is sealed", paths=("/repo/*",))
     carve = CommandRule(reason="outbox nod", paths=("/repo/outbox/*",))
     rules = AdmissionRules(deny=(broad,), ask=(carve,))
@@ -181,25 +181,25 @@ def test_op_refusal_reads_depth_before_verb_and_honours_a_grant():
     )
     # The deeper ask wins where both reach, exactly as command admission
     # ranks them, so a broad deny cannot overrule an approved carve-out.
-    assert op_refusal(rules, inside, ()) == "outbox nod"
-    assert op_refusal(rules, inside, (carve,)) is None
+    assert op_ruling(rules, inside, ()) == (carve, True)
+    assert op_ruling(rules, inside, (carve,)) is None
     # Outside the carve-out the deny is what is left, and a grant for
     # the ask says nothing about it.
     outside = VfsContext(
         op="write", path=_path("/repo/sealed/a"), write=True, prefix="/repo/"
     )
-    assert op_refusal(rules, outside, (carve,)) == "repo is sealed"
+    assert op_ruling(rules, outside, (carve,)) == (broad, False)
     # A metadata op is reached by neither: deny is present and refused.
     stat = VfsContext(
         op="stat", path=_path("/repo/outbox/a"), write=False, prefix="/repo/"
     )
-    assert op_refusal(rules, stat, ()) is None
+    assert op_ruling(rules, stat, ()) is None
     # No rules at all, and a rule naming a command, are both silent.
-    assert op_refusal(None, inside, ()) is None
+    assert op_ruling(None, inside, ()) is None
     named = AdmissionRules(
         deny=(CommandRule(reason="x", commands=("rm",), paths=("/repo/*",)),)
     )
-    assert op_refusal(named, inside, ()) is None
+    assert op_ruling(named, inside, ()) is None
 
 
 def _subtree_ctx(command: str, *operands: str) -> CommandContext:

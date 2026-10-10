@@ -16,9 +16,8 @@ from mirage.cache.index import IndexEntry
 from mirage.core.email.readdir import readdir
 from mirage.core.email.scope import detect_scope
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.hierarchy.stat import make_stat
+from mirage.core.hierarchy.stat import entry_stat, make_stat
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.filetype import content_type_for_path
 
 
 def _dir_stat(
@@ -49,18 +48,6 @@ def _attachment_dir_stat(
     )
 
 
-def _attachment_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=content_type_for_path(entry.vfs_name),
-        size=entry.size,
-        extra={"attachment_id": entry.id},
-    )
-
-
 stat = make_stat(
     detect_scope,
     readdir,
@@ -69,6 +56,6 @@ stat = make_stat(
         "day": _dir_stat,
         "message": _message_stat,
         "attachment_dir": _attachment_dir_stat,
-        "attachment": _attachment_stat,
+        "attachment": entry_stat("attachment_id"),
     },
 )

@@ -160,5 +160,6 @@ describe('entryName', () => {
     expect(entryName('sub/')).toBe('sub')
     expect(entryName('/a/b/c')).toBe('c')
     expect(entryName('plain')).toBe('plain')
+    expect(entryName('objects/pack//')).toBe('pack')
   })
 })

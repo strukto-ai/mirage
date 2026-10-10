@@ -67,13 +67,6 @@ describe('BoxTokenManager client credentials grant', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('reports no refresh token in ccg mode', async () => {
-    stubToken('tok1', 3600)
-    const tm = new BoxTokenManager(CCG_CONFIG)
-    await tm.getToken()
-    expect(tm.getRefreshToken()).toBe('')
-  })
-
   it('requires clientSecret with enterpriseId', () => {
     expect(() => new BoxTokenManager({ clientId: 'cid', enterpriseId: '123456' })).toThrow(
       'clientSecret is required when using enterpriseId',

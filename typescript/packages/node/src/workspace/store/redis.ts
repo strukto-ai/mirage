@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedisClientType } from 'redis'
 import type { ObserverStore } from '@struktoai/mirage-core/observe/store'
 import type { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
 import type { SessionStore } from '@struktoai/mirage-core/workspace/session/store'
@@ -22,7 +21,7 @@ import type {
   WorkspaceStateStoreOverrides,
 } from '@struktoai/mirage-core/workspace/store/base'
 import { RedisObserverStore } from '../../observe/redis_store.ts'
-import { connectRedis } from '../../optional_peer.ts'
+import { RedisConnection } from '../../optional_peer.ts'
 import { RedisNamespaceStore } from '../mount/namespace/redis.ts'
 import { CAS_SCRIPT, RedisSessionStore } from '../session/redis.ts'
 
@@ -50,7 +49,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   readonly url: string
   private readonly prefix: string
   private readonly metaKey: string
-  private clientPromise: Promise<RedisClientType> | null = null
+  private readonly redis: RedisConnection
   private readonly namespaces = new Map<string, RedisNamespaceStore>()
   private readonly observers = new Map<string, RedisObserverStore>()
   private readonly sessionTables = new Map<string, RedisSessionStore>()
@@ -61,16 +60,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     this.url = url ?? 'redis://localhost:6379/0'
     this.prefix = keyPrefix ?? 'mirage:'
     this.metaKey = `${this.prefix}workspaces`
-  }
-
-  private async client(): Promise<RedisClientType> {
-    if (this.clientPromise === null) {
-      const pending = connectRedis(this.url, 'RedisWorkspaceStateStore', () => {
-        if (this.clientPromise === pending) this.clientPromise = null
-      })
-      this.clientPromise = pending
-    }
-    return this.clientPromise
+    this.redis = new RedisConnection(this.url, 'RedisWorkspaceStateStore')
   }
 
   protected makeNamespace(workspaceId: string): NamespaceStore {
@@ -110,14 +100,9 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   }
 
   protected async readMeta(workspaceId: string): Promise<WorkspaceFields | null> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const raw = await c.hGet(this.metaKey, workspaceId)
     return raw != null ? (JSON.parse(raw) as WorkspaceFields) : null
-  }
-
-  protected async writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
-    const c = await this.client()
-    await c.hSet(this.metaKey, workspaceId, JSON.stringify(fields))
   }
 
   // Same generic hash-field CAS the session store uses: the meta hash
@@ -127,7 +112,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     fields: WorkspaceFields,
     expectedGeneration: number,
   ): Promise<boolean> {
-    const c = await this.client()
+    const c = await this.redis.client()
     const result = await c.eval(CAS_SCRIPT, {
       keys: [this.metaKey],
       arguments: [workspaceId, JSON.stringify(fields), String(expectedGeneration)],
@@ -140,7 +125,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
       await handles.get(workspaceId)?.close()
       handles.delete(workspaceId)
     }
-    const c = await this.client()
+    const c = await this.redis.client()
     await c.hDel(this.metaKey, workspaceId)
   }
 
@@ -148,9 +133,6 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     for (const ns of this.namespaces.values()) await ns.close()
     for (const ob of this.observers.values()) await ob.close()
     for (const table of this.sessionTables.values()) await table.close()
-    if (this.clientPromise !== null) {
-      const c = await this.clientPromise
-      await c.quit()
-    }
+    await this.redis.close()
   }
 }

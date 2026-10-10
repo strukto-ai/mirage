@@ -22,8 +22,8 @@ import {
   ioRefusal,
   matchIo,
   matchOp,
-  opRefusal,
   matchRule,
+  opRuling,
   ruleReach,
   ruleScope,
   skippedAtDispatch,
@@ -109,7 +109,7 @@ describe('rules', () => {
     ).toBeNull()
   })
 
-  it('opRefusal reads depth before verb and honours a grant', () => {
+  it('opRuling reads depth before verb and honours a grant', () => {
     const broad: CommandRule = { reason: 'repo is sealed', paths: ['/repo/*'] }
     const carve: CommandRule = { reason: 'outbox nod', paths: ['/repo/outbox/*'] }
     const rules: AdmissionRules = { allow: null, deny: [broad], ask: [carve] }
@@ -121,8 +121,8 @@ describe('rules', () => {
     }
     // The deeper ask wins where both reach, exactly as command admission
     // ranks them, so a broad deny cannot overrule an approved carve-out.
-    expect(opRefusal(rules, inside, [])).toBe('outbox nod')
-    expect(opRefusal(rules, inside, [carve])).toBeNull()
+    expect(opRuling(rules, inside, [])).toEqual([carve, true])
+    expect(opRuling(rules, inside, [carve])).toBeNull()
     // Outside the carve-out the deny is what is left, and a grant for
     // the ask says nothing about it.
     const outside: VfsContext = {
@@ -131,7 +131,7 @@ describe('rules', () => {
       write: true,
       prefix: '/repo/',
     }
-    expect(opRefusal(rules, outside, [carve])).toBe('repo is sealed')
+    expect(opRuling(rules, outside, [carve])).toEqual([broad, false])
     // A metadata op is reached by neither: deny is present and refused.
     const stat: VfsContext = {
       op: 'stat',
@@ -139,15 +139,15 @@ describe('rules', () => {
       write: false,
       prefix: '/repo/',
     }
-    expect(opRefusal(rules, stat, [])).toBeNull()
+    expect(opRuling(rules, stat, [])).toBeNull()
     // No rules at all, and a rule naming a command, are both silent.
-    expect(opRefusal(null, inside, [])).toBeNull()
+    expect(opRuling(null, inside, [])).toBeNull()
     const named: AdmissionRules = {
       allow: null,
       ask: [],
       deny: [{ reason: 'x', commands: ['rm'], paths: ['/repo/*'] }],
     }
-    expect(opRefusal(named, inside, [])).toBeNull()
+    expect(opRuling(named, inside, [])).toBeNull()
   })
 
   it('matchOp only for pure path rules', () => {

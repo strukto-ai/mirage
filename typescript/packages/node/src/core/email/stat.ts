@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
-import { makeStat } from '@struktoai/mirage-core/core/hierarchy/stat'
+import { entryStat, makeStat } from '@struktoai/mirage-core/core/hierarchy/stat'
 import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { ContentType, FileStat, FileType } from '@struktoai/mirage-core/types'
-import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -44,22 +43,12 @@ function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntr
   })
 }
 
-function attachmentStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: contentTypeForPath(entry.vfsName),
-    size: entry.size,
-    extra: { attachment_id: entry.id },
-  })
-}
-
 export const stat = makeStat<EmailAccessor>(detectScope, readdir, {
   entryStats: {
     folder: dirStat,
     day: dirStat,
     message: messageStat,
     attachment_dir: attachmentDirStat,
-    attachment: attachmentStat,
+    attachment: entryStat('attachment_id'),
   },
 })

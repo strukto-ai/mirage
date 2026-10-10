@@ -20,9 +20,9 @@ import {
   memberFilename,
   projectFilename,
   sanitizeName,
-  splitSuffixId,
   teamDirname,
 } from './pathing.ts'
+import { parseIdName } from '../../utils/naming.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 
 describe('sanitizeName', () => {
@@ -31,18 +31,6 @@ describe('sanitizeName', () => {
   })
   it('returns "unknown" for empty', () => {
     expect(sanitizeName('   ')).toBe('unknown')
-  })
-})
-
-describe('splitSuffixId', () => {
-  it('splits dirname into label and id', () => {
-    expect(splitSuffixId('STR-1__abc123')).toEqual(['STR-1', 'abc123'])
-  })
-  it('splits filename with suffix', () => {
-    expect(splitSuffixId('alice__u1.json', '.json')).toEqual(['alice', 'u1'])
-  })
-  it('throws when suffix mismatch', () => {
-    expect(() => splitSuffixId('alice__u1', '.json')).toThrow(/__/)
   })
 })
 
@@ -96,7 +84,7 @@ describe('linear names fit NAME_MAX', () => {
     const name = build(CJK, UUID)
     expect(byteLength(name)).toBeLessThanOrEqual(NAME_MAX_BYTES)
     expect(name).not.toContain('\uFFFD')
-    expect(splitSuffixId(name, suffix)[1]).toBe(UUID)
+    expect(parseIdName(name, suffix)[1]).toBe(UUID)
   })
 
   it('keeps the separator between teamDirname parts', () => {

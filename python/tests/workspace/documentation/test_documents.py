@@ -139,7 +139,7 @@ async def test_unmount_and_closed_sessions_release_paths():
     assert b"Virtual filesystem" in await ws.vfs.read(
         "/guide.md", session_id="b"
     )
-    await ws.close_all_sessions()
+    await ws.close_session("b")
     await ws.skill_md("/guide.md")
     await ws.unmount("/guide.md")
     await ws.vfs_md("/guide.md")

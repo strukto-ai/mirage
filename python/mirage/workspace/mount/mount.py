@@ -156,8 +156,8 @@ def _wrap_mount_streams(
     ``revision_for`` calls inside the lazy backend body see the right
     context when consumed after this frame exits.
 
-    Mirrors the ``exit_on_empty`` pattern: thin async-gen wrapper that
-    side-effects the recorder state as bytes flow through. Same object
+    A thin async-gen wrapper that side-effects the recorder state as
+    bytes flow through. Same object
     appearing in both the primary stream and IOResult.reads/writes is
     wrapped once (dedup by identity).
 
@@ -656,19 +656,6 @@ class MountEntry:
         for keep, _attempted in cmd_groups.values():
             for rc in keep:
                 self.register(rc)
-
-    def unregister(self, names: list[str]) -> None:
-        """Remove all commands with the given names.
-
-        Args:
-            names (list[str]): Command names to remove.
-        """
-        for name in names:
-            keys = [k for k in self._cmds if k[0] == name]
-            for k in keys:
-                del self._cmds[k]
-            self._general_cmds.pop(name, None)
-            self._cmd_specs.pop(name, None)
 
     def commands(self) -> dict[str, list[str | None]]:
         """List registered commands grouped by filetype variants.

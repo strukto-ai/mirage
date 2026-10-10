@@ -258,7 +258,7 @@ describe('S3 cache consistency (mocked)', () => {
         mock.store.set('fresh-bkt', 'f.txt', ENC.encode('v2\n'))
         mock.store.set('bounded-bkt', 'f.txt', ENC.encode('v2\n'))
         mock.resetCalls()
-        const mark = ws.networkRecords.length
+        const mark = ws.records.length
         const result = await ws.shell(line)
         const version = (prefix: string): string => (prefix === fresh ? 'v2' : 'v1')
         expect(result.exitCode).toBe(0)
@@ -276,9 +276,12 @@ describe('S3 cache consistency (mocked)', () => {
         // listings too), pays its gate probe and one refetch; a missing HEAD
         // means it was served without a check.
         expect(ledger('fresh-bkt')).toEqual([1, 1, 1])
-        expect(ws.networkRecords.slice(mark).map((r) => [r.op, r.path])).toEqual([
-          ['read', `${fresh}/f.txt`],
-        ])
+        expect(
+          ws.records
+            .slice(mark)
+            .filter((r) => !r.isCache)
+            .map((r) => [r.op, r.path]),
+        ).toEqual([['read', `${fresh}/f.txt`]])
         mock.resetCalls()
         const single = await ws.shell(`cat ${bounded}/f.txt`)
         expect(DEC.decode(single.stdout)).toBe('v1\n')

@@ -19,12 +19,12 @@ from mirage import Workspace
 from mirage.secrets.config import SecretSource
 from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.shell.constants import BIN_PREFIX
+from mirage.utils.path import norm_dir
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.registry import build_vfs
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.snapshot import requires_vfs_override, to_state_dict
-from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 
 async def build_override_mounts(
@@ -69,7 +69,7 @@ async def build_override_mounts(
                 config, sources, f"mounts.{prefix}.config"
             ),
         )
-        out[norm_mount_prefix(prefix)] = Mount(
+        out[norm_dir(prefix)] = Mount(
             vfs=built,
             vfs_ref=vfs_name,
             write=coerce_write_policy(write) if write is not None else None,
@@ -82,8 +82,8 @@ def _existing_redacted_mounts(
 ) -> dict[str, Any]:
     auto_prefixes = {
         "/dev/",
-        norm_mount_prefix(HISTORY_PREFIX),
-        norm_mount_prefix(BIN_PREFIX),
+        norm_dir(HISTORY_PREFIX),
+        norm_dir(BIN_PREFIX),
     }
     prefix_to_vfs = {
         m.prefix: m.vfs
@@ -93,7 +93,7 @@ def _existing_redacted_mounts(
     out: dict[str, Any] = {}
     for m in state["mounts"]:
         prefix = m["prefix"]
-        if norm_mount_prefix(prefix) in skip:
+        if norm_dir(prefix) in skip:
             continue
         if requires_vfs_override(m) and prefix in prefix_to_vfs:
             out[prefix] = prefix_to_vfs[prefix]

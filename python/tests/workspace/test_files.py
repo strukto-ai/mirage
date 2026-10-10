@@ -243,7 +243,6 @@ async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
         assert [(r.source, r.is_cache) for r in ws.vfs.records] == [
             ("ram", True)
         ]
-        assert ws.vfs.network_records == []
     finally:
         await ws.close()
 
@@ -274,7 +273,6 @@ async def test_a_denied_namespace_answer_is_not_a_backend_op(
         assert [(r.source, r.is_cache) for r in ws.vfs.records] == [
             ("ram", True)
         ]
-        assert ws.vfs.network_records == []
     finally:
         await ws.close()
 

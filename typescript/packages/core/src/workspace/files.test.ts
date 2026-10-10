@@ -382,7 +382,6 @@ describe('Files goes through the dispatcher', () => {
       ws.records.length = 0
       expect(await ws.vfs.readdir('/m/inner')).toEqual(['/m/inner/deep'])
       expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
-      expect(ws.networkRecords).toEqual([])
     })
   })
 
@@ -400,7 +399,6 @@ describe('Files goes through the dispatcher', () => {
       ws.records.length = 0
       await expect(ws.vfs.readdir('/m/inner')).rejects.toThrow(PolicyDenied)
       expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
-      expect(ws.networkRecords).toEqual([])
     })
   })
 

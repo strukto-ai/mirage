@@ -17,24 +17,13 @@ import pytest
 from mirage.vfs.hf_buckets.config import HfBucketsConfig, HfRepoConfig
 
 
-def test_a_bucket_splits_into_namespace_and_name():
-    cfg = HfBucketsConfig(bucket="myorg/mybkt")
-    assert (cfg.namespace, cfg.bucket_name) == ("myorg", "mybkt")
-
-
-@pytest.mark.parametrize(
-    "repo_id,namespace,name",
-    [("org/repo", "org", "repo"), ("widget", "", "widget")],
-)
-def test_a_repo_id_takes_either_spelling_the_hub_accepts(
-    repo_id, namespace, name
-):
+@pytest.mark.parametrize("repo_id", ["org/repo", "widget"])
+def test_a_repo_id_takes_either_spelling_the_hub_accepts(repo_id):
     """The Hub resolves a bare name against whoever the token belongs
     to, and the real CLI relies on it: `hf repo create widget` then
     `hf download widget`. Refusing it rejected an id the Hub had just
     minted."""
-    cfg = HfRepoConfig(repo_id=repo_id)
-    assert (cfg.namespace, cfg.repo_name) == (namespace, name)
+    assert HfRepoConfig(repo_id=repo_id).repo_id == repo_id
 
 
 @pytest.mark.parametrize(

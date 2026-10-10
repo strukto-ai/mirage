@@ -26,7 +26,7 @@ import { norm } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isDirectoryAttrs, joinRoot, stripPrefix } from './utils.ts'
+import { isDirectoryAttrs, joinRoot, readRemoteDir, stripPrefix } from './utils.ts'
 
 import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 
@@ -72,27 +72,6 @@ function matches(
     if (opts.maxSize != null && size > opts.maxSize) return false
   }
   return inMtimeWindow(entry.attrs.mtime, opts.mtimeMin, opts.mtimeMax)
-}
-
-async function readRemoteDir(
-  accessor: SSHAccessor,
-  remote: string,
-): Promise<FileEntryWithStats[] | null> {
-  const sftp = await accessor.sftp()
-  return new Promise<FileEntryWithStats[] | null>((resolveFn, rejectFn) => {
-    sftp.readdir(remote, (err, entries) => {
-      if (err !== undefined) {
-        const code = (err as { code?: unknown }).code
-        if (code === 2) {
-          resolveFn(null)
-          return
-        }
-        rejectFn(err)
-        return
-      }
-      resolveFn(entries)
-    })
-  })
 }
 
 async function statRemote(

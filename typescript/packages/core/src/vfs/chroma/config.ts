@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, parseConfigWithSchema } from '../secrets.ts'
+import { type ConfigOf, normalizeNonEmpty, parseConfigWithSchema } from '../secrets.ts'
 
 const ChromaConfigSchema = z.object({
   host: z.string().optional(),
@@ -37,14 +37,6 @@ export interface ChromaConfigResolved {
   collectionName: string
   slugField: string
   chunkIndexField: string
-}
-
-function normalizeNonEmpty(value: string, field: string): string {
-  const normalized = value.trim()
-  if (normalized === '') {
-    throw new Error(`${field} cannot be empty`)
-  }
-  return normalized
 }
 
 export function resolveChromaConfig(config: ChromaConfig): ChromaConfigResolved {

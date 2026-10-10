@@ -83,16 +83,9 @@ def test_register_commands_adds_registered_command(ws):
     assert "test_custom" in m.commands()
 
 
-def test_unregister_removes_command(ws):
-    m = ws.mount("/data/")
-    assert "rm" in m.commands()
-    m.unregister(["rm"])
-    assert "rm" not in m.commands()
-
-
-def test_unregister_removes_all_filetypes(ws):
+def test_register_adds_a_filetype_variant(ws):
     # mirage ships no filetype renderers, so register one to prove the
-    # extension point still works and that unregister clears every variant.
+    # extension point still works.
     m = ws.mount("/data/")
 
     async def demo_cat(store, paths, *texts, **kwargs):
@@ -103,16 +96,12 @@ def test_unregister_removes_all_filetypes(ws):
             "cat", spec=SPECS["cat"], vfs="ram", filetype=".demo", fn=demo_cat
         )
     )
-    assert len(m.commands().get("cat", [])) > 1
-    m.unregister(["cat"])
-    assert "cat" not in m.commands()
+    assert m.commands()["cat"] == [None, ".demo"]
 
 
 @pytest.mark.asyncio
-async def test_unregister_then_register_works(ws):
+async def test_register_commands_replaces_a_command(ws):
     m = ws.mount("/data/")
-    m.unregister(["cat"])
-    assert "cat" not in m.commands()
 
     @command("cat", vfs="ram", spec=SPECS["cat"])
     async def custom_cat(accessor, paths, *texts, **kw):
@@ -124,14 +113,6 @@ async def test_unregister_then_register_works(ws):
     result = await ws.shell("cat /data/hello.txt")
     assert result.exit_code == 0
     assert b"custom cat output" in result.stdout
-
-
-def test_register_isolated_per_mount(ws_two_mounts):
-    ma = ws_two_mounts.mount("/a/")
-    mb = ws_two_mounts.mount("/b/")
-    ma.unregister(["rm"])
-    assert "rm" not in ma.commands()
-    assert "rm" in mb.commands()
 
 
 def test_register_commands_isolated_per_mount(ws_two_mounts):

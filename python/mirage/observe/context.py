@@ -320,8 +320,7 @@ async def with_mount_context(
     """Wrap an async iterator so the recorder's mount_id is ``mount_id``
     during each ``__anext__`` of the underlying stream.
 
-    Mirrors the side-effect-on-iteration pattern used by
-    ``exit_on_empty``. Lets dispatchers preserve VFS backends as
+    Lets dispatchers preserve VFS backends as
     ``async def with yield`` while still stamping the serving mount's
     identity on records emitted lazily during stream consumption. A
     None ``mount_id`` inherits the consuming frame's.

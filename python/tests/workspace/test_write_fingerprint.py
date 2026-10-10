@@ -77,7 +77,8 @@ def test_write_record_carries_the_backend_token():
                 await io.materialize_stdout()
                 return [
                     (r.op, r.path, r.fingerprint)
-                    for r in ws.vfs.network_records
+                    for r in ws.vfs.records
+                    if not r.is_cache
                 ]
             finally:
                 await ws.close()

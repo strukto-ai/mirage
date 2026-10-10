@@ -12,30 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileEntryWithStats } from 'ssh2'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
-import { isDirectoryAttrs, isFileAttrs, joinRoot } from '../utils.ts'
-
-async function readRemoteDir(
-  accessor: SSHAccessor,
-  remote: string,
-): Promise<FileEntryWithStats[] | null> {
-  const sftp = await accessor.sftp()
-  return new Promise<FileEntryWithStats[] | null>((resolveFn, rejectFn) => {
-    sftp.readdir(remote, (err, entries) => {
-      if (err !== undefined) {
-        const code = (err as { code?: unknown }).code
-        if (code === 2) {
-          resolveFn(null)
-          return
-        }
-        rejectFn(err)
-        return
-      }
-      resolveFn(entries)
-    })
-  })
-}
+import { isDirectoryAttrs, isFileAttrs, joinRoot, readRemoteDir } from '../utils.ts'
 
 async function statRemote(
   accessor: SSHAccessor,

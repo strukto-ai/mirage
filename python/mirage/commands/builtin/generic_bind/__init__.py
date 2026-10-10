@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mirage.commands.builtin.generic_bind.factory import (
         generic_commands,
+        walked,
         with_stat_cache,
     )
     from mirage.utils.glob_walk import make_resolve_glob
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.commands.builtin.generic_bind.factory": (
         "generic_commands",
+        "walked",
         "with_stat_cache",
     ),
     "mirage.utils.glob_walk": ("make_resolve_glob",),
@@ -39,6 +41,7 @@ __all__ = [
     "DuOps",
     "generic_commands",
     "make_resolve_glob",
+    "walked",
     "with_stat_cache",
 ]
 

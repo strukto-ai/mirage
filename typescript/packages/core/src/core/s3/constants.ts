@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SCOPE_WARN = 500
 export const SCOPE_ERROR = 5000
 export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
   '412',

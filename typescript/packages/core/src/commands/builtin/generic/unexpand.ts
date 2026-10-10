@@ -20,22 +20,10 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 import { operandsIo, readOperands } from '../utils/operands.ts'
+import { splitLinesKeepends } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function splitLinesKeepEnds(text: string): string[] {
-  const lines: string[] = []
-  let start = 0
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\n') {
-      lines.push(text.slice(start, i + 1))
-      start = i + 1
-    }
-  }
-  if (start < text.length) lines.push(text.slice(start))
-  return lines
-}
 
 function unexpandLine(line: string, tabsize: number, allSpaces: boolean): string {
   if (allSpaces) {
@@ -103,13 +91,13 @@ export async function unexpandGeneric(
     // GNU reads its operands as one stream, so a line a file leaves
     // unfinished continues into the next one, column and all.
     const text = ok.map((o) => DEC.decode(o.data)).join('')
-    const parts = splitLinesKeepEnds(text).map((ln) => unexpandLine(ln, tabsize, allSpaces))
+    const parts = splitLinesKeepends(text).map((ln) => unexpandLine(ln, tabsize, allSpaces))
     const result: ByteSource = ENC.encode(parts.join(''))
     return [result, io]
   }
   const stdinData = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
   const text = DEC.decode(stdinData)
-  const lines = splitLinesKeepEnds(text)
+  const lines = splitLinesKeepends(text)
   const result: ByteSource = ENC.encode(
     lines.map((ln) => unexpandLine(ln, tabsize, allSpaces)).join(''),
   )

@@ -44,6 +44,7 @@ from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
 from mirage.types import JsonValue, MountMode, ReadSpec, VFSName, WritePolicy
+from mirage.utils.path import norm_dir
 from mirage.version import __version__
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
@@ -95,7 +96,7 @@ from mirage.workspace.snapshot.keys import (
     StateKey,
     VFSStateKey,
 )
-from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
+from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -244,8 +245,8 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLI:
 async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
     auto_prefixes = {
         "/dev/",
-        norm_mount_prefix(HISTORY_PREFIX),
-        norm_mount_prefix(BIN_PREFIX),
+        norm_dir(HISTORY_PREFIX),
+        norm_dir(BIN_PREFIX),
     }
 
     mounted = ws.registry.mounts()
@@ -405,13 +406,13 @@ def build_mount_args(
     """
     check_format_version(state)
 
-    overrides = {norm_mount_prefix(k): v for k, v in (mounts or {}).items()}
+    overrides = {norm_dir(k): v for k, v in (mounts or {}).items()}
 
     missing = [
         m[MountKey.PREFIX]
         for m in state[StateKey.MOUNTS]
         if requires_vfs_override(m)
-        and norm_mount_prefix(m[MountKey.PREFIX]) not in overrides
+        and norm_dir(m[MountKey.PREFIX]) not in overrides
     ]
     if missing:
         raise ValueError(
@@ -440,7 +441,7 @@ def build_mount_args(
     mount_args: dict[str, Mount] = {}
     anchor_mode: MountMode | None = None
     for m in state[StateKey.MOUNTS]:
-        prefix = norm_mount_prefix(m[MountKey.PREFIX])
+        prefix = norm_dir(m[MountKey.PREFIX])
         override = overrides.get(prefix)
         if m.get(MountKey.ANCHOR) and override is None:
             anchor_mode = MountMode(m[MountKey.MODE])
@@ -1005,8 +1006,8 @@ def reusable_mounts(
     """
     auto = {
         "/dev/",
-        norm_mount_prefix(HISTORY_PREFIX),
-        norm_mount_prefix(BIN_PREFIX),
+        norm_dir(HISTORY_PREFIX),
+        norm_dir(BIN_PREFIX),
     }
     live = {
         m.prefix: Mount(vfs=m.vfs, read=m.read, vfs_ref=m.vfs_ref)

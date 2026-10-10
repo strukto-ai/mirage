@@ -116,9 +116,14 @@ describe('parseIdName', () => {
   it('recovers the id', () => {
     expect(parseIdName('general__C123456')).toEqual(['general', 'C123456'])
     expect(parseIdName('team__uuid.json', '.json')).toEqual(['team', 'uuid'])
+    expect(parseIdName('ENG__Eng__T1')).toEqual(['ENG__Eng', 'T1'])
   })
 
   it.each(['nosep', 'trailing__', 'wrong.txt'])('refuses %s', (name) => {
     expect(() => parseIdName(name)).toThrow()
+  })
+
+  it('refuses another suffix', () => {
+    expect(() => parseIdName('team__uuid.json', '.md')).toThrow()
   })
 })

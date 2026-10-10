@@ -19,26 +19,12 @@ import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 
-export interface McpConfigResolutionOptions {
-  cwd?: string
-  env?: Record<string, string | undefined>
-}
+export const MCP_ENV_NAMES = ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG']
 
 interface McpCommandOptions {
   workspace?: string
   session?: string
   allCalls?: boolean
-}
-
-export function resolveMcpConfig(
-  config: string | undefined,
-  options: McpConfigResolutionOptions = {},
-): string {
-  return resolveWorkspaceConfig(config, {
-    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    ...(options.env !== undefined ? { env: options.env } : {}),
-    envNames: ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG'],
-  })
 }
 
 /**
@@ -82,7 +68,7 @@ async function runMcp(config: string | undefined, options: McpCommandOptions): P
   let path: string | undefined
   if (options.workspace === undefined) {
     try {
-      path = resolveMcpConfig(config)
+      path = resolveWorkspaceConfig(config, { envNames: MCP_ENV_NAMES })
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error), 2)
     }

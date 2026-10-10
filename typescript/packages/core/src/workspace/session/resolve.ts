@@ -25,7 +25,7 @@ import type { CommandRule, AdmissionRules, HideReason, ProfileScript } from '../
 import type { HiddenPaths, MountMode, ShowEntry, ShownPaths } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { classifyPaths, classifyShows, classifyVars } from '../../utils/hidden.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { norm } from '../../utils/path.ts'
 import {
   type CommandsBlock,
   type CompiledProfile,
@@ -245,11 +245,6 @@ export function withInline(
   return out
 }
 
-/** One spelling for a mount prefix: leading slash, no trailing one. */
-function rootOf(prefix: string): string {
-  return '/' + stripSlash(prefix)
-}
-
 /**
  * A mount section's path entries, anchored to the mount they are written
  * under.
@@ -296,7 +291,7 @@ export function compileCommands(profile: SessionProfile): AdmissionRules | null 
   const ask: CommandRule[] = []
   const deny: CommandRule[] = []
   for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    const root = rootOf(prefix)
+    const root = norm(prefix)
     ask.push(...scopeRules(rulesOf(entry.commands, 'ask'), root))
     deny.push(...scopeRules(rulesOf(entry.commands, 'deny'), root))
   }
@@ -319,7 +314,7 @@ export function compileCommands(profile: SessionProfile): AdmissionRules | null 
 function hiddenOf(profile: SessionProfile): HiddenPaths | null {
   const entries = [...(profile.paths?.hide ?? [])]
   for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    entries.push(...anchored(entry.paths?.hide ?? [], rootOf(prefix)))
+    entries.push(...anchored(entry.paths?.hide ?? [], norm(prefix)))
   }
   return classifyPaths(entries)
 }
@@ -345,7 +340,7 @@ function shownOf(profile: SessionProfile): ShownPaths | null {
 function hideReasonsOf(profile: SessionProfile): readonly HideReason[] {
   const groups: HideReason[] = [...(profile.paths?.reasons ?? [])]
   for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    const root = rootOf(prefix)
+    const root = norm(prefix)
     groups.push(
       ...(entry.paths?.reasons ?? []).map((g): HideReason => ({
         patterns: anchored(g.patterns, root),

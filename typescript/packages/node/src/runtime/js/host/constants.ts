@@ -19,12 +19,12 @@ import { HARD_LINK_REFUSAL } from '@struktoai/mirage-core/runtime/constants'
 // runtime/python/host/constants.py classifies `os`. A name covers its
 // three spellings (`fs.promises.x`, the callback `fs.x`, `fs.xSync`),
 // whichever node has. A routed name goes through the workspace on a
-// mounted path, a refused one answers its condition there, and a
-// passthrough name keeps node's function because nothing it takes is a
-// path a mount could serve. A sync spelling refuses a mounted path,
-// since the workspace answers asynchronously. A path-taking function in
-// none of the three would keep node's own answer with a mounted path in
-// hand, which is why constants.test.ts fails on any such name.
+// mounted path and a refused one answers its condition there; any other
+// keeps node's function. A sync spelling refuses a mounted path, since
+// the workspace answers asynchronously. constants.test.ts lists the
+// names that keep node's function on purpose, because nothing they take
+// is a path a mount could serve, and fails on any other, which would
+// keep node's own answer with a mounted path in hand.
 export const ROUTED_CALLS = [
   'access',
   'appendFile',
@@ -78,25 +78,6 @@ export const REFUSED_CALLS: Readonly<Record<string, FsCondition>> = {
 // callback (`fs.watch`, `fs.watchFile`): node answers their failure by
 // throwing, so the refusal throws too instead of calling the listener.
 export const LISTENED_CALLS: ReadonlySet<string> = new Set(['watch', 'watchFile'])
-
-// Descriptor calls take an fd, which a mounted path never opens, and
-// unwatchFile undoes a watch that could not have started on a mount.
-export const PASSTHROUGH_CALLS: ReadonlySet<string> = new Set([
-  '_toUnixTimestamp',
-  'close',
-  'fchmod',
-  'fchown',
-  'fdatasync',
-  'fstat',
-  'fsync',
-  'ftruncate',
-  'futimes',
-  'read',
-  'readv',
-  'unwatchFile',
-  'write',
-  'writev',
-])
 
 // The argument positions that name a path, for the calls that take more
 // than the first: both ends of a move or copy, and a symlink's own

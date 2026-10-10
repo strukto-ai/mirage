@@ -18,7 +18,8 @@ import {
   type FilesSearchQuery,
   type SearchEntry,
 } from './search/index.ts'
-import { isNotFound, rawPathOf } from './util.ts'
+import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { isNotFound } from './util.ts'
 import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
 
 interface FindScope {

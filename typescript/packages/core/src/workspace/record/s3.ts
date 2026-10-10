@@ -140,20 +140,6 @@ export class S3RecordClient {
     return names
   }
 
-  /** Every stored record, keyed by name; batch-first (one list, then parallel reads). */
-  async loadAll(): Promise<Map<string, Record<string, unknown>>> {
-    const names = await this.listNames()
-    const records = await Promise.all(names.map((name) => this.get(name)))
-    const out = new Map<string, Record<string, unknown>>()
-    for (const [i, name] of names.entries()) {
-      const record = records[i]
-      if (record === undefined) continue
-      const [fields] = record
-      if (fields !== null) out.set(name, fields)
-    }
-    return out
-  }
-
   async delete(names: readonly string[]): Promise<void> {
     if (names.length === 0) return
     const [client, mod] = await Promise.all([this.client(), loadS3Module(this.config)])

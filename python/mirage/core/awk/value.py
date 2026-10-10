@@ -51,8 +51,6 @@ class Value:
 
 
 UNINIT = Value(ValueKind.UNINIT)
-ZERO = Value(ValueKind.NUM, 0.0)
-ONE = Value(ValueKind.NUM, 1.0)
 
 
 def num(value: float) -> Value:
@@ -238,9 +236,7 @@ def compare(left: Value, right: Value, convfmt: str) -> int:
 
 
 __all__ = [
-    "ONE",
     "UNINIT",
-    "ZERO",
     "Value",
     "ValueKind",
     "compare",

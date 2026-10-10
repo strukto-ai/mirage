@@ -255,7 +255,7 @@ export {
 } from './vfs/nextcloud/config.ts'
 export { PROMPT as NEXTCLOUD_PROMPT } from './vfs/nextcloud/prompt.ts'
 export { NEXTCLOUD_COMMANDS } from './commands/builtin/nextcloud/index.ts'
-export { buildDeltaHook as buildNextcloudDeltaHook, NextcloudWalk } from './core/nextcloud/watch.ts'
+export { buildDeltaHook as buildNextcloudDeltaHook } from './core/nextcloud/watch.ts'
 export { DiscordVFS, type DiscordVFSState } from './vfs/discord/discord.ts'
 export {
   normalizeDiscordConfig,

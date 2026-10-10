@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
+import { concat } from '../../io/cachable_iterator.ts'
 import { recordStream } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
@@ -21,13 +22,6 @@ import { backendPath } from './path.ts'
 import { enoent } from '../../errors/fs.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
-
-function concatChunks(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const out = new Uint8Array(a.byteLength + b.byteLength)
-  out.set(a, 0)
-  out.set(b, a.byteLength)
-  return out
-}
 
 export async function* readStream(
   accessor: DatabricksVolumeAccessor,
@@ -57,7 +51,7 @@ export async function* readStream(
         completed = true
         break
       }
-      pending = concatChunks(pending, value)
+      pending = concat([pending, value])
       while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
         const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
         if (rec !== null) rec.bytes += piece.byteLength

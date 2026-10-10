@@ -12,43 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from typing import Any
-
-from pymongo import AsyncMongoClient
-
-from mirage.accessor.base import Accessor
+from mirage.accessor.mongodb import MongoClientAccessor
 from mirage.vfs.gridfs.config import GridFSConfig
-from mirage.vfs.secrets import reveal_secret
 
 
-class GridFSAccessor(Accessor):
+class GridFSAccessor(MongoClientAccessor):
     def __init__(self, config: GridFSConfig) -> None:
+        super().__init__(config.uri)
         self.config = config
-        self._clients: dict[int, AsyncMongoClient[dict[str, Any]]] = {}
-
-    @property
-    def client(self) -> AsyncMongoClient[dict[str, Any]]:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return self._for_loop(None)
-        return self._for_loop(loop)
-
-    def _for_loop(
-        self, loop: asyncio.AbstractEventLoop | None
-    ) -> AsyncMongoClient[dict[str, Any]]:
-        # AsyncMongoClient binds to the event loop it was created under, so
-        # keep one client per loop (mirrors MongoDBAccessor).
-        key = id(loop) if loop is not None else 0
-        client = self._clients.get(key)
-        if client is None:
-            client = AsyncMongoClient(reveal_secret(self.config.uri))
-            self._clients[key] = client
-        return client
-
-    async def close(self) -> None:
-        clients = list(self._clients.values())
-        self._clients.clear()
-        for client in clients:
-            await client.close()

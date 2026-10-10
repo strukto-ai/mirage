@@ -43,3 +43,35 @@ export async function connectRedis(
   await c.connect()
   return c
 }
+
+/**
+ * A node-redis client connected on first use. A client that errors is dropped,
+ * so the next call connects afresh. `close` is idempotent: the workspace closes
+ * the plane store it consumed and the owning WorkspaceStateStore closes every
+ * plane it built, so the second close is a no-op, not a crash on an
+ * already-quit client.
+ */
+export class RedisConnection {
+  private pending: Promise<RedisClientType> | null = null
+
+  constructor(
+    private readonly url: string,
+    private readonly feature: string,
+  ) {}
+
+  client(): Promise<RedisClientType> {
+    if (this.pending === null) {
+      const pending = connectRedis(this.url, this.feature, () => {
+        if (this.pending === pending) this.pending = null
+      })
+      this.pending = pending
+    }
+    return this.pending
+  }
+
+  async close(): Promise<void> {
+    const pending = this.pending
+    this.pending = null
+    if (pending !== null) await (await pending).quit()
+  }
+}

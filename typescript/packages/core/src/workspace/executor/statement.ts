@@ -168,7 +168,7 @@ export function carryStatus(session: SessionState): void {
  * Finalize a completed statement and seed $? for the next one.
  *
  * Every statement boundary must do the same dance: apply a VALUE
- * barrier so lazily finalized exit codes (grep's exitOnEmpty) are
+ * barrier so lazily finalized exit codes (grep's) are
  * concrete, then record the status the next statement's $? expands
  * to. Statement-list loops (program, subshell, brace group, if/loop/
  * case bodies, function bodies, && / || / ; lists) call this instead

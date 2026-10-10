@@ -59,7 +59,7 @@ import {
 } from '../snapshot/state.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
-import { QUIESCE_SECONDS, normMountPrefix } from '../snapshot/utils.ts'
+import { QUIESCE_SECONDS } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
 import {
@@ -129,7 +129,7 @@ import { resolveSources } from '../../secrets/sources.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { DEFAULT_PROFILE } from '../session/constants.ts'
 import { SessionManager } from '../session/manager.ts'
-import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
+import type { WorkspaceStateStore } from '../store/base.ts'
 import { varsFromEnv, varsFromEntries, type SessionState } from '../session/session.ts'
 import {
   parseProfileMounts,
@@ -139,7 +139,7 @@ import {
 import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
@@ -1020,19 +1020,6 @@ export class Workspace {
     this.reads.delete(sessionId)
   }
 
-  async closeAllSessions(): Promise<void> {
-    const closed = this.listSessions()
-      .map((s) => s.sessionId)
-      .filter((id) => id !== this.defaultSessionId)
-    await this.sessionManager.closeAll()
-    for (const id of closed) {
-      await this.documents.releaseSession(id)
-      await this.jobTable.closeSession(id)
-      this.toolTables.delete(id)
-      this.reads.delete(id)
-    }
-  }
-
   /**
    * Hydrate sessions from the session store (idempotent). The discovery
    * record resolves first so a minted default session id can adopt the
@@ -1149,11 +1136,6 @@ export class Workspace {
    */
   forgetReads(): void {
     this.reads.clear()
-  }
-
-  /** This workspace's metadata record (discovery surface). */
-  async workspaceMeta(): Promise<WorkspaceFields> {
-    return this.meta.load()
   }
 
   /** Write every session's durable fields through to the session store. */
@@ -1292,19 +1274,9 @@ export class Workspace {
     return this.vfs.records
   }
 
-  /** Records that hit a remote VFS (not cache). */
-  get networkRecords(): OpRecord[] {
-    return this.vfs.networkRecords
-  }
-
   /** Total bytes transferred over the network. */
   get networkBytes(): number {
     return this.vfs.networkBytes
-  }
-
-  /** Records served from in-memory cache. */
-  get cacheRecords(): OpRecord[] {
-    return this.vfs.cacheRecords
   }
 
   /** Total bytes served from cache. */
@@ -1953,7 +1925,7 @@ export class Workspace {
       state,
       rebuilt,
       cliOverrides,
-      new Set(Object.keys(overrides).map(normMountPrefix)),
+      new Set(Object.keys(overrides).map(normDir)),
     )
     // The Mounts ride through whole; flattening them to [vfs, mode]
     // here is what would drop the restored read policy.

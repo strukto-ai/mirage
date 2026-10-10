@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseIdName } from '../../utils/naming.ts'
-import { formatSegment, sanitizeName, stripDashes } from './pathing.ts'
+import { formatSegment, sanitizeName } from './pathing.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 
 describe('sanitizeName', () => {
@@ -35,15 +35,6 @@ describe('sanitizeName', () => {
   })
   it('truncates to 100 characters', () => {
     expect(sanitizeName('x'.repeat(150))).toHaveLength(100)
-  })
-})
-
-describe('stripDashes', () => {
-  it('strips dashes from a uuid-like string', () => {
-    expect(stripDashes('a-b-c-d-e')).toBe('abcde')
-  })
-  it('strips all dashes', () => {
-    expect(stripDashes('aaa-bbb-ccc-ddd-eee')).toBe('aaabbbcccdddeee')
   })
 })
 

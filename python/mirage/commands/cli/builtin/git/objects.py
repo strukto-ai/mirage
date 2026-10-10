@@ -25,7 +25,6 @@ from dulwich.repo import BaseRepo
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.cli.builtin.git.format import abbrev_length
 from mirage.commands.cli.builtin.git.io import (
-    basename,
     file_size,
     read_file,
     read_names,
@@ -35,6 +34,7 @@ from mirage.commands.cli.builtin.git.io import (
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.utils.remnants import entry_name
 
 OBJECTS_DIR = "objects"
 PACK_DIR = "objects/pack"
@@ -145,7 +145,7 @@ class LooseObjects:
         )
         found = []
         for entry in names:
-            rest = basename(entry)
+            rest = entry_name(entry)
             if len(fanout) + len(rest) == SHA_LEN:
                 found.append(ObjectID(f"{fanout}{rest}".encode()))
         return found
@@ -155,7 +155,7 @@ class LooseObjects:
         for entry in run_async_from_sync(
             read_names(self._dispatch, self._root), self._loop
         ):
-            fanout = basename(entry)
+            fanout = entry_name(entry)
             if len(fanout) == FANOUT_LEN:
                 yield from self.ids_under(fanout)
 
@@ -336,27 +336,6 @@ class VfsObjectStore(PackCapableObjectStore):
         """
         self._loose.put(obj)
 
-    def add_objects(self, objects, progress=None) -> None:
-        """Store several objects, loose.
-
-        Args:
-            objects (Iterable): (object, path) pairs, dulwich's shape.
-            progress (Callable | None): ignored; nothing here is slow
-                enough to report on and there is no terminal to report
-                to.
-        """
-        for obj, _path in objects:
-            self._loose.put(obj)
-
-    def add_pack(self):
-        # Packing is git's maintenance step, not part of any verb mirage
-        # offers, and a pack cannot be built one object at a time through
-        # a dispatcher anyway.
-        raise NotImplementedError("VfsObjectStore writes loose objects only")
-
-    def add_pack_data(self, count, unpacked_objects, progress=None):
-        raise NotImplementedError("VfsObjectStore writes loose objects only")
-
 
 async def load_packs(
     dispatch: DispatchFn, gitdir: PathSpec, loop: asyncio.AbstractEventLoop
@@ -378,7 +357,7 @@ async def load_packs(
     root = gitdir.join(PACK_DIR)
     packs: list[Pack] = []
     for entry in await read_names(dispatch, root):
-        name = basename(entry)
+        name = entry_name(entry)
         if not name.endswith(IDX_SUFFIX):
             continue
         stem = name[: -len(IDX_SUFFIX)]

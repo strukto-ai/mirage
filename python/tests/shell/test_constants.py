@@ -1,27 +1,16 @@
-from mirage.shell.constants import (
-    BUILTIN_GROUP,
-    GRAMMAR_BUILTINS,
-    GROUP_TIER,
-    TOOL_BUILTINS,
-)
+from mirage.shell.constants import BUILTIN_GROUP, GRAMMAR_BUILTINS, GROUP_TIER
 from mirage.shell.types import BuiltinGroup, BuiltinTier, ShellBuiltin
-
-
-def test_tiers_partition_the_builtins():
-    assert GRAMMAR_BUILTINS.isdisjoint(TOOL_BUILTINS)
-    assert GRAMMAR_BUILTINS | TOOL_BUILTINS == frozenset(ShellBuiltin)
 
 
 def test_tier_members_are_builtins():
     assert all(isinstance(b, ShellBuiltin) for b in GRAMMAR_BUILTINS)
-    assert all(isinstance(b, ShellBuiltin) for b in TOOL_BUILTINS)
 
 
 def test_tier_values():
     assert BuiltinTier.GRAMMAR == "grammar"
     assert BuiltinTier.TOOL == "tool"
     assert ShellBuiltin.CD in GRAMMAR_BUILTINS
-    assert ShellBuiltin.PYTHON3 in TOOL_BUILTINS
+    assert ShellBuiltin.PYTHON3 not in GRAMMAR_BUILTINS
 
 
 def test_group_rows_cover_every_builtin():
@@ -38,7 +27,6 @@ def test_tier_sets_derive_from_the_group_rows():
     for builtin, group in BUILTIN_GROUP.items():
         tier = GROUP_TIER[group]
         assert (builtin in GRAMMAR_BUILTINS) == (tier is BuiltinTier.GRAMMAR)
-        assert (builtin in TOOL_BUILTINS) == (tier is BuiltinTier.TOOL)
 
 
 def test_group_values():

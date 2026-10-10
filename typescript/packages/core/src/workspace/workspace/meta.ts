@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SessionManager } from '../session/manager.ts'
-import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
+import type { WorkspaceStateStore } from '../store/base.ts'
 
 /**
  * The workspace's discovery record: who it is and which session is its
@@ -87,12 +87,5 @@ export class WorkspaceMeta {
       default_session_id: sessionId,
     })
     this.written = true
-  }
-
-  /** This workspace's metadata record (discovery surface). */
-  async load(): Promise<WorkspaceFields> {
-    await this.ensure()
-    const meta = await this.store.loadMeta(this.wsId)
-    return meta ?? {}
   }
 }

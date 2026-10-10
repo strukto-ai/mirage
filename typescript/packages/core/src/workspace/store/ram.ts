@@ -69,11 +69,6 @@ export class RAMWorkspaceStateStore extends WorkspaceStateStore {
     return Promise.resolve(fields !== undefined ? { ...fields } : null)
   }
 
-  protected writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
-    this.meta.set(workspaceId, { ...fields })
-    return Promise.resolve()
-  }
-
   protected casWriteMeta(
     workspaceId: string,
     fields: WorkspaceFields,

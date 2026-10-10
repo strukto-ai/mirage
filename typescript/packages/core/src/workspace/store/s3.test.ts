@@ -49,7 +49,7 @@ describe('S3WorkspaceStateStore', () => {
   it('round-trips the meta record at the documented layout', async () => {
     const store = new S3WorkspaceStateStore(config())
     expect(await store.loadMeta('ws1')).toBeNull()
-    await store.setMeta('ws1', { workspace_id: 'ws1', default_session_id: 'main' })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1', default_session_id: 'main' }, 0)
     const meta = await store.loadMeta('ws1')
     await store.close()
     expect(meta).toEqual({ workspace_id: 'ws1', default_session_id: 'main' })
@@ -71,7 +71,7 @@ describe('S3WorkspaceStateStore', () => {
 
   it('replaceMeta merges over the stored record and bumps the generation', async () => {
     const store = new S3WorkspaceStateStore(config())
-    await store.setMeta('ws1', { workspace_id: 'ws1', created_at: 111, generation: 4 })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1', created_at: 111, generation: 4 }, 0)
     const written = await store.replaceMeta('ws1', {
       workspace_id: 'ws1',
       default_session_id: 'restored',
@@ -104,7 +104,7 @@ describe('S3WorkspaceStateStore', () => {
     store.namespace('ws1')
     store.observer('ws1')
     await store.sessions('ws1').set('main', { session_id: 'main' })
-    await store.setMeta('ws1', { workspace_id: 'ws1' })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
     await store.close()
     expect(currentFakeS3().entry(BUCKET, 'mirage/ws1/sessions/main.json')).toBeDefined()
     expect(currentFakeS3().entry(BUCKET, 'mirage/workspaces/ws1.json')).toBeDefined()
@@ -113,7 +113,7 @@ describe('S3WorkspaceStateStore', () => {
   it('drops the sessions and meta objects of a workspace', async () => {
     const store = new RAMWorkspaceStateStore({ workspace: new S3WorkspaceStateStore(config()) })
     await store.sessions('ws1').set('main', { session_id: 'main' })
-    await store.setMeta('ws1', { workspace_id: 'ws1' })
+    await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
     await store.drop('ws1')
     expect(await store.loadMeta('ws1')).toBeNull()
     await store.close()

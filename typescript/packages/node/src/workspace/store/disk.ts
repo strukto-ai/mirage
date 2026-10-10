@@ -25,7 +25,7 @@ import type {
 } from '@struktoai/mirage-core/workspace/store/base'
 import { DiskObserverStore } from '../../observe/disk_store.ts'
 import { DiskNamespaceStore } from '../mount/namespace/disk.ts'
-import { DiskRecordClient } from '../record/disk.ts'
+import { DiskRecordClient, quoteName } from '../record/disk.ts'
 import { DiskSessionStore } from '../session/disk.ts'
 
 export const DEFAULT_STATE_ROOT = '~/.mirage/state'
@@ -39,14 +39,6 @@ function expandHome(p: string): string {
 // The workspace ids that would name the state root or its `workspaces`
 // directory rather than one workspace's own.
 export const DOT_IDS: ReadonlySet<string> = new Set(['', '.', '..'])
-
-// Match Python's urllib quote(safe="") for the workspace path segment.
-function quoteSegment(name: string): string {
-  return encodeURIComponent(name).replace(
-    /[!'()*]/g,
-    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-  )
-}
 
 export interface DiskWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
   root?: string
@@ -89,7 +81,7 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
     // the dot names are the escapes quoting keeps, and deleting a
     // workspace removes this directory whole, so they are refused.
     if (DOT_IDS.has(workspaceId)) throw new Error(`invalid workspace id: ${workspaceId}`)
-    return path.join(this.root, 'workspaces', quoteSegment(workspaceId))
+    return path.join(this.root, 'workspaces', quoteName(workspaceId))
   }
 
   private metaClient(workspaceId: string): DiskRecordClient {
@@ -131,10 +123,6 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   protected async readMeta(workspaceId: string): Promise<WorkspaceFields | null> {
     const [fields] = await this.metaClient(workspaceId).get('workspace')
     return fields
-  }
-
-  protected async writeMeta(workspaceId: string, fields: WorkspaceFields): Promise<void> {
-    await this.metaClient(workspaceId).put('workspace', fields)
   }
 
   protected async casWriteMeta(

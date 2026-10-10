@@ -65,7 +65,8 @@ function extraString(entry: IndexEntry, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
-async function filteredTeams(accessor: LinearAccessor): Promise<Record<string, unknown>[]> {
+/** The teams the mount shows: all of them, or those in `teamIds`. Mirrors Python's `filtered_teams`. */
+export async function filteredTeams(accessor: LinearAccessor): Promise<Record<string, unknown>[]> {
   let teams = await listTeams(accessor.transport)
   if (accessor.teamIds !== null && accessor.teamIds.length > 0) {
     const allowed = new Set(accessor.teamIds)

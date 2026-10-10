@@ -19,17 +19,6 @@ import { fail } from './output.ts'
 
 export const RPC_ENV_NAMES = ['MIRAGE_RPC_CONFIG', 'MIRAGE_CONFIG']
 
-export function resolveRpcConfig(
-  config: string | undefined,
-  options: { cwd?: string; env?: Record<string, string | undefined> } = {},
-): string {
-  return resolveWorkspaceConfig(config, {
-    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    ...(options.env !== undefined ? { env: options.env } : {}),
-    envNames: RPC_ENV_NAMES,
-  })
-}
-
 /**
  * Serve a workspace session's API over JSON-RPC on stdio: line-delimited
  * JSON-RPC 2.0 on stdin and stdout, relayed to the workspace's
@@ -51,7 +40,7 @@ export function registerRpcCommand(program: Command): void {
         let path: string | undefined
         if (options.workspace === undefined) {
           try {
-            path = resolveRpcConfig(config)
+            path = resolveWorkspaceConfig(config, { envNames: RPC_ENV_NAMES })
           } catch (error) {
             fail(error instanceof Error ? error.message : String(error), 2)
           }

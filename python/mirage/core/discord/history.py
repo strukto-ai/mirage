@@ -19,7 +19,7 @@ from mirage.core.api.client import SessionArg
 from mirage.core.discord.client import discord_get
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
-from mirage.core.discord.render import history_jsonl_bytes
+from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import TimeRange
 
 DISCORD_EPOCH = 1420070400000
@@ -134,7 +134,7 @@ async def get_history_jsonl(
     messages = await list_messages_for_day(
         config, channel_id, date_str, scope, session=session
     )
-    return history_jsonl_bytes(messages)
+    return jsonl_bytes(messages)
 
 
 async def fetch_recent_messages(

@@ -19,6 +19,7 @@ from mirage.utils.key_prefix import (
     child_spec,
     mount_key,
     normalize,
+    raw_path_of,
     rekey,
     strip_mount,
     under_path,
@@ -151,3 +152,20 @@ def test_child_spec_appends_to_the_vfs_key():
     assert child.vfs_path == "d/x"
     root = PathSpec(virtual="/m", directory="/", vfs_path="")
     assert child_spec(root, "x").vfs_path == "x"
+
+
+@pytest.mark.parametrize(
+    ("virtual", "vfs_path", "raw"),
+    [
+        ("/nc/docs/a.txt", "docs/a.txt", "/docs/a.txt"),
+        ("/nc", "", "/"),
+        ("/nc/", "", "/"),
+        ("/nc/docs/", "docs", "/docs/"),
+        ("/a.txt", "a.txt", "/a.txt"),
+    ],
+)
+def test_raw_path_of_keeps_the_typed_spelling_below_the_mount(
+    virtual, vfs_path, raw
+):
+    path = PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
+    assert raw_path_of(path) == raw
