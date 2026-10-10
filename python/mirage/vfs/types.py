@@ -328,7 +328,10 @@ class ScanReason(StrEnum):
     plain text of three characters that every match holds (under -i, a
     word with a non-ASCII letter, or with i, k or s when case folds by
     Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints
-    lines that do not match. LINKS: rg -L follows links out of the walk.
+    lines that do not match. EVERY_FILE: rg --files-without-match, or
+    rg -c or --count-matches with --include-zero, lists files that do
+    not match, and rg leaves a binary one out. LINKS: rg -L follows
+    links out of the walk.
     UNANSWERED: ``files_containing`` returned None, or
     ``lines_containing`` returned None for a file.
     """
@@ -336,6 +339,7 @@ class ScanReason(StrEnum):
     NO_SEARCH = "the mount has no search"
     NO_TEXT = "the pattern has no plain text to search for"
     EVERY_LINE = "the output needs lines that do not match"
+    EVERY_FILE = "the output lists files that do not match"
     LINKS = "links are followed"
     UNANSWERED = "the search could not answer"
 

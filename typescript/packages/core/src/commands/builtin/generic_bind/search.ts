@@ -156,6 +156,9 @@ export function rgTerms(
   if (f.listFiles || f.typeList) return null
   const pattern = patternArg(texts, bag, PATTERN_KEYS.rg)
   if (f.invert || f.passthru) return ScanReason.EVERY_LINE
+  if (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches))) {
+    return ScanReason.EVERY_FILE
+  }
   if (f.follow) return ScanReason.LINKS
   if (pattern === null || fl.raw('file') !== undefined) return ScanReason.NO_TEXT
   const ignoreCase = foldsCase(pattern, f.fixedString, f)
@@ -326,11 +329,12 @@ export async function searchReads<A extends Accessor>(
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
   const found = hits
-  let scanAsked = false
-  const readUnanswered = async (): Promise<void> => {
-    if (found !== null || scanAsked) return
-    scanAsked = true
-    await fullScan(io, name, accessor, dirs, ScanReason.UNANSWERED, index)
+  // Asked once; a refusal then stands for every file no search answered.
+  let scan: Promise<void> | null = null
+  const readUnanswered = (): Promise<void> => {
+    if (found !== null) return Promise.resolve()
+    scan ??= fullScan(io, name, accessor, dirs, ScanReason.UNANSWERED, index)
+    return scan
   }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
     if (

@@ -200,6 +200,10 @@ def rg_terms(
     pattern = pattern_arg(texts, fl, PATTERN_KEYS["rg"])
     if f.invert or f.passthru:
         return ScanReason.EVERY_LINE
+    if f.files_without_match or (
+        f.include_zero and (f.count_only or f.count_matches)
+    ):
+        return ScanReason.EVERY_FILE
     if f.follow:
         return ScanReason.LINKS
     if pattern is None or fl.raw("file"):
@@ -416,14 +420,21 @@ async def search_reads(
         return read_bytes, read_stream
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
     scan_asked = False
+    refusal: Exception | None = None
 
     async def read_unanswered() -> None:
-        nonlocal scan_asked
+        nonlocal scan_asked, refusal
+        if refusal is not None:
+            raise refusal
         if hits is None and not scan_asked:
             scan_asked = True
-            await _full_scan(
-                io, name, accessor, dirs, ScanReason.UNANSWERED, index
-            )
+            try:
+                await _full_scan(
+                    io, name, accessor, dirs, ScanReason.UNANSWERED, index
+                )
+            except Exception as exc:
+                refusal = exc
+                raise
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
         if (

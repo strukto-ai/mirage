@@ -688,9 +688,10 @@ class BaseVFS:
 
         Once per command: before the walk when neither search can be
         asked, else at the first file ``lines_containing`` declines after
-        ``files_containing`` did not narrow. Return to let the scan run;
-        raise to refuse it, and the error's message is what the command
-        prints.
+        ``files_containing`` did not narrow, and a refusal then stands for
+        every such file. Return to let the scan run; raise to refuse it,
+        and the error's message is what the command prints (an OSError
+        raised at a file is that file's read error).
 
         Args:
             command (str): grep or rg.
@@ -699,8 +700,9 @@ class BaseVFS:
             reason (ScanReason): why the search cannot stand in:
                 NO_SEARCH (no search on this mount or this path),
                 NO_TEXT (-f, or no plain text every match holds),
-                EVERY_LINE (-v, rg --passthru), LINKS (rg -L) or
-                UNANSWERED (a search returned None).
+                EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
+                --files-without-match, rg -c with --include-zero), LINKS
+                (rg -L) or UNANSWERED (a search returned None).
             index (IndexCacheStore): the mount's index.
         """
         return None

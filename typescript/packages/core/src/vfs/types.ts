@@ -201,7 +201,9 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
  * NO_TEXT: -f, or no plain text of three characters that every match holds
  * (under -i, a word with a non-ASCII letter, or with k or s when case folds by
  * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
- * do not match. LINKS: rg -L follows links out of the walk. UNANSWERED:
+ * do not match. EVERY_FILE: rg --files-without-match, or rg -c or
+ * --count-matches with --include-zero, lists files that do not match, and rg
+ * leaves a binary one out. LINKS: rg -L follows links out of the walk. UNANSWERED:
  * `filesContaining` resolved null, or `linesContaining` resolved null for a
  * file.
  */
@@ -209,6 +211,7 @@ export const ScanReason = Object.freeze({
   NO_SEARCH: 'the mount has no search',
   NO_TEXT: 'the pattern has no plain text to search for',
   EVERY_LINE: 'the output needs lines that do not match',
+  EVERY_FILE: 'the output lists files that do not match',
   LINKS: 'links are followed',
   UNANSWERED: 'the search could not answer',
 } as const)

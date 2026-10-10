@@ -268,11 +268,13 @@ with why:
 | `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
 | `NO_TEXT` | `-f`, or no plain text of three characters every match holds (under `-i`, a word with a non-ASCII letter, or with k or s, counts as none) |
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
+| `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`: rg leaves a binary file out of these |
 | `LINKS` | rg `-L` |
 | `UNANSWERED` | `filesContaining` resolved `null`, or `linesContaining` resolved `null` for a file |
 
 Reject from it (or from `filesContaining`) to refuse: the error's message is
-what the command prints, and each reason's value is a sentence to put in it.
+what the command prints (a filesystem error rejected at a file is that file's read error), and each reason's value is a sentence
+to put in it.
 `examples/typescript/other/custom_vfs.ts` defines `filesContaining` for its
 wiki.
 

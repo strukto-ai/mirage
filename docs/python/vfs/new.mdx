@@ -273,11 +273,13 @@ with why:
 | `NO_SEARCH` | the mount defines neither search function, or a hide or path rule covers the walk |
 | `NO_TEXT` | `-f`, or no plain text of three characters every match holds (under `-i`, a word with a non-ASCII letter, or with i, k or s, counts as none) |
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
+| `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`: rg leaves a binary file out of these |
 | `LINKS` | rg `-L` |
 | `UNANSWERED` | `files_containing` returned `None`, or `lines_containing` returned `None` for a file |
 
 Raise from it (or from `files_containing`) to refuse: the error's message is
-what the command prints, and each reason's value is a sentence to put in it.
+what the command prints (an `OSError` raised at a file is that file's read error), and each reason's value is a sentence
+to put in it.
 `examples/python/other/custom_vfs.py` defines `files_containing` for its wiki.
 
 Native traversal (`find`) and size enumeration (`du_size` with `du_entries`)

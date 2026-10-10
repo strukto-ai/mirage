@@ -24,7 +24,7 @@ import { parseSessionProfile } from '../../../policy/profile.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import { efbig, enoent } from '../../../errors/fs.ts'
+import { eacces, efbig, enoent } from '../../../errors/fs.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
@@ -480,6 +480,8 @@ describe('a walk that reads every file', () => {
     ['rg --passthru ada /d', ScanReason.EVERY_LINE],
     ["grep -r 'a.b' /d", ScanReason.NO_TEXT],
     ['rg -L ada /d', ScanReason.LINKS],
+    ['rg --files-without-match ada /d', ScanReason.EVERY_FILE],
+    ['rg -c --include-zero ada /d', ScanReason.EVERY_FILE],
   ])('%s says why', async (line, reason) => {
     const vfs = new SearchRAM()
     await run(vfs, line)
@@ -549,6 +551,48 @@ describe('a line search that declines', () => {
     ])
   })
 })
+
+// A resource search beside a line search that answers no file.
+class DecliningResource extends Declining {
+  override search(): Promise<string[] | null> {
+    return Promise.resolve(null)
+  }
+}
+
+// Twin of test_a_refusal_stands_for_every_unanswered_file.
+it.each([Declining, DecliningResource])(
+  'lets a refusal stand for every unanswered file (%o)',
+  async (Mount) => {
+    // A filesystem error is a per-file read error to grep, which goes on to
+    // the next file; that file is refused too, not read.
+    class Refusing extends Mount {
+      override beforeFullScan(): Promise<void> {
+        return Promise.reject(eacces('/d', 'narrow the path'))
+      }
+    }
+    const vfs = new Refusing(false, true)
+    expect(await run(vfs, 'grep -r ada /d')).toEqual([
+      '',
+      ['a.txt', 'b.txt', 'c.txt', 'sub/d.txt']
+        .map((name) => `grep: /d/${name}: Permission denied\n`)
+        .join(''),
+      2,
+    ])
+    expect(vfs.reads).toEqual([])
+  },
+)
+
+// Twin of test_rg_leaves_a_binary_file_out_whatever_the_search_says.
+it.each(['rg --files-without-match ada /d', 'rg -c --include-zero ada /d'])(
+  'leaves a binary file out of %s whatever the search says',
+  async (line) => {
+    const seeded = async (vfs: RAMVFS): Promise<[string, string, number]> => {
+      vfs.store.files.set('/d/z.txt', ENC.encode('\0noise\n'))
+      return run(vfs, line)
+    }
+    expect(await seeded(new SearchRAM(true, false))).toEqual(await seeded(new RAMVFS()))
+  },
+)
 
 // Twin of test_hits_are_matched_without_case.
 it('matches hits without case', async () => {

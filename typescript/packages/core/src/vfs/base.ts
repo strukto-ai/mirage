@@ -579,17 +579,19 @@ export class BaseVFS<A extends Accessor = Accessor> {
   /**
    * Called before grep or rg reads a file no search answered, once per command:
    * before the walk when neither search can be asked, else at the first file
-   * `linesContaining` declines after `filesContaining` did not narrow.
-   * Resolve to let the scan run; reject to refuse it, and the error's message
-   * is what the command prints.
+   * `linesContaining` declines after `filesContaining` did not narrow, and a
+   * refusal then stands for every such file. Resolve to let the scan run;
+   * reject to refuse it, and the error's message is what the command prints
+   * (a filesystem error rejected at a file is that file's read error).
    *
    * @param command grep or rg.
    * @param under the directories about to be walked, as `filesContaining`
    *   gets them.
    * @param reason why the search cannot stand in: NO_SEARCH (no search on
    *   this mount or this path), NO_TEXT (-f, or no plain text every match
-   *   holds), EVERY_LINE (-v, rg --passthru), LINKS (rg -L) or UNANSWERED
-   *   (a search resolved null).
+   *   holds), EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
+   *   --files-without-match, rg -c with --include-zero), LINKS (rg -L) or
+   *   UNANSWERED (a search resolved null).
    * @param index the mount's index.
    */
   beforeFullScan(

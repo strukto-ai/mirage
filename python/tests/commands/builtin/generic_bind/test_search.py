@@ -546,6 +546,8 @@ def test_a_streamed_answer_is_closed_when_grep_stops_early(line):
         ("rg --passthru ada /d", ScanReason.EVERY_LINE),
         ("grep -r 'a.b' /d", ScanReason.NO_TEXT),
         ("rg -L ada /d", ScanReason.LINKS),
+        ("rg --files-without-match ada /d", ScanReason.EVERY_FILE),
+        ("rg -c --include-zero ada /d", ScanReason.EVERY_FILE),
     ],
 )
 def test_a_walk_that_reads_every_file_says_why(line, reason):
@@ -650,3 +652,47 @@ def test_a_resource_search_still_narrows_the_scan():
     vfs = Resource(lines=False)
     asyncio.run(_run(vfs, "grep -r ada /d"))
     assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"]
+
+
+class DecliningResource(Declining, Resource):
+    """A resource search beside a line search that answers no file."""
+
+
+@pytest.mark.parametrize("mount", [Declining, DecliningResource])
+def test_a_refusal_stands_for_every_unanswered_file(mount):
+    # An OSError is a per-file read error to grep, which goes on to the
+    # next file; that file is refused too, not read.
+    class Refusing(mount):
+        async def before_full_scan(
+            self, command, under, reason, index=NULL_INDEX
+        ):
+            raise PermissionError(f"{reason}; narrow the path")
+
+    vfs = Refusing(files=False)
+    assert asyncio.run(_run(vfs, "grep -r ada /d")) == (
+        b"",
+        b"".join(
+            b"grep: /d/%s: Permission denied\n" % name
+            for name in (b"a.txt", b"b.txt", b"c.txt", b"sub/d.txt")
+        ),
+        2,
+    )
+    assert vfs.reads == []
+
+
+@pytest.mark.parametrize(
+    "line", ["rg --files-without-match ada /d", "rg -c --include-zero ada /d"]
+)
+def test_rg_leaves_a_binary_file_out_whatever_the_search_says(line):
+    async def run(vfs: RAMVFS) -> tuple[bytes, bytes, int]:
+        _seed(vfs)._store.files["/d/z.txt"] = b"\0noise\n"
+        ws = Workspace({"/": vfs})
+        try:
+            result = await ws.shell(line)
+            return result.stdout, result.stderr or b"", result.exit_code
+        finally:
+            await ws.close()
+
+    assert asyncio.run(run(SearchRAM(lines=False))) == asyncio.run(
+        run(RAMVFS())
+    )
