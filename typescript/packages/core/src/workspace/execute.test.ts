@@ -398,6 +398,10 @@ async function* warning(): AsyncGenerator<Uint8Array> {
   yield await Promise.resolve(new TextEncoder().encode('warn\n'))
 }
 
+function warns(): [Uint8Array, IOResult] {
+  return [new TextEncoder().encode('out\n'), new IOResult({ stderr: warning() })]
+}
+
 describe('native output', () => {
   it('releases a canceled mount handler that ignores the abort', async () => {
     const { ws } = buildWorkspace()
@@ -462,10 +466,6 @@ describe('native output', () => {
 
   it.each(['mount', 'cli'])('keeps the streamed stderr of a %s handler', async (kind) => {
     const { ws } = buildWorkspace()
-    const warns = (): [Uint8Array, IOResult] => [
-      new TextEncoder().encode('out\n'),
-      new IOResult({ stderr: warning() }),
-    ]
     if (kind === 'cli')
       ws.registerCli(
         'warns',

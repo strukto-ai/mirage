@@ -275,35 +275,36 @@ async def test_json_collects_channels_and_preserves_metadata(
             await runner.cleanup()
 
 
-async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
-    async def handler(request):
-        return web.Response(
-            body=(
-                record(
-                    stream="stderr",
-                    data=base64.b64encode(b"rm: Permission denied\n").decode(),
-                )
-                + record(
-                    status="done",
-                    result={
-                        "kind": "io",
-                        "exit_code": 126,
-                        "refusal": {
-                            "kind": "deny",
-                            "reason": "no deletes",
-                            "policy": "Guard",
-                            "scope": "command",
-                            "ask_id": None,
-                        },
+async def _refused_shell(request):
+    return web.Response(
+        body=(
+            record(
+                stream="stderr",
+                data=base64.b64encode(b"rm: Permission denied\n").decode(),
+            )
+            + record(
+                status="done",
+                result={
+                    "kind": "io",
+                    "exit_code": 126,
+                    "refusal": {
+                        "kind": "deny",
+                        "reason": "no deletes",
+                        "policy": "Guard",
+                        "scope": "command",
+                        "ask_id": None,
                     },
-                    error=None,
-                )
-            ),
-            content_type="application/x-ndjson",
-        )
+                },
+                error=None,
+            )
+        ),
+        content_type="application/x-ndjson",
+    )
 
+
+async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
     app = web.Application()
-    app.router.add_post("/shell", handler)
+    app.router.add_post("/shell", _refused_shell)
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
