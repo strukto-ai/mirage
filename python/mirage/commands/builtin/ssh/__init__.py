@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands, walked
+from mirage.commands.builtin.generic_bind import generic, walked
 
 COMMANDS = [
-    *generic_commands("ssh", table=walked),
+    generic(name, vfs="ssh", table=walked) for name in ("cp", "du", "find")
 ]

@@ -21,8 +21,8 @@ from unittest.mock import patch
 import pytest
 
 from mirage.cache.index import NULL_INDEX
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.s3 import COMMANDS as _S3_COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -32,7 +32,7 @@ from mirage.workspace import Workspace
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
-s3_cat = _S3_COMMANDS.require("cat").fn
+s3_cat = generic("cat").fn
 LAST_MODIFIED = datetime(2026, 3, 26, tzinfo=timezone.utc)
 
 # Every kit-derived op reaches the store through the driver's single

@@ -19,9 +19,9 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
-import { DISCORD_COMMANDS } from './index.ts'
+import { generic } from '../generic_bind/factory.ts'
 
-const DISCORD_WC = DISCORD_COMMANDS.filter((c) => c.name === 'wc' && c.filetype == null)
+const DISCORD_WC = [generic('wc')]
 
 const DEC = new TextDecoder()
 

@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
-const RAM_CAT = RAM_COMMANDS.filter((c) => c.name === 'cat' && c.filetype == null)
+const RAM_CAT = GENERIC_COMMANDS.filter((c) => c.name === 'cat' && c.filetype == null)
 
 describe('cat', () => {
   it('full byte range (256 bytes)', async () => {

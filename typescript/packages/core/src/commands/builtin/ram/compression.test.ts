@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import type { Command } from '../../config.ts'
 import { materialize } from '../../../io/types.ts'
@@ -23,8 +23,8 @@ import { gzip as gzipUtil, gunzip as gunzipUtil } from '../../../utils/compress.
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-const RAM_GZIP = RAM_COMMANDS.filter((c) => c.name === 'gzip' && c.filetype == null)
-const RAM_GUNZIP = RAM_COMMANDS.filter((c) => c.name === 'gunzip' && c.filetype == null)
+const RAM_GZIP = GENERIC_COMMANDS.filter((c) => c.name === 'gzip' && c.filetype == null)
+const RAM_GUNZIP = GENERIC_COMMANDS.filter((c) => c.name === 'gunzip' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

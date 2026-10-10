@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { type CommandOpts, type Command } from '../../config.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
@@ -25,9 +25,9 @@ import { readTar } from '../tar_helper.ts'
 import { UsageError } from '../../errors.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-const RAM_TAR = RAM_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
-const RAM_ZIP = RAM_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
-const RAM_UNZIP = RAM_COMMANDS.filter((c) => c.name === 'unzip' && c.filetype == null)
+const RAM_TAR = GENERIC_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
+const RAM_ZIP = GENERIC_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
+const RAM_UNZIP = GENERIC_COMMANDS.filter((c) => c.name === 'unzip' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

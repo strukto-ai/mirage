@@ -5,8 +5,8 @@ import pytest
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.gdrive import COMMANDS
-from mirage.commands.config import CommandCatalog, CommandOpts
+from mirage.commands.builtin.generic_bind import generic
+from mirage.commands.config import CommandOpts
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.types import materialize
@@ -49,7 +49,7 @@ async def test_grep_i_keeps_rendered_google_json(kind, module):
             )
         ],
     )
-    cmd = CommandCatalog(COMMANDS).require("grep")
+    cmd = generic("grep")
     with patch(
         f"mirage.core.{module}.read.google_get",
         new=AsyncMock(return_value={"title": "needle\0tail"}),

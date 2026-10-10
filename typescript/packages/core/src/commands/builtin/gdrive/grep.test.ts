@@ -11,7 +11,7 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { googleGet, type TokenManager } from '../../../core/google/client.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { GDRIVE_COMMANDS } from './index.ts'
+import { generic } from '../generic_bind/factory.ts'
 import { ioFor } from '../../../test-utils.ts'
 import { GDriveVFS } from '../../../vfs/gdrive/gdrive.ts'
 
@@ -30,8 +30,7 @@ async function run(kind: string, flags: Record<string, boolean> = {}) {
   await index.setDir('/drive', [
     [name, new IndexEntry({ id: 'file1', name, resourceType: `gdrive/${kind}`, vfsName: name })],
   ])
-  const cmd = GDRIVE_COMMANDS.find((c) => c.name === 'grep')
-  if (cmd === undefined) throw new Error('grep not registered')
+  const cmd = generic('grep')
   const accessor = new GDriveAccessor({ tokenManager: TM })
   const result = await cmd.fn(accessor, [p], ['needle'], {
     stdin: null,

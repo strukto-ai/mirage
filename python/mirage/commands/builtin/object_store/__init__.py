@@ -29,11 +29,6 @@ from mirage.commands.builtin.object_store.tee import make_tee
 from mirage.commands.builtin.object_store.touch import make_touch
 from mirage.commands.config import CommandIO
 
-# Keyed-store behaviours kept as overrides of the generic commands: no
-# real directories (mkdir -p, rm not-empty), write-tracking (touch/tee),
-# and the index-threaded, missing-operand stat.
-OBJECT_STORE_OVERRIDES = {"stat", "rm", "mkdir", "tee", "touch"}
-
 
 def _guarded(io: CommandIO) -> CommandIO:
     return with_command_guards(with_slash_guard(io))
@@ -44,7 +39,10 @@ def _answered(io: CommandIO) -> CommandIO:
 
 
 def make_object_store_commands(vfs: str) -> list[Callable[..., Any]]:
-    """Build the five keyed-store command overrides for one backend.
+    """Build the five keyed-store commands that replace the generic ones
+    on one backend: no real directories (mkdir -p, rm not-empty),
+    write-tracking (touch/tee), and the index-threaded, missing-operand
+    stat.
 
     Each runs over the table of the mount it runs on, wrapped with the
     same hidden/rule/mode chain the factory gives every generic command,

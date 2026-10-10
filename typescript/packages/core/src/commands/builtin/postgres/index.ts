@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { POSTGRES_GREP } from './grep.ts'
 import { POSTGRES_HEAD } from './head.ts'
 import { POSTGRES_RG } from './rg.ts'
 import { POSTGRES_TAIL } from './tail.ts'
 import { POSTGRES_WC } from './wc.ts'
 
-const POSTGRES_OVERRIDES = new Set(['grep', 'head', 'rg', 'tail', 'wc'])
-
 export const POSTGRES_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.POSTGRES, {
-    overrides: POSTGRES_OVERRIDES,
-  }),
   ...POSTGRES_GREP,
   ...POSTGRES_HEAD,
   ...POSTGRES_RG,

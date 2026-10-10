@@ -14,10 +14,10 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.core.linear.config import LinearConfig
 from mirage.types import VFSName
 from mirage.vfs.linear.linear import LinearVFS
+from tests.fixtures.mount_commands import mount_commands
 
 
 @pytest.fixture
@@ -43,4 +43,4 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands_registered(config):
     vfs = LinearVFS(config)
-    assert len(commands_for(vfs)) >= 10
+    assert len(mount_commands(vfs)) >= 10

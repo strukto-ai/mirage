@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -21,7 +21,7 @@ import type { PathSpec } from '../../../types.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-const RAM_JOIN = RAM_COMMANDS.filter((c) => c.name === 'join' && c.filetype == null)
+const RAM_JOIN = GENERIC_COMMANDS.filter((c) => c.name === 'join' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

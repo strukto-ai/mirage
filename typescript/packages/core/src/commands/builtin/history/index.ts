@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { HISTORY_HISTORY } from './history.ts'
 
-export const HISTORY_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.HISTORY),
-  ...HISTORY_HISTORY,
-]
+export const HISTORY_COMMANDS: readonly Command[] = [...HISTORY_HISTORY]

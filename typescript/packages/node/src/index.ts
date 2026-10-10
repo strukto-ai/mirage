@@ -151,8 +151,6 @@ export {
   type HfSpacesConfigRedacted,
 } from './vfs/hf_spaces/config.ts'
 export { PROMPT as HF_SPACES_PROMPT } from './vfs/hf_spaces/prompt.ts'
-export { HF_BUCKETS_COMMANDS } from './commands/builtin/hf_buckets/index.ts'
-export { HF_HUB_COMMANDS } from './commands/builtin/hf_hub/index.ts'
 export { MinIOVFS, type MinIOVFSState } from './vfs/minio/minio.ts'
 export {
   redactMinIOConfig,
@@ -254,7 +252,6 @@ export {
   type NextcloudConfigRedacted,
 } from './vfs/nextcloud/config.ts'
 export { PROMPT as NEXTCLOUD_PROMPT } from './vfs/nextcloud/prompt.ts'
-export { NEXTCLOUD_COMMANDS } from './commands/builtin/nextcloud/index.ts'
 export { buildDeltaHook as buildNextcloudDeltaHook } from './core/nextcloud/watch.ts'
 export { DiscordVFS, type DiscordVFSState } from './vfs/discord/discord.ts'
 export {
@@ -411,7 +408,6 @@ export {
 } from './vfs/registry.ts'
 export { MODULE_SUFFIXES, isModulePath, loadAttr, splitRef } from './vfs/loader.ts'
 export { DISK_COMMANDS } from './commands/builtin/disk/index.ts'
-export { REDIS_COMMANDS } from '@struktoai/mirage-core/commands/builtin/redis/index'
 export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'
 export {
   absolutizeScripts,
@@ -433,7 +429,7 @@ export {
 // module so a consumer of this package needs no second dependency on
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
 export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-export { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+export { generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
 export type { CLIView } from '@struktoai/mirage-core/commands/cli/types'

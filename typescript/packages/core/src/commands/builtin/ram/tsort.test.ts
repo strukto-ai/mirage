@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-const RAM_TSORT = RAM_COMMANDS.filter((c) => c.name === 'tsort' && c.filetype == null)
+const RAM_TSORT = GENERIC_COMMANDS.filter((c) => c.name === 'tsort' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

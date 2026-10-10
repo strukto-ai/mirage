@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import { commandsFor } from '../commands/builtin/backends.ts'
 import { command, type Command } from '../commands/config.ts'
 import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
@@ -28,6 +27,7 @@ import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } f
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { buildMountArgs, toStateDict } from '../workspace/snapshot/state.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
+import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS, VFS_BRAND, type VFSOptions } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
@@ -181,8 +181,16 @@ function writableVfs(): [WritableWiki, WikiAccessor] {
   return [new WritableWiki({ name: 'wiki', accessor }), accessor]
 }
 
+function wikiMount(vfs: BaseVFS): MountEntry {
+  return new MountRegistry({ '/wiki/': vfs }, MountMode.READ).mountFor('/wiki/a')
+}
+
 function commandNames(vfs: BaseVFS): Set<string> {
-  return new Set(commandsFor(vfs).map((rc) => rc.name))
+  return new Set(
+    wikiMount(vfs)
+      .allCommands()
+      .map((rc) => rc.name),
+  )
 }
 
 const DISPATCH_OPS = ['read', 'readdir', 'stat', 'glob', 'write', 'unlink', 'mkdir', 'rename']
@@ -287,10 +295,16 @@ describe('a plug-in VFS', () => {
     for (const name of ['tee', 'rm', 'gzip', 'tar']) expect(names).toContain(name)
   })
 
-  it('suppresses a generic the backend overrides', () => {
-    const names = commandNames(makeVfs({ overrides: new Set(['grep']) }))
-    expect(names).not.toContain('grep')
-    expect(names).toContain('rg')
+  it('lets a handed command win over the generic', () => {
+    const grep = command({
+      name: 'grep',
+      vfs: 'wiki',
+      spec: new CommandSpec(),
+      fn: () => [new Uint8Array(), new IOResult()],
+    })
+    const mount = wikiMount(makeVfs({ commands: grep }))
+    expect(mount.resolveCommand('grep')).toBe(grep[0])
+    expect(mount.resolveCommand('rg')).not.toBeNull()
   })
 
   it('registers extra commands beside the generics', () => {

@@ -108,8 +108,8 @@ a function the VFS does not define answers `Operation not supported` at that
 function, and mount mode still controls whether a defined mutation may run. Set
 `local = True` only for host-local data; `is_mounted` can override the default
 availability check. `vfs.supports("write")` says whether a class defines a
-function. `overrides=` suppresses a generic command you replace, and
-`commands=[...]` adds bespoke `@command` verbs.
+function. `commands=[...]` adds bespoke `@command` verbs and replacements: a
+command of the same name as a generic wins on this VFS's mounts.
 
 The dispatcher reaches the same functions by name (`ws.dispatch("read", path)`)
 and wraps them the same way for every backend: a read takes a window, `append`
@@ -386,7 +386,7 @@ already.
 
 ## 4. Commands
 
-Build the standard set with `generic_commands("<name>", overrides={...})`; each command runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` names the builders a bespoke command replaces, and a name no builder has is refused.
+The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (dify's light `ls`).
 
 - Declare native text search by defining `search` on the VFS. The generic grep/rg builders use it only when `search_meta["grep"]` opts in; semantic search does not opt in. The hierarchy kit supplies `make_search_op` for scope-based core functions; unsupported requests fall back to scanning.
 - A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).

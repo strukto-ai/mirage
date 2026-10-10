@@ -1,8 +1,8 @@
 import pytest
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 from mirage.vfs.registry import REGISTRY, build_vfs
+from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
 
@@ -38,7 +38,7 @@ def test_vfs_registers_commands():
         "tree",
         "wc",
     }
-    assert expected <= {c.name for c in commands_for(res)}
+    assert expected <= {c.name for c in mount_commands(res)}
 
 
 @pytest.mark.asyncio

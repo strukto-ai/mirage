@@ -12,18 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { SLACK_GREP } from './grep.ts'
 import { SLACK_RG } from './rg.ts'
 
-const SLACK_OVERRIDES = new Set(['grep', 'rg'])
-
-export const SLACK_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.SLACK, {
-    overrides: SLACK_OVERRIDES,
-  }),
-  ...SLACK_GREP,
-  ...SLACK_RG,
-]
+export const SLACK_COMMANDS: readonly Command[] = [...SLACK_GREP, ...SLACK_RG]

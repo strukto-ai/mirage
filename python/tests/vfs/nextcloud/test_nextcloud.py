@@ -1,10 +1,13 @@
-from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
+from tests.fixtures.mount_commands import mount_commands
 
 
 def test_nextcloud_write_commands_tagged():
-    from mirage.commands.builtin.nextcloud import COMMANDS
-
+    vfs = NextcloudVFS(
+        NextcloudConfig(
+            url="https://cloud.example.com/remote.php/dav/files/user/"
+        )
+    )
     write_names = {
         "cp",
         "csplit",
@@ -27,12 +30,11 @@ def test_nextcloud_write_commands_tagged():
         "unzip",
         "zip",
     }
-    for fn in COMMANDS:
-        for rc in fn._registered_commands:
-            if rc.name in write_names:
-                assert rc.write is True, f"{rc.name} should be write=True"
-            else:
-                assert rc.write is False, f"{rc.name} should be write=False"
+    for rc in mount_commands(vfs):
+        if rc.name in write_names:
+            assert rc.write is True, f"{rc.name} should be write=True"
+        else:
+            assert rc.write is False, f"{rc.name} should be write=False"
 
 
 def test_nextcloud_vfs_registers_commands():
@@ -40,7 +42,7 @@ def test_nextcloud_vfs_registers_commands():
         url="https://cloud.example.com/remote.php/dav/files/user/"
     )
     vfs = NextcloudVFS(config)
-    command_names = {rc.name for rc in commands_for(vfs)}
+    command_names = {rc.name for rc in mount_commands(vfs)}
     assert "ls" in command_names
     assert "cat" in command_names
     assert "grep" in command_names

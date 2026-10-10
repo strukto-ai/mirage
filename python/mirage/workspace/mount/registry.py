@@ -25,6 +25,7 @@ from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
+from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.context import (
     effective_path_mode,
     strongest_mode_under,
@@ -345,7 +346,7 @@ class MountRegistry:
         if alias is not None:
             m.activity = alias.activity
         m.register_commands(commands_for(vfs))
-        for cmd in GENERAL_COMMANDS:
+        for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
             m.register_general(cmd)
         if self._file_cache is not None:
             self._attach_manager(m)

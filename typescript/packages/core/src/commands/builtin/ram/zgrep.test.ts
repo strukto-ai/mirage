@@ -15,7 +15,7 @@
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { zgrepGeneric } from '../generic/zgrep.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -23,7 +23,7 @@ import { MountMode, PathSpec } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { gzip } from '../../../utils/compress.ts'
-const RAM_ZGREP = RAM_COMMANDS.filter((c) => c.name === 'zgrep' && c.filetype == null)
+const RAM_ZGREP = GENERIC_COMMANDS.filter((c) => c.name === 'zgrep' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

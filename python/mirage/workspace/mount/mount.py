@@ -501,10 +501,10 @@ class MountEntry:
         self,
         cmd: Command,
     ) -> None:
-        """Register a general command (vfs=None).
+        """Register a command every mount shares (vfs=None).
 
-        General commands work on any VFS (e.g. echo, pwd).
-        They are the last fallback in resolve_command().
+        The generic coreutils and the general commands (e.g. echo, pwd)
+        work on any VFS. They are the last fallback in resolve_command().
         """
         self._general_cmds[cmd.name] = cmd
         if cmd.spec is not None:
@@ -521,7 +521,8 @@ class MountEntry:
         Lookup order:
         1. (cmd_name, extension) -- filetype-specific
         2. (cmd_name, None) -- VFS-specific
-        3. general_cmds[cmd_name] -- general fallback
+        3. general_cmds[cmd_name] -- the generic and general commands
+           every mount shares
         """
         if extension:
             cmd = self._cmds.get((cmd_name, extension))

@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
-const RAM_EXPAND = RAM_COMMANDS.filter((c) => c.name === 'expand' && c.filetype == null)
-const RAM_UNEXPAND = RAM_COMMANDS.filter((c) => c.name === 'unexpand' && c.filetype == null)
+const RAM_EXPAND = GENERIC_COMMANDS.filter((c) => c.name === 'expand' && c.filetype == null)
+const RAM_UNEXPAND = GENERIC_COMMANDS.filter((c) => c.name === 'unexpand' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

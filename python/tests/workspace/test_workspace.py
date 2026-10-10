@@ -1838,7 +1838,7 @@ def test_cross_mount_cp_no_clobber_duplicate_basenames():
 def test_cross_mount_no_clobber_uses_shared_command_spec():
     ws = _ws()
     source_mount = ws._registry.mount_for("/ram/source.txt")
-    source_mount._cmds.pop(("cp", None))
+    source_mount._general_cmds.pop("cp")
     source_mount._cmd_specs.pop("cp")
     _exec(ws, "echo source > /ram/source.txt")
     _exec(ws, "echo existing > /disk/target.txt")

@@ -86,7 +86,9 @@ function declaredCommandGroups(pkg: string): string[] {
 // declare them rather than from whatever the package index happens to name.
 // Nothing can go missing here: the directory scan is the source of truth.
 async function coreCommandGroups(): Promise<ModuleBag> {
-  const bag: ModuleBag = {}
+  const generic =
+    (await import('@struktoai/mirage-core/commands/builtin/generic_bind/index')) as ModuleBag
+  const bag: ModuleBag = { GENERIC_COMMANDS: generic.GENERIC_COMMANDS }
   for (const { dir } of commandGroupDirs('core')) {
     const mod = (await import(`@struktoai/mirage-core/commands/builtin/${dir}/index`)) as ModuleBag
     for (const [key, value] of Object.entries(mod)) {

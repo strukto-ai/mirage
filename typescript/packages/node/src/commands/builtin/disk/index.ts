@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { genericCommands, walked } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { generic, walked } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { Command } from '@struktoai/mirage-core/commands/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-export const DISK_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.DISK, { table: walked, local: true }),
-]
+export const DISK_COMMANDS: readonly Command[] = ['cp', 'du', 'find'].map((name) =>
+  generic(name, { vfs: VFSName.DISK, table: walked }),
+)

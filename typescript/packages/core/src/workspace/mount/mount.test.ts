@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { commandsFor } from '../../commands/builtin/backends.ts'
+import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
@@ -226,9 +226,7 @@ describe('Mount.runCommand', () => {
     // running a command straight on its mount, with none, cannot write.
     const vfs = new RAMVFS()
     const m = new MountEntry({ prefix: '/rw/', vfs, mode: MountMode.WRITE })
-    const tee = commandsFor(vfs).find((cmd) => cmd.name === 'tee')
-    if (tee === undefined) throw new Error('missing tee')
-    m.register(tee)
+    m.register(generic('tee'))
     const [stdout, io] = await m.runCommand(
       'tee',
       [PathSpec.fromStrPath('/rw/f')],
@@ -493,9 +491,7 @@ describe('ExecContext parity with CommandOpts', () => {
 it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
-  const cmd = commandsFor(vfs).find((cmd) => cmd.name === 'gzip')
-  if (cmd === undefined) throw new Error('missing gzip')
-  expect(cmd.pathGuarded).toBe(true)
+  expect(generic('gzip').pathGuarded).toBe(true)
   const ws = new Workspace(
     { '/ram/': [vfs, MountMode.READ] },
     { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },

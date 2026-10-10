@@ -2,6 +2,7 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.commands.builtin.backends import commands_for
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
@@ -37,11 +38,12 @@ def _res():
 
 
 def _command(vfs: Mem0VFS, name: str):
-    return next(
+    own = [
         command.fn
         for command in commands_for(vfs)
         if command.name == name and command.filetype is None
-    )
+    ]
+    return own[-1] if own else generic(name).fn
 
 
 async def _bytes(source):

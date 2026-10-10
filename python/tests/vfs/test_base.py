@@ -20,7 +20,6 @@ from mirage import MountMode, Workspace
 from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.backends import commands_for
 from mirage.commands.cli import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import Argument, CommandSpec
@@ -172,7 +171,9 @@ def ram_without(store: RAMStore, *names: str, name: str = "custom") -> RAMVFS:
 
 
 def command_names(vfs: BaseVFS) -> set[str]:
-    return {rc.name for rc in commands_for(vfs)}
+    ws = Workspace({"/wiki/": vfs}, mode=MountMode.READ)
+    mount = ws._registry.mount_for("/wiki/a")
+    return {rc.name for rc in mount.all_commands()}
 
 
 class Marker:
@@ -257,10 +258,18 @@ def test_write_commands_register_without_write_op():
     assert {"tee", "rm", "gzip", "tar"} <= names
 
 
-def test_overrides_suppress_generic():
-    names = command_names(make_vfs(overrides={"grep"}))
-    assert "grep" not in names
-    assert "rg" in names
+@command("grep", vfs="wiki", spec=CommandSpec())
+async def wiki_grep(accessor, paths, texts, opts):
+    return b"", IOResult()
+
+
+def test_a_handed_command_wins_over_the_generic():
+    ws = Workspace(
+        {"/wiki/": make_vfs(commands=[wiki_grep])}, mode=MountMode.READ
+    )
+    mount = ws._registry.mount_for("/wiki/a")
+    assert mount.resolve_command("grep").fn is wiki_grep
+    assert mount.resolve_command("rg") is not None
 
 
 def test_extra_commands_registered():

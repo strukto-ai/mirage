@@ -12,15 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
 
 COMMANDS = [
-    *generic_commands(
-        "slack",
-        overrides={"grep", "rg"},
-    ),
     grep,
     rg,
 ]

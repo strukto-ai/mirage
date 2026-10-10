@@ -83,13 +83,8 @@ export interface VFSOptions<A extends Accessor = Accessor> {
   /** Appended to `prompt` when the mount is writable. */
   writePrompt?: string
   /**
-   * Generic command names the backend replaces. Pass the replacements
-   * through `commands`.
-   */
-  overrides?: ReadonlySet<string>
-  /**
-   * Extra commands, from `command({...})`: bespoke verbs, or the
-   * replacements for whatever `overrides` suppressed.
+   * Extra commands, from `command({...})`: bespoke verbs, or replacements
+   * that win over the generic command of the same name.
    */
   commands?: readonly Command[]
   /** Serve repeat reads from the file cache. Read-mostly content only. */
@@ -262,8 +257,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * kept in the file cache, and a `raw` read asks for `read` itself.
    */
   readonly renderers: Readonly<Record<string, string>> = {}
-  /** The generic shell commands this VFS replaces with its own. */
-  readonly overrides: ReadonlySet<string> = new Set()
   /**
    * The backend handle every function takes. A builtin declares and
    * assigns its own; one that brings none runs over a no-op accessor.
@@ -286,7 +279,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
     if (options.accessor !== undefined) this.accessor = options.accessor
     if (options.prompt !== undefined) this.prompt = options.prompt
     if (options.writePrompt !== undefined) this.writePrompt = options.writePrompt
-    if (options.overrides !== undefined) this.overrides = new Set(options.overrides)
     if (options.cachesReads !== undefined) this.cachesReads = options.cachesReads
     if (options.sizesAlwaysKnown !== undefined) this.sizesAlwaysKnown = options.sizesAlwaysKnown
     if (options.supportsSnapshot !== undefined) this.supportsSnapshot = options.supportsSnapshot

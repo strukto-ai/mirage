@@ -19,9 +19,9 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
-import { SLACK_COMMANDS } from './index.ts'
+import { generic } from '../generic_bind/factory.ts'
 
-const SLACK_LS = SLACK_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
+const SLACK_LS = [generic('ls')]
 
 const DEC = new TextDecoder()
 

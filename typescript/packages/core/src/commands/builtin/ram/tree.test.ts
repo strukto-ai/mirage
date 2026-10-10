@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { RAM_COMMANDS } from './index.ts'
+import { GENERIC_COMMANDS } from '../generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
-const RAM_TREE = RAM_COMMANDS.filter((c) => c.name === 'tree' && c.filetype == null)
+const RAM_TREE = GENERIC_COMMANDS.filter((c) => c.name === 'tree' && c.filetype == null)
 
 const DEC = new TextDecoder()
 

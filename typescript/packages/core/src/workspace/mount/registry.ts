@@ -24,6 +24,7 @@ import type { FileCache } from '../../cache/file/mixin.ts'
 import type { Evicted } from '../../cache/index/config.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
+import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
@@ -306,14 +307,15 @@ export class MountRegistry {
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
     )
     if (alias !== undefined) m.activity = alias.activity
-    // Through `registerCommands`, as python's `registry.mount` does, so a
-    // family table that fans out over sibling VFS names (the HF four
-    // share one table) registers only this mount's entries instead of
-    // letting the last sibling win on a shared key.
-    m.registerCommands(commandsFor(init.vfs))
-    for (const cmd of GENERAL_COMMANDS) {
+    for (const cmd of [...GENERIC_COMMANDS, ...GENERAL_COMMANDS]) {
       m.registerGeneral(cmd)
     }
+    // Through `registerCommands`, as python's `registry.mount` does, so a
+    // family table that fans out over sibling VFS names registers only
+    // this mount's entries instead of letting the last sibling win on a
+    // shared key. After the shared set, so a command the VFS was handed
+    // without a VFS name still wins over the shared one of that name.
+    m.registerCommands(commandsFor(init.vfs))
     return m
   }
 

@@ -19,7 +19,7 @@ from types import MappingProxyType
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.backends import commands_for
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import ExecContext, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
@@ -366,7 +366,7 @@ def test_resolve_command_missing(registry):
 async def test_a_path_guarded_command_is_still_held_at_its_write():
     vfs = RAMVFS()
     vfs._store.files["/a"] = b"original"
-    cmd = next(cmd for cmd in commands_for(vfs) if cmd.name == "gzip")
+    cmd = generic("gzip")
     assert cmd.path_guarded
     ws = Workspace({"/ram/": (vfs, MountMode.READ)}, mode=MountMode.WRITE)
     # The write is refused where it happens and gzip says so in its own
