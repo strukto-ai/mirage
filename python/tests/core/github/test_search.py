@@ -26,8 +26,13 @@ from mirage.core.github.search import (
     search_code,
 )
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec, ReadSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.registry import build_vfs
+from mirage.workspace import Workspace
+from mirage.workspace.mount import Mount
+from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 
 
 @pytest.fixture
@@ -436,3 +441,218 @@ async def test_rest_search_paginates_and_clips_the_final_page(monkeypatch):
     assert all(params["per_page"] == "100" for params in requests)
     assert requests[0]["sort"] == "created"
     assert requests[0]["order"] == "asc"
+
+
+REPO = {
+    "src/a.py": b"import os\nx = 1\n",
+    "src/b.py": b"y = 2\n",
+    "docs/c.md": b"imports are here\nIMPORT them\n",
+    "docs/d.md": b"nothing\n",
+    "big.txt": b"import\n" + b"x" * SEARCH_LIMIT,
+}
+
+
+async def _run(vfs, line: str) -> tuple[bytes, bytes, int]:
+    ws = Workspace({"/gh": Mount(vfs=vfs, mode=MountMode.READ)})
+    try:
+        result = await ws.shell(line)
+        out = await result.materialize_stdout()
+        return out, result.stderr or b"", result.exit_code
+    finally:
+        await ws.close()
+
+
+def _ram() -> RAMVFS:
+    vfs = RAMVFS()
+    for key, data in REPO.items():
+        parts = key.split("/")
+        for depth in range(1, len(parts)):
+            vfs._store.dirs.add("/" + "/".join(parts[:depth]))
+        vfs._store.files["/" + key] = data
+    return vfs
+
+
+async def _on_github(
+    line: str, monkeypatch, pinned: bool = False, **hub_args
+) -> tuple[tuple[bytes, bytes, int], FakeGitHub]:
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
+    with serve(FakeGitHub(files=dict(REPO), **hub_args)) as hub:
+        config = {"token": "t", "owner": "o", "repo": "r", "base_url": hub.url}
+        if pinned:
+            config["ref"] = hub.head()
+        vfs = build_vfs("github", config)
+        hub.log.clear()
+        return await _run(vfs, line), hub
+
+
+def _read(hub: FakeGitHub) -> list[str]:
+    names = {blob_sha(data): path for path, data in REPO.items()}
+    return sorted(names[sha] for route, sha in hub.log if route == "blob")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, read",
+    [
+        ("grep -rw import /gh", ["big.txt", "docs/c.md", "src/a.py"]),
+        ("grep -rwi IMPORT /gh/src", ["src/a.py"]),
+        ("grep -rwc import /gh", ["big.txt", "docs/c.md", "src/a.py"]),
+        ("rg -w import /gh", ["big.txt", "docs/c.md", "src/a.py"]),
+        ("rg -wl import /gh/docs", ["docs/c.md"]),
+    ],
+)
+async def test_a_whole_word_reads_only_what_code_search_names(
+    line, read, monkeypatch
+):
+    # Code search matches whole words in any case and never indexes
+    # big.txt, which is past its size limit, so that file is read anyway.
+    got, hub = await _on_github(line, monkeypatch)
+    assert got == await _run(_ram(), line)
+    assert hub.count("search") == 1
+    assert _read(hub) == read
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -r import /gh",
+        "grep -rw 'imp.rt' /gh",
+        "grep -rwv import /gh",
+        "rg -w --files-without-match import /gh",
+        "grep -w import /gh/src/a.py /gh/src/b.py",
+        "grep -rwF 'path:src' /gh",
+    ],
+)
+async def test_a_line_code_search_cannot_answer_reads_every_file(
+    line, monkeypatch
+):
+    # The last line's word is a qualifier to code search, which would
+    # rescope the query instead of searching for it.
+    got, hub = await _on_github(line, monkeypatch)
+    assert got == await _run(_ram(), line)
+    assert hub.count("search") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hub_args",
+    [{"fail": {"search": (500, "boom")}}, {"truncated_recursive": True}],
+    ids=["failed", "truncated-tree"],
+)
+async def test_a_search_that_cannot_vouch_reads_every_file(
+    hub_args, monkeypatch
+):
+    # A truncated tree cannot list the files code search never indexes.
+    line = "grep -rw import /gh"
+    got, hub = await _on_github(line, monkeypatch, **hub_args)
+    assert got == await _run(_ram(), line)
+    assert _read(hub) == sorted(REPO)
+
+
+@pytest.mark.asyncio
+async def test_a_ref_off_the_default_branch_reads_every_file(monkeypatch):
+    # Code search indexes the default branch only, so a mount pinned to a
+    # commit reads every file as a plain scan does.
+    line = "grep -rw import /gh"
+    got, hub = await _on_github(line, monkeypatch, pinned=True)
+    assert got == await _run(_ram(), line)
+    assert hub.count("search") == 0
+    assert _read(hub) == sorted(REPO)
+
+
+@pytest.mark.asyncio
+async def test_a_ref_off_the_default_branch_is_refused_without_the_w_hint(
+    monkeypatch,
+):
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
+    got, _ = await _on_github("grep -rw import /gh", monkeypatch, pinned=True)
+    assert got == (b"", b"grep: 5 files in scope, narrow the path\n", 1)
+
+
+@pytest.mark.asyncio
+async def test_a_scope_cheaper_to_read_is_not_searched():
+    line = "grep -rw import /gh"
+    with serve(FakeGitHub(files=dict(REPO))) as hub:
+        vfs = build_vfs(
+            "github",
+            {"token": "t", "owner": "o", "repo": "r", "base_url": hub.url},
+        )
+        assert await _run(vfs, line) == await _run(_ram(), line)
+        assert hub.count("search") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, stderr",
+    [
+        (
+            "grep -r import /gh",
+            "grep: 5 files in scope and code search could not narrow them; "
+            "narrow the path, or search a whole word with -w\n",
+        ),
+        ("grep -rwv import /gh", "grep: 5 files in scope, narrow the path\n"),
+        (
+            "rg 'imp.rt' /gh",
+            "rg: 5 files in scope and code search could not narrow them; "
+            "narrow the path, or search a whole word with -w\n",
+        ),
+    ],
+)
+async def test_a_scan_past_the_scope_cap_is_refused(line, stderr, monkeypatch):
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
+    (out, err, code), hub = await _on_github(line, monkeypatch)
+    assert (out, err.decode(), code) == (b"", stderr, 1)
+    assert hub.count("blob") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_narrowed_scan_is_not_refused(monkeypatch):
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
+    line = "grep -rw import /gh"
+    got, _ = await _on_github(line, monkeypatch)
+    assert got == await _run(_ram(), line)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prefix, scope, count",
+    [("/gh", "", 5), ("/gh", "/docs", 3), ("/r/gh", "", 5)],
+    ids=["root", "subdir", "nested"],
+)
+async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
+    prefix, scope, count, monkeypatch
+):
+    files = {"docs/a.txt": b"a", "docs/b.txt": b"b", "top.txt": b"t"}
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 0)
+    with serve(FakeGitHub(files=files)) as hub:
+        vfs = build_vfs(
+            "github",
+            {
+                "token": "t",
+                "owner": "o",
+                "repo": "r",
+                "ref": "main",
+                "base_url": hub.url,
+            },
+        )
+        ws = Workspace(
+            {
+                prefix: Mount(
+                    vfs=vfs, mode=MountMode.READ, read=ReadSpec(ttl=600)
+                )
+            }
+        )
+        try:
+            assert (await ws.shell(f"ls {prefix}/docs")).exit_code == 0
+            hub.files["docs/c.txt"] = b"c"
+            hub.files["new/d.txt"] = b"d"
+            await ws._registry.mount_for(prefix).index.invalidate()
+            hub.log.clear()
+            result = await ws.shell(f"grep -rv x {prefix}{scope}")
+            assert result.stderr == (
+                f"grep: {count} files in scope, narrow the path\n".encode()
+            )
+            assert hub.counts() == (0, 1, 0)
+        finally:
+            await ws.close()

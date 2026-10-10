@@ -14,10 +14,14 @@
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
+import { ScanReason } from '../../vfs/types.ts'
 import { type GitHubTransport, type GitHubCodeSearch, searchCode } from './client.ts'
-import { scopeRelativeKey, unsearchableKeys } from './pushdown.ts'
+import { SCOPE_ERROR, SCOPE_WARN } from './constants.ts'
+import { countScopeFiles, scopeRelativeKey, searchSafe, unsearchableKeys } from './pushdown.ts'
+import { ensureTree } from './tree.ts'
 
 // Use GitHub code search to narrow grep/rg scopes to candidate files.
 // Returns null whenever the narrowed set cannot be trusted as a superset of
@@ -68,6 +72,76 @@ export async function narrowPaths(
       resolved: true,
     })
   })
+}
+
+async function scopeFiles(
+  accessor: GitHubAccessor,
+  under: readonly PathSpec[],
+  index?: IndexCacheStore,
+): Promise<number> {
+  const first = under[0]
+  if (first === undefined) return 0
+  await ensureTree(accessor, index, mountPrefixOf(first.virtual, first.vfsPath))
+  let count = 0
+  for (const p of under) count += countScopeFiles(accessor.tree, scopeRelativeKey(p))
+  return count
+}
+
+/**
+ * The files under `under` that may hold the whole word `text`.
+ *
+ * Code search answers only where it can vouch for the whole scope: more
+ * than `SCOPE_WARN` files (fewer are cheaper to read), a tree the API did
+ * not truncate, the default branch (the only one code search indexes), a
+ * word the search grammar reads as plain terms (`searchSafe`), and an
+ * answer that is the whole set (`narrowPaths`, which adds back every file
+ * the search never indexes). An empty answer is not trusted either: the
+ * index trails a push.
+ */
+export async function filesContaining(
+  accessor: GitHubAccessor,
+  text: string,
+  under: readonly PathSpec[],
+  index?: IndexCacheStore,
+): Promise<PathSpec[] | null> {
+  if (
+    accessor.truncated ||
+    !searchSafe(text) ||
+    (await scopeFiles(accessor, under, index)) <= SCOPE_WARN ||
+    !accessor.isDefaultBranch
+  ) {
+    return null
+  }
+  const narrowed = await narrowPaths(accessor, text, under)
+  return narrowed !== null && narrowed.length > 0 ? narrowed : null
+}
+
+/**
+ * Refuse a scan of more than `SCOPE_ERROR` files.
+ *
+ * Each file is one blob request, so a scope that large is refused rather
+ * than read. The remedy names `-w` when no search answered or the pattern
+ * held no plain text on the default branch, the only one code search
+ * indexes: there a whole word lets it narrow the scope.
+ */
+export async function beforeFullScan(
+  accessor: GitHubAccessor,
+  under: readonly PathSpec[],
+  reason: ScanReason,
+  index?: IndexCacheStore,
+): Promise<void> {
+  const count = await scopeFiles(accessor, under, index)
+  if (count <= SCOPE_ERROR) return
+  if (
+    (reason === ScanReason.UNANSWERED || reason === ScanReason.NO_TEXT) &&
+    accessor.isDefaultBranch
+  ) {
+    throw new Error(
+      `${String(count)} files in scope and code search could not narrow them; ` +
+        'narrow the path, or search a whole word with -w',
+    )
+  }
+  throw new Error(`${String(count)} files in scope, narrow the path`)
 }
 
 /** Fetch a bounded REST search, following the server's pagination. */

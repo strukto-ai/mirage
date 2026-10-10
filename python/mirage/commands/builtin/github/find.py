@@ -23,7 +23,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     mount_io,
     with_command_guards,
 )
-from mirage.commands.builtin.github.pushdown import resolve_glob
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.find import find as find_core
@@ -44,7 +43,7 @@ async def find(
     # find walks accessor.tree directly rather than the index, so the
     # tree has to be hydrated first; the mount is built without it.
     await ensure_tree(accessor, opts.index, opts.mount_prefix)
-    paths = await resolve_glob(accessor, paths, opts.index)
+    paths = await mount_io(opts).resolve_glob(accessor, paths, opts.index)
     # A native find op classifies on the raw backend tree, so under
     # hidden paths or a path rule it would answer for entries the
     # session cannot see; the walk classifies through the guarded

@@ -15,6 +15,7 @@
 import asyncio
 import base64
 import hashlib
+import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,11 +28,17 @@ from aiohttp import web
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import Evicted, IndexEntry, ListResult, LookupResult
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.github.constants import CODE_SEARCH_SIZE_LIMIT
 from mirage.core.github.tree import refill_snapshot
 
 SYMLINK = "120000"
 REGULAR = "100644"
 HEX = frozenset("0123456789abcdef")
+
+
+def _holds_word(data: bytes, word: str) -> bool:
+    text = data.decode(errors="replace").lower()
+    return re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text) is not None
 
 
 def blob_sha(data: bytes) -> str:
@@ -121,6 +128,11 @@ class FakeGitHub:
     The ``{ref}:{dir}`` segment is matched as one path segment, so a
     request whose ``/`` inside it went unencoded is not routed and 404s,
     the way the integ fake's router does.
+
+    Code search answers ``q`` the way the REST endpoint reads it: the
+    words outside ``repo:`` and ``path:`` must each appear as a whole
+    word, in any case, in a file under 384 KB below ``path:``; one page
+    of ``per_page`` rows carries the full ``total_count``.
 
     Truncating a shallow listing (``truncated_dirs``) is defensive, not
     measured: no single directory in the sampled repositories was large
@@ -374,6 +386,40 @@ class FakeGitHub:
             }
         )
 
+    async def search_code(self, request: web.Request) -> web.Response:
+        q = request.query.get("q", "")
+        self.log.append(("search", q))
+        refused = self._failure("search")
+        if refused is not None:
+            return refused
+        terms = q.split()
+        repo = next((t[5:] for t in terms if t.startswith("repo:")), "")
+        scope = next((t[5:] for t in terms if t.startswith("path:")), "")
+        words = [t.lower() for t in terms if ":" not in t]
+        hits = [
+            path
+            for path, data in sorted(self.files.items())
+            if len(data) < CODE_SEARCH_SIZE_LIMIT
+            and (not scope or path.startswith(scope.rstrip("/") + "/"))
+            and all(_holds_word(data, w) for w in words)
+        ]
+        per_page = int(request.query.get("per_page", "30"))
+        items = [
+            {
+                "path": path,
+                "sha": blob_sha(self.files[path]),
+                "repository": {"full_name": repo},
+            }
+            for path in hits[:per_page]
+        ]
+        return web.json_response(
+            {
+                "total_count": len(hits),
+                "incomplete_results": False,
+                "items": items,
+            }
+        )
+
     async def blob(self, request: web.Request) -> web.Response:
         sha = request.match_info["sha"]
         self.log.append(("blob", sha))
@@ -401,6 +447,7 @@ def _app(hub: FakeGitHub) -> web.Application:
     app.router.add_get(repo, hub.repo)
     app.router.add_get(repo + "/git/trees/{segment:[^/]+}", hub.tree)
     app.router.add_get(repo + "/git/blobs/{sha}", hub.blob)
+    app.router.add_get("/search/code", hub.search_code)
     return app
 
 

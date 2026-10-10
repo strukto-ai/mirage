@@ -16,13 +16,26 @@ import logging
 from dataclasses import dataclass
 
 from mirage.accessor.github import GitHubAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get, github_request_response
 from mirage.core.github.config import GhConfig, GitHubConfig
-from mirage.core.github.constants import SEARCH_PAGE_SIZE
-from mirage.core.github.pushdown import scope_relative_key, unsearchable_keys
+from mirage.core.github.constants import (
+    SCOPE_ERROR,
+    SCOPE_WARN,
+    SEARCH_PAGE_SIZE,
+)
+from mirage.core.github.pushdown import (
+    count_scope_files,
+    scope_relative_key,
+    search_safe,
+    unsearchable_keys,
+)
+from mirage.core.github.repo import ensure_default_branch, ensure_ref
+from mirage.core.github.tree import ensure_tree
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.vfs.types import ScanReason
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +176,86 @@ async def narrow_paths(
             )
         )
     return out
+
+
+async def _scope_files(
+    accessor: GitHubAccessor, index: IndexCacheStore, under: list[PathSpec]
+) -> int:
+    await ensure_tree(
+        accessor, index, mount_prefix_of(under[0].virtual, under[0].vfs_path)
+    )
+    return sum(
+        count_scope_files(accessor.tree, scope_relative_key(p)) for p in under
+    )
+
+
+async def files_containing(
+    accessor: GitHubAccessor,
+    index: IndexCacheStore,
+    text: str,
+    under: list[PathSpec],
+) -> list[PathSpec] | None:
+    """The files under ``under`` that may hold the whole word ``text``.
+
+    Code search answers only where it can vouch for the whole scope:
+    more than ``SCOPE_WARN`` files (fewer are cheaper to read), a tree
+    the API did not truncate, the default branch (the only one code
+    search indexes), a word the search grammar reads as plain terms
+    (``search_safe``), and an answer that is the whole set
+    (``narrow_paths``, which adds back every file the search never
+    indexes). An empty answer is not trusted either: the index trails
+    a push.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        index (IndexCacheStore): the mount's index.
+        text (str): the whole word grep searches for.
+        under (list[PathSpec]): the directories walked.
+    """
+    if (
+        accessor.truncated
+        or not search_safe(text)
+        or await _scope_files(accessor, index, under) <= SCOPE_WARN
+        or await ensure_ref(accessor) != await ensure_default_branch(accessor)
+    ):
+        return None
+    return await narrow_paths(accessor, text, under) or None
+
+
+async def before_full_scan(
+    accessor: GitHubAccessor,
+    index: IndexCacheStore,
+    under: list[PathSpec],
+    reason: ScanReason,
+) -> None:
+    """Refuse a scan of more than ``SCOPE_ERROR`` files.
+
+    Each file is one blob request, so a scope that large is refused
+    rather than read. The remedy names ``-w`` when no search answered or
+    the pattern held no plain text on the default branch, the only one
+    code search indexes: there a whole word lets it narrow the scope.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        index (IndexCacheStore): the mount's index.
+        under (list[PathSpec]): the directories about to be walked.
+        reason (ScanReason): why no search answered.
+
+    Raises:
+        ValueError: the scope holds more than ``SCOPE_ERROR`` files.
+    """
+    count = await _scope_files(accessor, index, under)
+    if count <= SCOPE_ERROR:
+        return
+    if reason in (
+        ScanReason.UNANSWERED,
+        ScanReason.NO_TEXT,
+    ) and await ensure_ref(accessor) == await ensure_default_branch(accessor):
+        raise ValueError(
+            f"{count} files in scope and code search could not narrow "
+            "them; narrow the path, or search a whole word with -w"
+        )
+    raise ValueError(f"{count} files in scope, narrow the path")
 
 
 async def search(

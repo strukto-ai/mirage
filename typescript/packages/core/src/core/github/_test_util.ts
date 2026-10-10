@@ -22,6 +22,7 @@ import type {
 } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { HttpGitHubTransport } from './client.ts'
+import { CODE_SEARCH_SIZE_LIMIT } from './constants.ts'
 import { refillSnapshot } from './tree.ts'
 import { sha1Hex } from '../../utils/hash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -150,6 +151,11 @@ export class Snapshot {
  * Truncating a shallow listing (`truncatedDirs`) is defensive, not
  * measured: no single directory sampled was large enough to truncate.
  */
+function holdsWord(text: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'u').test(text)
+}
+
 export class FakeGitHub {
   readonly files: Map<string, Uint8Array>
   readonly symlinks = new Set<string>()
@@ -373,6 +379,37 @@ export class FakeGitHub {
     return json(200, { sha, size: data.length, encoding: 'base64', content: btoa(binary) })
   }
 
+  // Code search reads `q` the way the REST endpoint does: the words
+  // outside `repo:` and `path:` must each appear as a whole word, in any
+  // case, in a file under 384 KB below `path:`; one page of `per_page`
+  // rows carries the full `total_count`.
+  private async searchCode(url: URL): Promise<Response> {
+    const q = url.searchParams.get('q') ?? ''
+    this.log.push(['search', q])
+    const refused = this.refused('search')
+    if (refused !== null) return refused
+    const terms = q.split(/\s+/).filter((term) => term !== '')
+    const repo = terms.find((term) => term.startsWith('repo:'))?.slice(5) ?? ''
+    const scope = terms.find((term) => term.startsWith('path:'))?.slice(5) ?? ''
+    const words = terms.filter((term) => !term.includes(':')).map((term) => term.toLowerCase())
+    const hits = [...this.files.keys()].sort(compareCodePoints).filter((path) => {
+      const data = this.files.get(path) ?? new Uint8Array()
+      if (data.length >= CODE_SEARCH_SIZE_LIMIT) return false
+      if (scope !== '' && !path.startsWith(`${scope.replace(/\/+$/, '')}/`)) return false
+      const text = new TextDecoder().decode(data).toLowerCase()
+      return words.every((word) => holdsWord(text, word))
+    })
+    const perPage = Number(url.searchParams.get('per_page') ?? '30')
+    const items = await Promise.all(
+      hits.slice(0, perPage).map(async (path) => ({
+        path,
+        sha: await blobSha(this.files.get(path) ?? new Uint8Array()),
+        repository: { full_name: repo },
+      })),
+    )
+    return json(200, { total_count: hits.length, incomplete_results: false, items })
+  }
+
   readonly fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const req = new Request(input, init)
     const url = new URL(req.url)
@@ -389,6 +426,7 @@ export class FakeGitHub {
     }
     const blob = /^\/repos\/[^/]+\/[^/]+\/git\/blobs\/([^/]+)$/.exec(path)
     if (blob !== null) return this.blob(blob[1] ?? '')
+    if (path === '/search/code') return this.searchCode(url)
     throw new Error(`FakeGitHub: unrouted ${req.method} ${req.url}`)
   }
 }
