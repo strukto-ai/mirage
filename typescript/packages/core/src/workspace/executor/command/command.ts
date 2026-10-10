@@ -816,7 +816,7 @@ export async function handleCommand(
       : null
   stdout = maybeWithTimeout(stdout, resolved, cmdName)
   io.stderr = maybeWithTimeout(io.stderr, resolved, cmdName)
-  const stderrBytes = await materialize(io.stderr)
+  const stderrBytes = await io.materializeStderr()
   const exec = new ExecutionNode({
     command: cmdStr,
     stderr: stderrBytes,

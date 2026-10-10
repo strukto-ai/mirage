@@ -549,6 +549,12 @@ export async function handleCli(
   // cache does too, so a verb that can mutate (`gh api` under any method)
   // costs the mounts a reload rather than a stale read.
   if (binding.write && dropCaches !== null) await dropCaches()
+  if (context.signal?.aborted === true) {
+    // The caller was released at its abort, so nothing reads this output:
+    // close it rather than leave its source open.
+    await closeQuietly(stdout)
+    await closeQuietly(io.stderr)
+  }
 
   io.producer = { command: prog, prefixes: [], declared: binding.limit ?? null }
 
@@ -570,7 +576,7 @@ export async function handleCli(
   }
   io.stderr = maybeWithTimeout(io.stderr, limit, prog)
 
-  const stderrBytes = await materialize(io.stderr)
+  const stderrBytes = await io.materializeStderr()
   return [
     stdout,
     io,

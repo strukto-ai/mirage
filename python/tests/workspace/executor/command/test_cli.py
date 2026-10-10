@@ -18,6 +18,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.config import command
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command
@@ -1405,3 +1406,36 @@ class _HeldSource:
         if self._on_close is not None:
             self._on_close()
             self._on_close = None
+
+
+async def _warning():
+    yield b"warn\n"
+
+
+async def _warns_leaf(inv):
+    return b"out\n", IOResult(stderr=_warning())
+
+
+@command("warns", vfs="ram", spec=CommandSpec())
+async def _warns_builtin(accessor, paths, texts, opts):
+    return b"out\n", IOResult(stderr=_warning())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["cli", "mount"])
+async def test_the_streamed_stderr_of_a_handler_reaches_the_caller(kind):
+    with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
+        if kind == "cli":
+            ws.register_cli(
+                "warns",
+                CLI(
+                    CommandSpec(name="warns"),
+                    handlers={"": CLIHandler(_warns_leaf)},
+                ),
+            )
+        else:
+            ws.mount("/ram").register_commands([_warns_builtin])
+        await ws.shell("cd /ram")
+        result = await ws.shell("warns")
+        assert result.stdout == b"out\n"
+        assert result.stderr == b"warn\n"

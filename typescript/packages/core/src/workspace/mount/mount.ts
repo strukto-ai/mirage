@@ -1125,14 +1125,18 @@ export class MountEntry {
     } catch (err) {
       if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
       // The caller has gone, so output the handler hands back later has no
-      // reader: close it. A later rejection has no one left to report to.
-      void running
-        .then(async (late) => {
+      // reader: close it, and log a failure no caller is left to see.
+      void running.then(
+        async (late) => {
           if (late === null) return
           await closeQuietly(late[0])
           await closeQuietly(late[1].stderr)
-        })
-        .catch(() => undefined)
+        },
+        (late: unknown) => {
+          if (late !== err && !(late instanceof Error && late.name === 'AbortError'))
+            console.error(`${cmdName}: failed after its caller left: ${String(late)}`)
+        },
+      )
       throw err
     }
   }

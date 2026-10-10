@@ -18,7 +18,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command } from '../commands/config.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
-import { IOResult } from '../io/types.ts'
+import { IOResult, type ByteSource } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
@@ -394,6 +394,10 @@ describe('Object.prototype-colliding names', () => {
   })
 })
 
+async function* warning(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new TextEncoder().encode('warn\n'))
+}
+
 describe('native output', () => {
   it('releases a canceled mount handler that ignores the abort', async () => {
     const { ws } = buildWorkspace()
@@ -413,39 +417,73 @@ describe('native output', () => {
     await ws.close()
   }, 3000)
 
-  it('closes output a canceled handler returns late', async () => {
-    const { ws } = buildWorkspace()
-    let closed = false
-    const source: AsyncIterableIterator<Uint8Array> = {
-      [Symbol.asyncIterator]() {
-        return this
-      },
-      next: () => Promise.resolve({ done: true, value: undefined }),
-      return: () => {
-        closed = true
-        return Promise.resolve({ done: true, value: undefined })
-      },
-    }
-    ws.mount('/ram').registerCommands(
-      command({
-        name: 'late',
-        vfs: 'ram',
-        spec: new CommandSpec(),
-        fn: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 400))
-          return [source, new IOResult()]
+  it.each(['mount', 'cli'])(
+    'closes output a canceled %s handler returns late',
+    async (kind) => {
+      const { ws } = buildWorkspace()
+      let closed = false
+      const source: AsyncIterableIterator<Uint8Array> = {
+        [Symbol.asyncIterator]() {
+          return this
         },
-      }),
-    )
+        next: () => Promise.resolve({ done: true, value: undefined }),
+        return: () => {
+          closed = true
+          return Promise.resolve({ done: true, value: undefined })
+        },
+      }
+      const late = async (): Promise<[ByteSource, IOResult]> => {
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        return [source, new IOResult()]
+      }
+      if (kind === 'cli')
+        ws.registerCli(
+          'late',
+          new CLI({
+            spec: new CommandSpec({ name: 'late' }),
+            handlers: { '': new CLIHandler({ fn: late }) },
+          }),
+        )
+      else
+        ws.mount('/ram').registerCommands(
+          command({ name: 'late', vfs: 'ram', spec: new CommandSpec(), fn: late }),
+        )
+      await ws.shell('cd /ram')
+      await expect(ws.shell('late', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+      await vi.waitFor(() => {
+        expect(closed).toBe(true)
+      })
+      await ws.close()
+    },
+    3000,
+  )
+
+  it.each(['mount', 'cli'])('keeps the streamed stderr of a %s handler', async (kind) => {
+    const { ws } = buildWorkspace()
+    const warns = (): [Uint8Array, IOResult] => [
+      new TextEncoder().encode('out\n'),
+      new IOResult({ stderr: warning() }),
+    ]
+    if (kind === 'cli')
+      ws.registerCli(
+        'warns',
+        new CLI({
+          spec: new CommandSpec({ name: 'warns' }),
+          handlers: { '': new CLIHandler({ fn: warns }) },
+        }),
+      )
+    else
+      ws.mount('/ram').registerCommands(
+        command({ name: 'warns', vfs: 'ram', spec: new CommandSpec(), fn: warns }),
+      )
     await ws.shell('cd /ram')
-    await expect(ws.shell('late', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
-      name: 'AbortError',
-    })
-    await vi.waitFor(() => {
-      expect(closed).toBe(true)
-    })
+    const result = await ws.shell('warns')
+    expect(new TextDecoder().decode(result.stdout)).toBe('out\n')
+    expect(new TextDecoder().decode(result.stderr)).toBe('warn\n')
     await ws.close()
-  }, 3000)
+  })
 
   it('closes a producer when a downstream reader exits early', async () => {
     const { ws } = buildWorkspace()
