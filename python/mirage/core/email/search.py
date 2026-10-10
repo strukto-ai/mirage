@@ -166,8 +166,9 @@ async def files_containing(
     hit is a message that may hold ``text``; its file is named from its
     Subject and Date, fetched alone. A day is asked for its whole folder.
     None when a scope is not a folder or a day, when ``text`` could match
-    the JSON outside the headers and body (``record_queries``), or when
-    the server fails.
+    the JSON outside the headers and body (``record_queries``), when more
+    than ``max_messages`` match (the newest would leave out older ones a
+    cached listing still holds), or when the server fails.
 
     Args:
         accessor (EmailAccessor): the account.
@@ -185,17 +186,16 @@ async def files_containing(
             return None
         folder = match.slots["folder"]
         segment = scope.mount_path.strip("/").split("/")[0]
+        cap = accessor.config.max_messages
         try:
             uids: set[str] = set()
             for query in queries:
-                uids.update(
-                    await search_messages(
-                        accessor,
-                        folder,
-                        text=query,
-                        max_results=accessor.config.max_messages,
-                    )
+                matched = await search_messages(
+                    accessor, folder, text=query, max_results=cap + 1
                 )
+                if len(matched) > cap:
+                    return None
+                uids.update(matched)
             named = await fetch_headers(
                 accessor, folder, sorted(uids, key=int), header_only=True
             )

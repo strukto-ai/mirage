@@ -208,22 +208,25 @@ function holds(text: string, word: string): boolean {
 class FakeSlack implements SlackTransport {
   readonly searches: string[] = []
   userLists = 0
+  searcherLists = 0
   constructor(
     private readonly pages = 1,
     private readonly fails: Error | null = null,
     private readonly shares = true,
-    private readonly hidden: ReadonlySet<string> = new Set(),
+    private readonly hidden: ReadonlySet<string> | null = null,
   ) {}
 
-  // The `hidden` channels are private ones a separate search token's user is
-  // not in: that user neither lists nor finds them.
+  // With `hidden` set, search runs as a separate search token's user, who is
+  // not in those private channels: that user neither lists nor finds them.
   searcher(): SlackTransport | null {
-    if (this.hidden.size === 0) return null
+    const hidden = this.hidden
+    if (hidden === null) return null
     return {
-      call: (endpoint, params = {}) =>
-        endpoint === 'conversations.list'
-          ? Promise.resolve({ ok: true, channels: CHANNELS.filter((c) => !this.hidden.has(c.id)) })
-          : this.call(endpoint, params),
+      call: (endpoint, params = {}) => {
+        if (endpoint !== 'conversations.list') return this.call(endpoint, params)
+        this.searcherLists += 1
+        return Promise.resolve({ ok: true, channels: CHANNELS.filter((c) => !hidden.has(c.id)) })
+      },
     }
   }
 
@@ -263,7 +266,7 @@ class FakeSlack implements SlackTransport {
     const reaction = words.filter((w) => w.startsWith('has::')).map((w) => w.slice(5, -1))
     const text = words.filter((w) => !w.startsWith('in:#') && !w.startsWith('has::')).join(' ')
     const ids = CHANNELS.filter(
-      (c) => (names.length === 0 || names.includes(c.name)) && !this.hidden.has(c.id),
+      (c) => (names.length === 0 || names.includes(c.name)) && this.hidden?.has(c.id) !== true,
     ).map((c) => c.id)
     if (names.length === 0) ids.push('D1')
     const matches: Record<string, unknown>[] = []
@@ -361,15 +364,16 @@ describe('filesContaining', () => {
   it('reads a day rather than searching it', async () => {
     const line = 'grep -rlw deploy /slack/channels/general__C1/2025-11-06'
     const full = await onSlack(line, new FakeSlack(), false)
-    const [out, code, read, searches] = await onSlack(line)
+    const fake = new FakeSlack()
+    const [out, code, read, searches] = await onSlack(line, fake)
     expect([out, code, read]).toEqual(full.slice(0, 3))
-    expect(searches).toEqual([])
+    expect([searches, fake.userLists]).toEqual([[], 0])
   })
 
-  it('shares one user listing among the patterns of one grep', async () => {
-    const fake = new FakeSlack()
+  it('shares one user and channel listing among the patterns of one grep', async () => {
+    const fake = new FakeSlack(1, null, true, new Set())
     await onSlack('grep -rlw -e deploy -e lunch /slack/channels', fake)
-    expect(fake.userLists).toBe(1)
+    expect([fake.userLists, fake.searcherLists]).toEqual([1, 1])
   })
 
   it('searches a channel by name and its reactions too', async () => {

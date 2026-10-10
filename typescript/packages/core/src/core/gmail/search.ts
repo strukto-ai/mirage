@@ -16,21 +16,21 @@ import type { GmailAccessor } from '../../accessor/gmail.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { parseIdName } from '../../utils/naming.ts'
 import { recordQueries } from '../../utils/record_search.ts'
 import { GoogleApiError } from '../google/client.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { dateDirToGmailQuery } from './date_query.ts'
 import { listMessagePage } from './messages.ts'
-import { MSG_SUFFIX, readdir } from './readdir.ts'
+import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
 export const MAX_HITS = 500
 
 // What a .gmail.json holds besides the headers, body and attachment names
-// Gmail searches: its key names, JSON literals, system label ids, the words
-// of a Date header, the entities a snippet escapes and MIME types.
+// Gmail searches: its key names, JSON literals, system label ids and the words
+// of a Date header. The snippet and the attachments' MIME types are checked
+// against the listing instead (`unsearchedText`).
 const RECORD_KEYS: ReadonlySet<string> = new Set([
   'id',
   'from',
@@ -97,51 +97,6 @@ const RECORD_KEYS: ReadonlySet<string> = new Set([
   'eastern',
   'central',
   'mountain',
-  'amp',
-  'quot',
-  'apos',
-  'lt',
-  'gt',
-  'nbsp',
-  'text',
-  'plain',
-  'html',
-  'csv',
-  'markdown',
-  'calendar',
-  'pdf',
-  'image',
-  'png',
-  'jpeg',
-  'jpg',
-  'gif',
-  'webp',
-  'svg',
-  'audio',
-  'video',
-  'mpeg',
-  'application',
-  'octet',
-  'stream',
-  'zip',
-  'json',
-  'xml',
-  'x',
-  'vnd',
-  'ms',
-  'msword',
-  'excel',
-  'powerpoint',
-  'openxmlformats',
-  'officedocument',
-  'spreadsheetml',
-  'sheet',
-  'wordprocessingml',
-  'document',
-  'presentationml',
-  'presentation',
-  'message',
-  'rfc',
 ])
 
 function childOf(directory: PathSpec, name: string): PathSpec {
@@ -152,12 +107,16 @@ function nameOf(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1)
 }
 
+// The message files under `directory` by id, and the ids whose unsearched text
+// (`unsearchedText`) holds `text`; null when a listing does not carry that text.
 async function messagesUnder(
   accessor: GmailAccessor,
   directory: PathSpec,
+  text: string,
   index?: IndexCacheStore,
-): Promise<Map<string, PathSpec[]>> {
+): Promise<[Map<string, PathSpec[]>, Set<string>] | null> {
   const found = new Map<string, PathSpec[]>()
+  const unsearched = new Set<string>()
   const pending = [directory]
   for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
     for (const listed of await readdir(accessor, current, index)) {
@@ -165,17 +124,21 @@ async function messagesUnder(
       const kind = detectScope(child).kind
       if (kind === 'day') pending.push(child)
       else if (kind === 'message') {
-        const id = parseIdName(nameOf(child.mountPath), MSG_SUFFIX)[1]
-        found.set(id, [...(found.get(id) ?? []), child])
+        const entry = await resolveEntry(readdir, accessor, child, index)
+        const kept = entry?.extra.unsearched
+        if (entry === null || typeof kept !== 'string') return null
+        found.set(entry.id, [...(found.get(entry.id) ?? []), child])
+        if (kept.includes(text.toLowerCase())) unsearched.add(entry.id)
       }
     }
   }
-  return found
+  return [found, unsearched]
 }
 
 async function hitsUnder(
   accessor: GmailAccessor,
   directory: PathSpec,
+  text: string,
   queries: readonly string[],
   index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
@@ -195,8 +158,10 @@ async function hitsUnder(
     if (more !== null || stubs.length >= MAX_HITS) return null
     for (const stub of stubs) ids.add(stub.id)
   }
-  const files = await messagesUnder(accessor, directory, index)
-  return [...ids].flatMap((id) => files.get(id) ?? [])
+  const walked = await messagesUnder(accessor, directory, text, index)
+  if (walked === null) return null
+  const [files, unsearched] = walked
+  return [...new Set([...ids, ...unsearched])].flatMap((id) => files.get(id) ?? [])
 }
 
 /**
@@ -206,7 +171,9 @@ async function hitsUnder(
  * attachment names, so each hit is a message that may hold `text`. Each
  * label is searched on its own, since an account search leaves out spam and
  * trash; a day adds its UTC bounds. Hits map to files by the message id the
- * listing names them with. null when `text` could match the JSON around
+ * listing names them with, and a message whose snippet or attachment MIME type
+ * holds `text` is a hit too: Gmail does not search them, and the listing keeps
+ * them. null when `text` could match the JSON around
  * those fields (`recordQueries`), on an API or connection error, at `MAX_HITS` hits or
  * when the answer names a next page, or with no hit at all, since Gmail indexes a message some time after it
  * arrives. Mirrors Python's `files_containing`.
@@ -230,7 +197,7 @@ export async function filesContaining(
       } else if (match.kind === 'label' || match.kind === 'day') labels = [scope]
       else continue
       for (const directory of labels) {
-        const hits = await hitsUnder(accessor, directory, queries, index)
+        const hits = await hitsUnder(accessor, directory, text, queries, index)
         if (hits === null) return null
         found.push(...hits)
       }

@@ -225,6 +225,23 @@ def message_json_bytes(raw: dict[str, Any]) -> bytes:
     return compact_json_bytes(process_message(raw))
 
 
+def unsearched_text(raw: dict[str, Any]) -> str:
+    """What a message's .gmail.json holds that Gmail search does not read.
+
+    The snippet is Gmail's own cut of the body, escaped as HTML, so it can
+    end inside a word or spell an entity, and an attachment's MIME type is
+    not searched at all. Lowercased, for a case-folded look.
+
+    Args:
+        raw (dict): full message from messages.get format=full.
+    """
+    types = [
+        a.get("mime_type", "")
+        for a in _extract_attachments(raw.get("payload", {}))
+    ]
+    return "\n".join([raw.get("snippet", ""), *types]).lower()
+
+
 def process_message(raw: dict[str, Any]) -> dict[str, Any]:
     """Shape a raw messages.get payload into the rendered message dict.
 

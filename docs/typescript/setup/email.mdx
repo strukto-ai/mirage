@@ -53,7 +53,8 @@ case; each hit's file is named from a header-only fetch. Attachments are always
 read.
 
 Every message is read when the text is a key of the message JSON or a flag
-name, holds anything but ASCII letters and spaces, or the search fails. It is
+name, holds anything but ASCII letters and spaces, matches more than
+`maxMessages` messages in a folder, or the search fails. It is
 off by default: a server that answers `SEARCH` from a full-text index (Dovecot
 with an FTS plugin, for one) matches words rather than substrings, so a
 narrowed scan could miss a message there.

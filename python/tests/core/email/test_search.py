@@ -173,3 +173,18 @@ async def test_a_failed_search_is_no_answer_and_no_hit_is_one():
             )
             == []
         )
+
+
+@pytest.mark.asyncio
+async def test_more_matches_than_a_folder_lists_is_no_answer():
+    # The search keeps the newest matches; past max_messages it leaves out
+    # older ones a cached listing may still hold, so it cannot rule out.
+    many = AsyncMock(return_value=[str(uid) for uid in range(201)])
+    with patch("mirage.core.email.search.list_message_uids", many):
+        assert (
+            await files_containing(
+                ACCESSOR, "budget", [_scope("/INBOX")], False
+            )
+            is None
+        )
+    assert many.await_args.kwargs["max_results"] == 201

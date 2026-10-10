@@ -425,21 +425,26 @@ async function fetchNameWords(accessor: SlackAccessor): Promise<ReadonlySet<stri
 }
 
 /**
- * The words of every user's name and of the workspace's domain.
+ * The words of every user's name and of the workspace's domain, and the
+ * channels search covers (`searchedChannels`).
  *
  * A message may carry its author's profile and a file its permalink on the
  * workspace's domain. The patterns of one grep ask at once, so they share
- * the fetch in flight; a later command fetches again and sees a user added
- * since.
+ * the fetch in flight; a later command fetches again and sees a user or
+ * channel added since. Mirrors Python's `_search_facts`.
  */
-function nameWords(accessor: SlackAccessor): Promise<ReadonlySet<string>> {
-  if (accessor.nameWords === null) {
-    const pending = fetchNameWords(accessor).finally(() => {
-      if (accessor.nameWords === pending) accessor.nameWords = null
-    })
-    accessor.nameWords = pending
+function searchFacts(
+  accessor: SlackAccessor,
+): Promise<[ReadonlySet<string>, ReadonlySet<string> | null]> {
+  if (accessor.searchFacts === null) {
+    const pending = Promise.all([fetchNameWords(accessor), searchedChannels(accessor)]).finally(
+      () => {
+        if (accessor.searchFacts === pending) accessor.searchFacts = null
+      },
+    )
+    accessor.searchFacts = pending
   }
-  return accessor.nameWords
+  return accessor.searchFacts
 }
 
 function dayOf(ts: unknown): string | null {
@@ -542,7 +547,7 @@ async function hitsOf(
  * no channel day in it adds nothing, and a day is cheaper to read than to
  * search. null when a channel in scope is one search does not cover
  * (`searchedChannels`), when `text` could match the JSON around those fields
- * (`recordQueries`), a user's name or the workspace's domain (`nameWords`),
+ * (`recordQueries`), a user's name or the workspace's domain (`searchFacts`),
  * on an API or connection error, past `MAX_PAGES` pages, or with no hit at
  * all, since Slack indexes a message some time after it is posted. Mirrors
  * Python's `files_containing`.
@@ -588,17 +593,19 @@ async function search(
   under: readonly PathSpec[],
   index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
+  const scopes = under.map((scope) => [scope, detectScope(scope)] as const)
+  if (scopes.some(([, match]) => match.kind === 'day' && match.slots.container === 'channels')) {
+    return null
+  }
   const words = text
     .toLowerCase()
     .split(/\s+/)
     .filter((word) => word !== '')
-  const names = await nameWords(accessor)
+  const [names, searched] = await searchFacts(accessor)
   if (words.some((word) => names.has(word))) return null
   const reaction = words.length === 1 ? (words[0] ?? '') : null
-  const searched = await searchedChannels(accessor)
   const found: PathSpec[] = []
-  for (const scope of under) {
-    const match = detectScope(scope)
+  for (const [scope, match] of scopes) {
     let dirs: Map<string, string>
     let within: string
     if (match.kind === ROOT || match.kind === 'channels_root') {
@@ -607,11 +614,7 @@ async function search(
       dirs = new Map(dirnames.map((name) => [parseIdName(name)[1], name]))
       if (searched !== null && [...dirs.keys()].some((id) => !searched.has(id))) return null
       within = ''
-    } else if (
-      (match.kind === 'channel' || match.kind === 'day') &&
-      match.slots.container === 'channels'
-    ) {
-      if (match.kind === 'day') return null
+    } else if (match.kind === 'channel' && match.slots.container === 'channels') {
       const dirname = scope.mountPath.split('/').filter((part) => part !== '')[1] ?? ''
       const channel = mountedPath(scope, `/channels/${dirname}`)
       const entry = await resolveEntry(readdir, accessor, channel, index)

@@ -112,6 +112,7 @@ class FakeSlack:
         self.hidden = hidden
         self.searches: list[str] = []
         self.user_lists = 0
+        self.searcher_lists = 0
 
     async def get(self, config, method, params=None, session=None):
         await asyncio.sleep(0)
@@ -119,6 +120,7 @@ class FakeSlack:
         if method == "conversations.list":
             channels = DMS if "im" in params["types"] else CHANNELS
             if config.token.get_secret_value() == SEARCHER:
+                self.searcher_lists += 1
                 channels = [c for c in channels if c["id"] not in self.hidden]
             return {"ok": True, "channels": channels}
         if method == "users.list":

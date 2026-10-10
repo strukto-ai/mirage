@@ -39,7 +39,14 @@ def _message_stat(
         type=FileType.FILE,
         content=ContentType.JSON,
         size=entry.size,
-        extra={"message_id": entry.id, **entry.extra},
+        extra={
+            "message_id": entry.id,
+            **{
+                key: value
+                for key, value in entry.extra.items()
+                if key == "size_estimate"
+            },
+        },
     )
 
 

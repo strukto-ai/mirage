@@ -131,4 +131,12 @@ describe('filesContaining', () => {
     named.mockResolvedValueOnce([])
     expect(await filesContaining(accessor, 'budget', [scope('/INBOX')], false)).toEqual([])
   })
+
+  // The search keeps the newest matches; past maxMessages it leaves out older
+  // ones a cached listing may still hold, so it cannot rule out.
+  it('reads more matches than a folder lists as no answer', async () => {
+    uids.mockResolvedValueOnce(Array.from({ length: 201 }, (_, uid) => String(uid)))
+    expect(await filesContaining(accessor, 'budget', [scope('/INBOX')], false)).toBeNull()
+    expect(uids.mock.calls[0]?.[3]).toBe(201)
+  })
 })

@@ -26,6 +26,7 @@ import {
   getMessageRaw,
   listMessages,
   messageJsonBytes,
+  unsearchedText,
 } from './messages.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
@@ -93,7 +94,7 @@ function dateChildren(raws: readonly GmailMessageRaw[]): {
     const filename = msgFilename(subject, mid)
     // The listing already fetched the full message, so the exact rendered
     // .gmail.json length is free; sizeEstimate is the source message size
-    // and stays in extra.
+    // and stays in extra, beside the text a search has to look at itself.
     children.push([
       filename,
       new IndexEntry({
@@ -102,7 +103,10 @@ function dateChildren(raws: readonly GmailMessageRaw[]): {
         resourceType: 'gmail/message',
         vfsName: filename,
         size: messageJsonBytes(raw).byteLength,
-        extra: raw.sizeEstimate != null ? { size_estimate: raw.sizeEstimate } : {},
+        extra: {
+          unsearched: unsearchedText(raw),
+          ...(raw.sizeEstimate != null ? { size_estimate: raw.sizeEstimate } : {}),
+        },
       }),
     ])
     const attEntries = attachmentEntries(raw)

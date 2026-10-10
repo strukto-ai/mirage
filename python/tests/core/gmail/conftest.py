@@ -45,6 +45,8 @@ def _message(
     subject: str,
     body: str,
     attachment: str = "",
+    mime: str = "text/plain",
+    snippet: str | None = None,
 ) -> dict[str, Any]:
     at = datetime.fromisoformat(f"{day}T09:00:00+00:00")
     parts: list[dict[str, Any]] = [
@@ -57,7 +59,7 @@ def _message(
         parts.append(
             {
                 "filename": attachment,
-                "mimeType": "text/plain",
+                "mimeType": mime,
                 "body": {"attachmentId": f"A{mid}", "size": 5},
             }
         )
@@ -66,7 +68,7 @@ def _message(
         "threadId": mid,
         "labelIds": labels,
         "internalDate": str(int(at.timestamp() * 1000)),
-        "snippet": body,
+        "snippet": body if snippet is None else snippet,
         "payload": {
             "mimeType": "multipart/mixed",
             "headers": [
@@ -103,6 +105,33 @@ MESSAGES = [
     ),
     _message(
         "d4", ["INBOX"], "2026-01-07", "Di <di@example.com>", "Notes", "quiet"
+    ),
+    _message(
+        "e5",
+        ["INBOX"],
+        "2026-01-07",
+        "Ed <ed@example.com>",
+        "Report",
+        "see attached",
+        attachment="report",
+        mime="application/rtf",
+    ),
+    _message(
+        "f6",
+        ["INBOX"],
+        "2026-01-07",
+        "Fa <fa@example.com>",
+        "Formats",
+        "rtf beats doc",
+    ),
+    _message(
+        "g7",
+        ["INBOX"],
+        "2026-01-08",
+        "Gi <gi@example.com>",
+        "Trip",
+        "the traveler program",
+        snippet="the travel",
     ),
 ]
 
