@@ -36,14 +36,6 @@ import {
 } from './grep_pushdown.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import type { Accessor } from '../../accessor/base.ts'
-import { commandIo } from './generic_bind/adapter.ts'
-import type { CommandIO } from '../config.ts'
-import { materialize } from '../../io/types.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
-import { FakeDiscordTransport, makeFakeVfs as discordVfs } from './discord/_test_util.ts'
-import { DISCORD_GREP } from './discord/grep.ts'
-import { DISCORD_RG } from './discord/rg.ts'
 
 describe('classifyPattern', () => {
   it('newlines and regex are REGEX, plain text is SIMPLE, fixed is EXACT', () => {
@@ -459,57 +451,5 @@ describe('textCandidates', () => {
     )
     expect(textCandidates(paths).map((p) => p.virtual)).toEqual(['/a.py', '/b.txt', '/README'])
     expect(textCandidates([])).toEqual([])
-  })
-})
-
-function discordEmpty(): [{ endpoint: string }[], Accessor, CommandIO] {
-  const transport = new FakeDiscordTransport(() => ({ total_results: 0, messages: [] }))
-  const vfs = discordVfs(transport)
-  return [transport.calls, vfs.accessor, commandIo(vfs)]
-}
-
-const DISCORD_CHANNEL = ['/mnt/discord', '/My Server__G1/channels/general__C1'] as const
-const DISCORD_SEARCHES = ['/guilds/G1/messages/search']
-
-describe('an empty search answer', () => {
-  it.each([
-    [
-      'discord grep',
-      DISCORD_GREP,
-      discordEmpty,
-      DISCORD_CHANNEL,
-      { w: true, r: true },
-      DISCORD_SEARCHES,
-    ],
-    [
-      'discord rg',
-      DISCORD_RG,
-      discordEmpty,
-      DISCORD_CHANNEL,
-      { word_regexp: true },
-      DISCORD_SEARCHES,
-    ],
-  ])('is final for %s', async (_name, commands, empty, [prefix, rest], flags, searches) => {
-    const cmd = commands[0]
-    if (cmd === undefined) throw new Error('command not registered')
-    const [calls, accessor, io] = empty()
-    const virtual = prefix + rest
-    const spec = new PathSpec({
-      virtual,
-      directory: virtual,
-      resolved: false,
-      vfsPath: mountKey(virtual, prefix),
-    })
-    const result = await cmd.fn(accessor, [spec], ['missing'], {
-      stdin: null,
-      flags,
-      io,
-      cwd: '/',
-    })
-    if (result === null) throw new Error('no result')
-    const [out, ioResult] = result
-    expect(calls.map((c) => c.endpoint)).toEqual(searches)
-    expect(ioResult.exitCode).toBe(1)
-    expect(await materialize(out)).toEqual(new Uint8Array())
   })
 })

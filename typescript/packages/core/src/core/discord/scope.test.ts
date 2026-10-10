@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { INVALID, ROOT } from '../hierarchy/scope.ts'
-import { detectScope, NATIVE_KINDS } from './scope.ts'
+import { detectScope } from './scope.ts'
 
 const CHAT = '/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl'
 
@@ -88,19 +88,5 @@ describe('detectScope', () => {
       INVALID,
     )
     expect(detectScope('/My Server__G1/channels/.hidden__C1').kind).toBe(INVALID)
-  })
-})
-
-describe('NATIVE_KINDS', () => {
-  it('excludes the rendered leaves', () => {
-    // A day and what it holds, member profiles and stored blobs are not
-    // answerable by the guild message search, which takes no date; the
-    // containers above them are.
-    for (const kind of ['day', 'messages', 'files', 'member', 'file_blob']) {
-      expect(NATIVE_KINDS.has(kind)).toBe(false)
-    }
-    for (const kind of ['guild', 'channels_dir', 'channel']) {
-      expect(NATIVE_KINDS.has(kind)).toBe(true)
-    }
   })
 })

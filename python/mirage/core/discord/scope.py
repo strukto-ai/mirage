@@ -20,11 +20,11 @@ _GUILD = (Slot("guild", id_key="guild_id"),)
 _CHANNEL = _GUILD + ("channels", Slot("channel", id_key="channel_id"))
 _DAY = _CHANNEL + (Slot("day", DATE),)
 
-# One description of the tree: readdir, stat, read and the search
-# push-down all classify through it, so the file surface and the command
-# surface cannot disagree about what a path means. Every dynamic level
-# is a `name__id` dirname the tree itself mints, so the ids decode from
-# the path and detection needs no index or network round-trip.
+# One description of the tree: readdir, stat and read all classify
+# through it, so the file surface and the command surface cannot
+# disagree about what a path means. Every dynamic level is a `name__id`
+# dirname the tree itself mints, so the ids decode from the path and
+# detection needs no index or network round-trip.
 SCOPES = (
     Scope(kind="guild", segments=_GUILD),
     Scope(kind="channels_dir", segments=_GUILD + ("channels",)),
@@ -51,10 +51,3 @@ SCOPES = (
 )
 
 detect_scope = make_detect_scope(SCOPES)
-
-# Kinds the guild search push-down may answer for. A day, its chat.jsonl
-# and its files are deliberately absent: `search_guild` takes a channel
-# but no date, so serving one day from a channel-wide search would report
-# messages the line did not ask for. Same doctrine for `file_blob` and
-# `member`, whose bytes the message search does not carry.
-NATIVE_KINDS = frozenset({"guild", "channels_dir", "channel"})

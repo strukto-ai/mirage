@@ -15,17 +15,13 @@
 import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
 import { genericCommands } from '../generic_bind/index.ts'
-import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
-import { DISCORD_RG } from './rg.ts'
 
-const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'head'])
+const DISCORD_OVERRIDES = new Set(['head'])
 
 export const DISCORD_COMMANDS: readonly Command[] = [
   ...genericCommands(VFSName.DISCORD, {
     overrides: DISCORD_OVERRIDES,
   }),
-  ...DISCORD_GREP,
-  ...DISCORD_RG,
   ...DISCORD_HEAD,
 ]

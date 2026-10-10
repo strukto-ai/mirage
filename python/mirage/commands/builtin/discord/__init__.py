@@ -12,17 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
-from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
     *generic_commands(
         "discord",
-        overrides={"grep", "rg", "head"},
+        overrides={"head"},
     ),
-    grep,
-    rg,
     head,
 ]

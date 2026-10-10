@@ -8,9 +8,9 @@
       ],
       "command": "grep -w green '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'",
       "expect": {
-        "exit": 0,
-        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl:[alice] deploy is green\n",
-        "stderr": ""
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001: Is a directory\n"
       }
     },
     {
@@ -153,8 +153,8 @@
       "command": "grep -w released '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
-        "stderr": ""
+        "stdout": "2\n",
+        "stderr": "grep: /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001: Is a directory\n"
       }
     },
     {
@@ -166,7 +166,7 @@
       "command": "rg -w green '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo rc=$?; rg -w zzznomatch '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl:[alice] deploy is green\nrc=0\nrc=1\n",
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl:{\"id\":\"1510934682009600000\",\"channel_id\":\"200000000000000001\",\"author\":{\"id\":\"300000000000000001\",\"username\":\"alice\",\"global_name\":\"Alice\",\"bot\":false},\"content\":\"deploy is green\",\"timestamp\":\"2026-06-01T09:15:00.000000+00:00\",\"edited_timestamp\":null,\"tts\":false,\"pinned\":false,\"mention_everyone\":false,\"mentions\":[],\"mention_roles\":[],\"attachments\":[],\"embeds\":[],\"type\":0}\nrc=0\nrc=1\n",
         "stderr": ""
       }
     },

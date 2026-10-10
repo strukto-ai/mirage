@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
-import { formatGrepResults, searchGuild } from './search.ts'
+import { searchGuild } from './search.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -110,108 +110,5 @@ describe('searchGuild', () => {
     const out = await searchGuild(new DiscordAccessor(t), 'G1', 'q')
     expect(out).toEqual([])
     expect(t.calls).toHaveLength(1)
-  })
-})
-
-describe('formatGrepResults', () => {
-  const scope = {
-    guildId: 'G1',
-    guildName: 'My Server',
-  }
-
-  it('builds full VFS path with prefix, sanitized guild and channel dirs', () => {
-    const lines = formatGrepResults(
-      [
-        {
-          id: '1',
-          channel_id: 'C1',
-          timestamp: '2026-04-25T12:34:56.000Z',
-          author: { username: 'alice' },
-          content: 'hello world',
-        },
-      ],
-      scope,
-      '/discord',
-      new Map([['C1', 'general']]),
-    )
-    expect(lines).toEqual([
-      '/discord/My Server__G1/channels/general__C1/2026-04-25/chat.jsonl:[alice] hello world',
-    ])
-  })
-
-  it('falls back to unknown__id when channel name unknown', () => {
-    const lines = formatGrepResults(
-      [
-        {
-          id: '1',
-          channel_id: 'C2',
-          timestamp: '2026-04-25T12:34:56.000Z',
-          author: { username: 'bob' },
-          content: 'hi',
-        },
-      ],
-      scope,
-      '/discord',
-    )
-    expect(lines).toEqual([
-      '/discord/My Server__G1/channels/unknown__C2/2026-04-25/chat.jsonl:[bob] hi',
-    ])
-  })
-
-  it('uses scope.channelName when channel-scoped', () => {
-    const lines = formatGrepResults(
-      [
-        {
-          id: '1',
-          channel_id: 'C3',
-          timestamp: '2026-04-25T12:34:56.000Z',
-          author: { username: 'carol' },
-          content: 'msg',
-        },
-      ],
-      { ...scope, channelName: 'eng' },
-      '/discord',
-    )
-    expect(lines).toEqual([
-      '/discord/My Server__G1/channels/eng__C3/2026-04-25/chat.jsonl:[carol] msg',
-    ])
-  })
-
-  it('derives the date from the snowflake when the timestamp is missing', () => {
-    // A hit without a timestamp still has a snowflake id, which encodes the
-    // creation day readdir buckets it under. 175928847299117056 is
-    // 2016-04-30 UTC.
-    const lines = formatGrepResults(
-      [
-        {
-          id: '175928847299117056',
-          channel_id: 'C1',
-          author: { username: 'alice' },
-          content: 'hello',
-        },
-      ],
-      scope,
-      '/discord',
-      new Map([['C1', 'general']]),
-    )
-    expect(lines).toEqual([
-      '/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl:[alice] hello',
-    ])
-  })
-
-  it('points a fully dateless hit at the channel dir instead of //chat.jsonl', () => {
-    const lines = formatGrepResults(
-      [
-        {
-          channel_id: 'C1',
-          author: { username: 'alice' },
-          content: 'hello',
-        },
-      ],
-      scope,
-      '/discord',
-      new Map([['C1', 'general']]),
-    )
-    expect(lines).toEqual(['/discord/My Server__G1/channels/general__C1:[alice] hello'])
   })
 })

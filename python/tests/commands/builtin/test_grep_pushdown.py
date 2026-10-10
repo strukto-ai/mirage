@@ -1,21 +1,13 @@
 import re
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin import grep_pushdown
 from mirage.commands.builtin.constants import PatternType
-from mirage.commands.builtin.discord.grep import grep as discord_grep
-from mirage.commands.builtin.discord.rg import rg as discord_rg
 from mirage.commands.builtin.types import RegexSyntax
-from mirage.commands.config import CommandOpts
-from mirage.core.time_range import TimeRange
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
-from mirage.vfs.discord import DiscordVFS
 from mirage.vfs.types import SearchOps, SearchQuery
-from tests.fixtures.vfs_io import io_for
 
 
 def test_classify_pattern_newline_list_is_regex():
@@ -505,55 +497,3 @@ def test_text_candidates_drops_what_a_walk_never_reads():
         "/README",
     ]
     assert grep_pushdown.text_candidates([]) == []
-
-
-DISCORD_CHANNEL = ("/discord", "/myguild__g_123/channels/general__ch_456")
-DISCORD_EMPTY = {"search_guild": [], "list_channels": []}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "cmd, path, flags, answers, read",
-    [
-        (
-            discord_grep,
-            DISCORD_CHANNEL,
-            {"w": True, "r": True},
-            DISCORD_EMPTY,
-            "discord_read",
-        ),
-        (
-            discord_rg,
-            DISCORD_CHANNEL,
-            {"word_regexp": True},
-            DISCORD_EMPTY,
-            "discord_read",
-        ),
-    ],
-)
-async def test_an_empty_search_answer_is_final(
-    cmd, path, flags, answers, read
-):
-    accessor = AsyncMock()
-    accessor.time_range = TimeRange()
-    mocks = {name: AsyncMock(return_value=v) for name, v in answers.items()}
-    mocks[read] = AsyncMock(return_value=b"")
-    prefix, rest = path
-    virtual = prefix + rest
-    spec = PathSpec(
-        vfs_path=mount_key(virtual, prefix), virtual=virtual, directory=virtual
-    )
-    with patch.dict(cmd.__wrapped__.__globals__, mocks):
-        out, io = await cmd(
-            accessor,
-            [spec],
-            ["missing"],
-            CommandOpts(
-                index=RAMIndexCacheStore(),
-                flags=flags,
-                io=io_for(DiscordVFS, accessor),
-            ),
-        )
-    assert next(iter(mocks.values())).await_count == 1
-    assert mocks[read].await_count == 0
-    assert (out, io.exit_code) == (b"", 1)
