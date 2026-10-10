@@ -105,11 +105,6 @@ DESCRIPTOR_CALLS: frozenset[str] = frozenset(
     }
 )
 
-# The block size every mirage stat translator reports; a backend has no
-# block size of its own, and 4 KiB is what the FUSE adapters already
-# answer.
-BLKSIZE = 4096
-
 # setxattr(2)'s flags as linux numbers them, the one platform whose os
 # module has the xattr family for this router to install.
 XATTR_CREATE = 1

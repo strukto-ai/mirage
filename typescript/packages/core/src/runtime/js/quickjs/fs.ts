@@ -15,7 +15,7 @@
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { PathSpec } from '../../../types.ts'
-import { WASI, errnoFor } from './errors.ts'
+import { WASI, errnoFor } from '../../../errors/wasi.ts'
 import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'

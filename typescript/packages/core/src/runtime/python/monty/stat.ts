@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DIR_SIZE } from '../../../utils/stat_view.ts'
 import type { VFSStat } from '../../types.ts'
 import type { MontyFsBits } from './loader.ts'
 
@@ -19,9 +20,9 @@ const S_IFREG = 0o100000
 const S_IFDIR = 0o40000
 const S_IFMT = 0o170000
 const PERMISSION_BITS = 0o7777
-// What monty's own StatResult reports for a directory, so a guest sees
-// the same two numbers whichever host answered.
-const DIR_SIZE = 4096
+// What monty's own StatResult reports for a directory (DIR_SIZE, shared,
+// and two links), so a guest sees the same two numbers whichever host
+// answered.
 const DIR_LINKS = 2
 const FILE_LINKS = 1
 

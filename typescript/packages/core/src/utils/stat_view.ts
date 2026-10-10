@@ -34,6 +34,32 @@ export const LINK_MODE = S_IFLNK | 0o777
 // report this, so find -size agrees with what the listing shows.
 export const DIR_SIZE = 4096
 
+// The block size every stat translator reports: a backend has none of its
+// own, and 4 KiB is what the kernel adapters answer. st_blocks counts in
+// BLOCK_UNIT whatever the block size, as POSIX has it.
+export const BLKSIZE = 4096
+export const BLOCK_UNIT = 512
+
+// FNV-1a, 64-bit: the same arithmetic on both hosts and in every runtime,
+// so one path reports one inode whoever asks.
+const FNV_OFFSET = 0xcbf29ce484222325n
+const FNV_PRIME = 0x100000001b3n
+const FNV_MASK = 0xffffffffffffffffn
+const ENC = new TextEncoder()
+
+/**
+ * A stable, distinct id for one name, as a stat's ino and dev: derived
+ * from the name rather than counted, so two processes reading the same
+ * workspace agree and a repeated stat of one path does not move. The top
+ * 48 bits of the hash, which a number holds exactly. Mirrors Python's
+ * `ident`.
+ */
+export function ident(text: string): number {
+  let value = FNV_OFFSET
+  for (const byte of ENC.encode(text)) value = ((value ^ BigInt(byte)) * FNV_PRIME) & FNV_MASK
+  return Number(value >> 16n)
+}
+
 /**
  * A FileStat's mtime as epoch milliseconds, null when unknown.
  *

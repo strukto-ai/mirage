@@ -188,6 +188,19 @@ describe('quickjs os.remove and seek', () => {
     }
   }, 120_000)
 
+  it('stats two files as two inodes, and one file as one', async () => {
+    const ws = await workspace()
+    try {
+      await ws.shell('echo a > /data/a; echo b > /data/b')
+      const result = await ws.shell(
+        `node -e "const a = os.stat('/data/a')[0]; const b = os.stat('/data/b')[0]; console.log(a.ino !== b.ino, a.ino === os.stat('/data/a')[0].ino)"`,
+      )
+      expect(DEC.decode(result.stdout)).toBe('true true\n')
+    } finally {
+      await ws.close()
+    }
+  }, 120_000)
+
   it('refuses a seek before the start and keeps the position', async () => {
     const ws = await workspace()
     try {

@@ -24,7 +24,7 @@ class FsCondition(StrEnum):
     a monty guest) keeps only a table from these names to its own
     numbers, and nothing else. The POSIX table is the shared base and
     lives here; each runtime dialect lives beside its boundary
-    (``runtime/wasm/errors.py``, ``runtime/python/monty/errors.py``).
+    (``errors/wasi.py``, ``runtime/python/monty/errors.py``).
     Every table stays total over this enum, and each table's own test
     fails a half-added member.
 

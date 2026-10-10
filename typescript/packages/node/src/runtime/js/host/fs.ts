@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { posix } from 'node:path'
@@ -24,6 +23,7 @@ import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
 import { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
+import { posixStat } from '@struktoai/mirage-core/runtime/stat'
 import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
@@ -52,12 +52,6 @@ function spelled(path: unknown): string | null {
   if (typeof path === 'string') return path
   if (path instanceof URL && path.protocol === 'file:') return fileURLToPath(path)
   return null
-}
-
-/** A stable id for one name, so two mounted files never compare as one
- * inode (`dev`/`ino`), mirroring python's `host/stat.ident`. */
-function ident(text: string): number {
-  return createHash('sha256').update(text).digest().readUIntBE(0, 6)
 }
 
 /** A stamp in nanoseconds, as node's BigIntStats spells one. */
@@ -326,10 +320,16 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   private statsOf(path: string, st: VFSStat, options?: Options): unknown {
-    const kind = st.mode & S_IFMT
-    const mtime = new Date(st.mtimeMs ?? this.born)
-    const atime = st.atimeMs === undefined ? mtime : new Date(st.atimeMs)
-    const prefix = this.ws.registry.tryMountFor(path)?.prefix ?? '/'
+    // The stat every runtime shares; an owner the row lacks is this
+    // process's own.
+    const posix = posixStat(st, path, this.ws.registry.tryMountFor(path)?.prefix ?? '/', {
+      uid: process.getuid?.() ?? 0,
+      gid: process.getgid?.() ?? 0,
+      unknownMs: this.born,
+    })
+    const kind = posix.mode & S_IFMT
+    const mtime = new Date(posix.mtimeMs)
+    const atime = new Date(posix.atimeMs)
     const kinds = {
       isFile: () => kind === S_IFREG,
       isDirectory: () => kind === S_IFDIR,
@@ -341,20 +341,20 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     }
     const dates = { atime, mtime, ctime: mtime, birthtime: mtime }
     const fields: Record<string, number> = {
-      dev: ident(prefix),
-      ino: ident(path),
-      mode: st.mode,
-      nlink: st.isDir ? 2 : 1,
-      uid: st.uid ?? process.getuid?.() ?? 0,
-      gid: st.gid ?? process.getgid?.() ?? 0,
-      rdev: st.rdev ?? 0,
-      size: st.size,
-      blksize: 4096,
-      blocks: Math.ceil(st.size / 512),
-      atimeMs: atime.getTime(),
-      mtimeMs: mtime.getTime(),
-      ctimeMs: mtime.getTime(),
-      birthtimeMs: mtime.getTime(),
+      dev: posix.dev,
+      ino: posix.ino,
+      mode: posix.mode,
+      nlink: posix.nlink,
+      uid: posix.uid,
+      gid: posix.gid,
+      rdev: posix.rdev,
+      size: posix.size,
+      blksize: posix.blksize,
+      blocks: posix.blocks,
+      atimeMs: posix.atimeMs,
+      mtimeMs: posix.mtimeMs,
+      ctimeMs: posix.ctimeMs,
+      birthtimeMs: posix.mtimeMs,
     }
     if (fieldsOf(options).bigint !== true) return { ...kinds, ...fields, ...dates }
     // node's BigIntStats: every number a bigint, plus the stamps in ns.

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.wasm.constants import (
     FT_CHR,
@@ -32,7 +33,8 @@ from mirage.utils.stat_view import CHAR_MODE, DIR_MODE, FILE_MODE, LINK_MODE
 def test_record_sizes_match_the_preview1_layouts():
     assert len(pack_prestat(1)) == 8
     assert len(pack_fdstat(FT_REG)) == 24
-    assert len(pack_filestat(0, 0, FT_REG, 0)) == 64
+    row = VFSStat(size=0, is_dir=False, mode=0o100644)
+    assert len(pack_filestat(posix_stat(row, "/f", "/"), FT_REG)) == 64
 
 
 def test_filetype_of_answers_a_stat_and_a_listing_row_alike():

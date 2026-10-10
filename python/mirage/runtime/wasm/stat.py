@@ -15,6 +15,7 @@
 import struct
 from stat import S_ISCHR
 
+from mirage.runtime.stat import PosixStat
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.wasm.constants import (
     ALL_RIGHTS,
@@ -60,34 +61,21 @@ def pack_fdstat(filetype: int) -> bytes:
     return struct.pack("<BxHxxxxQQ", filetype, 0, ALL_RIGHTS, ALL_RIGHTS)
 
 
-def pack_filestat(
-    size: int,
-    mtime_ns: int,
-    filetype: int,
-    ino: int,
-    atime_ns: int | None = None,
-) -> bytes:
-    """Encode a filestat record.
-
-    A directory links twice, from its parent and from its own ``.``, and
-    a file once, as ``st_nlink`` reads on Linux.
+def pack_filestat(st: PosixStat, filetype: int) -> bytes:
+    """Encode a filestat record from the stat every runtime shares.
 
     Args:
-        size (int): file size in bytes.
-        mtime_ns (int): modification time, epoch nanoseconds.
+        st (PosixStat): the path's stat.
         filetype (int): preview1 filetype.
-        ino (int): synthetic inode number, stable within a run.
-        atime_ns (int | None): access time, epoch nanoseconds; None
-            reads as the modification time.
     """
     return struct.pack(
         "<QQBxxxxxxxQQQQQ",
-        0,
-        ino,
+        st.dev,
+        st.ino,
         filetype,
-        2 if filetype == FT_DIR else 1,
-        size,
-        mtime_ns if atime_ns is None else atime_ns,
-        mtime_ns,
-        mtime_ns,
+        st.nlink,
+        st.size,
+        st.atime_ns,
+        st.mtime_ns,
+        st.ctime_ns,
     )

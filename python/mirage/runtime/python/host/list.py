@@ -17,8 +17,8 @@ from collections.abc import Iterator
 from stat import S_ISDIR, S_ISLNK, S_ISREG
 from typing import Any, Protocol
 
-from mirage.runtime.python.host.stat import ident
 from mirage.utils.remnants import entry_name
+from mirage.utils.stat_view import ident
 
 
 class StatRouter(Protocol):

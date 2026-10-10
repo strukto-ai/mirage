@@ -49,6 +49,7 @@ from mirage.runtime.python.host.list import (
 )
 from mirage.runtime.python.host.stat import stat_result
 from mirage.runtime.python.host.syscall import as_raised, host_files, syscall
+from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
@@ -367,53 +368,23 @@ class HostFs:
             prefix == owner for prefix, _ in self._files.writable_mounts()
         )
 
-    def _result(
-        self,
-        virtual: str,
-        mode: int,
-        size: int,
-        nlink: int,
-        uid: int | None,
-        gid: int | None,
-        atime_ns: int | None,
-        mtime_ns: int | None,
-    ) -> _real_os.stat_result:
-        """One `os.stat_result` from the fields a stat row carries.
+    def _stat_of(self, virtual: str, st: VFSStat) -> _real_os.stat_result:
+        """One `os.stat_result` for a row, by the rule every runtime
+        shares; an owner the row lacks is the host process's own.
 
         Args:
             virtual (str): the path being statted (the inode's name).
-            mode (int): st_mode, type bits included.
-            size (int): st_size.
-            nlink (int): st_nlink.
-            uid (int | None): owner from the overlay; None falls back to
-                the host's own uid.
-            gid (int | None): group, read the same way.
-            atime_ns (int | None): access time, None for unknown.
-            mtime_ns (int | None): modification time, None for unknown.
+            st (VFSStat): the mount's row for it.
         """
-        stamp = self._now if mtime_ns is None else mtime_ns / 1_000_000_000
         return stat_result(
-            virtual,
-            owner_prefix(self._files.mount_prefixes(), virtual) or "/",
-            mode,
-            size,
-            nlink,
-            self._uid if uid is None else uid,
-            self._gid if gid is None else gid,
-            stamp if atime_ns is None else atime_ns / 1_000_000_000,
-            stamp,
-        )
-
-    def _stat_of(self, virtual: str, st: VFSStat) -> _real_os.stat_result:
-        return self._result(
-            virtual,
-            st.mode,
-            st.size,
-            2 if st.is_dir else 1,
-            st.uid,
-            st.gid,
-            st.atime_ns,
-            st.mtime_ns,
+            posix_stat(
+                st,
+                virtual,
+                owner_prefix(self._files.mount_prefixes(), virtual) or "/",
+                uid=self._uid,
+                gid=self._gid,
+                unknown_ns=int(self._now * 1_000_000_000),
+            )
         )
 
     def _link_target(self, virtual: str) -> str | None:
@@ -611,15 +582,14 @@ class HostFs:
         if row is None:
             # A facade built without a link table: the target string is
             # the only fact there is.
-            return self._result(
+            return self._stat_of(
                 virtual,
-                LINK_MODE,
-                len(target.encode()),
-                1,
-                None,
-                None,
-                None,
-                None,
+                VFSStat(
+                    size=len(target.encode()),
+                    is_dir=False,
+                    mode=LINK_MODE,
+                    is_link=True,
+                ),
             )
         return self._stat_of(virtual, stat_row(row))
 

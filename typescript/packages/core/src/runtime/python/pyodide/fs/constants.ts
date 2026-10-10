@@ -20,10 +20,7 @@ export { DIR_MODE, FILE_MODE, LINK_MODE } from '../../../../utils/stat_view.ts'
 // Emscripten asks 0o666 for a file and 0o777 for a directory.
 export const UMASK = 0o022
 
-export const BLKSIZE = 4096
-
-// What st_blocks counts in, whatever the block size.
-export const BLOCK_UNIT = 512
+export { BLKSIZE, BLOCK_UNIT } from '../../../../utils/stat_view.ts'
 
 // The open flags' access bits, as Emscripten numbers them.
 export const O_ACCMODE = 3

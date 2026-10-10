@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import functools
 import logging
 import posixpath
@@ -20,10 +21,12 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FileHandle, FileTable
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
+from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
 from mirage.runtime.wasm.constants import (
     FDFLAG_APPEND,
@@ -49,7 +52,6 @@ from mirage.runtime.wasm.errors import (
     ENOTDIR,
     LINK_REFUSAL,
     OK,
-    errno_for,
 )
 from mirage.runtime.wasm.list import pack_dirent
 from mirage.runtime.wasm.loader import Func, FuncType, ValType, wasmtime
@@ -62,6 +64,7 @@ from mirage.runtime.wasm.stat import (
 )
 from mirage.runtime.wasm.view import WasmView
 from mirage.utils.dates import timestamp_iso
+from mirage.utils.stat_view import CHAR_MODE, FILE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -239,10 +242,6 @@ class WasiFs:
         joined = rel if rel.startswith("/") else posixpath.join(base, rel)
         normed = posixpath.normpath(joined)
         return normed if normed.startswith("/") else "/" + normed
-
-    @staticmethod
-    def _ino(path: str) -> int:
-        return hash(path) & (2**63 - 1)
 
     # -- fd lookups -------------------------------------------------------
 
@@ -535,25 +534,24 @@ class WasiFs:
         if entry is None:
             return EBADF
         if entry.kind == "file" and entry.handle is not None:
-            row = entry.stat
+            # The size is the handle's, which counts what it wrote.
+            row = entry.stat or VFSStat(size=0, is_dir=False, mode=FILE_MODE)
             packed = pack_filestat(
-                entry.handle.size,
-                (row.mtime_ns or 0) if row is not None else 0,
+                posix_stat(
+                    dataclasses.replace(row, size=entry.handle.size),
+                    entry.path,
+                    "/",
+                ),
                 FT_REG,
-                self._ino(entry.path),
-                None if row is None else row.atime_ns,
             )
         elif entry.kind == "dir":
             st = self._fs.stat(entry.path)
-            packed = pack_filestat(
-                st.size,
-                st.mtime_ns or 0,
-                FT_DIR,
-                self._ino(entry.path),
-                st.atime_ns,
-            )
+            packed = pack_filestat(posix_stat(st, entry.path, "/"), FT_DIR)
         else:
-            packed = pack_filestat(0, 0, FT_CHR, fd)
+            stream = VFSStat(size=0, is_dir=False, mode=CHAR_MODE)
+            packed = pack_filestat(
+                posix_stat(stream, f"/dev/fd/{fd}", "/"), FT_CHR
+            )
         self._store(caller, buf, packed)
         return OK
 
@@ -574,13 +572,7 @@ class WasiFs:
         # its target and os.path.islink was always False.
         follow = bool(flags & LOOKUP_SYMLINK_FOLLOW)
         st = self._fs.stat(path) if follow else self._fs.lstat(path)
-        packed = pack_filestat(
-            st.size,
-            st.mtime_ns or 0,
-            filetype_of(st),
-            self._ino(path),
-            st.atime_ns,
-        )
+        packed = pack_filestat(posix_stat(st, path, "/"), filetype_of(st))
         self._store(caller, buf, packed)
         return OK
 

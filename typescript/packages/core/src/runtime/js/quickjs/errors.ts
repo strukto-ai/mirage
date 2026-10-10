@@ -12,51 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { classify, type FsCondition } from '../../../errors/index.ts'
-
-// WASI preview1 wire numbers, from wasi-libc's errno.h (alphabetical
-// numbering; the same table python's wasm/errors.py keeps). These are NOT
-// POSIX values and must never be collapsed with them: ENOENT is 44 on
-// the wire, and 18 here is EDOM where a POSIX host means EXDEV. The
-// table is total over the vocabulary; errors.test.ts fails a half-added
-// member.
-export const WASI: Record<FsCondition, number> = {
-  EBADF: 8,
-  ENOENT: 44,
-  ENOTDIR: 54,
-  EISDIR: 31,
-  EEXIST: 20,
-  EACCES: 2,
-  EPERM: 63,
-  ENOTEMPTY: 55,
-  EXDEV: 75,
-  ENOTSUP: 58,
-  ELOOP: 32,
-  EINVAL: 28,
-  EIO: 29,
-  EBUSY: 10,
-  EROFS: 69,
-  EFBIG: 22,
-  // preview1 has no xattr syscalls, so this row is unreachable from a
-  // guest; ENOTSUP is the honest answer if a future host ever asks.
-  NO_XATTR: 58,
-  STALE_WRITE: 72,
-}
-
-/** The preview1 wire number for a condition. */
-export function wasiErrno(condition: FsCondition): number {
-  return WASI[condition]
-}
-
-/** The preview1 wire number a thrown error renders as. */
-export function errnoFor(err: unknown): number {
-  // Naming is the shared classifier's; this boundary only renders the
-  // condition in preview1 numbers. EIO is the same everything-else
-  // fallback the python host keeps for an unnamed OSError.
-  const condition = classify(err)
-  return wasiErrno(condition ?? 'EIO')
-}
-
 export class QuickJsUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)

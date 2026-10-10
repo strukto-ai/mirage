@@ -13,40 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from hashlib import blake2b
 
-from mirage.runtime.python.host.constants import BLKSIZE
-
-
-def ident(text: str) -> int:
-    """A stable, distinct id for one name.
-
-    ``os.path.samefile`` compares (st_dev, st_ino) pairs and
-    ``os.path.ismount`` compares a path's pair with its parent's, so
-    reporting zero for both would make every mounted file the same file
-    and every mount root invisible. Derived from the name rather than
-    counted, so two processes reading the same workspace agree and a
-    repeated stat of one path does not move.
-
-    Args:
-        text (str): the virtual path or mount prefix to identify.
-    """
-    return int.from_bytes(
-        blake2b(text.encode(), digest_size=7).digest(), "big"
-    )
+from mirage.runtime.stat import PosixStat
 
 
-def stat_result(
-    virtual: str,
-    prefix: str,
-    mode: int,
-    size: int,
-    nlink: int,
-    uid: int,
-    gid: int,
-    access: float,
-    stamp: float,
-) -> os.stat_result:
+def stat_result(st: PosixStat) -> os.stat_result:
     """One `os.stat_result`, every field resolved.
 
     Every optional field is filled explicitly, because built from a
@@ -58,40 +29,35 @@ def stat_result(
     result carries exactly what a real stat there would.
 
     Args:
-        virtual (str): the path being statted (the inode's name).
-        prefix (str): the mount owning it (the device's name).
-        mode (int): st_mode, type bits included.
-        size (int): st_size.
-        nlink (int): st_nlink.
-        uid (int): st_uid.
-        gid (int): st_gid.
-        access (float): access time.
-        stamp (float): modification and change time.
+        st (PosixStat): the stat the shared rule computed for the path.
     """
+    atime = st.atime_ns / 1_000_000_000
+    mtime = st.mtime_ns / 1_000_000_000
+    ctime = st.ctime_ns / 1_000_000_000
     return os.stat_result(
         (
-            mode,
-            ident(virtual),
-            ident(prefix),
-            nlink,
-            uid,
-            gid,
-            size,
-            int(access),
-            int(stamp),
-            int(stamp),
+            st.mode,
+            st.ino,
+            st.dev,
+            st.nlink,
+            st.uid,
+            st.gid,
+            st.size,
+            int(atime),
+            int(mtime),
+            int(ctime),
         ),
         {
-            "st_atime": access,
-            "st_mtime": stamp,
-            "st_ctime": stamp,
-            "st_atime_ns": int(access * 1_000_000_000),
-            "st_mtime_ns": int(stamp * 1_000_000_000),
-            "st_ctime_ns": int(stamp * 1_000_000_000),
-            "st_birthtime": stamp,
-            "st_blksize": BLKSIZE,
-            "st_blocks": -(-size // 512),
-            "st_rdev": 0,
+            "st_atime": atime,
+            "st_mtime": mtime,
+            "st_ctime": ctime,
+            "st_atime_ns": st.atime_ns,
+            "st_mtime_ns": st.mtime_ns,
+            "st_ctime_ns": st.ctime_ns,
+            "st_birthtime": mtime,
+            "st_blksize": st.blksize,
+            "st_blocks": st.blocks,
+            "st_rdev": st.rdev,
             "st_flags": 0,
             "st_gen": 0,
         },
