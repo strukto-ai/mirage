@@ -1402,6 +1402,7 @@ class SlackService:
                 token=bot,
                 search_token=search,
                 base_url=f"{self.url}/api",
+                content_search=True,
                 **mount.get("config", {}),
             )
         )

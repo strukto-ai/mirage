@@ -19,7 +19,7 @@ import type { ParsedQuery } from './query.ts'
 import { channels, users } from './store.ts'
 import type { MessageRow } from './store.ts'
 import type { ChannelRow, FileRow, UserRow } from './wire.ts'
-import { argsOf, fail, requestToken } from './wire.ts'
+import { argsOf, fail, reactionsOf, requestToken } from './wire.ts'
 
 interface Scope {
   parsed: ParsedQuery
@@ -131,6 +131,8 @@ export async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
         m.text !== '' &&
         m.subtype !== 'channel_join' &&
         m.subtype !== 'channel_leave' &&
+        (s.parsed.reaction === undefined ||
+          reactionsOf(m.reactionsJson).some((r) => r.name === s.parsed.reaction)) &&
         withinDates(Number(m.ts), s.parsed),
     )
     .map((m) => ({
@@ -165,10 +167,14 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
     ],
   }
   if (s.channelId !== undefined) where.channelId = s.channelId
-  // search.files has no author field in this model, so a from: query can never
-  // match a file; return an empty set rather than silently ignoring it.
+  // search.files has no author or reaction field in this model, so a from:
+  // or has:: query can never match a file; return an empty set rather than
+  // silently ignoring it.
   const rows: FileRow[] =
-    s.channelMissing || s.parsed.fromName !== undefined || s.parsed.fromId !== undefined
+    s.channelMissing ||
+    s.parsed.fromName !== undefined ||
+    s.parsed.fromId !== undefined ||
+    s.parsed.reaction !== undefined
       ? []
       : await ctx.db.slackFile.findMany({ where, orderBy: { id: 'asc' } })
   const matches = rows
@@ -181,6 +187,7 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
       filetype: f.filetype,
       size: f.size,
       timestamp: f.timestamp,
+      channels: [f.channelId],
     }))
   return {
     status: 200,

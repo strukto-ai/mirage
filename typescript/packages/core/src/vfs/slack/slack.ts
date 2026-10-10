@@ -21,6 +21,7 @@ import {
   readStream as slackReadStream,
 } from '../../core/slack/read.ts'
 import { readdir as slackReaddir } from '../../core/slack/readdir.ts'
+import { filesContaining as slackFilesContaining } from '../../core/slack/search.ts'
 import { stat as slackStat } from '../../core/slack/stat.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
@@ -32,6 +33,9 @@ import { BaseVFS } from '../base.ts'
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly maxDuEntries: number | null = DU_MAX_ENTRIES
   override readonly readsRanges: boolean = true
+  // Slack search names channel days; DMs, users and file blobs are read as
+  // usual.
+  override readonly searchable: readonly string[] = ['channels/*/*/chat.jsonl']
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return slackReaddir(this.accessor, path, index)
@@ -57,5 +61,20 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return slackStat(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+    index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    if (
+      !opts.wholeWord ||
+      !this.accessor.contentSearch ||
+      !(this.accessor.transport.searchAvailable?.() ?? true)
+    )
+      return Promise.resolve(null)
+    return slackFilesContaining(this.accessor, text, under, index)
   }
 }

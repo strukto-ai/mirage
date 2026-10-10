@@ -12,16 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.formatters import channel_dirname, format_grep_results
-from mirage.core.slack.scope import SearchTarget
-from mirage.core.slack.search import search_messages
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
+from mirage.core.slack.search import MAX_PAGES, search_files, search_messages
+from tests.core.slack.conftest import FakeSlack
 
 
 @pytest.mark.asyncio
@@ -52,59 +49,78 @@ async def test_search_messages_forwards_explicit_count_and_page():
     assert params["page"] == 3
 
 
-def test_format_grep_results_path_uses_chat_jsonl():
-    raw_payload = {
-        "messages": {
-            "matches": [
-                {
-                    "channel": {"id": "C001", "name": "general"},
-                    "user": "U1",
-                    "ts": "1712707200.0",
-                    "text": "hello",
-                },
+@pytest.mark.asyncio
+async def test_search_files_calls_correct_endpoint():
+    config = SlackConfig(token="xoxb", search_token="xoxp")
+    with patch(
+        "mirage.core.slack.search.slack_get",
+        new_callable=AsyncMock,
+        return_value={"ok": True, "files": {"matches": []}},
+    ) as mock:
+        await search_files(config, "report")
+    args, kwargs = mock.call_args
+    assert args[1] == "search.files"
+    assert kwargs["params"]["query"] == "report"
+    assert "token" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, reads",
+    [
+        (
+            "grep -rlw deploy /slack/channels",
+            ["C1/2025-11-03", "C1/2025-11-06", "C2/2025-11-04"],
+        ),
+        ("grep -rlw rocket /slack/channels/general__C1", ["C1/2025-11-04"]),
+        ("grep -rlw Launch /slack/channels/general__C1", ["C1/2025-11-05"]),
+        (
+            "grep -rlw deploy /slack/channels/general__C1/2025-11-06",
+            ["C1/2025-11-06"],
+        ),
+        (
+            "grep -rlw deploy /slack",
+            [
+                "C1/2025-11-03",
+                "C1/2025-11-06",
+                "C2/2025-11-04",
+                "D1/2025-11-03",
             ],
-        },
-    }
-    raw = json.dumps(raw_payload).encode()
-    scope = SearchTarget(
-        container="channels",
-        channel_name="general",
-        channel_id="C001",
-    )
-    lines = format_grep_results(raw, scope, "/slack")
-    assert len(lines) == 1
-    line = lines[0]
-    assert line.startswith(
-        "/slack/channels/general__C001/2024-04-10/chat.jsonl:"
-    ), line
+        ),
+    ],
+)
+async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
+    full = await slack(line, content_search=False)
+    out, code, read, _ = await slack(line)
+    assert (out, code) == full[:2]
+    assert read == reads
 
 
-def test_a_long_channel_name_reports_the_path_readdir_emits():
-    """A grep hit must name the directory the listing actually contains.
+@pytest.mark.asyncio
+async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
+    *_, searches = await slack("grep -rlw rocket /slack/channels/general__C1")
+    assert searches == [
+        "in:#general rocket",
+        "in:#general ocket",
+        "in:#general rocket",
+        "in:#general ocket",
+        "in:#general has::rocket:",
+    ]
 
-    The formatter composed ``<name>__<id>`` itself, so a CJK channel name
-    rendered a 613-byte segment where readdir emits a 253-byte one: the
-    reported path could not be opened.
-    """
-    name = "会議" * 100
-    raw = json.dumps(
-        {
-            "messages": {
-                "matches": [
-                    {
-                        "channel": {"id": "C001", "name": name},
-                        "ts": "1712707200.0",
-                        "text": "hello",
-                    }
-                ],
-            },
-        }
-    ).encode()
-    scope = SearchTarget(
-        container="channels", channel_name=name, channel_id="C001"
-    )
-    line = format_grep_results(raw, scope, "/slack")[0]
-    dirname = line.split("/slack/channels/")[1].split("/")[0]
 
-    assert dirname == channel_dirname({"id": "C001", "name": name})
-    assert byte_length(dirname) <= NAME_MAX_BYTES
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, fake",
+    [
+        ("grep -rlw text /slack/channels", FakeSlack()),
+        ("grep -rlw Lima /slack/channels", FakeSlack()),
+        ("grep -rlw nothing /slack/channels", FakeSlack()),
+        ("grep -rlw deploy /slack/channels", FakeSlack(pages=MAX_PAGES + 1)),
+        ("grep -rlw deploy /slack/channels", FakeSlack(fails=True)),
+        ("grep -rlw deploy /slack/dms", FakeSlack()),
+    ],
+)
+async def test_every_day_is_read_when_search_cannot_answer(slack, line, fake):
+    full = await slack(line, content_search=False)
+    out, code, read, _ = await slack(line, fake)
+    assert (out, code, read) == full[:3]

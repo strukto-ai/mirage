@@ -34,6 +34,9 @@ const SlackConfigSchema = z
     getHeaders: secretSchema(
       z.custom<HeaderProvider>((value) => typeof value === 'function'),
     ).optional(),
+    // See node's SlackConfig: grep -w and rg -w read only the channel days
+    // Slack search names. Off by default.
+    contentSearch: z.boolean().optional(),
   })
   .refine(orderedTimes, timeRangeOrderError)
 

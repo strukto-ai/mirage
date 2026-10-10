@@ -1988,6 +1988,7 @@ async function openSlack(target: Target): Promise<Open> {
         token: `xoxb-${workspace}`,
         searchToken: `xoxp-${workspace}`,
         baseUrl: `${base}/api`,
+        contentSearch: true,
       }),
     )
   }

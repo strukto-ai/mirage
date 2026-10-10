@@ -20,12 +20,14 @@ import type { SlackConfig } from '../core/slack/config.ts'
 
 export class SlackAccessor extends Accessor {
   readonly timeRange: TimeRange
+  readonly contentSearch: boolean
   constructor(
     public readonly transport: SlackTransport,
-    config: { startTime?: string | null; endTime?: string | null } = {},
+    config: { startTime?: string | null; endTime?: string | null; contentSearch?: boolean } = {},
   ) {
     super()
     this.timeRange = new TimeRange(config.startTime, config.endTime)
+    this.contentSearch = config.contentSearch === true
   }
 }
 

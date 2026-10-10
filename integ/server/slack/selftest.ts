@@ -273,6 +273,10 @@ async function main(): Promise<void> {
       ['"in:engineering"', 0],
       ['deploying in:##engineering', 4],
       ['deploying in:##engineering from:<@U8>', 2],
+      ['has::rocket:', 13],
+      ['in:#engineering has::rocket:', 2],
+      ['deploying in:#engineering has::rocket:', 0],
+      ['"has::rocket:"', 0],
     ] as const) {
       const response = await fetch(`${fake.endpoint}/api/search.messages`, {
         method: 'POST',

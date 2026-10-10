@@ -12,10 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type * as History from './history.ts'
+
+vi.mock('./history.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof History>()
+  return { ...actual, getHistoryJsonl: vi.fn(actual.getHistoryJsonl) }
+})
+
 import { SlackAccessor } from '../../accessor/slack.ts'
-import { NodeSlackTransport, type SlackResponse, type SlackTransport } from './client.ts'
-import { searchFiles, searchMessages } from './search.ts'
+import { MountMode } from '../../types.ts'
+import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Mount } from '../../workspace/mount/spec.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import {
+  NodeSlackTransport,
+  SlackApiError,
+  type SlackResponse,
+  type SlackTransport,
+} from './client.ts'
+import { getHistoryJsonl } from './history.ts'
+import { MAX_PAGES, searchFiles, searchMessages } from './search.ts'
 
 const DEC = new TextDecoder()
 
@@ -120,5 +138,211 @@ describe('searchFiles', () => {
       page: '2',
       sort: 'timestamp',
     })
+  })
+})
+
+const DAY = 86_400
+const START = 1762128000
+const CHANNELS = [
+  { id: 'C1', name: 'general', created: START },
+  { id: 'C2', name: 'random', created: START },
+]
+const DMS = [{ id: 'D1', user: 'U1', created: START }]
+const PROFILE = { real_name: 'Ana Lima', display_name: 'ana' }
+const USERS = [{ id: 'U1', name: 'ana', real_name: 'Ana Lima', profile: PROFILE }]
+const PLAN = {
+  id: 'F1',
+  name: 'plan.txt',
+  title: 'Launch plan',
+  mimetype: 'text/plain',
+  filetype: 'text',
+  size: 5,
+  timestamp: START + 2 * DAY + 60,
+  url_private_download: 'https://files.slack.com/files-pri/T1-F1/download/plan.txt',
+}
+
+interface Message {
+  type: string
+  user: string
+  text: string
+  ts: string
+  reactions?: { name: string; users: string[]; count: number }[]
+  files?: (typeof PLAN)[]
+  user_profile?: typeof PROFILE
+}
+
+function message(at: number, text: string, extra: Partial<Message> = {}): Message {
+  return { type: 'message', user: 'U1', text, ts: `${String(at)}.000001`, ...extra }
+}
+
+const MESSAGES: Record<string, Message[]> = {
+  C1: [
+    message(START + 60, 'the deploy is done'),
+    message(START + DAY + 60, 'lunch at noon', {
+      reactions: [{ name: 'rocket', users: ['U1'], count: 1 }],
+    }),
+    message(START + 2 * DAY + 60, '', { files: [PLAN] }),
+    message(START + 3 * DAY + 60, 'deploy again', { user_profile: PROFILE }),
+  ],
+  C2: [message(START + DAY + 60, 'a random deploy in Lima')],
+  D1: [message(START + 60, 'deploy in a dm')],
+}
+
+function holds(text: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<!\\w)${escaped}(?!\\w)`, 'i').test(text)
+}
+
+/**
+ * The Slack Web API a channel walk and its search reach. Search matches
+ * whole words in any case, as Slack does: message text (`search.messages`),
+ * a reaction name (`has::name:`) and a file's name or title
+ * (`search.files`), scoped by `in:#name`. Every page answers `pages` as its
+ * page count. Mirrors Python's `FakeSlack`.
+ */
+class FakeSlack implements SlackTransport {
+  readonly searches: string[] = []
+  constructor(
+    private readonly pages = 1,
+    private readonly fails = false,
+  ) {}
+
+  call(endpoint: string, params: Record<string, string> = {}): Promise<SlackResponse> {
+    if (endpoint === 'conversations.list') {
+      return Promise.resolve({
+        ok: true,
+        channels: (params.types ?? '').includes('im') ? DMS : CHANNELS,
+      })
+    }
+    if (endpoint === 'users.list') return Promise.resolve({ ok: true, members: USERS })
+    if (endpoint === 'conversations.history') {
+      const oldest = Number(params.oldest ?? 0)
+      const latest = params.latest === undefined ? Infinity : Number(params.latest)
+      const found = [...(MESSAGES[params.channel ?? ''] ?? [])]
+        .reverse()
+        .filter((m) => oldest <= Number(m.ts) && Number(m.ts) <= latest)
+      return Promise.resolve({ ok: true, messages: found.slice(0, Number(params.limit)) })
+    }
+    const query = params.query ?? ''
+    this.searches.push(query)
+    if (this.fails) return Promise.reject(new SlackApiError(endpoint, 'ratelimited'))
+    return Promise.resolve({
+      ok: true,
+      [endpoint.slice('search.'.length)]: this.search(endpoint, query),
+    })
+  }
+
+  private search(endpoint: string, query: string): Record<string, unknown> {
+    const words = query.split(' ').filter((w) => w !== '')
+    const names = words.filter((w) => w.startsWith('in:#')).map((w) => w.slice(4))
+    const reaction = words.filter((w) => w.startsWith('has::')).map((w) => w.slice(5, -1))
+    const text = words.filter((w) => !w.startsWith('in:#') && !w.startsWith('has::')).join(' ')
+    const ids = CHANNELS.filter((c) => names.length === 0 || names.includes(c.name)).map(
+      (c) => c.id,
+    )
+    if (names.length === 0) ids.push('D1')
+    const matches: Record<string, unknown>[] = []
+    for (const id of ids) {
+      for (const m of MESSAGES[id] ?? []) {
+        const hit =
+          reaction.length > 0
+            ? (m.reactions ?? []).some((r) => reaction.includes(r.name))
+            : holds(m.text, text)
+        if (endpoint === 'search.messages' && m.text !== '' && hit) {
+          matches.push({ ts: m.ts, channel: { id } })
+        }
+        if (endpoint === 'search.files' && reaction.length === 0) {
+          for (const f of m.files ?? []) {
+            if (holds(f.name, text) || holds(f.title, text)) {
+              matches.push({ id: f.id, timestamp: f.timestamp, channels: [id] })
+            }
+          }
+        }
+      }
+    }
+    return { matches, paging: { pages: this.pages } }
+  }
+
+  downloadFile(): Promise<Uint8Array> {
+    return Promise.resolve(new TextEncoder().encode('plan\n'))
+  }
+
+  searchAvailable(): boolean {
+    return true
+  }
+}
+
+class SearchSlackVFS extends SlackVFSBase {
+  override readonly name = 'slack'
+  override readonly accessor: SlackAccessor
+  constructor(transport: SlackTransport, contentSearch: boolean) {
+    super()
+    this.accessor = new SlackAccessor(transport, { contentSearch })
+  }
+}
+
+type Ran = [string, number, string[], string[]]
+
+async function onSlack(line: string, fake = new FakeSlack(), contentSearch = true): Promise<Ran> {
+  vi.mocked(getHistoryJsonl).mockClear()
+  const ws = new Workspace(
+    { '/slack': new Mount(new SearchSlackVFS(fake, contentSearch), { mode: MountMode.READ }) },
+    { shellParser: await getTestParser() },
+  )
+  try {
+    const result = await ws.shell(line)
+    const reads = vi
+      .mocked(getHistoryJsonl)
+      .mock.calls.map(([, channel, day]) => `${channel}/${day}`)
+      .sort()
+    return [DEC.decode(result.stdout), result.exitCode, reads, fake.searches]
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('filesContaining', () => {
+  it.each([
+    ['grep -rlw deploy /slack/channels', ['C1/2025-11-03', 'C1/2025-11-06', 'C2/2025-11-04']],
+    ['grep -rlw rocket /slack/channels/general__C1', ['C1/2025-11-04']],
+    ['grep -rlw Launch /slack/channels/general__C1', ['C1/2025-11-05']],
+    ['grep -rlw deploy /slack/channels/general__C1/2025-11-06', ['C1/2025-11-06']],
+    [
+      'grep -rlw deploy /slack',
+      ['C1/2025-11-03', 'C1/2025-11-06', 'C2/2025-11-04', 'D1/2025-11-03'],
+    ],
+  ])('reads only the days search names for %s', async (line, reads) => {
+    const full = await onSlack(line, new FakeSlack(), false)
+    const [out, code, read] = await onSlack(line)
+    expect([out, code]).toEqual(full.slice(0, 2))
+    expect(read).toEqual(reads)
+  })
+
+  it('searches a channel by name and its reactions too', async () => {
+    const [, , , searches] = await onSlack('grep -rlw rocket /slack/channels/general__C1')
+    expect(searches).toEqual([
+      'in:#general rocket',
+      'in:#general ocket',
+      'in:#general rocket',
+      'in:#general ocket',
+      'in:#general has::rocket:',
+    ])
+  })
+
+  it.each([
+    ['grep -rlw text /slack/channels', () => new FakeSlack()],
+    ['grep -rlw Lima /slack/channels', () => new FakeSlack()],
+    ['grep -rlw nothing /slack/channels', () => new FakeSlack()],
+    ['grep -rlw deploy /slack/channels', () => new FakeSlack(MAX_PAGES + 1)],
+    ['grep -rlw deploy /slack/channels', () => new FakeSlack(1, true)],
+    ['grep -rlw deploy /slack/dms', () => new FakeSlack()],
+  ])('reads every day when search cannot answer %s', async (line, fake) => {
+    const full = await onSlack(line, new FakeSlack(), false)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      expect((await onSlack(line, fake())).slice(0, 3)).toEqual(full.slice(0, 3))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

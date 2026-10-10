@@ -44,9 +44,6 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { FakeDiscordTransport, makeFakeVfs as discordVfs } from './discord/_test_util.ts'
 import { DISCORD_GREP } from './discord/grep.ts'
 import { DISCORD_RG } from './discord/rg.ts'
-import { FakeSlackTransport, makeFakeVfs as slackVfs } from './slack/_test_util.ts'
-import { SLACK_GREP } from './slack/grep.ts'
-import { SLACK_RG } from './slack/rg.ts'
 
 describe('classifyPattern', () => {
   it('newlines and regex are REGEX, plain text is SIMPLE, fixed is EXACT', () => {
@@ -465,31 +462,17 @@ describe('textCandidates', () => {
   })
 })
 
-function slackEmpty(): [{ endpoint: string }[], Accessor, CommandIO] {
-  const transport = new FakeSlackTransport((endpoint) =>
-    endpoint === 'search.files'
-      ? { ok: true, files: { matches: [] } }
-      : { ok: true, messages: { matches: [] } },
-  )
-  const vfs = slackVfs(transport)
-  return [transport.calls, vfs.accessor, commandIo(vfs)]
-}
-
 function discordEmpty(): [{ endpoint: string }[], Accessor, CommandIO] {
   const transport = new FakeDiscordTransport(() => ({ total_results: 0, messages: [] }))
   const vfs = discordVfs(transport)
   return [transport.calls, vfs.accessor, commandIo(vfs)]
 }
 
-const SLACK_CHANNEL = ['/mnt/slack', '/channels/general__C1'] as const
-const SLACK_SEARCHES = ['search.messages', 'search.files']
 const DISCORD_CHANNEL = ['/mnt/discord', '/My Server__G1/channels/general__C1'] as const
 const DISCORD_SEARCHES = ['/guilds/G1/messages/search']
 
 describe('an empty search answer', () => {
   it.each([
-    ['slack grep', SLACK_GREP, slackEmpty, SLACK_CHANNEL, { w: true }, SLACK_SEARCHES],
-    ['slack rg', SLACK_RG, slackEmpty, SLACK_CHANNEL, { word_regexp: true }, SLACK_SEARCHES],
     [
       'discord grep',
       DISCORD_GREP,

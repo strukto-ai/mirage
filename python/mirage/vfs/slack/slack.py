@@ -22,6 +22,8 @@ from mirage.core.slack.read import read as _read
 from mirage.core.slack.read import read_range as _read_range
 from mirage.core.slack.read import read_stream as _read_stream
 from mirage.core.slack.readdir import readdir as _readdir
+from mirage.core.slack.search import files_containing as _files_containing
+from mirage.core.slack.search import search_available
 from mirage.core.slack.stat import stat as _stat
 from mirage.core.time_range import TimeRange
 from mirage.types import FileStat, PathSpec, VFSName
@@ -44,6 +46,9 @@ class SlackVFS(BaseVFS):
     write_prompt: str = WRITE_PROMPT
 
     reads_ranges: bool = True
+    # Slack search names channel days; DMs, users and file blobs are read
+    # as usual.
+    searchable = ("channels/*/*/chat.jsonl",)
 
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
@@ -79,6 +84,23 @@ class SlackVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec] | None:
+        if (
+            not whole_word
+            or not self.config.content_search
+            or not search_available(self.config)
+        ):
+            return None
+        return await _files_containing(self.accessor, text, under, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

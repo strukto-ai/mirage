@@ -8,15 +8,12 @@ from mirage.commands.builtin import grep_pushdown
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.discord.grep import grep as discord_grep
 from mirage.commands.builtin.discord.rg import rg as discord_rg
-from mirage.commands.builtin.slack.grep import grep as slack_grep
-from mirage.commands.builtin.slack.rg import rg as slack_rg
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.config import CommandOpts
 from mirage.core.time_range import TimeRange
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.discord import DiscordVFS
-from mirage.vfs.slack import SlackVFS
 from mirage.vfs.types import SearchOps, SearchQuery
 from tests.fixtures.vfs_io import io_for
 
@@ -510,11 +507,6 @@ def test_text_candidates_drops_what_a_walk_never_reads():
     assert grep_pushdown.text_candidates([]) == []
 
 
-SLACK_CHANNEL = ("/slack", "/channels/general__C1")
-SLACK_EMPTY = {
-    "search_messages": b'{"messages":{"matches":[]}}',
-    "search_files": b'{"files":{"matches":[]}}',
-}
 DISCORD_CHANNEL = ("/discord", "/myguild__g_123/channels/general__ch_456")
 DISCORD_EMPTY = {"search_guild": [], "list_channels": []}
 
@@ -523,14 +515,6 @@ DISCORD_EMPTY = {"search_guild": [], "list_channels": []}
 @pytest.mark.parametrize(
     "cmd, path, flags, answers, read",
     [
-        (slack_grep, SLACK_CHANNEL, {"w": True}, SLACK_EMPTY, "slack_read"),
-        (
-            slack_rg,
-            SLACK_CHANNEL,
-            {"word_regexp": True},
-            SLACK_EMPTY,
-            "slack_read",
-        ),
         (
             discord_grep,
             DISCORD_CHANNEL,
@@ -567,9 +551,7 @@ async def test_an_empty_search_answer_is_final(
             CommandOpts(
                 index=RAMIndexCacheStore(),
                 flags=flags,
-                io=io_for(
-                    SlackVFS if read == "slack_read" else DiscordVFS, accessor
-                ),
+                io=io_for(DiscordVFS, accessor),
             ),
         )
     assert next(iter(mocks.values())).await_count == 1
