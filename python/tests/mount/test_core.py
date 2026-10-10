@@ -887,3 +887,92 @@ async def test_times_set_on_an_open_file_outlast_its_buffered_writes(seeded):
     await seeded.release(fh)
     assert (await seeded.getattr("/a.txt")).mtime == 10**18
     assert await seeded.read("/a.txt", 100, 0, None) == b"copiedworld"
+
+
+@pytest.mark.asyncio
+async def test_a_link_that_loops_can_still_be_renamed_and_removed():
+    # unlink(2) and rename(2) act on the name, never on what it points at.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    core = MountCore(ws.vfs)
+    await core.symlink("/loop", "loop")
+    await core.rename("/loop", "/spin")
+    await core.symlink("/loop", "loop")
+    await core.unlink("/loop")
+    assert not ws.namespace.is_link("/loop")
+    assert ws.namespace.is_link("/spin")
+
+
+@pytest.mark.asyncio
+async def test_an_unlinked_files_handle_stats_what_it_wrote(seeded):
+    fh = await seeded.open("/a.txt", os.O_RDWR)
+    await seeded.read("/a.txt", 100, 0, fh)
+    await seeded.write("/a.txt", b"a longer replacement", 0, fh)
+    await seeded.unlink("/a.txt")
+    assert (await seeded.fgetattr("/a.txt", fh)).size == 20
+    assert await seeded.read("/a.txt", 100, 0, fh) == b"a longer replacement"
+
+
+@pytest.mark.asyncio
+async def test_setattr_that_follows_changes_the_target_not_the_link(seeded):
+    await seeded.symlink("/lnk", "a.txt")
+    await seeded.setattr("/lnk", uid=1234, mtime=10**18, follow=True)
+    target = await seeded.getattr("/a.txt")
+    assert (target.uid, target.mtime) == (1234, 10**18)
+    assert (await seeded.getattr("/lnk")).uid != 1234
+
+
+@pytest.mark.asyncio
+async def test_an_open_while_writes_land_before_a_truncate_breaks_nothing():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo 'hello world' > /data/f; echo other > /data/g")
+    files = _Held(ws.vfs, "pwrite")
+    core = MountCore(files)
+    fh = await core.open("/data/f", os.O_WRONLY)
+    await core.write("/data/f", b"HELLO", 0, fh)
+    truncating = asyncio.create_task(core.truncate("/data/f", 5))
+    await files.out.wait()
+    other = await core.open("/data/g")
+    files.go.set()
+    await truncating
+    assert await ws.vfs.read("/data/f") == b"HELLO"
+    await core.release(other)
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_one_open_leaves_another_sharing_its_read():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/data/api.json", b"hydrated bytes")
+    files = _Held(_Sizeless(ws.vfs), "read")
+    core = MountCore(files)
+    first = asyncio.create_task(core.open("/data/api.json"))
+    await files.out.wait()
+    second = asyncio.create_task(core.open("/data/api.json"))
+    for _ in range(10):
+        await asyncio.sleep(0)
+    first.cancel()
+    files.go.set()
+    fh = await second
+    assert await core.read("/data/api.json", 100, 0, fh) == b"hydrated bytes"
+    assert files.calls == 1
+
+
+class _UmaskRAM(RAMVFS):
+    """A store that makes entries the way a disk mount under umask 077 does."""
+
+    async def stat(self, path, *args, **kwargs):
+        row = await super().stat(path, *args, **kwargs)
+        if row.mode is not None:
+            return row
+        mode = 0o700 if row.type == FileType.DIRECTORY else 0o600
+        return row.model_copy(update={"mode": mode})
+
+
+@pytest.mark.asyncio
+async def test_a_create_keeps_its_mode_over_the_stores_own_umask():
+    core = MountCore(Workspace({"/": _UmaskRAM()}, mode=MountMode.WRITE).vfs)
+    fh = await core.create("/f", stat.S_IFREG | 0o644)
+    await core.release(fh)
+    await core.mkdir("/d", 0o755)
+    assert stat.S_IMODE((await core.getattr("/f")).mode) == 0o644
+    assert stat.S_IMODE((await core.getattr("/d")).mode) == 0o755

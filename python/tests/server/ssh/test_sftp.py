@@ -150,6 +150,22 @@ async def test_setstat_stores_permissions_owner_and_times(ssh):
 
 
 @pytest.mark.asyncio
+async def test_setstat_follows_a_link_and_lsetstat_does_not(ssh):
+    # As chown(2) and lchown(2): fstat through the link reads the target.
+    async with ssh.connect() as conn:
+        await conn.run("echo target > /real; ln -s real /link")
+        async with conn.start_sftp_client() as sftp:
+            followed = asyncssh.SFTPAttrs(
+                uid=1234, gid=5678, atime=1_000_000_000, mtime=1_100_000_000
+            )
+            await sftp.setstat("/link", followed)
+            own = asyncssh.SFTPAttrs(uid=4321, gid=8765)
+            await sftp.setstat("/link", own, follow_symlinks=False)
+        result = await conn.run("stat -c '%u %Y' /real; stat -c %u /link")
+        assert result.stdout == "1234 1100000000\n4321\n"
+
+
+@pytest.mark.asyncio
 async def test_create_and_mkdir_keep_the_permissions_asked_for(ssh):
     async with ssh.connect() as conn:
         async with conn.start_sftp_client() as sftp:
@@ -385,6 +401,7 @@ class ListingCore:
         self.now = 0
         self.peak = 0
         self.calls = 0
+        self.tasks = 0
 
     async def readdir(self, path):
         return [".", ".."] + self.names
@@ -393,6 +410,7 @@ class ListingCore:
         self.calls += 1
         self.now += 1
         self.peak = max(self.peak, self.now)
+        self.tasks = max(self.tasks, len(asyncio.all_tasks()))
         try:
             if self.calls <= LISTING_CONCURRENCY:
                 await asyncio.wait_for(self.started.wait(), 5)
@@ -418,6 +436,7 @@ async def test_listing_stats_entries_together_under_the_cap():
     assert [name for name, _ in rows] == [".", ".."] + names[:-1]
     assert rows[2] == ("f0", {"st_size": len("/d/f0")})
     assert core.peak == LISTING_CONCURRENCY
+    assert core.tasks <= LISTING_CONCURRENCY + 1
 
 
 @pytest.mark.asyncio
@@ -435,4 +454,4 @@ async def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
     with pytest.raises(PermissionError):
         await listing(core, "/d")
     assert core.now == 0
-    assert core.calls < 2 * LISTING_CONCURRENCY
+    assert core.calls < 3 * LISTING_CONCURRENCY

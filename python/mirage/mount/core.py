@@ -37,7 +37,6 @@ from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
     DIR_MODE,
     DIR_SIZE,
-    FILE_MODE,
     atime_ns,
     content_size,
     device_rdev,
@@ -223,7 +222,9 @@ class MountCore:
             path (str): mount path being removed or replaced.
             fn (Callable[[], Awaitable[None]]): the removal.
         """
-        return self._queue(self._removals, self.identity(path), fn)
+        return self._queue(
+            self._removals, self.identity(path, follow=False), fn
+        )
 
     async def _settled(self, key: str) -> None:
         """Wait for a flush or truncation of ``key`` still landing."""
@@ -384,7 +385,7 @@ class MountCore:
             if size is None:
                 raise
             # An open descriptor keeps the bytes it had after an unlink.
-            return self.attrs(FileStat(name=name, type=FileType.FILE), size)
+            s = FileStat(name=name, type=FileType.FILE)
         if is_link(s):
             target = await self._op(self._files.readlink(virtual))
             return self.attrs(s, len(self.shown_target(path, target).encode()))
@@ -553,7 +554,7 @@ class MountCore:
 
         async def make() -> None:
             await self._op(self._files.create(self.resolve(path)))
-            await self._keep_mode(path, mode, FILE_MODE)
+            await self._keep_mode(path, mode)
             await self._changed(path)
 
         await self._mutate(key, make)
@@ -568,21 +569,22 @@ class MountCore:
                 applied; None takes the mount's default.
         """
         await self._op(self._files.mkdir(self.resolve(path)))
-        await self._keep_mode(path, mode, DIR_MODE)
+        await self._keep_mode(path, mode)
 
-    async def _keep_mode(
-        self, path: str, mode: int | None, default: int
-    ) -> None:
+    async def _keep_mode(self, path: str, mode: int | None) -> None:
         """Store the mode a create asked for, when it is not the one the
-        mount reports anyway, so ``open(O_CREAT, 0600)`` and ``mkdir -m``
-        read back as asked without a write per ordinary create.
+        backend made the entry with (a disk mount applies the daemon's
+        umask), so ``open(O_CREAT, 0600)`` and ``mkdir -m`` read back as
+        asked without a write per ordinary create.
 
         Args:
             path (str): mount path just created.
             mode (int | None): the requested mode, or None.
-            default (int): what the mount reports for a new entry.
         """
-        if mode is not None and mode & 0o7777 != default & 0o7777:
+        if mode is None:
+            return
+        made = await self._op(self._files.stat(self.resolve(path)))
+        if posix_mode(made) & 0o7777 != mode & 0o7777:
             await self.setattr(path, mode=mode)
 
     async def readlink(self, path: str) -> str:
@@ -640,7 +642,7 @@ class MountCore:
             await self._removing(path, remove)
             await self._changed(path, rehydrate=False)
 
-        await self._mutate(self.identity(path), run)
+        await self._mutate(self.identity(path, follow=False), run)
 
     async def rename(self, old: str, new: str) -> None:
         """Rename an entry, carrying the handles open under it along.
@@ -668,7 +670,7 @@ class MountCore:
             await self._changed(old, rehydrate=False)
             await self._changed(new, rehydrate=False)
 
-        await self._mutate(self.identity(old), run)
+        await self._mutate(self.identity(old, follow=False), run)
 
     async def rmdir(self, path: str) -> None:
         await self._op(self._files.rmdir(self.resolve(path)))
@@ -694,6 +696,7 @@ class MountCore:
         gid: int | None = None,
         atime: int | None = None,
         mtime: int | None = None,
+        follow: bool = False,
     ) -> None:
         """Store metadata through the dispatcher.
 
@@ -701,8 +704,9 @@ class MountCore:
         so a chmod, chown or ``touch -d`` through the mount is what
         ``stat`` in a shell reads back, on a backend with no permission
         bits or settable times of its own too. The kernel has already
-        resolved any link the call follows, so the path names the entry to
-        change, a link itself for ``chown -h``.
+        resolved any link the call follows, so a kernel mount names the
+        entry to change, a link itself for ``chown -h``; SFTP's setstat
+        asks to follow one.
 
         Args:
             path (str): mount path to change.
@@ -713,6 +717,7 @@ class MountCore:
                 leaves it.
             mtime (int | None): modification time, epoch nanoseconds;
                 None leaves it.
+            follow (bool): change a trailing link's target, not the link.
         """
 
         async def store() -> None:
@@ -724,23 +729,21 @@ class MountCore:
                     gid=gid,
                     atime=None if atime is None else ns_to_iso(atime),
                     mtime=None if mtime is None else ns_to_iso(mtime),
-                    nofollow=True,
+                    nofollow=not follow,
                 )
             )
 
         if atime is None and mtime is None:
             await store()
             return
-        key = self.identity(path)
+        key = self.identity(path, follow=follow)
 
         async def run() -> None:
             # Writes the kernel acknowledged before the times were set
             # precede them in POSIX order; landed later, they would stamp
             # over them (cp -p sets the times on the file it still holds
             # open).
-            for ctx in self._handles.values():
-                if ctx.key == key:
-                    await self._persist_buffered(ctx)
+            await self._land_buffered(key)
             await store()
 
         await self._mutate(key, run)
@@ -823,6 +826,15 @@ class MountCore:
             ctx.write_buf = [*runs, *ctx.write_buf]
             raise
 
+    async def _land_buffered(self, key: str) -> None:
+        """Land the buffered writes of every handle open on ``key``.
+
+        Args:
+            key (str): the file identity.
+        """
+        for ctx in [c for c in self._handles.values() if c.key == key]:
+            await self._persist_buffered(ctx)
+
     async def flush(self, path: str, fh: int | None) -> None:
         """Merge a handle's buffered writes and persist them.
 
@@ -879,7 +891,7 @@ class MountCore:
             # emptiness. The read goes through the dispatcher, so a caching
             # mount keeps the bytes for the next open and for a stat once
             # this one closes.
-            ctx.data = await self._hydrate(path)
+            ctx.data = await asyncio.shield(self._hydrate(path))
         elif s.size > READ_CHUNK and not flags & os.O_TRUNC:
             # A file larger than a chunk is read a chunk at a time: the
             # kernel asks in small pieces, and fetching the whole file on
@@ -965,14 +977,16 @@ class MountCore:
         handle holds one chunk of them, so an unlink or a rename onto the
         file would leave the rest unreadable. One read serves every such
         handle; it runs under ``_removing``, so no handle opens on the file
-        meanwhile. A read that fails (a policy may allow the removal and
-        refuse the read) leaves them chunked rather than refusing a
-        mutation the caller is allowed.
+        meanwhile. The handles are matched by the entry itself, so removing
+        a link holds nothing: it takes the link, never its target's bytes.
+        A read that fails (a policy may allow the removal and refuse the
+        read) leaves them chunked rather than refusing a mutation the
+        caller is allowed.
 
         Args:
             path (str): mount path about to be removed or replaced.
         """
-        key = self.identity(path)
+        key = self.identity(path, follow=False)
         held = [
             ctx
             for ctx in self._handles.values()
@@ -980,15 +994,8 @@ class MountCore:
         ]
         if not held:
             return
-        virtual = self.resolve(path)
         try:
-            if is_link(
-                await self._op(self._files.stat(virtual, nofollow=True))
-            ):
-                # Removing a link entry takes the link, never its target's
-                # bytes.
-                return
-            data = await self._op(self._files.read(virtual))
+            data = await self._op(self._files.read(self.resolve(path)))
         except Exception as err:
             logger.warning(
                 "fuse: holding %s before it goes failed: %r", path, err
@@ -1008,17 +1015,25 @@ class MountCore:
             await self.flush(ctx.path, fh)
         self._handles.pop(fh)
 
-    def identity(self, path: str) -> str:
+    def identity(self, path: str, follow: bool = True) -> str:
         """Where a mount path really points: the mount-resolved path with
         every namespace link followed, so two handles opened through a
         link and its target are recognised as the same file.
 
         Args:
             path (str): mount path to identify.
+            follow (bool): follow a trailing link too; an op on the
+                entry itself (unlink, rename, lsetattr) names the link,
+                which may loop.
         """
         virtual = self.resolve(path)
         links = self._files.links
-        return virtual if links is None else links.follow(virtual)
+        if links is None:
+            return virtual
+        if follow:
+            return links.follow(virtual)
+        parent, _, name = virtual.rpartition("/")
+        return posixpath.join(links.follow(parent or "/"), name)
 
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.
@@ -1039,9 +1054,7 @@ class MountCore:
         key = self.identity(path)
 
         async def run() -> None:
-            for ctx in self._handles.values():
-                if ctx.key == key:
-                    await self._persist_buffered(ctx)
+            await self._land_buffered(key)
             await self._op(self._files.truncate(self.resolve(path), length))
             await self._changed(path)
 
@@ -1059,7 +1072,8 @@ class MountCore:
         one read through the dispatcher, so fstat and read through any of
         them, including the handle that wrote, see the new bytes. A
         removal or rename passes ``rehydrate=False``: POSIX keeps an open
-        descriptor on the bytes it had. A refresh that fails is logged and
+        descriptor on the bytes it had, and the name, not what it points
+        at, is what changed. A refresh that fails is logged and
         leaves the handles unhydrated rather than failing the committed
         mutation.
 
@@ -1067,7 +1081,7 @@ class MountCore:
             path (str): mount path whose bytes changed.
             rehydrate (bool): refresh the handles open on the file.
         """
-        key = self.identity(path)
+        key = self.identity(path, follow=rehydrate)
         if key in self._hydrations:
             self._hydration_gen[key] = self._hydration_gen.get(key, 0) + 1
         if not rehydrate:

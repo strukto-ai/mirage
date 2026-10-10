@@ -30,7 +30,6 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import {
   DIR_MODE,
   DIR_SIZE,
-  FILE_MODE,
   atimeMs,
   contentSize,
   deviceRdev,
@@ -272,7 +271,7 @@ export class MountCore {
    * there too would let two renames that cross wait on each other.
    */
   private removing(path: string, fn: () => Promise<void>): Promise<void> {
-    return this.queue(this.removals, this.identity(path), fn)
+    return this.queue(this.removals, this.identity(path, false), fn)
   }
 
   /**
@@ -346,7 +345,7 @@ export class MountCore {
     } catch (err) {
       // An open descriptor keeps the bytes it had after an unlink.
       if (size === null || classify(err) !== 'ENOENT') throw err
-      return this.attrs(new FileStat({ name, type: FileType.FILE }), size)
+      s = new FileStat({ name, type: FileType.FILE })
     }
     if (isLink(s)) {
       const target = await this.op(() => this.files.readlink(virtual))
@@ -464,7 +463,7 @@ export class MountCore {
     const key = this.identity(path)
     await this.mutate(key, async () => {
       await this.op(() => this.files.create(this.resolve(path)))
-      await this.keepMode(path, mode, FILE_MODE)
+      await this.keepMode(path, mode)
       await this.changed(path)
     })
     return this.handles.add({ path, key })
@@ -473,17 +472,19 @@ export class MountCore {
   /** Create a directory, keeping the mode it was asked for. */
   async mkdir(path: string, mode: number | null = null): Promise<void> {
     await this.op(() => this.files.mkdir(this.resolve(path)))
-    await this.keepMode(path, mode, DIR_MODE)
+    await this.keepMode(path, mode)
   }
 
   /**
-   * Store the mode a create asked for, when it is not the one the mount
-   * reports anyway, so `open(O_CREAT, 0600)` and `mkdir -m` read back as
-   * asked without a write per ordinary create. Mirrors Python's
-   * `_keep_mode`.
+   * Store the mode a create asked for, when it is not the one the backend
+   * made the entry with (a disk mount applies the daemon's umask), so
+   * `open(O_CREAT, 0600)` and `mkdir -m` read back as asked without a
+   * write per ordinary create. Mirrors Python's `_keep_mode`.
    */
-  private async keepMode(path: string, mode: number | null, fallback: number): Promise<void> {
-    if (mode !== null && (mode & 0o7777) !== (fallback & 0o7777)) await this.setattr(path, mode)
+  private async keepMode(path: string, mode: number | null): Promise<void> {
+    if (mode === null) return
+    const made = await this.op(() => this.files.stat(this.resolve(path)))
+    if ((posixMode(made) & 0o7777) !== (mode & 0o7777)) await this.setattr(path, mode)
   }
 
   /** The target of a namespace link, read through the dispatcher; EINVAL when not a link. */
@@ -518,7 +519,7 @@ export class MountCore {
    * hides. Mirrors Python's MountCore.unlink.
    */
   async unlink(path: string): Promise<void> {
-    await this.mutate(this.identity(path), async () => {
+    await this.mutate(this.identity(path, false), async () => {
       await this.removing(path, async () => {
         await this.hold(path)
         await this.op(() => this.files.unlink(this.resolve(path)))
@@ -537,12 +538,13 @@ export class MountCore {
    * on the file are refreshed in one read through the dispatcher, so fstat
    * and read through any of them, including the handle that wrote, see the
    * new bytes. A removal or rename passes `rehydrate = false`: POSIX keeps
-   * an open descriptor on the bytes it had. A refresh that fails is logged
+   * an open descriptor on the bytes it had, and the name, not what it
+   * points at, is what changed. A refresh that fails is logged
    * and leaves the handles unhydrated rather than failing the committed
    * mutation. Mirrors Python's `_changed`.
    */
   private async changed(path: string, rehydrate = true): Promise<void> {
-    const key = this.identity(path)
+    const key = this.identity(path, rehydrate)
     if (this.hydrations.has(key)) {
       this.hydrationGen.set(key, (this.hydrationGen.get(key) ?? 0) + 1)
     }
@@ -576,7 +578,7 @@ export class MountCore {
     // which is what makes `mv` between two backends fall back to
     // copy+unlink instead of addressing the destination against the
     // source's backend.
-    await this.mutate(this.identity(src), async () => {
+    await this.mutate(this.identity(src, false), async () => {
       const source = this.resolve(src)
       const target = this.resolve(dst)
       await this.removing(dst, async () => {
@@ -607,10 +609,15 @@ export class MountCore {
    * namespace link followed, so two handles opened through a link and
    * its target are recognised as the same file.
    */
-  identity(path: string): string {
+  identity(path: string, follow = true): string {
     const virtual = this.resolve(path)
     const links = this.files.links
-    return links === null ? virtual : links.follow(virtual)
+    if (links === null) return virtual
+    if (follow) return links.follow(virtual)
+    // An op on the entry itself (unlink, rename, lsetattr) names the link,
+    // which may loop: only the links above it are followed.
+    const slash = virtual.lastIndexOf('/')
+    return posix.join(links.follow(virtual.slice(0, slash) || '/'), virtual.slice(slash + 1))
   }
 
   /**
@@ -623,6 +630,13 @@ export class MountCore {
   private settle(ctx: Handle): Promise<void> {
     if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return Promise.resolve()
     return this.mutate(ctx.key, () => this.persistBuffered(ctx))
+  }
+
+  /** Land the buffered writes of every handle open on `key`. */
+  private async landBuffered(key: string): Promise<void> {
+    for (const ctx of [...this.handles.values()].filter((c) => c.key === key)) {
+      await this.persistBuffered(ctx)
+    }
   }
 
   private async persistBuffered(ctx: Handle): Promise<void> {
@@ -646,9 +660,7 @@ export class MountCore {
     // Python's MountCore.truncate.
     const key = this.identity(path)
     await this.mutate(key, async () => {
-      for (const ctx of this.handles.values()) {
-        if (ctx.key === key) await this.persistBuffered(ctx)
-      }
+      await this.landBuffered(key)
       await this.op(() => this.files.truncate(this.resolve(path), size))
       await this.changed(path)
     })
@@ -682,10 +694,12 @@ export class MountCore {
     gid: number | null = null,
     atime: Date | null = null,
     mtime: Date | null = null,
+    follow = false,
   ): Promise<void> {
-    // The kernel has already resolved any link the call follows, so the
-    // path names the entry to change, a link itself for `chown -h`.
-    const fields: SetAttrFields = { nofollow: true }
+    // The kernel has already resolved any link the call follows, so a
+    // kernel mount names the entry to change, a link itself for `chown -h`;
+    // SFTP's setstat asks to follow one.
+    const fields: SetAttrFields = { nofollow: !follow }
     if (mode !== null) fields.mode = mode & 0o7777
     if (uid !== null) fields.uid = uid
     if (gid !== null) fields.gid = gid
@@ -697,14 +711,12 @@ export class MountCore {
       await store()
       return
     }
-    const key = this.identity(path)
+    const key = this.identity(path, follow)
     await this.mutate(key, async () => {
       // Writes the kernel acknowledged before the times were set precede
       // them in POSIX order; landed later, they would stamp over them (cp -p
       // sets the times on the file it still holds open). Mirrors Python.
-      for (const ctx of this.handles.values()) {
-        if (ctx.key === key) await this.persistBuffered(ctx)
-      }
+      await this.landBuffered(key)
       await store()
     })
   }
@@ -779,24 +791,22 @@ export class MountCore {
    * keeps an open descriptor on the bytes it had, and a chunked handle
    * holds one chunk of them, so an unlink or a rename onto the file would
    * leave the rest unreadable. One read serves every such handle; it runs
-   * under `removing`, so no handle opens on the file meanwhile. A read
-   * that fails (a policy may allow the removal and refuse the read) leaves
-   * them chunked rather than refusing a mutation the caller is allowed.
+   * under `removing`, so no handle opens on the file meanwhile. The
+   * handles are matched by the entry itself, so removing a link holds
+   * nothing: it takes the link, never its target's bytes. A read that
+   * fails (a policy may allow the removal and refuse the read) leaves them
+   * chunked rather than refusing a mutation the caller is allowed.
    * Mirrors Python's `MountCore._hold`.
    */
   private async hold(path: string): Promise<void> {
-    const key = this.identity(path)
+    const key = this.identity(path, false)
     const held = [...this.handles.values()].filter(
       (ctx) => ctx.key === key && ctx.chunked !== undefined,
     )
     if (held.length === 0) return
-    const virtual = this.resolve(path)
     let data: Uint8Array
     try {
-      const own = await this.op(() => this.files.stat(virtual, undefined, { nofollow: true }))
-      // Removing a link entry takes the link, never its target's bytes.
-      if (isLink(own)) return
-      data = await this.op(() => this.files.read(virtual))
+      data = await this.op(() => this.files.read(this.resolve(path)))
     } catch (err) {
       console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
       return

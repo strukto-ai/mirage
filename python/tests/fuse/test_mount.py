@@ -320,14 +320,17 @@ def test_unmount_with_fusermount_skips_a_helper_failure_once_gone(
     unmount_with_fusermount("/mnt/m")
 
 
+def _timespec(sec: int, nsec: int) -> SimpleNamespace:
+    return SimpleNamespace(tv_sec=sec, tv_nsec=nsec)
+
+
 def _utimbuf(
     atime: tuple[int, int], mtime: tuple[int, int]
 ) -> SimpleNamespace:
-    def spec(sec: int, nsec: int) -> SimpleNamespace:
-        return SimpleNamespace(tv_sec=sec, tv_nsec=nsec)
-
     return SimpleNamespace(
-        contents=SimpleNamespace(actime=spec(*atime), modtime=spec(*mtime))
+        contents=SimpleNamespace(
+            actime=_timespec(*atime), modtime=_timespec(*mtime)
+        )
     )
 
 

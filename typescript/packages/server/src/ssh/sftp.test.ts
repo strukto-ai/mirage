@@ -364,6 +364,18 @@ describe('sftp', () => {
     )
   })
 
+  it('follows a link on a setstat, as chown(2) and utimes(2) do', async () => {
+    const client = await connect(await startHarness())
+    await run(client, 'echo target > /real; ln -s real /link')
+    const sftp = await sftpOf(client)
+    await done((cb) => {
+      sftp.setstat('/link', { uid: 1234, gid: 5678, atime: 1e9, mtime: 1.1e9 }, cb)
+    })
+    expect(await run(client, "stat -c '%u %Y' /real; stat -c %u /link")).toBe(
+      '1234 1100000000\n-\n',
+    )
+  })
+
   it('keeps the permissions an open and a mkdir create with', async () => {
     const client = await connect(await startHarness())
     const sftp = await sftpOf(client)

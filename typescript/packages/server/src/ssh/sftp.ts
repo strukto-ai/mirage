@@ -328,8 +328,9 @@ class MirageSFTPServer {
       typeof attrs.atime === 'number' ? new Date(attrs.atime * 1000) : null,
       typeof attrs.mtime === 'number' ? new Date(attrs.mtime * 1000) : null,
     ] as const
-    if (fields.some((field) => field !== null)) await core.setattr(path, ...fields)
-    else if (typeof attrs.size !== 'number') await core.getattr(path)
+    // SETSTAT and FSETSTAT follow a link, as chmod(2) and fchmod(2) do.
+    if (fields.some((field) => field !== null)) await core.setattr(path, ...fields, true)
+    else if (typeof attrs.size !== 'number') await core.getattr(path, true)
     this.sftp.status(id, STATUS.OK)
   }
 

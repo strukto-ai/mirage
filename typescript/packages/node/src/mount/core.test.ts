@@ -887,3 +887,52 @@ it('refreshes generated documents through an already open handle', async () => {
   await core.release(fd)
   await ws.close()
 })
+
+it('renames and removes a link that loops, as rename(2) and unlink(2) act on the name', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const core = new MountCore(ws.vfs)
+  await core.symlink('loop', '/data/loop')
+  await core.rename('/data/loop', '/data/spin')
+  await core.symlink('loop', '/data/loop')
+  await core.unlink('/data/loop')
+  expect(ws.namespace.isLink('/data/loop')).toBe(false)
+  expect(ws.namespace.isLink('/data/spin')).toBe(true)
+})
+
+it("stats what an unlinked file's handle wrote", async () => {
+  const core = await mkCore()
+  const fd = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+  await core.read('/data/greeting.txt', fd, 0, 100)
+  const longer = new TextEncoder().encode('a longer replacement')
+  await core.write('/data/greeting.txt', fd, longer, 0)
+  await core.unlink('/data/greeting.txt')
+  expect((await core.fgetattr('/data/greeting.txt', fd)).size).toBe(longer.byteLength)
+})
+
+it('changes the target, not the link, when setattr follows', async () => {
+  const core = await mkCore()
+  await core.symlink('greeting.txt', '/data/lnk')
+  await core.setattr('/data/lnk', null, 1234, null, null, new Date(1e12), true)
+  const target = await core.getattr('/data/greeting.txt')
+  expect([target.uid, target.mtime.getTime()]).toEqual([1234, 1e12])
+  expect((await core.getattr('/data/lnk')).uid).not.toBe(1234)
+})
+
+/** A store that makes entries the way a disk mount under umask 077 does. */
+class UmaskRAM extends RAMVFS {
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
+    if (row.mode !== null) return row
+    return row.with({ mode: row.type === FileType.DIRECTORY ? 0o700 : 0o600 })
+  }
+}
+
+it("keeps a create's mode over the store's own umask", async () => {
+  const core = new MountCore(
+    new Workspace({ '/data/': new UmaskRAM() }, { mode: MountMode.WRITE }).vfs,
+  )
+  await core.release(await core.create('/data/f', 0o100644))
+  await core.mkdir('/data/d', 0o755)
+  expect((await core.getattr('/data/f')).mode & 0o7777).toBe(0o644)
+  expect((await core.getattr('/data/d')).mode & 0o7777).toBe(0o755)
+})

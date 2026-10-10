@@ -146,12 +146,12 @@ _STATS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
 async def listing(core: MountCore, path: str) -> list[tuple[str, MountAttrs]]:
     """A directory's entries with their attributes, in one pass.
 
-    The entries are stat'd together rather than one after another, with
-    at most ``LISTING_CONCURRENCY`` out at once across every listing on
-    the workspace's loop. A stat that fails ends the listing and cancels
-    the ones still waiting. An entry that vanishes between the listing
-    and its stat is left out, as ``ls`` leaves out a file deleted
-    mid-listing.
+    The entries are stat'd together rather than one after another, by at
+    most ``LISTING_CONCURRENCY`` workers, with at most that many stats out
+    at once across every listing on the workspace's loop. A stat that
+    fails ends the listing and cancels the ones still waiting. An entry
+    that vanishes between the listing and its stat is left out, as ``ls``
+    leaves out a file deleted mid-listing.
 
     Args:
         core (MountCore): the mount core.
@@ -181,14 +181,22 @@ async def listing(core: MountCore, path: str) -> list[tuple[str, MountAttrs]]:
                 return None
 
     names = await core.readdir(path)
+    rows: list[tuple[str, MountAttrs] | None] = [None] * len(names)
+    todo = iter(enumerate(names))
+
+    async def worker() -> None:
+        for index, name in todo:
+            rows[index] = await entry(name)
+
     try:
         async with asyncio.TaskGroup() as group:
-            tasks = [group.create_task(entry(name)) for name in names]
+            for _ in range(min(LISTING_CONCURRENCY, len(names))):
+                group.create_task(worker())
     except BaseExceptionGroup as failed:
         # The first refusal is the listing's answer, as it was before the
         # rest were cancelled.
         raise failed.exceptions[0]
-    return [row for task in tasks if (row := task.result()) is not None]
+    return [row for row in rows if row is not None]
 
 
 async def open_file(
@@ -238,7 +246,7 @@ def epoch_ns(seconds: int | None, ns: int | None) -> int | None:
 
 
 async def set_attrs(
-    core: MountCore, path: str, attrs: asyncssh.SFTPAttrs
+    core: MountCore, path: str, attrs: asyncssh.SFTPAttrs, follow: bool
 ) -> None:
     """Apply an SFTP setstat: a size truncates, and permissions, owner
     and times are stored as chmod, chown and utimens through a kernel
@@ -248,6 +256,8 @@ async def set_attrs(
         core (MountCore): the mount core.
         path (str): the path.
         attrs (asyncssh.SFTPAttrs): what the client asked to change.
+        follow (bool): change a trailing link's target (setstat,
+            fsetstat), or the link itself (lsetstat).
     """
     if attrs.size is not None:
         await core.truncate(path, attrs.size)
@@ -259,9 +269,9 @@ async def set_attrs(
         epoch_ns(attrs.mtime, attrs.mtime_ns),
     )
     if any(field is not None for field in fields):
-        await core.setattr(path, *fields)
+        await core.setattr(path, *fields, follow=follow)
     elif attrs.size is None:
-        await core.getattr(path)
+        await core.getattr(path, follow=follow)
 
 
 async def rename_new(core: MountCore, old: str, new: str) -> None:
@@ -409,10 +419,11 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     async def setstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
         p = self._path(path)
-        await self._call(lambda core: set_attrs(core, p, attrs))
+        await self._call(lambda core: set_attrs(core, p, attrs, True))
 
     async def lsetstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
-        await self.setstat(path, attrs)
+        p = self._path(path)
+        await self._call(lambda core: set_attrs(core, p, attrs, False))
 
     async def fsetstat(self, file_obj: Any, attrs: asyncssh.SFTPAttrs) -> None:
         f = opened(file_obj)
@@ -421,7 +432,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
             ctx = core.handles.get(f.fh)
             if ctx is None:
                 raise asyncssh.SFTPFailure("invalid handle")
-            await set_attrs(core, ctx.path, attrs)
+            await set_attrs(core, ctx.path, attrs, True)
 
         await self._call(resize)
 
