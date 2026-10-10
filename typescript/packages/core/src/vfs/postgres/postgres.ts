@@ -14,28 +14,20 @@
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { makeSearchOp } from '../../core/hierarchy/search.ts'
 import { read as postgresRead } from '../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../core/postgres/readdir.ts'
-import { detectScope } from '../../core/postgres/scope.ts'
-import { SEARCHERS } from '../../core/postgres/search.ts'
+import { linesContaining as postgresLinesContaining } from '../../core/postgres/search.ts'
 import { stat as postgresStat } from '../../core/postgres/stat.ts'
-import type { FileStat, JsonValue, PathSpec } from '../../types.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
-import type { SearchOp, SearchQuery } from '../types.ts'
-
-const searchOp: SearchOp<PostgresAccessor> = makeSearchOp(detectScope, SEARCHERS, postgresStat)
 
 /**
  * Postgres's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
 export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
-  override readonly searchMeta: Readonly<Record<string, JsonValue>> = {
-    grep: { mode: 'literal', stream: false },
-  }
-
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return postgresReaddir(this.accessor, path, index)
   }
@@ -54,11 +46,12 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
     return postgresStat(this.accessor, path, index)
   }
 
-  override search(
+  override linesContaining(
     path: PathSpec,
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<string[] | null> {
-    return searchOp(this.accessor, path, query, index)
+    text: string,
+    opts: { ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<ByteSource | null> {
+    return postgresLinesContaining(this.accessor, path, text, opts.ignoreCase)
   }
 }

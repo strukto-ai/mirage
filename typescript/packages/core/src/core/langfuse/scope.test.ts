@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { SEARCH_KINDS, detectScope } from './scope.ts'
+import { detectScope } from './scope.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 // A mount-relative operand, the way a command hands one to a scope.
@@ -134,25 +134,9 @@ describe('langfuse detectScope glob specs', () => {
   })
 })
 
-describe('langfuse search push-down classification', () => {
-  it('classifies an unrecognized path as invalid, not root', () => {
-    // Falling back to "root" made the grep/rg push-down treat any bogus path
-    // as "search every trace", answering a missing file with the whole mount.
+describe('an unrecognized path', () => {
+  it('classifies as invalid, not root', () => {
     expect(detectScope(spec('__nf_missing__')).kind).toBe('invalid')
     expect(detectScope(spec('traces/a/b/c/d')).kind).toBe('invalid')
-    expect(Object.hasOwn(SEARCH_KINDS, 'invalid')).toBe(false)
-  })
-
-  it('lets leaves fall through the search push-down', () => {
-    // A leaf path must reach the generic per-file scan, never a
-    // whole-container search.
-    for (const path of [
-      '/traces/abc.json',
-      '/datasets/qa/items.jsonl',
-      '/datasets/qa/runs',
-      '/datasets/qa/runs/r1.jsonl',
-    ]) {
-      expect(Object.hasOwn(SEARCH_KINDS, detectScope(spec(path)).kind)).toBe(false)
-    }
   })
 })

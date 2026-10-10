@@ -14,15 +14,7 @@
 
 import type { Command } from '../../config.ts'
 import { MONGODB_CAT } from './cat.ts'
-import { MONGODB_GREP } from './grep.ts'
-import { MONGODB_RG } from './rg.ts'
 import { MONGODB_TAIL } from './tail.ts'
 import { MONGODB_WC } from './wc.ts'
 
-export const MONGODB_COMMANDS: readonly Command[] = [
-  ...MONGODB_CAT,
-  ...MONGODB_GREP,
-  ...MONGODB_RG,
-  ...MONGODB_TAIL,
-  ...MONGODB_WC,
-]
+export const MONGODB_COMMANDS: readonly Command[] = [...MONGODB_CAT, ...MONGODB_TAIL, ...MONGODB_WC]

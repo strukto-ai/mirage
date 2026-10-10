@@ -27,5 +27,4 @@ it('ranks a batch through SearchOps once and preserves the mount prefix', async 
   expect(query).toHaveBeenCalledWith(
     expect.objectContaining({ queryTexts: ['question'], nResults: 2 }),
   )
-  expect(ioFor(ChromaVFS, accessor).search?.meta?.grep).toBeUndefined()
 })

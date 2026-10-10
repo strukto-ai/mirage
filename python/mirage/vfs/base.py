@@ -26,7 +26,6 @@ from mirage.types import (
     CapacityResult,
     CapacityState,
     FileStat,
-    JsonValue,
     ListingVersion,
     PathSpec,
 )
@@ -180,11 +179,6 @@ class BaseVFS:
     # what is below it); None for every file. grep and rg read any other
     # file whatever the answer, as a full scan would.
     searchable: tuple[str, ...] | None = None
-
-    # What ``search`` supports, read by the consumers that opt in by
-    # namespace (``{"grep": {"mode": "literal"}}`` lets grep and rg use
-    # it). Empty means no consumer may assume anything.
-    search_meta: Mapping[str, JsonValue] = MappingProxyType({})
 
     # Extensions whose ``read`` is a rendering rather than the stored
     # bytes, each to the name of the method that renders it, which takes
@@ -580,9 +574,9 @@ class BaseVFS:
     ) -> list[str] | None:
         """Search the resource under ``path``; None declines, [] is none.
 
-        Results are text records in the format ``search_meta`` declares.
-        Errors and incomplete results are raised, never answered as a
-        miss.
+        Results are the text records the ``search`` command prints, one
+        per line. Errors and incomplete results are raised, never
+        answered as a miss.
 
         Args:
             path (PathSpec): the scope.
@@ -701,8 +695,9 @@ class BaseVFS:
                 NO_TEXT (-f, or no plain text every match holds),
                 EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
                 --files-without-match, rg -c with --include-zero, without
-                -q), LINKS
-                (rg -L) or UNANSWERED (a search returned None).
+                -q), LINKS (rg -L), BINARY (grep -a, rg --binary: a
+                binary file is read) or UNANSWERED (a search returned
+                None).
             index (IndexCacheStore): the mount's index.
         """
         return None

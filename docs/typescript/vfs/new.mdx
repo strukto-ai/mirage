@@ -187,18 +187,14 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 
 `SearchQuery` contains `query` and optional `options`, for example
 `{ query: 'recent deployments', options: { limit: 20 } }`. Options can hold
-filters, limits, or other JSON values. The `searchMeta` member is optional
-static capability metadata. Regex support and grep compatibility are not
-required. Leaving `search` undefined also works: MIRAGE implements grep and rg
-by reading files.
+filters, limits, or other JSON values. Regex support and grep compatibility
+are not required. Leaving `search` undefined also works.
 
 `search` returns text records: `[]` means no matches and `null` declines the
 request. Errors propagate, and a truncated result is never a complete answer.
 Expose semantic or service-specific queries through a custom command that calls
-the same function with its own options. grep and rg do not read `search`
-results; PostgreSQL, MongoDB and Langfuse still answer them through
-`searchMeta.grep`, which is being retired. A new VFS lets them use its search
-through the functions below. Native traversal (`find`) and size enumeration
+the same function with its own options. grep and rg never ask `search`; they
+use the functions below. Native traversal (`find`) and size enumeration
 (`duSize` with `duEntries`) remain independent functions.
 
 ### Let grep and rg use your search
@@ -410,7 +406,7 @@ marks already.
 
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name replaces the generic on that backend; `generic('<name>')` hands the replacement the default command for what it does not support, and `generic('<name>', { vfs, table })` registers the default over a changed table (dify's light `ls`). Export a backend's own commands as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in the package's `commands/builtin/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
 
-- Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command. The hierarchy kit supplies `makeSearchOp` for scope-based core functions.
+- Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command.
 - A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
 
@@ -522,7 +518,7 @@ places:
 | --- | --- |
 | `new BaseVFS({ name, accessor, io: new VFSAdapter({ read: { readdir, readBytes, stat } }) })` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `readBytes` and `readRange` | one `read(path, index, offset, size)`; set `readsRanges` true when it fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `find`, `duSize` and `duEntries`, `write`, ..., `search`, `searchMany`); `SearchOps.meta` is the `searchMeta` member |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `find`, `duSize` and `duEntries`, `write`, ..., `search`, `searchMany`) |
 | `ops()`, `makeGenericOps`, `RegisteredOp`, `OPS` tables, `autoOps` | nothing to declare: the mount serves the functions; mark a custom one `@vfsCall({ effect })` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.ts` | `registerBackendCommands(cls, ...)` in `commands/builtin/backends.ts`; `commands()` returns only the commands the VFS was handed |
 | `new DriverOps(vfs)` and `checkDriverContract(vfs, fixture)` | call the functions on the VFS directly; `checkReadContract(vfs, fixture)` |

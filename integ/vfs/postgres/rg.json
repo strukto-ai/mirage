@@ -9,7 +9,7 @@
       "command": "rg ada /pg/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "public/tables/books/rows.jsonl:{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\npublic/tables/books/rows.jsonl:{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n",
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n",
         "stderr": ""
       }
     },
@@ -61,7 +61,7 @@
       "command": "rg ada /pg/public/tables/",
       "expect": {
         "exit": 0,
-        "stdout": "public/tables/authors/rows.jsonl:{\"id\":1,\"name\":\"ada\",\"books\":2}\npublic/tables/books/rows.jsonl:{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\npublic/tables/books/rows.jsonl:{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\npublic/tables/books/semantic.json:        \"ada\",\n",
+        "stdout": "/pg/public/tables/authors/rows.jsonl:{\"id\":1,\"name\":\"ada\",\"books\":2}\n/pg/public/tables/books/semantic.json:        \"ada\",\n/pg/public/tables/books/rows.jsonl:{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n/pg/public/tables/books/rows.jsonl:{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n",
         "stderr": ""
       }
     },
@@ -74,7 +74,7 @@
       "command": "rg dimensions /pg/public/tables/books/",
       "expect": {
         "exit": 0,
-        "stdout": "public/tables/books/semantic.json:  \"dimensions\": [\n",
+        "stdout": "/pg/public/tables/books/semantic.json:  \"dimensions\": [\n",
         "stderr": ""
       }
     },
@@ -92,7 +92,7 @@
       }
     },
     {
-      "id": "pg_rg_lone_table_uses_pushdown",
+      "id": "pg_rg_lone_table_walks",
       "seq": 610067,
       "targets": [
         "postgres"
@@ -100,7 +100,7 @@
       "command": "rg ada /pg/public/tables/authors",
       "expect": {
         "exit": 0,
-        "stdout": "public/tables/authors/rows.jsonl:{\"id\":1,\"name\":\"ada\",\"books\":2}\n",
+        "stdout": "/pg/public/tables/authors/rows.jsonl:{\"id\":1,\"name\":\"ada\",\"books\":2}\n",
         "stderr": ""
       }
     }

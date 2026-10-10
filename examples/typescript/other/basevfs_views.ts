@@ -16,11 +16,8 @@ import {
   Argument,
   type PathSpec,
   RuntimeFiles,
-  type SearchQuery,
   Workspace,
 } from '@struktoai/mirage-node'
-import { grepSearchOptions } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
-import { splitLines } from '@struktoai/mirage-core/commands/builtin/utils/lines'
 import { strict as assert } from 'node:assert'
 
 const ENC = new TextEncoder()
@@ -49,9 +46,6 @@ function pageBytes(accessor: NotesAccessor, path: PathSpec): Uint8Array {
 
 /** A flat, read-only collection of UTF-8 pages. */
 class NotesVFS extends BaseVFS<NotesAccessor> {
-  // grep and rg may hand a literal pattern to search instead of reading.
-  override readonly searchMeta = { grep: { mode: 'literal' } }
-
   constructor(pages: Record<string, string>) {
     super({
       name: 'notes',
@@ -88,16 +82,17 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
     })
   }
 
-  /** Search one page literally, declining requests that need a scan. */
-  override async search(path: PathSpec, query: SearchQuery): Promise<string[] | null> {
+  /** The lines of one page holding `text`, so grep and rg skip the read; declines under -i. */
+  override async linesContaining(
+    path: PathSpec,
+    text: string,
+    opts: { ignoreCase: boolean },
+  ): Promise<Uint8Array | null> {
     this.accessor.searchCalls += 1
-    const options = grepSearchOptions(query)
-    if (path.vfsPath.replace(/^\/+|\/+$/g, '') === '' || options.ignoreCase || options.wholeWord) {
-      return null
-    }
-    const text = new TextDecoder().decode(pageBytes(this.accessor, path))
-    if (text.includes('\0')) return null
-    return splitLines(text).filter((line) => line.includes(query.query))
+    if (opts.ignoreCase) return null
+    const page = new TextDecoder().decode(pageBytes(this.accessor, path))
+    const lines = page.split(/(?<=\n)/).filter((line) => line.includes(text))
+    return ENC.encode(lines.join(''))
   }
 }
 
@@ -130,9 +125,9 @@ async function showSearch(ws: Workspace, notes: NotesVFS): Promise<void> {
   for (const command of ['grep', 'rg']) {
     for (const [flags, pattern, calls] of [
       ['-F', 'BaseVFS', [1, 0]],
-      ['-nF', 'BaseVFS', [0, 1]],
-      ['-e', 'Base.*adapter', [0, 1]],
-      ['-iF', 'basevfs', [1, 1]],
+      ['-nF', 'BaseVFS', [1, 1]],
+      ['-e', 'Base.*adapter', [1, 0]],
+      ['-iF', 'ADAPTER', [1, 1]],
     ] as const) {
       const before = [notes.accessor.searchCalls, notes.accessor.readCalls]
       await show(ws, `${command} ${flags} '${pattern}' /notes/todo.txt`)

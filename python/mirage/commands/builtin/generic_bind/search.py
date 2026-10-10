@@ -18,114 +18,38 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.builtin.generic.grep import (
     parse_flags as parse_grep_flags,
 )
 from mirage.commands.builtin.generic.rg import (
     folds_case,
-    rg_generic,
     rg_matcher,
-    rg_syntax,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import (
     PATTERN_KEYS,
     compile_pattern,
-    matcher_syntax,
     pattern_arg,
 )
 from mirage.commands.builtin.grep_pushdown import (
-    grep_search_meta,
-    literal_pushdown_operand,
-    pushdown_operand,
     search_terms,
-    text_search_results,
 )
 from mirage.commands.builtin.types import SearchTerms
-from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.types import FileTooLargeError
 from mirage.io.stream import close_quietly, ensure_stream
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
-from mirage.types import FileType, JsonValue, PathSpec
+from mirage.types import FileType, PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import glob_prefix_match
-from mirage.vfs.types import ScanReason, SearchQuery
+from mirage.vfs.types import ScanReason
 from mirage.view.namespace_view import paths_scoped
 
 logger = logging.getLogger(__name__)
-
-_GENERICS = {"grep": grep_generic, "rg": rg_generic}
-
-
-def search_options(
-    name: str, fl: FlagView, pattern: str, utf8: bool = False
-) -> dict[str, JsonValue]:
-    """How a native search matches the pushed-down pattern.
-
-    Args:
-        name (str): grep or rg.
-        fl (FlagView): the invocation's flags.
-        pattern (str): the pattern pushed down.
-        utf8 (bool): grep runs under a UTF-8 locale; ripgrep matches
-            text under any.
-    """
-    if name == "rg":
-        f = parse_rg_flags(fl)
-        return {
-            "ignore_case": folds_case(pattern, f.fixed_string, f),
-            "fixed_string": f.fixed_string,
-            "whole_word": f.whole_word,
-            "syntax": rg_syntax(f).value,
-        }
-    return {
-        "ignore_case": fl.as_bool("i"),
-        "fixed_string": fl.as_bool("F"),
-        "whole_word": fl.as_bool("w"),
-        "syntax": matcher_syntax(fl).value,
-        "utf8": utf8,
-    }
-
-
-def native_or_bytes(
-    read_stream: Callable[[PathSpec], AsyncIterator[bytes]],
-    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
-) -> Callable[[PathSpec], AsyncIterator[bytes]]:
-    """A stream that falls back to the whole read on a first-pull failure.
-
-    A native stream may serve only some kinds (mongodb streams
-    documents.jsonl and refuses schema.json before yielding anything), so
-    a failure before any data has flowed falls back to ``read_bytes``; an
-    error after data has flowed is real and propagates. Mirrors the TS
-    ``nativeOrBytes`` in ``generic_bind/search.ts``.
-
-    Args:
-        read_stream (Callable[[PathSpec], AsyncIterator[bytes]]): the
-            bound native stream op.
-        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): the bound
-            whole-read op the first pull falls back to.
-    """
-
-    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
-        it = read_stream(path).__aiter__()
-        try:
-            first = await it.__anext__()
-        except StopAsyncIteration:
-            return
-        except OSError:
-            yield await read_bytes(path)
-            return
-        yield first
-        async for chunk in it:
-            yield chunk
-
-    return stream
 
 
 def grep_terms(
@@ -508,91 +432,3 @@ async def _full_scan(
     """
     if dirs and io.before_full_scan is not None:
         await io.before_full_scan(accessor, name, dirs, reason, index)
-
-
-async def run_search(
-    io: CommandIO,
-    name: str,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    opts: CommandOpts,
-) -> tuple[ByteSource | None, IOResult]:
-    """Run the adapter's native search, or scan for an unsupported request.
-
-    The scan reads through ``search_reads``, so ``files_containing``,
-    ``lines_containing`` and ``before_full_scan`` still apply.
-
-    Args:
-        io (CommandIO): guarded resource operations and optional search.
-        name (str): grep or rg.
-        accessor (Accessor): resource handle.
-        paths (list[PathSpec]): operands.
-        texts (list[str]): pattern arguments.
-        opts (CommandOpts): parsed invocation context.
-    """
-    capability = io.search
-    meta = grep_search_meta(capability)
-    generic = _GENERICS[name]
-    fl = FlagView(opts.flags, spec=SPECS[name])
-    pattern = pattern_arg(texts, fl, PATTERN_KEYS[name])
-    gate = (
-        literal_pushdown_operand
-        if meta is not None and meta.mode == "literal"
-        else pushdown_operand
-    )
-    operand = gate(paths, opts.flags, pattern)
-    if (
-        capability is not None
-        and meta is not None
-        and pattern is not None
-        and operand is not None
-        and not paths_scoped(opts.ns, [operand])
-    ):
-        query = SearchQuery(
-            query=pattern,
-            options={
-                "grep": search_options(
-                    name, fl, pattern, utf8_locale(opts.env)
-                )
-            },
-        )
-        try:
-            lines = await capability.search(
-                accessor, operand, query, opts.index
-            )
-        except FileTooLargeError as exc:
-            # A push-down whose answer is past the mount's read cap cannot
-            # print it; the scan reads each operand, and reports the same
-            # refusal against the operand as typed.
-            logger.debug(
-                "%s push-down refused %s: %s", name, operand.virtual, exc
-            )
-            lines = None
-        if lines is not None:
-            if not lines:
-                return b"", IOResult(exit_code=1)
-            if name != "grep" or text_search_results(lines):
-                return format_records(lines), IOResult()
-
-    resolved = (
-        await io.resolve_glob(accessor, paths, index=opts.index)
-        if paths
-        else []
-    )
-    read_bytes, read_stream = await search_reads(
-        io, name, accessor, resolved, texts, opts
-    )
-    stream = meta is None or meta.stream
-    return await generic(
-        resolved,
-        texts,
-        opts,
-        readdir=bound_op(io.readdir, accessor, opts.index),
-        stat=bound_op(io.stat, accessor, opts.index),
-        read_bytes=read_bytes,
-        read_stream=native_or_bytes(read_stream, read_bytes)
-        if stream and read_stream is not None
-        else None,
-        stdin=opts.stdin,
-    )

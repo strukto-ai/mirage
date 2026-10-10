@@ -442,18 +442,15 @@ class SearchManyOp(Protocol):
 
 @dataclass(frozen=True, kw_only=True)
 class SearchOps:
-    """Optional resource search with extensible capability metadata.
+    """Optional resource search, what the ``search`` command asks.
 
     Args:
         search (SearchOp): the resource's single-scope search callback.
         search_many (SearchManyOp | None): optional batch ranking.
-        meta (Mapping[str, JsonValue]): static capabilities; consumers
-            validate their own namespace. No grep compatibility is assumed.
     """
 
     search: SearchOp
     search_many: SearchManyOp | None = None
-    meta: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
 @runtime_checkable

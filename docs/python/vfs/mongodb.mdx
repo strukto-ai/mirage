@@ -161,40 +161,25 @@ memory ahead of the consumer.
 | `tail -n K`                  | Server-side sort + limit; a K past `max_doc_limit` stops there, notes it on stderr, exits 1 |
 | `tail -f`                    | Opens a change stream; yields each new insert as a JSONL line     |
 | `grep` (file level)          | Streams from `documents.jsonl`; supports `-m` for short-circuit   |
-| `grep` (collection/db level) | Every file under the directory, each read as `cat` renders it; no result cap |
+| `grep -r` (collection/db level) | Every file under the directory, each read as `cat` renders it; no result cap |
 | `jq`                         | Inherits the streaming `cat` source                               |
 | `wc`                         | Uses `countDocuments()` server-side; zero download                |
 | `stat`                       | Existence and type only; no counts or index queries   |
 
 ## Smart Commands
 
-### grep at different scopes
+### grep and rg
 
-`grep` uses MongoDB's query engine at directory scopes instead of
-streaming all documents through the regex pipeline:
+grep and rg read each file as `cat` renders it, streaming `documents.jsonl`
+so `-m` stops the cursor early; `grep -r` and `rg` walk a directory. A
+MongoDB query cannot say which documents' rendered lines hold a text (keys,
+nested values and the JSON around them), so no server-side search stands in
+for the read.
 
 ```bash
-# FILE level - streams documents.jsonl, runs the regex locally
 grep "Godfather" "/mongodb/sample_mflix/collections/movies/documents.jsonl"
-
-# COLLECTION level - server-side query against the collection
-grep "Godfather" "/mongodb/sample_mflix/collections/movies/"
-
-# DATABASE level - searches across every collection in sample_mflix
-grep "Godfather" "/mongodb/sample_mflix/"
-
-# ROOT level - fans out across every mounted database
-grep "Godfather" "/mongodb/"
+grep -r "Godfather" "/mongodb/sample_mflix/"
 ```
-
-At collection or higher scope the VFS picks the best server-side
-strategy from the indexes available:
-
-1. **Text index exists** → uses `$text` (ranked by relevance)
-1. **Atlas Search index exists** → uses `$search` (fuzzy, Lucene-based)
-1. **Neither** → falls back to `$regex` on sampled string fields
-
-Scope detection is handled by `mirage/core/mongodb/scope.py`.
 
 ### head / tail / tail -f
 

@@ -43,3 +43,15 @@ The DSN is redacted on snapshot. Hand the mount back at load (`mounts=`, or a co
 `rows.jsonl` is rendered on demand. `stat -c %s` and `ls -l` show `-` when its rendered byte length is unknown; physical table storage is never used as a file size. `stat` checks existence and type without fetching columns, row counts, or relation sizes. Planner counts cannot identify content changes, so they are not used as a content fingerprint.
 
 The metadata JSON files expose explicitly named row and storage estimates. Use `wc -c rows.jsonl` for the rendered byte count; reading the whole export is subject to the configured row and byte limits.
+
+## grep and rg
+
+For one plain text in a `rows.jsonl`, grep and rg ask Postgres for the rows
+that hold it, with a `LIKE` over every column (`ILIKE` under `-i`), and search
+those rows instead of the whole relation. This needs every column to be text,
+an integer, a boolean or a uuid, which a line spells as the column's cast
+does. The file is read as usual when another column type is present, when the
+text could match a key, `null` or the JSON between values, or when more than
+`max_read_rows` rows match. Since only the matching rows are fetched, a
+relation too large to read can still be searched when the output shows no line
+numbers or context.

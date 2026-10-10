@@ -19,8 +19,6 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.postgres.grep import grep
-from mirage.commands.builtin.postgres.rg import rg
 from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
@@ -31,10 +29,6 @@ from tests.fixtures.vfs_io import io_for
 
 CONCRETE = "/public/tables/books/rows.jsonl"
 GLOB = "/public/tables/*/rows.jsonl"
-
-GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
-RESOLVE = "mirage.commands.config.make_resolve_glob"
-SEARCH_ENTITY = "mirage.core.postgres.search.search_entity"
 
 
 @asynccontextmanager
@@ -76,120 +70,12 @@ def _resolved_pair() -> list[PathSpec]:
     ]
 
 
-async def _resolve_pair(_accessor, _paths, index=None):
-    return _resolved_pair()
-
-
-def _fake_resolver(resolve):
-    return lambda *_args, **_kwargs: resolve
-
-
-@pytest.mark.asyncio
-async def test_grep_glob_skips_pushdown_and_expands(accessor):
-    seen: dict[str, object] = {}
-
-    async def fake_generic(paths, _texts, _flags, **_kwargs):
-        seen["generic"] = [p.virtual for p in paths]
-        return b"", IOResult()
-
-    with (
-        patch(
-            SEARCH_ENTITY,
-            new=AsyncMock(side_effect=AssertionError("pushdown ran on glob")),
-        ),
-        patch(
-            RESOLVE,
-            new=_fake_resolver(_resolve_pair),
-        ),
-        patch.dict(GENERICS, {"grep": fake_generic}),
-    ):
-        _, io = await grep(
-            accessor,
-            [_glob_path()],
-            ["ada"],
-            CommandOpts(io=io_for(PostgresVFS, accessor), index=NULL_INDEX),
-        )
-
-    assert io.exit_code == 0
-    assert seen["generic"] == [
-        "/public/tables/authors/rows.jsonl",
-        "/public/tables/books/rows.jsonl",
-    ]
-
-
 def _concrete_path() -> PathSpec:
     return PathSpec(
         virtual=CONCRETE,
         directory="/public/tables/books",
         vfs_path=CONCRETE.strip("/"),
     )
-
-
-@pytest.mark.asyncio
-async def test_grep_regex_pattern_skips_pushdown(accessor):
-    # A pattern with regex meaning is matched literally by ILIKE, so it must
-    # take the generic scan rather than silently mis-matching.
-    seen: dict[str, object] = {}
-
-    async def _resolve_one(_accessor, _paths, index=None):
-        return [_concrete_path()]
-
-    async def fake_generic(paths, _texts, _flags, **_kwargs):
-        seen["generic"] = [p.virtual for p in paths]
-        return b"", IOResult()
-
-    with (
-        patch(
-            SEARCH_ENTITY,
-            new=AsyncMock(side_effect=AssertionError("pushdown ran on regex")),
-        ),
-        patch(
-            RESOLVE,
-            new=_fake_resolver(_resolve_one),
-        ),
-        patch.dict(GENERICS, {"grep": fake_generic}),
-    ):
-        await grep(
-            accessor,
-            [_concrete_path()],
-            ["a.b"],
-            CommandOpts(io=io_for(PostgresVFS, accessor), index=NULL_INDEX),
-        )
-
-    assert seen["generic"] == [CONCRETE]
-
-
-@pytest.mark.asyncio
-async def test_rg_glob_skips_pushdown_and_expands(accessor):
-    seen: dict[str, object] = {}
-
-    async def fake_generic(paths, _texts, _flags, **_kwargs):
-        seen["generic"] = [p.virtual for p in paths]
-        return b"", IOResult()
-
-    with (
-        patch(
-            SEARCH_ENTITY,
-            new=AsyncMock(side_effect=AssertionError("pushdown ran on glob")),
-        ),
-        patch(
-            RESOLVE,
-            new=_fake_resolver(_resolve_pair),
-        ),
-        patch.dict(GENERICS, {"rg": fake_generic}),
-    ):
-        _, io = await rg(
-            accessor,
-            [_glob_path()],
-            ["ada"],
-            CommandOpts(io=io_for(PostgresVFS, accessor), index=NULL_INDEX),
-        )
-
-    assert io.exit_code == 0
-    assert seen["generic"] == [
-        "/public/tables/authors/rows.jsonl",
-        "/public/tables/books/rows.jsonl",
-    ]
 
 
 @pytest.mark.asyncio

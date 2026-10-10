@@ -71,8 +71,8 @@ describe('browser VFS registry', () => {
       ],
       [
         'langfuse',
-        { public_key: 'p', secret_key: 's', default_trace_limit: 5, default_search_limit: 6 },
-        { publicKey: 'p', defaultTraceLimit: 5, defaultSearchLimit: 6 },
+        { public_key: 'p', secret_key: 's', default_trace_limit: 5 },
+        { publicKey: 'p', defaultTraceLimit: 5 },
       ],
       ['slack', { proxy_url: 'http://x' }, { proxyUrl: 'http://x' }],
       ['discord', { proxy_url: 'http://x' }, { proxyUrl: 'http://x' }],

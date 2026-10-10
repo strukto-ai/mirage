@@ -14,7 +14,6 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
 
 from mirage.core.generic.find_eval import RowActionKind
 
@@ -78,26 +77,6 @@ class RegexSyntax(Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class GrepSearchOptions:
-    """The grep integration's per-request options, parsed from SearchQuery.
-
-    Args:
-        ignore_case (bool): -i, or rg's smart case over the pattern.
-        fixed_string (bool): -F; a plain resource query is literal text.
-        whole_word (bool): -w.
-        syntax (RegexSyntax): the pattern's dialect.
-        utf8 (bool): grep runs under a UTF-8 locale, so a line is
-            matched as text rather than as its bytes.
-    """
-
-    ignore_case: bool = False
-    fixed_string: bool = True
-    whole_word: bool = False
-    syntax: RegexSyntax = RegexSyntax.EXTENDED
-    utf8: bool = False
-
-
-@dataclass(frozen=True, slots=True)
 class SearchTerms:
     """What grep or rg asks a mount's search, read off the line once.
 
@@ -115,11 +94,3 @@ class SearchTerms:
     ignore_case: bool
     line_output: bool
     reads_binary: bool
-
-
-@dataclass(frozen=True, slots=True)
-class GrepSearchMeta:
-    """The grep integration's declared search dialect and scan strategy."""
-
-    mode: Literal["literal", "regex"]
-    stream: bool = False

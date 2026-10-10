@@ -13,16 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command } from '../../config.ts'
-import { POSTGRES_GREP } from './grep.ts'
 import { POSTGRES_HEAD } from './head.ts'
-import { POSTGRES_RG } from './rg.ts'
 import { POSTGRES_TAIL } from './tail.ts'
 import { POSTGRES_WC } from './wc.ts'
 
 export const POSTGRES_COMMANDS: readonly Command[] = [
-  ...POSTGRES_GREP,
   ...POSTGRES_HEAD,
-  ...POSTGRES_RG,
   ...POSTGRES_TAIL,
   ...POSTGRES_WC,
 ]

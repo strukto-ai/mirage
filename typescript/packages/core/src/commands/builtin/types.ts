@@ -51,16 +51,6 @@ export enum RegexSyntax {
   RUST = 'rust',
 }
 
-/** Parsed per-request options owned by the grep integration. */
-export interface GrepSearchOptions {
-  readonly ignoreCase: boolean
-  readonly fixedString: boolean
-  readonly wholeWord: boolean
-  readonly syntax: RegexSyntax
-  /** grep runs under a UTF-8 locale, so a line is matched as text rather than as its bytes. */
-  readonly utf8: boolean
-}
-
 /**
  * What grep or rg asks a mount's search, read off the line once: plain texts,
  * one held by every match; whether each is needed only as a whole word;
@@ -75,10 +65,4 @@ export interface SearchTerms {
   readonly ignoreCase: boolean
   readonly lineOutput: boolean
   readonly readsBinary: boolean
-}
-
-/** Declared search dialect and fallback scan strategy for grep/rg. */
-export interface GrepSearchMeta {
-  readonly mode: 'literal' | 'regex'
-  readonly stream: boolean
 }

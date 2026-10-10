@@ -19,10 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.builtin.generic_bind.search import (
-    run_search,
-    search_reads,
-)
+from mirage.commands.builtin.generic_bind.search import search_reads
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -35,8 +32,6 @@ async def rg(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    if ops.search is not None:
-        return await run_search(ops, "rg", accessor, paths, texts, opts)
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, opts.index)
     read_bytes, read_stream = await search_reads(

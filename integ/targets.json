@@ -1427,6 +1427,18 @@
           }
         },
         {
+          "path": "/pg-contract-limited",
+          "vfs": "postgres",
+          "backend": "postgres",
+          "mode": "read",
+          "config": {
+            "schemas": [
+              "contract"
+            ],
+            "max_read_rows": 3
+          }
+        },
+        {
           "path": "/pg-bytes",
           "vfs": "postgres",
           "backend": "postgres",

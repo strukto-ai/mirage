@@ -117,9 +117,9 @@ try {
   console.log('='.repeat(60))
   await run(`grep -c title "${collDoc}"`)
   await run(`grep -m 3 title "${collDoc}"`)
-  await run(`grep mongodb "/mongodb/${DB}/collections/${COLL_TXT}/"`)
-  await run(`grep mongodb "/mongodb/${DB}/"`)
-  await run('grep mongodb "/mongodb/"')
+  await run(`grep -r mongodb "/mongodb/${DB}/collections/${COLL_TXT}/"`)
+  await run(`grep -r mongodb "/mongodb/${DB}/"`)
+  await run('grep -r mongodb "/mongodb/"')
 
   console.log('\n' + '='.repeat(60))
   console.log('RG at db / root scope')

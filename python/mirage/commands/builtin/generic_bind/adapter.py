@@ -355,7 +355,6 @@ def command_io(vfs: BaseVFS) -> CommandIO:
             SearchOps(
                 search=_without_accessor(vfs.search),
                 search_many=slot("search_many"),
-                meta=vfs.search_meta,
             )
             if vfs.supports("search")
             else None

@@ -17,7 +17,6 @@ import type { LangfuseTransport } from '../core/langfuse/client.ts'
 
 export interface LangfuseAccessorConfig {
   defaultTraceLimit?: number
-  defaultSearchLimit?: number
   defaultFromTimestamp?: string
 }
 

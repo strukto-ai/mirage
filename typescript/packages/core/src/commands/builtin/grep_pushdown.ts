@@ -12,16 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../accessor/base.ts'
-import type { SearchOps, SearchQuery } from '../../vfs/types.ts'
-import { RegexSyntax, type GrepSearchOptions, type GrepSearchMeta } from './types.ts'
 import type { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/paths.ts'
 import { isStdin } from './utils/stream.ts'
 import { UNICODE_FOLDED, foldsByUnicode, requiredNeedles } from './grep_prefilter.ts'
-import { FlagView } from '../spec/flag_view.ts'
-import { type FlagValue } from '../spec/types.ts'
 
 // Classify a grep pattern for API push-down decisions.
 export function classifyPattern(pattern: string, fixedString: boolean): PatternType {
@@ -94,231 +89,13 @@ export function searchTerms(
   return [needles, false]
 }
 
-// grep's dests, then rg's, which spells each flag by its long name; a
-// spec-less view reads both, and neither command sets the other's.
-const PUSHDOWN_SHAPING_BOOL = [
-  'v',
-  'n',
-  'byte_offset',
-  'c',
-  'args_l',
-  'files_without_match',
-  'w',
-  'o',
-  'q',
-  'no_messages',
-  'H',
-  'h',
-  'args_I',
-  'text',
-  'invert_match',
-  'line_number',
-  'count',
-  'files_with_matches',
-  'word_regexp',
-  'only_matching',
-  'quiet',
-  'with_filename',
-  'no_filename',
-  'line_regexp',
-  'column',
-  'vimgrep',
-  'trim',
-  'null',
-  'count_matches',
-  'include_zero',
-  'files',
-  'type_list',
-  'heading',
-  'passthru',
-  'passthrough',
-  'binary',
-  'sort_files',
-  'follow',
-] as const
-const PUSHDOWN_SHAPING_INT = ['m', 'A', 'B', 'C'] as const
-// rg's valued options defer on presence alone: a value the generic would
-// refuse in ripgrep's words is not the push-down's to parse.
-const PUSHDOWN_SHAPING_VALUE = [
-  'max_count',
-  'after_context',
-  'before_context',
-  'context',
-  'max_columns',
-  'replace',
-  'field_match_separator',
-  'max_depth',
-  'max_filesize',
-  'sort',
-  'sortr',
-] as const
-// Split the way Python's `_PUSHDOWN_FILTER_STR` / `_PUSHDOWN_FILTER_LIST`
-// are, because the two halves are tested differently: a repeatable option
-// arrives as a list and an empty list means "not supplied", while a
-// single-valued one arrives as a string. One flat list tested with
-// `!== undefined` answered differently from Python for both. -f adds
-// patterns the pushed-down one never carried.
-const PUSHDOWN_FILTER_STR = ['binary_files'] as const
-const PUSHDOWN_FILTER_LIST = [
-  'include',
-  'exclude',
-  'exclude_dir',
-  'file',
-  'glob',
-  'iglob',
-  'type',
-  'type_not',
-] as const
-
-// True when a flag alters the match set or output shape of grep/rg. A search
-// push-down prints each matching record as one whole line, so it cannot honor
-// -v/-n/-b/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), -x, -r,
-// --column and the rest of its output options, nor the file filters
-// (--include/--exclude, rg's -g/-t/-T/-d), the patterns -f adds, or rg's -L,
-// which walks links no backend can see; the wrapper must defer to the generic
-// scan when any is present.
-//
-// `honored` names the flags this particular push-down implements itself, so
-// their presence is not a reason to defer. Two shapes need it. A provider
-// whose search is word-based (gmail, slack, discord) is faithful only *with*
-// -w, so for those the flag in this list is the one that turns the push-down
-// on rather than off. A push-down that uses the search only to pick
-// candidates and then runs the real compiled matcher over each one (email)
-// honors whatever that local scan implements. Everything left out of the list
-// still defers, which is what keeps the exemption honest.
-export function hasSearchShapingFlags(
-  bag: Record<string, FlagValue>,
-  honored: readonly string[] = [],
-): boolean {
-  // Spec-less on purpose, as Python's `FlagView(flags)` is: the shared key
-  // set has to work for both the grep and the rg spec, and rg simply never
-  // sets the grep-only keys.
-  const fl = new FlagView(bag)
-  const gated = (name: string): boolean => !honored.includes(name)
-  if (PUSHDOWN_SHAPING_BOOL.some((name) => gated(name) && fl.asBool(name))) return true
-  if (PUSHDOWN_SHAPING_INT.some((name) => gated(name) && fl.asInt(name) !== undefined)) return true
-  if (PUSHDOWN_SHAPING_VALUE.some((name) => gated(name) && fl.raw(name) !== undefined)) return true
-  if (PUSHDOWN_FILTER_LIST.some((name) => gated(name) && fl.asList(name).length > 0)) return true
-  return PUSHDOWN_FILTER_STR.some((name) => gated(name) && fl.asStr(name) !== undefined)
-}
-
-// True when a literal-substring push-down (LIKE/ILIKE) faithfully reproduces
-// grep/rg: a literal pattern with no shaping flags. A newline-joined pattern
-// list (-F with multiple -e) is a set of independent alternatives LIKE cannot
-// express, so it stays on the generic path. Backends that push a real regex
-// down (mongodb) gate on hasSearchShapingFlags alone instead.
-export function searchPushdownOk(bag: Record<string, FlagValue>, pattern: string): boolean {
-  if (pattern.includes('\n')) return false
-  const fl = new FlagView(bag)
-  const fixed = fl.asBool('F') || fl.asBool('fixed_strings')
-  return isLiteralPattern(pattern, fixed) && !hasSearchShapingFlags(bag)
-}
-
 // The one operand a search push-down may answer for, or null. A push-down
 // asks the backend a single whole-container question and prints its entire
-// answer, so it can only stand in for a line naming exactly one operand.
-// Given two it answered for the first and dropped the rest in silence
-// (rg pat /lf/traces /lf/sessions reported only traces). Running it once per
-// operand is not the fix: several scopes map to the same container search
-// (langfuse routes both `sessions` and one `session` to "search every
-// session"), so two operands in one family would print that container twice.
-// A multi-operand line therefore takes the generic scan, which searches each
-// operand in turn the way GNU does. A glob operand defers for the older
-// reason: an unexpanded pattern segment would be read as a literal entity
-// name. A `-` operand defers because it is the line's stdin, which no backend
-// holds: asked about `<mount>/-`, the search answered "no match" and the pipe
-// was never read.
+// answer, so it can only stand in for a line naming exactly one operand; given
+// two it answers for the first and drops the rest in silence. A glob operand
+// defers since an unexpanded pattern segment would be read as a literal name,
+// and a `-` operand since it is the line's stdin, which no backend holds.
 export function loneOperand(paths: PathSpec[]): PathSpec | null {
   if (paths.length !== 1 || hasUnresolvedGlob(paths) || paths.some((p) => isStdin(p))) return null
   return paths[0] ?? null
-}
-
-// The operand a regex push-down may answer for, or null. For a backend that
-// pushes the real regex down (mongodb, langfuse), which is faithful for any
-// single pattern with no shaping flags. A newline-joined pattern list (-F
-// with several -e) is a set of independent alternatives it cannot express.
-export function pushdownOperand(
-  paths: PathSpec[],
-  bag: Record<string, FlagValue>,
-  pattern: string | null,
-  honored: readonly string[] = [],
-): PathSpec | null {
-  if (pattern === null || pattern.includes('\n')) return null
-  if (hasSearchShapingFlags(bag, honored)) return null
-  return loneOperand(paths)
-}
-
-// The operand a literal-substring push-down may answer for, or null.
-// loneOperand's rule plus searchPushdownOk's, which is the stricter flag gate
-// LIKE/ILIKE needs (postgres): a real regex is treated literally by LIKE, so
-// only a verbatim pattern may push down.
-export function literalPushdownOperand(
-  paths: PathSpec[],
-  bag: Record<string, FlagValue>,
-  pattern: string | null,
-): PathSpec | null {
-  if (pattern === null || !searchPushdownOk(bag, pattern)) return null
-  return loneOperand(paths)
-}
-
-export function textSearchResults(lines: readonly string[]): boolean {
-  return lines.every(
-    (line) =>
-      !line.includes('\0') &&
-      !Array.from(line).some((char) => {
-        const cp = char.codePointAt(0) ?? 0
-        return cp >= 0xd800 && cp <= 0xdfff
-      }),
-  )
-}
-
-/** Read only grep's opt-in namespace; other capability metadata is opaque. */
-export function grepSearchMeta<A extends Accessor>(
-  search: SearchOps<A> | undefined,
-): GrepSearchMeta | null {
-  if (search?.meta?.grep === undefined) return null
-  const meta = search.meta.grep
-  if (
-    meta === null ||
-    typeof meta !== 'object' ||
-    Array.isArray(meta) ||
-    Object.keys(meta).some((key) => !['mode', 'stream'].includes(key))
-  ) {
-    throw new Error('search.meta.grep must contain mode and optional stream')
-  }
-  const mode = meta.mode
-  const stream = meta.stream === undefined ? false : meta.stream
-  if ((mode !== 'literal' && mode !== 'regex') || typeof stream !== 'boolean') {
-    throw new Error('search.meta.grep requires mode=literal|regex and boolean stream')
-  }
-  return { mode, stream }
-}
-
-/** A plain resource query is literal text; grep owns its optional namespace. */
-export function grepSearchOptions(query: SearchQuery): GrepSearchOptions {
-  const options = query.options?.grep === undefined ? {} : query.options.grep
-  const allowed = ['ignore_case', 'fixed_string', 'whole_word', 'syntax', 'utf8']
-  if (
-    options === null ||
-    typeof options !== 'object' ||
-    Array.isArray(options) ||
-    Object.keys(options).some((key) => !allowed.includes(key))
-  ) {
-    throw new Error('search.options.grep contains unknown options')
-  }
-  if (
-    Object.entries(options).some(([key, value]) => key !== 'syntax' && typeof value !== 'boolean')
-  ) {
-    throw new Error('search.options.grep values must be boolean')
-  }
-  const syntax = options.syntax ?? RegexSyntax.EXTENDED
-  const dialects: readonly unknown[] = Object.values(RegexSyntax)
-  if (!dialects.includes(syntax)) throw new Error('search.options.grep.syntax names no dialect')
-  return {
-    ignoreCase: options.ignore_case === true,
-    fixedString: options.fixed_string !== false,
-    wholeWord: options.whole_word === true,
-    syntax: syntax as RegexSyntax,
-    utf8: options.utf8 === true,
-  }
 }

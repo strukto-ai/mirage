@@ -75,20 +75,18 @@ the VFS does not define answers `Operation not supported`:
   preserve the baseline read semantics. Set `reads_ranges` / `readsRanges`
   when `read` fetches only the asked window: `offset` plus `size` is an
   exclusive end, and an omitted size reads through EOF.
-- `search` is optional resource search over a `PathSpec` and `SearchQuery`
-  with `query` text and backend-defined JSON `options`. The optional
-  `search_meta` / `searchMeta` fact describes capabilities; no regex support
-  or grep compatibility is assumed. Return text records, an empty list for no
-  matches, or `None` / `null` to decline. Validate resource-specific options
-  and propagate failures. Opt into grep/rg acceleration only with
-  `search_meta.grep.mode` (`literal` or `regex`); that integration passes its
-  booleans in `options.grep` using snake_case keys in both languages. It
-  requires complete rendered output lines. `search_meta.grep.stream` opts into
-  native streams for fallback scans. Semantic queries can use the same
-  function through a custom command with its own options. Define optional
+- `search` is optional resource search for the `search` command, over a
+  `PathSpec` and `SearchQuery` with `query` text and backend-defined JSON
+  `options`. No regex support or grep compatibility is assumed. Return text
+  records, an empty list for no matches, or `None` / `null` to decline.
+  Validate resource-specific options and propagate failures. Define optional
   `search_many` / `searchMany` when ranking and limits must apply once across
-  several scopes. The hierarchy kit can adapt scope-specific callbacks via
-  `make_search_op` / `makeSearchOp`.
+  several scopes.
+- `files_containing` / `filesContaining` and `lines_containing` /
+  `linesContaining` let grep and rg skip reads: the files under a directory,
+  or the lines of one file, that may hold a plain text. Answer every match or
+  return `None` / `null`; a missed hit is a wrong answer. `before_full_scan` /
+  `beforeFullScan` may raise to refuse a scan no search could narrow.
 - `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r` /
   `rmR`, `rename`, `copy`, `truncate`, and `setattr` are individual mutations.
   Defining `write` does not imply deletion, rename, or directory support;

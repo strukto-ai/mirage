@@ -197,18 +197,14 @@ class JiraVFS(BaseVFS):
 
 `SearchQuery(query="recent deployments", options={"limit": 20})` carries plain
 search text and backend-specific arguments. The options can hold filters, limits,
-or other JSON values. The `search_meta` class attribute is optional static
-capability metadata. Neither regex support nor grep compatibility is required.
-Leaving `search` undefined also works: MIRAGE implements grep and rg by reading
-files.
+or other JSON values. Neither regex support nor grep compatibility is
+required. Leaving `search` undefined also works.
 
 `search` returns text records: `[]` means no matches and `None` declines the
 request. Errors propagate, and a truncated result is never a complete answer.
 Expose semantic or service-specific queries through a custom command that calls
-the same function with its own options. grep and rg do not read `search`
-results; PostgreSQL, MongoDB and Langfuse still answer them through
-`search_meta["grep"]`, which is being retired. A new VFS lets them use its
-search through the functions below.
+the same function with its own options. grep and rg never ask `search`; they
+use the functions below.
 
 ### Let grep and rg use your search
 
@@ -449,7 +445,7 @@ already.
 
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (dify's light `ls`).
 
-- Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command. The hierarchy kit supplies `make_search_op` for scope-based core functions.
+- Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
 - A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
@@ -570,7 +566,7 @@ places:
 | --- | --- |
 | `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `read_bytes` and `read_range` | one `read(path, index, offset, size)`; set `reads_ranges = True` when it fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `find`, `du_size` and `du_entries`, `write`, ..., `search`, `search_many`); `SearchOps.meta` is the `search_meta` class attribute |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `find`, `du_size` and `du_entries`, `write`, ..., `search`, `search_many`) |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `commands/builtin/backends.py`; `commands()` returns only the commands the VFS was handed |
 | `DriverOps(vfs)` and `check_driver_contract(vfs, fixture)` | call the functions on the VFS directly; `check_read_contract(vfs, fixture)` |

@@ -1,20 +1,20 @@
 {
   "cases": [
     {
-      "id": "lf_search_pushdown_grep_records",
+      "id": "lf_search_grep_r_reads_traces",
       "seq": 602100,
       "targets": [
         "langfuse"
       ],
-      "command": "grep checkout-flow /lf/traces | cut -d: -f1",
+      "command": "grep -r checkout-flow /lf/traces | cut -d: -f1",
       "expect": {
         "exit": 0,
-        "stdout": "traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/trace-alpha.json\n",
         "stderr": ""
       }
     },
     {
-      "id": "lf_search_pushdown_rg_records",
+      "id": "lf_search_rg_reads_traces",
       "seq": 602101,
       "targets": [
         "langfuse"
@@ -22,7 +22,7 @@
       "command": "rg checkout-flow /lf/traces | cut -d: -f1",
       "expect": {
         "exit": 0,
-        "stdout": "traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/trace-alpha.json\n",
         "stderr": ""
       }
     },
@@ -53,15 +53,15 @@
       }
     },
     {
-      "id": "lf_search_pushdown_greps_summaries_only",
+      "id": "lf_search_grep_reads_full_traces",
       "seq": 602104,
       "targets": [
         "langfuse"
       ],
-      "command": "grep gpt-4o-mini /lf/traces",
+      "command": "grep -rl gpt-4o-mini /lf/traces",
       "expect": {
-        "exit": 1,
-        "stdout": "",
+        "exit": 0,
+        "stdout": "/lf/traces/trace-alpha.json\n",
         "stderr": ""
       }
     },
@@ -79,15 +79,15 @@
       }
     },
     {
-      "id": "lf_search_pushdown_sessions_by_id",
+      "id": "lf_search_grep_r_reads_sessions",
       "seq": 602106,
       "targets": [
         "langfuse"
       ],
-      "command": "grep session-one /lf/sessions | cut -d: -f1",
+      "command": "grep -rl checkout-flow /lf/sessions",
       "expect": {
         "exit": 0,
-        "stdout": "sessions/session-one\n",
+        "stdout": "/lf/sessions/session-one/trace-alpha.json\n",
         "stderr": ""
       }
     },
