@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,7 +22,9 @@ from mirage.cache.context import capture_read, push_write_context
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.types import WriteContext
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
+from mirage.core.dropbox.constants import RESULT_HEADER
 from mirage.core.dropbox.read import read, read_stream
+from mirage.core.dropbox.readdir import readdir
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -200,7 +203,10 @@ A = PathSpec(virtual="/a.txt", directory="/", vfs_path="a.txt")
 
 def served_accessor(url: str) -> DropboxAccessor:
     config = DropboxConfig(
-        client_id="c", client_secret="s", refresh_token="r", endpoint=url
+        client_id="c",
+        client_secret="s",
+        refresh_token="r",
+        endpoint=url,
     )
     return DropboxAccessor(config, DropboxTokenManager(config))
 
@@ -256,16 +262,23 @@ async def test_a_stream_records_the_content_hash(recorded):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "status, raised",
-    [(409, FileNotFoundError), (500, DropboxApiError)],
-    ids=["missing", "server-error"],
+    "status, summary, raised",
+    [
+        (409, "path/not_found/..", FileNotFoundError),
+        (409, "path/not_file/..", IsADirectoryError),
+        (409, "path/restricted_content/..", DropboxApiError),
+        (500, "path/not_found/..", DropboxApiError),
+    ],
+    ids=["missing", "folder", "restricted", "server-error"],
 )
-async def test_an_index_less_read_maps_only_a_409_to_enoent(status, raised):
+async def test_an_index_less_read_maps_only_a_miss_to_enoent(
+    status, summary, raised
+):
     # The ops factory's emulated truncate reads with no index.
     with patch(
         "mirage.core.dropbox.read.dropbox_download",
         new_callable=AsyncMock,
-        side_effect=DropboxApiError("refused", status),
+        side_effect=DropboxApiError("refused", status, summary),
     ):
         with pytest.raises(raised):
             await read(make_accessor(), A)
@@ -316,3 +329,115 @@ async def test_a_whole_read_publishes_its_token_on_a_conditional_mount(
             push_write_context(prev)
             await accessor.close()
     assert tokens == published
+
+
+async def _listed_then(fake: FakeDropbox):
+    accessor = served_accessor(fake.url)
+    index = RAMIndexCacheStore()
+    root = PathSpec(virtual="/", directory="/", vfs_path="")
+    await readdir(accessor, root, index)
+    return accessor, index
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True], ids=["read", "stream"])
+async def test_a_file_created_after_the_listing_is_read(streamed):
+    # The cached listing predates the file, so it is no proof of absence:
+    # the read goes to Dropbox by path and stamps the download's hash.
+    with serve(FakeDropbox(files={"/f": b"one\n"})) as fake:
+        accessor, index = await _listed_then(fake)
+        fake.write("/n", DATA)
+        start = len(fake.log)
+        scope = RecordingScope()
+        try:
+            n = PathSpec(virtual="/n", directory="/", vfs_path="n")
+            if streamed:
+                data = b"".join(
+                    [c async for c in read_stream(accessor, n, index)]
+                )
+            else:
+                data = await read(accessor, n, index)
+        finally:
+            scope.close()
+            await accessor.close()
+    assert data == DATA
+    assert fake.log[start:] == [("download", "/n")]
+    assert [r.fingerprint for r in scope.records] == [content_hash(DATA)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True], ids=["read", "stream"])
+async def test_a_live_read_names_what_dropbox_answered(streamed):
+    with serve(FakeDropbox(files={"/f": b"one\n"})) as fake:
+        accessor, index = await _listed_then(fake)
+        fake.dirs.add("/n")
+        n = PathSpec(virtual="/n", directory="/", vfs_path="n")
+        try:
+            with pytest.raises(IsADirectoryError):
+                if streamed:
+                    [c async for c in read_stream(accessor, n, index)]
+                else:
+                    await read(accessor, n, index)
+        finally:
+            await accessor.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("door", ["read", "stream", "index-less"])
+async def test_a_live_read_refuses_another_case(index, door):
+    # A download by path matches names case-insensitively; the listing
+    # does not, so a file stored as N is not n.
+    result = json.dumps({".tag": "file", "name": "N", "content_hash": "h"})
+
+    async def stream(_tm, _path, on_response=None):
+        on_response({RESULT_HEADER.lower(): result})
+        yield DATA
+
+    n = PathSpec(virtual="/n", directory="/", vfs_path="n")
+    await index.set_dir("/", [])
+    with (
+        patch(
+            "mirage.core.dropbox.read.dropbox_download",
+            new_callable=AsyncMock,
+            return_value=(DATA, result),
+        ),
+        patch("mirage.core.dropbox.read.dropbox_download_stream", new=stream),
+    ):
+        with pytest.raises(FileNotFoundError):
+            if door == "stream":
+                [c async for c in read_stream(make_accessor(), n, index)]
+            elif door == "read":
+                await read(make_accessor(), n, index)
+            else:
+                await read(make_accessor(), n)
+
+
+class _CountingIndex(RAMIndexCacheStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.listings = 0
+
+    async def list_dir(self, vfs_path: str):
+        self.listings += 1
+        return await super().list_dir(vfs_path)
+
+
+@pytest.mark.asyncio
+async def test_a_read_of_a_listed_file_lists_its_folder_once():
+    # The listing-miss check rides the lookup the read already makes, so a
+    # file the listing names costs no extra listing read (one MGET of the
+    # whole folder on a Redis index).
+    with serve(FakeDropbox(files={"/a.txt": DATA})) as fake:
+        accessor = served_accessor(fake.url)
+        index = _CountingIndex()
+        try:
+            await readdir(
+                accessor,
+                PathSpec(virtual="/", directory="/", vfs_path=""),
+                index,
+            )
+            index.listings = 0
+            assert await read(accessor, A, index) == DATA
+        finally:
+            await accessor.close()
+    assert index.listings == 1

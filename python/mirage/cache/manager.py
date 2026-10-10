@@ -28,7 +28,11 @@ from mirage.cache.index.constants import (
     LISTING_TRUST_WINDOW,
     PROBED_LIMIT,
 )
-from mirage.cache.index.scope import command_started, tick
+from mirage.cache.index.scope import (
+    command_started,
+    sole_command_started,
+    tick,
+)
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.io.stream import close_quietly
@@ -106,7 +110,7 @@ class CacheManager:
         self._on_gone = on_gone
         self._excluded_prefixes = excluded_prefixes
         self._may_serve_listing = may_serve_listing
-        self._written: dict[str, tuple[int, float]] = {}
+        self._written: dict[str, tuple[int, float, int | None]] = {}
         self._checked: dict[str, tuple[str, int, float]] = {}
         self._checking: dict[
             str, tuple[int, float, asyncio.Task[str | None]]
@@ -150,8 +154,9 @@ class CacheManager:
         if self._file_cache is None or isinstance(index, IndexView):
             return index
         if self._view is None or self._view.store is not index:
-            self._written.clear()
+            # The notes describe the old store; a first view keeps them.
             if self._view is not None:
+                self._written.clear()
                 self._forget_checks()
             self._view = IndexView(
                 index,
@@ -163,6 +168,7 @@ class CacheManager:
                 excluded_prefixes=self._excluded_prefixes,
                 may_serve_listing=self._may_serve_listing,
                 note_written=self._note_written,
+                listed_this_command=self.listed_this_command,
             )
         return self._view
 
@@ -193,17 +199,40 @@ class CacheManager:
         self._probe_bound = PROBED_LIMIT
 
     def _note_written(self, folder: str) -> None:
-        self._written[folder] = (tick(), _now())
+        self._written[folder] = (tick(), _now(), sole_command_started())
+
+    def listed_this_command(self, folder: str) -> bool:
+        """Whether the running command fetched ``folder``'s listing itself.
+
+        Stricter than ``listing_trusted``: outside a command no listing is
+        the caller's own, and inside one only a listing fetched under the
+        same command stamp is: not one another session fetched meanwhile,
+        nor one a nested ``$(...)`` or function body fetched. A listing the
+        command fetched stays its own until the command ends, so a
+        long-running command does not see a name another client creates
+        after it listed the folder.
+
+        Args:
+            folder (str): mount-absolute listing key.
+        """
+        written = self._written.get(folder)
+        started = sole_command_started()
+        return (
+            written is not None
+            and started is not None
+            and written[2] == started
+        )
 
     def listing_trusted(self, folder: str) -> bool:
         """Whether ``folder``'s listing is recent enough to serve under fresh.
 
-        Inside a command: only if the command wrote it itself, so one
-        command re-lists a folder once however often it reads it. Outside
-        any command (FUSE, a programmatic op) there is no command to
-        belong to, so a listing written within ``LISTING_TRUST_WINDOW``
-        seconds is trusted instead: one ``ls -l`` over FUSE is a burst of
-        calls that can share a re-list until the window expires.
+        Inside a command: only if it was fetched since the command
+        started, so one command re-lists a folder once however often it
+        reads it. Outside any command (FUSE, a programmatic op) there is
+        no command to belong to, so a listing fetched within
+        ``LISTING_TRUST_WINDOW`` seconds is trusted instead: one ``ls -l``
+        over FUSE is a burst of calls that can share a re-list until the
+        window expires.
 
         Every view of the mount, shared or lock-held, records into one map,
         so a glob's write counts for the ``ls`` that follows it.
@@ -214,7 +243,7 @@ class CacheManager:
         written = self._written.get(folder)
         if written is None:
             return False
-        stamp, at = written
+        stamp, at, _ = written
         started = command_started()
         if started is not None:
             return stamp > started
@@ -445,6 +474,7 @@ class CacheManager:
             excluded_prefixes=self._excluded_prefixes,
             may_serve_listing=self._may_serve_listing,
             note_written=self._note_written,
+            listed_this_command=self.listed_this_command,
         )
 
     async def _evict_dir(self, key: str) -> None:

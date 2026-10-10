@@ -24,6 +24,8 @@ CONTENT_HASH = "content_hash"
 # other 409 (restricted_content, malformed_path, locked, ...) names a path
 # that may well exist.
 MISS_SUMMARIES = ("path/not_found", "path/not_folder")
+# A download of a folder's path answers this 409.
+NOT_FILE_SUMMARY = "path/not_file"
 # A write sent with a rev (upload in update mode, delete_v2 parent_rev)
 # answers these when the file changed since that rev, and these when it is
 # gone (measured 2026-10-05 for uploads, 2026-10-08 for deletes).

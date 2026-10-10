@@ -191,6 +191,17 @@ class IndexCacheStore:
         """
         raise NotImplementedError
 
+    def listed_this_command(self, folder: str) -> bool:
+        """Whether the running command fetched ``folder``'s listing itself.
+
+        A raw store belongs to no mount and no command, so it cannot tell
+        and answers False; a mount's view answers from its cache manager.
+
+        Args:
+            folder (str): mount-absolute listing key.
+        """
+        return False
+
     async def holds_subtree(self, vfs_path: str) -> bool:
         """Whether a listing is cached at ``vfs_path`` or anywhere under it.
 

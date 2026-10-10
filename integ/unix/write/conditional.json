@@ -758,7 +758,9 @@
       "seq": 310089,
       "targets": [
         "s3",
-        "s3-prefix"
+        "s3-prefix",
+        "dropbox",
+        "dropbox-root"
       ],
       "read": "bounded",
       "ttl": 600,

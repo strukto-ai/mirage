@@ -188,7 +188,7 @@ export async function dropboxUpload(
 /**
  * Download a file, or a byte range of it, with its result header: the raw
  * `Dropbox-API-Result`, or null when the response carries none
- * (`fingerprint.resultToken` reads it).
+ * (`fingerprint.resultOf` reads it).
  */
 export async function dropboxDownload(
   tm: DropboxTokenManager,
@@ -198,7 +198,11 @@ export async function dropboxDownload(
   const headers = await dropboxAuthHeaders(tm)
   const resp = (await apiRequest('POST', `${tm.contentBase}/files/download`, {
     errorOf: (r, text) =>
-      new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status),
+      new DropboxApiError(
+        `Dropbox download ${path} → ${String(r.status)} ${text}`,
+        r.status,
+        summaryOf(text),
+      ),
     headers: { ...headers, 'Dropbox-API-Arg': headerJson({ path }) },
     read: 'bytes_response',
     window,
@@ -223,9 +227,20 @@ export async function* dropboxDownloadStream(
   })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
-    throw new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status)
+    throw new DropboxApiError(
+      `Dropbox download ${path} → ${String(r.status)} ${text}`,
+      r.status,
+      summaryOf(text),
+    )
   }
-  onResponse?.(loweredHeaders(r.headers))
+  try {
+    onResponse?.(loweredHeaders(r.headers))
+  } catch (err) {
+    await r.body?.cancel().catch((cancelErr: unknown) => {
+      console.debug(`Dropbox download ${path}: body cancel failed`, cancelErr)
+    })
+    throw err
+  }
   if (r.body === null) return
   const reader = r.body.getReader()
   for (;;) {

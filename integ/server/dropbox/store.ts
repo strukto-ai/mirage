@@ -41,11 +41,6 @@ export async function itemAt(db: C, tenant: string, path: string): Promise<Item 
   return row === null ? null : toItem(row)
 }
 
-export async function fileAt(db: C, tenant: string, path: string): Promise<Item | null> {
-  const item = await itemAt(db, tenant, path)
-  return item === null || item.isFolder ? null : item
-}
-
 // Real Dropbox has no separate mkdir -p: uploading to /a/b/c.txt materialises
 // /a and /a/b as folder objects, and a later list_folder on /a has to see /a/b.
 // The rows are created rather than upserted per level so an existing folder

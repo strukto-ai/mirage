@@ -50,6 +50,11 @@ export const LookupStatus = Object.freeze({
 
 export type LookupStatus = (typeof LookupStatus)[keyof typeof LookupStatus]
 
+/** A name missing from a cached listing this command did not fetch. */
+export const ListedMiss = Object.freeze({ UNTRUSTED: 'untrusted' } as const)
+
+export type ListedMiss = (typeof ListedMiss)[keyof typeof ListedMiss]
+
 export const IndexType = Object.freeze({
   RAM: 'ram',
   REDIS: 'redis',

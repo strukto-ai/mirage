@@ -56,7 +56,8 @@ class FakeDropbox:
     ``/2/files/list_folder``, ``/2/files/get_metadata`` and
     ``/2/files/download``. A download answers ``Dropbox-API-Result`` with
     the file's metadata on a full read and on a ranged one (206), as the
-    real service does. ``/2/files/upload`` stores the body at the
+    real service does, and a download of a folder answers 409
+    ``path/not_file``. ``/2/files/upload`` stores the body at the
     ``Dropbox-API-Arg`` path and answers the FileMetadata rendered by
     ``_file_entry``, the renderer get_metadata and listings use, so an
     upload reply's content_hash and a later stat's cannot disagree.
@@ -188,6 +189,15 @@ class FakeDropbox:
             status=409,
         )
 
+    def _not_file(self) -> web.Response:
+        return web.json_response(
+            {
+                "error_summary": "path/not_file/..",
+                "error": {".tag": "path", "path": {".tag": "not_file"}},
+            },
+            status=409,
+        )
+
     def _refused(self) -> web.Response:
         return web.json_response(
             {
@@ -312,6 +322,8 @@ class FakeDropbox:
         self.log.append(("download", path))
         if path in self.restricted:
             return self._refused()
+        if path in self.dirs:
+            return self._not_file()
         if path not in self.files:
             return self._missing()
         data = self.files[path]

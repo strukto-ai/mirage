@@ -7,11 +7,11 @@ import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
 from redis.asyncio import Redis
 
-from mirage.cache.index.config import IndexEntry, LookupStatus
+from mirage.cache.index.config import IndexEntry, ListedMiss, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
-from mirage.cache.index.warm import entry_or_warm
+from mirage.cache.index.warm import entry_or_listed_miss, entry_or_warm
 from mirage.errors.fs import enoent, enotdir
 
 KEY = "/owned/notes.json"
@@ -416,3 +416,64 @@ async def test_partial_refresh_survives_through_its_own_retry():
     release.set()
     found = await asyncio.gather(first, second)
     assert [row.id for row in found] == ["1", "2"]
+
+
+class _AskedIndex(RAMIndexCacheStore):
+    def __init__(self, listed: bool) -> None:
+        super().__init__()
+        self.listed = listed
+        self.asked: list[str] = []
+
+    def listed_this_command(self, folder: str) -> bool:
+        self.asked.append(folder)
+        return self.listed
+
+
+async def _absent_listing(index: RAMIndexCacheStore) -> None:
+    await index.set_dir("/owned", [("old.json", entry_for("old"))])
+
+
+async def _expired_listing(index: RAMIndexCacheStore) -> None:
+    await index.set_dir(
+        "/owned",
+        [("old.json", entry_for("old"))],
+        expired_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+
+
+async def _partial_listing(index: RAMIndexCacheStore) -> None:
+    await index.set_partial_dir("/owned", [("old.json", entry_for("old"))])
+
+
+async def _no_listing(index: RAMIndexCacheStore) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "listed, setup, found",
+    [
+        (False, _absent_listing, ListedMiss.UNTRUSTED),
+        (True, _absent_listing, None),
+        (False, _expired_listing, None),
+        (False, _partial_listing, None),
+        (False, _no_listing, None),
+    ],
+    ids=[
+        "earlier-listing-lacks-it",
+        "this-command-listed-it",
+        "expired",
+        "partial",
+        "no-listing",
+    ],
+)
+async def test_entry_or_listed_miss_flags_only_an_untrusted_complete_miss(
+    listed, setup, found
+):
+    # Only a complete, unexpired listing the running command did not fetch
+    # answers UNTRUSTED; with no warm, every other state answers None, as
+    # entry_or_warm does. The trust question names the key's folder.
+    index = _AskedIndex(listed)
+    await setup(index)
+    assert await entry_or_listed_miss(index, KEY, None) is found
+    assert set(index.asked) <= {"/owned"}

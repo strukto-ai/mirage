@@ -61,7 +61,8 @@ function norm(path: string): string {
  * Dropbox's RPC and content routes behind a fetch router, the twin of
  * python's tests/fixtures/dropbox_api.py. A download answers
  * `Dropbox-API-Result` with the file's metadata on a full read and on a
- * ranged one (206), as the real service does. A rewrite keeps
+ * ranged one (206), as the real service does, and a download of a folder
+ * answers 409 `path/not_file`. A rewrite keeps
  * `server_modified`: the real service repeated it across same-size writes,
  * so only `content_hash` tells them apart. `/2/files/upload` (logged
  * `upload`, routed before the JSON-body routes since its body is the bytes)
@@ -265,6 +266,16 @@ export class InlineDropbox {
     )
   }
 
+  private static notFile(): Response {
+    return InlineDropbox.json(
+      {
+        error_summary: 'path/not_file/..',
+        error: { '.tag': 'path', path: { '.tag': 'not_file' } },
+      },
+      409,
+    )
+  }
+
   private static refused(): Response {
     return InlineDropbox.json(
       {
@@ -280,6 +291,7 @@ export class InlineDropbox {
     const path = norm(arg.path ?? '')
     this.log.push('download')
     if (this.restricted.has(path)) return InlineDropbox.refused()
+    if (this.dirs.has(path)) return InlineDropbox.notFile()
     const data = this.files.get(path)
     if (data === undefined) return InlineDropbox.missing()
     const result = { 'Dropbox-API-Result': headerJson(this.fileEntry(path, data)) }

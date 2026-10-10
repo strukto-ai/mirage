@@ -188,7 +188,9 @@ def _download_error(
     resp: aiohttp.ClientResponse, text: str, *, path: str
 ) -> Exception:
     return DropboxApiError(
-        f"Dropbox download {path} → {resp.status} {text}", resp.status
+        f"Dropbox download {path} → {resp.status} {text}",
+        resp.status,
+        summary_of(text),
     )
 
 
@@ -198,7 +200,7 @@ async def dropbox_download(
     """Download a file, or a byte range of it, with its result header.
 
     The second value is the raw ``Dropbox-API-Result`` header, or None when
-    the response carries none; ``fingerprint.result_token`` reads it.
+    the response carries none; ``fingerprint.result_of`` reads it.
 
     Args:
         tm (DropboxTokenManager): token manager.
@@ -244,7 +246,9 @@ async def dropbox_download_stream(
         if resp.status >= 400:
             text = await resp.text()
             raise DropboxApiError(
-                f"Dropbox download {path} → {resp.status} {text}", resp.status
+                f"Dropbox download {path} → {resp.status} {text}",
+                resp.status,
+                summary_of(text),
             )
         if on_response is not None:
             on_response(lowered_headers(resp.headers))

@@ -32,11 +32,20 @@ export function liveOf(entry: DropboxEntry | null): LiveVersion | null {
 }
 
 /**
- * The content token a download's `Dropbox-API-Result` names. Dropbox sends the
- * file's metadata there on a full and on a ranged (206) download, so a read
- * stamps the token with no extra request.
+ * The content token a download's result metadata names: what `resultOf`
+ * parsed, or null. Mirrors Python's `result_token`.
  */
-export function resultToken(raw: string | null | undefined): string | null {
+export function resultToken(result: Record<string, unknown> | null): string | null {
+  return result === null ? null : tokenOf(result[CONTENT_HASH])
+}
+
+/**
+ * The file metadata a download's `Dropbox-API-Result` carries, or null.
+ * Dropbox sends it on a full and on a ranged (206) download, so a read learns
+ * the file's token and name with no extra request. Mirrors Python's
+ * `result_of`.
+ */
+export function resultOf(raw: string | null | undefined): Record<string, unknown> | null {
   if (raw === null || raw === undefined || raw === '') return null
   let result: unknown
   try {
@@ -48,5 +57,5 @@ export function resultToken(raw: string | null | undefined): string | null {
     console.warn(`unreadable ${RESULT_HEADER} header: ${raw}`)
     return null
   }
-  return tokenOf((result as Record<string, unknown>)[CONTENT_HASH])
+  return result as Record<string, unknown>
 }

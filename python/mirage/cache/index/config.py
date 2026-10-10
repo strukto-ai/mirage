@@ -61,6 +61,12 @@ class LookupStatus(str, Enum):
     NOT_FOUND = "not_found"
 
 
+class ListedMiss(Enum):
+    """A name missing from a cached listing this command did not fetch."""
+
+    UNTRUSTED = "untrusted"
+
+
 class IndexEntry(BaseModel):
     id: str
     name: str

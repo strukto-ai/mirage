@@ -16,7 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.cache.index.config import IndexEntry, LookupStatus
+from mirage.cache.index.config import IndexEntry, ListedMiss, LookupStatus
 from mirage.cache.index.lock import index_lock
 from mirage.cache.index.store import IndexCacheStore
 
@@ -28,6 +28,27 @@ async def entry_or_warm(
     virtual_key: str,
     warm: Callable[[], Awaitable[Any]] | None,
 ) -> IndexEntry | None:
+    """``entry_or_listed_miss`` for a caller that cannot ask by path.
+
+    A complete listing that omits the key answers None, whoever fetched
+    it.
+
+    Args:
+        index (IndexCacheStore): the index to read, and to warm through
+            ``warm``.
+        virtual_key (str): the index key being resolved.
+        warm (Callable | None): lists the parent directory, populating the
+            index; ``None`` when the key has no distinct parent to list.
+    """
+    found = await entry_or_listed_miss(index, virtual_key, warm)
+    return None if found is ListedMiss.UNTRUSTED else found
+
+
+async def entry_or_listed_miss(
+    index: IndexCacheStore,
+    virtual_key: str,
+    warm: Callable[[], Awaitable[Any]] | None,
+) -> IndexEntry | ListedMiss | None:
     """Resolve an entry when its parent listing is absent or expired.
 
     Id-addressed backends (Drive, Box, Dropbox, Gmail) can only turn a path
@@ -46,6 +67,11 @@ async def entry_or_warm(
     dropped connection reported as "no such file" both misdiagnoses the fault
     and hides that it is worth retrying.
 
+    A complete listing that omits the key answers without a warm: None
+    when the running command fetched it, ``ListedMiss.UNTRUSTED`` when it
+    did not, so a backend that can ask by path learns whether the miss is
+    proof.
+
     Args:
         index (IndexCacheStore): the index to read, and to warm through
             ``warm``.
@@ -57,7 +83,9 @@ async def entry_or_warm(
     async with index_lock(index, parent):
         listing = await index.list_dir(parent)
         if listing.entries is not None and virtual_key not in listing.entries:
-            return None
+            if index.listed_this_command(parent):
+                return None
+            return ListedMiss.UNTRUSTED
         hit = await index.get(virtual_key)
         if hit.entry is not None and (
             listing.entries is not None

@@ -468,6 +468,38 @@ describe('what a mount has listed since a command started', () => {
     })
   })
 
+  // Fetched while this command runs, but by no command or by another
+  // session's, started before or after this one: its miss is no proof.
+  it.each(['none', 'earlier', 'later'] as const)(
+    'does not count a listing another command fetched (%s)',
+    async (producer) => {
+      const index = new RAMIndexCacheStore({ ttl: 600 })
+      const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+      let ready = (): void => undefined
+      let release = (): void => undefined
+      const readyPromise = new Promise<void>((resolve) => {
+        ready = resolve
+      })
+      const releasePromise = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const note = async (): Promise<void> => {
+        ready()
+        await releasePromise
+        await manager.scopeIndex(index).setDir('/data', [])
+      }
+      const produce = (): Promise<void> => (producer === 'none' ? note() : runInCommandScope(note))
+      const early = producer === 'later' ? null : produce()
+      await runInCommandScope(async () => {
+        const task = early ?? produce()
+        await readyPromise
+        release()
+        await task
+        expect(manager.listedThisCommand('/data')).toBe(false)
+      })
+    },
+  )
+
   it('does not count a write before the command', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
@@ -505,7 +537,7 @@ describe('which listings a mount trusts', () => {
     expect(manager.listingTrusted('/data')).toBe(false)
   })
 
-  // A listing the previous command wrote a moment ago is still re-listed by
+  // A listing the previous command fetched a moment ago is still re-listed by
   // the next one: the window is only for reads that belong to no command.
   it('does not apply the window inside a command', async () => {
     const clock = shiftPerformanceNow()
