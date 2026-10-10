@@ -12,15 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { GCAL_RM } from './rm.ts'
 
 // Calendar verbs and API passthroughs live in the gws CLI
 // (commands/cli/builtin/gws), installed by name; the mount only serves the
 // filesystem surface, and rm is the one mutation a path can express.
-export const GCAL_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.GCAL, { overrides: new Set(['rm']) }),
-  ...GCAL_RM,
-]
+export const GCAL_COMMANDS: readonly Command[] = [...GCAL_RM]

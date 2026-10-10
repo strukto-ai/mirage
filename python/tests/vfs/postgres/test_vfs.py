@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.postgres import PostgresConfig, PostgresVFS
+from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
 
@@ -33,7 +33,7 @@ def test_vfs_registers_three_ops():
 
 def test_vfs_registers_commands():
     res = PostgresVFS(PostgresConfig(dsn="postgres://localhost/db"))
-    cmd_names = {rc.name for rc in commands_for(res)}
+    cmd_names = {rc.name for rc in mount_commands(res)}
     expected = {
         "cat",
         "find",

@@ -12,18 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
 import { LANGFUSE_GREP } from './grep.ts'
-import { genericCommands } from '../generic_bind/index.ts'
 import { LANGFUSE_RG } from './rg.ts'
 
-const LANGFUSE_OVERRIDES = new Set(['grep', 'rg'])
-
-export const LANGFUSE_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.LANGFUSE, {
-    overrides: LANGFUSE_OVERRIDES,
-  }),
-  ...LANGFUSE_GREP,
-  ...LANGFUSE_RG,
-]
+export const LANGFUSE_COMMANDS: readonly Command[] = [...LANGFUSE_GREP, ...LANGFUSE_RG]

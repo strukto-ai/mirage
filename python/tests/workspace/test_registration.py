@@ -52,8 +52,7 @@ def test_commands_introspection(ws):
     m = ws.mount("/data/")
     cmds = m.commands()
     assert isinstance(cmds, dict)
-    assert "cat" in cmds
-    assert None in cmds["cat"]
+    assert cmds["cat"] == []
 
 
 def test_the_mount_answers_its_vfs_functions(ws):
@@ -96,7 +95,7 @@ def test_register_adds_a_filetype_variant(ws):
             "cat", spec=SPECS["cat"], vfs="ram", filetype=".demo", fn=demo_cat
         )
     )
-    assert m.commands()["cat"] == [None, ".demo"]
+    assert m.commands()["cat"] == [".demo"]
 
 
 @pytest.mark.asyncio

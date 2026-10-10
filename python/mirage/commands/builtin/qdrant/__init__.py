@@ -13,9 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.search import make_search
-from mirage.commands.builtin.generic_bind import generic_commands
 
 COMMANDS = [
-    *generic_commands("qdrant"),
     make_search("qdrant"),
 ]

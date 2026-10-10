@@ -19,9 +19,9 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
-import { DISCORD_COMMANDS } from './index.ts'
+import { generic } from '../generic_bind/factory.ts'
 
-const DISCORD_JQ = DISCORD_COMMANDS.filter((c) => c.name === 'jq' && c.filetype == null)
+const DISCORD_JQ = [generic('jq')]
 
 const DEC = new TextDecoder()
 

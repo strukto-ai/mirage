@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import generic_commands
 from mirage.commands.builtin.trello.reads import make_trello_read_commands
 from mirage.commands.builtin.trello.trello_card_assign import (
     trello_card_assign,
@@ -38,9 +37,6 @@ from mirage.commands.builtin.trello.trello_card_update import (
 )
 
 COMMANDS = [
-    *generic_commands(
-        "trello",
-    ),
     *make_trello_read_commands(),
     trello_card_assign,
     trello_card_comment_add,

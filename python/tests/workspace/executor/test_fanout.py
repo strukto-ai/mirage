@@ -22,10 +22,6 @@ from mirage.workspace import Workspace
 from mirage.workspace.executor.fanout import _should_fan_out
 
 
-class _NoWalkRAM(RAMVFS):
-    overrides = frozenset({"find", "du"})
-
-
 def _nested() -> Workspace:
     return Workspace(
         {"/base": RAMVFS(), "/base/inner": RAMVFS(), "/other": RAMVFS()},
@@ -93,11 +89,9 @@ async def test_a_hidden_mount_does_not_bound_the_walk(line):
         ("du -s /base/inner /other", b"3\t/base/inner\n1\t/other\n"),
     ],
 )
-async def test_a_mount_without_its_own_walk_is_walked_through_the_ops(
-    line, expected
-):
+async def test_a_nested_mount_is_walked_through_the_ops(line, expected):
     ws = Workspace(
-        {"/base": RAMVFS(), "/base/inner": _NoWalkRAM(), "/other": RAMVFS()},
+        {"/base": RAMVFS(), "/base/inner": RAMVFS(), "/other": RAMVFS()},
         mode=MountMode.WRITE,
     )
     try:

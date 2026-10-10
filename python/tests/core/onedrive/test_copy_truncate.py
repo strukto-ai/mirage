@@ -7,7 +7,7 @@ from yarl import URL
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.cache.context import push_cache_manager
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.onedrive import COMMANDS
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
 from mirage.core.msgraph.client import GraphError
 from mirage.core.onedrive.copy import copy
@@ -23,11 +23,7 @@ def _accessor(**kw) -> OneDriveAccessor:
 
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
 
-_cp = next(
-    c
-    for c in COMMANDS
-    if any(rc.name == "cp" for rc in getattr(c, "_registered_commands", []))
-)
+_cp = generic("cp").fn
 
 
 @pytest.mark.asyncio

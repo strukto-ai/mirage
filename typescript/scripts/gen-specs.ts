@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -58,6 +58,9 @@ type ModuleBag = Record<string, unknown>
 function commandGroupDirs(pkg: string): { dir: string; groups: string[] }[] {
   const root = resolve(PACKAGES, pkg, 'src', 'commands', 'builtin')
   const out: { dir: string; groups: string[] }[] = []
+  // A package whose backends all run the shared generic set has no
+  // commands of its own, and no directory for them.
+  if (!existsSync(root)) return out
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     let source: string
@@ -86,7 +89,9 @@ function declaredCommandGroups(pkg: string): string[] {
 // declare them rather than from whatever the package index happens to name.
 // Nothing can go missing here: the directory scan is the source of truth.
 async function coreCommandGroups(): Promise<ModuleBag> {
-  const bag: ModuleBag = {}
+  const generic =
+    (await import('@struktoai/mirage-core/commands/builtin/generic_bind/index')) as ModuleBag
+  const bag: ModuleBag = { GENERIC_COMMANDS: generic.GENERIC_COMMANDS }
   for (const { dir } of commandGroupDirs('core')) {
     const mod = (await import(`@struktoai/mirage-core/commands/builtin/${dir}/index`)) as ModuleBag
     for (const [key, value] of Object.entries(mod)) {

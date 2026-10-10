@@ -82,9 +82,9 @@ describe('Command.withOverrides', () => {
 })
 
 it('S3 commands expose static lookup', () => {
-  const cat = S3_COMMANDS.require('cat')
+  const rm = S3_COMMANDS.require('rm')
 
-  expect(cat.name).toBe('cat')
-  expect(cat.vfs).toBe('s3')
-  expect(cat.filetype).toBeNull()
+  expect(rm.name).toBe('rm')
+  expect(rm.vfs).toBe('s3')
+  expect(rm.filetype).toBeNull()
 })

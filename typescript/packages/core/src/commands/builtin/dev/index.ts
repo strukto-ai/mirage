@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { ZERO_CHUNK_SIZE } from '../../../core/dev/constants.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
 import type { Command, CommandIO } from '../../config.ts'
-import { genericCommands } from '../generic_bind/index.ts'
+import { generic } from '../generic_bind/index.ts'
 
 type ReadRange = NonNullable<CommandIO['readRange']>
 
@@ -54,5 +54,6 @@ function endless(io: CommandIO): CommandIO {
 // the two bounded streaming commands read in ranges, which /dev/zero answers
 // without end.
 export const DEV_COMMANDS: readonly Command[] = [
-  ...genericCommands(VFSName.RAM, { adapt: { cat: endless, head: endless }, local: true }),
+  generic('cat', { vfs: VFSName.RAM, table: endless }),
+  generic('head', { vfs: VFSName.RAM, table: endless }),
 ]

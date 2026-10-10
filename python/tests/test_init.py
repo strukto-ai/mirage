@@ -61,7 +61,7 @@ def test_authoring_surface_is_stable():
         "known_vfs_names",
         "known_runtimes",
         "known_sources",
-        "generic_commands",
+        "generic",
         "make_resolve_glob",
         "register_cli_spec",
         "register_vfs",

@@ -18,12 +18,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.cache.index import IndexEntry
-from mirage.commands.builtin.backends import commands_for
 from mirage.types import VFSName
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.discord.config import DiscordConfig
 from mirage.vfs.discord.discord import DiscordVFS
 from mirage.workspace.workspace.workspace import Workspace
+from tests.fixtures.mount_commands import mount_commands
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def test_vfs_commands(config):
     # ENOTSUP at the op Discord lacks, + bespoke grep/rg/head +
     # md5sum/sha1sum/sha384sum/sha512sum); acting on Discord moved to the
     # discord CLI
-    assert len(commands_for(vfs)) == 71
+    assert len(mount_commands(vfs)) == 71
 
 
 @pytest.mark.asyncio

@@ -575,9 +575,10 @@ export class MountEntry {
 
   /**
    * Batch-register commands. Mirrors Python's `Mount.register_commands(...)`.
-   * Commands with `vfs: null` go to the general table. Multi-VFS entries
-   * (sharing the same name across mounts) are filtered to this mount's VFS
-   * kind; if a name has entries but none match this mount, throw.
+   * Each one is this mount's own, keyed by name and filetype, so it wins
+   * over the shared commands of that name. Multi-VFS entries (sharing the
+   * same name across mounts) are filtered to this mount's VFS kind; if a
+   * name has entries but none match this mount, throw.
    */
   registerCommands(items: readonly Command[]): void {
     const kind = this.vfs.name
@@ -604,10 +605,7 @@ export class MountEntry {
       }
     }
     for (const g of groups.values()) {
-      for (const cmd of g.toRegister) {
-        if (cmd.vfs === null) this.registerGeneral(cmd)
-        else this.register(cmd)
-      }
+      for (const cmd of g.toRegister) this.register(cmd)
     }
   }
 

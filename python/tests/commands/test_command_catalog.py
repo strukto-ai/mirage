@@ -93,8 +93,8 @@ def test_with_overrides_returns_an_independent_definition():
 def test_s3_commands_expose_static_lookup():
     from mirage.commands.builtin.s3 import COMMANDS
 
-    cat = COMMANDS.require("cat")
+    rm = COMMANDS.require("rm")
 
-    assert cat.name == "cat"
-    assert cat.vfs == "s3"
-    assert cat.filetype is None
+    assert rm.name == "rm"
+    assert rm.vfs == "s3"
+    assert rm.filetype is None

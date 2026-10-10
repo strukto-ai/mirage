@@ -252,8 +252,8 @@ async function demoGdrive(ws: Workspace): Promise<void> {
 }
 
 /**
- * Cloud-backend demo via real shell commands. `ws.shell('ls /s3/…')` now
- * flows through core's S3_COMMANDS, which internally branches on
+ * Cloud-backend demo via real shell commands. `ws.shell('ls /s3/…')` runs
+ * core's generic `ls` over the S3 VFS, which internally branches on
  * `config.presignedUrlProvider` and dispatches each AWS SDK command to a
  * presigned URL fetch — mirroring Python's `async_session(config)` seam.
  */
@@ -444,5 +444,5 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  line(String(err instanceof Error ? err.stack ?? err.message : err), 'err')
+  line(String(err instanceof Error ? (err.stack ?? err.message) : err), 'err')
 })

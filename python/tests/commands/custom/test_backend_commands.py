@@ -14,22 +14,22 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import mount_commands
 
 
 def test_memory_backend_provides_commands():
     backend = RAMVFS()
-    cmds = commands_for(backend)
+    cmds = mount_commands(backend)
     names = {c.name for c in cmds}
     assert "cat" in names
     assert "ls" in names
     assert "grep" in names
     assert "wc" in names
     for c in cmds:
-        assert c.vfs == "ram"
+        assert c.vfs is None
 
 
 @pytest.mark.asyncio

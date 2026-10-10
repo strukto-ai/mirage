@@ -14,6 +14,7 @@
 
 import { MountEntry } from '../../workspace/mount/mount.ts'
 import { commandsFor } from '../../commands/builtin/backends.ts'
+import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
@@ -29,7 +30,7 @@ describe('BinViewVFS', () => {
       () => ['ls'],
       (name) => (name === 'ls' ? 'ls' : null),
     )
-    const names = new Set(commandsFor(vfs).map((cmd) => cmd.name))
+    const names = new Set([...GENERIC_COMMANDS, ...commandsFor(vfs)].map((cmd) => cmd.name))
     // Every generic command registers, the writers included: `gzip -c`
     // reads the view like any reader, and a line that writes is refused
     // at the op the view does not have.

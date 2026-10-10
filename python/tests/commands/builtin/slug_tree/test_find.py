@@ -12,7 +12,7 @@ from mirage.commands.builtin.slug_tree.find import (
     reads_sizes,
     reads_times,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandCatalog, CommandOpts
 from mirage.context import reset_current_session, set_current_session
 from mirage.core.dify import tree
 from mirage.io.types import IOResult, materialize
@@ -27,14 +27,8 @@ from tests.commands.builtin.dify.conftest import document
 from tests.core.chroma.conftest import accessor_for, seeded_collection
 from tests.fixtures.vfs_io import io_for
 
-find = next(
-    cmd for cmd in COMMANDS if cmd._registered_commands[0].name == "find"
-)
-chroma_find = next(
-    cmd
-    for cmd in CHROMA_COMMANDS
-    if cmd._registered_commands[0].name == "find"
-)
+find = CommandCatalog(COMMANDS).require("find").fn
+chroma_find = CommandCatalog(CHROMA_COMMANDS).require("find").fn
 
 
 def spec(virtual: str) -> PathSpec:

@@ -18,7 +18,7 @@ from dataclasses import replace
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind import generic_commands
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandIO
 from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.types import PathSpec
@@ -67,9 +67,5 @@ def _endless(io: CommandIO) -> CommandIO:
 # stream, while the two bounded streaming commands read in ranges, which
 # /dev/zero answers without end.
 COMMANDS = [
-    *generic_commands(
-        "ram",
-        adapt={"cat": _endless, "head": _endless},
-        local=True,
-    ),
+    generic(name, vfs="ram", table=_endless) for name in ("cat", "head")
 ]

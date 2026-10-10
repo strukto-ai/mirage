@@ -32,7 +32,6 @@ export { Workspace } from './workspace.ts'
 export { OPFSVFS, type OPFSVFSOptions, type OPFSVFSState } from './vfs/opfs/opfs.ts'
 export { PROMPT as OPFS_PROMPT } from './vfs/opfs/prompt.ts'
 export { OPFSAccessor } from './accessor/opfs.ts'
-export { OPFS_COMMANDS } from './commands/builtin/opfs/index.ts'
 export { S3VFS, type S3VFSState } from './vfs/s3/s3.ts'
 export { PROMPT as S3_BROWSER_PROMPT } from './vfs/s3/prompt.ts'
 export { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
@@ -278,7 +277,6 @@ export {
 export { RedisVFS, type RedisVFSOptions, type RedisVFSState } from './vfs/redis/redis.ts'
 export { UpstashRedisStore, type UpstashRedisStoreOptions } from './vfs/redis/store.ts'
 export { PROMPT as REDIS_PROMPT } from '@struktoai/mirage-core/vfs/redis/prompt'
-export { REDIS_COMMANDS } from '@struktoai/mirage-core/commands/builtin/redis/index'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export {
   buildVfs,
@@ -294,7 +292,7 @@ export {
 // module so a consumer of this package needs no second dependency on
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
 export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-export { genericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+export { generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
 export type { CLIView } from '@struktoai/mirage-core/commands/cli/types'

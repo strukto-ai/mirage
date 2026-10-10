@@ -19,7 +19,7 @@ from types import MappingProxyType
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.backends import commands_for
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import ExecContext, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
@@ -362,11 +362,49 @@ def test_resolve_command_missing(registry):
     assert cmd is None
 
 
+@command("cat", vfs=None, spec=CommandSpec(), filetype=".csv")
+async def csv_cat(accessor, paths, texts, opts):
+    return b"", IOResult()
+
+
+def test_a_filetype_command_added_later_keeps_the_generic(registry):
+    mount = registry.mount_for("/data/hello.txt")
+    mount.register_commands([csv_cat])
+    assert mount.resolve_command("cat", ".csv").fn is csv_cat
+    assert mount.resolve_command("cat", ".txt") is generic("cat")
+
+
+@command(
+    "summarize",
+    vfs=None,
+    spec=CommandSpec(
+        arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
+    ),
+    filetype=".csv",
+)
+async def csv_summary(accessor, paths, texts, opts):
+    return b"ok", IOResult()
+
+
+@pytest.mark.asyncio
+async def test_a_command_for_one_filetype_runs_only_on_that_filetype():
+    ws = Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo hit > /ram/x.csv; echo hit > /ram/x.txt")
+    ws.mount("/ram/").register_commands([csv_summary])
+    csv = await ws.shell("summarize /ram/x.csv")
+    txt = await ws.shell("summarize /ram/x.txt")
+    assert (csv.exit_code, await csv.stdout_str()) == (0, "ok")
+    assert (txt.exit_code, await txt.materialize_stderr()) == (
+        127,
+        b"summarize: command not found",
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_path_guarded_command_is_still_held_at_its_write():
     vfs = RAMVFS()
     vfs._store.files["/a"] = b"original"
-    cmd = next(cmd for cmd in commands_for(vfs) if cmd.name == "gzip")
+    cmd = generic("gzip")
     assert cmd.path_guarded
     ws = Workspace({"/ram/": (vfs, MountMode.READ)}, mode=MountMode.WRITE)
     # The write is refused where it happens and gzip says so in its own

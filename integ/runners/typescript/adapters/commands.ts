@@ -16,8 +16,11 @@ import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggrega
 import { CLI as CLIProgram, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import { RAM_COMMANDS } from '@struktoai/mirage-core/commands/builtin/ram/index'
+import {
+  commandIo,
+  generic,
+  walked,
+} from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { command, type Command } from '@struktoai/mirage-core/commands/config'
@@ -36,12 +39,10 @@ const GATE = {
 export class CommandService extends RAMVFS {
   private readonly calls: string[] = []
   private readonly dropped: readonly string[]
-  override readonly overrides: ReadonlySet<string>
 
   constructor(metadataOnly = false) {
     super()
-    this.dropped = metadataOnly ? ['grep', 'rg', 'find', 'du'] : []
-    this.overrides = new Set([...this.dropped, 'grep', 'rg', 'rev'])
+    this.dropped = metadataOnly ? ['grep', 'rg'] : []
   }
 
   override commands(): readonly Command[] {
@@ -50,10 +51,9 @@ export class CommandService extends RAMVFS {
     const view = new RAMVFS()
     Object.assign(view, { accessor: this.accessor })
     const own = commandIo(view)
-    const wrapped = RAM_COMMANDS.filter(
-      (original) =>
-        ['grep', 'rg', 'rev'].includes(original.name) && !this.dropped.includes(original.name),
-    )
+    const wrapped = ['grep', 'rev', 'rg']
+      .filter((name) => !this.dropped.includes(name))
+      .map((name) => generic(name))
     const handlers = wrapped.flatMap((original) => {
       return command({
         name: original.name,
@@ -105,8 +105,15 @@ export class CommandService extends RAMVFS {
         },
       })
     })
+    // Without its own search it has no walk of its own either: find and du
+    // list through readdir, which refuses what it hides.
+    const walks =
+      this.dropped.length > 0
+        ? ['du', 'find'].map((name) => generic(name, { vfs: 'ram', table: walked }))
+        : []
     return [
       ...handlers,
+      ...walks,
       ...command({
         name: 'gate-status',
         vfs: 'ram',

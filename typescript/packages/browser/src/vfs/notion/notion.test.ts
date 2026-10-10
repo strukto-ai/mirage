@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NOTION_COMMANDS } from '@struktoai/mirage-core/commands/builtin/notion/index'
 import { MemoryOAuthClientProvider } from '@struktoai/mirage-core/core/notion/client'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { OAuthClientMetadata } from '@modelcontextprotocol/client'
@@ -46,9 +45,9 @@ describe('NotionVFS (browser)', () => {
     expect(r.writePrompt.length).toBeGreaterThan(0)
   })
 
-  it('serves NOTION_COMMANDS', () => {
+  it('serves only the generic set', () => {
     const r = new NotionVFS({ authProvider: makeAuthProvider() })
-    expect(commandsFor(r)).toEqual(NOTION_COMMANDS)
+    expect(commandsFor(r)).toEqual([])
   })
 
   it('getState() returns redacted config for default config', async () => {

@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.ram import COMMANDS
-from mirage.commands.config import CommandCatalog
+from mirage.commands.builtin.generic_bind import generic
+from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -22,17 +22,15 @@ from mirage.workspace import Workspace
 def test_builtins_registered_by_default():
     ws = Workspace({"/tmp/": RAMVFS()}, mode=MountMode.READ)
     mount = ws._registry.mount_for("/tmp/a")
-    names = {name for (name, _) in mount._cmds}
-    assert "cat" in names
-    assert "head" in names
-    assert "ls" in names
-    assert "grep" in names
-    assert "rm" in names
+    for name in ("cat", "head", "ls", "grep", "rm"):
+        assert mount.resolve_command(name) is generic(name)
 
 
-def test_builtin_count_matches_commands_dict():
-    ws = Workspace({"/tmp/": RAMVFS()}, mode=MountMode.READ)
-    mount = ws._registry.mount_for("/tmp/a")
-    names = {name for (name, _) in mount._cmds}
-    for registered in CommandCatalog(COMMANDS):
-        assert registered.name in names, f"{registered.name} not registered"
+def test_every_mount_shares_the_generic_set():
+    ws = Workspace(
+        {"/tmp/": RAMVFS(), "/other/": RAMVFS()}, mode=MountMode.READ
+    )
+    for prefix in ("/tmp/a", "/other/a"):
+        mount = ws._registry.mount_for(prefix)
+        for registered in GENERIC_COMMANDS:
+            assert mount.resolve_command(registered.name) is registered
