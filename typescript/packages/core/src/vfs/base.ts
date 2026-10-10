@@ -22,7 +22,14 @@ import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import { type DuEntries, type FindOptions, Effect, type SearchQuery, Target } from './types.ts'
+import {
+  type DuEntries,
+  type FindOptions,
+  Effect,
+  type ScanReason,
+  type SearchQuery,
+  Target,
+} from './types.ts'
 
 /**
  * The two keys the snapshot machinery reads out of a VFS's state.
@@ -502,19 +509,52 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * The files under `paths` a content index says may hold `query`, so a
-   * recursive grep scans only those. A superset is harmless, since the
-   * scan still runs over the answer; null means the index cannot answer
-   * and the scan walks everything. Consulted only while
-   * `contentSearchEnabled`.
+   * Files under `under` whose content may contain `text`. grep and rg still
+   * walk, filter, order and label every file, and read only the ones answered
+   * here, so extra files cost a read and a missing one is a wrong answer.
+   * `text` is plain text, never a pattern; `wholeWord` says it is needed only
+   * as a whole word (-w, -x), and `ignoreCase` that any case must match (-i).
+   * Answer the keys `read` gets as `path.vfsPath`, or any object whose `has`
+   * also says yes for files the search cannot see; null reads every file.
    */
-  narrowPaths(_query: string, _paths: PathSpec[]): Promise<PathSpec[] | null> {
+  filesContaining(
+    _text: string,
+    _under: PathSpec[],
+    _opts: { wholeWord: boolean; ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<{ has(key: string): boolean } | null> {
     return Promise.resolve(null)
   }
 
-  /** Whether this mount opted in to `narrowPaths`. */
-  contentSearchEnabled(): boolean {
-    return false
+  /**
+   * The lines of `path` that may contain `text`, joined in file order with
+   * their newlines as the file has them. grep and rg match each line
+   * themselves, so extra lines are fine and a missing one is a wrong answer.
+   * Used in place of the file when the output shows no line positions or
+   * unmatched lines, and as a test of whether the file is worth reading
+   * otherwise; null reads the file.
+   */
+  linesContaining(
+    _path: PathSpec,
+    _text: string,
+    _opts: { ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<Uint8Array | null> {
+    return Promise.resolve(null)
+  }
+
+  /**
+   * Called before grep or rg reads every file under `under`, with why the
+   * search cannot stand in. Resolve to let the scan run; reject to refuse
+   * it, and the error's message is what the command prints.
+   */
+  beforeFullScan(
+    _command: string,
+    _under: PathSpec[],
+    _reason: ScanReason,
+    _index?: IndexCacheStore,
+  ): Promise<void> {
+    return Promise.resolve()
   }
 
   /** Whether the backend is there to answer at all. */

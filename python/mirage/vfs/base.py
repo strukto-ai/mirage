@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Container, Mapping
 from types import MappingProxyType
 from typing import Any, Unpack
 
@@ -37,6 +37,7 @@ from mirage.vfs.types import (
     DuEntries,
     Effect,
     FindOptions,
+    ScanReason,
     SearchQuery,
     Target,
 )
@@ -598,25 +599,78 @@ class BaseVFS:
         """
         raise enotsup(self.name, "search", paths[0] if paths else "")
 
-    async def narrow_paths(
-        self, query: str, paths: list[PathSpec]
-    ) -> list[PathSpec] | None:
-        """The files under ``paths`` a content index says may hold
-        ``query``, so a recursive grep scans only those.
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> Container[str] | None:
+        """Files under ``under`` whose content may contain ``text``.
 
-        A superset is harmless, since the scan still runs over the
-        answer; None means the index cannot answer and the scan walks
-        everything. Consulted only while ``content_search_enabled``.
+        grep and rg still walk, filter, order and label every file, and
+        read only the ones answered here, so extra files cost a read and
+        a missing one is a wrong answer. ``text`` is plain text, never a
+        pattern. Answer the keys ``read`` gets as ``path.vfs_path``, or
+        any object whose ``in`` also says yes for files the search cannot
+        see; None when the search cannot answer, which reads every file.
 
         Args:
-            query (str): the whole-word literal.
-            paths (list[PathSpec]): the scopes.
+            text (str): the plain text every match holds.
+            under (list[PathSpec]): the directories walked.
+            whole_word (bool): ``text`` is needed only as a whole word
+                (-w, -x); False needs it anywhere, inside a word too.
+            ignore_case (bool): any case must match (-i); folding when
+                False is fine.
+            index (IndexCacheStore): the mount's index.
         """
         return None
 
-    def content_search_enabled(self) -> bool:
-        """Whether this mount opted in to ``narrow_paths``."""
-        return False
+    async def lines_containing(
+        self,
+        path: PathSpec,
+        text: str,
+        *,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> bytes | None:
+        """The lines of ``path`` that may contain ``text``, in file order.
+
+        grep and rg match each line themselves, so extra lines are fine
+        and a missing one is a wrong answer. The lines are joined with
+        their newlines as the file has them. Used in place of the file when the output
+        shows no line positions or unmatched lines, and as a test of
+        whether the file is worth reading otherwise; None reads the file.
+
+        Args:
+            path (PathSpec): the file.
+            text (str): the plain text every match holds.
+            ignore_case (bool): any case must match (-i).
+            index (IndexCacheStore): the mount's index.
+        """
+        return None
+
+    async def before_full_scan(
+        self,
+        command: str,
+        under: list[PathSpec],
+        reason: ScanReason,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        """Called before grep or rg reads every file under ``under``.
+
+        Return to let the scan run; raise to refuse it, and the error's
+        message is what the command prints.
+
+        Args:
+            command (str): grep or rg.
+            under (list[PathSpec]): the directories about to be walked.
+            reason (ScanReason): why the search cannot stand in.
+            index (IndexCacheStore): the mount's index.
+        """
+        return None
 
     def is_mounted(self) -> bool:
         """Whether the backend is there to answer at all."""

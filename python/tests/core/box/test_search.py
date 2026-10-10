@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.client import BoxApiError, BoxTokenManager
-from mirage.core.box.search import narrow_paths
+from mirage.core.box.search import files_containing
 from mirage.types import PathSpec
 from mirage.vfs.box.config import BoxConfig
 
@@ -53,59 +53,24 @@ ROOT = [("0", "All Files")]
 
 
 @pytest.mark.asyncio
-async def test_narrow_maps_path_collection_to_mount_paths():
+async def test_hits_are_keyed_from_their_path_collection():
     results = [
         _file("2", "x.txt", ROOT),
         _file("3", "y.txt", ROOT + [("100", "Sub")]),
+        _file("4", "out.txt", [("7", "Elsewhere")]),
     ]
     with patch(
         "mirage.core.box.search.search_content",
         new_callable=AsyncMock,
         return_value=(results, False),
     ) as spy:
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
+        out = await files_containing(make_accessor(), "needle", [mount_root()])
     assert spy.await_args.args[2] == "0"
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/Sub/y.txt", "/data/x.txt"]
-    assert out[1].vfs_path == "x.txt"
-    assert out[1].resolved
+    assert out == {"x.txt", "Sub/y.txt"}
 
 
 @pytest.mark.asyncio
-async def test_narrow_sorts_results_in_walk_order():
-    # A sorted readdir walk descends into foo/ before visiting foo.txt;
-    # plain lexicographic path order would put foo.txt first ('.' < '/').
-    results = [
-        _file("2", "foo.txt", ROOT),
-        _file("3", "inner.txt", ROOT + [("100", "foo")]),
-    ]
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/foo/inner.txt", "/data/foo.txt"]
-
-
-@pytest.mark.asyncio
-async def test_narrow_rebases_raw_onto_the_scope_spelling():
-    scope = PathSpec(
-        vfs_path="", virtual="/data", directory="/data", raw_path="."
-    )
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        return_value=([_file("2", "x.txt", ROOT)], False),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [scope])
-    assert out is not None
-    assert out[0].raw_path == "./x.txt"
-
-
-@pytest.mark.asyncio
-async def test_narrow_subfolder_scope_resolves_id_and_trims_key():
+async def test_a_subfolder_scope_searches_under_its_folder_id():
     scope = PathSpec(
         vfs_path="docs", virtual="/data/docs", directory="/data/docs"
     )
@@ -122,14 +87,34 @@ async def test_narrow_subfolder_scope_resolves_id_and_trims_key():
             return_value=(results, False),
         ) as spy,
     ):
-        out = await narrow_paths(make_accessor(), "needle", [scope])
+        out = await files_containing(make_accessor(), "needle", [scope])
     assert spy.await_args.args[2] == "100"
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/docs/in.txt"]
+    assert out == {"docs/in.txt"}
 
 
 @pytest.mark.asyncio
-async def test_narrow_non_folder_scope_returns_none():
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"side_effect": BoxApiError("boom", 500)},
+        {"return_value": ([_file("2", "x.txt", ROOT)], True)},
+        {"return_value": ([], False)},
+    ],
+    ids=["api-error", "truncated", "no-hit"],
+)
+async def test_an_answer_that_may_miss_a_match_is_none(answer):
+    # No hit is distrusted too: Box indexes a write after it lands.
+    with patch(
+        "mirage.core.box.search.search_content",
+        new_callable=AsyncMock,
+        **answer,
+    ):
+        out = await files_containing(make_accessor(), "needle", [mount_root()])
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_a_scope_that_is_no_folder_is_none():
     scope = PathSpec(
         vfs_path="a.txt", virtual="/data/a.txt", directory="/data/a.txt"
     )
@@ -138,27 +123,5 @@ async def test_narrow_non_folder_scope_returns_none():
         new_callable=AsyncMock,
         return_value={"id": "9", "type": "file"},
     ):
-        out = await narrow_paths(make_accessor(), "needle", [scope])
-    assert out is None
-
-
-@pytest.mark.asyncio
-async def test_narrow_api_error_returns_none():
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        side_effect=BoxApiError("boom", 500),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
-    assert out is None
-
-
-@pytest.mark.asyncio
-async def test_narrow_truncated_results_return_none():
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        return_value=([_file("2", "x.txt", ROOT)], True),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
+        out = await files_containing(make_accessor(), "needle", [scope])
     assert out is None

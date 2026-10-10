@@ -430,18 +430,25 @@ describe('withDispatchRuleGuard', () => {
 })
 
 describe('scopedIo', () => {
-  it('sets a content index aside', () => {
-    // A content index names files under a listing a rule may refuse, so a
-    // scoped command walks the guarded readdir instead, as it does for
+  it('sets the mount search aside', () => {
+    // The mount's search reads under a listing a rule may refuse, so a scoped
+    // command walks and reads through the guards instead, as it does for
     // every other native scan.
-    const index = { narrowPaths: () => Promise.resolve([]), enabled: () => true }
-    const io: CommandIO = { ...dirOps([]), contentSearch: index }
+    const filesContaining = () => Promise.resolve(null)
+    const linesContaining = () => Promise.resolve(null)
+    const io: CommandIO = { ...dirOps([]), filesContaining, linesContaining }
     const roots = [PathSpec.fromStrPath('/data')]
     const free = { scoped: () => false }
     const judged = { scoped: (virtual: string) => virtual === '/data' }
-    expect(scopedIo(io, free, roots, '/data/').contentSearch).toBe(index)
-    expect(scopedIo(io, undefined, roots, '/data/').contentSearch).toBe(index)
-    expect(scopedIo(io, judged, roots, '/data/').contentSearch).toBeUndefined()
+    for (const ns of [free, undefined]) {
+      const kept = scopedIo(io, ns, roots, '/data/')
+      expect([kept.filesContaining, kept.linesContaining]).toEqual([
+        filesContaining,
+        linesContaining,
+      ])
+    }
+    const scoped = scopedIo(io, judged, roots, '/data/')
+    expect([scoped.filesContaining, scoped.linesContaining]).toEqual([undefined, undefined])
   })
 })
 

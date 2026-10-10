@@ -21,12 +21,7 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.search import (
-    candidate_reads,
-    narrow_scope,
-    run_search,
-)
-from mirage.commands.builtin.grep_pushdown import grep_needs_every_file
+from mirage.commands.builtin.generic_bind.search import run_search
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
@@ -36,7 +31,9 @@ from mirage.core.hierarchy.search import make_search_op
 from mirage.errors.fs import efbig, enoent
 from mirage.io.types import ByteSource
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.vfs.types import ContentSearchOps, SearchOps, SearchQuery
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.types import ScanReason, SearchOps, SearchQuery
+from mirage.workspace import Workspace
 from tests.core.hierarchy.conftest import FakeAccessor, detect_scope, spec
 
 CONTENT = b"x ada\ny\n"
@@ -341,190 +338,180 @@ def test_stdin_operand_reads_the_pipe_not_the_backend():
     assert asked == []
 
 
-DIRECTORY = FileStat(name="data", type=FileType.DIRECTORY)
-
-
-def _scope() -> PathSpec:
-    return PathSpec(vfs_path="", virtual="/data", directory="/data")
-
-
-def _hit(virtual: str) -> PathSpec:
-    return PathSpec(
-        vfs_path=virtual.removeprefix("/data/"),
-        virtual=virtual,
-        directory="",
-        resolved=True,
-    )
-
-
-HITS = [_hit("/data/a.txt")]
-
-
-def _narrowing(stat=None, answer=HITS, enabled=True):
-    stat_op = stat or AsyncMock(return_value=DIRECTORY)
-    narrow = AsyncMock(return_value=answer)
-    io = replace(
-        IO,
-        stat=stat_op,
-        content_search=ContentSearchOps(
-            narrow_paths=narrow, enabled=lambda a: enabled
-        ),
-    )
-    return io, narrow
-
-
-def _narrow(io, **gates):
-    flags = {
-        "fixed_string": False,
-        "recursive": True,
-        "whole_word": True,
-        "exact_file_set": False,
-        **gates,
-    }
-    return asyncio.run(
-        narrow_scope(
-            io, FakeAccessor(), NULL_INDEX, [_scope()], "needle", **flags
-        )
-    )
-
-
-def test_a_recursive_whole_word_literal_narrows_to_candidates():
-    io, narrow = _narrowing()
-    resolved, used = _narrow(io)
-    assert used
-    assert [p.virtual for p in resolved] == ["/data/a.txt"]
-    narrow.assert_awaited_once()
-
-
-@pytest.mark.parametrize(
-    "gates",
-    [
-        {"recursive": False},
-        {"exact_file_set": True},
-        {"whole_word": False},
-        {
-            "exact_file_set": grep_needs_every_file(
-                FlagView({"w": True, "line_regexp": True}, spec=SPECS["grep"])
-            )
-        },
-    ],
-)
-def test_a_failed_gate_scans_every_file(gates):
-    io, narrow = _narrowing()
-    assert _narrow(io, **gates) == ([_scope()], False)
-    narrow.assert_not_awaited()
-
-
-def test_a_mount_that_did_not_opt_in_scans_every_file():
-    io, narrow = _narrowing(enabled=False)
-    assert _narrow(io) == ([_scope()], False)
-    narrow.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    "stat",
-    [
-        AsyncMock(return_value=FileStat(name="x.txt", type=FileType.FILE)),
-        AsyncMock(side_effect=FileNotFoundError("/data")),
-    ],
-)
-def test_a_file_or_missing_operand_scans_every_file(stat):
-    io, narrow = _narrowing(stat=stat)
-    assert _narrow(io) == ([_scope()], False)
-    narrow.assert_not_awaited()
-
-
-@pytest.mark.parametrize("answer", [None, []])
-def test_an_unusable_or_empty_answer_scans_every_file(answer):
-    io, _ = _narrowing(answer=answer)
-    assert _narrow(io) == ([_scope()], False)
-
-
-def test_binary_candidates_are_dropped_and_may_leave_none():
-    io, _ = _narrowing(answer=[_hit("/data/a.parquet"), _hit("/data/a.txt")])
-    resolved, used = _narrow(io)
-    assert (used, [p.virtual for p in resolved]) == (True, ["/data/a.txt"])
-    io, _ = _narrowing(answer=[_hit("/data/a.parquet")])
-    assert _narrow(io) == ([], True)
-
-
-_TREE = {
-    "/d": None,
-    "/d/a.txt": b"ada here\n",
-    "/d/b.txt": b"ada too\n",
+TREE = {
+    "/d/a.txt": b"ada here\nnothing\n",
+    "/d/b.txt": b"conn was refused\nbob\n",
     "/d/c.txt": b"nothing\n",
+    "/d/sub/d.txt": b"ADA upper\nada lovelace\n",
+    "/d/w.bin": b"ada in a blob\n",
 }
 
 
-async def _tree_readdir(path: PathSpec) -> list[str]:
-    base = path.virtual.rstrip("/") + "/"
-    return sorted(
-        key
-        for key in _TREE
-        if key.startswith(base) and "/" not in key[len(base) :]
+class SearchRAM(RAMVFS):
+    """A RAM mount whose search answers by substring, counting reads.
+
+    Like a real index it never covers a binary-extension file.
+    """
+
+    def __init__(self, files: bool = True, lines: bool = True) -> None:
+        super().__init__()
+        self.reads: list[str] = []
+        self.asked: list[tuple[str, bool]] = []
+        self.scans: list[ScanReason] = []
+        if not files:
+            self.files_containing = None  # type: ignore[assignment]
+        if not lines:
+            self.lines_containing = None  # type: ignore[assignment]
+
+    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+        self.reads.append(path.vfs_path)
+        return await super().read(path, index, offset, size)
+
+    def read_stream(self, path, index=NULL_INDEX):
+        self.reads.append(path.vfs_path)
+        return super().read_stream(path, index)
+
+    async def files_containing(
+        self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
+    ):
+        self.asked.append((text, whole_word))
+        return {
+            key.strip("/")
+            for key, data in self._store.files.items()
+            if _holds(data, text, ignore_case) and not key.endswith(".bin")
+        }
+
+    async def lines_containing(
+        self, path, text, *, ignore_case, index=NULL_INDEX
+    ):
+        data = self._store.files["/" + path.vfs_path]
+        return b"".join(
+            line
+            for line in data.splitlines(keepends=True)
+            if _holds(line, text, ignore_case)
+        )
+
+    async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
+        self.scans.append(reason)
+
+
+def _holds(data: bytes, text: str, ignore_case: bool) -> bool:
+    if ignore_case:
+        return text.lower().encode() in data.lower()
+    return text.encode() in data
+
+
+def _seed(vfs: RAMVFS) -> RAMVFS:
+    vfs._store.dirs.update({"/d", "/d/sub"})
+    vfs._store.files.update(TREE)
+    return vfs
+
+
+async def _run(vfs: RAMVFS, line: str) -> tuple[bytes, bytes, int]:
+    ws = Workspace({"/": _seed(vfs)})
+    try:
+        result = await ws.shell(line)
+        return result.stdout, result.stderr or b"", result.exit_code
+    finally:
+        await ws.close()
+
+
+LINES = [
+    "grep -r ada /d",
+    "grep -rc ada /d",
+    "grep -rL ada /d",
+    "grep -rlw ada /d",
+    "grep -rn ada /d",
+    "grep -ri ADA /d",
+    "grep -rx 'ada lovelace' /d",
+    "grep -r -e ada -e bob /d",
+    "grep -rE 'conn.*refused' /d",
+    "grep -r --exclude-dir=sub ada /d",
+    "grep -r -C1 ada /d",
+    "grep -rv ada /d",
+    "grep -ra ada /d",
+    "grep -rh ada /d /d/w.bin",
+    "grep -rq ada /d",
+    "rg ada /d",
+    "rg -c ada /d",
+    "rg --files-without-match ada /d",
+    "rg -g '*.txt' -i ADA /d",
+    "rg -n ada /d",
+    "rg -w -e ada -e nothing /d",
+]
+
+
+@pytest.mark.parametrize("files, lines", [(1, 0), (0, 1), (1, 1)])
+@pytest.mark.parametrize("line", LINES)
+def test_a_search_never_changes_what_grep_and_rg_print(line, files, lines):
+    plain = asyncio.run(_run(RAMVFS(), line))
+    narrowed = asyncio.run(_run(SearchRAM(bool(files), bool(lines)), line))
+    assert narrowed == plain
+
+
+@pytest.mark.parametrize(
+    "line, reads, asked",
+    [
+        # Only the files holding the text are read; -c and -L still
+        # print the rest from the walk.
+        ("grep -rc ada /d", ["a.txt", "sub/d.txt"], [("ada", False)]),
+        ("rg -lw ada /d", ["a.txt", "sub/d.txt"], [("ada", True)]),
+        # A regex is asked for the text every match holds.
+        ("grep -rE 'conn.*refused' /d", ["b.txt"], [("refused", False)]),
+        # -a reads the binary-extension file the search cannot vouch for.
+        ("grep -ra ada /d", ["a.txt", "sub/d.txt", "w.bin"], [("ada", False)]),
+        # A named file is read whatever the search said, here twice, as
+        # GNU reads it once in the walk and once as the operand.
+        (
+            "grep -r ada /d /d/c.txt",
+            ["a.txt", "c.txt", "c.txt", "sub/d.txt"],
+            [("ada", False)],
+        ),
+    ],
+)
+def test_only_the_files_a_search_returns_are_read(line, reads, asked):
+    vfs = SearchRAM(lines=False)
+    asyncio.run(_run(vfs, line))
+    assert (sorted(vfs.reads), vfs.asked) == (
+        [f"d/{key}" for key in reads],
+        asked,
     )
 
 
-async def _tree_stat(path: PathSpec) -> FileStat:
-    data = _TREE[path.virtual]
-    if data is None:
-        return FileStat(name=path.virtual, type=FileType.DIRECTORY)
-    return FileStat(name=path.virtual, type=FileType.FILE, size=len(data))
+def test_matching_lines_stand_in_for_a_file_when_nothing_else_prints():
+    lines = SearchRAM(files=False)
+    assert asyncio.run(_run(lines, "grep -r ada /d"))[2] == 0
+    assert lines.reads == []
+    # -n needs the real line numbers, so a file with a matching line is
+    # read whole.
+    numbered = SearchRAM(files=False)
+    asyncio.run(_run(numbered, "grep -rn ada /d"))
+    assert sorted(numbered.reads) == ["d/a.txt", "d/sub/d.txt"]
 
 
-def _tree_reads(read_log: list[str]):
-    async def read(path: PathSpec) -> bytes:
-        read_log.append(path.virtual)
-        data = _TREE[path.virtual]
-        assert data is not None
-        return data
+@pytest.mark.parametrize(
+    "line, reason",
+    [
+        ("grep -rv ada /d", ScanReason.EVERY_LINE),
+        ("rg --passthru ada /d", ScanReason.EVERY_LINE),
+        ("grep -r 'a.b' /d", ScanReason.NO_TEXT),
+        ("rg -L ada /d", ScanReason.LINKS),
+    ],
+)
+def test_a_walk_that_reads_every_file_says_why(line, reason):
+    vfs = SearchRAM()
+    asyncio.run(_run(vfs, line))
+    assert (vfs.scans, vfs.asked) == ([reason], [])
 
-    return read
 
+def test_a_mount_may_refuse_a_full_scan():
+    class Refusing(SearchRAM):
+        async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
+            raise ValueError(f"{reason}; narrow the path")
 
-def _spec(virtual: str) -> PathSpec:
-    return PathSpec(virtual=virtual, directory=virtual, vfs_path=virtual)
-
-
-@pytest.mark.asyncio
-async def test_candidate_reads_empty_only_what_the_search_ruled_out():
-    log: list[str] = []
-    read, stream = candidate_reads(
-        _tree_reads(log),
-        partial(stream_from_bytes, _tree_reads(log)),
-        {"/d/a.txt"},
-        {"/d/c.txt"},
+    assert asyncio.run(_run(Refusing(), "grep -rv ada /d")) == (
+        b"",
+        b"grep: the output needs lines that do not match; narrow the path\n",
+        1,
     )
-    assert await read(_spec("/d/a.txt")) == b"ada here\n"
-    assert await read(_spec("/d/b.txt")) == b""
-    assert await read(_spec("/d/c.txt")) == b"nothing\n"
-    assert stream is not None
-    assert b"".join([c async for c in stream(_spec("/d/b.txt"))]) == b""
-    assert log == ["/d/a.txt", "/d/c.txt"]
-
-
-@pytest.mark.asyncio
-async def test_candidate_reads_keep_a_whole_read_backend_whole():
-    read, stream = candidate_reads(_tree_reads([]), None, set(), set())
-    assert stream is None
-    assert await read(_spec("/d/a.txt")) == b""
-
-
-@pytest.mark.asyncio
-async def test_candidate_reads_narrow_a_walk_without_changing_it():
-    # The walk still lists and labels every file; only the candidate is
-    # read, and the file the search ruled out still counts 0 under -c.
-    log: list[str] = []
-    read, _ = candidate_reads(_tree_reads(log), None, {"/d/a.txt"}, {"/d"})
-    output, io = await grep_generic(
-        [_spec("/d")],
-        ["ada"],
-        CommandOpts(flags={"r": True, "c": True}),
-        readdir=_tree_readdir,
-        stat=_tree_stat,
-        read_bytes=read,
-        read_stream=None,
-    )
-    assert await _drain(output) == b"/d/a.txt:1\n/d/b.txt:0\n/d/c.txt:0\n"
-    assert io.exit_code == 0
-    assert log == ["/d/a.txt"]
+    assert asyncio.run(_run(Refusing(), "grep -r ada /d"))[2] == 0

@@ -189,27 +189,43 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
 ) => Promise<string[] | null>
 
 /** Optional resource search. Consumers validate their own metadata namespace. */
-/**
- * Files under the scopes that may hold the whole-word literal `query`. A
- * superset is harmless, since the scan still runs over the answer; null
- * means the index cannot answer and the scan walks everything.
- */
-export type NarrowPathsOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  query: string,
-  paths: PathSpec[],
-) => Promise<PathSpec[] | null>
+/** Why grep or rg reads every file instead of asking the mount. Mirrors Python's `ScanReason`. */
+export const ScanReason = Object.freeze({
+  NO_SEARCH: 'the mount has no search',
+  NO_TEXT: 'the pattern has no plain text to search for',
+  EVERY_LINE: 'the output needs lines that do not match',
+  LINKS: 'links are followed',
+  UNANSWERED: 'the search could not answer',
+} as const)
 
-/**
- * A content index that narrows a recursive grep/rg to candidate files. The
- * scan still runs locally over the files it names, so an empty answer falls
- * back to the full walk: a search index lags recent writes. Mirrors Python's
- * `ContentSearchOps`.
- */
-export interface ContentSearchOps<A extends Accessor = Accessor> {
-  narrowPaths: NarrowPathsOp<A>
-  enabled: (accessor: A) => boolean
-}
+export type ScanReason = (typeof ScanReason)[keyof typeof ScanReason]
+
+/** Files under `under` whose content may contain `text`; null when the search cannot answer for every file. */
+export type FilesContainingOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  text: string,
+  under: PathSpec[],
+  opts: { wholeWord: boolean; ignoreCase: boolean },
+  index?: IndexCacheStore,
+) => Promise<{ has(key: string): boolean } | null>
+
+/** The lines of `path` that may contain `text`, joined in file order; null when the search cannot answer for this file. */
+export type LinesContainingOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  text: string,
+  opts: { ignoreCase: boolean },
+  index?: IndexCacheStore,
+) => Promise<Uint8Array | null>
+
+/** Called before grep or rg reads every file under `under`; reject to refuse. */
+export type BeforeFullScanOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  command: string,
+  under: PathSpec[],
+  reason: ScanReason,
+  index?: IndexCacheStore,
+) => Promise<void>
 
 export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>

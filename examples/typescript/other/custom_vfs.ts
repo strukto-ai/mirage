@@ -81,6 +81,14 @@ function node(pages: Tree, key: string): Tree | string {
   return current;
 }
 
+function pageEntries(pages: Tree, prefix = ""): [string, string][] {
+  return Object.entries(pages).flatMap(([name, child]) =>
+    typeof child === "string"
+      ? [[`${prefix}${name}`, child] as [string, string]]
+      : pageEntries(child, `${prefix}${name}/`),
+  );
+}
+
 // Markdown pages read from the accessor's tree.
 class PagesVFS extends BaseVFS<WikiAccessor> {
   override readdir(path: PathSpec): Promise<string[]> {
@@ -126,6 +134,24 @@ class PagesVFS extends BaseVFS<WikiAccessor> {
         content: ContentType.TEXT,
         fingerprint,
       }),
+    );
+  }
+
+  // Optional: say which pages may hold a text, and grep and rg read only
+  // those. What they print is unchanged; null reads every page.
+  override filesContaining(
+    text: string,
+    _under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<Set<string>> {
+    const fold = (value: string) =>
+      opts.ignoreCase ? value.toLowerCase() : value;
+    return Promise.resolve(
+      new Set(
+        pageEntries(this.accessor.pages)
+          .filter(([, page]) => fold(page).includes(fold(text)))
+          .map(([key]) => key),
+      ),
     );
   }
 }

@@ -92,6 +92,7 @@ Every other function is optional, and each stands alone:
 | `read_stream`, `exists`, `find`, `du_size` with `du_entries` | Optional equivalent fast paths. |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
 | `search`, `search_many` | Optional resource search. |
+| `files_containing`, `lines_containing`, `before_full_scan` | Optional: let grep and rg skip what your search rules out. |
 
 `pwrite` receives `(path, data, offset)` and keeps every byte outside the
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
@@ -201,32 +202,62 @@ capability metadata. Neither regex support nor grep compatibility is required.
 Leaving `search` undefined also works: MIRAGE implements grep and rg by reading
 files.
 
-A resource search is not automatically used by grep or rg. To opt into that
-integration, declare `search_meta = {"grep": {"mode": "literal"}}`
-or use `"mode": "regex"` when the backend honors regex semantics. Only this
-integration interprets the `grep` namespace. Each request puts case, fixed-string,
-whole-word, and basic-regex flags in `query.options["grep"]`, using snake_case
-keys in both languages. Other metadata and options belong to your resource.
+`search` returns text records: `[]` means no matches and `None` declines the
+request. Errors propagate, and a truncated result is never a complete answer.
+Expose semantic or service-specific queries through a custom command that calls
+the same function with its own options. grep and rg do not read `search`
+results; PostgreSQL, MongoDB and Langfuse still answer them through
+`search_meta["grep"]`, which is being retired. A new VFS lets them use its
+search through the functions below.
 
-`search` returns text records: `[]` means no matches and `None` declines
-the request. Errors propagate. Under the grep integration, records must be
-complete rendered output lines, including path prefixes. A new filesystem search
-accelerator must match scanning the rendered files. Existing backends retain
-their declared output semantics, including Langfuse's summary search. Never
-return a truncated result as a complete answer.
+### Let grep and rg use your search
 
-MIRAGE scans for unsupported flags, multiple operands, declined requests, and
-visibility restrictions. Set `search_meta = {"grep": {"mode": "regex", "stream": True}}`
-to use native streaming during fallback scans. The hierarchy kit's
-`make_search_op(detect_scope, SEARCHERS, stat)` can adapt scope-specific callbacks;
-PostgreSQL, MongoDB and Langfuse use it. Custom resources can implement `search`
-directly. Expose semantic or service-specific queries through a custom command
-that calls the same function with its own options.
+grep and rg always walk, filter, order and label the files themselves. Your
+search only tells them what they can skip, so their output never changes.
 
-`examples/python/other/basevfs_views.py` defines one literal `search` for both
-commands. Its counters verify that `grep -F` and `rg -F` avoid file reads,
-line numbers and regexes scan, and `-i` scans after `search` returns `None`.
-The example accelerates single-page searches; directory searches also decline.
+| Function | Asked | Answer |
+| --- | --- | --- |
+| `files_containing(text, under, *, whole_word, ignore_case, index)` | which files under the walked directories may hold `text` | the keys `read` gets as `path.vfs_path` (a set), or `None` |
+| `lines_containing(path, text, *, ignore_case, index)` | which lines of one file may hold `text` | those lines joined in file order, or `None` |
+| `before_full_scan(command, under, reason, index)` | nothing can narrow, so every file is about to be read | return to scan, raise to refuse |
+
+The arguments come from the command line:
+
+| Argument | grep | rg |
+| --- | --- | --- |
+| `text` | the pattern or each `-e`, reduced to plain text | the same |
+| `under` | directory operands under `-r` or `-R` | directory operands, the cwd when none |
+| `whole_word=True` | `-w` or `-x` with plain-text patterns | `-w` or `-x` |
+| `whole_word=False` | any other pattern; `text` may sit inside a word | the same |
+| `ignore_case` | `-i` | `-i`, or `-S` with a lowercase pattern |
+
+Answer more than needed, never less: an extra file costs a read, a missing one
+is a wrong answer. Return `None` when the answer may be incomplete (an error, a
+truncated result, an index that lags writes) and every file is read. A
+word-based index answers `whole_word=True` and returns `None` otherwise.
+
+```python
+class WikiVFS(BaseVFS):
+    async def files_containing(
+        self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
+    ):
+        if not whole_word:
+            return None
+        hits = await self.api.search(text, under=[p.vfs_path for p in under])
+        return None if hits.truncated else {hit.path for hit in hits}
+
+    async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
+        raise ValueError(f"{reason}; narrow the path")
+```
+
+`lines_containing` suits row stores. Its lines replace the file when the output
+shows no line numbers, byte offsets or context; otherwise the file is read only
+when it has such a line. A file named on the line, a binary-extension file read
+under `-a`, and any path under a hide or path rule are always read. `-v`,
+`--passthru`, `-f` and a pattern with no plain text read every file, and
+`before_full_scan` gets the `ScanReason`. Raise from it (or from
+`files_containing`) to refuse: the error's message is what the command prints.
+`examples/python/other/custom_vfs.py` defines `files_containing` for its wiki.
 
 Native traversal (`find`) and size enumeration (`du_size` with `du_entries`)
 remain separate functions.
@@ -388,7 +419,7 @@ already.
 
 Build the standard set with `generic_commands("<name>", overrides={...})`; each command runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. `overrides` names the builders a bespoke command replaces, and a name no builder has is refused.
 
-- Declare native text search by defining `search` on the VFS. The generic grep/rg builders use it only when `search_meta["grep"]` opts in; semantic search does not opt in. The hierarchy kit supplies `make_search_op` for scope-based core functions; unsupported requests fall back to scanning.
+- Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command. The hierarchy kit supplies `make_search_op` for scope-based core functions.
 - A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.

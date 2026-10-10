@@ -468,6 +468,31 @@ def test_whole_word_literals_union_only_complete_alternatives(
     )
 
 
+@pytest.mark.parametrize(
+    "pattern, flags, w, i, expected",
+    [
+        ("ada\nbob", 0, True, False, (("ada", "bob"), True)),
+        ("conn.*refused", 0, False, False, (("refused",), False)),
+        ("Conn.*TOMORROW", re.I, False, True, (("tomorrow",), False)),
+        ("Conn.*REFUSED", re.I, False, True, None),
+        ("a.b", 0, False, False, None),
+        ("café", re.I, True, True, None),
+    ],
+)
+def test_search_terms_ask_words_or_the_text_every_match_holds(
+    pattern, flags, w, i, expected
+):
+    # Whole-word literals go as words; any other pattern as the needles
+    # every match holds, never shorter than three characters. Under -i a
+    # needle with s, k or i is dropped (Unicode folds the long s to s),
+    # and a mount's folding of a non-ASCII literal is not trusted.
+    matcher = re.compile(pattern.replace("\n", "|"), flags)
+    assert (
+        grep_pushdown.search_terms(pattern, matcher, False, w, False, i)
+        == expected
+    )
+
+
 def test_text_candidates_drops_what_a_walk_never_reads():
     paths = [
         PathSpec.from_str_path(p)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ReadBytesOp, ResolveGlobOp, SearchQuery } from '../../../vfs/types.ts'
+import type { ReadBytesOp, ResolveGlobOp, ScanReason, SearchQuery } from '../../../vfs/types.ts'
 import type { BaseVFS } from '../../../vfs/base.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
 import { getExtension } from '../../../utils/filetype.ts'
@@ -253,12 +253,36 @@ export function commandIo(vfs: BaseVFS): CommandIO {
           },
         }
       : {}),
-    ...(has('narrowPaths')
+    ...(has('filesContaining')
       ? {
-          contentSearch: {
-            narrowPaths: withoutAccessor((q: string, ps: PathSpec[]) => vfs.narrowPaths(q, ps)),
-            enabled: () => vfs.contentSearchEnabled(),
-          },
+          filesContaining: withoutAccessor(
+            (
+              text: string,
+              under: PathSpec[],
+              opts: { wholeWord: boolean; ignoreCase: boolean },
+              index?: IndexCacheStore,
+            ) => vfs.filesContaining(text, under, opts, index),
+          ),
+        }
+      : {}),
+    ...(has('linesContaining')
+      ? {
+          linesContaining: withoutAccessor(
+            (
+              path: PathSpec,
+              text: string,
+              opts: { ignoreCase: boolean },
+              index?: IndexCacheStore,
+            ) => vfs.linesContaining(path, text, opts, index),
+          ),
+        }
+      : {}),
+    ...(has('beforeFullScan')
+      ? {
+          beforeFullScan: withoutAccessor(
+            (command: string, under: PathSpec[], reason: ScanReason, index?: IndexCacheStore) =>
+              vfs.beforeFullScan(command, under, reason, index),
+          ),
         }
       : {}),
   }
@@ -1219,7 +1243,8 @@ export function scopedIo<A extends Accessor>(
   delete result.find
   delete result.du
   delete result.search
-  delete result.contentSearch
+  delete result.filesContaining
+  delete result.linesContaining
   delete result.copy
   delete result.dirCopy
   return result

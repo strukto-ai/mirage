@@ -58,7 +58,6 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
-from mirage.vfs.types import ContentSearchOps
 from mirage.view.types import NamespaceView
 from mirage.workspace.session import SessionState
 
@@ -346,19 +345,20 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-def test_scoped_io_sets_a_content_index_aside():
-    # A content index names files under a listing a rule may refuse, so
-    # a scoped command walks the guarded readdir instead, as it does for
-    # every other native scan.
-    index = ContentSearchOps(narrow_paths=fake_readdir, enabled=lambda a: True)
-    io = make_io(content_search=index)
+def test_scoped_io_sets_the_mount_search_aside():
+    # The mount's search reads under a listing a rule may refuse, so a
+    # scoped command walks and reads through the guards instead, as it
+    # does for every other native scan.
+    io = make_io(files_containing=fake_readdir, lines_containing=fake_readdir)
     roots = [_spec("/data")]
     free = NamespaceView(scoped=lambda _virtual: False)
     judged = NamespaceView(scoped=lambda virtual: virtual == "/data")
-    assert adapter.scoped_io(io, free, roots, "/data/").content_search is index
-    assert adapter.scoped_io(io, None, roots, "/data/").content_search is index
+    for ns in (free, None):
+        kept = adapter.scoped_io(io, ns, roots, "/data/")
+        assert kept.files_containing is fake_readdir
+        assert kept.lines_containing is fake_readdir
     scoped = adapter.scoped_io(io, judged, roots, "/data/")
-    assert scoped.content_search is None
+    assert (scoped.files_containing, scoped.lines_containing) == (None, None)
 
 
 @pytest.mark.asyncio

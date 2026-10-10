@@ -26,7 +26,7 @@ import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { PathSpec } from '../../types.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
-import { narrowPaths } from './search.ts'
+import { filesContaining } from './search.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 const search = vi.mocked(api.searchFiles)
@@ -50,80 +50,52 @@ beforeEach(() => {
   search.mockReset()
 })
 
-describe('narrowPaths', () => {
-  it('maps API paths back to mount paths', async () => {
-    search.mockResolvedValueOnce({
-      paths: [
-        ['/x.txt', '/x.txt'],
-        ['/sub/y.txt', '/Sub/Y.txt'],
-      ],
-      truncated: false,
-    })
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(search.mock.calls[0]?.[2]).toEqual({ path: '' })
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/Sub/Y.txt', '/data/x.txt'])
-    expect(out?.[1]?.vfsPath).toBe('x.txt')
-    expect(out?.[1]?.resolved).toBe(true)
+async function ask(
+  paths: [string, string][],
+  scope: PathSpec,
+  rootPath?: string,
+  truncated = false,
+): Promise<[Set<string> | null, unknown]> {
+  search.mockResolvedValueOnce({ paths, truncated })
+  const out = await filesContaining(makeAccessor(rootPath), 'needle', [scope])
+  return [out, search.mock.calls[0]?.[2]]
+}
+
+describe('filesContaining', () => {
+  it('keys each hit from its display path', async () => {
+    const paths: [string, string][] = [
+      ['/x.txt', '/x.txt'],
+      ['/sub/y.txt', '/Sub/Y.txt'],
+    ]
+    expect(await ask(paths, mountRoot())).toEqual([new Set(['x.txt', 'Sub/Y.txt']), { path: '' }])
   })
 
-  it('strips the configured root path case-insensitively', async () => {
-    search.mockResolvedValueOnce({
-      paths: [['/team/sub/a.txt', '/Team/Sub/A.txt']],
-      truncated: false,
-    })
-    const out = await narrowPaths(makeAccessor('/Team'), 'needle', [mountRoot()])
-    expect(search.mock.calls[0]?.[2]).toEqual({ path: '/Team' })
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/Sub/A.txt'])
+  it('strips the root path case-insensitively', async () => {
+    const paths: [string, string][] = [['/team/sub/a.txt', '/Team/Sub/A.txt']]
+    expect(await ask(paths, mountRoot(), '/Team')).toEqual([
+      new Set(['Sub/A.txt']),
+      { path: '/Team' },
+    ])
   })
 
-  it('filters results outside the scope', async () => {
-    search.mockResolvedValueOnce({
-      paths: [
-        ['/docs/in.txt', '/docs/in.txt'],
-        ['/other/out.txt', '/other/out.txt'],
-      ],
-      truncated: false,
-    })
-    const out = await narrowPaths(makeAccessor(), 'needle', [subdir()])
-    expect(search.mock.calls[0]?.[2]).toEqual({ path: '/docs' })
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/docs/in.txt'])
+  it('drops hits outside the scope', async () => {
+    const paths: [string, string][] = [
+      ['/docs/in.txt', '/docs/in.txt'],
+      ['/other/out.txt', '/other/out.txt'],
+    ]
+    expect(await ask(paths, subdir())).toEqual([new Set(['docs/in.txt']), { path: '/docs' }])
   })
 
-  it('sorts results in sorted-readdir walk order', async () => {
-    // A sorted readdir walk descends into foo/ before visiting foo.txt;
-    // plain lexicographic path order would put foo.txt first ('.' < '/').
-    search.mockResolvedValueOnce({
-      paths: [
-        ['/foo.txt', '/foo.txt'],
-        ['/foo/inner.txt', '/foo/inner.txt'],
-      ],
-      truncated: false,
-    })
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(out?.map((p) => p.virtual)).toEqual(['/data/foo/inner.txt', '/data/foo.txt'])
+  // No hit is distrusted too: Dropbox indexes a write after it lands.
+  it.each<[string, [string, string][], boolean]>([
+    ['a truncated answer', [['/x.txt', '/x.txt']], true],
+    ['no hit', [], false],
+  ])('is null for %s', async (_name, paths, truncated) => {
+    expect((await ask(paths, mountRoot(), undefined, truncated))[0]).toBeNull()
   })
 
-  it('rebases rawPath onto the scope spelling', async () => {
-    const scope = new PathSpec({
-      virtual: '/data',
-      directory: '/data',
-      vfsPath: '',
-      rawPath: '.',
-    })
-    search.mockResolvedValueOnce({ paths: [['/x.txt', '/x.txt']], truncated: false })
-    const out = await narrowPaths(makeAccessor(), 'needle', [scope])
-    expect(out?.[0]?.rawPath).toBe('./x.txt')
-  })
-
-  it('returns null on an API failure', async () => {
+  it('is null for an API failure', async () => {
     search.mockRejectedValueOnce(new DropboxApiError('boom', 500))
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(out).toBeNull()
-  })
-
-  it('returns null for truncated results', async () => {
-    search.mockResolvedValueOnce({ paths: [['/x.txt', '/x.txt']], truncated: true })
-    const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
-    expect(out).toBeNull()
+    expect(await filesContaining(makeAccessor(), 'needle', [mountRoot()])).toBeNull()
   })
 })

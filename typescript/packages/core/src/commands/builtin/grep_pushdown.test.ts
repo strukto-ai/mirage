@@ -29,6 +29,7 @@ import {
   pushdownOperand,
   searchPushdownOk,
   searchQuery,
+  searchTerms,
   textCandidates,
   wholeWordLiteral,
   wholeWordLiterals,
@@ -422,6 +423,25 @@ describe('wholeWordLiterals', () => {
     // alternative must be a whole-word literal; an empty one matches every
     // line, and -x is a whole-line, hence whole-word, match.
     expect(wholeWordLiterals(pattern, fixed, w, x)).toEqual(expected)
+  })
+})
+
+// Twin of test_search_terms_ask_words_or_the_text_every_match_holds.
+describe('searchTerms', () => {
+  it.each<[string, string, boolean, boolean, [string[], boolean] | null]>([
+    ['ada\nbob', '', true, false, [['ada', 'bob'], true]],
+    ['conn.*refused', '', false, false, [['refused'], false]],
+    ['Conn.*TOMORROW', 'iu', false, true, [['tomorrow'], false]],
+    ['Conn.*REFUSED', 'iu', false, true, null],
+    ['a.b', '', false, false, null],
+    ['café', 'iu', true, true, null],
+  ])('asks %j (flags %j)', (pattern, flags, w, i, expected) => {
+    // Whole-word literals go as words; any other pattern as the needles every
+    // match holds, never shorter than three characters. Under -i a needle
+    // with s, k or i is dropped (Unicode folds the long s to s), and a
+    // mount's folding of a non-ASCII literal is not trusted.
+    const matcher = new RegExp(pattern.replace('\n', '|'), flags)
+    expect(searchTerms(pattern, matcher, false, w, false, i)).toEqual(expected)
   })
 })
 

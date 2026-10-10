@@ -2,6 +2,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Container,
     Mapping,
     Sequence,
 )
@@ -314,32 +315,62 @@ class DuOps:
     entries: DuEntriesOp
 
 
-class NarrowPathsOp(Protocol):
-    """Files under the scopes that may hold the whole-word literal *query*.
+class ScanReason(StrEnum):
+    """Why grep or rg reads every file instead of asking the mount."""
 
-    A superset is harmless, since the scan still runs over the answer;
-    None means the index cannot answer and the scan walks everything.
-    """
+    NO_SEARCH = "the mount has no search"
+    NO_TEXT = "the pattern has no plain text to search for"
+    EVERY_LINE = "the output needs lines that do not match"
+    LINKS = "links are followed"
+    UNANSWERED = "the search could not answer"
+
+
+class FilesContainingOp(Protocol):
+    """Files under ``under`` whose content may contain ``text``; None
+    when the search cannot answer for every file."""
 
     def __call__(
-        self, accessor: Any, query: str, paths: list[PathSpec], /
-    ) -> Awaitable[list[PathSpec] | None]: ...
+        self,
+        accessor: Any,
+        text: str,
+        under: list[PathSpec],
+        /,
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[Container[str] | None]: ...
 
 
-@dataclass(frozen=True, kw_only=True)
-class ContentSearchOps:
-    """A content index that narrows a recursive grep/rg to candidate files.
+class LinesContainingOp(Protocol):
+    """The lines of ``path`` that may contain ``text``, joined in file
+    order; None when the search cannot answer for this file."""
 
-    The scan still runs locally over the files it names, so an empty
-    answer falls back to the full walk: a search index lags recent writes.
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        text: str,
+        /,
+        *,
+        ignore_case: bool,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[bytes | None]: ...
 
-    Args:
-        narrow_paths (NarrowPathsOp): candidate files under the scopes.
-        enabled (IsMountedOp): whether this mount opted in.
-    """
 
-    narrow_paths: NarrowPathsOp
-    enabled: IsMountedOp
+class BeforeFullScanOp(Protocol):
+    """Called before grep or rg reads every file under ``under``; raise
+    to refuse."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        command: str,
+        under: list[PathSpec],
+        reason: ScanReason,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[None]: ...
 
 
 @dataclass(frozen=True, slots=True)

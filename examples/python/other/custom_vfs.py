@@ -68,6 +68,14 @@ def _node(pages: dict, key: str):
     return node
 
 
+def _pages(pages: dict, prefix: str = ""):
+    for name, child in pages.items():
+        if isinstance(child, dict):
+            yield from _pages(child, f"{prefix}{name}/")
+        else:
+            yield f"{prefix}{name}", child
+
+
 class PagesVFS(BaseVFS):
     """Markdown pages read from the accessor's dict."""
 
@@ -116,6 +124,25 @@ class PagesVFS(BaseVFS):
             content=ContentType.TEXT,
             fingerprint=hashlib.sha256(data).hexdigest()[:16],
         )
+
+
+    # Optional: say which pages may hold a text, and grep and rg read
+    # only those. What they print is unchanged; None reads every page.
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> set[str]:
+        fold = str.lower if ignore_case else str
+        return {
+            key
+            for key, page in _pages(self.accessor.pages)
+            if fold(text) in fold(page)
+        }
 
 
 # Optional: a bespoke domain verb, registered alongside the generics.

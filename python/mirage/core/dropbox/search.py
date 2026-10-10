@@ -19,78 +19,45 @@ from mirage.core.dropbox.api import search_files
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import respell_raw
 
 logger = logging.getLogger(__name__)
 
 
-async def narrow_paths(
-    accessor: DropboxAccessor,
-    query: str,
-    paths: list[PathSpec],
-) -> list[PathSpec] | None:
-    """Use Dropbox file search to narrow grep/rg scopes to candidate files.
+async def files_containing(
+    accessor: DropboxAccessor, text: str, under: list[PathSpec]
+) -> set[str] | None:
+    """Mount keys of the files under ``under`` Dropbox search returns.
 
-    Search results are compared against each scope on ``path_lower``
-    (Dropbox paths are case-insensitive) and mapped back to mount paths
-    from ``path_display``. Per-scope results are sorted component-wise so
-    they line up with the order a sorted readdir walk would visit, and
-    each ``raw_path`` is rebased onto the scope's as-typed spelling so
-    output labels match a walk's.
-
-    Returns None whenever the narrowed set cannot be trusted as a superset
-    of what a full scan would read (API failure, or the 10,000-match
-    search ceiling), so the caller falls back to the full scan.
+    Hits are kept inside each scope on ``path_lower`` (Dropbox paths are
+    case-insensitive) and keyed from ``path_display``. None whenever the
+    answer may miss a match: an API failure, the 10,000-match ceiling, or
+    no hit at all, since Dropbox indexes a write some time after it lands.
 
     Args:
         accessor (DropboxAccessor): backend handle carrying the root path.
-        query (str): literal search query.
-        paths (list[PathSpec]): scope paths, possibly mount-prefixed.
-
-    Returns:
-        list[PathSpec] | None: one PathSpec per matching file under the
-            scopes, or None when narrowing is unusable.
+        text (str): the whole word searched for.
+        under (list[PathSpec]): the directories walked.
     """
-    if not paths:
-        return []
-    mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     root = accessor.root_path
-    narrowed: list[PathSpec] = []
-    for p in paths:
+    keys: set[str] = set()
+    for p in under:
         scope_api = dropbox_path_of(accessor, p)
         try:
             results, truncated = await search_files(
-                accessor.token_manager, query, path=scope_api
+                accessor.token_manager, text, path=scope_api
             )
         except DropboxApiError as exc:
             logger.warning(
-                "dropbox search push-down failed (%s); "
-                "falling back to per-file scan",
-                exc,
+                "dropbox search failed (%s); reading every file", exc
             )
             return None
         if truncated:
             return None
         scope_lower = scope_api.lower()
         scope_prefix = scope_lower.rstrip("/") + "/"
-        scoped: list[str] = []
         for lower, display in results:
-            if lower != scope_lower and not lower.startswith(scope_prefix):
-                continue
-            key = display[len(root) :].strip("/")
-            scoped.append(
-                f"{mount_prefix}/{key}" if key else mount_prefix or "/"
-            )
-        scoped.sort(key=lambda virtual: virtual.split("/"))
-        for virtual in scoped:
-            narrowed.append(
-                PathSpec(
-                    virtual=virtual,
-                    directory="",
-                    vfs_path=mount_key(virtual, mount_prefix),
-                    resolved=True,
-                    raw_path=respell_raw([virtual], p.virtual, p.raw_path)[0],
-                )
-            )
-    return narrowed
+            if lower == scope_lower or lower.startswith(scope_prefix):
+                key = display[len(root) :].strip("/")
+                if key:
+                    keys.add(key)
+    return keys or None

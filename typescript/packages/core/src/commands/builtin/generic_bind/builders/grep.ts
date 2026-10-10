@@ -12,48 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { narrowScope, runSearch } from '../search.ts'
+import { runSearch, searchReads } from '../search.ts'
 
-import { IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
-import { specOf } from '../../../spec/builtins.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
 import { prefixAggregate } from '../../aggregators.ts'
-import { grepGeneric, labelled } from '../../generic/grep.ts'
-import { patternArg } from '../../grep_pattern.ts'
-import { grepNeedsEveryFile } from '../../grep_pushdown.ts'
+import { grepGeneric } from '../../generic/grep.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
 const grep: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   if (ops.search !== undefined) return runSearch(ops, 'grep', accessor, paths, texts, opts)
   const idx = opts.index ?? undefined
-  let resolved: PathSpec[] = []
-  let runOpts = opts
-  if (paths.length > 0 && ops.contentSearch === undefined) {
-    resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-  } else if (paths.length > 0) {
-    const fl = new FlagView(opts.flags, specOf('grep'))
-    const narrowed = await narrowScope(ops, accessor, paths, patternArg(texts, opts.flags), {
-      fixedString: fl.asBool('F'),
-      recursive: fl.asBool('r') || fl.asBool('R'),
-      wholeWord: fl.asBool('w'),
-      exactFileSet: grepNeedsEveryFile(fl),
-      index: idx,
-    })
-    resolved = narrowed.resolved
-    if (narrowed.usedSearch && resolved.length === 0) {
-      return [new Uint8Array(), new IOResult({ exitCode: 1 })]
-    }
-    if (narrowed.usedSearch) runOpts = labelled(opts)
-  }
+  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return grepGeneric(
     'grep',
     resolved,
     texts,
-    runOpts,
+    opts,
     (p) => ops.stat(accessor, p, idx),
     (p) => ops.readdir(accessor, p, idx),
-    (p) => ops.readStream(accessor, p, idx),
+    await searchReads(ops, 'grep', accessor, resolved, texts, opts),
   )
 }
 

@@ -17,18 +17,18 @@ import { Accessor } from '../../../accessor/base.ts'
 import { JSON_NAME } from '../../../core/hierarchy/codec.ts'
 import { Slot, Scope, makeDetectScope } from '../../../core/hierarchy/scope.ts'
 import type { Searcher } from '../../../core/hierarchy/search.ts'
-import type { SearchQuery } from '../../../vfs/types.ts'
+import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { efbig, enoent } from '../../../errors/fs.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 
-import { candidateReads, narrowScope, runSearch } from './search.ts'
-import { grepGeneric } from '../generic/grep.ts'
-import { grepNeedsEveryFile } from '../grep_pushdown.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { runSearch } from './search.ts'
 import { makeSearchOp } from '../../../core/hierarchy/search.ts'
 
 const SCOPES: readonly Scope[] = [
@@ -269,163 +269,177 @@ describe('adapter search', () => {
   })
 })
 
-describe('narrowScope', () => {
-  const scope = new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
-  const hit = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: '',
-      vfsPath: virtual.replace(/^\/data\//, ''),
-      resolved: true,
-    })
-  const directory = new FileStat({ name: 'data', type: FileType.DIRECTORY })
+const TREE: Record<string, string> = {
+  '/d/a.txt': 'ada here\nnothing\n',
+  '/d/b.txt': 'conn was refused\nbob\n',
+  '/d/c.txt': 'nothing\n',
+  '/d/sub/d.txt': 'ADA upper\nada lovelace\n',
+  '/d/w.bin': 'ada in a blob\n',
+}
+const ENC = new TextEncoder()
+const DEC = new TextDecoder()
 
-  function narrowing(
-    answer: PathSpec[] | null = [hit('/data/a.txt')],
-    stat: CommandIO<FakeAccessor>['stat'] = () => Promise.resolve(directory),
-    enabled = true,
-  ) {
-    const narrowPaths = vi.fn(() => Promise.resolve(answer))
-    const io = makeIO({ stat, contentSearch: { narrowPaths, enabled: () => enabled } })
-    return { io, narrowPaths }
+function holds(data: string, text: string, ignoreCase: boolean): boolean {
+  return ignoreCase ? data.toLowerCase().includes(text.toLowerCase()) : data.includes(text)
+}
+
+// A RAM mount whose search answers by substring, counting reads. Like a real
+// index it never covers a binary-extension file. Mirrors Python's SearchRAM.
+class SearchRAM extends RAMVFS {
+  reads: string[] = []
+  asked: [string, boolean][] = []
+  scans: ScanReason[] = []
+
+  constructor(files = true, lines = true) {
+    super()
+    if (!files) Object.assign(this, { filesContaining: undefined })
+    if (!lines) Object.assign(this, { linesContaining: undefined })
   }
 
-  async function run(
-    io: CommandIO<FakeAccessor>,
-    gates: Partial<{ recursive: boolean; exactFileSet: boolean; wholeWord: boolean }> = {},
-  ) {
-    return narrowScope(io, new FakeAccessor(), [scope], 'needle', {
-      fixedString: false,
-      recursive: true,
-      wholeWord: true,
-      exactFileSet: false,
-      index: undefined,
-      ...gates,
-    })
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset?: number,
+    size?: number | null,
+  ): Promise<Uint8Array> {
+    this.reads.push(path.vfsPath)
+    return super.read(path, index, offset, size)
   }
 
-  it('narrows a recursive whole-word literal to its candidates', async () => {
-    const { io, narrowPaths } = narrowing()
-    const r = await run(io)
-    expect(r.usedSearch).toBe(true)
-    expect(r.resolved.map((p) => p.virtual)).toEqual(['/data/a.txt'])
-    expect(narrowPaths).toHaveBeenCalledOnce()
-  })
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    this.reads.push(path.vfsPath)
+    return super.readStream(path, index)
+  }
 
-  it.each([
-    { recursive: false },
-    { exactFileSet: true },
-    { wholeWord: false },
-    {
-      exactFileSet: grepNeedsEveryFile(
-        new FlagView({ w: true, line_regexp: true }, specOf('grep')),
-      ),
+  override filesContaining(
+    text: string,
+    _under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<Set<string>> {
+    this.asked.push([text, opts.wholeWord])
+    const keys = [...this.store.files]
+      .filter(
+        ([key, data]) => holds(DEC.decode(data), text, opts.ignoreCase) && !key.endsWith('.bin'),
+      )
+      .map(([key]) => stripSlash(key))
+    return Promise.resolve(new Set(keys))
+  }
+
+  override linesContaining(
+    path: PathSpec,
+    text: string,
+    opts: { ignoreCase: boolean },
+  ): Promise<Uint8Array> {
+    const data = DEC.decode(this.store.files.get(`/${path.vfsPath}`))
+    const kept = data.split(/(?<=\n)/).filter((line) => holds(line, text, opts.ignoreCase))
+    return Promise.resolve(ENC.encode(kept.join('')))
+  }
+
+  override beforeFullScan(_command: string, _under: PathSpec[], reason: ScanReason): Promise<void> {
+    this.scans.push(reason)
+    return Promise.resolve()
+  }
+}
+
+async function run(vfs: RAMVFS, line: string): Promise<[string, string, number]> {
+  for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
+  for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
+  const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
+  try {
+    const out = await ws.shell(line)
+    return [DEC.decode(out.stdout), DEC.decode(out.stderr), out.exitCode]
+  } finally {
+    await ws.close()
+  }
+}
+
+// Twin of test_a_search_never_changes_what_grep_and_rg_print.
+describe('a search never changes what grep and rg print', () => {
+  const lines = [
+    'grep -r ada /d',
+    'grep -rc ada /d',
+    'grep -rL ada /d',
+    'grep -rlw ada /d',
+    'grep -rn ada /d',
+    'grep -ri ADA /d',
+    "grep -rx 'ada lovelace' /d",
+    'grep -r -e ada -e bob /d',
+    "grep -rE 'conn.*refused' /d",
+    'grep -r --exclude-dir=sub ada /d',
+    'grep -r -C1 ada /d',
+    'grep -rv ada /d',
+    'grep -ra ada /d',
+    'grep -rh ada /d /d/w.bin',
+    'grep -rq ada /d',
+    'rg ada /d',
+    'rg -c ada /d',
+    'rg --files-without-match ada /d',
+    "rg -g '*.txt' -i ADA /d",
+    'rg -n ada /d',
+    'rg -w -e ada -e nothing /d',
+  ]
+  const flavors: [boolean, boolean][] = [
+    [true, false],
+    [false, true],
+    [true, true],
+  ]
+  it.each(lines.flatMap((line) => flavors.map(([files, ls]) => [line, files, ls] as const)))(
+    '%s (files=%s, lines=%s)',
+    async (line, files, ls) => {
+      expect(await run(new SearchRAM(files, ls), line)).toEqual(await run(new RAMVFS(), line))
     },
-  ])('scans every file when a gate fails: %o', async (gates) => {
-    const { io, narrowPaths } = narrowing()
-    const r = await run(io, gates)
-    expect([r.resolved.map((p) => p.virtual), r.usedSearch]).toEqual([['/data'], false])
-    expect(narrowPaths).not.toHaveBeenCalled()
-  })
+  )
+})
 
-  it('scans every file on a mount that did not opt in', async () => {
-    const { io, narrowPaths } = narrowing(undefined, undefined, false)
-    expect((await run(io)).usedSearch).toBe(false)
-    expect(narrowPaths).not.toHaveBeenCalled()
-  })
-
-  it('scans every file for a file or missing operand', async () => {
-    for (const stat of [
-      () => Promise.resolve(new FileStat({ name: 'x.txt', type: FileType.FILE })),
-      () => Promise.reject(enoent('/data')),
-    ]) {
-      const { io, narrowPaths } = narrowing(undefined, stat)
-      expect((await run(io)).usedSearch).toBe(false)
-      expect(narrowPaths).not.toHaveBeenCalled()
-    }
-  })
-
-  it('scans every file when the index cannot answer or answers nothing', async () => {
-    for (const answer of [null, []]) {
-      expect((await run(narrowing(answer).io)).usedSearch).toBe(false)
-    }
-  })
-
-  it('drops binary candidates, possibly to none', async () => {
-    const some = await run(narrowing([hit('/data/a.parquet'), hit('/data/a.txt')]).io)
-    expect([some.usedSearch, some.resolved.map((p) => p.virtual)]).toEqual([true, ['/data/a.txt']])
-    expect(await run(narrowing([hit('/data/a.parquet')]).io)).toEqual({
-      resolved: [],
-      usedSearch: true,
-    })
+// Twin of test_only_the_files_a_search_returns_are_read.
+describe('only the files a search returns are read', () => {
+  it.each<[string, string[], [string, boolean][]]>([
+    ['grep -rc ada /d', ['a.txt', 'sub/d.txt'], [['ada', false]]],
+    ['rg -lw ada /d', ['a.txt', 'sub/d.txt'], [['ada', true]]],
+    ["grep -rE 'conn.*refused' /d", ['b.txt'], [['refused', false]]],
+    ['grep -ra ada /d', ['a.txt', 'sub/d.txt', 'w.bin'], [['ada', false]]],
+    ['grep -r ada /d /d/c.txt', ['a.txt', 'c.txt', 'c.txt', 'sub/d.txt'], [['ada', false]]],
+  ])('%s', async (line, reads, asked) => {
+    const vfs = new SearchRAM(true, false)
+    await run(vfs, line)
+    expect([[...vfs.reads].sort(), vfs.asked]).toEqual([reads.map((key) => `d/${key}`), asked])
   })
 })
 
-describe('candidateReads', () => {
-  const tree: Record<string, string | null> = {
-    '/d': null,
-    '/d/a.txt': 'ada here\n',
-    '/d/b.txt': 'ada too\n',
-    '/d/c.txt': 'nothing\n',
-  }
-  const enc = new TextEncoder()
-  const treeSpec = (virtual: string): PathSpec =>
-    new PathSpec({ virtual, directory: virtual, vfsPath: virtual })
-  const treeStat = (p: PathSpec): Promise<FileStat> => {
-    const data = tree[p.virtual]
-    return Promise.resolve(
-      data === null || data === undefined
-        ? new FileStat({ name: p.virtual, type: FileType.DIRECTORY })
-        : new FileStat({ name: p.virtual, type: FileType.FILE, size: data.length }),
-    )
-  }
-  const treeReaddir = (p: PathSpec): Promise<string[]> => {
-    const base = `${p.virtual.replace(/\/$/, '')}/`
-    return Promise.resolve(
-      Object.keys(tree)
-        .filter((k) => k.startsWith(base) && !k.slice(base.length).includes('/'))
-        .sort(),
-    )
-  }
-  const treeStream = (log: string[]) =>
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async function* (p: PathSpec): AsyncIterable<Uint8Array> {
-      log.push(p.virtual)
-      yield enc.encode(tree[p.virtual] ?? '')
-    }
-  const collect = async (it: AsyncIterable<Uint8Array>): Promise<string> => {
-    let out = ''
-    for await (const chunk of it) out += new TextDecoder().decode(chunk)
-    return out
-  }
+describe('matching lines', () => {
+  it('stand in for a file when nothing else prints', async () => {
+    const lines = new SearchRAM(false, true)
+    expect((await run(lines, 'grep -r ada /d'))[2]).toBe(0)
+    expect(lines.reads).toEqual([])
+    const numbered = new SearchRAM(false, true)
+    await run(numbered, 'grep -rn ada /d')
+    expect([...numbered.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'])
+  })
+})
 
-  it('reads empty only what the search ruled out', async () => {
-    const log: string[] = []
-    const read = candidateReads(treeStream(log), new Set(['/d/a.txt']), new Set(['/d/c.txt']))
-    expect(await collect(read(treeSpec('/d/a.txt')))).toBe('ada here\n')
-    expect(await collect(read(treeSpec('/d/b.txt')))).toBe('')
-    expect(await collect(read(treeSpec('/d/c.txt')))).toBe('nothing\n')
-    expect(log).toEqual(['/d/a.txt', '/d/c.txt'])
+describe('a walk that reads every file', () => {
+  it.each<[string, ScanReason]>([
+    ['grep -rv ada /d', ScanReason.EVERY_LINE],
+    ['rg --passthru ada /d', ScanReason.EVERY_LINE],
+    ["grep -r 'a.b' /d", ScanReason.NO_TEXT],
+    ['rg -L ada /d', ScanReason.LINKS],
+  ])('%s says why', async (line, reason) => {
+    const vfs = new SearchRAM()
+    await run(vfs, line)
+    expect([vfs.scans, vfs.asked]).toEqual([[reason], []])
   })
 
-  it('narrows a walk without changing it', async () => {
-    // The walk still lists and labels every file; only the candidate is
-    // read, and the file the search ruled out still counts 0 under -c.
-    const log: string[] = []
-    const read = candidateReads(treeStream(log), new Set(['/d/a.txt']), new Set(['/d']))
-    const [out, io] = unwrap(
-      await grepGeneric(
-        'grep',
-        [treeSpec('/d')],
-        ['ada'],
-        opts({ r: true, c: true }),
-        treeStat,
-        treeReaddir,
-        read,
-      ),
-    )
-    expect(await drain(out)).toBe('/d/a.txt:1\n/d/b.txt:0\n/d/c.txt:0\n')
-    expect(io.exitCode).toBe(0)
-    expect(log).toEqual(['/d/a.txt'])
+  it('may be refused by the mount', async () => {
+    class Refusing extends SearchRAM {
+      override beforeFullScan(_c: string, _u: PathSpec[], reason: ScanReason): Promise<void> {
+        return Promise.reject(new Error(`${reason}; narrow the path`))
+      }
+    }
+    expect(await run(new Refusing(), 'grep -rv ada /d')).toEqual([
+      '',
+      'grep: the output needs lines that do not match; narrow the path\n',
+      1,
+    ])
+    expect((await run(new Refusing(), 'grep -r ada /d'))[2]).toBe(0)
   })
 })

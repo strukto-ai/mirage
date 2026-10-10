@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
-from mirage.core.dropbox.search import narrow_paths
+from mirage.core.dropbox.search import files_containing
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -43,104 +43,58 @@ def subdir() -> PathSpec:
     )
 
 
-@pytest.mark.asyncio
-async def test_narrow_maps_api_paths_to_mount_paths():
-    results = [("/x.txt", "/x.txt"), ("/sub/y.txt", "/Sub/Y.txt")]
+async def _search(results, scope, root_path="/", truncated=False):
     with patch(
         "mirage.core.dropbox.search.search_files",
         new_callable=AsyncMock,
-        return_value=(results, False),
+        return_value=(results, truncated),
     ) as spy:
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
-    assert spy.await_args.kwargs["path"] == ""
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/Sub/Y.txt", "/data/x.txt"]
-    assert out[1].vfs_path == "x.txt"
-    assert out[1].resolved
-
-
-@pytest.mark.asyncio
-async def test_narrow_strips_root_path_case_insensitively():
-    results = [("/team/sub/a.txt", "/Team/Sub/A.txt")]
-    with patch(
-        "mirage.core.dropbox.search.search_files",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ) as spy:
-        out = await narrow_paths(
-            make_accessor("/Team"), "needle", [mount_root()]
+        out = await files_containing(
+            make_accessor(root_path), "needle", [scope]
         )
-    assert spy.await_args.kwargs["path"] == "/Team"
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/Sub/A.txt"]
+    return out, spy.await_args.kwargs["path"]
 
 
 @pytest.mark.asyncio
-async def test_narrow_filters_results_outside_the_scope():
+async def test_hits_are_keyed_from_their_display_path():
+    results = [("/x.txt", "/x.txt"), ("/sub/y.txt", "/Sub/Y.txt")]
+    assert await _search(results, mount_root()) == ({"x.txt", "Sub/Y.txt"}, "")
+
+
+@pytest.mark.asyncio
+async def test_the_root_path_is_stripped_case_insensitively():
+    results = [("/team/sub/a.txt", "/Team/Sub/A.txt")]
+    out = await _search(results, mount_root(), "/Team")
+    assert out == ({"Sub/A.txt"}, "/Team")
+
+
+@pytest.mark.asyncio
+async def test_hits_outside_the_scope_are_dropped():
     results = [
         ("/docs/in.txt", "/docs/in.txt"),
         ("/other/out.txt", "/other/out.txt"),
     ]
-    with patch(
-        "mirage.core.dropbox.search.search_files",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ) as spy:
-        out = await narrow_paths(make_accessor(), "needle", [subdir()])
-    assert spy.await_args.kwargs["path"] == "/docs"
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/docs/in.txt"]
+    assert await _search(results, subdir()) == ({"docs/in.txt"}, "/docs")
 
 
 @pytest.mark.asyncio
-async def test_narrow_sorts_results_in_walk_order():
-    # A sorted readdir walk descends into foo/ before visiting foo.txt;
-    # plain lexicographic path order would put foo.txt first ('.' < '/').
-    results = [("/foo.txt", "/foo.txt"), ("/foo/inner.txt", "/foo/inner.txt")]
-    with patch(
-        "mirage.core.dropbox.search.search_files",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
-    assert out is not None
-    assert [p.virtual for p in out] == ["/data/foo/inner.txt", "/data/foo.txt"]
+@pytest.mark.parametrize(
+    "results, truncated",
+    [([("/x.txt", "/x.txt")], True), ([], False)],
+    ids=["truncated", "no-hit"],
+)
+async def test_an_answer_that_may_miss_a_match_is_none(results, truncated):
+    # No hit is distrusted too: Dropbox indexes a write after it lands.
+    out, _ = await _search(results, mount_root(), truncated=truncated)
+    assert out is None
 
 
 @pytest.mark.asyncio
-async def test_narrow_rebases_raw_onto_the_scope_spelling():
-    scope = PathSpec(
-        vfs_path="", virtual="/data", directory="/data", raw_path="."
-    )
-    results = [("/x.txt", "/x.txt")]
-    with patch(
-        "mirage.core.dropbox.search.search_files",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [scope])
-    assert out is not None
-    assert out[0].raw_path == "./x.txt"
-
-
-@pytest.mark.asyncio
-async def test_narrow_api_error_returns_none():
+async def test_an_api_error_is_none():
     with patch(
         "mirage.core.dropbox.search.search_files",
         new_callable=AsyncMock,
         side_effect=DropboxApiError("boom", 500),
     ):
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
-    assert out is None
-
-
-@pytest.mark.asyncio
-async def test_narrow_truncated_results_return_none():
-    results = [("/x.txt", "/x.txt")]
-    with patch(
-        "mirage.core.dropbox.search.search_files",
-        new_callable=AsyncMock,
-        return_value=(results, True),
-    ):
-        out = await narrow_paths(make_accessor(), "needle", [mount_root()])
+        out = await files_containing(make_accessor(), "needle", [mount_root()])
     assert out is None

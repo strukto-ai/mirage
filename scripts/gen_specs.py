@@ -70,8 +70,9 @@ VFS_FUNCTIONS = (
     "setattr",
     "search",
     "search_many",
-    "narrow_paths",
-    "content_search_enabled",
+    "files_containing",
+    "lines_containing",
+    "before_full_scan",
     "is_mounted",
 )
 

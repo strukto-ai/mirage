@@ -23,6 +23,7 @@ from mirage.commands.builtin.grep_pattern import (
     perl_regex,
     rust_source,
 )
+from mirage.commands.builtin.grep_prefilter import required_needles
 from mirage.commands.builtin.types import (
     GrepSearchMeta,
     GrepSearchOptions,
@@ -251,6 +252,40 @@ def whole_word_literals(
     if any(not t or not is_literal_pattern(t, fixed_string) for t in terms):
         return None
     return list(dict.fromkeys(terms))
+
+
+def search_terms(
+    pattern: str | None,
+    matcher: re.Pattern[str],
+    fixed_string: bool,
+    whole_word: bool,
+    line_regexp: bool,
+    ignore_case: bool,
+) -> tuple[tuple[str, ...], bool] | None:
+    """The texts a mount's search is asked for, and whether as whole words.
+
+    Literals under -w or -x are asked as whole words, which a word index
+    can answer; any other pattern is narrowed on the needles one of which
+    every match contains, asked anywhere. A non-ASCII literal under -i is
+    left to the scan, since a mount's case folding need not be grep's.
+
+    Args:
+        pattern (str | None): the newline-joined patterns.
+        matcher (re.Pattern[str]): the compiled line matcher.
+        fixed_string (bool): True if -F is set.
+        whole_word (bool): True if -w is set.
+        line_regexp (bool): True if -x is set.
+        ignore_case (bool): the match folds case.
+    """
+    words = whole_word_literals(pattern, fixed_string, whole_word, line_regexp)
+    if words is not None and not (
+        ignore_case and not all(w.isascii() for w in words)
+    ):
+        return tuple(words), True
+    needles = required_needles(matcher)
+    if needles is None or any(len(n) < _MIN_SEARCH_LITERAL for n in needles):
+        return None
+    return tuple(n.decode("ascii") for n in needles), False
 
 
 def grep_needs_every_file(fl: FlagView) -> bool:

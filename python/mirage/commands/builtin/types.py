@@ -98,6 +98,26 @@ class GrepSearchOptions:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchTerms:
+    """What grep or rg asks a mount's search, read off the line once.
+
+    Args:
+        texts (tuple[str, ...]): plain texts, one held by every match.
+        whole_word (bool): each is needed only as a whole word.
+        ignore_case (bool): the match folds case.
+        line_output (bool): the output shows matching lines and nothing
+            positional, so a file's matching lines can stand in for it.
+        reads_binary (bool): the walk also reads binary-extension files.
+    """
+
+    texts: tuple[str, ...]
+    whole_word: bool
+    ignore_case: bool
+    line_output: bool
+    reads_binary: bool
+
+
+@dataclass(frozen=True, slots=True)
 class GrepSearchMeta:
     """The grep integration's declared search dialect and scan strategy."""
 
