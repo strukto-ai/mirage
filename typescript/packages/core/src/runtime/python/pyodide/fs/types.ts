@@ -27,7 +27,8 @@ export interface FlushFailure {
 
 export interface SyncVFS {
   process?(payload: string): string
-  read(path: string): Uint8Array
+  /** A file's bytes; `raw` reads what is stored rather than its rendering. */
+  read(path: string, raw?: boolean): Uint8Array
   stat(path: string): VFSStat
   readdir(path: string, classify?: boolean): VFSEntry[]
   readlink(path: string): string
@@ -104,6 +105,9 @@ export interface FSNode {
   /** A directory whose children came from a listing of the mount. */
   listed?: boolean
   loaded?: boolean
+  /** The owner the mount reported; absent reads as 0. */
+  uid?: number
+  gid?: number
   /**
    * A symlink's target, verbatim as it was typed. Emscripten's own
    * MEMFS keeps it under this name and `FS.readlink` reads it, so the

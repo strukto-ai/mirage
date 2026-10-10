@@ -12,17 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const S_IFDIR = 0o040000
-const S_IFREG = 0o100000
+// The modes every translator reports for a directory, a file and a link,
+// shared rather than restated so a guest's stat reads what a shell's does.
+export { DIR_MODE, FILE_MODE, LINK_MODE } from '../../../../utils/stat_view.ts'
 
-export const DIR_MODE = S_IFDIR | 0o777
-export const FILE_MODE = S_IFREG | 0o666
-// A link is not this filesystem's choice the way the two above are: no
-// POSIX system consults the bits on a symlink, so every translator
-// reports the same mode and this one is shared rather than restated.
-export { LINK_MODE } from '../../../../utils/stat_view.ts'
+// What a create's mode loses, as a process's default umask takes it off:
+// Emscripten asks 0o666 for a file and 0o777 for a directory.
+export const UMASK = 0o022
 
 export const BLKSIZE = 4096
+
+// What st_blocks counts in, whatever the block size.
+export const BLOCK_UNIT = 512
+
+// The open flags' access bits, as Emscripten numbers them.
+export const O_ACCMODE = 3
 
 // The open flag that puts every write at the end, as Emscripten numbers it.
 export const O_APPEND = 1024

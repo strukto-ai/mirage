@@ -60,7 +60,13 @@ def pack_fdstat(filetype: int) -> bytes:
     return struct.pack("<BxHxxxxQQ", filetype, 0, ALL_RIGHTS, ALL_RIGHTS)
 
 
-def pack_filestat(size: int, mtime_ns: int, filetype: int, ino: int) -> bytes:
+def pack_filestat(
+    size: int,
+    mtime_ns: int,
+    filetype: int,
+    ino: int,
+    atime_ns: int | None = None,
+) -> bytes:
     """Encode a filestat record.
 
     A directory links twice, from its parent and from its own ``.``, and
@@ -71,6 +77,8 @@ def pack_filestat(size: int, mtime_ns: int, filetype: int, ino: int) -> bytes:
         mtime_ns (int): modification time, epoch nanoseconds.
         filetype (int): preview1 filetype.
         ino (int): synthetic inode number, stable within a run.
+        atime_ns (int | None): access time, epoch nanoseconds; None
+            reads as the modification time.
     """
     return struct.pack(
         "<QQBxxxxxxxQQQQQ",
@@ -79,7 +87,7 @@ def pack_filestat(size: int, mtime_ns: int, filetype: int, ino: int) -> bytes:
         filetype,
         2 if filetype == FT_DIR else 1,
         size,
-        mtime_ns,
+        mtime_ns if atime_ns is None else atime_ns,
         mtime_ns,
         mtime_ns,
     )

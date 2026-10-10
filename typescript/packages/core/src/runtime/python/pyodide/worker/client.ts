@@ -247,7 +247,7 @@ export class PyodideWorkerClient {
       case 'process':
         return processes.call(request.payload ?? '{}')
       case 'read':
-        return files.read(request.path)
+        return files.read(request.path, request.raw === true ? { raw: true } : {})
       case 'stat':
         return files.stat(request.path, true)
       case 'readdir':

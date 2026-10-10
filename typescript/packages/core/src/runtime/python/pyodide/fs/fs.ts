@@ -14,7 +14,19 @@
 
 import { epochToIso } from '../../../../utils/dates.ts'
 import type { SetAttrFields } from '../../../../types.ts'
-import { BLKSIZE, GROW_FLOOR, LINK_MODE, O_APPEND, SEEK_CUR, SEEK_END } from './constants.ts'
+import {
+  BLKSIZE,
+  BLOCK_UNIT,
+  DIR_MODE,
+  FILE_MODE,
+  GROW_FLOOR,
+  LINK_MODE,
+  O_ACCMODE,
+  O_APPEND,
+  SEEK_CUR,
+  SEEK_END,
+  UMASK,
+} from './constants.ts'
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
@@ -132,6 +144,12 @@ function ownRow(sync: SyncVFS, path: string, entry: VFSEntry): VFSEntry | VFSSta
   }
 }
 
+/** The owner a mount's row reports, kept on the node `getattr` reads. */
+function takeOwner(node: FSNode, stat: VFSStat): void {
+  if (typeof stat.uid === 'number') node.uid = stat.uid
+  if (typeof stat.gid === 'number') node.gid = stat.gid
+}
+
 export class PyodideFs {
   readonly type: FSType
   private readonly host: FSHost
@@ -210,15 +228,15 @@ export class PyodideFs {
       ino: node.id,
       mode: node.mode,
       nlink: this.host.isDir(node.mode) ? 2 : 1,
-      uid: 0,
-      gid: 0,
+      uid: node.uid ?? 0,
+      gid: node.gid ?? 0,
       rdev: node.rdev,
       size,
       atime: new Date(node.atime),
       mtime: new Date(node.mtime),
       ctime: new Date(node.ctime),
       blksize: BLKSIZE,
-      blocks: Math.ceil(size / BLKSIZE),
+      blocks: Math.ceil(size / BLOCK_UNIT),
     }
   }
 
@@ -237,7 +255,7 @@ export class PyodideFs {
     const isDevice = isCharDevice(node.mode)
     const fields = finalizing || isDevice ? null : changedAttrs(node, attr)
     const size = isDevice ? undefined : attr.size
-    if (size !== undefined && size > 0) this.loadContents(node)
+    if (size !== undefined && size > 0) this.loadContents(node, true)
     if (fields !== null) {
       // A link's own attrs go to the link, since the tree resolved to
       // the link node itself and the target's row is not what changed.
@@ -249,7 +267,9 @@ export class PyodideFs {
     // opens no handle at all, reach the mount.
     if (size !== undefined) this.journal.markTruncate(this.nodes.pathOf(node), size)
     this.settle(this.nodes.pathOf(node))
-    if (attr.mode !== undefined) node.mode = attr.mode
+    // The chmod that finalizes a create carries the mode the create asked
+    // for, so the umask comes off it as it did off the node.
+    if (attr.mode !== undefined) node.mode = finalizing ? attr.mode & ~UMASK : attr.mode
     if (attr.atime !== undefined) node.atime = attr.atime
     if (attr.mtime !== undefined) node.mtime = attr.mtime
     if (attr.ctime !== undefined) node.ctime = attr.ctime
@@ -305,7 +325,7 @@ export class PyodideFs {
     // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
     else this.journal.markCreate(path)
     this.settle(path)
-    const node = this.nodes.makeNode(parent, name, mode)
+    const node = this.nodes.makeNode(parent, name, mode & ~UMASK)
     node.rdev = rdev
     // FS.open finalizes a new file with a chmod of its own, right here
     // and on this node. Only a file is marked: a directory gets no such
@@ -424,10 +444,12 @@ export class PyodideFs {
     const target = stat.isLink
       ? this.sync.readlink(this.nodes.pathOf(parent) + '/' + name)
       : undefined
-    const mode = stat.isLink ? LINK_MODE : (stat.mode ?? (stat.isDir ? 0o40755 : 0o100644))
+    const mode = stat.isLink ? LINK_MODE : (stat.mode ?? (stat.isDir ? DIR_MODE : FILE_MODE))
     const node = this.nodes.makeNode(parent, name, mode, stat.rdev ?? 0)
     node.usedBytes = stat.size
     if (stat.mtimeMs !== undefined) node.atime = node.mtime = node.ctime = stat.mtimeMs
+    if ('atimeMs' in stat) node.atime = stat.atimeMs
+    if ('uid' in stat) takeOwner(node, stat)
     if (target !== undefined) node.link = target
     else if (this.host.isFile(mode)) node.loaded = false
     // Emscripten's getdents looks up every name it lists, so a row the
@@ -458,14 +480,20 @@ export class PyodideFs {
     this.nodes.retype(node, stat.mode)
     node.rdev = stat.rdev ?? 0
     node.atime = node.mtime = node.ctime = stat.mtimeMs ?? 0
+    if (stat.atimeMs !== undefined) node.atime = stat.atimeMs
+    takeOwner(node, stat)
     if (this.host.isFile(stat.mode) && node.loaded === false) node.usedBytes = stat.size
   }
 
-  private loadContents(node: FSNode): void {
+  /**
+   * Fetch a node's bytes on its first open. A writing open reads what is
+   * stored, since its writes land on that; a reading one the rendering.
+   */
+  private loadContents(node: FSNode, raw = false): void {
     const sync = this.sync
     if (node.loaded !== false) return
     const path = this.nodes.pathOf(node)
-    const bytes = this.readThrough([path], () => sync.read(path))
+    const bytes = this.readThrough([path], () => sync.read(path, raw))
     node.contents = bytes
     node.usedBytes = bytes.length
     node.loaded = true
@@ -505,7 +533,7 @@ export class PyodideFs {
   }
 
   private streamOpen(stream: FSStream): void {
-    this.loadContents(stream.node)
+    this.loadContents(stream.node, (stream.flags & O_ACCMODE) !== 0)
   }
 
   private streamRead(

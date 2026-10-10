@@ -26,6 +26,7 @@ export interface VfsRequest {
   mutations?: MirageMutation[]
   payload?: string
   classify?: boolean
+  raw?: boolean
 }
 export interface ExecuteRequest {
   kind: 'execute'

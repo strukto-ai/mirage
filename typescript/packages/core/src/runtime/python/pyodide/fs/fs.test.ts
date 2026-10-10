@@ -639,6 +639,64 @@ _einval = errno.EINVAL
     expect(py.globals.get('_errno')).toBe(py.globals.get('_einval'))
   })
 
+  it('reports a new file and directory with the umask taken off', async () => {
+    const p = prefix()
+    await mountPrefix(p)
+    await py.runPythonAsync(`
+import os, stat
+open('${p}new.txt', 'w').close()
+os.mkdir('${p}newdir')
+_file = stat.S_IMODE(os.stat('${p}new.txt').st_mode)
+_dir = stat.S_IMODE(os.stat('${p}newdir').st_mode)
+`)
+    expect(py.globals.get('_file')).toBe(0o644)
+    expect(py.globals.get('_dir')).toBe(0o755)
+  })
+
+  it('reports the owner and access time the mount gives, in 512-byte blocks', async () => {
+    const p = prefix()
+    const row = {
+      size: 1000,
+      isDir: false,
+      mode: FILE_MODE,
+      mtimeMs: 2_000_000,
+      atimeMs: 1_000_000,
+      uid: 501,
+      gid: 20,
+    }
+    mountOver(p, syncOver({}, { [`${p}f.bin`]: row }, []))
+    await py.runPythonAsync(`
+import os
+_st = os.stat('${p}f.bin')
+_seen = f'{_st.st_uid}:{_st.st_gid} {int(_st.st_atime)} {_st.st_blocks}'
+`)
+    expect(py.globals.get('_seen')).toBe('501:20 1000 2')
+  })
+
+  it('reads what is stored for a writing open and the rendering for a reading one', async () => {
+    const p = prefix()
+    const reads: [string, boolean][] = []
+    const row = { size: 3, isDir: false, mode: FILE_MODE, mtimeMs: 0 }
+    const sync = syncOver({}, { [`${p}r.txt`]: row, [`${p}w.txt`]: row }, [])
+    mountOver(p, {
+      ...sync,
+      read: (path, raw = false) => {
+        reads.push([path, raw])
+        return enc.encode('abc')
+      },
+    })
+    await py.runPythonAsync(`
+open('${p}r.txt').read()
+f = open('${p}w.txt', 'r+')
+f.read()
+f.close()
+`)
+    expect(reads).toEqual([
+      [`${p}r.txt`, false],
+      [`${p}w.txt`, true],
+    ])
+  })
+
   // A truncating open reaches setattr too (Emscripten routes the resize
   // through it), and that must not turn into a metadata write the guest
   // never asked for: the bytes are the mutation, the stamp is not.

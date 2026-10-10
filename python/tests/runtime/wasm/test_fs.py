@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import inspect
 import struct
 
@@ -21,6 +22,8 @@ pytest.importorskip("wasmtime")
 
 import wasmtime
 
+from mirage import MountMode, Workspace
+from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FileHandle
 from mirage.runtime.wasm import fs
 from mirage.runtime.wasm.constants import (
@@ -41,6 +44,8 @@ from mirage.runtime.wasm.fs import (
     unpack_iovs,
 )
 from mirage.runtime.wasm.view import WasmView
+from mirage.utils.stat_view import mtime_ns
+from mirage.vfs.ram import RAMVFS
 
 # End-to-end host-function behavior (path_open buffering, fd table,
 # errno answers inside a real guest) is covered by the live wasi and
@@ -152,3 +157,36 @@ def test_close_all_reports_a_flush_the_mount_cannot_take(monkeypatch):
     handle.write(b"kept")
     wasi_fs._fds.add(FdEntry(kind="file", handle=handle, path="/data/f.txt"))
     assert wasi_fs.close_all() == ["/data/f.txt: truncate is not supported"]
+
+
+def _wasi_over_ram() -> tuple[Workspace, WasiFs, int, FileHandle]:
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.vfs.write("/data/f.txt", b""))
+    wasi_fs = WasiFs(WasmView(files=RuntimeFiles(ws.vfs.dispatch, None)), b"")
+    handle = FileHandle.opened(
+        "/data/f.txt", None, size=0, writable=True, append=False
+    )
+    fd = wasi_fs._fds.add(
+        FdEntry(kind="file", handle=handle, path="/data/f.txt")
+    )
+    return ws, wasi_fs, fd, handle
+
+
+def test_fd_sync_lands_what_a_file_owes_before_its_close():
+    ws, wasi_fs, fd, handle = _wasi_over_ram()
+    handle.write(b"synced")
+    assert wasi_fs.fd_sync(None, fd) == 0
+    assert asyncio.run(ws.vfs.read("/data/f.txt")) == b"synced"
+    handle.write(b"!")
+    assert wasi_fs.fd_close(None, fd) == 0
+    assert asyncio.run(ws.vfs.read("/data/f.txt")) == b"synced!"
+
+
+def test_fd_filestat_set_times_stamps_after_the_writes_land():
+    ws, wasi_fs, fd, handle = _wasi_over_ram()
+    handle.write(b"body")
+    stamp = 981173107 * 1_000_000_000
+    assert wasi_fs.fd_filestat_set_times(None, fd, 0, stamp, FST_MTIM) == 0
+    assert wasi_fs.fd_close(None, fd) == 0
+    assert asyncio.run(ws.vfs.read("/data/f.txt")) == b"body"
+    assert mtime_ns(asyncio.run(ws.vfs.stat("/data/f.txt"))) == stamp

@@ -41,7 +41,7 @@ console.warn = (...messages: unknown[]) => {
 }
 const sync: SyncVFS = {
   process: (payload) => call({ op: 'process', path: '', payload }) as string,
-  read: (path) => call({ op: 'read', path }) as Uint8Array,
+  read: (path, raw = false) => call({ op: 'read', path, raw }) as Uint8Array,
   stat: (path) => call({ op: 'stat', path }) as VFSStat,
   readdir: (path, classify = true) => call({ op: 'readdir', path, classify }) as VFSEntry[],
   readlink: (path) => call({ op: 'readlink', path }) as string,
