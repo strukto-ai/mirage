@@ -490,6 +490,34 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
+  it('lets an open file go under a policy that refuses reads', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'body')
+    ws.policies.add({
+      preVfs: (ctx) => (ctx.op === 'read' ? { kind: 'deny', reason: 'write-only' } : null),
+    })
+    const handle = await fs.promises.open('/data/f.txt', 'w')
+    await fs.promises.unlink('/data/f.txt')
+    await handle.close()
+    expect(await ws.vfs.exists('/data/f.txt')).toBe(false)
+    await ws.close()
+  })
+
+  it('keeps a handle through a rename onto its own name', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/a.txt', 'hello')
+    const handle = await fs.promises.open('/data/a.txt', 'r+')
+    await handle.write('J', 0)
+    await fs.promises.rename('/data/a.txt', '/data/a.txt')
+    await handle.close()
+    expect(await fs.promises.readFile('/data/a.txt', 'utf-8')).toBe('Jello')
+    await ws.close()
+  })
+
   it('answers existsSync on a mounted path without throwing', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

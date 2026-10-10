@@ -993,7 +993,9 @@ class HostFs:
                 None,
                 _spelled(dst),
             )
-        held = self._descriptors.hold(dest)
+        # A rename onto its own name changes nothing, its descriptors
+        # included.
+        held = self._descriptors.hold(dest) if dest != source else []
         self._adapter.rename(source, dest)
         self._descriptors.keep(held)
         self._descriptors.moved(source, dest)

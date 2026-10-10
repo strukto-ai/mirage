@@ -236,7 +236,17 @@ export class Descriptors {
     for (const desc of this.table.values()) {
       const named = desc.path === path || (under && desc.path.startsWith(prefix))
       if (!named || desc.kept !== null || desc.handle === null) continue
-      held.push([desc, await this.files.read(desc.path, { raw: desc.mode.writable })])
+      // A descriptor that cannot read needs nothing kept, and a read a
+      // policy refuses must not refuse the removal it allows.
+      let data: Uint8Array = new Uint8Array()
+      if (desc.mode.readable) {
+        try {
+          data = await this.files.read(desc.path, { raw: desc.mode.writable })
+        } catch (err) {
+          console.warn(`host: keeping ${desc.path} before it goes failed`, err)
+        }
+      }
+      held.push([desc, data])
     }
     return held
   }

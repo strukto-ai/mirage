@@ -14,6 +14,7 @@
 
 import errno
 import functools
+import logging
 import os
 from dataclasses import dataclass
 from typing import IO, Any, cast
@@ -32,6 +33,8 @@ from mirage.runtime.python.host.file import (
     text_encoding,
 )
 from mirage.runtime.python.host.syscall import syscall
+
+logger = logging.getLogger(__name__)
 
 
 def open_mode(flags: int) -> OpenMode:
@@ -244,10 +247,20 @@ class Descriptors:
                 continue
             if desc.handle is None:
                 continue
+            # A descriptor that cannot read needs nothing kept, and a read
+            # a policy refuses must not refuse the removal it allows.
             raw = desc.facts.writable
-            if raw not in views:
-                views[raw] = read_range(self._adapter, path, raw, 0, None)
-            held.append((desc, views[raw]))
+            if desc.facts.readable and raw not in views:
+                try:
+                    views[raw] = read_range(self._adapter, path, raw, 0, None)
+                except OSError as err:
+                    logger.warning(
+                        "host: keeping %s before it goes failed: %r", path, err
+                    )
+                    views[raw] = b""
+            held.append(
+                (desc, views.get(raw, b"") if desc.facts.readable else b"")
+            )
         return held
 
     @staticmethod
@@ -306,6 +319,7 @@ class Descriptors:
             self._adapter,
             desc.handle,
             facts.readable and desc.facts.readable,
+            facts.writable and desc.facts.writable,
             raw_mode(facts),
             functools.partial(self.close, fd) if closefd else None,
             fd,

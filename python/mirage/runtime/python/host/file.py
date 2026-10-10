@@ -89,6 +89,7 @@ class HandleRaw(io.RawIOBase):
         adapter (RuntimeFiles): the file adapter writes land through.
         handle (FileHandle): the handle it reads and writes through.
         readable (bool): whether the mode reads.
+        writable (bool): whether the mode writes.
         mode (str): the mode ``io.FileIO`` would report.
         release (Callable[[], None] | None): what a close gives back
             once its writes landed, the descriptor a stream over one
@@ -102,6 +103,7 @@ class HandleRaw(io.RawIOBase):
         adapter: RuntimeFiles,
         handle: FileHandle,
         readable: bool,
+        writable: bool,
         mode: str,
         release: Callable[[], None] | None = None,
         fd: int | None = None,
@@ -110,6 +112,7 @@ class HandleRaw(io.RawIOBase):
         self._adapter = adapter
         self._handle = handle
         self._readable = readable
+        self._writable = writable
         self._release = release
         self._fd = fd
         self.name = handle.path
@@ -119,7 +122,23 @@ class HandleRaw(io.RawIOBase):
         return self._readable
 
     def writable(self) -> bool:
-        return self._handle.writable
+        return self._writable
+
+    def _check(self, reading: bool | None = None) -> None:
+        """Refuse a call on a closed stream, or one its mode does not
+        allow, as ``io.FileIO`` does: an unbuffered open hands this
+        stream out bare.
+
+        Args:
+            reading (bool | None): the call reads (True) or writes
+                (False); None checks only that the stream is open.
+        """
+        if self.closed:
+            raise ValueError("I/O operation on closed file")
+        if reading is True and not self._readable:
+            raise io.UnsupportedOperation("File not open for reading")
+        if reading is False and not self._writable:
+            raise io.UnsupportedOperation("File not open for writing")
 
     def seekable(self) -> bool:
         return True
@@ -127,21 +146,23 @@ class HandleRaw(io.RawIOBase):
     def fileno(self) -> int:
         if self._fd is None:
             return super().fileno()
-        if self.closed:
-            raise ValueError("I/O operation on closed file")
+        self._check()
         return self._fd
 
     def readinto(self, buffer: "WriteableBuffer") -> int:
+        self._check(reading=True)
         chunk = self._handle.read(len(memoryview(buffer)))
         memoryview(buffer).cast("B")[: len(chunk)] = chunk
         return len(chunk)
 
     def write(self, data: "ReadableBuffer") -> int:
+        self._check(reading=False)
         payload = bytes(data)
         self._handle.write(payload)
         return len(payload)
 
     def seek(self, offset: int, whence: int = 0) -> int:
+        self._check()
         pos = self._handle.seek(offset, whence)
         if pos is None:
             raise OSError(
@@ -151,9 +172,11 @@ class HandleRaw(io.RawIOBase):
         return pos
 
     def tell(self) -> int:
+        self._check()
         return self._handle.pos
 
     def truncate(self, size: int | None = None) -> int:
+        self._check(reading=False)
         size = self._handle.pos if size is None else size
         self._handle.truncate(size)
         return size
@@ -325,7 +348,9 @@ def open_file(
         writable=facts.writable,
         append=facts.append,
     )
-    raw = HandleRaw(adapter, handle, facts.readable, raw_mode(facts))
+    raw = HandleRaw(
+        adapter, handle, facts.readable, facts.writable, raw_mode(facts)
+    )
     if facts.binary:
         return layered(raw, facts, mode, buffering=buffering)
     return layered(raw, facts, mode, encoding, errors, newline, buffering)

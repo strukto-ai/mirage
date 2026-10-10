@@ -277,6 +277,17 @@ class TestOpenFile:
                 io.TextIOWrapper(f, encoding="utf-8").read() == "alpha\nbeta\n"
             )
 
+    def test_an_unbuffered_stream_refuses_what_its_mode_and_state_refuse(self):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/f.bin", b"body")
+        f = open_file(ops, "/data/dir/f.bin", "rb", buffering=0)
+        with pytest.raises(io.UnsupportedOperation):
+            f.write(b"X")
+        f.close()
+        with pytest.raises(ValueError):
+            f.read()
+        assert _read(ops, "/data/dir/f.bin") == b"body"
+
     def test_zipfile_writes_and_reads_a_mounted_archive(self):
         ops, _ = make_ops_with_dir()
         with (

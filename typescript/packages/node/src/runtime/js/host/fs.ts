@@ -552,7 +552,8 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     // A move between a mount and the host is EXDEV, the kernel's answer
     // for two filesystems and the errno a mover retries as copy + delete.
     if (!this.mounted(src) || !this.mounted(dst)) throw refusal('EXDEV', 'rename', src)
-    const held = await this.descriptors.hold(dst)
+    // A rename onto its own name changes nothing, its descriptors included.
+    const held = dst === src ? [] : await this.descriptors.hold(dst)
     await this.files.rename(src, dst)
     this.descriptors.keep(held)
     this.descriptors.moved(src, dst)

@@ -51,6 +51,11 @@ class _NoStats(Policy):
         return Deny("no stat") if ctx.op == "stat" else None
 
 
+class _NoReads(Policy):
+    async def pre_vfs(self, ctx):
+        return Deny("no read") if ctx.op == "read" else None
+
+
 def seeded():
     """An ops facade over /data with one file and one subdirectory."""
     ops, _ = make_ops_with_dir()
@@ -615,6 +620,24 @@ class TestDescriptors:
         patched.fsync(fd)
         assert run(ops.read("/data/dir/raw.bin")) == b"raw"
         f.close()
+
+    def test_a_policy_that_refuses_reads_still_lets_an_open_file_go(self):
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.vfs.write("/data/f.txt", b"body"))
+        ws.policies.add(_NoReads())
+        patched = make_os_module(ws.vfs)
+        fd = patched.open("/data/f.txt", os.O_WRONLY)
+        patched.unlink("/data/f.txt")
+        patched.close(fd)
+        assert not patched.path.exists("/data/f.txt")
+
+    def test_a_rename_onto_its_own_name_keeps_the_descriptor(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR)
+        patched.write(fd, b"J")
+        patched.rename("/data/dir/a.txt", "/data/dir/a.txt")
+        patched.close(fd)
+        assert run(ops.read("/data/dir/a.txt")) == b"Jello"
 
     def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
         _, patched = seeded()
