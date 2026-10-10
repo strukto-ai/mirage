@@ -139,6 +139,20 @@
         "stdout": "/search/alpha.txt\n/search/beta.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "search_orders_hits_by_code_point",
+      "seq": 540011,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "mkdir -p /search/order && printf 'numbat\\n' > /search/order/$'\\xee\\x80\\x80'.txt && printf 'numbat\\n' > /search/order/\ud83d\ude00.txt && grep -rlw numbat /search/order; rg -lw numbat /search/order; rm -r /search/order",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n/search/order/\ue000.txt\n/search/order/\ud83d\ude00.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }
