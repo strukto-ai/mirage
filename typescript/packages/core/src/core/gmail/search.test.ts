@@ -59,6 +59,7 @@ function message(
   attachment = '',
   mime = 'text/plain',
   snippet: string | null = null,
+  date = 'Mon, 5 Jan 2026 09:00:00 +0000',
 ): Message {
   const parts: Message['payload']['parts'] = [{ mimeType: 'text/plain', body: { data: b64(body) } }]
   if (attachment !== '') {
@@ -80,7 +81,7 @@ function message(
         { name: 'From', value: sender },
         { name: 'To', value: 'me@example.com' },
         { name: 'Subject', value: subject },
-        { name: 'Date', value: 'Mon, 5 Jan 2026 09:00:00 +0000' },
+        { name: 'Date', value: date },
       ],
       parts,
     },
@@ -128,6 +129,19 @@ const MESSAGES = [
     '',
     'text/plain',
     'the travel',
+  ),
+  message('h8', ['INBOX'], '2026-01-08', 'Ha <ha@example.com>', 'Hike', 'the mountain trail'),
+  message(
+    'i9',
+    ['INBOX'],
+    '2026-01-08',
+    'Io <io@example.com>',
+    'Ping',
+    'quiet',
+    '',
+    'text/plain',
+    null,
+    'Thu, 8 Jan 2026 09:00:00 -0700 (Mountain Standard Time)',
   ),
 ]
 
@@ -260,12 +274,13 @@ describe('filesContaining', () => {
   })
 
   // Twin of test_text_gmail_does_not_search_is_checked_in_the_listing: e5
-  // holds rtf only in its attachment's MIME type, and g7 holds travel only in
-  // a snippet cut inside traveler; Gmail searches neither, so the listing's
-  // copy of them is checked.
+  // holds rtf only in its attachment's MIME type, g7 holds travel only in a
+  // snippet cut inside traveler and i9 holds mountain only in its Date header;
+  // Gmail searches none of them, so the listing's copy of them is checked.
   it.each([
     ['grep -rlw rtf /gmail/INBOX', ['e5', 'f6']],
     ['grep -rlw travel /gmail/INBOX', ['a1', 'g7']],
+    ['grep -rlw mountain /gmail/INBOX', ['h8', 'i9']],
   ])('checks what Gmail does not search in the listing for %s', async (line, reads) => {
     const full = await onGmail(line, new FakeGmail(), false)
     const [out, code, read] = await onGmail(line)

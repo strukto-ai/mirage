@@ -42,11 +42,13 @@ async def test_a_word_reads_only_the_messages_search_names(gmail, line, reads):
 @pytest.mark.parametrize(
     "line, reads",
     [
-        # e5 holds rtf only in its attachment's MIME type, and g7 holds
-        # travel only in a snippet cut inside traveler; Gmail searches
-        # neither, so the listing's copy of them is checked.
+        # e5 holds rtf only in its attachment's MIME type, g7 holds travel
+        # only in a snippet cut inside traveler and i9 holds mountain only
+        # in its Date header; Gmail searches none of them, so the listing's
+        # copy of them is checked.
         ("grep -rlw rtf /gmail/INBOX", ["e5", "f6"]),
         ("grep -rlw travel /gmail/INBOX", ["a1", "g7"]),
+        ("grep -rlw mountain /gmail/INBOX", ["h8", "i9"]),
     ],
 )
 async def test_text_gmail_does_not_search_is_checked_in_the_listing(

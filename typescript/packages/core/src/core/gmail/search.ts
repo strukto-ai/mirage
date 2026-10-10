@@ -28,9 +28,9 @@ import { detectScope } from './scope.ts'
 export const MAX_HITS = 500
 
 // What a .gmail.json holds besides the headers, body and attachment names
-// Gmail searches: its key names, JSON literals, system label ids and the words
-// of a Date header. The snippet and the attachments' MIME types are checked
-// against the listing instead (`unsearchedText`).
+// Gmail searches: its key names, JSON literals and system label ids. The
+// snippet, the Date header and the attachments' MIME types are checked against
+// the listing instead (`unsearchedText`).
 const RECORD_KEYS: ReadonlySet<string> = new Set([
   'id',
   'from',
@@ -58,45 +58,6 @@ const RECORD_KEYS: ReadonlySet<string> = new Set([
   'starred',
   'important',
   'chat',
-  'mon',
-  'tue',
-  'wed',
-  'thu',
-  'fri',
-  'sat',
-  'sun',
-  'jan',
-  'feb',
-  'mar',
-  'apr',
-  'may',
-  'jun',
-  'jul',
-  'aug',
-  'sep',
-  'oct',
-  'nov',
-  'dec',
-  'gmt',
-  'utc',
-  'ut',
-  'est',
-  'edt',
-  'cst',
-  'cdt',
-  'mst',
-  'mdt',
-  'pst',
-  'pdt',
-  'time',
-  'standard',
-  'daylight',
-  'universal',
-  'coordinated',
-  'pacific',
-  'eastern',
-  'central',
-  'mountain',
 ])
 
 function childOf(directory: PathSpec, name: string): PathSpec {

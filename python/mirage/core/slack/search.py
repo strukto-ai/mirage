@@ -467,6 +467,21 @@ async def _fetch_name_words(accessor: SlackAccessor) -> frozenset[str]:
     return frozenset(words)
 
 
+async def _fetch_search_facts(
+    accessor: SlackAccessor,
+) -> tuple[frozenset[str], frozenset[str] | None]:
+    """The name words, then the channels search covers.
+
+    One after the other, so a failed users.list leaves no channel listing
+    paging on after the search has given up.
+
+    Args:
+        accessor (SlackAccessor): the workspace.
+    """
+    words = await _fetch_name_words(accessor)
+    return words, await _searched_channels(accessor)
+
+
 async def _search_facts(
     accessor: SlackAccessor,
 ) -> tuple[frozenset[str], frozenset[str] | None] | None:
@@ -492,10 +507,7 @@ async def _search_facts(
     accessor.search_facts = ready
     facts: tuple[frozenset[str], frozenset[str] | None] | None = None
     try:
-        facts = (
-            await _fetch_name_words(accessor),
-            await _searched_channels(accessor),
-        )
+        facts = await _fetch_search_facts(accessor)
         return facts
     finally:
         ready.set_result(facts)
