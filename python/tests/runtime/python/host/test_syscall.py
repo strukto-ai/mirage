@@ -31,11 +31,12 @@ def test_a_builtin_error_is_raised_as_it_came():
     assert as_raised(original) is original
 
 
-def test_syscall_wraps_an_entry_point():
-    def refuse() -> None:
-        raise erofs("/data/f")
+def _refuse() -> None:
+    raise erofs("/data/f")
 
+
+def test_syscall_wraps_an_entry_point():
     with pytest.raises(OSError) as caught:
-        syscall(refuse)()
+        syscall(_refuse)()
     assert type(caught.value) is OSError
     assert caught.value.errno == errno.EROFS

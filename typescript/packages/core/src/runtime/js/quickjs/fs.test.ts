@@ -166,15 +166,15 @@ describe('quickjs reads after a failed fetch', () => {
   }, 120_000)
 })
 
-describe('quickjs os.remove and seek', () => {
-  async function workspace(): Promise<Workspace> {
-    const parser = await getTestParser()
-    return new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
-  }
+async function workspace(): Promise<Workspace> {
+  const parser = await getTestParser()
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+  )
+}
 
+describe('quickjs os.remove and seek', () => {
   it('removes a link to a directory and leaves the directory', async () => {
     const ws = await workspace()
     try {
