@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SlackAccessor } from '../../accessor/slack.ts'
+import { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
@@ -21,6 +21,7 @@ import { recordQueries } from '../../utils/record_search.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { compactJsonBytes } from '../render/json.ts'
+import { listChannels } from './channels.ts'
 import { SlackApiError, type SlackResponse } from './client.ts'
 import { cursorPages } from './paginate.ts'
 import { readdir } from './readdir.ts'
@@ -539,7 +540,8 @@ async function hitsOf(
  * `in:#name` (`on:` would read the day in the searcher's time zone); hits
  * map to dirnames through the channel ids the listing holds. A scope with
  * no channel day in it adds nothing, and a day is cheaper to read than to
- * search. null when `text` could match the JSON around those fields
+ * search. null when a channel in scope is one search does not cover
+ * (`searchedChannels`), when `text` could match the JSON around those fields
  * (`recordQueries`), a user's name or the workspace's domain (`nameWords`),
  * on an API or connection error, past `MAX_PAGES` pages, or with no hit at
  * all, since Slack indexes a message some time after it is posted. Mirrors
@@ -568,6 +570,17 @@ export async function filesContaining(
   }
 }
 
+// The channels search covers, or null when it covers every listed one. With a
+// separate search token, search runs as that token's user, who sees every
+// public channel but only the private ones they are in; the listing's token
+// may read a private channel they are not in, whose days no search names.
+// Mirrors Python's `_searched_channels`.
+async function searchedChannels(accessor: SlackAccessor): Promise<ReadonlySet<string> | null> {
+  const searcher = accessor.transport.searcher?.() ?? null
+  if (searcher === null) return null
+  return new Set((await listChannels(new SlackAccessor(searcher))).map((channel) => channel.id))
+}
+
 async function search(
   accessor: SlackAccessor,
   text: string,
@@ -582,6 +595,7 @@ async function search(
   const names = await nameWords(accessor)
   if (words.some((word) => names.has(word))) return null
   const reaction = words.length === 1 ? (words[0] ?? '') : null
+  const searched = await searchedChannels(accessor)
   const found: PathSpec[] = []
   for (const scope of under) {
     const match = detectScope(scope)
@@ -591,6 +605,7 @@ async function search(
       const listed = await readdir(accessor, mountedPath(scope, '/channels'), index)
       const dirnames = listed.map((path) => path.slice(path.lastIndexOf('/') + 1))
       dirs = new Map(dirnames.map((name) => [parseIdName(name)[1], name]))
+      if (searched !== null && [...dirs.keys()].some((id) => !searched.has(id))) return null
       within = ''
     } else if (
       (match.kind === 'channel' || match.kind === 'day') &&
@@ -600,7 +615,7 @@ async function search(
       const dirname = scope.mountPath.split('/').filter((part) => part !== '')[1] ?? ''
       const channel = mountedPath(scope, `/channels/${dirname}`)
       const entry = await resolveEntry(readdir, accessor, channel, index)
-      if (entry === null) return null
+      if (entry === null || (searched !== null && !searched.has(entry.id))) return null
       dirs = new Map([[entry.id, dirname]])
       within = `in:#${entry.name} `
     } else continue

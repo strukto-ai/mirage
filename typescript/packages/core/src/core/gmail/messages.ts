@@ -52,6 +52,7 @@ export interface GmailMessageStub {
 
 interface ListMessagesResponse {
   messages?: GmailMessageStub[]
+  nextPageToken?: string
 }
 
 export interface GmailAttachmentInfo {
@@ -93,10 +94,15 @@ export interface ListMessagesOptions {
   maxResults?: number
 }
 
-export async function listMessages(
+/**
+ * One page of message stubs for a label or query, and the next page's token,
+ * null on the last page. Gmail may return fewer than `maxResults` stubs and
+ * still name a next page. Mirrors Python's `list_message_page`.
+ */
+export async function listMessagePage(
   tokenManager: TokenManager,
   opts: ListMessagesOptions = {},
-): Promise<GmailMessageStub[]> {
+): Promise<[GmailMessageStub[], string | null]> {
   const params: Record<string, string | number> = { maxResults: opts.maxResults ?? 50 }
   if (opts.labelId !== undefined && opts.labelId !== null && opts.labelId !== '') {
     params.labelIds = opts.labelId
@@ -106,7 +112,15 @@ export async function listMessages(
   }
   const url = `${gmailBase(tokenManager)}/users/me/messages`
   const data = (await googleGet(tokenManager, url, params)) as ListMessagesResponse
-  return data.messages ?? []
+  return [data.messages ?? [], data.nextPageToken ?? null]
+}
+
+export async function listMessages(
+  tokenManager: TokenManager,
+  opts: ListMessagesOptions = {},
+): Promise<GmailMessageStub[]> {
+  const [stubs] = await listMessagePage(tokenManager, opts)
+  return stubs
 }
 
 export async function getMessageRaw(

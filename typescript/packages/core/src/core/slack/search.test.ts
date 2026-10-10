@@ -212,7 +212,20 @@ class FakeSlack implements SlackTransport {
     private readonly pages = 1,
     private readonly fails: Error | null = null,
     private readonly shares = true,
+    private readonly hidden: ReadonlySet<string> = new Set(),
   ) {}
+
+  // The `hidden` channels are private ones a separate search token's user is
+  // not in: that user neither lists nor finds them.
+  searcher(): SlackTransport | null {
+    if (this.hidden.size === 0) return null
+    return {
+      call: (endpoint, params = {}) =>
+        endpoint === 'conversations.list'
+          ? Promise.resolve({ ok: true, channels: CHANNELS.filter((c) => !this.hidden.has(c.id)) })
+          : this.call(endpoint, params),
+    }
+  }
 
   call(endpoint: string, params: Record<string, string> = {}): Promise<SlackResponse> {
     if (endpoint === 'conversations.list') {
@@ -249,9 +262,9 @@ class FakeSlack implements SlackTransport {
     const names = words.filter((w) => w.startsWith('in:#')).map((w) => w.slice(4))
     const reaction = words.filter((w) => w.startsWith('has::')).map((w) => w.slice(5, -1))
     const text = words.filter((w) => !w.startsWith('in:#') && !w.startsWith('has::')).join(' ')
-    const ids = CHANNELS.filter((c) => names.length === 0 || names.includes(c.name)).map(
-      (c) => c.id,
-    )
+    const ids = CHANNELS.filter(
+      (c) => (names.length === 0 || names.includes(c.name)) && !this.hidden.has(c.id),
+    ).map((c) => c.id)
     if (names.length === 0) ids.push('D1')
     const matches: Record<string, unknown>[] = []
     for (const id of ids) {
@@ -396,4 +409,16 @@ describe('filesContaining', () => {
       warn.mockRestore()
     }
   })
+
+  // Twin of test_a_channel_the_search_user_is_not_in_is_read: random is
+  // private and the search token's user is not in it, so no search names its
+  // days; ruling them out would miss its deploy.
+  it.each(['grep -rlw deploy /slack/channels', 'rg -lw deploy /slack/channels/random__C2'])(
+    'reads a channel the search user is not in: %s',
+    async (line) => {
+      const full = await onSlack(line, new FakeSlack(), false)
+      const hidden = new FakeSlack(1, null, true, new Set(['C2']))
+      expect((await onSlack(line, hidden)).slice(0, 3)).toEqual(full.slice(0, 3))
+    },
+  )
 })

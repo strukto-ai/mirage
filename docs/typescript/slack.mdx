@@ -172,7 +172,10 @@ searched on its own are always read.
 Every day is read when the word is a key or fixed value of the message JSON, a
 file-type or URL word, a join or leave message word, or part of a user's name
 or of the workspace's domain, and when a search fails, returns more than 1,000
-messages or finds nothing. It is off by default: Slack indexes a message some
+messages or finds nothing. With a separate `searchToken`, every day is also read
+when the scope holds a private channel that token's user is not in, since their
+search never sees it; that token needs `channels:read` and `groups:read` to list
+the channels it sees. It is off by default: Slack indexes a message some
 time after it is posted, and a word held only in another field of a message (a
 bot's username, an unfurled link) is not searched.
 

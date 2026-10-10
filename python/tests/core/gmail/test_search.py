@@ -62,6 +62,7 @@ async def test_a_label_day_is_searched_within_its_bounds(gmail):
             FakeGmail(fails=aiohttp.ClientConnectionError("reset")),
         ),
         ("grep -rlw deploy /gmail", FakeGmail(fails=asyncio.TimeoutError())),
+        ("grep -rlw deploy /gmail", FakeGmail(more=True)),
     ],
 )
 async def test_every_message_is_read_when_search_cannot_answer(

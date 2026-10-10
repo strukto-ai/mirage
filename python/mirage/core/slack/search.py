@@ -26,6 +26,7 @@ from mirage.core.api.client import SessionArg
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes
+from mirage.core.slack.channels import list_channels
 from mirage.core.slack.client import slack_get, slack_search_available
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
@@ -35,6 +36,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.naming import parse_id_name
 from mirage.utils.record_search import record_queries
+from mirage.vfs.secrets import reveal_secret
 
 logger = logging.getLogger(__name__)
 
@@ -584,6 +586,27 @@ async def _hits_of(
     return hits
 
 
+async def _searched_channels(accessor: SlackAccessor) -> set[str] | None:
+    """The channels search covers, or None when it covers every listed one.
+
+    With ``search_token`` set, search runs as that token's user, who sees
+    every public channel but only the private ones they are in; the
+    listing's token may read a private channel they are not in, whose
+    days no search names. Without it both are the same user.
+
+    Args:
+        accessor (SlackAccessor): the workspace.
+    """
+    search_token = accessor.config.search_token
+    if not reveal_secret(search_token):
+        return None
+    searcher = accessor.config.model_copy(update={"token": search_token})
+    return {
+        channel["id"]
+        for channel in await list_channels(searcher, session=accessor.pool)
+    }
+
+
 async def files_containing(
     accessor: SlackAccessor,
     text: str,
@@ -599,11 +622,13 @@ async def files_containing(
     a channel with ``in:#name`` (``on:`` would read the day in the
     searcher's time zone); hits map to dirnames through the channel ids
     the listing holds. A scope with no channel day in it adds nothing,
-    and a day is cheaper to read than to search. None when ``text`` could
-    match the JSON around those fields (``record_queries``), a user's
-    name or the workspace's domain (``_name_words``), on an API or
-    connection error, past ``MAX_PAGES`` pages, or with no hit at all,
-    since Slack indexes a message some time after it is posted.
+    and a day is cheaper to read than to search. None when a channel in
+    scope is one search does not cover (``_searched_channels``), when
+    ``text`` could match the JSON around those fields
+    (``record_queries``), a user's name or the workspace's domain
+    (``_name_words``), on an API or connection error, past ``MAX_PAGES``
+    pages, or with no hit at all, since Slack indexes a message some time
+    after it is posted.
 
     Args:
         accessor (SlackAccessor): the workspace.
@@ -633,6 +658,7 @@ async def _search(
     if name_words is None or not set(words).isdisjoint(name_words):
         return None
     reaction = words[0] if len(words) == 1 else None
+    searched = await _searched_channels(accessor)
     found: list[PathSpec] = []
     for scope in under:
         match = detect_scope(scope)
@@ -642,6 +668,8 @@ async def _search(
             )
             names = [path.rsplit("/", 1)[-1] for path in listed]
             dirs = {parse_id_name(name)[1]: name for name in names}
+            if searched is not None and not dirs.keys() <= searched:
+                return None
             within = ""
         elif (
             match.kind in ("channel", "day")
@@ -652,7 +680,9 @@ async def _search(
             dirname = scope.mount_path.strip("/").split("/")[1]
             channel = mounted_path(scope, f"/channels/{dirname}")
             entry = await resolve_entry(readdir, accessor, channel, index)
-            if entry is None:
+            if entry is None or (
+                searched is not None and entry.id not in searched
+            ):
                 return None
             dirs = {entry.id: dirname}
             within = f"in:#{entry.name} "
