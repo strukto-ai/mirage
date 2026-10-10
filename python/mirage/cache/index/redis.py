@@ -39,6 +39,7 @@ from mirage.cache.index.config import (
 )
 from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
+    DEFAULT_KEY_PREFIX,
     ENTRY_PREFIX,
     GENERATION_KEY,
     PATHS_KEY,
@@ -356,7 +357,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         ttl: float = 600,
         url: str = "redis://localhost:6379/0",
         client: Redis | None = None,
-        key_prefix: str = "",
+        key_prefix: str = DEFAULT_KEY_PREFIX,
     ) -> None:
         super().__init__()
         self._ttl = ttl
