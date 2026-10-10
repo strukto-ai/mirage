@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
 
 import pytest
 
@@ -174,7 +175,21 @@ async def test_only_the_newest_finished_records_are_kept(monkeypatch):
     await table.wait(first.id)
     second = submit(table, lambda: asyncio.sleep(0))
     await table.wait(second.id)
-    assert [job.id for job in table.list()] == [second.id]
     with pytest.raises(KeyError):
         table.get(first.id)
+    assert table.cancel(first.id) is False
+    assert [job.id for job in table.list()] == [second.id]
+    await table.close()
+
+
+@pytest.mark.asyncio
+async def test_finished_records_expire_after_an_hour(monkeypatch):
+    table = JobTable()
+    job = submit(table, lambda: asyncio.sleep(0))
+    await table.wait(job.id)
+    later = time.time() + 3601
+    monkeypatch.setattr("mirage.server.jobs.time.time", lambda: later)
+    with pytest.raises(KeyError):
+        table.get(job.id)
+    assert table.list() == []
     await table.close()

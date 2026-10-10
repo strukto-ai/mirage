@@ -76,7 +76,7 @@ import {
 import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { mergeSignals } from '../../utils/abort.ts'
+import { joinOrAbort, mergeSignals } from '../../utils/abort.ts'
 import { lineSignal } from '../abort.ts'
 import {
   captureRecordingContext,
@@ -1131,7 +1131,7 @@ export class MountEntry {
         : cmdOpts
     try {
       return await runWithTimeout(
-        Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts)),
+        joinOrAbort(Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts)), runSignal),
         cmdTimeout,
         cmdName,
       )

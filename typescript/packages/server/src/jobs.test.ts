@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { JobStatus, JobTable } from './jobs.ts'
+import { MAX_FINISHED_JOBS } from './constants.ts'
 
 function gate() {
   let release!: () => void
@@ -183,11 +184,39 @@ describe('async execution ownership', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       vi.setSystemTime(Date.now() + 3601_000)
-      expect(table.list()).toEqual([])
       expect(table.get(job.id)).toBeNull()
+      expect(table.list()).toEqual([])
     } finally {
       vi.useRealTimers()
     }
+    await table.close()
+  })
+
+  it('keeps only the newest finished records', async () => {
+    const table = new JobTable()
+    const jobs = Array.from({ length: MAX_FINISHED_JOBS + 1 }, () =>
+      submit(table, () => Promise.resolve(null)),
+    )
+    await Promise.all(jobs.map((job) => table.wait(job.id)))
+    const [first] = jobs
+    if (first === undefined) throw new Error('no job')
+    expect(table.get(first.id)).toBeNull()
+    expect(table.cancel(first.id)).toBe(false)
+    expect(table.list()).toHaveLength(MAX_FINISHED_JOBS)
+    await table.close()
+  })
+
+  it('waits for a timeout past the timer limit', async () => {
+    const table = new JobTable()
+    const { wait, release } = gate()
+    const job = submit(table, async () => {
+      await wait
+      return 'done'
+    })
+    const waited = table.wait(job.id, 2_592_000)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    release()
+    expect((await waited).status).toBe(JobStatus.DONE)
     await table.close()
   })
 })

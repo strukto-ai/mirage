@@ -16,6 +16,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
+import anyio
 import jsonschema
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -90,9 +91,12 @@ async def call_tool(
         await asyncio.wait({call, gone}, return_when=asyncio.FIRST_COMPLETED)
     finally:
         gone.cancel()
-    if not call.done():
-        call.cancel()
-        await asyncio.wait({call})
+        canceled = not call.done()
+        if canceled:
+            call.cancel()
+            with anyio.CancelScope(shield=True):
+                await asyncio.wait({call})
+    if canceled:
         return ToolResponse(text="tool canceled", is_error=True)
     try:
         result = call.result()

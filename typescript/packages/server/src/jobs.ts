@@ -19,6 +19,7 @@ import {
 } from '@struktoai/mirage-core/execution/types'
 import { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { sleep } from '@struktoai/mirage-core/utils/abort'
 import { FINISHED_JOB_RETENTION_SECONDS, MAX_FINISHED_JOBS } from './constants.ts'
 
 export { JobStatus, type JobEntry }
@@ -43,6 +44,7 @@ export class JobTable {
   private closing: Promise<void> | undefined
 
   get(id: string): JobEntry | null {
+    this.prune()
     return this.runs.get(id)?.record ?? null
   }
 
@@ -138,6 +140,7 @@ export class JobTable {
       error,
       finishedAt: Date.now() / 1000,
     }
+    this.prune()
   }
 
   /** The execution once it finishes, or as it stands at the timeout. */
@@ -147,14 +150,10 @@ export class JobTable {
     if (timeoutSeconds === undefined) {
       await run.settled
     } else {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      await Promise.race([
-        run.settled,
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, Math.max(0, timeoutSeconds) * 1000)
-        }),
-      ])
-      clearTimeout(timer)
+      const timer = new AbortController()
+      const elapsed = sleep(Math.max(0, timeoutSeconds) * 1000, timer.signal).catch(() => undefined)
+      await Promise.race([run.settled, elapsed])
+      timer.abort()
     }
     return run.record
   }
@@ -180,7 +179,7 @@ export class JobTable {
   /** Stop an execution and record that it was asked to stop. Answers whether this call did. */
   cancel(id: string): boolean {
     const run = this.runs.get(id)
-    if (run === undefined) throw new Error(`job not found: ${id}`)
+    if (run === undefined) return false
     if (run.record.finishedAt !== null || run.record.cancelRequested) return false
     run.record = { ...run.record, cancelRequested: true, status: JobStatus.STOPPING }
     run.controller.abort()

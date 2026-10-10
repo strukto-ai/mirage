@@ -56,6 +56,7 @@ class JobTable:
         self._closing: asyncio.Task[None] | None = None
 
     def get(self, job_id: str) -> JobEntry:
+        self._prune()
         return self._runs[job_id].record
 
     def list(self, workspace_id: str | None = None) -> list[JobEntry]:
@@ -152,6 +153,7 @@ class JobTable:
             finished_at=time.time(),
         )
         run.settled.set()
+        self._prune()
 
     async def wait(
         self, job_id: str, timeout: float | None = None
@@ -199,10 +201,15 @@ class JobTable:
             job_id (str): execution to cancel.
 
         Returns:
-            bool: whether this call cancelled the execution.
+            bool: whether this call cancelled the execution; False for one
+            already finished, or finished and evicted.
         """
-        run = self._runs[job_id]
-        if run.record.finished_at is not None or run.record.cancel_requested:
+        run = self._runs.get(job_id)
+        if (
+            run is None
+            or run.record.finished_at is not None
+            or run.record.cancel_requested
+        ):
             return False
         run.record = replace(
             run.record, cancel_requested=True, status=JobStatus.STOPPING

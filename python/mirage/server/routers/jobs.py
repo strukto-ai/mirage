@@ -125,9 +125,5 @@ async def wait_job(
 @router.delete("/{job_id}", response_model=CancelResponse)
 async def cancel_job(job_id: str, request: Request) -> CancelResponse:
     await _require_job(request, job_id)
-    table = request.app.state.jobs
-    try:
-        canceled = table.cancel(job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="job not found") from exc
+    canceled = request.app.state.jobs.cancel(job_id)
     return CancelResponse(job_id=job_id, canceled=canceled)

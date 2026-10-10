@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import inspect
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -46,7 +47,12 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks
-from mirage.io.stream import OutputStream, close_quietly, materialize
+from mirage.io.stream import (
+    OutputStream,
+    close_quietly,
+    materialize,
+    wrap_cachable_streams,
+)
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
@@ -612,6 +618,11 @@ async def handle_cli(
         if binding.write and drop_caches is not None:
             await drop_caches()
         raise
+    except asyncio.CancelledError:
+        # A canceled leaf may already have sent its write too.
+        if binding.write and drop_caches is not None:
+            await drop_caches()
+        raise
     except Exception as exc:
         # Any other thrown leaf error (an API RuntimeError, a ValueError)
         # becomes this command's IOResult, prefixed like GNU
@@ -636,7 +647,7 @@ async def handle_cli(
     if out is None:
         stdout, io = None, IOResult()
     else:
-        stdout, io = out
+        stdout, io = wrap_cachable_streams(*out)
     # The spec's `write` is the one answer: what policy calls a write,
     # the cache does too, so a verb that can mutate (`gh api` under any
     # method) costs the mounts a reload rather than a stale read.

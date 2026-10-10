@@ -36,7 +36,7 @@ import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { OutputStream, closeQuietly, wrapCachableStreams } from '../../../io/stream.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { SessionState } from '../../session/session.ts'
@@ -492,7 +492,7 @@ export async function handleCli(
   try {
     const out = await runWithTimeout(body, timeout, prog)
     if (out !== null) {
-      ;[stdout, io] = out
+      ;[stdout, io] = wrapCachableStreams(...out)
     }
   } catch (err) {
     // Leaf-raised usage errors (a malformed --json) keep the bare

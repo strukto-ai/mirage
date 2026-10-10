@@ -24,6 +24,7 @@ from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
+from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
@@ -340,6 +341,55 @@ async def test_a_timed_out_write_still_drops_the_caches():
             install, ["prog", "run"], SessionState("t"), drop_caches=drop
         )
     assert dropped == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_canceled_write_still_drops_the_caches():
+    dropped = []
+    entered = asyncio.Event()
+
+    async def drop():
+        dropped.append(True)
+
+    async def send(inv):
+        entered.set()
+        await asyncio.Event().wait()
+
+    spec = CLI(
+        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
+        handlers={"run": CLIHandler(fn=send, write=True)},
+        config_model=TokenConfig,
+    )
+    install = CLIInstall(name="prog", cli=spec, config=TokenConfig(token="t"))
+    calling = asyncio.create_task(
+        handle_cli(
+            install, ["prog", "run"], SessionState("t"), drop_caches=drop
+        )
+    )
+    await entered.wait()
+    calling.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await calling
+    assert dropped == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_cached_read_outlives_the_output_reading_it():
+    async def source():
+        yield b"body"
+
+    async def read(inv):
+        stream = source()
+        return stream, IOResult(reads={"/f": stream}, cache=["/f"])
+
+    cli = CLI(CommandSpec(name="reader"), handlers={"": CLIHandler(read)})
+    stdout, io, _ = await handle_cli(
+        CLIInstall(name="reader", cli=cli), ["reader"], SessionState("t")
+    )
+    assert await materialize(stdout) == b"body"
+    cached = io.reads["/f"]
+    assert isinstance(cached, CachableAsyncIterator)
+    assert await cached.drain() == b"body"
 
 
 @pytest.mark.asyncio
