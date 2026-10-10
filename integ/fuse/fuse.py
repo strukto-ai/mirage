@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import faulthandler
 import json
 import os
 import shutil
@@ -417,6 +418,9 @@ def run_external_unmount_probe(result: dict[str, ProbeValue]) -> None:
 
 
 def main() -> None:
+    # A mount that stops answering blocks this process in a file call:
+    # print every thread's stack and exit rather than hold the job.
+    faulthandler.dump_traceback_later(600, exit=True)
     result: dict[str, ProbeValue] = {}
     data = RAMVFS()
     data._store.dirs.add("/")

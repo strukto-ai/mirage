@@ -1400,6 +1400,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 20
     # Advisory only: WinFsp support is experimental, this job is not in the
     # gate and never blocks a merge. It exists to surface what actually
     # breaks on Windows. Python only: mfusepy is ctypes and ships a WinFsp
