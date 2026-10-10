@@ -1454,9 +1454,13 @@ jobs:
       - name: Run Python FUSE mount and check (WinFsp)
         shell: bash
         # Dump the raw output before checking: on failure the traceback is
-        # the whole point of this advisory job.
+        # the whole point of this advisory job. A process blocked on its own
+        # WinFsp mount may never exit, so the wait is bounded and the
+        # output, the runner's stack dump included, is printed either way.
         run: |
-          ./python/.venv/Scripts/python integ/fuse/fuse.py > /tmp/fuse-win.out 2>&1 || true
+          ./python/.venv/Scripts/python integ/fuse/fuse.py > /tmp/fuse-win.out 2>&1 &
+          pid=$!
+          for _ in $(seq 72); do kill -0 "$pid" 2>/dev/null || break; sleep 5; done
           cat /tmp/fuse-win.out
           ./python/.venv/Scripts/python integ/check_json.py integ/fuse/truth_fuse.json < /tmp/fuse-win.out
 
