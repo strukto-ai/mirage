@@ -35,7 +35,10 @@ function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): Fi
     type: FileType.FILE,
     content: ContentType.JSON,
     size: entry.size,
-    extra: { message_id: entry.id, ...entry.extra },
+    extra: {
+      message_id: entry.id,
+      ...('size_estimate' in entry.extra ? { size_estimate: entry.extra.size_estimate } : {}),
+    },
   })
 }
 

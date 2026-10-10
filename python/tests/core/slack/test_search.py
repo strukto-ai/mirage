@@ -22,7 +22,7 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.search import (
     MAX_PAGES,
-    _name_words,
+    _search_facts,
     search_files,
     search_messages,
 )
@@ -109,16 +109,18 @@ async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
 async def test_a_day_is_read_rather_than_searched(slack):
     line = "grep -rlw deploy /slack/channels/general__C1/2025-11-06"
     full = await slack(line, content_search=False)
-    out, code, read, searches = await slack(line)
+    fake = FakeSlack()
+    out, code, read, searches = await slack(line, fake)
     assert (out, code, read) == full[:3]
-    assert searches == []
+    assert (searches, fake.user_lists) == ([], 0)
 
 
 @pytest.mark.asyncio
 async def test_the_patterns_of_one_grep_share_one_user_listing(slack):
     fake = FakeSlack()
-    await slack("grep -rlw -e deploy -e lunch /slack/channels", fake)
-    assert fake.user_lists == 1
+    line = "grep -rlw -e deploy -e lunch /slack/channels"
+    await slack(line, fake, search_token=SEARCHER)
+    assert (fake.user_lists, fake.searcher_lists) == (1, 1)
 
 
 @pytest.mark.asyncio
@@ -137,16 +139,16 @@ async def test_a_stopped_search_stops_its_user_listing(monkeypatch):
 
     monkeypatch.setattr("mirage.core.slack.paginate.slack_get", hang)
     accessor = SlackAccessor(SlackConfig(token="xoxp-test"))
-    first = asyncio.create_task(_name_words(accessor))
+    first = asyncio.create_task(_search_facts(accessor))
     await listing.wait()
-    second = asyncio.create_task(_name_words(accessor))
+    second = asyncio.create_task(_search_facts(accessor))
     await asyncio.sleep(0)
     first.cancel()
     assert await second is None
     await asyncio.wait([first])
     assert first.cancelled()
     assert stopped.is_set()
-    assert accessor.name_words is None
+    assert accessor.search_facts is None
 
 
 @pytest.mark.asyncio

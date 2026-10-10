@@ -57,12 +57,14 @@ function message(
   subject: string,
   body: string,
   attachment = '',
+  mime = 'text/plain',
+  snippet: string | null = null,
 ): Message {
   const parts: Message['payload']['parts'] = [{ mimeType: 'text/plain', body: { data: b64(body) } }]
   if (attachment !== '') {
     parts.push({
       filename: attachment,
-      mimeType: 'text/plain',
+      mimeType: mime,
       body: { attachmentId: `A${id}`, size: 5 },
     })
   }
@@ -71,7 +73,7 @@ function message(
     threadId: id,
     labelIds,
     internalDate: String(Date.parse(`${day}T09:00:00Z`)),
-    snippet: body,
+    snippet: snippet ?? body,
     payload: {
       mimeType: 'multipart/mixed',
       headers: [
@@ -105,6 +107,28 @@ const MESSAGES = [
   ),
   message('c3', ['TRASH'], '2026-01-06', 'Cy <cy@example.com>', 'Old', 'deploy'),
   message('d4', ['INBOX'], '2026-01-07', 'Di <di@example.com>', 'Notes', 'quiet'),
+  message(
+    'e5',
+    ['INBOX'],
+    '2026-01-07',
+    'Ed <ed@example.com>',
+    'Report',
+    'see attached',
+    'report',
+    'application/rtf',
+  ),
+  message('f6', ['INBOX'], '2026-01-07', 'Fa <fa@example.com>', 'Formats', 'rtf beats doc'),
+  message(
+    'g7',
+    ['INBOX'],
+    '2026-01-08',
+    'Gi <gi@example.com>',
+    'Trip',
+    'the traveler program',
+    '',
+    'text/plain',
+    'the travel',
+  ),
 ]
 
 function holds(text: string, word: string): boolean {
@@ -229,6 +253,20 @@ describe('filesContaining', () => {
     ['grep -rlw deploy /gmail/INBOX/2026-01-06', ['b2']],
     ['rg -lw friday /gmail/Work', ['b2']],
   ])('reads only the messages search names for %s', async (line, reads) => {
+    const full = await onGmail(line, new FakeGmail(), false)
+    const [out, code, read] = await onGmail(line)
+    expect([out, code]).toEqual(full.slice(0, 2))
+    expect(read).toEqual(reads)
+  })
+
+  // Twin of test_text_gmail_does_not_search_is_checked_in_the_listing: e5
+  // holds rtf only in its attachment's MIME type, and g7 holds travel only in
+  // a snippet cut inside traveler; Gmail searches neither, so the listing's
+  // copy of them is checked.
+  it.each([
+    ['grep -rlw rtf /gmail/INBOX', ['e5', 'f6']],
+    ['grep -rlw travel /gmail/INBOX', ['a1', 'g7']],
+  ])('checks what Gmail does not search in the listing for %s', async (line, reads) => {
     const full = await onGmail(line, new FakeGmail(), false)
     const [out, code, read] = await onGmail(line)
     expect([out, code]).toEqual(full.slice(0, 2))

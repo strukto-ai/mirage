@@ -260,6 +260,8 @@ its messages, so this saves the second fetch of each message it rules out.
 Attachments are always read.
 
 Every message is read when the word is a key of the message JSON, a system
-label, a Date header or MIME type word, and when a search fails, reaches 500
-messages, answers with a next page or finds nothing. It is off by default: Gmail indexes a message some
-time after it arrives.
+label or a Date header word, and when a search fails, reaches 500 messages,
+answers with a next page or finds nothing. A message whose snippet or
+attachment MIME type holds the word is read too, since Gmail search reads
+neither. It is off by default: Gmail indexes a message some time after it
+arrives.

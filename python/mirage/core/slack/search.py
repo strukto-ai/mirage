@@ -467,32 +467,40 @@ async def _fetch_name_words(accessor: SlackAccessor) -> frozenset[str]:
     return frozenset(words)
 
 
-async def _name_words(accessor: SlackAccessor) -> frozenset[str] | None:
-    """The words of every user's name and of the workspace's domain.
+async def _search_facts(
+    accessor: SlackAccessor,
+) -> tuple[frozenset[str], frozenset[str] | None] | None:
+    """The words of every user's name and of the workspace's domain, and
+    the channels search covers (``_searched_channels``).
 
     A message may carry its author's profile and a file its permalink on
     the workspace's domain. The patterns of one grep ask at once, so the
     first fetches in its own task and the rest wait for its answer; a
-    later command fetches again and sees a user added since. None to a
-    waiter when that fetch failed or its command was stopped.
+    later command fetches again and sees a user or channel added since.
+    None to a waiter when that fetch failed or its command was stopped.
 
     Args:
         accessor (SlackAccessor): the workspace.
     """
     loop = asyncio.get_running_loop()
-    shared = accessor.name_words
+    shared = accessor.search_facts
     if shared is not None and shared.get_loop() is loop:
         return await asyncio.shield(shared)
-    ready: asyncio.Future[frozenset[str] | None] = loop.create_future()
-    accessor.name_words = ready
-    words: frozenset[str] | None = None
+    ready: asyncio.Future[
+        tuple[frozenset[str], frozenset[str] | None] | None
+    ] = loop.create_future()
+    accessor.search_facts = ready
+    facts: tuple[frozenset[str], frozenset[str] | None] | None = None
     try:
-        words = await _fetch_name_words(accessor)
-        return words
+        facts = (
+            await _fetch_name_words(accessor),
+            await _searched_channels(accessor),
+        )
+        return facts
     finally:
-        ready.set_result(words)
-        if accessor.name_words is ready:
-            accessor.name_words = None
+        ready.set_result(facts)
+        if accessor.search_facts is ready:
+            accessor.search_facts = None
 
 
 def _day_of(ts: Any) -> str | None:
@@ -586,7 +594,9 @@ async def _hits_of(
     return hits
 
 
-async def _searched_channels(accessor: SlackAccessor) -> set[str] | None:
+async def _searched_channels(
+    accessor: SlackAccessor,
+) -> frozenset[str] | None:
     """The channels search covers, or None when it covers every listed one.
 
     With ``search_token`` set, search runs as that token's user, who sees
@@ -601,10 +611,10 @@ async def _searched_channels(accessor: SlackAccessor) -> set[str] | None:
     if not reveal_secret(search_token):
         return None
     searcher = accessor.config.model_copy(update={"token": search_token})
-    return {
+    return frozenset(
         channel["id"]
         for channel in await list_channels(searcher, session=accessor.pool)
-    }
+    )
 
 
 async def files_containing(
@@ -626,7 +636,7 @@ async def files_containing(
     scope is one search does not cover (``_searched_channels``), when
     ``text`` could match the JSON around those fields
     (``record_queries``), a user's name or the workspace's domain
-    (``_name_words``), on an API or connection error, past ``MAX_PAGES``
+    (``_search_facts``), on an API or connection error, past ``MAX_PAGES``
     pages, or with no hit at all, since Slack indexes a message some time
     after it is posted.
 
@@ -653,15 +663,22 @@ async def _search(
     under: list[PathSpec],
     index: IndexCacheStore,
 ) -> list[PathSpec] | None:
+    scopes = [(scope, detect_scope(scope)) for scope in under]
+    if any(
+        match.kind == "day" and match.slots["container"] == "channels"
+        for _, match in scopes
+    ):
+        return None
     words = text.lower().split()
-    name_words = await _name_words(accessor)
-    if name_words is None or not set(words).isdisjoint(name_words):
+    facts = await _search_facts(accessor)
+    if facts is None:
+        return None
+    name_words, searched = facts
+    if not set(words).isdisjoint(name_words):
         return None
     reaction = words[0] if len(words) == 1 else None
-    searched = await _searched_channels(accessor)
     found: list[PathSpec] = []
-    for scope in under:
-        match = detect_scope(scope)
+    for scope, match in scopes:
         if match.kind in (ROOT, "channels_root"):
             listed = await readdir(
                 accessor, mounted_path(scope, "/channels"), index
@@ -672,11 +689,8 @@ async def _search(
                 return None
             within = ""
         elif (
-            match.kind in ("channel", "day")
-            and match.slots["container"] == "channels"
+            match.kind == "channel" and match.slots["container"] == "channels"
         ):
-            if match.kind == "day":
-                return None
             dirname = scope.mount_path.strip("/").split("/")[1]
             channel = mounted_path(scope, f"/channels/{dirname}")
             entry = await resolve_entry(readdir, accessor, channel, index)

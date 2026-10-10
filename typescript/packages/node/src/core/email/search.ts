@@ -126,7 +126,9 @@ export function buildVfsPath(prefix: string, folder: string, msg: FetchedMessage
  * is a message that may hold `text`; its file is named from its Subject and
  * Date, fetched alone. A day is asked for its whole folder. null when a scope
  * is not a folder or a day, when `text` could match the JSON outside the
- * headers and body (`recordQueries`), or when the server fails.
+ * headers and body (`recordQueries`), when more than `maxMessages` match (the
+ * newest would leave out older ones a cached listing still holds), or when
+ * the server fails. Mirrors Python's `files_containing`.
  */
 export async function filesContaining(
   accessor: EmailAccessor,
@@ -142,16 +144,13 @@ export async function filesContaining(
     const folder = match.slots.folder
     if (!NATIVE_KINDS.has(match.kind) || folder === undefined) return null
     const segment = scope.mountPath.replace(/^\/+/, '').split('/')[0] ?? ''
+    const cap = accessor.config.maxMessages
     let named: FetchedMessage[]
     try {
       const uids = new Set<string>()
       for (const query of queries) {
-        const hits = await searchMessages(
-          accessor,
-          folder,
-          { text: query },
-          accessor.config.maxMessages,
-        )
+        const hits = await searchMessages(accessor, folder, { text: query }, cap + 1)
+        if (hits.length > cap) return null
         for (const uid of hits) uids.add(uid)
       }
       const ordered = [...uids].sort((a, b) => Number(a) - Number(b))

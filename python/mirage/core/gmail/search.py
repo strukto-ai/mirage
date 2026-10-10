@@ -21,13 +21,12 @@ from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.gmail.date_query import date_dir_to_gmail_query
 from mirage.core.gmail.messages import list_message_page
-from mirage.core.gmail.readdir import MSG_SUFFIX, readdir
+from mirage.core.gmail.readdir import readdir
 from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.scope import ROOT
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.naming import parse_id_name
 from mirage.utils.record_search import record_queries
 
 logger = logging.getLogger(__name__)
@@ -35,8 +34,9 @@ logger = logging.getLogger(__name__)
 MAX_HITS = 500
 
 # What a .gmail.json holds besides the headers, body and attachment names
-# Gmail searches: its key names, JSON literals, system label ids, the
-# words of a Date header, the entities a snippet escapes and MIME types.
+# Gmail searches: its key names, JSON literals, system label ids and the
+# words of a Date header. The snippet and the attachments' MIME types are
+# checked against the listing instead (``unsearched_text``).
 RECORD_KEYS = frozenset(
     {
         "id",
@@ -104,51 +104,6 @@ RECORD_KEYS = frozenset(
         "eastern",
         "central",
         "mountain",
-        "amp",
-        "quot",
-        "apos",
-        "lt",
-        "gt",
-        "nbsp",
-        "text",
-        "plain",
-        "html",
-        "csv",
-        "markdown",
-        "calendar",
-        "pdf",
-        "image",
-        "png",
-        "jpeg",
-        "jpg",
-        "gif",
-        "webp",
-        "svg",
-        "audio",
-        "video",
-        "mpeg",
-        "application",
-        "octet",
-        "stream",
-        "zip",
-        "json",
-        "xml",
-        "x",
-        "vnd",
-        "ms",
-        "msword",
-        "excel",
-        "powerpoint",
-        "openxmlformats",
-        "officedocument",
-        "spreadsheetml",
-        "sheet",
-        "wordprocessingml",
-        "document",
-        "presentationml",
-        "presentation",
-        "message",
-        "rfc",
     }
 )
 
@@ -164,9 +119,17 @@ def _child_of(directory: PathSpec, name: str) -> PathSpec:
 
 
 async def _messages_under(
-    accessor: GmailAccessor, directory: PathSpec, index: IndexCacheStore
-) -> dict[str, list[PathSpec]]:
+    accessor: GmailAccessor,
+    directory: PathSpec,
+    text: str,
+    index: IndexCacheStore,
+) -> tuple[dict[str, list[PathSpec]], set[str]] | None:
+    """The message files under ``directory`` by id, and the ids whose
+    unsearched text (``unsearched_text``) holds ``text``; None when a
+    listing does not carry that text.
+    """
     found: dict[str, list[PathSpec]] = {}
+    unsearched: set[str] = set()
     pending = [directory]
     while pending:
         current = pending.pop()
@@ -176,15 +139,19 @@ async def _messages_under(
             if kind == "day":
                 pending.append(child)
             elif kind == "message":
-                name = _name_of(child.mount_path)
-                message_id = parse_id_name(name, suffix=MSG_SUFFIX)[1]
-                found.setdefault(message_id, []).append(child)
-    return found
+                entry = await resolve_entry(readdir, accessor, child, index)
+                if entry is None or "unsearched" not in entry.extra:
+                    return None
+                found.setdefault(entry.id, []).append(child)
+                if text.lower() in entry.extra["unsearched"]:
+                    unsearched.add(entry.id)
+    return found, unsearched
 
 
 async def _hits_under(
     accessor: GmailAccessor,
     directory: PathSpec,
+    text: str,
     queries: list[str],
     index: IndexCacheStore,
 ) -> list[PathSpec] | None:
@@ -206,8 +173,15 @@ async def _hits_under(
         if more is not None or len(stubs) >= MAX_HITS:
             return None
         ids.update(stub["id"] for stub in stubs)
-    files = await _messages_under(accessor, directory, index)
-    return [path for message_id in ids for path in files.get(message_id, [])]
+    walked = await _messages_under(accessor, directory, text, index)
+    if walked is None:
+        return None
+    files, unsearched = walked
+    return [
+        path
+        for message_id in ids | unsearched
+        for path in files.get(message_id, [])
+    ]
 
 
 async def files_containing(
@@ -222,7 +196,9 @@ async def files_containing(
     ``filename:``) attachment names, so each hit is a message that may
     hold ``text``. Each label is searched on its own, since an account
     search leaves out spam and trash; a day adds its UTC bounds. Hits map
-    to files by the message id the listing names them with. None when
+    to files by the message id the listing names them with, and a message
+    whose snippet or attachment MIME type holds ``text`` is a hit too:
+    Gmail does not search them, and the listing keeps them. None when
     ``text`` could match the JSON around those fields
     (``record_queries``), on an API or connection error, at ``MAX_HITS``
     hits or when the answer names a next page, or with no hit at all,
@@ -250,7 +226,9 @@ async def files_containing(
             else:
                 continue
             for directory in labels:
-                hits = await _hits_under(accessor, directory, queries, index)
+                hits = await _hits_under(
+                    accessor, directory, text, queries, index
+                )
                 if hits is None:
                     return None
                 found.extend(hits)

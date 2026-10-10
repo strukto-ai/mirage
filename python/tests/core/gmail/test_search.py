@@ -39,6 +39,26 @@ async def test_a_word_reads_only_the_messages_search_names(gmail, line, reads):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, reads",
+    [
+        # e5 holds rtf only in its attachment's MIME type, and g7 holds
+        # travel only in a snippet cut inside traveler; Gmail searches
+        # neither, so the listing's copy of them is checked.
+        ("grep -rlw rtf /gmail/INBOX", ["e5", "f6"]),
+        ("grep -rlw travel /gmail/INBOX", ["a1", "g7"]),
+    ],
+)
+async def test_text_gmail_does_not_search_is_checked_in_the_listing(
+    gmail, line, reads
+):
+    full = await gmail(line, content_search=False)
+    out, code, read, _ = await gmail(line)
+    assert (out, code) == full[:2]
+    assert read == reads
+
+
+@pytest.mark.asyncio
 async def test_a_label_day_is_searched_within_its_bounds(gmail):
     *_, searches = await gmail("grep -rlw deploy /gmail/INBOX/2026-01-06")
     assert searches == [

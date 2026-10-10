@@ -274,6 +274,17 @@ function processMessage(raw: GmailMessageRaw): GmailMessageProcessed {
   }
 }
 
+/**
+ * What a message's .gmail.json holds that Gmail search does not read. The
+ * snippet is Gmail's own cut of the body, escaped as HTML, so it can end inside
+ * a word or spell an entity, and an attachment's MIME type is not searched at
+ * all. Lowercased, for a case-folded look. Mirrors Python's `unsearched_text`.
+ */
+export function unsearchedText(raw: GmailMessageRaw): string {
+  const types = extractProcessedAttachments(raw.payload).map((a) => a.mime_type)
+  return [raw.snippet ?? '', ...types].join('\n').toLowerCase()
+}
+
 // The single renderer behind both read and the readdir-time size, so
 // stat().size == len(read()) by construction.
 export function messageJsonBytes(raw: GmailMessageRaw): Uint8Array {
