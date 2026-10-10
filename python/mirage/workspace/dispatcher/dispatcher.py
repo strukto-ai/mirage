@@ -148,6 +148,32 @@ def _served(report: OpReport | None, result: Any) -> None:
         )
 
 
+async def _sized(mount: MountEntry, path: PathSpec, row: Any) -> Any:
+    """A stat row with the length the file cache holds, when the backend
+    named none.
+
+    An API mount cannot size a file without fetching it, so once a read
+    kept its bytes, their length is the size. The backfill command stats
+    already make (``generic_bind``), here once for every caller of the
+    dispatcher (``ws.vfs``, FUSE, a runtime's ``os.stat``). The length
+    alone, read without revalidating: it serves no content.
+
+    Args:
+        mount (MountEntry): the mount that answered the stat.
+        path (PathSpec): the path it answered for.
+        row (Any): the stat's answer.
+    """
+    manager = mount.cache_manager
+    if (
+        not isinstance(row, FileStat)
+        or row.size is not None
+        or manager is None
+    ):
+        return row
+    size = await manager.cached_size(path)
+    return row if size is None else row.model_copy(update={"size": size})
+
+
 async def _primed(
     stream: AsyncIterator[bytes], report: OpReport | None
 ) -> AsyncIterator[bytes]:
@@ -1167,6 +1193,8 @@ class Dispatcher:
                 result = await mount.call(
                     call.name, call.path.virtual, **kwargs
                 )
+                if call.name == "stat":
+                    result = await _sized(mount, call.path, result)
         except (FileNotFoundError, NotADirectoryError):
             result = self._namespace_result(call.name, call.path.virtual)
             if result is None:

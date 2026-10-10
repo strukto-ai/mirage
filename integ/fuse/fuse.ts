@@ -26,6 +26,7 @@ import {
   MountBackend,
   MountMode,
   parseSessionProfile,
+  PathSpec,
   RAMVFS,
   Workspace,
   type Action,
@@ -35,28 +36,32 @@ import {
 } from '@struktoai/mirage-node'
 import { resolveFusermountBinary } from '@struktoai/mirage-node/fuse/mount'
 
-// Size-unknown probe: a stat wrapper simulates API-backed mounts (Linear,
-// Slack, Trello, ...) whose byte size is unknown until the content is
-// fetched. Over FUSE such files must stat as 0 until first open and read
-// fully afterwards (see the CLAUDE.md FUSE section).
+// Size-unknown probe: a caching mount whose backend names no size simulates
+// API-backed mounts (Linear, Slack, Trello, ...) whose byte size is unknown
+// until the content is fetched. Over FUSE such files must stat as 0 until
+// first open and read fully afterwards, and once read the workspace cache
+// sizes them (see the CLAUDE.md FUSE section).
 const API_CONTENT = '{"messages": 2}\n'
+
+class SizelessRAM extends RAMVFS {
+  override readonly cachesReads = true
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const s = await super.stat(path)
+    return s.type === FileType.DIRECTORY ? s : s.with({ size: null })
+  }
+}
 
 async function runSizelessProbe(
   result: Record<string, string | number | boolean | null>,
 ): Promise<void> {
   const enc = new TextEncoder()
-  const api = new RAMVFS()
+  const api = new SizelessRAM()
   api.store.dirs.add('/')
   api.store.files.set('/api.json', enc.encode(API_CONTENT))
   const ws = new Workspace({
     '/api': new Mount(api, { mode: MountMode.READ }),
   })
-  const realStat = ws.vfs.stat.bind(ws.vfs)
-  ws.vfs.stat = async (path, sessionId, opts) => {
-    const s = await realStat(path, sessionId, opts)
-    if (s.type === FileType.DIRECTORY) return s
-    return new FileStat({ name: s.name, type: s.type, size: null })
-  }
   const handle = await fuseMount(ws)
   const apiFile = join(handle.mountpoint, 'api', 'api.json')
   try {
@@ -382,6 +387,17 @@ async function main(): Promise<void> {
       await sparse.close()
     }
     result.sparse_writes_body = await readFile(`${dataMp}/s.txt`, 'utf8')
+    // A read through the descriptor that wrote sees the write before it is
+    // flushed, as on any filesystem.
+    const own = await open(`${dataMp}/w.txt`, 'w+')
+    try {
+      await own.write(enc.encode('written'), 0, 7, 0)
+      const back = Buffer.alloc(64)
+      const { bytesRead } = await own.read(back, 0, 64, 0)
+      result.kernel_reads_its_own_writes = back.subarray(0, bytesRead).toString('utf8')
+    } finally {
+      await own.close()
+    }
     // A chmod through the mount is stored, and an open handle reports it.
     await chmod(`${dataMp}/a.txt`, 0o600)
     result.kernel_chmod_kept = ((await stat(`${dataMp}/a.txt`)).mode & 0o7777) === 0o600

@@ -16,6 +16,7 @@ import { constants as fsConstants } from 'node:fs'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enotsup } from '@struktoai/mirage-core/errors/fs'
 import { DIR_SIZE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
@@ -25,6 +26,29 @@ import { MountCore } from './core.ts'
 import { errnoError } from './errors.ts'
 
 const NAIVE_STAMP = '2026-01-02T03:04:05'
+const PAYLOAD = new TextEncoder().encode('payload-bytes')
+
+/** A caching mount whose backend names no size, as an API mount does. */
+class UnsizedRAM extends RAMVFS {
+  override readonly cachesReads = true
+  reads = 0
+
+  constructor() {
+    super()
+    this.store.dirs.add('/')
+    this.store.files.set('/u.json', PAYLOAD)
+  }
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
+    return row.type === FileType.DIRECTORY ? row : row.with({ size: null })
+  }
+
+  override read(...args: Parameters<RAMVFS['read']>): ReturnType<RAMVFS['read']> {
+    this.reads += 1
+    return super.read(...args)
+  }
+}
 
 async function mkCore(): Promise<MountCore> {
   const ws = new Workspace(
@@ -386,41 +410,59 @@ describe('MountCore', () => {
     expect(new TextDecoder().decode(body)).toBe('BB\n')
   })
 
-  it('an O_TRUNC open through a link drops the cached bytes of its target', async () => {
-    // The target was opened and released as greeting.txt, leaving its
-    // bytes in the TTL cache; truncating through the link must drop that
-    // entry too, or the next stat of the target serves the old length.
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    await ws.shell("echo 'hello world' | tee /data/greeting.txt")
-    await ws.shell('ln -s greeting.txt /data/lk')
-    const realStat = ws.vfs.stat.bind(ws.vfs)
-    vi.spyOn(ws.vfs, 'stat').mockImplementation(async (path) => {
-      const s = await realStat(path)
-      return s.type === FileType.FILE
-        ? new FileStat({ name: s.name, type: s.type, content: s.content })
-        : s
-    })
-    const core = new MountCore(ws.vfs)
-    const fh = await core.open('/data/greeting.txt')
+  it("takes a released file's size from the workspace cache", async () => {
+    const vfs = new UnsizedRAM()
+    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE }).vfs)
+    expect((await core.getattr('/data/u.json')).size).toBe(0)
+    let fh = await core.open('/data/u.json')
+    expect(await core.read('/data/u.json', fh, 0, 1024)).toEqual(PAYLOAD)
     await core.release(fh)
-    expect((await core.getattr('/data/greeting.txt')).size).toBe(12)
-    const writer = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
-    await core.release(writer)
-    expect((await core.getattr('/data/greeting.txt')).size).toBe(0)
+    expect((await core.getattr('/data/u.json')).size).toBe(PAYLOAD.byteLength)
+    fh = await core.open('/data/u.json')
+    await core.release(fh)
+    expect(vfs.reads).toBe(1)
   })
 
-  it('keeps no prefetch generation once the prefetch has settled', async () => {
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    await ws.shell("echo 'hello world' | tee /data/greeting.txt")
+  it('an O_TRUNC open through a link leaves no stale size for its target', async () => {
+    // The target was opened and released as u.json, leaving its bytes in
+    // the workspace cache; truncating through the link must not leave the
+    // old length for the next stat of the target.
+    const ws = new Workspace({ '/data/': new UnsizedRAM() }, { mode: MountMode.WRITE })
+    await ws.shell('ln -s u.json /data/lk')
     const core = new MountCore(ws.vfs)
-    const generations = (core as unknown as { prefetchGen: Map<string, number> }).prefetchGen
-    for (const name of ['a', 'b', 'c']) {
-      const fh = await core.create(`/data/${name}.txt`)
-      await core.write(`/data/${name}.txt`, fh, new TextEncoder().encode(name), 0)
+    const fh = await core.open('/data/u.json')
+    await core.release(fh)
+    expect((await core.getattr('/data/u.json')).size).toBe(PAYLOAD.byteLength)
+    const writer = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.release(writer)
+    expect((await core.getattr('/data/u.json')).size).toBe(0)
+  })
+
+  it('keeps no hydration generation once the hydration has settled', async () => {
+    const ws = new Workspace({ '/data/': new UnsizedRAM() }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs)
+    const generations = (core as unknown as { hydrationGen: Map<string, number> }).hydrationGen
+    for (let i = 0; i < 3; i++) {
+      const fh = await core.open('/data/u.json')
+      await core.write('/data/u.json', fh, new TextEncoder().encode('x'), 0)
       await core.release(fh)
-      await core.truncate(`/data/${name}.txt`, 0)
+      await core.truncate('/data/u.json', 4)
     }
     expect(generations.size).toBe(0)
+  })
+
+  it('reads its own unflushed writes through a handle', async () => {
+    const core = await mkCore()
+    const fh = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+    const dec = new TextDecoder()
+    expect(dec.decode(await core.read('/data/greeting.txt', fh, 0, 100))).toBe('hello world\n')
+    await core.write('/data/greeting.txt', fh, new TextEncoder().encode('HELLO'), 0)
+    await core.write('/data/greeting.txt', fh, new TextEncoder().encode('!'), 14)
+    const want = 'HELLO world\n\0\0!'
+    expect(dec.decode(await core.read('/data/greeting.txt', fh, 0, 100))).toBe(want)
+    expect((await core.fgetattr('/data/greeting.txt', fh)).size).toBe(15)
+    await core.release(fh)
+    expect(dec.decode(await core.read('/data/greeting.txt', -1, 0, 100))).toBe(want)
   })
 
   it("keeps the other handle's buffer when the settlement flush is refused", async () => {

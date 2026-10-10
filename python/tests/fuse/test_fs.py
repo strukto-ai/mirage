@@ -25,7 +25,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.fuse.fs import XATTR_CREATE, XATTR_REPLACE, MirageFS
-from mirage.types import HiddenPaths, MountMode, Visibility
+from mirage.types import FileType, HiddenPaths, MountMode, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -677,15 +677,50 @@ async def test_unknown_size_truncate_rehydrates_with_settled_writes(
     fs.release("/u.json", reader)
 
 
+class _UnsizedRAM(RAMVFS):
+    """A caching mount whose backend names no size, as an API mount does."""
+
+    caches_reads = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._store.dirs.add("/")
+        self._store.files["/u.json"] = _PAYLOAD
+        self.reads = 0
+
+    async def stat(self, path, *args, **kwargs):
+        row = await super().stat(path, *args, **kwargs)
+        if row.type == FileType.DIRECTORY:
+            return row
+        return row.model_copy(update={"size": None})
+
+    async def read(self, path, *args, **kwargs):
+        self.reads += 1
+        return await super().read(path, *args, **kwargs)
+
+
 @pytest.mark.asyncio
-async def test_unknown_size_truncate_through_a_link_drops_the_targets_cache():
+async def test_a_released_files_size_comes_from_the_workspace_cache():
+    vfs = _UnsizedRAM()
+    fs = MirageFS(Workspace({"/": vfs}, mode=MountMode.WRITE).vfs)
+    assert fs.getattr("/u.json")["st_size"] == 0
+    fh = fs.open("/u.json", os.O_RDONLY)
+    assert fs.read("/u.json", 1024, 0, fh) == _PAYLOAD
+    fs.release("/u.json", fh)
+    assert fs.getattr("/u.json")["st_size"] == len(_PAYLOAD)
+    fh = fs.open("/u.json", os.O_RDONLY)
+    fs.release("/u.json", fh)
+    assert vfs.reads == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_size_truncate_through_a_link_leaves_no_stale_size():
     # The target was opened and released as /u.json, leaving its bytes in
-    # the TTL cache; an O_TRUNC open through a link to it must drop that
-    # entry too, or the next stat of /u.json serves the old length.
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("tee /u.json", stdin=_PAYLOAD)
+    # the workspace cache; an O_TRUNC open through a link to it must not
+    # leave the old length for the next stat of /u.json.
+    ws = Workspace({"/": _UnsizedRAM()}, mode=MountMode.WRITE)
     await ws.shell("ln -s u.json /lk")
-    fs = MirageFS(_SizelessOps(ws.vfs))
+    fs = MirageFS(ws.vfs)
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
     assert fs.getattr("/u.json")["st_size"] == len(_PAYLOAD)
@@ -770,53 +805,12 @@ async def test_unknown_size_path_stat_uses_open_handle(sizeless_fs):
 
 
 @pytest.mark.asyncio
-async def test_prefetch_survives_release_within_ttl(sizeless_fs):
-    fs, ops = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDONLY)
-    fs.release("/u.json", fh)
-    attrs = fs.getattr("/u.json")
-    assert attrs["st_size"] == len(_PAYLOAD)
-    assert ops.read_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_prefetch_expires_after_ttl(sizeless_fs):
-    fs, _ = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDONLY)
-    fs.release("/u.json", fh)
-    data, _ = fs.core._prefetch["/u.json"]
-    fs.core._prefetch["/u.json"] = (data, 0.0)
-    attrs = fs.getattr("/u.json")
-    assert attrs["st_size"] == 0
-    assert "/u.json" not in fs.core._prefetch
-
-
-@pytest.mark.asyncio
 async def test_open_then_read_does_not_refetch(sizeless_fs):
     fs, ops = sizeless_fs
     fh = fs.open("/u.json", os.O_RDONLY)
     assert fs.read("/u.json", 1024, 0, fh) == _PAYLOAD
     assert fs.read("/u.json", 7, 0, fh) == _PAYLOAD[:7]
     assert ops.read_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_flush_drops_prefetch(sizeless_fs):
-    fs, _ = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDWR)
-    assert "/u.json" in fs.core._prefetch
-    fs.write("/u.json", b"NEW", 0, fh)
-    fs.flush("/u.json", fh)
-    assert "/u.json" not in fs.core._prefetch
-
-
-@pytest.mark.asyncio
-async def test_unlink_drops_prefetch(sizeless_fs):
-    fs, _ = sizeless_fs
-    fh = fs.open("/u.json", os.O_RDONLY)
-    fs.release("/u.json", fh)
-    fs.unlink("/u.json")
-    assert "/u.json" not in fs.core._prefetch
 
 
 @pytest.mark.asyncio

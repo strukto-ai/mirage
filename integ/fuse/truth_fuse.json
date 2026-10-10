@@ -5,6 +5,7 @@
   "overwrite_short_size": 3,
   "overwrite_short_body": "BB",
   "sparse_writes_body": "a.b.Z.d.e.f.g.h.i.j.",
+  "kernel_reads_its_own_writes": "written",
   "kernel_chmod_kept": true,
   "kernel_fstat_keeps_mode": true,
   "data_pinned": true,

@@ -27,7 +27,7 @@ from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background, resolve_fusermount_binary
 from mirage.policy import Policy
 from mirage.policy.types import Deny, VfsContext, VfsResultContext
-from mirage.types import FileStat
+from mirage.types import FileStat, FileType
 from mirage.vfs.ram import RAMVFS
 
 # What a probe records: a captured file body or stat string, a byte
@@ -36,22 +36,21 @@ from mirage.vfs.ram import RAMVFS
 ProbeValue = str | int | bool | None
 
 
-class SizelessFiles:
-    """Files proxy that strips stat sizes.
+class SizelessRAM(RAMVFS):
+    """A caching mount whose backend names no size.
 
     Simulates API-backed mounts (Linear, Slack, Trello, ...) whose byte
     size is unknown until the content is fetched: over FUSE such files must
-    stat as 0 until first open and read fully afterwards.
+    stat as 0 until first open and read fully afterwards, and once read
+    the workspace cache sizes them.
     """
 
-    def __init__(self, inner) -> None:
-        self._inner = inner
+    caches_reads = True
 
-    def __getattr__(self, name: str):
-        return getattr(self._inner, name)
-
-    async def stat(self, path: str, nofollow: bool = False) -> FileStat:
-        result = await self._inner.stat(path, nofollow=nofollow)
+    async def stat(self, path, *args, **kwargs) -> FileStat:
+        result = await super().stat(path, *args, **kwargs)
+        if result.type == FileType.DIRECTORY:
+            return result
         return result.model_copy(update={"size": None})
 
 
@@ -340,12 +339,12 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
     Args:
         result (dict[str, ProbeValue]): the probe result to extend.
     """
-    api = RAMVFS()
+    api = SizelessRAM()
     api._store.dirs.add("/")
     api._store.files["/api.json"] = API_CONTENT
     ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
-    mount_background(SizelessFiles(ws.vfs), mountpoint)
+    mount_background(ws.vfs, mountpoint)
     api_file = f"{mountpoint}/api/api.json"
     try:
         # Size-unknown semantics (see the CLAUDE.md FUSE section): stat 0
@@ -473,6 +472,12 @@ def main() -> None:
             fh.write(b"Z")
         with open(f"{data_mp}/s.txt", "rb") as fh:
             result["sparse_writes_body"] = fh.read().decode()
+        # A read through the descriptor that wrote sees the write before
+        # it is flushed, as on any filesystem.
+        with open(f"{data_mp}/w.txt", "w+b", buffering=0) as fh:
+            fh.write(b"written")
+            fh.seek(0)
+            result["kernel_reads_its_own_writes"] = fh.read(64).decode()
         # A chmod through the mount is stored, and an open handle reports
         # it. Windows maps a mode onto the read-only flag alone.
         os.chmod(f"{data_mp}/a.txt", 0o600)

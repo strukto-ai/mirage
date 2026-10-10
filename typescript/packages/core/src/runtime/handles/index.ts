@@ -15,6 +15,6 @@
 export { planFlush } from './flush.ts'
 export type { FlushKind, FlushStep } from './types.ts'
 export { parseMode, type OpenMode } from './mode.ts'
-export { FileHandle, writeRuns } from './file_handle.ts'
+export { FileHandle, overlaid, writeRuns } from './file_handle.ts'
 export { FileTable } from './file_table.ts'
 export { ChunkedHandle } from './chunked.ts'

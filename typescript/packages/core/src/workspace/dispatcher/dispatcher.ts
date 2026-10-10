@@ -306,6 +306,21 @@ function served(report: OpReport | undefined, result: unknown): void {
 }
 
 /**
+ * A stat row with the length the file cache holds, when the backend named
+ * none. An API mount cannot size a file without fetching it, so once a read
+ * kept its bytes, their length is the size. The backfill command stats
+ * already make (`generic_bind`), here once for every caller of the
+ * dispatcher (`ws.vfs`, FUSE, a runtime's `fs.stat`). The length alone, read
+ * without revalidating: it serves no content. Mirrors Python's `_sized`.
+ */
+async function sized(mount: MountEntry, path: PathSpec, row: unknown): Promise<unknown> {
+  const manager = mount.cacheManager
+  if (!(row instanceof FileStat) || row.size !== null || manager === null) return row
+  const size = await manager.cachedSize(path)
+  return size === null ? row : row.with({ size })
+}
+
+/**
  * Pull a stream's first chunk now and answer the stream from there, so a read
  * that fails at its start fails at the call, where the dispatcher handles it, rather
  * than in the hands of whoever pulls it later. Mirrors Python's `_primed`.
@@ -1110,6 +1125,7 @@ export class Dispatcher {
         )
       } else {
         result = await run(fullKwargs)
+        if (name === 'stat') result = await sized(mount, p, result)
       }
     } catch (err) {
       const code = (err as { code?: string }).code

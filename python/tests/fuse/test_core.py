@@ -179,6 +179,18 @@ async def test_open_without_o_trunc_keeps_the_body(seeded):
 
 
 @pytest.mark.asyncio
+async def test_a_handle_reads_its_own_unflushed_writes(seeded):
+    fh = seeded.open("/a.txt", os.O_RDWR)
+    assert seeded.read("/a.txt", 100, 0, fh) == b"hello world"
+    seeded.write("/a.txt", b"HELLO", 0, fh)
+    seeded.write("/a.txt", b"!", 13, fh)
+    assert seeded.read("/a.txt", 100, 0, fh) == b"HELLO world\x00\x00!"
+    assert seeded.getattr("/a.txt", fh)["st_size"] == 14
+    seeded.release(fh)
+    assert seeded.read("/a.txt", 100, 0, None) == b"HELLO world\x00\x00!"
+
+
+@pytest.mark.asyncio
 async def test_write_then_read(seeded):
     seeded.write("/new.txt", b"written", 0, None)
     assert seeded.read("/new.txt", 100, 0, None) == b"written"

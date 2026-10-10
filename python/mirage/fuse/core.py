@@ -27,7 +27,12 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent, erofs
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.policy.match import skipped_at_dispatch
-from mirage.runtime.handles import ChunkedHandle, FileTable, write_runs
+from mirage.runtime.handles import (
+    ChunkedHandle,
+    FileTable,
+    overlaid,
+    write_runs,
+)
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.types import FileStat, FileType
 from mirage.utils.stat_view import (
@@ -43,11 +48,6 @@ from mirage.utils.stat_view import (
 )
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
-
-# How long prefetched bytes for size-unknown files outlive their handle, so a
-# release-then-stat burst (ls right after cat) neither refetches nor reports
-# an unknown size. Mirrors the TS PREFETCH_TTL_MS.
-PREFETCH_TTL = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +119,6 @@ class MountCore:
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()
-        # Prefetched content for size-unknown files: path -> (data, expiry).
-        self._prefetch: dict[str, tuple[bytes, float]] = {}
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
         # as owned by the mounting user (see mount.py). Mirrors fs.ts.
@@ -263,73 +261,22 @@ class MountCore:
         self._files.records.clear()
         return records
 
-    def cached_data(self, path: str) -> bytes | None:
-        """Return prefetched bytes from open handles or the TTL cache.
+    def held_size(self, path: str) -> int | None:
+        """The length of the bytes an open handle on the file holds.
+
+        A size-unknown file is read whole when it opens, so while a handle
+        is open its length answers a stat by path too (``ls -l`` beside a
+        ``cat``). Once every handle is released, the dispatcher answers
+        from the workspace cache instead.
 
         Args:
             path (str): mount path to look up.
-
-        Returns:
-            bytes | None: cached content, or None when nothing fresh is held.
         """
         key = self.identity(path)
         for ctx in self._handles.values():
             if ctx.key == key and ctx.data is not None:
-                return ctx.data
-        entry = self._prefetch.get(key)
-        if entry is None:
-            return None
-        data, expires = entry
-        if time.monotonic() >= expires:
-            del self._prefetch[key]
-            return None
-        return data
-
-    def cached_size(self, path: str) -> int | None:
-        """Return the real size of prefetched data, if any is cached.
-
-        Args:
-            path (str): mount path to look up.
-
-        Returns:
-            int | None: byte length of cached content, or None.
-        """
-        data = self.cached_data(path)
-        return len(data) if data is not None else None
-
-    def prefetch_read(self, path: str) -> bytes | None:
-        """Fetch and cache the bytes of a size-unknown file.
-
-        Args:
-            path (str): mount path being opened.
-
-        Returns:
-            bytes | None: file content, or None when the backend read fails
-            for any reason (open() stays permissive, as the TypeScript core
-            does; the subsequent read() surfaces the error to the caller).
-            This matters most after an O_TRUNC, whose truncation has
-            already committed by the time this runs: failing the open then
-            would erase the old body and refuse the replacement.
-        """
-        data = self.cached_data(path)
-        if data is not None:
-            return data
-        try:
-            data = self._run(self._files.read(self.resolve(path)))
-        except Exception as err:
-            logger.debug(
-                "fuse: hydration read of %s failed, deferring to read(): %r",
-                path,
-                err,
-            )
-            return None
-        # No inflight dedup: FUSE mounts run nothreads=True, so callbacks are
-        # serialized and two opens cannot race (TS needs the dedup map).
-        self._prefetch[self.identity(path)] = (
-            data,
-            time.monotonic() + PREFETCH_TTL,
-        )
-        return data
+                return len(ctx.data)
+        return None
 
     def getattr(
         self, path: str, fh: int | None = None, follow: bool = False
@@ -353,17 +300,16 @@ class MountCore:
             FileNotFoundError: no such entry.
         """
         # fstat(fd) after open: the hydrated handle knows the real byte
-        # length. attr_timeout=0 on FUSE mounts makes the kernel actually
-        # ask here instead of trusting the cached pre-open size, which is
-        # what keeps wc -c, BSD cp, and tail -c correct for size-unknown
-        # files.
+        # length, and what the handle wrote and has not flushed counts.
+        # attr_timeout=0 on FUSE mounts makes the kernel actually ask here
+        # instead of trusting the cached pre-open size, which is what keeps
+        # wc -c, BSD cp, and tail -c correct for size-unknown files.
+        ctx = self._handles.get(fh) if fh is not None else None
         size = None
-        if fh is not None:
-            ctx = self._handles.get(fh)
-            if ctx is not None:
-                path = ctx.path
-                if ctx.data is not None:
-                    size = len(ctx.data)
+        if ctx is not None:
+            path = ctx.path
+            if ctx.data is not None:
+                size = len(ctx.data)
         if path == "/":
             return self.dir_stat()
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
@@ -382,14 +328,19 @@ class MountCore:
         if is_link(s):
             target = self._run(self._files.readlink(virtual))
             return self.attrs(s, len(self.shown_target(path, target).encode()))
-        if size is None and s.size is None and not is_dir(s):
-            # Unopened size-unknown files stat as 0, matching mirage's own
-            # find semantics. Reads stay correct anyway: direct_io makes the
-            # kernel ignore st_size, and the fh branch above serves the real
-            # size to fstat-based tools after open. Never report a fake size
-            # and never fetch content here: getattr runs once per entry on
-            # every ls -l.
-            size = self.cached_size(path)
+        if is_dir(s):
+            return self.attrs(s)
+        if size is None and s.size is None:
+            # A size-unknown file the cache has not seen stats as 0,
+            # matching mirage's own find semantics. Reads stay correct
+            # anyway: direct_io makes the kernel ignore st_size, and the fh
+            # branch above serves the real size to fstat-based tools after
+            # open. Never report a fake size and never fetch content here:
+            # getattr runs once per entry on every ls -l.
+            size = self.held_size(path)
+        if ctx is not None and ctx.write_buf:
+            stored = content_size(s) if size is None else size
+            size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
         return self.attrs(s, size)
 
     def readdir(self, path: str) -> list[str]:
@@ -429,22 +380,24 @@ class MountCore:
             bytes: the requested slice, possibly short at EOF.
         """
         ctx = self._ctx(fh)
-        if ctx is not None and ctx.live:
-            return self._run(
+        if ctx is None:
+            # Whole, as a handle's first read is: the read that fills the
+            # cache and records the version a conditional write sends.
+            data = self._run(self._files.read(self.resolve(path)))
+            return data[offset : offset + size]
+        if ctx.live:
+            stored = self._run(
                 self._files.read(self.resolve(ctx.path), offset, size)
             )
-        if ctx is not None and ctx.data is not None:
-            return ctx.data[offset : offset + size]
-        if ctx is not None and ctx.chunked is not None:
-            return ctx.chunked.pread(offset, size)
-        if ctx is not None:
-            path = ctx.path
-        data = self.cached_data(path)
-        if data is None:
-            data = self._run(self._files.read(self.resolve(path)))
-        if ctx is not None:
-            ctx.data = data
-        return data[offset : offset + size]
+        elif ctx.chunked is not None:
+            stored = ctx.chunked.pread(offset, size)
+        else:
+            if ctx.data is None:
+                ctx.data = self._run(self._files.read(self.resolve(ctx.path)))
+            stored = ctx.data[offset : offset + size]
+        if not ctx.write_buf:
+            return stored
+        return overlaid(stored, offset, size, ctx.write_buf)
 
     def _apply_writes(self, path: str, runs: WriteBuf) -> None:
         """Land write runs on the mount, one pwrite each, in order.
@@ -562,7 +515,6 @@ class MountCore:
         """
         self._hold(path)
         self._run(self._files.unlink(self.resolve(path)))
-        self._forget(path)
 
     def rename(self, old: str, new: str) -> None:
         source, target = self.resolve(old), self.resolve(new)
@@ -572,8 +524,6 @@ class MountCore:
             if ctx.key == source or ctx.key.startswith(source + "/"):
                 ctx.key = target + ctx.key[len(source) :]
                 ctx.path = ctx.key[len(self._root) :]
-        self._changed(old, rehydrate=False)
-        self._changed(new, rehydrate=False)
 
     def rmdir(self, path: str) -> None:
         self._run(self._files.rmdir(self.resolve(path)))
@@ -725,8 +675,10 @@ class MountCore:
             # the TTL cache keeps release-then-stat bursts from refetching.
             # This holds after an O_TRUNC too: the read follows the rendered
             # path, so an extension whose renderer gives an empty file a body
-            # is honored rather than shadowed by literal raw emptiness.
-            ctx.data = self.prefetch_read(path)
+            # is honored rather than shadowed by literal raw emptiness. The
+            # read goes through the dispatcher, so a caching mount keeps the
+            # bytes for the next open and for a stat once this one closes.
+            ctx.data = self._hydrate(path)
         elif s.size > READ_CHUNK and not flags & os.O_TRUNC:
             # A file larger than a chunk is read a chunk at a time: the
             # kernel asks in small pieces, and fetching the whole file on
@@ -737,6 +689,29 @@ class MountCore:
                 fetch=functools.partial(self._read_chunk, ctx),
             )
         return self._handles.add(ctx)
+
+    def _hydrate(self, path: str) -> bytes | None:
+        """Read a size-unknown file whole for the handle opening it.
+
+        Returns None when the read fails for any reason: open() stays
+        permissive, as the TypeScript core does, and the read() that
+        follows surfaces the error. This matters most after an O_TRUNC,
+        whose truncation has already committed by the time this runs:
+        failing the open then would erase the old body and refuse the
+        replacement.
+
+        Args:
+            path (str): mount path being opened.
+        """
+        try:
+            return self._run(self._files.read(self.resolve(path)))
+        except Exception as err:
+            logger.debug(
+                "fuse: hydration read of %s failed, deferring to read(): %r",
+                path,
+                err,
+            )
+            return None
 
     def _read_chunk(self, ctx: Handle, offset: int, size: int) -> bytes:
         # The handle's path as it is now: a rename moves it.
@@ -828,29 +803,24 @@ class MountCore:
         self._run(self._files.truncate(self.resolve(path), length))
         self._changed(path)
 
-    def _changed(self, path: str, rehydrate: bool = True) -> None:
+    def _changed(self, path: str) -> None:
         """The one function every mutation of a file's bytes goes through.
 
-        Every cache the core keeps for a file is keyed by its identity
-        (the mount path with namespace links followed), and this is the
-        only place they are invalidated, so a new mutating op cannot
-        forget one of them and a link alias cannot slip past. The TTL
-        entry is dropped; hydrated handles on the file are refreshed
-        from the backend in one read, so fstat and read through any of
-        them, including the handle that wrote, see the new bytes. A
-        removal or rename passes ``rehydrate=False``: POSIX keeps an
-        open descriptor on the bytes it had.
+        The open handles on a file are matched by its identity (the
+        mount path with namespace links followed), and this is the only
+        place their bytes are refreshed, so a new mutating op cannot
+        forget one of them and a link alias cannot slip past. Hydrated
+        handles on the file are refreshed in one read through the
+        dispatcher, so fstat and read through any of them, including the
+        handle that wrote, see the new bytes. A refresh that fails is
+        logged and leaves the handles unhydrated rather than failing the
+        committed mutation. A removal or rename refreshes nothing: POSIX
+        keeps an open descriptor on the bytes it had.
 
         Args:
             path (str): mount path whose bytes changed.
-            rehydrate (bool): refresh hydrated handles from the backend; a
-                refresh that fails is logged and leaves the handles
-                unhydrated rather than failing the committed mutation.
         """
         key = self.identity(path)
-        self._prefetch.pop(key, None)
-        if not rehydrate:
-            return
         for ctx in self._handles.values():
             if ctx.key == key and ctx.chunked is not None:
                 ctx.chunked.drop()
@@ -878,6 +848,3 @@ class MountCore:
             return
         for ctx in hydrated:
             ctx.data = data
-
-    def _forget(self, path: str) -> None:
-        self._changed(path, rehydrate=False)
