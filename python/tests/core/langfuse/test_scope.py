@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.langfuse.scope import SEARCH_KINDS, detect_scope
+from mirage.core.langfuse.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -134,20 +134,5 @@ def test_glob_scope_file():
 
 
 def test_unrecognized_path_is_not_root():
-    # Falling back to "root" made the grep/rg push-down treat any bogus path
-    # as "search every trace", answering a missing file with the whole mount.
     assert detect_scope(_spec("__nf_missing__")).kind == "invalid"
     assert detect_scope(_spec("traces/a/b/c/d")).kind == "invalid"
-    assert "invalid" not in SEARCH_KINDS
-
-
-def test_leaves_fall_through_the_search_pushdown():
-    # A leaf path must reach the generic per-file scan, never a
-    # whole-container search.
-    for path in (
-        "/traces/abc.json",
-        "/datasets/qa/items.jsonl",
-        "/datasets/qa/runs",
-        "/datasets/qa/runs/r1.jsonl",
-    ):
-        assert detect_scope(_spec(path)).kind not in SEARCH_KINDS

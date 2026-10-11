@@ -16,16 +16,9 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import {
-  grepSearchMeta,
-  grepSearchOptions,
-  textSearchResults,
   classifyPattern,
-  hasSearchShapingFlags,
   isLiteralPattern,
-  literalPushdownOperand,
   loneOperand,
-  pushdownOperand,
-  searchPushdownOk,
   searchTerms,
   wholeWordLiterals,
 } from './grep_pushdown.ts'
@@ -58,57 +51,6 @@ describe('isLiteralPattern', () => {
   })
 })
 
-describe('hasSearchShapingFlags', () => {
-  it.each([
-    [{}, false],
-    [{ i: true }, false],
-    [{ F: true }, false],
-    [{ r: true }, false],
-    [{ v: true }, true],
-    [{ no_messages: true }, true],
-    [{ n: true }, true],
-    [{ c: true }, true],
-    [{ args_l: true }, true],
-    // A bare `l` key is one the parser never emits: -l is short-only, so
-    // it lands on the disambiguated `args_l` dest (`AMBIGUOUS_NAMES`).
-    [{ l: true }, false],
-    [{ w: true }, true],
-    [{ o: true }, true],
-    [{ q: true }, true],
-    [{ H: true }, true],
-    [{ h: true }, true],
-    [{ m: '3' }, true],
-    [{ A: '2' }, true],
-    [{ B: '2' }, true],
-    [{ C: '2' }, true],
-    [{ args_I: true }, true],
-    [{ text: true }, true],
-    // rg -L walks links, which no backend's search can see.
-    [{ follow: true }, true],
-  ])('hasSearchShapingFlags(%j) === %j', (flags, expected) => {
-    expect(
-      hasSearchShapingFlags(flags as Record<string, string | boolean | number | string[]>),
-    ).toBe(expected)
-  })
-})
-
-describe('searchPushdownOk', () => {
-  it('allows a plain literal, with or without -i', () => {
-    expect(searchPushdownOk({}, 'ada')).toBe(true)
-    expect(searchPushdownOk({ i: true }, 'ada')).toBe(true)
-  })
-
-  it('rejects any shaping flag', () => {
-    expect(searchPushdownOk({ v: true }, 'ada')).toBe(false)
-    expect(searchPushdownOk({ c: true }, 'ada')).toBe(false)
-  })
-
-  it('rejects a regex pattern but allows it under -F', () => {
-    expect(searchPushdownOk({}, 'a.b')).toBe(false)
-    expect(searchPushdownOk({ F: true }, 'a.b')).toBe(true)
-  })
-})
-
 function operand(virtual: string, pattern: string | null = null): PathSpec {
   return new PathSpec({
     virtual,
@@ -119,104 +61,12 @@ function operand(virtual: string, pattern: string | null = null): PathSpec {
   })
 }
 
-const EMAIL_HONORED = ['n', 'args_l', 'w', 'o', 'm']
-const EMAIL_RG_HONORED = [
-  'line_number',
-  'files_with_matches',
-  'word_regexp',
-  'only_matching',
-  'max_count',
-  'line_regexp',
-]
-
 const TRACES = operand('/traces')
 const SESSIONS = operand('/sessions')
 
-describe('pushdownOperand', () => {
-  it('admits one concrete operand', () => {
-    expect(pushdownOperand([TRACES], {}, 'ada')).toBe(TRACES)
-  })
-
-  it('refuses a second operand', () => {
-    // The bug this gate exists for: the push-down answered for the first
-    // operand and dropped the rest in silence.
-    expect(pushdownOperand([TRACES, SESSIONS], {}, 'ada')).toBe(null)
-    // Two operands in one family, which a per-operand push-down would have
-    // answered twice over.
-    expect(pushdownOperand([TRACES, TRACES], {}, 'ada')).toBe(null)
-  })
-
-  it('refuses no operand', () => {
-    expect(pushdownOperand([], {}, 'ada')).toBe(null)
-  })
-
-  it('refuses a glob, a shaping flag and a pattern list', () => {
-    expect(pushdownOperand([operand('/traces/*', '*')], {}, 'ada')).toBe(null)
-    expect(pushdownOperand([TRACES], { c: true }, 'ada')).toBe(null)
-    expect(pushdownOperand([TRACES], {}, 'ada\nbob')).toBe(null)
-    expect(pushdownOperand([TRACES], {}, null)).toBe(null)
-  })
-})
-
-// The filter dests are read the way python reads them: the repeatable ones
-// through `asList` and the single-valued ones through `asStr`, and the count
-// dests through `asInt`. One flat list tested with `!== undefined` and
-// `typeof === 'string'` answered differently from python for all three
-// shapes below, so the two hosts could disagree about whether a grep/rg
-// push-down was safe (issue #1089 item 11a).
-describe('hasSearchShapingFlags matches the python filter split', () => {
-  it('reads a count dest as a number, not only as a numeric string', () => {
-    // python's `fl.as_int("m")` sees both; `typeof flags.m === 'string'` saw
-    // only the string, so a numeric value let an unsafe push-down through.
-    expect(hasSearchShapingFlags({ m: '3' })).toBe(true)
-    expect(hasSearchShapingFlags({ m: 3 })).toBe(true)
-    expect(hasSearchShapingFlags({ A: 2 })).toBe(true)
-    expect(hasSearchShapingFlags({ B: 2 })).toBe(true)
-    expect(hasSearchShapingFlags({ C: 2 })).toBe(true)
-  })
-
-  it('reads a repeatable filter dest as a list', () => {
-    expect(hasSearchShapingFlags({ include: ['*.py'] })).toBe(true)
-    expect(hasSearchShapingFlags({ exclude: ['*.log'] })).toBe(true)
-    expect(hasSearchShapingFlags({ exclude_dir: ['node_modules'] })).toBe(true)
-    // An empty list is "not supplied", as `fl.as_list` reports it; the flat
-    // `!== undefined` test called it supplied and deferred.
-    expect(hasSearchShapingFlags({ include: [] })).toBe(false)
-  })
-
-  it('reads a single-valued filter dest as a string', () => {
-    expect(hasSearchShapingFlags({ type: 'py' })).toBe(true)
-    expect(hasSearchShapingFlags({ glob: '*.py' })).toBe(true)
-    expect(hasSearchShapingFlags({ binary_files: 'text' })).toBe(true)
-    // A bare boolean is not a value, as `fl.as_str` reports it.
-    expect(hasSearchShapingFlags({ glob: true })).toBe(false)
-  })
-})
-
-describe('hasSearchShapingFlags honored', () => {
-  it('exempts only the named dests', () => {
-    // gmail/slack/discord: the provider's search is word-based, so -w is what
-    // makes the push-down faithful rather than what breaks it.
-    expect(hasSearchShapingFlags({ w: true }, ['w'])).toBe(false)
-    expect(hasSearchShapingFlags({ w: true, n: true }, ['w'])).toBe(true)
-    // email: the local re-scan implements these, so they ride along.
-    expect(hasSearchShapingFlags({ n: true, o: true, m: '3' }, EMAIL_HONORED)).toBe(false)
-    // ...but never -v or -c, which need messages the search did not return.
-    expect(hasSearchShapingFlags({ v: true }, EMAIL_HONORED)).toBe(true)
-    expect(hasSearchShapingFlags({ c: true }, EMAIL_HONORED)).toBe(true)
-    expect(hasSearchShapingFlags({ invert_match: true }, EMAIL_RG_HONORED)).toBe(true)
-  })
-
-  it('never exempts the operand rule', () => {
-    // An exemption is about flags only: two operands still defer.
-    expect(pushdownOperand([TRACES, SESSIONS], { w: true }, 'ada', ['w'])).toBe(null)
-    expect(pushdownOperand([TRACES], { w: true }, 'ada', ['w'])).toBe(TRACES)
-  })
-})
-
 describe('loneOperand', () => {
   it('is the operand rule on its own, for a caller with no pattern', () => {
-    // email's find push-down has no grep pattern and no shaping flags.
+    // email's find push-down answers for one concrete operand only.
     expect(loneOperand([TRACES])).toBe(TRACES)
     expect(loneOperand([TRACES, SESSIONS])).toBe(null)
     expect(loneOperand([])).toBe(null)
@@ -234,53 +84,7 @@ describe('loneOperand', () => {
       rawPath: '-',
     })
     expect(loneOperand([dash])).toBe(null)
-    expect(pushdownOperand([dash], {}, 'ada')).toBe(null)
-    expect(literalPushdownOperand([dash], {}, 'ada')).toBe(null)
   })
-})
-
-describe('literalPushdownOperand', () => {
-  it('adds the LIKE pattern rule to the same operand rule', () => {
-    expect(literalPushdownOperand([TRACES], {}, 'ada')).toBe(TRACES)
-    // Everything pushdownOperand refuses, this refuses too.
-    expect(literalPushdownOperand([TRACES, SESSIONS], {}, 'ada')).toBe(null)
-    expect(literalPushdownOperand([TRACES], { c: true }, 'ada')).toBe(null)
-    // Plus the one it adds: LIKE matches a regex literally.
-    expect(literalPushdownOperand([TRACES], {}, 'a.b')).toBe(null)
-    expect(literalPushdownOperand([TRACES], { F: true }, 'a.b')).toBe(TRACES)
-  })
-})
-
-it.each(['binary', 'text', 'without-match', 'bad'])('binary mode %s requires scanning', (mode) => {
-  expect(hasSearchShapingFlags({ binary_files: mode })).toBe(true)
-})
-it.each([
-  ['hello 😀', true],
-  ['hello\0tail', false],
-  ['hello\udcff', false],
-] as const)('checks provider snippets %j', (text, expected) => {
-  expect(textSearchResults([text])).toBe(expected)
-})
-
-it.each([
-  { mode: 'semantic' },
-  { mode: 'literal', stream: null },
-  { mode: 'literal', typo: true },
-  null,
-])('rejects invalid grep metadata %j', (grep) => {
-  expect(() => grepSearchMeta({ search: () => Promise.resolve([]), meta: { grep } })).toThrow()
-})
-
-it.each([{ ignore_case: 'true' }, { typo: true }, null])(
-  'rejects invalid grep options %j',
-  (grep) => {
-    expect(() => grepSearchOptions({ query: 'query', options: { grep } })).toThrow()
-  },
-)
-
-it('leaves resource namespaces opaque and treats plain queries as literal', () => {
-  expect(grepSearchOptions({ query: 'a.*b', options: { limit: 20 } }).fixedString).toBe(true)
-  expect(grepSearchMeta({ search: () => Promise.resolve([]), meta: { semantic: true } })).toBeNull()
 })
 
 // Twin of test_whole_word_literals_union_only_complete_alternatives.

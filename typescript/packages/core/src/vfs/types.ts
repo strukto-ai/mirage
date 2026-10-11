@@ -176,8 +176,7 @@ export interface SearchQuery {
   readonly options?: Readonly<Record<string, JsonValue>>
 }
 
-/** Text records in the backend's declared format. null declines; [] means no results.
- * Integrations such as grep require an explicit declaration in metadata. */
+/** Text records the `search` command prints. null declines; [] means no results. */
 export type SearchOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
@@ -193,13 +192,12 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<string[] | null>
 
-/** Optional resource search. Consumers validate their own metadata namespace. */
 /**
  * Why grep or rg reads every file instead of asking the mount. Mirrors
  * Python's `ScanReason`. NO_SEARCH: no `filesContaining` or
  * `linesContaining` on the mount, or a hide or path rule covers the walk.
  * NO_TEXT: -f, or no plain text of three characters that every match holds
- * (under -i, a word with a non-ASCII letter, or with k or s when case folds by
+ * (under -i, a word with a non-ASCII letter, or with i, k or s when case folds by
  * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
  * do not match. EVERY_FILE: rg --files-without-match, or rg -c or
  * --count-matches with --include-zero, without -q, lists files that do not
@@ -248,10 +246,10 @@ export type BeforeFullScanOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<void>
 
+/** Optional resource search, what the `search` command asks. */
 export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>
   searchMany?: SearchManyOp<A>
-  meta?: Readonly<Record<string, JsonValue>>
 }
 
 export interface FindOptions {

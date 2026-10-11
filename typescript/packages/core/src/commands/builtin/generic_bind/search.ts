@@ -16,87 +16,24 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
-import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
+import { ScanReason } from '../../../vfs/types.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
+import type { ByteSource } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
 import { globPrefixMatch } from '../../../utils/path.ts'
-import { isEfbig, isFsError } from '../../../errors/fs.ts'
+import { isFsError } from '../../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
+import type { CommandOpts, CommandIO } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 
-import { grepGeneric, parseFlags as parseGrepFlags } from '../generic/grep.ts'
-import {
-  foldsCase,
-  parseFlags as parseRgFlags,
-  rgGeneric,
-  rgMatcher,
-  rgSyntax,
-} from '../generic/rg.ts'
-import {
-  grepSearchMeta,
-  textSearchResults,
-  literalPushdownOperand,
-  pushdownOperand,
-  searchTerms,
-} from '../grep_pushdown.ts'
-import { PATTERN_KEYS, compilePattern, matcherSyntax, patternArg } from '../grep_pattern.ts'
+import { parseFlags as parseGrepFlags } from '../generic/grep.ts'
+import { foldsCase, parseFlags as parseRgFlags, rgMatcher } from '../generic/rg.ts'
+import { searchTerms } from '../grep_pushdown.ts'
+import { PATTERN_KEYS, compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
-import { formatRecords } from '../utils/output.ts'
-import { resolveGlobOf } from './adapter.ts'
-
-type GenericScan = (
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-  stat: (p: PathSpec) => Promise<FileStat>,
-  readdir: (p: PathSpec) => Promise<string[]>,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-) => Promise<CommandFnResult>
-
-const GENERICS: Record<string, GenericScan> = {
-  grep: (paths, texts, opts, stat, readdir, stream) =>
-    grepGeneric('grep', paths, texts, opts, stat, readdir, stream),
-  rg: rgGeneric,
-}
-
-async function* bytesStream<A extends Accessor>(
-  io: CommandIO<A>,
-  accessor: A,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await io.readBytes(accessor, p, index)
-}
-
-// A native stream may serve only some kinds (mongodb streams documents.jsonl
-// and refuses schema.json before yielding anything), so a first-pull failure
-// falls back to the whole read; an error after data has flowed is real and
-// propagates. Mirrors the python generic, which streams only where the
-// backend can serve and reads bytes everywhere else.
-async function* nativeOrBytes<A extends Accessor>(
-  io: CommandIO<A>,
-  accessor: A,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  const it = io.readStream(accessor, p, index)[Symbol.asyncIterator]()
-  let first: IteratorResult<Uint8Array>
-  try {
-    first = await it.next()
-  } catch {
-    yield await io.readBytes(accessor, p, index)
-    return
-  }
-  while (!first.done) {
-    yield first.value
-    first = await it.next()
-  }
-}
 
 type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -264,7 +201,6 @@ async function fullScan<A extends Accessor>(
  * Neither is asked when a hide, a path rule or a preVfs policy judges a path,
  * since a search sees the raw tree.
  * When neither can stand in for a walk, `beforeFullScan` may refuse it.
- * `read` is the plain stream narrowed, the mount's `readStream` by default.
  * Mirrors Python's `search_reads`.
  */
 export async function searchReads<A extends Accessor>(
@@ -274,10 +210,9 @@ export async function searchReads<A extends Accessor>(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
-  read?: Reads,
 ): Promise<Reads> {
   const index = opts.index ?? undefined
-  const stream: Reads = read ?? ((p) => io.readStream(accessor, p, index))
+  const stream: Reads = (p) => io.readStream(accessor, p, index)
   const scoped = pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')
   const files = scoped ? undefined : io.filesContaining
   const searchable = io.searchable ?? null
@@ -372,90 +307,4 @@ export async function searchReads<A extends Accessor>(
     return new Uint8Array(0)
   }
   return candidateReads(stream, narrowed)
-}
-
-// How a native search matches the pushed-down pattern. `utf8` is grep under a
-// UTF-8 locale; ripgrep matches text under any.
-export function searchOptions(
-  name: 'grep' | 'rg',
-  fl: FlagView,
-  pattern: string,
-  utf8 = false,
-): Record<string, boolean | string> {
-  if (name === 'rg') {
-    const f = parseRgFlags(fl)
-    return {
-      ignore_case: foldsCase(pattern, f.fixedString, f),
-      fixed_string: f.fixedString,
-      whole_word: f.wholeWord,
-      syntax: rgSyntax(f),
-    }
-  }
-  return {
-    ignore_case: fl.asBool('i'),
-    fixed_string: fl.asBool('F'),
-    whole_word: fl.asBool('w'),
-    syntax: matcherSyntax(fl),
-    utf8,
-  }
-}
-
-/**
- * Execute an adapter's qualified search, or scan for an unsupported request.
- * The scan reads through `searchReads`, so `filesContaining`,
- * `linesContaining` and `beforeFullScan` still apply.
- */
-export async function runSearch<A extends Accessor>(
-  io: CommandIO<A>,
-  name: 'grep' | 'rg',
-  accessor: A,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const capability = io.search
-  const meta = grepSearchMeta(capability)
-  const fl = new FlagView(opts.flags, specOf(name))
-  const pattern = patternArg(texts, opts.flags, PATTERN_KEYS[name])
-  const gate = meta?.mode === 'literal' ? literalPushdownOperand : pushdownOperand
-  const operand = gate(paths, opts.flags, pattern)
-  if (
-    capability !== undefined &&
-    meta !== null &&
-    pattern !== null &&
-    operand !== null &&
-    !pathsScoped(opts.ns, [operand])
-  ) {
-    const query: SearchQuery = {
-      query: pattern,
-      options: { grep: searchOptions(name, fl, pattern, utf8Locale(opts.env)) },
-    }
-    let lines: string[] | null
-    try {
-      lines = await capability.search(accessor, operand, query, opts.index ?? undefined)
-    } catch (err) {
-      // A push-down whose answer is past the mount's read cap cannot print
-      // it; the scan reads each operand, and reports the same refusal against
-      // the operand as typed.
-      if (!isEfbig(err)) throw err
-      lines = null
-    }
-    if (lines !== null) {
-      if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      if (name !== 'grep' || textSearchResults(lines)) return [formatRecords(lines), new IOResult()]
-    }
-  }
-  const resolved =
-    paths.length > 0 ? await resolveGlobOf(io)(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => io.stat(accessor, p, opts.index ?? undefined)
-  const readdir = (p: PathSpec): Promise<string[]> =>
-    io.readdir(accessor, p, opts.index ?? undefined)
-  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    meta === null || meta.stream
-      ? nativeOrBytes(io, accessor, p, opts.index ?? undefined)
-      : bytesStream(io, accessor, p, opts.index ?? undefined)
-  const reads = await searchReads(io, name, accessor, resolved, texts, opts, stream)
-  const generic = GENERICS[name]
-  if (generic === undefined) throw new Error(`runSearch: no generic for ${name}`)
-  return generic(resolved, texts, opts, stat, readdir, reads)
 }

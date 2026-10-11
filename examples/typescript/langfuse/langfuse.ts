@@ -89,10 +89,10 @@ async function main(): Promise<void> {
       `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
     )
 
-    console.log('\n=== grep scope pushdown ===')
-    await run(ws, 'grep "a" /langfuse/traces/ | head -n 3')
-    await run(ws, 'grep "a" /langfuse/sessions/ | head -n 3')
-    await run(ws, 'grep "a" /langfuse/prompts/ | head -n 3')
+    console.log('\n=== grep -r per scope ===')
+    await run(ws, 'grep -r "a" /langfuse/traces/ | head -n 3')
+    await run(ws, 'grep -r "a" /langfuse/sessions/ | head -n 3')
+    await run(ws, 'grep -r "a" /langfuse/prompts/ | head -n 3')
 
     console.log('\n=== rg across prompts ===')
     await run(ws, 'rg -l "name" /langfuse/prompts/ | head -n 3')

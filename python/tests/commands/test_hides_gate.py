@@ -98,25 +98,18 @@ def test_every_wired_find_core_forks_to_the_guarded_walk():
     )
 
 
-def test_every_native_search_routes_through_the_gated_factory():
-    """A grep/rg wrapper with a native searcher must be built by
-    ``make_search``, whose chokepoint yields to the generic scan while
-    the gate trips; a hand-rolled push-down would print lines out of
-    files the session cannot see."""
+def test_no_backend_registers_its_own_grep_or_rg():
+    """A mount's search is ``files_containing`` and ``lines_containing``,
+    which only the generic's reads ask, behind the gate; a backend grep
+    or rg would answer from the raw tree and print lines out of files
+    the session cannot see."""
     commands, failed = _registered()
     assert not failed, f"builtin modules would not import: {failed}"
-    offenders = []
-    for cmd in commands:
-        if cmd.name not in ("grep", "rg"):
-            continue
-        fn = inspect.unwrap(cmd.fn)
-        source_file = inspect.getsourcefile(fn) or ""
-        if "/generic_bind/" in source_file:
-            continue
-        source = inspect.getsource(inspect.getmodule(fn))
-        if "SEARCHERS" in source and "make_search(" not in source:
-            offenders.append(f"{cmd.vfs}/{cmd.name} ({source_file})")
-    assert not offenders, (
-        "these search wrappers wire native searchers around the gated "
-        f"make_search chokepoint: {offenders}"
-    )
+    offenders = [
+        f"{cmd.vfs}/{cmd.name} ({inspect.getsourcefile(inspect.unwrap(cmd.fn))})"
+        for cmd in commands
+        if cmd.name in ("grep", "rg")
+        and "/generic_bind/"
+        not in (inspect.getsourcefile(inspect.unwrap(cmd.fn)) or "")
+    ]
+    assert not offenders, f"backend grep or rg wrappers: {offenders}"

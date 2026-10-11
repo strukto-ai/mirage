@@ -135,7 +135,6 @@ jobs:
               - 'python/mirage/accessor/jaeger.py'
               - 'python/mirage/core/langfuse/**'
               - 'python/mirage/core/jaeger/**'
-              - 'python/mirage/commands/builtin/langfuse/**'
               - 'python/mirage/commands/builtin/jaeger/**'
               - 'python/mirage/vfs/langfuse/**'
               - 'python/mirage/vfs/jaeger/**'

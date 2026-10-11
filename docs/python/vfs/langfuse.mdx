@@ -32,7 +32,6 @@ ws = Workspace({"/langfuse": vfs}, mode=MountMode.READ)
 | `secret_key`           | yes      |                              | Langfuse project secret key                      |
 | `host`                 | no       | `https://cloud.langfuse.com` | Langfuse API host URL                            |
 | `default_trace_limit`  | no       | 100                          | Default trace/observation cap for listings       |
-| `default_search_limit` | no       | 50                           | Default result cap for search at directory scope |
 
 ## Filesystem Layout
 
@@ -108,31 +107,17 @@ and metadata.
 
 ## Smart Commands
 
-### grep at different scopes
+### grep and rg
+
+grep and rg read each file as `cat` renders it, at every scope; `grep -r`
+and `rg` walk a directory. Langfuse's filter API matches names, tags and
+metadata rather than a trace's text, so it cannot say which files hold a
+text, and a search over `traces/` reads every trace the listing returns.
 
 ```bash
-# FILE level - downloads the file, greps locally
-grep "error" "/langfuse/traces/abc123.json"
-
-# TRACES level - uses Langfuse trace filter API (name, tags, metadata)
-grep "error" "/langfuse/traces/"
-
-# SESSIONS level - uses Langfuse session listing
-grep "chat" "/langfuse/sessions/"
-
-# PROMPTS level - filters prompt names
-grep "classify" "/langfuse/prompts/"
-
-# ROOT level - searches across all resource types
-grep "error" "/langfuse/"
+grep -r "error" "/langfuse/traces/"
+rg -l "classify" "/langfuse/prompts/"
 ```
-
-At directory scope, the VFS uses Langfuse's filter API instead of
-downloading data:
-
-- **traces/**: filters by trace name, user ID, or tags
-- **sessions/**: filters by session listing
-- **prompts/**: filters by prompt name
 
 ### head / tail
 
@@ -153,7 +138,7 @@ tail -n 10 "/langfuse/traces/"
 | ------------------------ | ---------------------------------------------------- |
 | `ls traces/`             | Returns up to `default_trace_limit` traces           |
 | `cat traces/<id>.json`   | Full trace (single doc, no limit needed)             |
-| `grep` (directory level) | Server-side filter, capped at `default_search_limit` |
+| `grep -r traces/`         | Reads every trace `ls traces/` lists                 |
 | `wc -l traces/`          | Not supported (Langfuse has no count endpoint)       |
 
 ## Cache
@@ -202,8 +187,8 @@ async def main():
     r = await ws.shell("ls /langfuse/prompts/")
     print(await r.stdout_str())
 
-    # Search traces (uses Langfuse filter API)
-    r = await ws.shell('grep "error" "/langfuse/traces/"')
+    # Search the listed traces
+    r = await ws.shell('grep -r "error" "/langfuse/traces/"')
     print(await r.stdout_str())
 
     # List datasets

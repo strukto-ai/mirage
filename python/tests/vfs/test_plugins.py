@@ -24,7 +24,6 @@ from mirage import (
     MountMode,
     PathSpec,
     SearchQuery,
-    SessionProfile,
     Workspace,
 )
 from mirage.accessor.ram import RAMAccessor
@@ -34,7 +33,6 @@ from mirage.core.ram.read import read as ram_read
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.core.ram.write import write as ram_write
-from mirage.policy.profile import PathsBlock
 from mirage.types import FileStat
 from mirage.utils.ranges import slice_window
 from mirage.vfs.ram.store import RAMStore
@@ -206,79 +204,15 @@ async def test_write_capability_obeys_mount_mode(accessor, mode):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["grep", "rg"])
-@pytest.mark.parametrize("answer", [["native match"], [], None])
-async def test_search_capability_distinguishes_decline_from_no_matches(
-    accessor, command, answer
-):
-    vfs = Searchable(accessor=accessor)
-    vfs.search_meta = {"grep": {"mode": "literal"}}
-    vfs.search = AsyncMock(return_value=answer)  # type: ignore[method-assign]
-    vfs.read = AsyncMock(wraps=vfs.read)  # type: ignore[method-assign]
-    ws = Workspace({"/nested/data": vfs})
-    try:
-        result = await ws.shell(f"{command} -F hello {PATH.virtual}")
-        output = await result.stdout_str()
-        assert output == (
-            "hello\n"
-            if answer is None
-            else "".join(line + "\n" for line in answer)
-        )
-        assert result.exit_code == (1 if answer == [] else 0)
-        assert vfs.read.await_count == (1 if answer is None else 0)
-        vfs.search.assert_awaited_once()
-        called = vfs.search.await_args
-        assert called.args[0].vfs_path == "a.txt"
-        assert called.kwargs["query"] == SearchQuery(
-            query="hello",
-            options={
-                "grep": {
-                    "ignore_case": False,
-                    "fixed_string": True,
-                    "whole_word": False,
-                    "syntax": "basic" if command == "grep" else "rust",
-                    **({"utf8": False} if command == "grep" else {}),
-                }
-            },
-        )
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "flags,pattern,expected",
-    [("-n", "hello", "1:hello\n"), ("-E", "h.*o", "hello\n")],
-)
-async def test_search_unsupported_requests_scan_without_calling_backend(
-    accessor, flags, pattern, expected
-):
-    vfs = Searchable(accessor=accessor)
-    vfs.search_meta = {"grep": {"mode": "literal"}}
-    vfs.search = AsyncMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("native query must not run")
-    )
-    ws = Workspace({"/nested/data": vfs})
-    try:
-        result = await ws.shell(f"grep {flags} '{pattern}' {PATH.virtual}")
-        assert await result.stdout_str() == expected
-        assert result.exit_code == 0
-        vfs.search.assert_not_awaited()
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_search_errors_do_not_turn_into_fallback_reads(accessor):
     vfs = Searchable(accessor=accessor)
-    vfs.search_meta = {"grep": {"mode": "regex"}}
-    vfs.search = AsyncMock(  # type: ignore[method-assign]
+    vfs.files_containing = AsyncMock(  # type: ignore[method-assign]
         side_effect=PermissionError("search refused")
     )
     vfs.read = AsyncMock(wraps=vfs.read)  # type: ignore[method-assign]
     ws = Workspace({"/nested/data": vfs})
     try:
-        result = await ws.shell(f"grep hello {PATH.virtual}")
+        result = await ws.shell("grep -r hello /nested/data")
         assert result.exit_code != 0
         assert "search refused" in await result.stderr_str()
         vfs.read.assert_not_awaited()
@@ -287,35 +221,8 @@ async def test_search_errors_do_not_turn_into_fallback_reads(accessor):
 
 
 @pytest.mark.asyncio
-async def test_native_search_defers_when_subtree_contains_hidden_paths(
-    accessor,
-):
+async def test_grep_and_rg_never_ask_the_search_commands_search(accessor):
     vfs = Searchable(accessor=accessor)
-    vfs.search_meta = {"grep": {"mode": "regex"}}
-    vfs.search = AsyncMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("native search would bypass visibility")
-    )
-    ws = Workspace(
-        {"/nested/data": vfs},
-        profiles={
-            "default": SessionProfile(
-                paths=PathsBlock(hide=("/nested/data/secret",))
-            )
-        },
-    )
-    try:
-        result = await ws.shell("grep -r hello /nested/data")
-        assert result.exit_code == 0
-        assert "hello" in await result.stdout_str()
-        vfs.search.assert_not_awaited()
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_resource_search_options_are_independent_of_grep(accessor):
-    vfs = Searchable(accessor=accessor)
-    vfs.search_meta = {"ranking": "relevance"}
     vfs.search = AsyncMock(return_value=["deployment 42"])  # type: ignore[method-assign]
     query = SearchQuery(
         "recent deployments",

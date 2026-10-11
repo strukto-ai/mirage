@@ -25,7 +25,6 @@ import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
 import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { LanceDBVFSBase } from '../../vfs/lancedb/lancedb.ts'
-import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { MongoDBVFSBase } from '../../vfs/mongodb/mongodb.ts'
 import { PostgresVFSBase } from '../../vfs/postgres/postgres.ts'
@@ -45,7 +44,6 @@ import { GSHEETS_COMMANDS } from './gsheets/index.ts'
 import { GSLIDES_COMMANDS } from './gslides/index.ts'
 import { HISTORY_COMMANDS } from './history/index.ts'
 import { LANCEDB_COMMANDS } from './lancedb/index.ts'
-import { LANGFUSE_COMMANDS } from './langfuse/index.ts'
 import { MEM0_COMMANDS } from './mem0/index.ts'
 import { MONGODB_COMMANDS } from './mongodb/index.ts'
 import { POSTGRES_COMMANDS } from './postgres/index.ts'
@@ -137,7 +135,6 @@ registerBackendCommands(GSheetsVFS, () => GSHEETS_COMMANDS)
 registerBackendCommands(GSlidesVFS, () => GSLIDES_COMMANDS)
 registerBackendCommands(HistoryViewVFS, () => HISTORY_COMMANDS)
 registerBackendCommands(LanceDBVFSBase, () => LANCEDB_COMMANDS)
-registerBackendCommands(LangfuseVFS, () => LANGFUSE_COMMANDS)
 registerBackendCommands(Mem0VFS, () => MEM0_COMMANDS)
 registerBackendCommands(MongoDBVFSBase, () => MONGODB_COMMANDS)
 registerBackendCommands(PostgresVFSBase, () => POSTGRES_COMMANDS)

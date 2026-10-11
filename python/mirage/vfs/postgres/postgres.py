@@ -12,26 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Any
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hierarchy.search import make_search_op
 from mirage.core.postgres.read import read as _read
 from mirage.core.postgres.readdir import readdir as _readdir
-from mirage.core.postgres.scope import detect_scope
-from mirage.core.postgres.search import SEARCHERS
+from mirage.core.postgres.search import (
+    lines_containing as _lines_containing,
+)
 from mirage.core.postgres.stat import stat as _stat
-from mirage.types import FileStat, JsonValue, PathSpec, VFSName
+from mirage.io.types import ByteSource
+from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.postgres.config import PostgresConfig
 from mirage.vfs.postgres.prompt import PROMPT
-from mirage.vfs.types import SearchQuery
-
-_search_fn = make_search_op(detect_scope, SEARCHERS, _stat)
 
 
 class PostgresVFS(BaseVFS):
@@ -42,10 +38,6 @@ class PostgresVFS(BaseVFS):
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
     prompt: str = PROMPT
-
-    search_meta: Mapping[str, JsonValue] = MappingProxyType(
-        {"grep": {"mode": "literal", "stream": False}}
-    )
 
     def __init__(self, config: PostgresConfig) -> None:
         super().__init__()
@@ -72,13 +64,15 @@ class PostgresVFS(BaseVFS):
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
 
-    async def search(
+    async def lines_containing(
         self,
         path: PathSpec,
-        query: SearchQuery,
+        text: str,
+        *,
+        ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
-        return await _search_fn(self.accessor, path, query, index)
+    ) -> ByteSource | None:
+        return await _lines_containing(self.accessor, path, text, ignore_case)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

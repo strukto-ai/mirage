@@ -21,18 +21,12 @@ import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat, JsonValue } from '../../types.ts'
+import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import type { SearchQuery, SearchOp } from '../types.ts'
 import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
-import { makeSearchOp } from '../../core/hierarchy/search.ts'
-import { detectScope } from '../../core/langfuse/scope.ts'
-import { SEARCHERS } from '../../core/langfuse/search.ts'
-
-const searchOp: SearchOp<LangfuseAccessor> = makeSearchOp(detectScope, SEARCHERS)
 
 export interface LangfuseVFSState {
   type: string
@@ -56,22 +50,16 @@ export class LangfuseVFS extends BaseVFS {
     if (config.host !== undefined) transportOpts.host = config.host
     const accessorConfig: {
       defaultTraceLimit?: number
-      defaultSearchLimit?: number
       defaultFromTimestamp?: string
     } = {}
     if (config.defaultTraceLimit !== undefined) {
       accessorConfig.defaultTraceLimit = config.defaultTraceLimit
-    }
-    if (config.defaultSearchLimit !== undefined) {
-      accessorConfig.defaultSearchLimit = config.defaultSearchLimit
     }
     if (config.defaultFromTimestamp !== undefined) {
       accessorConfig.defaultFromTimestamp = config.defaultFromTimestamp
     }
     this.accessor = new LangfuseAccessor(new HttpLangfuseTransport(transportOpts), accessorConfig)
   }
-
-  override readonly searchMeta: Readonly<Record<string, JsonValue>> = { grep: { mode: 'regex' } }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return langfuseReaddir(this.accessor, path, index)
@@ -89,14 +77,6 @@ export class LangfuseVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return langfuseStat(this.accessor, path, index)
-  }
-
-  override search(
-    path: PathSpec,
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<string[] | null> {
-    return searchOp(this.accessor, path, query, index)
   }
 
   override getState(): Promise<LangfuseVFSState> {

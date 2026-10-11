@@ -32,9 +32,9 @@ def is_kind(text: str) -> bool:
 
 KIND = Codec(validate=is_kind)
 
-# One description of the tree: readdir, stat, read AND the grep/rg
-# search push-down all classify through it, so the file surface and the
-# search surface cannot disagree about what a path means.
+# One description of the tree: readdir, stat, read and grep's line
+# search all classify through it, so they cannot disagree about what a
+# path means.
 SCOPES = (
     Scope(
         kind="database_json",

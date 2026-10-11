@@ -12,34 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { grepSearchOptions } from '../../commands/builtin/grep_pushdown.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
-import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { queryMatcher, type Searcher } from '../hierarchy/search.ts'
-import { type SearchQuery } from '../../vfs/types.ts'
-import {
-  fetchBoundedQuery,
-  fetchColumns,
-  listMatviews,
-  listSchemas,
-  listTables,
-  listViews,
-  qualified,
-  quoteIdent,
-} from './client.ts'
-import { buildEntitySchemaJson } from './_schema_json.ts'
-import { readRows, rowLine } from './read.ts'
-import { buildEntitySemanticJson } from './semantic.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { jsonText } from '../render/json.ts'
-import { efbig } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
+import { concat } from '../../utils/bytes.ts'
+import { fetchBoundedQuery, fetchColumns, qualified, quoteIdent } from './client.ts'
+import { rowLine } from './read.ts'
+import { detectScope } from './scope.ts'
 
 // Column types whose `::text` is the value exactly as a rows.jsonl line spells
-// it, so a LIKE over the cast finds every row whose line holds the pattern
-// inside that value. Everything else renders differently in the line (a
-// timestamp's separator, a float's digits, a `char(n)`'s padding, json's
-// spacing), and a table holding one is not searchable. Mirrors
-// `_SAME_TEXT_TYPES` in `mirage/core/postgres/search.py`.
+// it, so a LIKE over the cast finds every row whose line holds the text inside
+// that value. Everything else renders differently in the line (a timestamp's
+// separator, a float's digits, a `char(n)`'s padding, json's spacing), and a
+// table holding one is not searchable. Mirrors `_SAME_TEXT_TYPES` in
+// `mirage/core/postgres/search.py`.
 const SAME_TEXT_TYPES: ReadonlySet<string> = new Set([
   'text',
   'character varying',
@@ -51,285 +36,111 @@ const SAME_TEXT_TYPES: ReadonlySet<string> = new Set([
   'boolean',
 ])
 // The ones that can hold a control character, which the line spells as an
-// escape (`\n`, `\u0001`), so a pattern can match the escape's letters in a
+// escape (`\n`, `\u0001`), so the text can match the escape's letters in a
 // row whose value never holds them: such rows are candidates too.
 const STRING_TYPES: ReadonlySet<string> = new Set(['text', 'character varying', 'name'])
-// What a line spells around and between values: a pattern holding one can
-// match where no single value holds it (`:4` after a key).
+// What a line spells around and between values: a text holding one can match
+// where no single value holds it (`:4` after a key).
 const STRUCTURAL: ReadonlySet<string> = new Set(['"', '\\', ':', ',', '{', '}'])
 // How a NULL spells in the line; no LIKE over a NULL ever matches it.
 const NULL = 'null'
+// Relations whose rows a plain read takes in ctid order: a table or a
+// materialized view with no child. A view runs its own query, and a parent
+// appends its children's rows after its own.
+const HEAP_KINDS: ReadonlySet<string> = new Set(['r', 'm'])
+const RELATION =
+  'SELECT c.relkind::text AS relkind, c.relhassubclass FROM pg_class c ' +
+  'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+  'WHERE n.nspname = $1 AND c.relname = $2'
 
-export interface EntityMatches {
-  schema: string
-  kind: string
-  entity: string
-  lines: string[]
+// Escape LIKE/ILIKE wildcards so the text matches as a literal: Postgres LIKE
+// treats % and _ as wildcards and \ as the default escape char, but grep's
+// text has no such meaning (`user_id` must not match `userXid`).
+function escapeLike(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
-// Escape LIKE/ILIKE wildcards so the pattern matches as a literal: Postgres
-// LIKE treats % and _ as wildcards and \ as the default escape char, but
-// grep's substring pattern has no such meaning (`user_id` must not match
-// `userXid`).
-function escapeLike(pattern: string): string {
-  return pattern.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
-}
-
-// Whether a LIKE over the columns finds every row a scan would. The push-down
-// prints what grep over rows.jsonl would print, and a LIKE per column sees
-// only values: a pattern that can match a key (every row holds every key), the
-// text between values, a NULL's `null` or a value the line spells differently
-// from its cast would be found by the scan and missed by the query. Mirrors
-// `_answerable` in `mirage/core/postgres/search.py`.
-function answerable(columns: readonly [string, string][], query: SearchQuery): boolean {
-  const pattern = query.query
-  for (const ch of pattern) {
+// Whether a LIKE over the columns finds every line a scan would. A LIKE per
+// column sees only values: a text that can match a key (every row holds every
+// key), the text between values, a NULL's `null` or a value the line spells
+// differently from its cast would be found by the scan and missed by the
+// query. Mirrors `_answerable` in `mirage/core/postgres/search.py`.
+function answerable(
+  columns: readonly [string, string][],
+  text: string,
+  ignoreCase: boolean,
+): boolean {
+  for (const ch of text) {
     if (STRUCTURAL.has(ch) || (ch.codePointAt(0) ?? 0) < 0x20) return false
   }
-  const folded = grepSearchOptions(query).ignoreCase ? pattern.toLowerCase() : pattern
+  const folded = ignoreCase ? text.toLowerCase() : text
   if (NULL.includes(folded)) return false
   for (const [name, dataType] of columns) {
     if (!SAME_TEXT_TYPES.has(dataType)) return false
-    const key = grepSearchOptions(query).ignoreCase ? name.toLowerCase() : name
-    if (key.includes(folded)) return false
+    if ((ignoreCase ? name.toLowerCase() : name).includes(folded)) return false
   }
   return true
 }
 
 /**
- * The rows.jsonl lines of one entity that grep would print. When the columns
- * and the pattern let a LIKE see every match (`answerable`), the query picks
- * candidates (a value holding the pattern, or one holding a control character
- * the line escapes) and the matcher grep compiles decides each candidate's
- * line. Otherwise the file is read and scanned the way `cat | grep` would,
- * through the same read and its size guard, so a table too large to read is
- * refused rather than answered short. There is no result cap: the push-down
- * used to stop at `defaultSearchLimit` rows and print those as grep's whole
- * answer; past `maxReadRows` candidates it now refuses with EFBIG, as a whole
- * read of that many rows is refused. Mirrors `search_entity` in
- * `mirage/core/postgres/search.py`.
+ * The lines of a table's rows.jsonl that may hold `text`. A LIKE (ILIKE under
+ * -i) over every column picks the rows whose value holds `text`, plus any row
+ * with a control character the line spells as an escape; grep matches each
+ * line itself. The rows come in ctid order, the order the plain read scans the
+ * heap in, whatever plan the filter gets (an index or a parallel scan returns
+ * them otherwise), so only a relation in `HEAP_KINDS` with no child is
+ * searched. Null for any other file or relation, when the columns or the text
+ * keep a LIKE from seeing every match (`answerable`), or past `maxReadRows`
+ * rows or `maxReadBytes` bytes, where reading the file refuses it as too
+ * large. Mirrors `lines_containing` in `mirage/core/postgres/search.py`.
  */
-export async function searchEntity(
+export async function linesContaining(
   accessor: PostgresAccessor,
-  schema: string,
-  kind: string,
-  entity: string,
-  query: SearchQuery,
-): Promise<string[]> {
-  const cap = accessor.config.maxReadRows
-  const rowsPath = `${schema}/${kind}/${entity}/rows.jsonl`
-  const matcher = queryMatcher(query)
+  path: PathSpec,
+  text: string,
+  ignoreCase: boolean,
+): Promise<Uint8Array | null> {
+  const match = detectScope(path)
+  if (match.kind !== 'entity_rows') return null
+  const schema = match.slots.schema ?? ''
+  const entity = match.slots.entity ?? ''
+  const { maxReadRows, maxReadBytes } = accessor.config
+  const relation = (
+    await accessor.store.query<{ relkind: string; relhassubclass: boolean }>(RELATION, [
+      schema,
+      entity,
+    ])
+  ).rows
+  const [only] = relation
+  if (relation.length !== 1 || only === undefined) return null
+  if (!HEAP_KINDS.has(only.relkind) || only.relhassubclass) return null
   const columns = (await fetchColumns(accessor, schema, entity)).map((c): [string, string] => [
     c.name,
     c.type,
   ])
-  if (columns.length === 0) return []
-  if (answerable(columns, query)) {
-    const op = grepSearchOptions(query).ignoreCase ? 'ILIKE' : 'LIKE'
-    const clauses = columns.map(([name]) => `${quoteIdent(name)}::text ${op} $1`)
-    for (const [name, dataType] of columns) {
-      if (STRING_TYPES.has(dataType)) clauses.push(`${quoteIdent(name)} ~ '[[:cntrl:]]'`)
-    }
-    const sql =
-      `SELECT * FROM ${qualified(schema, entity)} ` + `WHERE ${clauses.join(' OR ')} LIMIT $2`
-    const maxBytes = accessor.config.maxReadBytes
-    const rows = await fetchBoundedQuery(
-      accessor,
-      sql,
-      [`%${escapeLike(query.query)}%`, cap + 1],
-      new Set(columns.map(([name]) => name)),
-      maxBytes,
-    )
-    if (rows === null || rows.length > cap) throw efbig(rowsPath)
-    const lines: string[] = []
-    const encoder = new TextEncoder()
-    let renderedBytes = 0
-    for (const row of rows) {
-      const line = rowLine(row)
-      renderedBytes += encoder.encode(line).length + 1
-      if (renderedBytes > maxBytes) throw efbig(rowsPath)
-      if (matcher(line)) lines.push(line)
-    }
-    return lines
+  if (columns.length === 0 || !answerable(columns, text, ignoreCase)) return null
+  const op = ignoreCase ? 'ILIKE' : 'LIKE'
+  const clauses = columns.map(([name]) => `${quoteIdent(name)}::text ${op} $1`)
+  for (const [name, dataType] of columns) {
+    if (STRING_TYPES.has(dataType)) clauses.push(`${quoteIdent(name)} ~ '[[:cntrl:]]'`)
   }
-  const text = new TextDecoder().decode(await readRows(accessor, schema, entity, rowsPath))
-  return splitLines(text).filter((line) => matcher(line))
-}
-
-// python's `str.splitlines()` over a rows.jsonl rendering, whose only
-// terminators are the `\n` after each row (a value's own newline is escaped).
-function splitLines(text: string): string[] {
-  const lines = text.split('\n')
-  if (lines[lines.length - 1] === '') lines.pop()
-  return lines
-}
-
-async function entityNames(
-  accessor: PostgresAccessor,
-  schema: string,
-  kind: string,
-): Promise<string[]> {
-  if (kind === 'tables') return listTables(accessor, schema)
-  const views = await listViews(accessor, schema)
-  const mviews = await listMatviews(accessor, schema)
-  return [...new Set([...views, ...mviews])].sort(compareCodePoints)
-}
-
-// Grep an entity's rendered metadata files. The LIKE push-down only ever
-// sees row values, so schema.json and semantic.json would be invisible at
-// directory scope: `grep -r` would report "not found" for content that is
-// plainly there. These documents are rendered, not stored, so the only honest
-// way to match them is to render and scan, with the matcher grep compiles.
-export async function searchEntityMetadata(
-  accessor: PostgresAccessor,
-  schema: string,
-  kind: string,
-  entity: string,
-  query: SearchQuery,
-): Promise<string[]> {
-  const entityKind = kind === 'tables' ? 'table' : 'view'
-  const matcher = queryMatcher(query)
-  const docs: [string, unknown][] = [
-    ['schema.json', await buildEntitySchemaJson(accessor, schema, entity, entityKind)],
-    ['semantic.json', await buildEntitySemanticJson(accessor, schema, entity, entityKind)],
-  ]
-  const lines: string[] = []
-  for (const [name, doc] of docs) {
-    for (const line of jsonText(doc).split('\n')) {
-      if (matcher(line)) lines.push(`${schema}/${kind}/${entity}/${name}:${line}`)
-    }
+  const sql = `SELECT * FROM ${qualified(schema, entity)} WHERE ${clauses.join(' OR ')} ORDER BY ctid LIMIT $2`
+  const rows = await fetchBoundedQuery(
+    accessor,
+    sql,
+    [`%${escapeLike(text)}%`, maxReadRows + 1],
+    new Set(columns.map(([name]) => name)),
+    maxReadBytes,
+  )
+  if (rows === null || rows.length > maxReadRows) return null
+  const encoder = new TextEncoder()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (const row of rows) {
+    const line = encoder.encode(rowLine(row) + '\n')
+    size += line.length
+    if (size > maxReadBytes) return null
+    chunks.push(line)
   }
-  return lines
-}
-
-export async function searchKindMetadata(
-  accessor: PostgresAccessor,
-  schema: string,
-  kind: string,
-  query: SearchQuery,
-): Promise<string[]> {
-  const lines: string[] = []
-  for (const n of await entityNames(accessor, schema, kind)) {
-    lines.push(...(await searchEntityMetadata(accessor, schema, kind, n, query)))
-  }
-  return lines
-}
-
-export async function searchSchemaMetadata(
-  accessor: PostgresAccessor,
-  schema: string,
-  query: SearchQuery,
-): Promise<string[]> {
-  const lines: string[] = []
-  for (const kind of ['tables', 'views'] as const) {
-    lines.push(...(await searchKindMetadata(accessor, schema, kind, query)))
-  }
-  return lines
-}
-
-export async function searchDatabaseMetadata(
-  accessor: PostgresAccessor,
-  query: SearchQuery,
-): Promise<string[]> {
-  const lines: string[] = []
-  for (const s of await listSchemas(accessor, accessor.config.schemas)) {
-    lines.push(...(await searchSchemaMetadata(accessor, s, query)))
-  }
-  return lines
-}
-
-export async function searchKind(
-  accessor: PostgresAccessor,
-  schema: string,
-  kind: string,
-  query: SearchQuery,
-): Promise<EntityMatches[]> {
-  const out: EntityMatches[] = []
-  for (const n of await entityNames(accessor, schema, kind)) {
-    const lines = await searchEntity(accessor, schema, kind, n, query)
-    if (lines.length > 0) out.push({ schema, kind, entity: n, lines })
-  }
-  return out
-}
-
-export async function searchSchema(
-  accessor: PostgresAccessor,
-  schema: string,
-  query: SearchQuery,
-): Promise<EntityMatches[]> {
-  const out: EntityMatches[] = []
-  for (const kind of ['tables', 'views'] as const) {
-    out.push(...(await searchKind(accessor, schema, kind, query)))
-  }
-  return out
-}
-
-export async function searchDatabase(
-  accessor: PostgresAccessor,
-  query: SearchQuery,
-): Promise<EntityMatches[]> {
-  const out: EntityMatches[] = []
-  for (const s of await listSchemas(accessor, accessor.config.schemas)) {
-    out.push(...(await searchSchema(accessor, s, query)))
-  }
-  return out
-}
-
-export function formatGrepResults(results: readonly EntityMatches[]): string[] {
-  const lines: string[] = []
-  for (const { schema, kind, entity, lines: found } of results) {
-    for (const line of found) lines.push(`${schema}/${kind}/${entity}/rows.jsonl:${line}`)
-  }
-  return lines
-}
-
-// Directory scopes cover every file under them, so the rendered
-// schema.json / semantic.json are searched alongside the row push-down.
-// Deliberate divergence from GNU: rows come first and metadata second,
-// rather than in per-entity readdir order.
-const rootSearcher: Searcher<PostgresAccessor> = async (accessor, _match, query) => [
-  ...formatGrepResults(await searchDatabase(accessor, query)),
-  ...(await searchDatabaseMetadata(accessor, query)),
-]
-
-const schemaSearcher: Searcher<PostgresAccessor> = async (accessor, match, query) => {
-  const schema = match.slots.schema ?? ''
-  return [
-    ...formatGrepResults(await searchSchema(accessor, schema, query)),
-    ...(await searchSchemaMetadata(accessor, schema, query)),
-  ]
-}
-
-const kindSearcher: Searcher<PostgresAccessor> = async (accessor, match, query) => {
-  const schema = match.slots.schema ?? ''
-  const kind = match.slots.kind ?? ''
-  return [
-    ...formatGrepResults(await searchKind(accessor, schema, kind, query)),
-    ...(await searchKindMetadata(accessor, schema, kind, query)),
-  ]
-}
-
-async function entityLines(
-  accessor: PostgresAccessor,
-  match: ScopeMatch,
-  query: SearchQuery,
-  metadata: boolean,
-): Promise<string[]> {
-  const schema = match.slots.schema ?? ''
-  const kind = match.slots.kind ?? ''
-  const entity = match.slots.entity ?? ''
-  const lines = await searchEntity(accessor, schema, kind, entity, query)
-  const found = formatGrepResults([{ schema, kind, entity, lines }])
-  // entity_rows names rows.jsonl explicitly; only the directory scope
-  // pulls in the sibling metadata files.
-  if (metadata) found.push(...(await searchEntityMetadata(accessor, schema, kind, entity, query)))
-  return found
-}
-
-export const SEARCHERS: Readonly<Record<string, Searcher<PostgresAccessor>>> = {
-  root: rootSearcher,
-  schema: schemaSearcher,
-  kind: kindSearcher,
-  entity: (accessor, match, query) => entityLines(accessor, match, query, true),
-  entity_rows: (accessor, match, query) => entityLines(accessor, match, query, false),
+  return concat(chunks)
 }

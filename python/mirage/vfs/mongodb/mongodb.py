@@ -12,27 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Mapping
-from types import MappingProxyType
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hierarchy.search import make_search_op
 from mirage.core.mongodb.read import read as _read
 from mirage.core.mongodb.read import stream_any as _read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
-from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.search import SEARCHERS
 from mirage.core.mongodb.stat import stat as _stat
-from mirage.types import FileStat, JsonValue, PathSpec, VFSName
+from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
 from mirage.vfs.mongodb.prompt import PROMPT
-from mirage.vfs.types import SearchQuery
-
-_search_fn = make_search_op(detect_scope, SEARCHERS, _stat)
 
 
 class MongoDBVFS(BaseVFS):
@@ -43,10 +36,6 @@ class MongoDBVFS(BaseVFS):
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
     prompt: str = PROMPT
-
-    search_meta: Mapping[str, JsonValue] = MappingProxyType(
-        {"grep": {"mode": "regex", "stream": True}}
-    )
 
     def __init__(self, config: MongoDBConfig) -> None:
         super().__init__()
@@ -77,14 +66,6 @@ class MongoDBVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
         return _read_stream(self.accessor, path, index)
-
-    async def search(
-        self,
-        path: PathSpec,
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
-        return await _search_fn(self.accessor, path, query, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

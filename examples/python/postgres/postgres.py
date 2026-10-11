@@ -113,13 +113,13 @@ async def main():
     await _run(ws, f'cat "{fp}"')
 
     print("\n" + "=" * 60)
-    print("GREP at different scopes (ILIKE pushdown)")
+    print("GREP at different scopes")
     print("=" * 60)
 
     await _run(ws, f'grep system "{fp}"')
     await _run(ws, f'grep -c system "{fp}"')
-    await _run(ws, "grep system /pg/public/tables/")
-    await _run(ws, "grep system /pg/public/")
+    await _run(ws, "grep -r system /pg/public/tables/")
+    await _run(ws, "grep -r system /pg/public/")
 
     print("\n" + "=" * 60)
     print("RG at schema scope")

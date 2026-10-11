@@ -22,7 +22,6 @@ class LangfuseConfig(BaseModel):
     secret_key: SecretStr
     host: str = "https://cloud.langfuse.com"
     default_trace_limit: int = 100
-    default_search_limit: int = 50
     # Opt-in lower bound for trace listings. Unset lists whatever the project
     # holds, up to default_trace_limit: an implicit rolling window would hide
     # traces that read() happily serves.

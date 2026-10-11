@@ -20,7 +20,6 @@ const LangfuseConfigSchema = z.object({
   secretKey: secretStr(),
   host: z.string().optional(),
   defaultTraceLimit: z.number().optional(),
-  defaultSearchLimit: z.number().optional(),
   defaultFromTimestamp: z.string().optional(),
 })
 

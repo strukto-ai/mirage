@@ -178,7 +178,7 @@
       "command": "grep right /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":2,\"body\":\"left right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":4,\"body\":\"leftright\",\"active\":false}\n",
+        "stdout": "{\"id\":2,\"body\":\"left right\",\"active\":false}\n{\"id\":3,\"body\":\"left right\",\"active\":true}\n{\"id\":4,\"body\":\"leftright\",\"active\":false}\n",
         "stderr": ""
       }
     },
@@ -191,7 +191,7 @@
       "command": "grep 5 /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
+        "stdout": "{\"id\":5,\"body\":null,\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -204,7 +204,7 @@
       "command": "grep true /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
+        "stdout": "{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n{\"id\":3,\"body\":\"left right\",\"active\":true}\n{\"id\":5,\"body\":null,\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -217,7 +217,7 @@
       "command": "grep null /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
+        "stdout": "{\"id\":5,\"body\":null,\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -230,7 +230,7 @@
       "command": "grep body /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":2,\"body\":\"left right\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":3,\"body\":\"left right\",\"active\":true}\ncontract/tables/probes/rows.jsonl:{\"id\":4,\"body\":\"leftright\",\"active\":false}\ncontract/tables/probes/rows.jsonl:{\"id\":5,\"body\":null,\"active\":true}\n",
+        "stdout": "{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n{\"id\":2,\"body\":\"left right\",\"active\":false}\n{\"id\":3,\"body\":\"left right\",\"active\":true}\n{\"id\":4,\"body\":\"leftright\",\"active\":false}\n{\"id\":5,\"body\":null,\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -243,7 +243,7 @@
       "command": "grep tab /pg-contract/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "contract/tables/probes/rows.jsonl:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n",
+        "stdout": "{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n",
         "stderr": ""
       }
     },
@@ -440,6 +440,45 @@
         "exit": 0,
         "stdout": "{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
         "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\ntail: no files remaining\n"
+      }
+    },
+    {
+      "id": "postgres_search_answers_a_table_too_large_to_read",
+      "seq": 611119,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -F Ada /pg-contract-limited/contract/tables/probes/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_search_line_numbers_read_the_table",
+      "seq": 611120,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -nF Ada /pg-contract-limited/contract/tables/probes/rows.jsonl",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: /pg-contract-limited/contract/tables/probes/rows.jsonl: File too large\n"
+      }
+    },
+    {
+      "id": "postgres_search_cat_still_refuses",
+      "seq": 611121,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg-contract-limited/contract/tables/probes/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /pg-contract-limited/contract/tables/probes/rows.jsonl: File too large\n"
       }
     }
   ]

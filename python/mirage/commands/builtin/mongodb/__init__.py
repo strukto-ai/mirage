@@ -13,15 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.mongodb.cat import cat
-from mirage.commands.builtin.mongodb.grep import grep
-from mirage.commands.builtin.mongodb.rg import rg
 from mirage.commands.builtin.mongodb.tail import tail
 from mirage.commands.builtin.mongodb.wc import wc
 
 COMMANDS = [
     cat,
-    grep,
-    rg,
     tail,
     wc,
 ]

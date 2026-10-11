@@ -1,5 +1,5 @@
 import asyncio
-from types import MappingProxyType
+import re
 
 from mirage import (
     CLI,
@@ -17,11 +17,8 @@ from mirage import (
     IOResult,
     MountMode,
     PathSpec,
-    SearchQuery,
     Workspace,
 )
-from mirage.commands.builtin.grep_pushdown import grep_search_options
-from mirage.commands.builtin.utils.lines import split_lines
 from mirage.runtime.files import RuntimeFiles
 
 
@@ -48,8 +45,6 @@ class NotesVFS(BaseVFS):
     """A flat, read-only collection of UTF-8 pages."""
 
     accessor: NotesAccessor
-    # grep and rg may hand a literal pattern to search instead of reading.
-    search_meta = MappingProxyType({"grep": {"mode": "literal"}})
 
     def __init__(self, pages: dict[str, str]) -> None:
         super().__init__(
@@ -91,31 +86,31 @@ class NotesVFS(BaseVFS):
             size=len(page_bytes(self.accessor, path)),
         )
 
-    async def search(
+    async def lines_containing(
         self,
         path: PathSpec,
-        query: SearchQuery,
+        text: str,
+        *,
+        ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
-        """Search one page literally, declining requests that need a scan.
+    ) -> bytes | None:
+        """The lines of one page holding ``text``, so grep and rg skip the read.
+
+        Declines (None) under -i, or for a page holding a NUL byte, which
+        grep reports as binary; grep and rg then read the page.
 
         Args:
-            path (PathSpec): the page to search.
-            query (SearchQuery): text and grep integration options.
+            path (PathSpec): the page grep or rg would read.
+            text (str): plain text every match holds.
+            ignore_case (bool): whether case folds.
             index (IndexCacheStore): the mount's metadata view.
         """
         self.accessor.search_calls += 1
-        options = grep_search_options(query)
-        if (
-            not path.vfs_path.strip("/")
-            or options.ignore_case
-            or options.whole_word
-        ):
+        page = page_bytes(self.accessor, path)
+        if ignore_case or b"\0" in page:
             return None
-        text = page_bytes(self.accessor, path).decode("utf-8")
-        if "\0" in text:
-            return None
-        return [line for line in split_lines(text) if query.query in line]
+        lines = re.split(rb"(?<=\n)", page)
+        return b"".join(line for line in lines if text.encode() in line)
 
 
 async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
@@ -156,9 +151,9 @@ async def show_search(ws: Workspace, notes: NotesVFS) -> None:
     for command in ("grep", "rg"):
         for flags, pattern, calls in (
             ("-F", "BaseVFS", (1, 0)),
-            ("-nF", "BaseVFS", (0, 1)),
-            ("-e", "Base.*adapter", (0, 1)),
-            ("-iF", "basevfs", (1, 1)),
+            ("-nF", "BaseVFS", (1, 1)),
+            ("-e", "Base.*adapter", (1, 0)),
+            ("-iF", "ADAPTER", (1, 1)),
         ):
             before = (notes.accessor.search_calls, notes.accessor.read_calls)
             await show(ws, f"{command} {flags} '{pattern}' /notes/todo.txt")

@@ -14,28 +14,18 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { makeSearchOp } from '../../core/hierarchy/search.ts'
 import { read as mongodbRead, streamAny as mongodbStream } from '../../core/mongodb/read.ts'
 import { readdir as mongodbReaddir } from '../../core/mongodb/readdir.ts'
-import { detectScope as detectMongoScope } from '../../core/mongodb/scope.ts'
-import { SEARCHERS } from '../../core/mongodb/search.ts'
 import { stat as mongodbStat } from '../../core/mongodb/stat.ts'
-import type { FileStat, JsonValue, PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
-import type { SearchOp, SearchQuery } from '../types.ts'
-
-const searchOp: SearchOp<MongoDBAccessor> = makeSearchOp(detectMongoScope, SEARCHERS, mongodbStat)
 
 /**
  * MongoDB's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
 export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
-  override readonly searchMeta: Readonly<Record<string, JsonValue>> = {
-    grep: { mode: 'regex', stream: true },
-  }
-
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return mongodbReaddir(this.accessor, path, index)
   }
@@ -56,13 +46,5 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
 
   override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
     return mongodbStream(this.accessor, path, index)
-  }
-
-  override search(
-    path: PathSpec,
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<string[] | null> {
-    return searchOp(this.accessor, path, query, index)
   }
 }

@@ -80,7 +80,7 @@ try {
     await run('head -n 3 rows.jsonl', `head -n 3 ${dir}/rows.jsonl`)
     await run('tail -n 2 rows.jsonl', `tail -n 2 ${dir}/rows.jsonl`)
     await run('wc -l rows.jsonl', `wc -l ${dir}/rows.jsonl`)
-    await run('grep ":" /pg/public/tables (top-level pushdown)', `grep -c ":" ${dir}/rows.jsonl`)
+    await run('grep -c ":" rows.jsonl', `grep -c ":" ${dir}/rows.jsonl`)
     await run('jq .name schema.json', `jq ".name" ${dir}/schema.json`)
     await run('find /pg/public -maxdepth 2', 'find /pg/public -maxdepth 2')
     await run('tree -L 2 /pg/public', 'tree -L 2 /pg/public')

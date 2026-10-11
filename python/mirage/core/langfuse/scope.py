@@ -18,10 +18,8 @@ from mirage.types import ContentType
 
 TOP_LEVEL_DIRS = ["traces", "sessions", "prompts", "datasets"]
 
-# One description of the tree: readdir, stat, read AND the grep/rg
-# search push-down all classify through it, so the file surface and the
-# search surface cannot disagree about what a path means (they used to
-# be two hand-maintained dispatch ladders).
+# One description of the tree: readdir, stat and read all classify
+# through it, so they cannot disagree about what a path means.
 SCOPES = (
     Scope(kind="traces", segments=("traces",), probed=False),
     Scope(
@@ -72,17 +70,3 @@ SCOPES = (
 )
 
 detect_scope = make_detect_scope(SCOPES)
-
-# The kinds the grep/rg push-down may answer with a whole-container
-# search; leaves and unrecognized paths fall through to the generic
-# per-file scan.
-SEARCH_KINDS = {
-    "root": "traces",
-    "traces": "traces",
-    "sessions": "sessions",
-    "session": "sessions",
-    "prompts": "prompts",
-    "prompt": "prompts",
-    "datasets": "datasets",
-    "dataset": "datasets",
-}

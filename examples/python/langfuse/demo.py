@@ -102,15 +102,15 @@ async def main():
     print("GREP across different scopes")
     print("=" * 60)
 
-    await _run(ws, 'grep "chat" "/langfuse/traces/"')
+    await _run(ws, 'grep -r "chat" "/langfuse/traces/"')
 
-    await _run(ws, 'grep "support" "/langfuse/traces/"')
+    await _run(ws, 'grep -r "support" "/langfuse/traces/"')
 
-    await _run(ws, 'grep "chat-session" "/langfuse/sessions/"')
+    await _run(ws, 'grep -r "chat-session" "/langfuse/sessions/"')
 
-    await _run(ws, 'grep "summarize" "/langfuse/prompts/"')
+    await _run(ws, 'grep -r "summarize" "/langfuse/prompts/"')
 
-    await _run(ws, 'grep "qa" "/langfuse/datasets/"')
+    await _run(ws, 'grep -r "qa" "/langfuse/datasets/"')
 
     if trace_files:
         tp = f"/langfuse/traces/{trace_files[0].strip()}"

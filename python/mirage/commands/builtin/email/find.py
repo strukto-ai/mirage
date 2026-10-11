@@ -45,9 +45,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 def _folder_operand(paths: list[PathSpec]) -> PathSpec | None:
     """The one folder operand the IMAP subject search may answer for.
 
-    Shares ``lone_operand``'s rule with the grep/rg push-downs, for the
-    same reason: the search answers one whole-folder question and prints
-    its entire answer, so a second operand was dropped in silence
+    Takes ``lone_operand``'s rule: the search answers one whole-folder
+    question and prints its entire answer, so a second operand was
+    dropped in silence
     (``find /mail/INBOX /mail/Sent -name '*x*'`` searched INBOX only).
     On top of that the operand must name exactly one path segment, the
     folder. The mount root used to reach here too and then answer with

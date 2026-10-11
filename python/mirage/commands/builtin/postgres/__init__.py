@@ -12,16 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.postgres.grep import grep
 from mirage.commands.builtin.postgres.head import head
-from mirage.commands.builtin.postgres.rg import rg
 from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.builtin.postgres.wc import wc
 
 COMMANDS = [
-    grep,
     head,
-    rg,
     tail,
     wc,
 ]

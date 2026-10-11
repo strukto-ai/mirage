@@ -254,7 +254,6 @@ export function commandIo(vfs: BaseVFS): CommandIO {
                   ),
                 }
               : {}),
-            meta: vfs.searchMeta,
           },
         }
       : {}),

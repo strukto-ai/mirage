@@ -74,5 +74,4 @@ it('uses one native ranking for a batch and carries the requested limit', async 
   expect(new TextDecoder().decode(result)).toBe('/data/17.txt:0.8100\nanswer\n')
   expect(query).toHaveBeenCalledOnce()
   expect(query.mock.calls[0]?.[1]).toMatchObject({ limit: 2 })
-  expect(ioFor(QdrantVFS, accessor).search?.meta?.grep).toBeUndefined()
 })

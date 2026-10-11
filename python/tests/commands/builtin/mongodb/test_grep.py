@@ -19,7 +19,7 @@ from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.mongodb.grep import grep
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mongodb import MongoDBVFS
@@ -36,8 +36,7 @@ def accessor():
 
 @pytest.fixture
 def _stat_reads(monkeypatch):
-    # The stat guard is captured by the search factory at import, so fake
-    # what it reads at call time: the existence probes and the counters.
+    # Fake what stat reads: the existence probes and the counters.
     monkeypatch.setattr(
         "mirage.core.mongodb.readdir.entity_exists",
         AsyncMock(return_value=True),
@@ -79,7 +78,7 @@ async def test_grep_m1_short_circuits_after_first_match(accessor, _stat_reads):
             yield {"_id": ObjectId(), "i": i, "tag": tag}
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake):
-        source, _ = await grep(
+        source, _ = await generic("grep").fn(
             accessor,
             [_path()],
             ["FOUND"],

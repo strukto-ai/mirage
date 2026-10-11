@@ -38,7 +38,6 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.gridfs.gridfs.GridFSVFS": "mirage.commands.builtin.gridfs",
     "mirage.vfs.history.history.HistoryViewVFS": "mirage.commands.builtin.history",
     "mirage.vfs.lancedb.lancedb.LanceDBVFS": "mirage.commands.builtin.lancedb",
-    "mirage.vfs.langfuse.langfuse.LangfuseVFS": "mirage.commands.builtin.langfuse",
     "mirage.vfs.mem0.mem0.Mem0VFS": "mirage.commands.builtin.mem0",
     "mirage.vfs.mongodb.mongodb.MongoDBVFS": "mirage.commands.builtin.mongodb",
     "mirage.vfs.postgres.postgres.PostgresVFS": "mirage.commands.builtin.postgres",

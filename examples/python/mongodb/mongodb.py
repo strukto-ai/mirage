@@ -120,9 +120,9 @@ async def main():
     print("=" * 60)
     await _run(ws, f'grep -c title "{coll_doc}"')
     await _run(ws, f'grep -m 3 title "{coll_doc}"')
-    await _run(ws, f'grep mongodb "/mongodb/{DB}/collections/{COLL_TXT}/"')
-    await _run(ws, f'grep mongodb "/mongodb/{DB}/"')
-    await _run(ws, 'grep mongodb "/mongodb/"')
+    await _run(ws, f'grep -r mongodb "/mongodb/{DB}/collections/{COLL_TXT}/"')
+    await _run(ws, f'grep -r mongodb "/mongodb/{DB}/"')
+    await _run(ws, 'grep -r mongodb "/mongodb/"')
 
     print("\n" + "=" * 60)
     print("RG at db / root scope")

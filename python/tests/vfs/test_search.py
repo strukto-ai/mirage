@@ -95,4 +95,3 @@ async def test_builtin_semantic_adapters_delegate_one_batch(
     raw.assert_awaited_once()
     assert raw.await_args.kwargs["top_k"] == 2
     assert raw.await_args.kwargs["mount_prefix"] == "/data"
-    assert "grep" not in table.search.meta
