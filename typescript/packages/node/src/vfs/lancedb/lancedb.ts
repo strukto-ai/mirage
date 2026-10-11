@@ -52,6 +52,8 @@ export class LanceDBVFS extends LanceDBVFSBase {
   readonly config: LanceDBConfigResolved
   readonly store: LanceDBStore
   override readonly accessor: LanceDBAccessor
+  // Only cards are searched: a blob file is the blob column's bytes.
+  override readonly searchable: readonly string[]
 
   constructor(options: LanceDBVFSOptions | LanceDBConfig) {
     super()
@@ -60,6 +62,8 @@ export class LanceDBVFS extends LanceDBVFSBase {
     this.cachesReads = REMOTE_SCHEMES.some((scheme) => this.config.uri.startsWith(scheme))
     this.store = new LanceDBStore(this.config)
     this.accessor = new LanceDBAccessor(this.store, this.config)
+    const depth = this.config.groupBy.length + (this.config.table === null ? 1 : 0)
+    this.searchable = [[...Array<string>(depth).fill('*'), '*.md'].join('/')]
   }
 
   override getState(): LanceDBVFSState {

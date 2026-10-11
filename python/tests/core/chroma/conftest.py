@@ -22,6 +22,22 @@ class FakeCollection:
         if ids == ["__path_tree__"]:
             return {"documents": [self.documents["__path_tree__"]]}
 
+        held = (kwargs.get("where_document") or {}).get("$contains")
+        if held is not None:
+            found = [
+                item
+                for items in self.chunks.values()
+                for item in items
+                if held in item["document"]
+            ]
+            offset = kwargs.get("offset") or 0
+            found = found[
+                offset : offset + (kwargs.get("limit") or len(found))
+            ]
+            return {
+                "ids": [str(i) for i in range(len(found))],
+                "metadatas": [item["metadata"] for item in found],
+            }
         where = kwargs.get("where") or {}
         selector = where.get("page_slug")
         slugs: list[str] | None = None

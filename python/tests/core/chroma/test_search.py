@@ -44,3 +44,28 @@ async def test_search_segments_empty_paths_searches_collection(
         b"/knowledge/api/reference:0.75\napi chunk\n"
     )
     assert "where" not in chroma_accessor.collection.queries[0]
+
+
+# A page is its chunks joined by line breaks, so a chunk holding the text
+# is the page holding it; Chroma matches case, so -i asks nothing.
+@pytest.mark.asyncio
+async def test_files_containing_names_the_pages_a_chunk_holds_text_in(
+    chroma_accessor,
+):
+    under = [
+        PathSpec(vfs_path="", virtual="/knowledge", directory="/knowledge")
+    ]
+    out = await search.files_containing(chroma_accessor, "first", under, False)
+    assert out is not None
+    assert [p.virtual for p in out] == ["/knowledge/guides/quickstart"]
+    assert chroma_accessor.collection.get_calls[-1]["where_document"] == {
+        "$contains": "first"
+    }
+    assert (
+        await search.files_containing(chroma_accessor, "nowhere", under, False)
+        == []
+    )
+    assert (
+        await search.files_containing(chroma_accessor, "first", under, True)
+        is None
+    )

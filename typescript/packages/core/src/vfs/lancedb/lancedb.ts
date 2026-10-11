@@ -14,6 +14,7 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { filesContaining } from '../../core/lancedb/search.ts'
 import { SEARCH, read, readdir, stat } from '../../core/lancedb/tree.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
@@ -41,6 +42,15 @@ export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return stat(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    return filesContaining(this.accessor, text, under, opts.wholeWord, opts.ignoreCase)
   }
 
   override search(

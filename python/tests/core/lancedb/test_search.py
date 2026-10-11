@@ -12,12 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import lancedb
 import pytest
 
+from mirage.accessor.lancedb import LanceDBAccessor
+from mirage.core.hierarchy.codec import PATH_SAFE
+from mirage.core.lancedb.search import files_containing
 from mirage.core.lancedb.tree import TREE
 from mirage.core.vector.search import search_rows_output
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 async def _search(accessor, query: str, path: str, top_k: int = 1) -> str:
@@ -61,3 +66,61 @@ async def test_search_spells_group_values_as_the_listing_does(edged):
     ):
         out = await _search(edged, query, "/db/docs")
         assert out.splitlines()[0].startswith(head)
+
+
+def _scope(path: str = "/db") -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(path, "/db"), virtual=path, directory=path
+    )
+
+
+async def _cards(accessor, text, under, whole_word=False, ignore_case=False):
+    out = await files_containing(
+        accessor, text, under, whole_word, ignore_case
+    )
+    return None if out is None else [p.virtual for p in out]
+
+
+# A card is `column: value` lines, so a string column holding the text is a
+# card line holding it; the vector and blob columns are not rendered.
+@pytest.mark.asyncio
+async def test_files_containing_names_the_cards_a_string_column_holds(
+    accessor,
+):
+    assert await _cards(accessor, "orange", [_scope()]) == [
+        "/db/animals/cat/big/1.md"
+    ]
+    assert await _cards(accessor, "ORANGE", [_scope()], ignore_case=True) == [
+        "/db/animals/cat/big/1.md"
+    ]
+    assert await _cards(accessor, "big", [_scope("/db/animals/dog")]) == [
+        "/db/animals/dog/big/3.md"
+    ]
+    assert await _cards(accessor, "nowhere", [_scope()]) == []
+
+
+# What a line can hold besides a string value: a column's name, the
+# separator a leading space reaches into, a boolean or null, a digit.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text", ["name", "abe", "kind", "true", " big", "or4nge"]
+)
+async def test_files_containing_leaves_card_words_to_the_scan(accessor, text):
+    assert await _cards(accessor, text, [_scope()]) is None
+
+
+@pytest.mark.asyncio
+async def test_files_containing_spells_group_values_as_the_listing(edged):
+    assert await _cards(edged, "one", [_scope()]) == [
+        f"/db/docs/{PATH_SAFE.encode('a/b')}/1.md"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_list_column_reads_every_card(tmp_path):
+    uri = str(tmp_path / "lists")
+    lancedb.connect(uri).create_table(
+        "t", data=[{"id": 1, "tags": ["orange"], "name": "plain"}]
+    )
+    accessor = LanceDBAccessor(LanceDBConfig(uri=uri, id_column="id"))
+    assert await _cards(accessor, "plain", [_scope()]) is None

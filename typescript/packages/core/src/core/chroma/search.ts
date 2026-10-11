@@ -16,7 +16,7 @@ import type { Where } from 'chromadb'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
 import { scoreFromDistance } from '../../utils/score.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -24,6 +24,7 @@ import { intOption, validateOptions } from '../../vfs/search.ts'
 import type { SearchQuery } from '../../vfs/types.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 import { hitLines, searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
+import { PAGE_CHUNK_BATCH_SIZE } from './client.ts'
 import { CHROMA_TREE } from './tree.ts'
 
 const ENC = new TextEncoder()
@@ -120,4 +121,39 @@ export function searchResource(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   return searchMany(accessor, [path], query, index)
+}
+
+/**
+ * The pages with a chunk holding `text`.
+ *
+ * A page is its chunks joined by line breaks, so a line, and so any match
+ * grep makes, lies within one chunk, and Chroma's `$contains` over the chunks
+ * answers exactly. It matches case, so -i reads every page. Mirrors Python's
+ * `files_containing`.
+ */
+export async function filesContaining(
+  accessor: ChromaAccessor,
+  text: string,
+  under: readonly PathSpec[],
+  ignoreCase: boolean,
+): Promise<PathSpec[] | null> {
+  const [first] = under
+  if (ignoreCase || first === undefined) return null
+  const collection = await accessor.getCollection()
+  const field = accessor.config.slugField
+  const slugs = new Set<string>()
+  for (let offset = 0; ; offset += PAGE_CHUNK_BATCH_SIZE) {
+    const result = await collection.get({
+      whereDocument: { $contains: text },
+      include: ['metadatas'],
+      limit: PAGE_CHUNK_BATCH_SIZE,
+      offset,
+    })
+    for (const metadata of result.metadatas) {
+      const slug = scalarString(metadata?.[field])
+      if (slug !== null) slugs.add(stripSlash(slug))
+    }
+    if (result.ids.length < PAGE_CHUNK_BATCH_SIZE) break
+  }
+  return [...slugs].sort(compareCodePoints).map((slug) => mountedPath(first, `/${slug}`))
 }

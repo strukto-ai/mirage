@@ -62,6 +62,50 @@ export function predicate(column: string, filters: Record<string, string>, prefi
   return parts.join(' AND ')
 }
 
+/**
+ * The where clause for rows whose string columns hold one of `texts`, within a
+ * group's filters. The texts are ASCII letters and spaces, so no LIKE wildcard
+ * or quote needs escaping. Mirrors Python's `holding_clause`.
+ */
+export function holdingClause(
+  columns: readonly string[],
+  texts: readonly string[],
+  ignoreCase: boolean,
+  filters: Record<string, string>,
+): string {
+  const tests = columns.flatMap((c) =>
+    texts.map((t) =>
+      ignoreCase
+        ? `lower(${columnRef(c)}) LIKE '%${t.toLowerCase()}%'`
+        : `${columnRef(c)} LIKE '%${t}%'`,
+    ),
+  )
+  const clause = `(${tests.join(' OR ')})`
+  return Object.keys(filters).length > 0 ? `${whereClause(filters)} AND ${clause}` : clause
+}
+
+/**
+ * The string columns of a table's card, or null when a column the card
+ * renders is neither a string nor a scalar. Mirrors Python's `text_columns`.
+ */
+export function textColumns(
+  accessor: LanceDBAccessor,
+  table: string,
+  skipped: ReadonlySet<string>,
+): Promise<string[] | null> {
+  return accessor.driver.textColumns(table, skipped)
+}
+
+/** Every row the clause keeps, `columns` selected. Mirrors Python's `rows_where`. */
+export function rowsWhere(
+  accessor: LanceDBAccessor,
+  table: string,
+  clause: string,
+  columns: string[],
+): Promise<LanceRow[]> {
+  return accessor.driver.rowsWhere(table, clause, columns)
+}
+
 export async function tableExists(accessor: LanceDBAccessor, name: string): Promise<boolean> {
   return (await accessor.driver.listTables()).includes(name)
 }

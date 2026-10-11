@@ -82,9 +82,10 @@ grep -in "billing" /knowledge/
 
 ## Exact Search with Grep
 
-`grep` uses Chroma document filtering as a coarse prefilter when possible, then
-applies Mirage's grep matching over assembled file text. Scoped paths restrict
-the candidate files before querying Chroma.
+`grep -r` and `rg` read only the pages with a chunk holding the text, which
+Chroma's `$contains` answers, then match each page as grep does. A page is its
+chunks joined by line breaks, so no match can span two chunks and the answer is
+exact. `$contains` matches case, so `-i` reads every page.
 
 ```bash
 grep "refund" /knowledge/policies/

@@ -35,6 +35,14 @@ export interface LanceDriver {
     prefix?: string,
   ): Promise<LanceRow[]>
   rowRecord(table: string, idColumn: string, rowId: string): Promise<LanceRow | null>
+  /**
+   * The string columns of a table's card, or null when a column the card
+   * renders is neither a string nor a scalar (a list, a struct, bytes), whose
+   * spelling a filter on strings cannot test. Mirrors Python's `text_columns`.
+   */
+  textColumns(table: string, skipped: ReadonlySet<string>): Promise<string[] | null>
+  /** Every row the clause keeps, `columns` selected. Mirrors Python's `rows_where`. */
+  rowsWhere(table: string, clause: string, columns: string[]): Promise<LanceRow[]>
   search(table: string, query: string, limit: number): Promise<LanceRow[]>
   close(): Promise<void>
 }

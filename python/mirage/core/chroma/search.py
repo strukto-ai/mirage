@@ -2,6 +2,7 @@ from typing import Any
 
 from mirage.accessor.chroma import ChromaAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.chroma.client import PAGE_CHUNK_BATCH_SIZE
 from mirage.core.chroma.tree import CHROMA_TREE
 from mirage.core.slug_tree.search import (
     hit_lines,
@@ -10,7 +11,7 @@ from mirage.core.slug_tree.search import (
     validate_query,
 )
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.utils.key_prefix import mount_prefix_of, mounted_path
 from mirage.utils.score import score_from_distance
 from mirage.vfs.search import int_option, validate_options
 from mirage.vfs.types import SearchQuery
@@ -119,3 +120,46 @@ async def search_resource(
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     return await search_many(accessor, [path], query, index)
+
+
+async def files_containing(
+    accessor: ChromaAccessor,
+    text: str,
+    under: list[PathSpec],
+    ignore_case: bool,
+) -> list[PathSpec] | None:
+    """The pages with a chunk holding ``text``.
+
+    A page is its chunks joined by line breaks, so a line, and so any
+    match grep makes, lies within one chunk, and Chroma's ``$contains``
+    over the chunks answers exactly. It matches case, so -i reads every
+    page.
+
+    Args:
+        accessor (ChromaAccessor): the mount's collection.
+        text (str): the text searched for.
+        under (list[PathSpec]): the directories walked.
+        ignore_case (bool): whether case is folded.
+    """
+    if ignore_case:
+        return None
+    collection = await accessor.get_collection()
+    field = accessor.config.slug_field
+    slugs: set[str] = set()
+    offset = 0
+    while True:
+        result = await collection.get(
+            where_document={"$contains": text},
+            include=["metadatas"],
+            limit=PAGE_CHUNK_BATCH_SIZE,
+            offset=offset,
+        )
+        metadatas = result.get("metadatas") or []
+        for metadata in metadatas:
+            slug = metadata.get(field) if isinstance(metadata, dict) else None
+            if slug is not None:
+                slugs.add(str(slug).strip("/"))
+        if len(result.get("ids") or []) < PAGE_CHUNK_BATCH_SIZE:
+            break
+        offset += PAGE_CHUNK_BATCH_SIZE
+    return [mounted_path(under[0], f"/{slug}") for slug in sorted(slugs)]

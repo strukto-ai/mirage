@@ -17,7 +17,7 @@ import { enoent } from '../../errors/fs.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 
 const PATH_TREE_ID = '__path_tree__'
-const PAGE_CHUNK_BATCH_SIZE = 100
+export const PAGE_CHUNK_BATCH_SIZE = 100
 
 export interface ChromaChunk {
   document: string

@@ -20,6 +20,12 @@ import type { LanceDBConfigResolved } from '@struktoai/mirage-core/vfs/lancedb/c
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
+// Arrow's names for a column a card spells as text, and for one it spells as
+// digits, signs or a fixed word; any other type (a list, a struct, bytes) can
+// hold any text.
+const TEXT_TYPE = /^(Large)?Utf8$/
+const SCALAR_TYPE = /^(Null|U?Int\d*|Float\d*|Bool|Decimal|Date|Time|Timestamp|Duration|Interval)/
+
 function textsOf(rows: LanceRow[], column: string): string[] {
   const texts: string[] = []
   for (const row of rows) {
@@ -136,6 +142,23 @@ export class LanceDBStore implements LanceDriver {
     const clause = predicate(idColumn, filters, prefix)
     if (clause !== '') query = query.where(clause)
     return (await query.toArray()) as LanceRow[]
+  }
+
+  async textColumns(table: string, skipped: ReadonlySet<string>): Promise<string[] | null> {
+    const tbl = await this.table(table)
+    const texts: string[] = []
+    for (const field of (await tbl.schema()).fields) {
+      if (skipped.has(field.name)) continue
+      const kind = String(field.type)
+      if (TEXT_TYPE.test(kind)) texts.push(field.name)
+      else if (!SCALAR_TYPE.test(kind)) return null
+    }
+    return texts
+  }
+
+  async rowsWhere(table: string, clause: string, columns: string[]): Promise<LanceRow[]> {
+    const tbl = await this.table(table)
+    return (await tbl.query().select(columns).where(clause).toArray()) as LanceRow[]
   }
 
   async rowRecord(table: string, idColumn: string, rowId: string): Promise<LanceRow | null> {

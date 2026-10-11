@@ -14,6 +14,7 @@
 
 import re
 
+import pyarrow as pa
 from lancedb.query import AsyncQuery
 
 from mirage.accessor.lancedb import LanceDBAccessor
@@ -214,4 +215,84 @@ async def search_rows(
     builder = await tbl.search(query_text)
     rows = await builder.limit(limit).to_list()
     accessor.search_cache[key] = rows
+    return rows
+
+
+async def text_columns(
+    accessor: LanceDBAccessor, table: str, skipped: set[str]
+) -> list[str] | None:
+    """The string columns of a table's card, or None when a column the
+    card renders is neither a string nor a scalar (a list, a struct,
+    bytes), whose spelling a filter on strings cannot test.
+
+    Args:
+        accessor (LanceDBAccessor): the mount's accessor.
+        table (str): the table.
+        skipped (set[str]): the columns the card leaves out.
+    """
+    tbl = await accessor.table(table)
+    schema = await tbl.schema()
+    texts: list[str] = []
+    for field in schema:
+        if field.name in skipped:
+            continue
+        kind = field.type
+        if pa.types.is_string(kind) or pa.types.is_large_string(kind):
+            texts.append(field.name)
+        elif not (
+            pa.types.is_integer(kind)
+            or pa.types.is_floating(kind)
+            or pa.types.is_boolean(kind)
+            or pa.types.is_decimal(kind)
+            or pa.types.is_temporal(kind)
+            or pa.types.is_null(kind)
+        ):
+            return None
+    return texts
+
+
+def holding_clause(
+    columns: list[str],
+    texts: list[str],
+    ignore_case: bool,
+    filters: dict[str, str],
+) -> str:
+    """The where clause for rows whose string columns hold one of
+    ``texts``, within a group's filters.
+
+    Args:
+        columns (list[str]): the string columns.
+        texts (list[str]): ASCII letters and spaces, so no LIKE
+            wildcard or quote needs escaping.
+        ignore_case (bool): fold ASCII case.
+        filters (dict[str, str]): the group's equality filters.
+    """
+    tests = [
+        f"lower({_column(c)}) LIKE '%{t.lower()}%'"
+        if ignore_case
+        else f"{_column(c)} LIKE '%{t}%'"
+        for c in columns
+        for t in texts
+    ]
+    clause = "(" + " OR ".join(tests) + ")"
+    return f"{_where(filters)} AND {clause}" if filters else clause
+
+
+async def rows_where(
+    accessor: LanceDBAccessor, table: str, clause: str, columns: list[str]
+) -> list[LanceRow]:
+    """Every row of ``table`` the clause keeps, ``columns`` selected.
+
+    Args:
+        accessor (LanceDBAccessor): the mount's accessor.
+        table (str): the table.
+        clause (str): the where clause.
+        columns (list[str]): the columns returned.
+    """
+    tbl = await accessor.table(table)
+    rows: list[LanceRow] = []
+    async for batch in (
+        await tbl.query().select(columns).where(clause).to_batches()
+    ):
+        rows.extend(batch.to_pylist())
     return rows

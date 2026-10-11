@@ -126,6 +126,11 @@ All commands delegate to Mirage's shared implementations.
 auto-embeds the query via the table's embedding function and returns ranked
 rows as canonical file paths, which compose with `cat`, `wc`, and pipes.
 
+`grep -r` and `rg` read only the cards whose string columns hold the text, which
+a `LIKE` query answers. A text that could match a column's name, a boolean or
+`null`, or the `column: ` prefix reads every card, as does a table that renders
+a list, struct or bytes column.
+
 ## Access pattern
 
 The mount is **read-only** (`MountMode.READ`); writes are not supported. The two

@@ -31,7 +31,7 @@ import type { SearchQuery } from '../types.ts'
 import { CHROMA_TREE } from '../../core/chroma/tree.ts'
 import { read, readStream } from '../../core/chroma/read.ts'
 import { stat } from '../../core/chroma/stat.ts'
-import { searchResource, searchMany } from '../../core/chroma/search.ts'
+import { filesContaining, searchResource, searchMany } from '../../core/chroma/search.ts'
 
 export interface ChromaVFSOptions {
   config: ChromaConfig
@@ -95,6 +95,15 @@ export class ChromaVFS extends BaseVFS {
 
   override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
     return readStream(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+    _index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    return filesContaining(this.accessor, text, under, opts.ignoreCase)
   }
 
   override search(

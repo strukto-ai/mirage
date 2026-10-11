@@ -71,3 +71,38 @@ describe('lancedb store distinct', () => {
     expect(await store.distinct('crowded', 'label', {}, CAP, 'a', slashed)).toEqual(['a∕x'])
   })
 })
+
+// The store halves of the card search: which columns a filter on strings can
+// test, and the rows a clause keeps.
+describe('lancedb store card search', () => {
+  let root = ''
+  let store: LanceDBStore
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'mirage-lancedb-'))
+    const db = await connect(root)
+    await db.createTable('plain', [
+      { id: 1, name: 'a big orange cat', score: 1.5, live: true },
+      { id: 2, name: 'a small grey cat', score: 2, live: false },
+    ])
+    await db.createTable('tagged', [{ id: 1, name: 'x', tags: ['orange'] }])
+    db.close()
+    store = new LanceDBStore(resolveLanceDBConfig({ uri: root, idColumn: 'id' }))
+  })
+
+  afterAll(async () => {
+    await store.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('names the string columns, and none past a list column', async () => {
+    expect(await store.textColumns('plain', new Set())).toEqual(['name'])
+    expect(await store.textColumns('tagged', new Set())).toBeNull()
+    expect(await store.textColumns('tagged', new Set(['tags']))).toEqual(['name'])
+  })
+
+  it('returns the rows a clause keeps', async () => {
+    const rows = await store.rowsWhere('plain', "`name` LIKE '%orange%'", ['id'])
+    expect(rows.map((row) => Number(row.id))).toEqual([1])
+  })
+})

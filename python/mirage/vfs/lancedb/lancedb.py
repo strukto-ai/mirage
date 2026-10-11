@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.lancedb.search import files_containing as _files_containing
 from mirage.core.lancedb.tree import SEARCH, read, readdir, stat
 from mirage.errors.fs import enotsup
 from mirage.types import FileStat, PathSpec, VFSName
@@ -44,6 +45,9 @@ class LanceDBVFS(BaseVFS):
         self.config = config
         self.caches_reads = config.uri.startswith(_REMOTE_SCHEMES)
         self.accessor = LanceDBAccessor(self.config)
+        # Only cards are searched: a blob file is the blob column's bytes.
+        depth = len(config.group_by) + (0 if config.table else 1)
+        self.searchable = ("/".join(["*"] * depth + ["*.md"]),)
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
@@ -64,6 +68,19 @@ class LanceDBVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await stat(self.accessor, path, index)
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec] | None:
+        return await _files_containing(
+            self.accessor, text, under, whole_word, ignore_case
+        )
 
     async def search(
         self,
