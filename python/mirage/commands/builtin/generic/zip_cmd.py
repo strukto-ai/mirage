@@ -3,12 +3,17 @@ import zipfile
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.generic.archive.errors import ZipUpdateError
 from mirage.commands.builtin.generic.archive.types import MemberKind
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
     StatFn,
     WalkFn,
     scan_operand,
+)
+from mirage.commands.builtin.generic.archive.zip_update import (
+    read_archive,
+    update_archive,
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -308,6 +313,13 @@ def _stderr(warnings: tuple[str, ...], quiet: bool) -> bytes:
     return "".join(WARNING_PREFIX + line + "\n" for line in warnings).encode()
 
 
+def _invalid_archive(path: PathSpec) -> tuple[None, IOResult]:
+    return None, IOResult(
+        exit_code=3,
+        stderr=f"\nzip error: Zip file structure invalid ({path.raw_path})\n".encode(),
+    )
+
+
 async def zip_cmd(
     paths: list[PathSpec],
     *,
@@ -326,6 +338,16 @@ async def zip_cmd(
     if not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
     archive_path = paths[0]
+    try:
+        existing = await read_bytes(archive_path)
+    except FileNotFoundError:
+        # Only absence means create; a refused or broken read must not overwrite.
+        original = None
+    else:
+        try:
+            original = read_archive(existing)
+        except ZipUpdateError:
+            return _invalid_archive(archive_path)
     plan = await plan_zip(
         paths[1:],
         archive=archive_path,
@@ -360,16 +382,34 @@ async def zip_cmd(
     # ``could not open for reading`` beside the adding line, and closes
     # with a read/skipped summary that needs every member's size and
     # exit 18; none of that is reproduced.
+    old_order = (
+        {entry.name: i for i, entry in enumerate(original.records)}
+        if original
+        else {}
+    )
+    members = sorted(
+        plan.members,
+        key=lambda member: old_order.get(member.name, len(old_order)),
+    )
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for member in plan.members:
+        for member in members:
             data = b""
             if member.kind == "link":
                 data = member.target.encode()
             elif member.path is not None:
                 data = await read_bytes(member.path)
             zf.writestr(_info(member, len(data)), data)
-            output_lines.append(f"  adding: {member.name}")
+            output_lines.append(
+                f"updating: {member.name}"
+                if member.name in old_order
+                else f"  adding: {member.name}"
+            )
     archive = buf.getvalue()
+    if original is not None:
+        try:
+            archive = update_archive(original, read_archive(archive).records)
+        except ZipUpdateError:
+            return _invalid_archive(archive_path)
     try:
         await write_bytes(archive_path, archive)
     except FS_ERRORS as exc:

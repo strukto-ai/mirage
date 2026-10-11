@@ -86,6 +86,17 @@ export async function readScriptText(
   return decodeText(await readScriptBytes(dispatch, path, cwd))
 }
 
+export function isBinary(data: Uint8Array): boolean {
+  // Bash checks ELF magic and NUL before the first newline in its
+  // initial 80-byte sample, not whether the entire file is UTF-8.
+  if (data[0] === 0x7f && data[1] === 0x45 && data[2] === 0x4c && data[3] === 0x46) return true
+  for (const byte of data.subarray(0, 80)) {
+    if (byte === 0x0a) break
+    if (byte === 0) return true
+  }
+  return false
+}
+
 /**
  * Read a script file operand, or the failure bash reports for it.
  *
@@ -106,7 +117,11 @@ export async function readScriptFile(
   session: SessionState,
 ): Promise<[string, null] | [null, Result]> {
   try {
-    return [await readScriptText(dispatch, path, session.cwd), null]
+    const data = await readScriptBytes(dispatch, path, session.cwd)
+    if (isBinary(data)) {
+      return [null, scriptError(path, `${path}: cannot execute binary file`, 126, name)]
+    }
+    return [decodeText(data), null]
   } catch (exc) {
     // A strerror is exactly what makes this a filesystem error, so the
     // lookup is both the test and the message.

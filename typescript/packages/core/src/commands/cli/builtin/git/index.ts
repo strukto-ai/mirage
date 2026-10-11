@@ -41,7 +41,7 @@ import { mv } from './mv.ts'
 import { reset } from './reset.ts'
 import { restore } from './restore.ts'
 import { rm } from './rm.ts'
-import { revParse, config, remote, revList, version, showRef } from './inspect.ts'
+import { revParse, config, mergeBase, remote, revList, version, showRef } from './inspect.ts'
 import { shortlog } from './shortlog.ts'
 import { symbolicRef, symbolicRefReadOnly } from './symbolic_ref.ts'
 import { indexLocked, verb } from './session.ts'
@@ -831,6 +831,23 @@ export const GIT = new CLI({
             help: 'Get the variables whose names match a regular expression',
           }),
           new Argument('name', { nargs: '?' }),
+          new Argument('value', { nargs: '?' }),
+          new Argument('value-pattern', { nargs: '?' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'merge-base',
+        description: 'Find best common ancestors of commits',
+        arguments: [
+          new Argument(['-a', '--all'], {
+            action: 'store_true',
+            help: 'Show all best common ancestors',
+          }),
+          new Argument('--is-ancestor', {
+            action: 'store_true',
+            help: 'Test whether the first commit is an ancestor of the second',
+          }),
+          REVISION,
         ],
       }),
       new CommandSpec({ name: 'show-ref', description: 'List references', arguments: [REVISION] }),
@@ -1051,6 +1068,7 @@ export const GIT = new CLI({
     version: new CLIHandler({ fn: verb(version) }),
     remote: new CLIHandler({ fn: verb(remote) }),
     config: new CLIHandler({ fn: verb(config) }),
+    'merge-base': new CLIHandler({ fn: verb(mergeBase) }),
     'show-ref': new CLIHandler({ fn: verb(showRef) }),
     'symbolic-ref': new CLIHandler({ fn: verb(symbolicRef, symbolicRefReadOnly), write: true }),
     shortlog: new CLIHandler({ fn: verb(shortlog) }),

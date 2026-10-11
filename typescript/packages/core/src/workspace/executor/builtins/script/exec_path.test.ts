@@ -213,3 +213,43 @@ it('virtual programs skip functions and preserve caller aliases', async () => {
     await ws.close()
   }
 })
+
+it.each([
+  '\x7fELFbinary',
+  '\x7fELF\x02\x01\x01\0binary',
+  'echo BAD\0data\n',
+  'MZ\0exe',
+  '\xcf\xfa\xed\xfe\0mach',
+])('refuses binary bytes before parsing: %j', async (data) => {
+  for (const command of [
+    '/work/binary',
+    'command /work/binary',
+    'env /work/binary',
+    'exec /work/binary',
+    'bash /work/binary',
+    'sh /work/binary',
+  ]) {
+    const ws = await makeWs()
+    await ws.dispatch('write', '/work/binary', [Uint8Array.from(data, (c) => c.charCodeAt(0))])
+    const result = await ws.shell(command)
+    expect(result.exitCode).toBe(126)
+    expect(stdoutStr(result)).toBe('')
+    const message = /^(bash|sh) /.test(command)
+      ? '/work/binary: /work/binary: cannot execute binary file\n'
+      : '/work/binary: cannot execute binary file: Exec format error\n'
+    expect(stderrStr(result)).toBe(message)
+    expect(stdoutStr(await ws.shell('echo alive'))).toBe('alive\n')
+  }
+})
+
+it.each([
+  ['echo caf\xe9\n', '/work/text', 'caf\xe9\n'],
+  ['echo BEFORE\necho AFTER\0junk\n', '/work/text', 'BEFORE\nAFTER\0junk\n'],
+  ['echo BEFORE\0junk\n', 'source /work/text', 'BEFORE\0junk\n'],
+])('keeps shell text rules: %j', async (data, command, expected) => {
+  const ws = await makeWs()
+  await ws.dispatch('write', '/work/text', [Uint8Array.from(data, (c) => c.charCodeAt(0))])
+  const result = await ws.shell(command)
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout).toEqual(Uint8Array.from(expected, (c) => c.charCodeAt(0)))
+})

@@ -1,0 +1,58 @@
+{
+  "targets": [
+    "git-ram",
+    "git-disk"
+  ],
+  "cases": [
+    {
+      "id": "git_merge_base_same_commit",
+      "seq": 10000009,
+      "command": "test \"$(git -C /repo merge-base HEAD HEAD)\" = \"$(git -C /repo rev-parse HEAD)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_merge_base_all_same_commit",
+      "seq": 10000010,
+      "command": "test \"$(git -C /repo merge-base --all HEAD HEAD)\" = \"$(git -C /repo rev-parse HEAD)\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_merge_base_is_ancestor_self",
+      "seq": 10000011,
+      "command": "git -C /repo merge-base --is-ancestor HEAD HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_merge_base_missing_revision",
+      "seq": 10000012,
+      "command": "git -C /repo merge-base issue1556-missing HEAD",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: Not a valid object name issue1556-missing\n"
+      }
+    },
+    {
+      "id": "git_config_write_explicit_refusal",
+      "seq": 10000013,
+      "command": "git -C /repo config user.email changed@example.com",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: git config is read-only in Mirage; writes are not supported\n"
+      }
+    }
+  ]
+}

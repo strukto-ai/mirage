@@ -98,29 +98,38 @@ ENV = {
 
 
 @pytest.fixture(scope="module")
-def gaps_repo(tmp_path_factory):
-    path = tmp_path_factory.mktemp("gaps") / "repo"
-    subprocess.run(
-        ["bash", str(GAPS), str(path)],
-        check=True,
-        capture_output=True,
-        env=ENV,
-    )
-    return path
+def inspection_repos(tmp_path_factory):
+    repos = {}
+    for name in ("gaps", "merge-base"):
+        path = tmp_path_factory.mktemp(name) / "repo"
+        subprocess.run(
+            ["bash", str(GAPS.with_name(name + ".sh")), str(path)],
+            check=True,
+            capture_output=True,
+            env=ENV,
+        )
+        repos[name] = path
+    return repos
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "command", json.loads(GAPS.with_suffix(".json").read_text())
+    "fixture,command",
+    [
+        (name, command)
+        for name in ("gaps", "merge-base")
+        for command in json.loads(GAPS.with_name(name + ".json").read_text())
+    ],
 )
-async def test_inspection_forms_match_git(gaps_repo, command):
+async def test_inspection_forms_match_git(inspection_repos, fixture, command):
+    path = inspection_repos[fixture]
     native = await asyncio.to_thread(
         subprocess.run,
-        ["git", "-C", str(gaps_repo), *shlex.split(command)],
+        ["git", "-C", str(path), *shlex.split(command)],
         capture_output=True,
         env=ENV,
     )
-    with mounted_rw(gaps_repo) as ws:
+    with mounted_rw(path) as ws:
         actual = await ws.shell("git -C /repo " + command)
     assert (actual.exit_code, actual.stdout or b"", actual.stderr or b"") == (
         native.returncode,
@@ -177,3 +186,23 @@ async def test_rev_parse_prints_toplevel_in_line_order(git_ws):
         "git -C /repo rev-parse HEAD --show-toplevel HEAD"
     )
     assert result.stdout == head + b"/repo\n" + head
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "form",
+    [
+        "user.email changed@example.com",
+        "user.name ''",
+        "--global user.email changed@example.com",
+        "user.name changed old",
+    ],
+)
+async def test_config_writes_are_explicitly_refused(git_ws, repo_path, form):
+    config = repo_path / ".git/config"
+    original = config.read_bytes()
+    result = await git_ws.shell("git -C /repo config " + form)
+    assert result.exit_code == 1
+    assert result.stdout in (None, b"")
+    assert b"git config is read-only in Mirage" in result.stderr
+    assert config.read_bytes() == original

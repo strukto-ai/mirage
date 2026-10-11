@@ -59,6 +59,7 @@ NEGATION = "^"
 LEFT = 1
 RIGHT = 2
 STALE = 4
+RESULT = 8
 
 
 def split_operators(revision: str) -> tuple[str, tuple[RevOp, ...]]:
@@ -258,7 +259,9 @@ def range_commits(
         raise AmbiguousArgumentError(revision) from exc
 
 
-def merge_bases(repo: BaseRepo, one: Commit, other: Commit) -> list[Commit]:
+def merge_bases(
+    repo: BaseRepo, one: Commit, other: Commit, *others: Commit
+) -> list[Commit]:
     """The common ancestors of two commits that nothing shared descends from.
 
     git's paint walk: each side paints what it reaches, newest first
@@ -271,25 +274,31 @@ def merge_bases(repo: BaseRepo, one: Commit, other: Commit) -> list[Commit]:
         repo (BaseRepo): repository whose store holds the commits.
         one (Commit): one side.
         other (Commit): the other side.
+        others (Commit): further tips of the hypothetical merged side.
     """
     paint = {one.id: LEFT}
-    paint[other.id] = paint.get(other.id, 0) | RIGHT
-    queue = [one] if one.id == other.id else [one, other]
+    queue = [one]
+    for commit in (other, *others):
+        if commit.id not in paint:
+            queue.append(commit)
+        paint[commit.id] = paint.get(commit.id, 0) | RIGHT
     bases: list[Commit] = []
     while any(not paint[commit.id] & STALE for commit in queue):
         queue.sort(key=lambda commit: -commit.commit_time)
         commit = queue.pop(0)
-        flags = paint[commit.id]
+        flags = paint[commit.id] & (LEFT | RIGHT | STALE)
         if flags == LEFT | RIGHT:
-            bases.append(commit)
+            if not paint[commit.id] & RESULT:
+                bases.append(commit)
+                paint[commit.id] |= RESULT
             flags |= STALE
-            paint[commit.id] = flags
         for parent_id in commit.parents:
             if paint.get(parent_id, 0) & flags == flags:
                 continue
             paint[parent_id] = paint.get(parent_id, 0) | flags
             queue.append(_commit_at(repo, parent_id, parent_id.decode()))
-    return bases
+    # Clock skew can discover an older common ancestor before its child.
+    return [commit for commit in bases if not paint[commit.id] & STALE]
 
 
 def split_revisions(

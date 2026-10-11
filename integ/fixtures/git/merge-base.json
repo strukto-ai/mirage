@@ -1,0 +1,15 @@
+[
+  "merge-base --all x y",
+  "merge-base x y",
+  "merge-base --all y x",
+  "merge-base --all tagged y",
+  "merge-base --all x a b",
+  "merge-base x isolated",
+  "merge-base --all x isolated",
+  "merge-base --is-ancestor root x",
+  "merge-base --is-ancestor x root",
+  "merge-base --is-ancestor x isolated",
+  "merge-base --is-ancestor tagged x",
+  "merge-base --all skew-left skew-right",
+  "merge-base --is-ancestor skew-root skew-left"
+]

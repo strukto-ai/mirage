@@ -192,3 +192,39 @@ describe('an archive on another mount matches one on the same mount', () => {
     expect(stdoutStr(cross)).not.toContain('i.txt')
   })
 })
+
+it.each(['/work/report.docx', '/report.docx'])(
+  'updates existing ZIPs through the same generic: %s',
+  async (archive) => {
+    const ws = await makeWs()
+    for (const line of [
+      'mkdir -p /work/doc/word; cd /work/doc; echo types > types.xml; echo old > word/document.xml',
+      `zip -q ${archive} types.xml word/document.xml`,
+      'echo updated > word/document.xml; echo added > extra.xml',
+    ])
+      expect((await ws.shell(line)).exitCode).toBe(0)
+    const updated = await ws.shell(`zip -X ${archive} extra.xml word/document.xml`)
+    expect(updated.exitCode).toBe(0)
+    expect(stdoutStr(updated)).toBe('updating: word/document.xml\n  adding: extra.xml\n')
+    expect(stdoutStr(await ws.shell(`unzip -Z1 ${archive}`))).toBe(
+      'types.xml\nword/document.xml\nextra.xml\n',
+    )
+    expect(
+      stdoutStr(await ws.shell(`unzip -p ${archive} types.xml word/document.xml extra.xml`)),
+    ).toBe('types\nupdated\nadded\n')
+    expect((await ws.shell(`zip --no-extra -q ${archive} extra.xml`)).exitCode).toBe(0)
+  },
+)
+
+it.each(['', 'not a zip', 'PK\x05\x06' + '\0'.repeat(10)])(
+  'refuses a malformed archive without replacing it: %j',
+  async (original) => {
+    const ws = await makeWs()
+    await ws.dispatch('write', '/work/out.zip', [ENC.encode(original)])
+    await ws.shell('echo new > /work/a')
+    const result = await ws.shell('zip -q /work/out.zip /work/a')
+    expect(result.exitCode).toBe(3)
+    expect(stderrStr(result)).toBe('\nzip error: Zip file structure invalid (/work/out.zip)\n')
+    expect(stdoutStr(await ws.shell('cat /work/out.zip'))).toBe(original)
+  },
+)

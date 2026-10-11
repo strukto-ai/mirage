@@ -171,5 +171,17 @@
   "ls-tree HEAD ''",
   "-C docs ls-tree HEAD .",
   "-C docs ls-tree --full-name HEAD",
-  "-C docs ls-tree --full-tree HEAD"
+  "-C docs ls-tree --full-tree HEAD",
+  "merge-base HEAD HEAD~1",
+  "merge-base --all HEAD HEAD~1",
+  "merge-base -a HEAD v1",
+  "merge-base HEAD HEAD",
+  "merge-base HEAD HEAD~1 HEAD",
+  "merge-base --is-ancestor HEAD~1 HEAD",
+  "merge-base --is-ancestor HEAD HEAD~1",
+  "merge-base --is-ancestor HEAD HEAD",
+  "merge-base --all --is-ancestor HEAD HEAD",
+  "merge-base --is-ancestor HEAD HEAD HEAD",
+  "merge-base missing HEAD",
+  "merge-base HEAD~9 HEAD"
 ]

@@ -339,7 +339,7 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/zx/sub && echo one > /data/zx/a.txt && echo two > /data/zx/sub/b.txt && (cd /data/zx && zip -qr /data/zx.zip . -x './sub/*') && unzip -Z1 /data/zx.zip",
+      "command": "mkdir -p /data/zx/sub && echo one > /data/zx/a.txt && echo two > /data/zx/sub/b.txt && (cd /data/zx && zip -qr /data/zx-dot-slash.zip . -x './sub/*') && unzip -Z1 /data/zx-dot-slash.zip",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",

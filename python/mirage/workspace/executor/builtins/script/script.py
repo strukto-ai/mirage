@@ -97,6 +97,12 @@ async def read_script_text(dispatch: DispatchFn, path: str, cwd: str) -> str:
     return decode_text(await read_script_bytes(dispatch, path, cwd))
 
 
+def is_binary(data: bytes) -> bool:
+    # Bash checks ELF magic and NUL before the first newline in its
+    # initial 80-byte sample, not whether the entire file is UTF-8.
+    return data.startswith(b"\x7fELF") or b"\0" in data[:80].split(b"\n", 1)[0]
+
+
 async def read_script_file(
     dispatch: DispatchFn,
     name: str,
@@ -123,7 +129,12 @@ async def read_script_file(
         session (SessionState): shell session state, for the working directory.
     """
     try:
-        return await read_script_text(dispatch, path, session.cwd), None
+        data = await read_script_bytes(dispatch, path, session.cwd)
+        if is_binary(data):
+            return None, script_error(
+                path, f"{path}: cannot execute binary file", 126, name
+            )
+        return decode_text(data), None
     except FS_ERRORS as exc:
         strerror = fs_strerror(exc)
         if isinstance(exc, IsADirectoryError):

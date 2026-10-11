@@ -26,6 +26,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import decode_text
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
@@ -37,7 +38,8 @@ from mirage.workspace.executor.builtins.command.command import (
 )
 from mirage.workspace.executor.builtins.script.bash import handle_bash
 from mirage.workspace.executor.builtins.script.script import (
-    read_script_text,
+    is_binary,
+    read_script_bytes,
     script_error,
 )
 from mirage.workspace.mount import MountRegistry
@@ -136,13 +138,18 @@ async def handle_exec_path(
     """
     session = context.session
     try:
-        script = await read_script_text(dispatch, path, session.cwd)
+        data = await read_script_bytes(dispatch, path, session.cwd)
     except FS_ERRORS as exc:
         strerror = fs_strerror(exc)
         if strerror is None:
             raise
         code = 127 if isinstance(exc, FileNotFoundError) else 126
         return script_error(path, strerror, code)
+    if is_binary(data):
+        return script_error(
+            path, "cannot execute binary file: Exec format error", 126
+        )
+    script = decode_text(data)
     target = namespace.follow(resolve_path(path, session.cwd))
     vfs, key, _ = registry.resolve(target)
     if isinstance(vfs, BinViewVFS):

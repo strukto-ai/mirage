@@ -94,6 +94,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-r", action="store_true"),
             Argument("-j", action="store_true"),
             Argument("-q", action="store_true"),
+            Argument("-X", "--no-extra", action="store_true"),
             # -y stores a symlink as a symlink; without it zip archives
             # what the link points at, which is tar's -h inverted.
             Argument("-y", action="store_true"),

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.policy import CommandRule
 from mirage.policy.profile import CommandsBlock, SessionProfile
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.script import shebang_words
@@ -221,3 +221,61 @@ async def test_virtual_program_skips_functions_and_preserves_caller(ws):
     assert b"command echo" in io.stdout
     io = await ws.shell("cat")
     assert io.stdout == b"alias\n"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"\x7fELFbinary",
+        b"\x7fELF\x02\x01\x01\0binary",
+        b"echo BAD\0data\n",
+        b"MZ\0exe",
+        b"\xcf\xfa\xed\xfe\0mach",
+    ],
+)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/work/binary",
+        "command /work/binary",
+        "env /work/binary",
+        "exec /work/binary",
+        "bash /work/binary",
+        "sh /work/binary",
+    ],
+)
+def test_binary_execution_refused_before_parsing(ws, data, command):
+    asyncio.run(
+        ws.dispatch("write", PathSpec.from_str_path("/work/binary"), data=data)
+    )
+    result = _run(ws, command)
+    assert result.exit_code == 126
+    assert not result.stdout
+    message = (
+        "/work/binary: /work/binary: cannot execute binary file\n"
+        if command.startswith(("bash ", "sh "))
+        else "/work/binary: cannot execute binary file: Exec format error\n"
+    )
+    assert result.stderr.decode() == message
+    assert _run(ws, "echo alive").stdout == b"alive\n"
+
+
+@pytest.mark.parametrize(
+    "data,command,expected",
+    [
+        (b"echo caf\xe9\n", "/work/text", b"caf\xe9\n"),
+        (
+            b"echo BEFORE\necho AFTER\0junk\n",
+            "/work/text",
+            b"BEFORE\nAFTER\0junk\n",
+        ),
+        (b"echo BEFORE\0junk\n", "source /work/text", b"BEFORE\0junk\n"),
+    ],
+)
+def test_binary_probe_preserves_shell_text_rules(ws, data, command, expected):
+    asyncio.run(
+        ws.dispatch("write", PathSpec.from_str_path("/work/text"), data=data)
+    )
+    result = _run(ws, command)
+    assert result.exit_code == 0
+    assert result.stdout == expected

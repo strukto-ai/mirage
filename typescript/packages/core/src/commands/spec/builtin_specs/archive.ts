@@ -102,6 +102,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-r', { action: 'store_true' }),
       new Argument('-j', { action: 'store_true' }),
       new Argument('-q', { action: 'store_true' }),
+      new Argument(['-X', '--no-extra'], { action: 'store_true' }),
       new Argument('-y', { action: 'store_true' }),
       new Argument('-x', { action: 'append' }),
       new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),

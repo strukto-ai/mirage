@@ -19,6 +19,18 @@ import type { PathSpec } from '../../../../types.ts'
 // ends in a slash, a symlink carries its target string instead.
 export type MemberKind = 'file' | 'dir' | 'link'
 
+export interface ZipRecord {
+  name: string
+  local: Uint8Array
+  central: Uint8Array
+}
+
+export interface ZipArchive {
+  records: readonly ZipRecord[]
+  prefix: Uint8Array
+  comment: Uint8Array
+}
+
 // One thing found under an operand, before it is named or filtered.
 // `namePath` and `read` are two different paths whenever a link is being
 // followed: the member keeps the link's own name while its bytes come
