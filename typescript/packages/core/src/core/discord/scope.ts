@@ -20,9 +20,9 @@ const GUILD = [new Slot('guild', undefined, 'guild_id')] as const
 const CHANNEL = [...GUILD, 'channels', new Slot('channel', undefined, 'channel_id')] as const
 const DAY = [...CHANNEL, new Slot('day', DATE)] as const
 
-// One description of the tree: readdir, stat, read and the search push-down
-// all classify through it, so the file surface and the command surface cannot
-// disagree about what a path means. Every dynamic level is a `name__id`
+// One description of the tree: readdir, stat and read all classify through
+// it, so the file surface and the command surface cannot disagree about what
+// a path means. Every dynamic level is a `name__id`
 // dirname the tree itself mints, so the ids decode from the path and
 // detection needs no index or network round-trip.
 export const SCOPES: readonly Scope[] = [
@@ -52,10 +52,3 @@ export const SCOPES: readonly Scope[] = [
 ]
 
 export const detectScope = makeDetectScope(SCOPES)
-
-// Kinds the guild search push-down may answer for. A day, its chat.jsonl
-// and its files are deliberately absent: `searchGuild` takes a channel but
-// no date, so serving one day from a channel-wide search would report
-// messages the line did not ask for. Same doctrine for `file_blob` and
-// `member`, whose bytes the message search does not carry.
-export const NATIVE_KINDS: ReadonlySet<string> = new Set(['guild', 'channels_dir', 'channel'])

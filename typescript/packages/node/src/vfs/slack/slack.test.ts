@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
 import { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
@@ -51,9 +50,9 @@ describe('SlackVFS (node)', () => {
     expect(typeof r.writePrompt).toBe('string')
   })
 
-  it('serves SLACK_COMMANDS', () => {
+  it('serves no commands of its own', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
-    expect(commandsFor(r)).toEqual(SLACK_COMMANDS)
+    expect(commandsFor(r)).toEqual([])
   })
 
   it('getState() redacts both token and searchToken when both present', async () => {

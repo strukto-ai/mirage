@@ -17,7 +17,6 @@ from typing import Any
 
 from mirage.core.api.client import SessionArg
 from mirage.core.discord.config import DiscordConfig
-from mirage.core.discord.entry import snowflake_to_iso
 from mirage.core.discord.paginate import offset_pages
 
 PAGE_SIZE = 25
@@ -109,42 +108,3 @@ async def search_guild(
             break
     messages.sort(key=lambda m: int(m.get("id", 0)))
     return messages[:limit]
-
-
-def format_grep_results(
-    messages: list[dict[str, Any]],
-    prefix: str,
-    guild_dirname: str,
-    channel_names: dict[str, str] | None = None,
-) -> list[str]:
-    """Format guild-search hits as grep-style lines.
-
-    Args:
-        messages (list[dict]): Discord message dicts from search_guild.
-        prefix (str): mount prefix, e.g. ``"/discord"``.
-        guild_dirname (str): vfs-safe guild dir name.
-        channel_names (dict[str, str] | None): channel_id → workspace name.
-
-    Returns:
-        list[str]: grep-style lines, one per matched message.
-    """
-    names = channel_names or {}
-    lines: list[str] = []
-    for msg in messages:
-        ts = (msg.get("timestamp") or "")[:10]
-        if not ts:
-            # A hit without a timestamp still has a snowflake id, which
-            # encodes the creation day readdir buckets it under.
-            iso = snowflake_to_iso(str(msg.get("id") or ""))
-            ts = iso[:10] if iso else ""
-        ch_id = msg.get("channel_id", "")
-        ch_name = names.get(ch_id, ch_id)
-        author = msg.get("author", {}).get("username", "?")
-        content = msg.get("content", "").replace("\n", " ")
-        path = (
-            f"{prefix}/{guild_dirname}/channels/{ch_name}/{ts}/chat.jsonl"
-            if ts
-            else f"{prefix}/{guild_dirname}/channels/{ch_name}"
-        )
-        lines.append(f"{path}:[{author}] {content}")
-    return lines

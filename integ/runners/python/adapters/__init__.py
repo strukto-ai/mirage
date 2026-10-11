@@ -826,7 +826,10 @@ class GwsService:
     def gmail_vfs(self) -> GmailVFS:
         return GmailVFS(
             GmailConfig(
-                client_id="integ", refresh_token=GWS_TOKEN, api_base=self.url
+                client_id="integ",
+                refresh_token=GWS_TOKEN,
+                api_base=self.url,
+                content_search=True,
             )
         )
 
@@ -904,6 +907,9 @@ class EmailService:
                 username=EMAIL_USERNAME,
                 password=self.password,
                 use_ssl=False,
+                # The fake answers IMAP SEARCH TEXT, so exercise grep/rg
+                # narrowing in the battery.
+                content_search=True,
             )
         )
 
@@ -1399,6 +1405,7 @@ class SlackService:
                 token=bot,
                 search_token=search,
                 base_url=f"{self.url}/api",
+                content_search=True,
                 **mount.get("config", {}),
             )
         )

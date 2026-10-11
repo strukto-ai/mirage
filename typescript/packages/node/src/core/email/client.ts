@@ -349,10 +349,16 @@ export async function fetchMessage(
   }
 }
 
+/**
+ * Fetch messages by uid, parsed. `headerOnly` fetches the header block
+ * alone, which names a message's file (Subject, Date, INTERNALDATE for a
+ * message without one) without its body.
+ */
 export async function fetchHeaders(
   accessor: EmailAccessor,
   folder: string,
   uids: readonly string[],
+  headerOnly = false,
 ): Promise<FetchedMessage[]> {
   if (uids.length === 0) return []
   const imap = await accessor.getImap()
@@ -360,15 +366,18 @@ export async function fetchHeaders(
   try {
     const results: FetchedMessage[] = []
     for (const uid of uids) {
-      // Full source (not headers-only): listings need the MIME structure
-      // to surface attachment dirs, mirroring the python backend.
+      // Full source (not headers-only) by default: listings need the MIME
+      // structure to surface attachment dirs, mirroring the python backend.
       const msg = await imap.fetchOne(
         uid,
-        { source: true, flags: true, uid: true, internalDate: true },
+        headerOnly
+          ? { headers: true, uid: true, internalDate: true }
+          : { source: true, flags: true, uid: true, internalDate: true },
         { uid: true },
       )
       if (msg === false) continue
-      const source = msg.source instanceof Buffer ? new Uint8Array(msg.source) : new Uint8Array(0)
+      const raw = headerOnly ? msg.headers : msg.source
+      const source = raw instanceof Buffer ? new Uint8Array(raw) : new Uint8Array(0)
       const parsed = await parseRfc822(source)
       results.push({
         ...parsed,

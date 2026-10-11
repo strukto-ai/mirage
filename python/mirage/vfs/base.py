@@ -175,6 +175,12 @@ class BaseVFS:
     # cap.
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
 
+    # The files ``files_containing`` answers for, as mount-relative
+    # globs matched segment by segment (a glob naming a directory covers
+    # what is below it); None for every file. grep and rg read any other
+    # file whatever the answer, as a full scan would.
+    searchable: tuple[str, ...] | None = None
+
     # What ``search`` supports, read by the consumers that opt in by
     # namespace (``{"grep": {"mode": "literal"}}`` lets grep and rg use
     # it). Empty means no consumer may assume anything.
@@ -612,12 +618,13 @@ class BaseVFS:
         """Files under ``under`` whose content may contain ``text``.
 
         grep and rg still walk, filter, order and label every file, and
-        read only the ones answered here, matched on ``vfs_path`` without
-        case, so an extra file costs a read and a missing one is a wrong
-        answer. A search that holds only keys names each one with
-        ``mounted_path(under[0], "/" + key)``. Return None when the answer
-        may be incomplete (an error, a truncated result, an index that
-        lags writes), and every file is read; raise to refuse the
+        of the files ``searchable`` names read only the ones answered
+        here, matched on ``vfs_path`` without case, so an extra file
+        costs a read and a missing one is a wrong answer. A search that
+        holds only keys names each one with
+        ``mounted_path(under[0], "/" + key)``. Return None when the
+        answer may be incomplete (an error, a truncated result, an index
+        that lags writes), and every file is read; raise to refuse the
         command, and the error's message is what it prints.
 
         Args:

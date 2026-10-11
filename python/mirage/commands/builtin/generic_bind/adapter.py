@@ -361,6 +361,7 @@ def command_io(vfs: BaseVFS) -> CommandIO:
             else None
         ),
         files_containing=slot("files_containing"),
+        searchable=vfs.searchable,
         lines_containing=slot("lines_containing"),
         before_full_scan=slot("before_full_scan"),
     )

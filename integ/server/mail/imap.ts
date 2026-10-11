@@ -582,7 +582,9 @@ async function search(
 // The FETCH items every consumer here asks for, and no more. There is no
 // ENVELOPE and no BODYSTRUCTURE on purpose: all three clients fetch the whole
 // message and parse the MIME themselves, so implementing the structured forms
-// would be inventing a second, unexercised rendering of the same bytes.
+// would be inventing a second, unexercised rendering of the same bytes. The
+// header block alone (BODY[HEADER]) names a search hit's file without the
+// body.
 function fetchItem(item: string, msg: SearchMsg): string | null {
   const key = item.toUpperCase()
   if (key === 'UID') return `UID ${String(msg.uid)}`
@@ -593,6 +595,14 @@ function fetchItem(item: string, msg: SearchMsg): string | null {
 }
 
 const BODY_ITEM = /^(BODY(?:\.PEEK)?\[\]|RFC822(?:\.TEXT)?)$/i
+const HEADER_ITEM = /^BODY(?:\.PEEK)?\[HEADER\]$/i
+
+// RFC 3501's header part: every byte up to and including the blank line that
+// ends the header, or the whole message when it has no body.
+function headerOf(source: Buffer): Buffer {
+  const end = source.indexOf('\r\n\r\n')
+  return end < 0 ? source : source.subarray(0, end + 4)
+}
 
 // The value a bare `*` in a sequence set resolves to (RFC 3501: the largest
 // number in use), in whichever numbering the command runs under.
@@ -629,6 +639,11 @@ async function fetch(
       if (BODY_ITEM.test(item)) {
         bodyKey = item.toUpperCase().startsWith('RFC822') ? 'RFC822' : 'BODY[]'
         body = msg.source
+        continue
+      }
+      if (HEADER_ITEM.test(item)) {
+        bodyKey = 'BODY[HEADER]'
+        body = headerOf(msg.source)
         continue
       }
       write(session, `${tag} BAD unsupported fetch item ${item}`)

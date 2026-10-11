@@ -34,8 +34,7 @@ import {
   resolvePattern,
 } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
-import { BINARY_EXTENSIONS } from '../constants.ts'
-import { getExtension } from '../../../utils/filetype.ts'
+import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
 import { grepInput, type FlagSet } from '../grep_binary.ts'
 import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'

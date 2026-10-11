@@ -55,6 +55,23 @@ For OAuth in a browser, prefer PKCE so secrets stay off the page; the [Google se
 | `clientSecret` | required | Google OAuth client secret. Redacted in snapshots. |
 | `refreshToken` | required | User's refresh token. Redacted in snapshots. |
 | `refreshFn` | built-in | Optional override for the access-token refresh callback. |
+| `contentSearch` | `false` | Narrow `grep -rw` and `rg -w` with Gmail search ([below](#grep-and-rg)). |
+
+## grep and rg
+
+With `contentSearch: true` (YAML `content_search: true`), `grep -rw` and `rg -w` read only
+the messages Gmail search names, and print what reading every message would.
+Search covers the From, To, Cc and Subject headers, the body and, through
+`filename:`, attachment names. Each label is searched on its own, since an
+account-wide search leaves out spam and trash. Listing a label already fetches
+its messages, so this saves the second fetch of each message it rules out.
+Attachments are always read.
+
+Every message is read when the word is a key of the message JSON or a system
+label, and when a search fails, reaches 500 messages, answers with a next page
+or finds nothing. A message whose snippet, Date header or attachment MIME type
+holds the word is read too, since Gmail search reads none of them. It is off by default: Gmail indexes a message some time after it
+arrives.
 
 ## Mount mode
 

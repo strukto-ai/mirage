@@ -99,12 +99,17 @@
               "home/bash",
               "home/vfs-matrix",
               "home/cache",
-              "home/search",
               "home/yaml",
               "home/snapshot",
               "home/observer",
               "home/permissions",
               "home/route-policy"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "home/integration/search"
             ]
           },
           {

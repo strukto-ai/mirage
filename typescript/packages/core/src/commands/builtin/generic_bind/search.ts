@@ -20,7 +20,8 @@ import { ScanReason, type SearchQuery } from '../../../vfs/types.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
-import { getExtension } from '../../../utils/filetype.ts'
+import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
+import { globPrefixMatch } from '../../../utils/path.ts'
 import { isEfbig, isFsError } from '../../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../config.ts'
@@ -28,7 +29,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 
-import { BINARY_EXTENSIONS } from '../constants.ts'
 import { grepGeneric, parseFlags as parseGrepFlags } from '../generic/grep.ts'
 import {
   foldsCase,
@@ -256,9 +256,10 @@ async function fullScan<A extends Accessor>(
 
 /**
  * grep's or rg's reads, narrowed by the mount's search where it can.
- * `filesContaining` rules out walked files no match can be in, and
- * `linesContaining` hands a file's matching lines in its place when the
- * output shows nothing else, or tells whether it is worth reading. An operand
+ * `filesContaining` rules out walked files no match can be in, of those the
+ * mount's `searchable` names, and `linesContaining` hands a file's matching
+ * lines in its place when the output shows nothing else, or tells whether it
+ * is worth reading. An operand
  * named on the line is never ruled out by a search asked about directories.
  * Neither is asked when a hide, a path rule or a preVfs policy judges a path,
  * since a search sees the raw tree.
@@ -279,6 +280,7 @@ export async function searchReads<A extends Accessor>(
   const stream: Reads = read ?? ((p) => io.readStream(accessor, p, index))
   const scoped = pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')
   const files = scoped ? undefined : io.filesContaining
+  const searchable = io.searchable ?? null
   const lines = scoped ? undefined : io.linesContaining
   if (
     paths.length === 0 ||
@@ -328,6 +330,9 @@ export async function searchReads<A extends Accessor>(
     await fullScan(io, name, accessor, dirs, reason, index)
     return stream
   }
+  if (hits !== null && asked.readsBinary) {
+    await fullScan(io, name, accessor, dirs, ScanReason.BINARY, index)
+  }
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
   const found = hits
@@ -343,7 +348,8 @@ export async function searchReads<A extends Accessor>(
       found !== null &&
       !named.has(path.virtual) &&
       !(asked.readsBinary && BINARY_EXTENSIONS.has(getExtension(path.virtual) ?? '')) &&
-      !found.has(path.vfsPath.toLowerCase())
+      !found.has(path.vfsPath.toLowerCase()) &&
+      (searchable === null || searchable.some((glob) => globPrefixMatch(path.vfsPath, glob)))
     ) {
       return new Uint8Array(0)
     }

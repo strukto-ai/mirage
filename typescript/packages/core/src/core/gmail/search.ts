@@ -12,120 +12,167 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { TokenManager } from '../google/client.ts'
-import { decodeBody, extractHeader, getMessageRaw, listMessages } from './messages.ts'
-import { msgFilename } from './readdir.ts'
+import type { GmailAccessor } from '../../accessor/gmail.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { PathSpec } from '../../types.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
+import { recordQueries } from '../../utils/record_search.ts'
+import { GoogleApiError } from '../google/client.ts'
+import { resolveEntry } from '../hierarchy/probe.ts'
+import { ROOT } from '../hierarchy/scope.ts'
+import { dateDirToGmailQuery } from './date_query.ts'
+import { listMessagePage } from './messages.ts'
+import { readdir } from './readdir.ts'
+import { detectScope } from './scope.ts'
 
-const EXCERPT_WINDOW = 120
-const EXCERPT_MAX = 240
+export const MAX_HITS = 500
 
-export interface GmailSearchRow {
-  id: string
-  subject: string
-  snippet: string
-  sender: string
-  date: string
-  label: string
-  bodyText: string
+// What a .gmail.json holds besides the headers, body and attachment names
+// Gmail searches: its key names, JSON literals and system label ids. The
+// snippet, the Date header and the attachments' MIME types are checked against
+// the listing instead (`unsearchedText`).
+const RECORD_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'from',
+  'name',
+  'email',
+  'to',
+  'cc',
+  'subject',
+  'date',
+  'snippet',
+  'labels',
+  'attachments',
+  'filename',
+  'path',
+  'size',
+  'true',
+  'false',
+  'null',
+  'inbox',
+  'sent',
+  'draft',
+  'spam',
+  'trash',
+  'unread',
+  'starred',
+  'important',
+  'chat',
+])
+
+function childOf(directory: PathSpec, name: string): PathSpec {
+  return mountedPath(directory, `${directory.mountPath.replace(/\/+$/, '')}/${name}`)
 }
 
-// Every offset below is a python string index, and python counts code points
-// where `String.length` and `String.indexOf` count UTF-16 units. Measuring in
-// units halves the budget for astral text -- a 200-emoji body excerpts to all
-// 200 in python and to 117 here -- and the cut lands inside the 118th
-// surrogate pair, whose lone half encodes as U+FFFD.
-function extractExcerpt(text: string, pattern: string): string {
-  if (text === '' || pattern === '') return ''
-  const flat = text.replace(/\s+/g, ' ').trim()
-  const lower = flat.toLowerCase()
-  const hit = lower.indexOf(pattern.toLowerCase())
-  const points = Array.from(flat)
-  if (hit < 0) return points.slice(0, EXCERPT_MAX).join('')
-  const idx = Array.from(lower.slice(0, hit)).length
-  const start = Math.max(0, idx - EXCERPT_WINDOW)
-  const end = Math.min(points.length, idx + Array.from(pattern).length + EXCERPT_WINDOW)
-  const prefix = start > 0 ? '...' : ''
-  const suffix = end < points.length ? '...' : ''
-  return `${prefix}${points.slice(start, end).join('')}${suffix}`
+function nameOf(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1)
 }
 
-function buildQuery(pattern: string, labelName: string | null, dateStr: string | null): string {
-  const parts: string[] = [pattern]
-  if (labelName !== null && labelName !== '') parts.push(`label:${labelName}`)
-  if (dateStr !== null && dateStr !== '') {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr)
-    if (m !== null) parts.push(`after:${m[1] ?? ''}/${m[2] ?? ''}/${m[3] ?? ''}`)
+// The message files under `directory` by id, and the ids whose unsearched text
+// (`unsearchedText`) holds `text`; null when a listing does not carry that text.
+async function messagesUnder(
+  accessor: GmailAccessor,
+  directory: PathSpec,
+  text: string,
+  index?: IndexCacheStore,
+): Promise<[Map<string, PathSpec[]>, Set<string>] | null> {
+  const found = new Map<string, PathSpec[]>()
+  const unsearched = new Set<string>()
+  const pending = [directory]
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+    for (const listed of await readdir(accessor, current, index)) {
+      const child = childOf(current, nameOf(listed))
+      const kind = detectScope(child).kind
+      if (kind === 'day') pending.push(child)
+      else if (kind === 'message') {
+        const entry = await resolveEntry(readdir, accessor, child, index)
+        const kept = entry?.extra.unsearched
+        if (entry === null || typeof kept !== 'string') return null
+        found.set(entry.id, [...(found.get(entry.id) ?? []), child])
+        if (kept.includes(text.toLowerCase())) unsearched.add(entry.id)
+      }
+    }
   }
-  return parts.join(' ')
+  return [found, unsearched]
 }
 
-function dateFromInternal(internalDate: string | undefined): string {
-  if (internalDate === undefined || internalDate === '') return ''
-  const ts = Number.parseInt(internalDate, 10)
-  if (!Number.isFinite(ts)) return ''
-  const d = new Date(ts)
-  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = d.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-export async function searchMessages(
-  tokenManager: TokenManager,
-  pattern: string,
-  labelName: string | null = null,
-  dateStr: string | null = null,
-  maxResults = 50,
-): Promise<GmailSearchRow[]> {
-  const query = buildQuery(pattern, labelName, dateStr)
-  const stubs = await listMessages(tokenManager, { query, maxResults })
-  const rows: GmailSearchRow[] = []
-  for (const stub of stubs) {
-    const mid = stub.id
-    if (mid === '') continue
-    const raw = await getMessageRaw(tokenManager, mid)
-    const headers = raw.payload?.headers ?? []
-    const subject = extractHeader(headers, 'Subject') || 'No Subject'
-    const sender = extractHeader(headers, 'From') || '?'
-    const snippet = raw.snippet ?? ''
-    const bodyText = decodeBody(raw.payload)
-    const msgDate = dateFromInternal(raw.internalDate)
-    rows.push({
-      id: mid,
-      subject,
-      snippet,
-      sender,
-      date: msgDate,
-      label: labelName ?? '',
-      bodyText,
+async function hitsUnder(
+  accessor: GmailAccessor,
+  directory: PathSpec,
+  text: string,
+  queries: readonly string[],
+  index?: IndexCacheStore,
+): Promise<PathSpec[] | null> {
+  const match = detectScope(directory)
+  const label = mountedPath(directory, `/${match.slots.label ?? ''}`)
+  const entry = await resolveEntry(readdir, accessor, label, index)
+  const day = match.slots.day
+  const bound = day !== undefined ? dateDirToGmailQuery(day) : ''
+  if (entry === null || bound === null) return null
+  const ids = new Set<string>()
+  for (const query of queries) {
+    const [stubs, more] = await listMessagePage(accessor.tokenManager, {
+      labelId: entry.id,
+      query: `${query} ${bound}`.trim(),
+      maxResults: MAX_HITS,
     })
+    if (more !== null || stubs.length >= MAX_HITS) return null
+    for (const stub of stubs) ids.add(stub.id)
   }
-  return rows
+  const walked = await messagesUnder(accessor, directory, text, index)
+  if (walked === null) return null
+  const [files, unsearched] = walked
+  return [...new Set([...ids, ...unsearched])].flatMap((id) => files.get(id) ?? [])
 }
 
-export function formatGrepResults(
-  rows: GmailSearchRow[],
-  labelName: string | null,
-  prefix: string,
-  pattern = '',
-): string[] {
-  const lines: string[] = []
-  for (const row of rows) {
-    const label = row.label !== '' ? row.label : (labelName ?? 'INBOX')
-    const date = row.date
-    const mid = row.id
-    // The same builder readdir names the file with, not a second spelling of
-    // it: the subject's budget depends on the id and the suffix, so a hit
-    // composed from a bare `sanitize` pointed at a path that does not exist
-    // once a long subject was trimmed.
-    const filename = msgFilename(row.subject || 'No Subject', mid)
-    const sender = row.sender !== '' ? row.sender : '?'
-    const haystack = `${row.subject}\n${row.bodyText}`
-    let excerpt = pattern !== '' ? extractExcerpt(haystack, pattern) : ''
-    if (excerpt === '') excerpt = row.snippet.replace(/\n/g, ' ')
-    const path =
-      date !== '' ? `${prefix}/${label}/${date}/${filename}` : `${prefix}/${label}/${filename}`
-    lines.push(`${path}:[${sender}] ${excerpt}`)
+/**
+ * The message files under `under` Gmail search names.
+ *
+ * Gmail matches whole words of the headers, the body and (with `filename:`)
+ * attachment names, so each hit is a message that may hold `text`. Each
+ * label is searched on its own, since an account search leaves out spam and
+ * trash; a day adds its UTC bounds. Hits map to files by the message id the
+ * listing names them with, and a message whose snippet or attachment MIME type
+ * holds `text` is a hit too: Gmail does not search them, and the listing keeps
+ * them. null when `text` could match the JSON around
+ * those fields (`recordQueries`), on an API or connection error, at `MAX_HITS` hits or
+ * when the answer names a next page, or with no hit at all, since Gmail indexes a message some time after it
+ * arrives. Mirrors Python's `files_containing`.
+ */
+export async function filesContaining(
+  accessor: GmailAccessor,
+  text: string,
+  under: readonly PathSpec[],
+  index?: IndexCacheStore,
+): Promise<PathSpec[] | null> {
+  const words = recordQueries(text, RECORD_KEYS, true)
+  if (words === null) return null
+  const queries = [...words, ...words.map((query) => `filename:${query.split(/\s+/)[0] ?? ''}`)]
+  const found: PathSpec[] = []
+  try {
+    for (const scope of under) {
+      const match = detectScope(scope)
+      let labels: PathSpec[]
+      if (match.kind === ROOT) {
+        labels = (await readdir(accessor, scope, index)).map((path) => childOf(scope, nameOf(path)))
+      } else if (match.kind === 'label' || match.kind === 'day') labels = [scope]
+      else continue
+      for (const directory of labels) {
+        const hits = await hitsUnder(accessor, directory, text, queries, index)
+        if (hits === null) return null
+        found.push(...hits)
+      }
+    }
+  } catch (err) {
+    // fetch rejects with a TypeError when the connection fails and a
+    // DOMException when its timeout aborts it
+    if (
+      !(err instanceof GoogleApiError || err instanceof TypeError || err instanceof DOMException)
+    ) {
+      throw err
+    }
+    console.warn(`gmail search failed (${String(err)}); reading every file`)
+    return null
   }
-  return lines
+  return found.length > 0 ? found : null
 }

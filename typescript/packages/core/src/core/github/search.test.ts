@@ -16,19 +16,29 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
+import type * as TreeModule from './tree.ts'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
   return { ...actual, searchCode: vi.fn() }
 })
 
+vi.mock('./tree.ts', async () => {
+  const actual = await vi.importActual<typeof TreeModule>('./tree.ts')
+  return { ...actual, ensureTree: vi.fn() }
+})
+
 import { GitHubAccessor } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import * as client from './client.ts'
-import { narrowPaths, search as restSearch } from './search.ts'
+import { SCOPE_WARN } from './constants.ts'
+import { filesContaining, narrowPaths, search as restSearch } from './search.ts'
+import { ensureTree } from './tree.ts'
 import type { TreeEntry } from './tree_entry.ts'
 
 const search = vi.mocked(client.searchCode)
+const loadTree = vi.mocked(ensureTree)
 // GitHub's documented code-search limit; files at or over it are not indexed.
 const SEARCH_LIMIT = 384 * 1024
 
@@ -67,6 +77,27 @@ const SMALL = { 'src/a.py': blob('src/a.py', 10) }
 
 beforeEach(() => {
   search.mockReset()
+  loadTree.mockReset()
+})
+
+describe('filesContaining', () => {
+  // A cold mount learns its tree is truncated only once it loads it.
+  it('judges the tree it loads', async () => {
+    loadTree.mockImplementationOnce((accessor) => {
+      for (let i = 0; i <= SCOPE_WARN; i++)
+        accessor.tree[`f${String(i)}`] = blob(`f${String(i)}`, 10)
+      accessor.truncated = true
+      return Promise.resolve()
+    })
+    const got = await filesContaining(
+      makeAccessor({}),
+      'needle',
+      [root()],
+      new RAMIndexCacheStore(),
+    )
+    expect(got).toBeNull()
+    expect(search).not.toHaveBeenCalled()
+  })
 })
 
 describe('narrowPaths', () => {

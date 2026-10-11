@@ -203,9 +203,11 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
  * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
  * do not match. EVERY_FILE: rg --files-without-match, or rg -c or
  * --count-matches with --include-zero, without -q, lists files that do not
- * match, and rg leaves a binary one out. LINKS: rg -L follows links out of the walk. UNANSWERED:
- * `filesContaining` resolved null, or `linesContaining` resolved null for a
- * file.
+ * match, and rg leaves a binary one out. LINKS: rg -L follows links out of the walk. BINARY:
+ * -a, --binary-files=text, rg -a, --binary or -uuu reads every
+ * binary-extension file, which a search that answered does not rule out.
+ * UNANSWERED: `filesContaining` resolved null, or `linesContaining` resolved
+ * null for a file.
  */
 export const ScanReason = Object.freeze({
   NO_SEARCH: 'the mount has no search',
@@ -213,6 +215,7 @@ export const ScanReason = Object.freeze({
   EVERY_LINE: 'the output needs lines that do not match',
   EVERY_FILE: 'the output lists files that do not match',
   LINKS: 'links are followed',
+  BINARY: 'binary files are read',
   UNANSWERED: 'the search could not answer',
 } as const)
 

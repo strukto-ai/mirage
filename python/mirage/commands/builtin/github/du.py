@@ -27,7 +27,6 @@ from mirage.commands.builtin.generic_bind.builders.du import (
     walk_entries,
     walk_size,
 )
-from mirage.commands.builtin.github.pushdown import resolve_glob
 from mirage.commands.config import CommandIO, CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.core.github.stat import stat
@@ -71,13 +70,14 @@ def _subtree(
 
 
 async def _resolve(
+    io: CommandIO,
     live: Callable[[], Awaitable[None]],
     accessor: GitHubAccessor,
     index: IndexCacheStore,
     targets: list[PathSpec],
 ) -> list[PathSpec]:
     await live()
-    return await resolve_glob(accessor, targets, index)
+    return await io.resolve_glob(accessor, targets, index)
 
 
 async def _stat(
@@ -179,7 +179,7 @@ async def du(
         paths,
         list(texts),
         opts,
-        partial(_resolve, live, accessor, opts.index),
+        partial(_resolve, io, live, accessor, opts.index),
         partial(_stat, live, accessor, opts.index),
         partial(_live_size, io, live, accessor, opts.index, budget, opts.ns),
         partial(

@@ -13,18 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.hierarchy.scope import INVALID, ROOT
-from mirage.core.slack.scope import (
-    NATIVE_KINDS,
-    SearchTarget,
-    detect_scope,
-    search_target,
-)
+from mirage.core.slack.scope import detect_scope
 
 
 def test_root():
     match = detect_scope("/")
     assert match.kind == ROOT
-    assert ROOT in NATIVE_KINDS
 
 
 def test_containers():
@@ -60,14 +54,12 @@ def test_user_file():
     match = detect_scope("/users/alice__U001.json")
     assert match.kind == "user"
     assert match.slots == {"user": "alice", "user_id": "U001"}
-    assert "user" not in NATIVE_KINDS
 
 
 def test_day_dir():
     match = detect_scope("/channels/general__C001/2024-04-10")
     assert match.kind == "day"
     assert match.slots["day"] == "2024-04-10"
-    assert "day" not in NATIVE_KINDS
 
 
 def test_non_date_under_channel_is_invalid():
@@ -77,38 +69,19 @@ def test_non_date_under_channel_is_invalid():
 def test_chat_jsonl():
     match = detect_scope("/channels/general__C001/2024-04-10/chat.jsonl")
     assert match.kind == "messages"
-    assert "messages" not in NATIVE_KINDS
 
 
-def test_files_dir_is_not_native():
+def test_files_dir():
     match = detect_scope("/channels/general__C001/2024-04-10/files")
     assert match.kind == "files"
-    # search.files has no per-day filter, so the files dir takes the scan.
-    assert "files" not in NATIVE_KINDS
 
 
 def test_file_blob():
     match = detect_scope("/dms/bob__D001/2024-04-10/files/report__F1.pdf")
     assert match.kind == "file_blob"
     assert match.slots["blob"] == "report__F1.pdf"
-    assert "file_blob" not in NATIVE_KINDS
 
 
 def test_unknown_root_is_invalid():
     assert detect_scope("/nope").kind == INVALID
     assert detect_scope("/nope/deeper").kind == INVALID
-
-
-def test_search_target_from_channel():
-    match = detect_scope("/channels/general__C001/2024-04-10")
-    assert search_target(match) == SearchTarget(
-        container="channels", channel_name="general", channel_id="C001"
-    )
-
-
-def test_search_target_from_container_root():
-    assert search_target(detect_scope("/dms")) == SearchTarget(container="dms")
-
-
-def test_search_target_from_root_is_workspace_wide():
-    assert search_target(detect_scope("/")) == SearchTarget()

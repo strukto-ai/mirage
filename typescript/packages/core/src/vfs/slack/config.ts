@@ -5,6 +5,7 @@ import {
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
+  z,
 } from '../secrets.ts'
 
 /**
@@ -12,10 +13,15 @@ import {
  * keeps the credentials schema, so installing it with start_time/end_time
  * is refused rather than accepted and never applied.
  */
-const SlackConfigSchema = SlackCredentialsSchema.extend({ ...timeRangeShape }).refine(
-  orderedTimes,
-  timeRangeOrderError,
-)
+const SlackConfigSchema = SlackCredentialsSchema.extend({
+  ...timeRangeShape,
+  // Let grep -w and rg -w read only the channel days Slack search names
+  // (`filesContaining`). Off by default: Slack indexes a message some time
+  // after it is posted, and searches only message text, file names and
+  // titles and reactions, so a word elsewhere in the JSON (a profile or
+  // block field) is not found.
+  contentSearch: z.boolean().optional(),
+}).refine(orderedTimes, timeRangeOrderError)
 
 export type SlackConfig = ConfigOf<typeof SlackConfigSchema>
 

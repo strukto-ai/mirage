@@ -14,9 +14,7 @@
 
 import type { Command } from '@struktoai/mirage-core/commands/config'
 import { EMAIL_FIND } from './find.ts'
-import { EMAIL_GREP } from './grep.ts'
-import { EMAIL_RG } from './rg.ts'
 
 // Mail verbs live in the himalaya CLI (commands/cli/builtin/himalaya),
 // installed by name; the mount only serves the filesystem surface.
-export const EMAIL_COMMANDS: readonly Command[] = [...EMAIL_FIND, ...EMAIL_GREP, ...EMAIL_RG]
+export const EMAIL_COMMANDS: readonly Command[] = [...EMAIL_FIND]

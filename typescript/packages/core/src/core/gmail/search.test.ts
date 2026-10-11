@@ -12,74 +12,307 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { formatGrepResults, type GmailSearchRow } from './search.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
+import { GmailVFS } from '../../vfs/gmail/gmail.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Mount } from '../../workspace/mount/spec.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 
-const LABEL = 'INBOX'
+const BASE = 'https://gmail.test'
+const DEC = new TextDecoder()
+const LABELS = [
+  { id: 'INBOX', name: 'INBOX', type: 'system' },
+  { id: 'TRASH', name: 'TRASH', type: 'system' },
+  { id: 'Label_1', name: 'Work', type: 'user' },
+]
 
-const EMOJI = '\u{1F600}'
-
-function row(bodyText: string): GmailSearchRow {
-  return {
-    id: 'm1',
-    subject: 'note',
-    snippet: 'fallback snippet',
-    sender: 'a@b.c',
-    date: '2026-08-19',
-    label: 'INBOX',
-    bodyText,
+interface Message {
+  id: string
+  threadId: string
+  labelIds: string[]
+  internalDate: string
+  snippet: string
+  payload: {
+    mimeType: string
+    headers: { name: string; value: string }[]
+    parts: {
+      mimeType: string
+      filename?: string
+      body: { data?: string; attachmentId?: string; size?: number }
+    }[]
   }
 }
 
-/** The excerpt is everything after the `<path>:[<sender>] ` header. */
-function excerptOf(lines: string[]): string {
-  const line = lines[0] ?? ''
-  return line.slice(line.indexOf('] ') + 2)
+function b64(text: string): string {
+  return Buffer.from(text).toString('base64url')
+}
+
+function message(
+  id: string,
+  labelIds: string[],
+  day: string,
+  sender: string,
+  subject: string,
+  body: string,
+  attachment = '',
+  mime = 'text/plain',
+  snippet: string | null = null,
+  date = 'Mon, 5 Jan 2026 09:00:00 +0000',
+): Message {
+  const parts: Message['payload']['parts'] = [{ mimeType: 'text/plain', body: { data: b64(body) } }]
+  if (attachment !== '') {
+    parts.push({
+      filename: attachment,
+      mimeType: mime,
+      body: { attachmentId: `A${id}`, size: 5 },
+    })
+  }
+  return {
+    id,
+    threadId: id,
+    labelIds,
+    internalDate: String(Date.parse(`${day}T09:00:00Z`)),
+    snippet: snippet ?? body,
+    payload: {
+      mimeType: 'multipart/mixed',
+      headers: [
+        { name: 'From', value: sender },
+        { name: 'To', value: 'me@example.com' },
+        { name: 'Subject', value: subject },
+        { name: 'Date', value: date },
+      ],
+      parts,
+    },
+  }
+}
+
+const MESSAGES = [
+  message(
+    'a1',
+    ['INBOX'],
+    '2026-01-05',
+    'Ana Lima <ana@example.com>',
+    'Budget review',
+    'numbers for travel',
+    'plan.txt',
+  ),
+  message(
+    'b2',
+    ['INBOX', 'Label_1'],
+    '2026-01-06',
+    'Bo <bo@example.com>',
+    'Lunch',
+    'deploy friday',
+  ),
+  message('c3', ['TRASH'], '2026-01-06', 'Cy <cy@example.com>', 'Old', 'deploy'),
+  message('d4', ['INBOX'], '2026-01-07', 'Di <di@example.com>', 'Notes', 'quiet'),
+  message(
+    'e5',
+    ['INBOX'],
+    '2026-01-07',
+    'Ed <ed@example.com>',
+    'Report',
+    'see attached',
+    'report',
+    'application/rtf',
+  ),
+  message('f6', ['INBOX'], '2026-01-07', 'Fa <fa@example.com>', 'Formats', 'rtf beats doc'),
+  message(
+    'g7',
+    ['INBOX'],
+    '2026-01-08',
+    'Gi <gi@example.com>',
+    'Trip',
+    'the traveler program',
+    '',
+    'text/plain',
+    'the travel',
+  ),
+  message('h8', ['INBOX'], '2026-01-08', 'Ha <ha@example.com>', 'Hike', 'the mountain trail'),
+  message(
+    'i9',
+    ['INBOX'],
+    '2026-01-08',
+    'Io <io@example.com>',
+    'Ping',
+    'quiet',
+    '',
+    'text/plain',
+    null,
+    'Thu, 8 Jan 2026 09:00:00 -0700 (Mountain Standard Time)',
+  ),
+]
+
+function holds(text: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'i').test(text)
+}
+
+function header(m: Message, name: string): string {
+  return m.payload.headers.find((h) => h.name === name)?.value ?? ''
 }
 
 /**
- * Re-encode through UTF-8, which is what a lone surrogate does not survive.
- *
- * A slice that lands inside a surrogate pair leaves a half that is still a
- * legal `String` value, so `toContain('�')` on the raw excerpt sees
- * nothing; the replacement character only appears once the bytes are written.
+ * The Gmail API a label walk and its search reach. A bare word matches whole
+ * words of the From, To, Cc and Subject headers and the body in any case,
+ * `filename:` an attachment name, and `after:`/`before:` take epoch seconds,
+ * as Gmail does. A search answers 429 when `fails` is 'status' and rejects
+ * with it when it is an error, and with `more` names a next page however few
+ * stubs it returns. Mirrors Python's `FakeGmail`.
  */
-function roundTrip(text: string): string {
-  return new TextDecoder('utf-8').decode(new TextEncoder().encode(text))
+class FakeGmail {
+  readonly searches: string[] = []
+  constructor(
+    private readonly fails: 'status' | Error | null = null,
+    private readonly more = false,
+  ) {}
+
+  readonly fetch = (input: string | URL | Request): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : String(input))
+    const path = url.pathname.replace('/gmail/v1/users/me', '')
+    if (path === '/labels') return this.json({ labels: LABELS })
+    if (path === '/messages') return this.list(url.searchParams)
+    const attachment = /^\/messages\/[^/]+\/attachments\//.exec(path)
+    if (attachment !== null) return this.json({ data: b64('plan\n') })
+    const id = path.slice('/messages/'.length)
+    return this.json(MESSAGES.find((m) => m.id === id) ?? {})
+  }
+
+  private json(body: unknown, status = 200): Promise<Response> {
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+  }
+
+  private list(params: URLSearchParams): Promise<Response> {
+    const query = params.get('q') ?? ''
+    if (query !== '' && !query.startsWith('after:')) {
+      this.searches.push(query)
+      if (this.fails === 'status') return this.json({ error: { message: 'rate limited' } }, 429)
+      if (this.fails !== null) return Promise.reject(this.fails)
+    }
+    const label = params.get('labelIds')
+    const found = MESSAGES.filter(
+      (m) => (label === null || m.labelIds.includes(label)) && this.matches(m, query),
+    ).map((m) => ({ id: m.id, threadId: m.threadId }))
+    const messages = found.slice(0, Number(params.get('maxResults') ?? 100))
+    const searched = query !== '' && !query.startsWith('after:')
+    return this.json(this.more && searched ? { messages, nextPageToken: 'next' } : { messages })
+  }
+
+  private matches(m: Message, query: string): boolean {
+    const seconds = Math.floor(Number(m.internalDate) / 1000)
+    for (const term of query.split(' ').filter((t) => t !== '')) {
+      if (term.startsWith('after:')) {
+        if (seconds <= Number(term.slice(6))) return false
+      } else if (term.startsWith('before:')) {
+        if (seconds >= Number(term.slice(7))) return false
+      } else if (term.startsWith('filename:')) {
+        if (!m.payload.parts.some((p) => holds(p.filename ?? '', term.slice(9)))) return false
+      } else {
+        const body = Buffer.from(m.payload.parts[0]?.body.data ?? '', 'base64url').toString()
+        const texts = [...['From', 'To', 'Cc', 'Subject'].map((n) => header(m, n)), body]
+        if (!texts.some((t) => holds(t, term))) return false
+      }
+    }
+    return true
+  }
 }
 
-describe('formatGrepResults excerpts', () => {
-  it('measures the no-match budget in code points, matching python', () => {
-    // Gmail matched the message server-side on something the literal scan
-    // does not find, so the excerpt falls back to the head of the body.
-    // 200 emoji are 200 code points and 400 UTF-16 units: python returns all
-    // of them, and measuring in units returned 117 plus a split 118th pair.
-    const body = EMOJI.repeat(200)
-    const excerpt = excerptOf(formatGrepResults([row(body)], LABEL, '/gmail', 'zzz'))
-    expect(excerpt).toBe(`note ${body}`)
-    expect(Array.from(excerpt)).toHaveLength(205)
-    expect(roundTrip(excerpt)).not.toContain('�')
+class CountingGmail extends GmailVFS {
+  readonly reads: string[] = []
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (path.vfsPath.endsWith('.gmail.json')) this.reads.push(path.vfsPath.split('__').pop() ?? '')
+    return super.read(path, index, offset, size)
+  }
+}
+
+type Ran = [string, number, string[], string[]]
+
+async function onGmail(line: string, fake = new FakeGmail(), contentSearch = true): Promise<Ran> {
+  vi.stubGlobal('fetch', fake.fetch)
+  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE, contentSearch })
+  const ws = new Workspace(
+    { '/gmail': new Mount(vfs, { mode: MountMode.READ }) },
+    { shellParser: await getTestParser() },
+  )
+  try {
+    const result = await ws.shell(line)
+    const reads = vfs.reads.map((name) => name.replace('.gmail.json', '')).sort()
+    return [DEC.decode(result.stdout), result.exitCode, reads, fake.searches]
+  } finally {
+    await ws.close()
+  }
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('filesContaining', () => {
+  it.each([
+    ['grep -rlw deploy /gmail', ['b2', 'b2', 'c3']],
+    ['grep -rlw Ana /gmail/INBOX', ['a1']],
+    ['grep -rlw plan /gmail/INBOX', ['a1']],
+    ['grep -rlw deploy /gmail/INBOX/2026-01-06', ['b2']],
+    ['rg -lw friday /gmail/Work', ['b2']],
+  ])('reads only the messages search names for %s', async (line, reads) => {
+    const full = await onGmail(line, new FakeGmail(), false)
+    const [out, code, read] = await onGmail(line)
+    expect([out, code]).toEqual(full.slice(0, 2))
+    expect(read).toEqual(reads)
   })
 
-  it('windows around the match on code-point boundaries', () => {
-    const pad = EMOJI.repeat(200)
-    const excerpt = excerptOf(
-      formatGrepResults([row(`${pad} needle ${pad}`)], LABEL, '/gmail', 'needle'),
-    )
-    // `note ` + 200 emoji + ` needle ` + 200 emoji, windowed 120 code points
-    // either side of the hit at index 206 and clipped to the body's end.
-    expect(excerpt).toBe(`...${EMOJI.repeat(119)} needle ${EMOJI.repeat(119)}...`)
-    expect(roundTrip(excerpt)).not.toContain('�')
+  // Twin of test_text_gmail_does_not_search_is_checked_in_the_listing: e5
+  // holds rtf only in its attachment's MIME type, g7 holds travel only in a
+  // snippet cut inside traveler and i9 holds mountain only in its Date header;
+  // Gmail searches none of them, so the listing's copy of them is checked.
+  it.each([
+    ['grep -rlw rtf /gmail/INBOX', ['e5', 'f6']],
+    ['grep -rlw travel /gmail/INBOX', ['a1', 'g7']],
+    ['grep -rlw mountain /gmail/INBOX', ['h8', 'i9']],
+  ])('checks what Gmail does not search in the listing for %s', async (line, reads) => {
+    const full = await onGmail(line, new FakeGmail(), false)
+    const [out, code, read] = await onGmail(line)
+    expect([out, code]).toEqual(full.slice(0, 2))
+    expect(read).toEqual(reads)
   })
 
-  it('leaves an ascii excerpt exactly where python leaves it', () => {
-    const body = `${'a'.repeat(300)} needle ${'b'.repeat(300)}`
-    const excerpt = excerptOf(formatGrepResults([row(body)], LABEL, '/gmail', 'needle'))
-    expect(excerpt).toBe(`...${'a'.repeat(119)} needle ${'b'.repeat(119)}...`)
+  it('searches a label day within its bounds', async () => {
+    const [, , , searches] = await onGmail('grep -rlw deploy /gmail/INBOX/2026-01-06')
+    expect(searches).toEqual([
+      'deploy after:1767657599 before:1767744000',
+      'eploy after:1767657599 before:1767744000',
+      'filename:deploy after:1767657599 before:1767744000',
+      'filename:eploy after:1767657599 before:1767744000',
+    ])
   })
 
-  it('falls back to the snippet when the pattern is empty', () => {
-    const lines = formatGrepResults([row('body')], LABEL, '/gmail')
-    expect(lines).toEqual(['/gmail/INBOX/2026-08-19/note__m1.gmail.json:[a@b.c] fallback snippet'])
+  it.each([
+    ['grep -rlw inbox /gmail', () => new FakeGmail()],
+    ['grep -rlw Jan /gmail', () => new FakeGmail()],
+    ['grep -rlw nothing /gmail', () => new FakeGmail()],
+    ['grep -rlw deploy /gmail', () => new FakeGmail('status')],
+    ['grep -rlw deploy /gmail', () => new FakeGmail(new TypeError('fetch failed'))],
+    ['grep -rlw deploy /gmail', () => new FakeGmail(new DOMException('timed out', 'TimeoutError'))],
+    ['grep -rlw deploy /gmail', () => new FakeGmail(null, true)],
+  ])('reads every message when search cannot answer %s', async (line, fake) => {
+    const full = await onGmail(line, new FakeGmail(), false)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      expect((await onGmail(line, fake())).slice(0, 3)).toEqual(full.slice(0, 3))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

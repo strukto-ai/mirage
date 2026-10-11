@@ -13,9 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import { channelDirname, guildDirname } from './entry.ts'
 import { offsetPages } from './paginate.ts'
-import { snowflakeToIso } from './entry.ts'
 
 const PAGE_SIZE = 25
 
@@ -72,48 +70,4 @@ export async function searchGuild(
     return ai < bi ? -1 : ai > bi ? 1 : 0
   })
   return messages.slice(0, limit)
-}
-
-function asString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-
-export interface SearchScope {
-  guildId: string
-  guildName?: string
-  channelName?: string
-}
-
-export function formatGrepResults(
-  messages: readonly DiscordSearchMessage[],
-  scope: SearchScope,
-  prefix: string,
-  channelNames: ReadonlyMap<string, string> = new Map(),
-): string[] {
-  const guildId = scope.guildId
-  const guildVfs = guildDirname({
-    id: guildId,
-    ...(scope.guildName !== undefined ? { name: scope.guildName } : {}),
-  })
-  const lines: string[] = []
-  for (const msg of messages) {
-    let ts = asString(msg.timestamp).slice(0, 10)
-    if (ts === '') {
-      // A hit without a timestamp still has a snowflake id, which encodes
-      // the creation day readdir buckets it under.
-      const iso = snowflakeToIso(asString(msg.id))
-      ts = iso !== null ? iso.slice(0, 10) : ''
-    }
-    const chId = asString(msg.channel_id)
-    const chName = channelNames.get(chId) ?? scope.channelName ?? ''
-    const chVfs = channelDirname({ id: chId, ...(chName !== '' ? { name: chName } : {}) })
-    const author = (msg.author as { username?: string } | undefined)?.username ?? '?'
-    const content = asString(msg.content).replace(/\n/g, ' ')
-    const path =
-      ts !== ''
-        ? `${prefix}/${guildVfs}/channels/${chVfs}/${ts}/chat.jsonl`
-        : `${prefix}/${guildVfs}/channels/${chVfs}`
-    lines.push(`${path}:[${author}] ${content}`)
-  }
-  return lines
 }

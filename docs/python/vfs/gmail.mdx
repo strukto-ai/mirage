@@ -248,3 +248,19 @@ Standard commands available on the mounted Gmail tree:
 
 Acting on Gmail (send, reply, forward, triage, raw API calls) goes
 through the [gws CLI](/python/cli/gws) when installed.
+
+## grep and rg
+
+With `content_search=True` (YAML `content_search: true`), `grep -rw` and `rg -w` read only
+the messages Gmail search names, and print what reading every message would.
+Search covers the From, To, Cc and Subject headers, the body and, through
+`filename:`, attachment names. Each label is searched on its own, since an
+account-wide search leaves out spam and trash. Listing a label already fetches
+its messages, so this saves the second fetch of each message it rules out.
+Attachments are always read.
+
+Every message is read when the word is a key of the message JSON or a system
+label, and when a search fails, reaches 500 messages, answers with a next page
+or finds nothing. A message whose snippet, Date header or attachment MIME type
+holds the word is read too, since Gmail search reads none of them. It is off by default: Gmail indexes a message some time after it
+arrives.

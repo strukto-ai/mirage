@@ -29,6 +29,7 @@ from mirage.core.gmail.messages import (
     get_message_raw,
     list_messages,
     message_json_bytes,
+    unsearched_text,
 )
 from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
@@ -122,7 +123,11 @@ def _date_children(
         size_estimate = raw.get("sizeEstimate")
         # The listing already fetched the full message, so the exact
         # rendered .gmail.json length is free; sizeEstimate is the
-        # source message size and stays in extra.
+        # source message size and stays in extra, beside the text a
+        # search has to look at itself.
+        extra: dict[str, Any] = {"unsearched": unsearched_text(raw)}
+        if size_estimate is not None:
+            extra["size_estimate"] = size_estimate
         children.append(
             (
                 filename,
@@ -132,9 +137,7 @@ def _date_children(
                     resource_type="gmail/message",
                     vfs_name=filename,
                     size=len(message_json_bytes(raw)),
-                    extra={"size_estimate": size_estimate}
-                    if size_estimate is not None
-                    else {},
+                    extra=extra,
                 ),
             )
         )

@@ -12,28 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.gmail.scope import NATIVE_KINDS, detect_scope
+from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.scope import INVALID, ROOT
 
 
 def test_root():
     match = detect_scope("/")
     assert match.kind == ROOT
-    assert ROOT in NATIVE_KINDS
 
 
 def test_label_dir():
     match = detect_scope("/INBOX")
     assert match.kind == "label"
     assert match.slots == {"label": "INBOX"}
-    assert "label" in NATIVE_KINDS
 
 
 def test_day_dir():
     match = detect_scope("/INBOX/2026-04-12")
     assert match.kind == "day"
     assert match.slots == {"label": "INBOX", "day": "2026-04-12"}
-    assert "day" not in NATIVE_KINDS
 
 
 def test_non_date_under_label_is_invalid():
@@ -45,7 +42,6 @@ def test_message_file():
     assert match.kind == "message"
     assert match.slots["message"] == "Test_Email"
     assert match.slots["message_id"] == "msg1"
-    assert "message" not in NATIVE_KINDS
 
 
 def test_attachment_dir():
@@ -59,7 +55,6 @@ def test_attachment_file():
     assert match.kind == "attachment"
     assert match.slots["message_id"] == "msg1"
     assert match.slots["filename"] == "report.pdf"
-    assert "attachment" not in NATIVE_KINDS
 
 
 def test_bare_name_at_message_depth_is_invalid():

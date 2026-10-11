@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from mirage.accessor.base import Accessor
 from mirage.accessor.imap import IMAPClient
 from mirage.core.email.config import EmailConfig
@@ -22,6 +24,9 @@ class EmailAccessor(Accessor):
     def __init__(self, config: EmailConfig) -> None:
         self.config = config
         self._imap: IMAPClient | None = None
+        # Held from a SELECT to the last command that reads the mailbox
+        # it chose, so a concurrent task cannot select another in between.
+        self.mailbox_lock = asyncio.Lock()
 
     async def get_imap(self) -> IMAPClient:
         """The connected IMAP client, connecting on first use and again

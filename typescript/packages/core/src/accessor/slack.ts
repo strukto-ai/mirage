@@ -20,12 +20,18 @@ import type { SlackConfig } from '../core/slack/config.ts'
 
 export class SlackAccessor extends Accessor {
   readonly timeRange: TimeRange
+  readonly contentSearch: boolean
+  // The words of the workspace's names and the channels search covers while a
+  // search fetches them, so the patterns of one grep share one users.list and
+  // one channel listing.
+  searchFacts: Promise<[ReadonlySet<string>, ReadonlySet<string> | null]> | null = null
   constructor(
     public readonly transport: SlackTransport,
-    config: { startTime?: string | null; endTime?: string | null } = {},
+    config: { startTime?: string | null; endTime?: string | null; contentSearch?: boolean } = {},
   ) {
     super()
     this.timeRange = new TimeRange(config.startTime, config.endTime)
+    this.contentSearch = config.contentSearch === true
   }
 }
 

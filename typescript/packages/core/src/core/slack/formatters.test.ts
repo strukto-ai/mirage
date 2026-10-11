@@ -13,110 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  buildQuery,
-  channelDirname,
-  dmDirname,
-  fileBlobName,
-  formatFileGrepResults,
-  formatGrepResults,
-  userFilename,
-} from './formatters.ts'
-import type { SearchTarget } from './scope.ts'
-import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
-
-const ENC = new TextEncoder()
-
-describe('buildQuery', () => {
-  it('returns pattern unchanged when no container', () => {
-    const scope: SearchTarget = {}
-    expect(buildQuery('hi', scope)).toBe('hi')
-  })
-
-  it('prefixes channels with in:#name', () => {
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: 'general',
-    }
-    expect(buildQuery('hi', scope)).toBe('in:#general hi')
-  })
-
-  it('prefixes dms with in:@name', () => {
-    const scope: SearchTarget = {
-      container: 'dms',
-      channelName: 'alice',
-    }
-    expect(buildQuery('hi', scope)).toBe('in:@alice hi')
-  })
-})
-
-describe('formatGrepResults', () => {
-  it('formats matches with channel/date prefix', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        messages: {
-          matches: [
-            {
-              channel: { name: 'general', id: 'C1' },
-              ts: '1700000000.000100',
-              user: 'U1',
-              text: 'hello world',
-            },
-          ],
-        },
-      }),
-    )
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: 'general',
-      channelId: 'C1',
-    }
-    const lines = formatGrepResults(raw, scope, '/mnt/slack')
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatch(
-      /^\/mnt\/slack\/channels\/general__C1\/\d{4}-\d{2}-\d{2}\/chat\.jsonl:\[U1\] hello world$/,
-    )
-  })
-
-  it('falls back to scope channel info when not present in match', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        messages: { matches: [{ ts: '1700000000.0', text: 'hi', username: 'alice' }] },
-      }),
-    )
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: 'general',
-      channelId: 'C1',
-    }
-    const lines = formatGrepResults(raw, scope, '/mnt/slack')
-    expect(lines[0]).toContain('/channels/general__C1/')
-    expect(lines[0]).toContain('[alice] hi')
-  })
-
-  it('returns empty when no matches', () => {
-    const raw = ENC.encode(JSON.stringify({ messages: { matches: [] } }))
-    const scope: SearchTarget = {}
-    expect(formatGrepResults(raw, scope, '/mnt/slack')).toEqual([])
-  })
-
-  it('replaces newlines in text with spaces', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        messages: {
-          matches: [{ ts: '1.0', user: 'U1', text: 'a\nb\nc' }],
-        },
-      }),
-    )
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: 'general',
-      channelId: 'C1',
-    }
-    const lines = formatGrepResults(raw, scope, '/mnt/slack')
-    expect(lines[0]).toContain('[U1] a b c')
-  })
-})
+import { channelDirname, dmDirname, fileBlobName, userFilename } from './formatters.ts'
 
 describe('fileBlobName', () => {
   it.each([
@@ -125,42 +22,6 @@ describe('fileBlobName', () => {
     [{ id: 'F3' }, 'file__F3'],
   ])('names %j as %s', (meta, expected) => {
     expect(fileBlobName(meta)).toBe(expected)
-  })
-})
-
-describe('formatFileGrepResults', () => {
-  it('emits one line per file match with full path', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        files: {
-          matches: [
-            { id: 'F1', name: 'design.pdf', timestamp: 1700000000 },
-            { id: 'F2', title: 'spec.md', timestamp: '1700000500' },
-          ],
-        },
-      }),
-    )
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: 'general',
-      channelId: 'C1',
-    }
-    const lines = formatFileGrepResults(raw, scope, '/mnt/slack')
-    expect(lines).toHaveLength(2)
-    expect(lines[0]).toMatch(
-      /^\/mnt\/slack\/channels\/general__C1\/\d{4}-\d{2}-\d{2}\/files\/design__F1\.pdf:\[file\] design\.pdf$/,
-    )
-    expect(lines[1]).toContain('files/spec__F2.md:[file] spec.md')
-  })
-
-  it('skips matches when scope has no channelId', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        files: { matches: [{ id: 'F1', name: 'x.txt', timestamp: 1 }] },
-      }),
-    )
-    const scope: SearchTarget = {}
-    expect(formatFileGrepResults(raw, scope, '/mnt/slack')).toEqual([])
   })
 })
 
@@ -195,49 +56,5 @@ describe('dirname helpers', () => {
 
   it('userFilename falls back to unknown when name missing', () => {
     expect(userFilename({ id: 'U2' })).toBe('unknown__U2.json')
-  })
-})
-
-describe('a long channel name renders one way everywhere', () => {
-  const NAME = '会議'.repeat(100)
-
-  it('reports the dirname readdir emits, not a second spelling of it', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        messages: {
-          matches: [{ channel: { id: 'C001', name: NAME }, ts: '1712707200.0', text: 'hello' }],
-        },
-      }),
-    )
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: NAME,
-      channelId: 'C001',
-    }
-    const dirname = formatGrepResults(raw, scope, '/slack')[0]
-      ?.split('/slack/channels/')[1]
-      ?.split('/')[0]
-
-    expect(dirname).toBe(channelDirname({ id: 'C001', name: NAME }))
-    expect(byteLength(dirname ?? '')).toBeLessThanOrEqual(NAME_MAX_BYTES)
-  })
-
-  it('reports it for file hits too', () => {
-    const raw = ENC.encode(
-      JSON.stringify({
-        files: { matches: [{ id: 'F001', name: 'report.pdf', timestamp: 1712707200 }] },
-      }),
-    )
-    const scope: SearchTarget = {
-      container: 'channels',
-      channelName: NAME,
-      channelId: 'C001',
-    }
-    const dirname = formatFileGrepResults(raw, scope, '/slack')[0]
-      ?.split('/slack/channels/')[1]
-      ?.split('/')[0]
-
-    expect(dirname).toBe(channelDirname({ id: 'C001', name: NAME }))
-    expect(byteLength(dirname ?? '')).toBeLessThanOrEqual(NAME_MAX_BYTES)
   })
 })

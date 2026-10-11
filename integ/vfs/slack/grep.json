@@ -9,7 +9,7 @@
       "command": "grep -rw Quokka /slack/channels/product-runtime__C7/",
       "expect": {
         "exit": 0,
-        "stdout": "/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[henry] quokka milestone 27 is basically done\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:[marcus] kicking off project Quokka, the runtime for building agents over company tools\n/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:[file] Runtime Spec\n",
+        "stdout": "/slack/channels/product-runtime__C7/2026-01-15/files/runtime_spec__F6.md:# Kestrel Runtime Spec (Quokka)\n/slack/channels/product-runtime__C7/2026-01-08/chat.jsonl:{\"type\":\"message\",\"user\":\"U8\",\"text\":\"kicking off project Quokka, the runtime for building agents over company tools\",\"ts\":\"1767878065.000559\"}\n",
         "stderr": ""
       }
     },
@@ -22,7 +22,7 @@
       "command": "grep -rw 'reply moat' /slack/channels/leadership__C5/",
       "expect": {
         "exit": 0,
-        "stdout": "/slack/channels/leadership__C5/2025-11-24/chat.jsonl:[priya] the reply moat is basically gone after this week's model launches\n/slack/channels/leadership__C5/2026-01-06/files/pivot_memo__F4.md:[file] Pivot Memo\n",
+        "stdout": "/slack/channels/leadership__C5/2026-01-06/files/pivot_memo__F4.md:The reply moat is gone. Foundation models draft email natively and for\n",
         "stderr": ""
       }
     },

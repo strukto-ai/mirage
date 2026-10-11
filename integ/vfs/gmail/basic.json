@@ -140,7 +140,7 @@
       "command": "grep -rw 'worker-3' /mail/INBOX | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json:[ops@example.com] Server alert: worker-3 disk usage at 91 percent on worker-3\n",
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json:{\"id\":\"msg0003\",\"thread_id\":\"msg0003\",\"from\":{\"name\":\"\",\"email\":\"ops@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[{\"name\":\"\",\"email\":\"marcus@example.com\"}],\"subject\":\"Server alert: worker-3\",\"date\":\"Wed, 07 Jan 2026 03:15:00 +0000\",\"body_text\":\"disk usage at 91 percent on worker-3\",\"snippet\":\"disk usage at 91 percent on worker-3\",\"labels\":[\"INBOX\",\"UNREAD\"],\"attachments\":[]}\n",
         "stderr": ""
       }
     },
@@ -153,7 +153,7 @@
       "command": "grep -riw 'invoice 4471' /mail | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json:[billing@vendor.example] Invoice 4471 invoice 4471 attached, total 240 usd\n",
+        "stdout": "/mail/INBOX/2026-01-07/Invoice_4471__msg0005.gmail.json:{\"id\":\"msg0005\",\"thread_id\":\"msg0005\",\"from\":{\"name\":\"\",\"email\":\"billing@vendor.example\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Invoice 4471\",\"date\":\"Wed, 07 Jan 2026 08:45:00 +0000\",\"body_text\":\"invoice 4471 attached, total 240 usd\",\"snippet\":\"invoice 4471 attached, total 240 usd\",\"labels\":[\"INBOX\",\"label0001\"],\"attachments\":[{\"id\":\"att0003\",\"filename\":\"invoice-4471.txt\",\"path\":\"attachments/att0003_invoice-4471.txt\",\"mime_type\":\"text/plain\",\"size\":28}]}\n/mail/INBOX/2026-01-07/Invoice_4471__msg0005/invoice-4471.txt:invoice 4471\n/mail/expenses/2026-01-07/Invoice_4471__msg0005.gmail.json:{\"id\":\"msg0005\",\"thread_id\":\"msg0005\",\"from\":{\"name\":\"\",\"email\":\"billing@vendor.example\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Invoice 4471\",\"date\":\"Wed, 07 Jan 2026 08:45:00 +0000\",\"body_text\":\"invoice 4471 attached, total 240 usd\",\"snippet\":\"invoice 4471 attached, total 240 usd\",\"labels\":[\"INBOX\",\"label0001\"],\"attachments\":[{\"id\":\"att0003\",\"filename\":\"invoice-4471.txt\",\"path\":\"attachments/att0003_invoice-4471.txt\",\"mime_type\":\"text/plain\",\"size\":28}]}\n/mail/expenses/2026-01-07/Invoice_4471__msg0005/invoice-4471.txt:invoice 4471\n",
         "stderr": ""
       }
     },
@@ -244,7 +244,7 @@
       "command": "rg -w 'forecast' /mail/INBOX",
       "expect": {
         "exit": 0,
-        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json:[marcus@example.com] Standup notes yesterday shipped the parser today reviewing the budget forecast\n",
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json:{\"id\":\"msg0002\",\"thread_id\":\"msg0002\",\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"snippet\":\"yesterday shipped the parser today reviewing the budget forecast\",\"labels\":[\"INBOX\"],\"attachments\":[]}\n",
         "stderr": ""
       }
     },

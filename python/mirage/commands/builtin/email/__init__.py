@@ -13,14 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.email.find import find
-from mirage.commands.builtin.email.grep import grep
-from mirage.commands.builtin.email.rg import rg
 
 # Mail verbs live in the himalaya CLI
 # (mirage.commands.cli.builtin.himalaya), installed by name; the mount
 # only serves the filesystem surface.
 COMMANDS = [
     find,
-    grep,
-    rg,
 ]

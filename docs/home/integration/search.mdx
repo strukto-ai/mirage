@@ -1,0 +1,145 @@
+---
+title: Search
+description: The VFS methods grep and rg ask, and which commands and flags use each.
+icon: magnifying-glass
+---
+
+A VFS that defines these methods lets `grep` and `rg` skip files and lines. The
+commands still walk, filter, order and label every file, so output is the same
+as a full scan.
+
+## Interface
+
+<CodeGroup>
+
+```python Python
+from mirage import NULL_INDEX, BaseVFS, PathSpec, ScanReason
+from mirage.io.types import ByteSource
+
+
+class MyVFS(BaseVFS):
+    searchable: tuple[str, ...] | None = None
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index=NULL_INDEX,
+    ) -> list[PathSpec] | None: ...
+
+    async def lines_containing(
+        self,
+        path: PathSpec,
+        text: str,
+        *,
+        ignore_case: bool,
+        index=NULL_INDEX,
+    ) -> ByteSource | None: ...
+
+    async def before_full_scan(
+        self,
+        command: str,
+        under: list[PathSpec],
+        reason: ScanReason,
+        index=NULL_INDEX,
+    ) -> None: ...
+```
+
+```ts TypeScript
+import { BaseVFS, type PathSpec, type ScanReason } from '@struktoai/mirage-core'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+
+class MyVFS extends BaseVFS {
+  override readonly searchable: readonly string[] | null = null
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[] | null> { /* ... */ }
+
+  override linesContaining(
+    path: PathSpec,
+    text: string,
+    opts: { ignoreCase: boolean },
+  ): Promise<ByteSource | null> { /* ... */ }
+
+  override beforeFullScan(
+    command: string,
+    under: PathSpec[],
+    reason: ScanReason,
+  ): Promise<void> { /* ... */ }
+}
+```
+
+</CodeGroup>
+
+| Method | Answer | Otherwise |
+| --- | --- | --- |
+| `files_containing` | the files under `under` that may hold `text`, matched on `vfs_path` ignoring case | `None`: every file is read |
+| `lines_containing` | the lines of `path` that may hold `text`, in file order, as bytes or a stream | `None`: the file is read; required for a file that may hold a NUL byte |
+| `before_full_scan` | return: the scan runs | raise: the command is refused |
+
+An extra file or line costs a read; a missing one is a wrong answer. A search
+that holds only keys names each file with `mounted_path(under[0], "/" + key)`
+from `mirage.utils.key_prefix` (`mountedPath` in TypeScript).
+
+`searchable` names the files `files_containing` answers for, as mount-relative
+globs where a directory covers what is under it. A walked file outside it is
+always read; `None` (`null`), the default, covers every file.
+
+## Commands and flags
+
+| Method | Commands | Used when |
+| --- | --- | --- |
+| `files_containing` | `grep -r`, `grep -R`, `rg` | the walk reads any file, unless a flag below scans |
+| `lines_containing` | `grep`, `rg` | in place of the file with no `-n`, `-b`, `-A`, `-B`, `-C` (rg also no `--column`, `--vimgrep`, `--stop-on-nonmatch`, `--null-data`) and one pattern; otherwise to decide whether the file is read |
+| `before_full_scan` | `grep -r`, `grep -R`, `rg` | once, before the first file no search answered is read |
+
+| Argument | Set by |
+| --- | --- |
+| `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds |
+| `under` | the directory operands; for `rg` with none, the cwd |
+| `whole_word` | `-w` or `-x` with a plain-text pattern |
+| `ignore_case` | `-i`; for `rg`, also `-S` with a lowercase pattern |
+
+These flags scan every file and call `before_full_scan` with the reason:
+
+| Flags | `ScanReason` |
+| --- | --- |
+| `-v`; `rg --passthru` | `EVERY_LINE` |
+| `rg --files-without-match`; `rg -c` or `--count-matches` with `--include-zero`; not under `-q` | `EVERY_FILE` |
+| `-f`; no plain text of three characters in the pattern; under `-i`, a word with a non-ASCII letter, or with i, k or s under Unicode folding | `NO_TEXT` |
+| `rg -L` | `LINKS` |
+| `grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`, after a search answered | `BINARY` |
+| no search method, or a hide or path rule on the path | `NO_SEARCH` |
+| a search answered `None` | `UNANSWERED` |
+
+Every other flag is applied by the walk as usual. `rg --files` and
+`rg --type-list` read no content and ask nothing. `files_containing` never
+rules out a file named on the command line, or a binary-extension file under
+`grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`.
+
+Raise from `before_full_scan` to refuse: the command prints `grep: <message>`
+and exits 1. A filesystem error raised at a file is that file's read error
+instead, and grep exits 2.
+
+## Backends
+
+| Backend | Search | Answers for | Opt-in |
+| --- | --- | --- | --- |
+| GitHub | code search | `-w`, on the default branch, over 100 files | always |
+| Box | `/search` | `-w` | `content_search` |
+| Dropbox | `/2/files/search_v2` | `-w` | `content_search` |
+| Email | IMAP `SEARCH TEXT` | messages (`*/*/*.email.json`) | `content_search` |
+| Slack | `search.messages`, `search.files` | `-w`, channel days (`channels/*/*/chat.jsonl`) | `content_search` |
+| Gmail | messages search | `-w`, messages (`*/*/*.gmail.json`) | `content_search` |
+
+A word a backend's search is known not to see reads every file: a key of the
+rendered JSON, a fixed word such as a file type, a user's name on Slack. Each
+backend's page lists what its search covers. Discord reads every file, since a
+reply carries the message it answers, which its search does not tie to the
+reply.

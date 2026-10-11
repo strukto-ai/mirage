@@ -515,9 +515,16 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
         ("grep -rc ada /d", "files", "a.txt sub/d.txt", "ada", None),
         ("rg -lw ada /d", "files", "a.txt sub/d.txt", "ada -w", None),
         ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused", None),
-        # -a reads the binary-extension file no search vouches for, and a
-        # named file is read whatever the search said (twice, as GNU does).
-        ("grep -ra ada /d", "files", "a.txt sub/d.txt w.bin", "ada", None),
+        # -a reads the binary-extension file no search vouches for, asking
+        # the mount first, and a named file is read whatever the search said
+        # (twice, as GNU does).
+        (
+            "grep -ra ada /d",
+            "files",
+            "a.txt sub/d.txt w.bin",
+            "ada",
+            ScanReason.BINARY,
+        ),
         (
             "grep -r ada /d /d/c.txt",
             "files",
@@ -563,6 +570,26 @@ def test_what_a_search_reads_asks_and_scans(line, mount, reads, asked, scan):
     assert vfs.scans == ([scan] if scan else [])
     if reads is not None:
         assert sorted(vfs.reads) == [f"d/{key}" for key in reads.split()]
+
+
+@pytest.mark.parametrize(
+    "searchable, reads",
+    [
+        (
+            ("d/sub",),
+            ["d/a.txt", "d/b.txt", "d/c.txt", "d/sub/d.txt", "d/z.txt"],
+        ),
+        (("d/*.txt",), ["d/a.txt", "d/sub/d.txt"]),
+    ],
+)
+def test_a_file_the_search_does_not_cover_is_always_read(searchable, reads):
+    # A glob naming a directory covers what is below it, and `*` stays
+    # within one segment, so d/*.txt leaves d/sub/d.txt uncovered.
+    vfs = SearchRAM(lines=None)
+    vfs.searchable = searchable
+    line = "grep -r ada /d"
+    assert _run(vfs, line) == _run(RAMVFS(), line)
+    assert sorted(vfs.reads) == reads
 
 
 def test_a_hidden_path_is_walked_without_the_search():

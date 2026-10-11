@@ -230,6 +230,12 @@ incomplete (an error, a truncated result, an index that lags writes) and every
 file is read. A word-based index answers `wholeWord: true` and returns `null`
 otherwise.
 
+A search that sees only some files names them in `searchable`, a list of
+mount-relative globs where a directory covers what is under it; a walked file
+outside it is always read. The default, `null`, covers every file. The email
+mount, whose IMAP search sees messages but not attachments, sets
+`override readonly searchable = ['*/*/*.email.json']`.
+
 ```ts
 import { BaseVFS, type PathSpec, type ScanReason } from '@struktoai/mirage-core'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
@@ -270,6 +276,7 @@ with why:
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
 | `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`, without `-q`: rg leaves a binary file out of these |
 | `LINKS` | rg `-L` |
+| `BINARY` | `-a`, `--binary-files=text`, rg `-a`, `--binary` or `-uuu` after a search answered: every binary-extension file is read |
 | `UNANSWERED` | `filesContaining` resolved `null`, or `linesContaining` resolved `null` for a file |
 
 Reject from it (or from `filesContaining`) to refuse: the error's message is

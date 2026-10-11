@@ -35,7 +35,6 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.gsheets.gsheets.GSheetsVFS": "mirage.commands.builtin.gsheets",
     "mirage.vfs.gslides.gslides.GSlidesVFS": "mirage.commands.builtin.gslides",
     "mirage.vfs.github.github.GitHubVFS": "mirage.commands.builtin.github",
-    "mirage.vfs.gmail.gmail.GmailVFS": "mirage.commands.builtin.gmail",
     "mirage.vfs.gridfs.gridfs.GridFSVFS": "mirage.commands.builtin.gridfs",
     "mirage.vfs.history.history.HistoryViewVFS": "mirage.commands.builtin.history",
     "mirage.vfs.lancedb.lancedb.LanceDBVFS": "mirage.commands.builtin.lancedb",
@@ -46,7 +45,6 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.qdrant.qdrant.QdrantVFS": "mirage.commands.builtin.qdrant",
     "mirage.vfs.s3.s3.S3VFS": "mirage.commands.builtin.s3",
     "mirage.vfs.ssh.ssh.SSHVFS": "mirage.commands.builtin.ssh",
-    "mirage.vfs.slack.slack.SlackVFS": "mirage.commands.builtin.slack",
     "mirage.vfs.trello.trello.TrelloVFS": "mirage.commands.builtin.trello",
 }
 

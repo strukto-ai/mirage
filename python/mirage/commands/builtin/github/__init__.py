@@ -14,12 +14,8 @@
 
 from mirage.commands.builtin.github.du import du
 from mirage.commands.builtin.github.find import find
-from mirage.commands.builtin.github.grep import grep
-from mirage.commands.builtin.github.rg import rg
 
 COMMANDS = [
     du,
     find,
-    grep,
-    rg,
 ]

@@ -143,9 +143,9 @@ async function main(): Promise<void> {
     r = await ws.shell(`grep -c . "${filePath}"`)
     console.log(`  line count: ${r.stdoutText.trim()}`)
 
-    // ── grep at CHANNEL level (Discord search push-down) ──
-    console.log(`\n=== grep at CHANNEL level: grep -m 5 . ${base}/ ===`)
-    r = await ws.shell(`grep -m 5 . "${base}/"`)
+    // ── grep at CHANNEL level ──────────────────────
+    console.log(`\n=== grep at CHANNEL level: grep -r -m 5 . ${base}/ ===`)
+    r = await ws.shell(`grep -r -m 5 . "${base}/"`)
     console.log(`  exit=${String(r.exitCode)}`)
     const chanOut = r.stdoutText.trim()
     if (chanOut !== '') {
@@ -157,8 +157,8 @@ async function main(): Promise<void> {
     if (err !== '') console.log(`  stderr: ${err.slice(0, 200)}`)
 
     // ── grep at GUILD level ────────────────────────
-    console.log(`\n=== grep at GUILD level: grep -m 5 . /discord/${guild}/ ===`)
-    r = await ws.shell(`grep -m 5 . "/discord/${guild}/"`)
+    console.log(`\n=== grep at GUILD level: grep -r -m 5 . /discord/${guild}/ ===`)
+    r = await ws.shell(`grep -r -m 5 . "/discord/${guild}/"`)
     console.log(`  exit=${String(r.exitCode)}`)
     const guildOut = r.stdoutText.trim()
     if (guildOut !== '') {

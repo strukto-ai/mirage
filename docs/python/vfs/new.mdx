@@ -238,6 +238,12 @@ keys names each with `mounted_path(under[0], "/" + key)` from
 error, a truncated result, an index that lags writes) and every file is read. A
 word-based index answers `whole_word=True` and returns `None` otherwise.
 
+A search that sees only some files names them in `searchable`, a tuple of
+mount-relative globs where a directory covers what is under it; a walked file
+outside it is always read. The default, `None`, covers every file. The email
+mount, whose IMAP search sees messages but not attachments, sets
+`searchable = ("*/*/*.email.json",)`.
+
 ```python
 from mirage.utils.key_prefix import mounted_path
 
@@ -275,6 +281,7 @@ with why:
 | `EVERY_LINE` | `-v`, or rg `--passthru` |
 | `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`, without `-q`: rg leaves a binary file out of these |
 | `LINKS` | rg `-L` |
+| `BINARY` | `-a`, `--binary-files=text`, rg `-a`, `--binary` or `-uuu` after a search answered: every binary-extension file is read |
 | `UNANSWERED` | `files_containing` returned `None`, or `lines_containing` returned `None` for a file |
 
 Raise from it (or from `files_containing`) to refuse: the error's message is

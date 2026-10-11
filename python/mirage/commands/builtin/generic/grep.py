@@ -10,7 +10,6 @@ from contextlib import aclosing
 from dataclasses import replace
 from functools import partial
 
-from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.grep_binary import GrepFlags, grep_input
 from mirage.commands.builtin.grep_pattern import (
     NEVER_MATCH,
@@ -50,7 +49,7 @@ from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.filetype import get_extension
+from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one
 

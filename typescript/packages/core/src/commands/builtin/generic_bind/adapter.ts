@@ -268,6 +268,7 @@ export function commandIo(vfs: BaseVFS): CommandIO {
               index?: IndexCacheStore,
             ) => vfs.filesContaining(text, under, opts, index),
           ),
+          searchable: vfs.searchable,
         }
       : {}),
     ...(has('linesContaining')

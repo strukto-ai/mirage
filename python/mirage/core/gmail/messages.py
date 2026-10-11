@@ -19,6 +19,37 @@ from mirage.core.google.client import TokenManager, gmail_base, google_get
 from mirage.core.render.json import compact_json_bytes
 
 
+async def list_message_page(
+    token_manager: TokenManager,
+    label_id: str | None = None,
+    query: str | None = None,
+    max_results: int = 50,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """One page of message stubs for a label or query, and the next page's token.
+
+    Gmail may return fewer than ``max_results`` stubs and still name a
+    next page.
+
+    Args:
+        token_manager (TokenManager): manages OAuth2 tokens.
+        label_id (str | None): Gmail label ID to filter by.
+        query (str | None): Gmail search query.
+        max_results (int): maximum number of results.
+
+    Returns:
+        tuple[list[dict], str | None]: stubs with "id" and "threadId", and
+            the next page's token, or None on the last page.
+    """
+    params: dict[str, Any] = {"maxResults": max_results}
+    if label_id:
+        params["labelIds"] = label_id
+    if query:
+        params["q"] = query
+    url = f"{gmail_base(token_manager)}/users/me/messages"
+    data = await google_get(token_manager, url, params=params)
+    return data.get("messages", []), data.get("nextPageToken")
+
+
 async def list_messages(
     token_manager: TokenManager,
     label_id: str | None = None,
@@ -36,14 +67,10 @@ async def list_messages(
     Returns:
         list[dict]: list of message stubs with "id" and "threadId".
     """
-    params: dict[str, Any] = {"maxResults": max_results}
-    if label_id:
-        params["labelIds"] = label_id
-    if query:
-        params["q"] = query
-    url = f"{gmail_base(token_manager)}/users/me/messages"
-    data = await google_get(token_manager, url, params=params)
-    return data.get("messages", [])
+    stubs, _ = await list_message_page(
+        token_manager, label_id, query, max_results
+    )
+    return stubs
 
 
 async def get_message_raw(
@@ -196,6 +223,23 @@ def message_json_bytes(raw: dict[str, Any]) -> bytes:
         bytes: compact JSON encoding of the processed message.
     """
     return compact_json_bytes(process_message(raw))
+
+
+def unsearched_text(raw: dict[str, Any]) -> str:
+    """What a message's .gmail.json holds that Gmail search does not read.
+
+    The snippet is Gmail's own cut of the body, escaped as HTML, so it can
+    end inside a word or spell an entity, and neither the Date header nor
+    an attachment's MIME type is searched at all. Lowercased, for a
+    case-folded look.
+
+    Args:
+        raw (dict): full message from messages.get format=full.
+    """
+    payload = raw.get("payload", {})
+    date = _extract_header(payload.get("headers", []), "Date")
+    types = [a.get("mime_type", "") for a in _extract_attachments(payload)]
+    return "\n".join([raw.get("snippet", ""), date, *types]).lower()
 
 
 def process_message(raw: dict[str, Any]) -> dict[str, Any]:

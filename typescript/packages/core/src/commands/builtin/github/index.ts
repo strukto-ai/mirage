@@ -15,12 +15,5 @@
 import type { Command } from '../../config.ts'
 import { GITHUB_DU } from './du.ts'
 import { GITHUB_FIND } from './find.ts'
-import { GITHUB_GREP } from './grep.ts'
-import { GITHUB_RG } from './rg.ts'
 
-export const GITHUB_COMMANDS: readonly Command[] = [
-  ...GITHUB_DU,
-  ...GITHUB_FIND,
-  ...GITHUB_GREP,
-  ...GITHUB_RG,
-]
+export const GITHUB_COMMANDS: readonly Command[] = [...GITHUB_DU, ...GITHUB_FIND]

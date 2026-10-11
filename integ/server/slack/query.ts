@@ -21,6 +21,7 @@
 //   after:DATE    strictly after that UTC day (DATE = YYYY-MM-DD)
 //   before:DATE   strictly before that UTC day
 //   on:DATE       within that UTC day
+//   has::name:    only messages carrying that reaction
 // Everything else is the literal, matched as an ASCII-case-insensitive
 // substring against the stored text/name/title/content -- data-driven, so the
 // same fake answers any query, not just the fixture's exact wording. Names
@@ -34,6 +35,7 @@ export interface ParsedQuery {
   after?: string
   before?: string
   on?: string
+  reaction?: string
 }
 
 const TOKEN_RE = /"([^"]*)"|(\S+)/g
@@ -69,6 +71,11 @@ export function parseQuery(query: string): ParsedQuery {
     if (mention !== null) {
       delete out.fromName
       out.fromId = mention[1]!
+      continue
+    }
+    const reaction = quoted ? null : /^has::([^:\s]+):$/.exec(value)
+    if (reaction !== null) {
+      out.reaction = reaction[1]!
       continue
     }
     // Order matters: `from:@x` must be tried before `from:x`, which is why

@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "em_search_reads_attachments_it_cannot_see",
+      "seq": 540229,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl travel /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_search_covers_a_word_after_an_escape",
+      "seq": 540230,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rlw ntoday /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_search_scans_for_a_key_name",
+      "seq": 540231,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl subject /mail/INBOX/2026-01-05 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json\n/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_search_scans_for_a_flag_name",
+      "seq": 540232,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl Seen /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_search_finds_no_message",
+      "seq": 540233,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl zzzqx /mail/INBOX; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_search_folds_case",
+      "seq": 540234,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rli BUDGET /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json\n/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

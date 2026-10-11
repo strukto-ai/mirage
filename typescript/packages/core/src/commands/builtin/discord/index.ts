@@ -13,12 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command } from '../../config.ts'
-import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
-import { DISCORD_RG } from './rg.ts'
 
-export const DISCORD_COMMANDS: readonly Command[] = [
-  ...DISCORD_GREP,
-  ...DISCORD_RG,
-  ...DISCORD_HEAD,
-]
+export const DISCORD_COMMANDS: readonly Command[] = [...DISCORD_HEAD]

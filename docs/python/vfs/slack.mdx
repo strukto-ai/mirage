@@ -249,6 +249,26 @@ through the [slack CLI](/python/cli/slack) when installed; the mounted
 tree stays read-oriented. The `<name>__<id>` path segments supply the
 channel and user IDs the CLI flags take.
 
+## grep and rg
+
+With `content_search=True` (YAML `content_search: true`) and a user token,
+`grep -rw` and `rg -w` read only the channel days Slack search names, and
+print what reading every day would. Search covers message text, file names
+and titles (`search.files`) and reactions (`has::name:`); listing a day already
+fetches its history, so this saves the second fetch of each day it rules out.
+A file hit names each day the file was shared. DMs, users, file blobs and a day
+searched on its own are always read.
+
+Every day is read when the word is a key or fixed value of the message JSON, a
+file-type or URL word, a join or leave message word, or part of a user's name
+or of the workspace's domain, and when a search fails, returns more than 1,000
+messages or finds nothing. With a separate `search_token`, every day is also read
+when the scope holds a private channel that token's user is not in, since their
+search never sees it; that token needs `channels:read` and `groups:read` to list
+the channels it sees. It is off by default: Slack indexes a message some
+time after it is posted, and a word held only in another field of a message (a
+bot's username, an unfurled link) is not searched.
+
 ## Time scope
 
 Set `start_time` and/or `end_time` in the mount's YAML `config` (or pass
@@ -271,8 +291,8 @@ mounts:
 With a bound configured, channel listings cover the selected period rather
 than the default recent window. Day directories use UTC. Messages are selected
 by creation time, and attachments follow their parent messages. Direct paths,
-`stat`, date globs, and `grep`/`rg` cannot escape the scope. Scoped searches scan
-the filtered files instead of using unrestricted provider search. User/member
+`stat`, date globs, and `grep`/`rg` cannot escape the scope: a search only rules
+out files, so scoped searches scan the filtered files. User/member
 and channel/server metadata remain visible as context.
 
 These settings apply to the VFS, not to separately installed account CLIs.

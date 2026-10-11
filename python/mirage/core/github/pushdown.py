@@ -36,34 +36,6 @@ def scope_relative_key(path: PathSpec) -> str:
     return key
 
 
-def is_repo_root(key: str) -> bool:
-    """Return whether a repo-relative key points at the repository root.
-
-    Args:
-        key (str): Repo-relative key from :func:`scope_relative_key`.
-
-    Returns:
-        bool: True for ``""`` or ``"/"``.
-    """
-    return key in ("", "/")
-
-
-def is_directory_key(tree: dict[str, TreeEntry], key: str) -> bool:
-    """Return whether a scope key names a directory of the git tree.
-
-    Args:
-        tree (dict[str, TreeEntry]): The recursive git tree.
-        key (str): Repo-relative key from :func:`scope_relative_key`.
-
-    Returns:
-        bool: True for the repository root or a ``tree`` entry.
-    """
-    if is_repo_root(key):
-        return True
-    entry = tree.get(key.strip("/"))
-    return entry is not None and entry.type == "tree"
-
-
 def scope_blobs(
     tree: dict[str, TreeEntry], key: str
 ) -> list[tuple[str, TreeEntry]]:
@@ -102,19 +74,6 @@ def count_scope_files(tree: dict[str, TreeEntry], key: str) -> int:
         int: Number of file entries at or below the scope.
     """
     return len(scope_blobs(tree, key))
-
-
-def should_use_search(
-    recursive: bool,
-    on_default_branch: bool,
-) -> bool:
-    """Whether grep/rg should narrow paths via GitHub code search.
-
-    Search only helps recursive scans on the default branch (code search only
-    indexes the default branch). Whether a usable literal exists, and whether
-    the scope is large enough to bother, is decided by the caller.
-    """
-    return recursive and on_default_branch
 
 
 _NARROWING = re.compile(

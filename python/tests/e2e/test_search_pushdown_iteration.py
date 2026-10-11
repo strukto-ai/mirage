@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.builtin.slack.grep import grep as slack_grep
 from mirage.types import ContentType, FileStat, FileType
 from mirage.vfs.slack import SlackConfig, SlackVFS
 from tests.fixtures.vfs_io import override
@@ -27,17 +26,19 @@ DAYS = [f"2026-{m:02d}-{d:02d}" for m in range(1, 5) for d in range(1, 16)]
 
 @pytest.mark.asyncio
 async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
-    # This line used to become ONE channel-wide search: `coalesce_scopes`
-    # folded the 60 same-channel operands into a channel scope, and
-    # `build_query` carries only `in:#general` with no date. So the answer
-    # covered every day the channel ever had — including the ones the glob
-    # did not match, since slack search also reaches past the browse window.
-    # It is 60 named files: read them. The saving was real and is gone with
-    # it; the answer it bought was not the question asked.
+    # A search never rules out a file named on the line, so the 60 days
+    # the glob expanded to are each read and Slack is never searched.
     slack = SlackVFS(
-        config=SlackConfig(token="xoxb-test", search_token="xoxp-test")
+        config=SlackConfig(
+            token="xoxb-test", search_token="xoxp-test", content_search=True
+        )
     )
-    read = AsyncMock(return_value=b'{"text":"hello there"}\n')
+    reads: list[str] = []
+
+    async def read_stream(accessor, path, index=None):
+        reads.append(path.virtual)
+        yield b'{"text":"hello there"}\n'
+
     stat = AsyncMock(
         return_value=FileStat(
             name="chat.jsonl",
@@ -46,7 +47,7 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
             size=23,
         )
     )
-    override(slack, "read", read)
+    override(slack, "read_stream", read_stream)
     override(slack, "stat", stat)
     ws = Workspace({"/slack": (slack, MountMode.READ)}, mode=MountMode.READ)
     expanded = " ".join(
@@ -54,13 +55,10 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
     )
     try:
         fake_search = AsyncMock()
-        with patch.dict(
-            slack_grep.__wrapped__.__globals__,
-            {"search_messages": fake_search},
-        ):
+        with patch("mirage.core.slack.search.slack_get", new=fake_search):
             result = await ws.shell(f"grep -iw hello {expanded}")
         fake_search.assert_not_awaited()
-        assert read.await_count == len(DAYS)
+        assert len(reads) == len(DAYS)
         assert result.exit_code == 0
         out = (result.stdout or b"").decode()
         assert out.count("hello there") == len(DAYS)

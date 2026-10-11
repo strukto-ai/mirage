@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.discord.scope import NATIVE_KINDS, detect_scope
+from mirage.core.discord.scope import detect_scope
 from mirage.core.hierarchy.scope import INVALID, ROOT
 
 CHAT = "/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl"
@@ -105,13 +105,3 @@ def test_deep_unknown_path_is_invalid():
 
 def test_dot_segment_is_invalid():
     assert detect_scope("/My Server__G1/channels/.hidden__C1").kind == INVALID
-
-
-def test_native_kinds_exclude_the_rendered_leaves():
-    # A day and what it holds, member profiles and stored blobs are not
-    # answerable by the guild message search, which takes no date; the
-    # containers above them are.
-    assert {"day", "messages", "files", "member", "file_blob"}.isdisjoint(
-        NATIVE_KINDS
-    )
-    assert {"guild", "channels_dir", "channel"} <= NATIVE_KINDS

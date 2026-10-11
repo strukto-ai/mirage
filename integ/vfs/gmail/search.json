@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "gmail_search_reads_attachments_it_cannot_see",
+      "seq": 540243,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw invoice /mail | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/TRASH/2026-01-07/Invoice_4471__msg0005.gmail.json\n/mail/TRASH/2026-01-07/Invoice_4471__msg0005/invoice-4471.txt\n/mail/expenses/2026-01-07/Invoice_4471__msg0005.gmail.json\n/mail/expenses/2026-01-07/Invoice_4471__msg0005/invoice-4471.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_names_a_sender",
+      "seq": 540244,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw marcus /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_names_an_attachment",
+      "seq": 540245,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw notes /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_walks_every_label",
+      "seq": 540246,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw budget /mail | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n/mail/UNREAD/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_on_a_day",
+      "seq": 540247,
+      "targets": [
+        "gmail"
+      ],
+      "command": "rg -lw budget /mail/INBOX/2026-01-05 | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_reads_every_message_for_a_key_name",
+      "seq": 540248,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rlw subject /mail/INBOX | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_without_a_hit_reads_every_message",
+      "seq": 540249,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rw zzzqx /mail; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_ignores_case_under_i",
+      "seq": 540250,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rliw BUDGET /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -12,68 +12,84 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+import asyncio
 
-from mirage.core.gmail.search import format_grep_results
+import aiohttp
+import pytest
 
-LABEL = "INBOX"
-
-EMOJI = "\U0001f600"
-
-
-def _row(body_text: str) -> dict[str, Any]:
-    return {
-        "id": "m1",
-        "subject": "note",
-        "snippet": "fallback snippet",
-        "sender": "a@b.c",
-        "date": "2026-08-19",
-        "label": "INBOX",
-        "body_text": body_text,
-    }
+from tests.core.gmail.conftest import RATE_LIMITED, FakeGmail
 
 
-def _excerpt(lines: list[str]) -> str:
-    """Everything after the ``<path>:[<sender>] `` header."""
-    line = lines[0]
-    return line[line.index("] ") + 2 :]
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, reads",
+    [
+        ("grep -rlw deploy /gmail", ["b2", "b2", "c3"]),
+        ("grep -rlw Ana /gmail/INBOX", ["a1"]),
+        ("grep -rlw plan /gmail/INBOX", ["a1"]),
+        ("grep -rlw deploy /gmail/INBOX/2026-01-06", ["b2"]),
+        ("rg -lw friday /gmail/Work", ["b2"]),
+    ],
+)
+async def test_a_word_reads_only_the_messages_search_names(gmail, line, reads):
+    full = await gmail(line, content_search=False)
+    out, code, read, _ = await gmail(line)
+    assert (out, code) == full[:2]
+    assert read == reads
 
 
-def test_no_match_budget_counts_code_points():
-    # Gmail matched the message server-side on something the literal scan
-    # does not find, so the excerpt falls back to the head of the body. 200
-    # emoji are 200 code points and 400 UTF-16 units, which is the input the
-    # typescript twin cut to 117 -- splitting the 118th surrogate pair.
-    body = EMOJI * 200
-    excerpt = _excerpt(
-        format_grep_results([_row(body)], LABEL, "/gmail", "zzz")
-    )
-    assert excerpt == f"note {body}"
-    assert len(excerpt) == 205
-    assert "�" not in excerpt
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, reads",
+    [
+        # e5 holds rtf only in its attachment's MIME type, g7 holds travel
+        # only in a snippet cut inside traveler and i9 holds mountain only
+        # in its Date header; Gmail searches none of them, so the listing's
+        # copy of them is checked.
+        ("grep -rlw rtf /gmail/INBOX", ["e5", "f6"]),
+        ("grep -rlw travel /gmail/INBOX", ["a1", "g7"]),
+        ("grep -rlw mountain /gmail/INBOX", ["h8", "i9"]),
+    ],
+)
+async def test_text_gmail_does_not_search_is_checked_in_the_listing(
+    gmail, line, reads
+):
+    full = await gmail(line, content_search=False)
+    out, code, read, _ = await gmail(line)
+    assert (out, code) == full[:2]
+    assert read == reads
 
 
-def test_match_window_cuts_on_code_point_boundaries():
-    pad = EMOJI * 200
-    excerpt = _excerpt(
-        format_grep_results(
-            [_row(f"{pad} needle {pad}")], LABEL, "/gmail", "needle"
-        )
-    )
-    assert excerpt == f"...{EMOJI * 119} needle {EMOJI * 119}..."
-    assert "�" not in excerpt
-
-
-def test_match_window_on_ascii():
-    body = "a" * 300 + " needle " + "b" * 300
-    excerpt = _excerpt(
-        format_grep_results([_row(body)], LABEL, "/gmail", "needle")
-    )
-    assert excerpt == f"...{'a' * 119} needle {'b' * 119}..."
-
-
-def test_empty_pattern_falls_back_to_the_snippet():
-    lines = format_grep_results([_row("body")], LABEL, "/gmail")
-    assert lines == [
-        "/gmail/INBOX/2026-08-19/note__m1.gmail.json:[a@b.c] fallback snippet"
+@pytest.mark.asyncio
+async def test_a_label_day_is_searched_within_its_bounds(gmail):
+    *_, searches = await gmail("grep -rlw deploy /gmail/INBOX/2026-01-06")
+    assert searches == [
+        "deploy after:1767657599 before:1767744000",
+        "eploy after:1767657599 before:1767744000",
+        "filename:deploy after:1767657599 before:1767744000",
+        "filename:eploy after:1767657599 before:1767744000",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, fake",
+    [
+        ("grep -rlw inbox /gmail", FakeGmail()),
+        ("grep -rlw Jan /gmail", FakeGmail()),
+        ("grep -rlw nothing /gmail", FakeGmail()),
+        ("grep -rlw deploy /gmail", FakeGmail(fails=RATE_LIMITED)),
+        (
+            "grep -rlw deploy /gmail",
+            FakeGmail(fails=aiohttp.ClientConnectionError("reset")),
+        ),
+        ("grep -rlw deploy /gmail", FakeGmail(fails=asyncio.TimeoutError())),
+        ("grep -rlw deploy /gmail", FakeGmail(more=True)),
+    ],
+)
+async def test_every_message_is_read_when_search_cannot_answer(
+    gmail, line, fake
+):
+    full = await gmail(line, content_search=False)
+    out, code, read, _ = await gmail(line, fake)
+    assert (out, code, read) == full[:3]

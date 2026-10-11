@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -178,6 +179,39 @@ async def test_list_message_uids(accessor):
 
     uids = await list_message_uids(accessor, "INBOX")
     assert uids == ["101", "102", "103", "104", "105"]
+
+
+class OneSelection:
+    """A connection with one selected mailbox, as a server keeps it."""
+
+    alive = True
+
+    def __init__(self) -> None:
+        self.selected = ""
+
+    async def select(self, mailbox: str) -> MagicMock:
+        self.selected = mailbox
+        await asyncio.sleep(0)
+        return MagicMock(result="OK")
+
+    async def search(self, criteria: str, charset: None = None) -> MagicMock:
+        await asyncio.sleep(0)
+        return MagicMock(result="OK", lines=[b"1"])
+
+    async def fetch(self, seq_set: str, items: str) -> MagicMock:
+        await asyncio.sleep(0)
+        uid = "101" if self.selected == '"INBOX"' else "202"
+        return MagicMock(lines=[f"{seq_set} FETCH (UID {uid})".encode()])
+
+
+@pytest.mark.asyncio
+async def test_a_search_keeps_its_mailbox_while_another_runs(accessor):
+    accessor._imap = OneSelection()
+    got = await asyncio.gather(
+        list_message_uids(accessor, "INBOX"),
+        list_message_uids(accessor, "Archive"),
+    )
+    assert got == [["101"], ["202"]]
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Codec, DATE } from '../hierarchy/codec.ts'
-import { makeDetectScope, ROOT, Scope, Slot } from '../hierarchy/scope.ts'
+import { makeDetectScope, Scope, Slot } from '../hierarchy/scope.ts'
 import { ContentType } from '../../types.ts'
 
 export const GMAIL_JSON = new Codec({ suffix: '.gmail.json' })
@@ -21,9 +21,9 @@ export const GMAIL_JSON = new Codec({ suffix: '.gmail.json' })
 const LABEL = [new Slot('label')] as const
 const DAY = [...LABEL, new Slot('day', DATE)] as const
 
-// One description of the tree: readdir, stat, read and the search push-down
-// all classify through it, so the file surface and the command surface
-// cannot disagree about what a path means. The message scope is declared
+// One description of the tree: readdir, stat, read and search all classify
+// through it, so the file surface and the command surface cannot disagree
+// about what a path means. The message scope is declared
 // before the attachment dir because only the suffix separates the two at
 // that depth.
 export const SCOPES: readonly Scope[] = [
@@ -47,9 +47,3 @@ export const SCOPES: readonly Scope[] = [
 ]
 
 export const detectScope = makeDetectScope(SCOPES)
-
-// Kinds the Gmail search push-down may answer for: the whole account or one
-// label. A day is absent because its query has no upper bound, so it would
-// report the later days' messages too; a message file or an attachment
-// names one node, which a query over the account cannot stand in for.
-export const NATIVE_KINDS: ReadonlySet<string> = new Set([ROOT, 'label'])

@@ -149,7 +149,7 @@ Every standard MIRAGE shell command works on the mounted Discord tree:
 | `ls`            | List guilds, channels, members, dates, attachments               |
 | `cat`           | Read `chat.jsonl`, member `.json`, or download an attachment     |
 | `head` / `tail` | Smart: uses messages API for file scope                          |
-| `grep` / `rg`   | Smart: uses search API for channel/guild scope (with fallback)   |
+| `grep` / `rg`   | Pattern search (file or directory level)                         |
 | `jq`            | Query JSON; runs once per line of a JSONL file (`-s` for all)   |
 | `wc`            | Line/word/byte counts                                            |
 | `stat`          | File metadata (name, size, type, ID via `extra`)                 |
@@ -215,7 +215,7 @@ With a bound configured, channel listings cover the selected period rather
 than the default recent window. Day directories use UTC. Messages are selected
 by creation time, and attachments follow their parent messages. Direct paths,
 `stat`, date globs, and `grep`/`rg` cannot escape the scope. Scoped searches scan
-the filtered files instead of using unrestricted provider search. User/member
+the filtered files. User/member
 and channel/server metadata remain visible as context.
 
 These settings apply to the VFS, not to separately installed account CLIs.

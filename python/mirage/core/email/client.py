@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
@@ -151,6 +153,26 @@ async def select_folder(imap: IMAPClient, folder: str) -> None:
         raise FileNotFoundError(f"no such mailbox {folder!r}")
 
 
+@asynccontextmanager
+async def lock_mailbox(
+    accessor: EmailAccessor, folder: str
+) -> AsyncIterator[IMAPClient]:
+    """The connected client with ``folder`` selected, held for the block.
+
+    The connection has one selected mailbox, so a task that selected one
+    keeps it until its last command; another waits instead of switching
+    the mailbox under it.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox to select.
+    """
+    async with accessor.mailbox_lock:
+        imap = await accessor.get_imap()
+        await select_folder(imap, folder)
+        yield imap
+
+
 async def list_folders(accessor: EmailAccessor) -> list[str]:
     return [name for name, _ in await list_folder_entries(accessor)]
 
@@ -161,36 +183,35 @@ async def list_message_uids(
     search_criteria: str = "ALL",
     max_results: int | None = None,
 ) -> list[str]:
-    imap = await accessor.get_imap()
-    await select_folder(imap, folder)
-    response = await imap.search(search_criteria, charset=None)
-    if response.result != "OK":
-        # A refused SEARCH must not read as "matched nothing": that hides
-        # criteria the server cannot answer behind an empty result.
-        raise ValueError(f"IMAP rejected the search: {search_criteria}")
-    if not response.lines:
-        return []
-    seq_nums = bytes(response.lines[0]).decode().split()
-    if not seq_nums:
-        return []
-    if max_results is not None:
-        seq_nums = seq_nums[-max_results:]
-    uids: list[str] = []
-    batch_size = 50
-    for i in range(0, len(seq_nums), batch_size):
-        batch = seq_nums[i : i + batch_size]
-        seq_set = ",".join(batch)
-        uid_response = await imap.fetch(seq_set, "(UID)")
-        for line in _text_lines(uid_response):
-            if "UID" in line:
-                try:
-                    uid_idx = line.index("UID") + 4
-                    rest = line[uid_idx:].strip()
-                    uid_val = rest.split(")")[0].split()[0]
-                    uids.append(uid_val)
-                except (ValueError, IndexError):
-                    # tolerant IMAP parse: skip lines that do not match
-                    pass
+    async with lock_mailbox(accessor, folder) as imap:
+        response = await imap.search(search_criteria, charset=None)
+        if response.result != "OK":
+            # A refused SEARCH must not read as "matched nothing": that
+            # hides criteria the server cannot answer behind an empty result.
+            raise ValueError(f"IMAP rejected the search: {search_criteria}")
+        if not response.lines:
+            return []
+        seq_nums = bytes(response.lines[0]).decode().split()
+        if not seq_nums:
+            return []
+        if max_results is not None:
+            seq_nums = seq_nums[-max_results:]
+        uids: list[str] = []
+        batch_size = 50
+        for i in range(0, len(seq_nums), batch_size):
+            batch = seq_nums[i : i + batch_size]
+            seq_set = ",".join(batch)
+            uid_response = await imap.fetch(seq_set, "(UID)")
+            for line in _text_lines(uid_response):
+                if "UID" in line:
+                    try:
+                        uid_idx = line.index("UID") + 4
+                        rest = line[uid_idx:].strip()
+                        uid_val = rest.split(")")[0].split()[0]
+                        uids.append(uid_val)
+                    except (ValueError, IndexError):
+                        # tolerant IMAP parse: skip lines that do not match
+                        pass
     return uids
 
 
@@ -199,9 +220,8 @@ async def fetch_raw_message(
     folder: str,
     uid: str,
 ) -> bytes:
-    imap = await accessor.get_imap()
-    await select_folder(imap, folder)
-    response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
+    async with lock_mailbox(accessor, folder) as imap:
+        response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     return _extract_body(response)
 
 
@@ -210,11 +230,11 @@ async def fetch_message(
     folder: str,
     uid: str,
 ) -> dict[str, Any]:
-    imap = await accessor.get_imap()
-    await select_folder(imap, folder)
-    # BODY.PEEK[] instead of RFC822: reading a rendered file must not flip
-    # \Seen on the mailbox, matching the imapflow client in the TS backend.
-    response = await imap.uid("fetch", uid, FETCH_ITEMS)
+    async with lock_mailbox(accessor, folder) as imap:
+        # BODY.PEEK[] instead of RFC822: reading a rendered file must not
+        # flip \Seen on the mailbox, matching the imapflow client in the TS
+        # backend.
+        response = await imap.uid("fetch", uid, FETCH_ITEMS)
     raw_bytes = _extract_body(response)
     flags = _extract_flags(response)
     msg_dict = parse_rfc822(raw_bytes)
@@ -228,22 +248,35 @@ async def fetch_headers(
     accessor: EmailAccessor,
     folder: str,
     uids: list[str],
+    header_only: bool = False,
 ) -> list[dict[str, Any]]:
+    """Fetch messages by uid, parsed.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox holding them.
+        uids (list[str]): the messages.
+        header_only (bool): fetch the header block alone, which names a
+            message's file (Subject, Date, INTERNALDATE for a message
+            without one) without its body.
+    """
     if not uids:
         return []
-    imap = await accessor.get_imap()
-    await select_folder(imap, folder)
+    items = (
+        "(UID INTERNALDATE BODY.PEEK[HEADER])" if header_only else FETCH_ITEMS
+    )
     results: list[dict[str, Any]] = []
     batch_size = 25
-    for i in range(0, len(uids), batch_size):
-        batch = uids[i : i + batch_size]
-        uid_set = ",".join(batch)
-        # Full BODY.PEEK[] rather than BODY[HEADER]: attachment names live
-        # in the MIME structure, and listings must surface attachment dirs
-        # without flipping \Seen (the gmail backend fetches full messages
-        # on readdir the same way).
-        response = await imap.uid("fetch", uid_set, FETCH_ITEMS)
-        results.extend(_parse_multi_fetch(response, batch))
+    async with lock_mailbox(accessor, folder) as imap:
+        for i in range(0, len(uids), batch_size):
+            batch = uids[i : i + batch_size]
+            uid_set = ",".join(batch)
+            # Full BODY.PEEK[] rather than BODY[HEADER]: attachment names
+            # live in the MIME structure, and listings must surface
+            # attachment dirs without flipping \Seen (the gmail backend
+            # fetches full messages on readdir the same way).
+            response = await imap.uid("fetch", uid_set, items)
+            results.extend(_parse_multi_fetch(response, batch))
     return results
 
 
@@ -253,9 +286,8 @@ async def fetch_attachment(
     uid: str,
     filename: str,
 ) -> bytes | None:
-    imap = await accessor.get_imap()
-    await select_folder(imap, folder)
-    response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
+    async with lock_mailbox(accessor, folder) as imap:
+        response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     raw_bytes = _extract_body(response)
     attachments = parse_with_payloads(raw_bytes)
     for att in attachments:

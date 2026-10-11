@@ -42,6 +42,11 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { read as githubRead } from '../../core/github/read.ts'
 import { stat as githubStat } from '../../core/github/stat.ts'
+import {
+  beforeFullScan as githubBeforeFullScan,
+  filesContaining as githubFilesContaining,
+} from '../../core/github/search.ts'
+import type { ScanReason } from '../types.ts'
 import { SCOPE_ERROR } from '../../core/github/constants.ts'
 
 export interface GitHubVFSState {
@@ -138,6 +143,25 @@ export class GitHubVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return githubStat(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+    index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    if (!opts.wholeWord) return Promise.resolve(null)
+    return githubFilesContaining(this.accessor, text, under, index)
+  }
+
+  override beforeFullScan(
+    _command: string,
+    under: PathSpec[],
+    reason: ScanReason,
+    index?: IndexCacheStore,
+  ): Promise<void> {
+    return githubBeforeFullScan(this.accessor, under, reason, index)
   }
 
   override deltaHook(): DeltaHook {

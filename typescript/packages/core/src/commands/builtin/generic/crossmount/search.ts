@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BINARY_EXTENSIONS } from '../../constants.ts'
 import { combinedExit } from './fanout/exit.ts'
 import { joinRuns } from './fanout/fanout.ts'
 import { ownedScopes } from './scopes.ts'
@@ -33,7 +32,7 @@ import type { FlagSet } from '../../grep_binary.ts'
 import { patternArg, compilePattern } from '../../grep_pattern.ts'
 import { dirAdmitted, fileAdmitted } from '../../grep_select.ts'
 import { isStdin, resolveSource } from '../../utils/stream.ts'
-import { getExtension } from '../../../../utils/filetype.ts'
+import { BINARY_EXTENSIONS, getExtension } from '../../../../utils/filetype.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'

@@ -26,6 +26,12 @@ class EmailConfig(BaseModel):
     password: SecretStr
     use_ssl: bool = True
     max_messages: int = 200
+    # grep and rg ask IMAP SEARCH TEXT which messages may match and read
+    # only those. Off by default: the server searches headers and body,
+    # not the mounted JSON's keys, uids or flags (``record_queries``
+    # refuses words that can sit there, but a custom keyword cannot be
+    # told apart from a word).
+    content_search: bool = False
     # Upstream himalaya's message.send.save-copy, whose default is true
     # since pimalaya/himalaya#536. sent_folder is its folder.alias.sent:
     # unset means ask the server for its \Sent mailbox.

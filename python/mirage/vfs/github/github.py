@@ -20,6 +20,8 @@ from mirage.core.github.config import GitHubConfig
 from mirage.core.github.constants import COMMIT_SHA, SCOPE_ERROR
 from mirage.core.github.read import read as _read
 from mirage.core.github.readdir import readdir as _readdir
+from mirage.core.github.search import before_full_scan as _before_full_scan
+from mirage.core.github.search import files_containing as _files_containing
 from mirage.core.github.stat import stat as _stat
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.core.github.watch import build_delta_hook
@@ -27,6 +29,7 @@ from mirage.types import FileStat, ListingVersion, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.github.prompt import PROMPT
+from mirage.vfs.types import ScanReason
 from mirage.watch.base import DeltaHook
 
 
@@ -164,6 +167,28 @@ class GitHubVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec] | None:
+        if not whole_word:
+            return None
+        return await _files_containing(self.accessor, index, text, under)
+
+    async def before_full_scan(
+        self,
+        command: str,
+        under: list[PathSpec],
+        reason: ScanReason,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await _before_full_scan(self.accessor, index, under, reason)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

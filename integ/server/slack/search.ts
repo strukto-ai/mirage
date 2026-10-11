@@ -19,7 +19,7 @@ import type { ParsedQuery } from './query.ts'
 import { channels, users } from './store.ts'
 import type { MessageRow } from './store.ts'
 import type { ChannelRow, FileRow, UserRow } from './wire.ts'
-import { argsOf, fail, requestToken } from './wire.ts'
+import { argsOf, fail, reactionsOf, requestToken } from './wire.ts'
 
 interface Scope {
   parsed: ParsedQuery
@@ -29,6 +29,7 @@ interface Scope {
   channelMissing: boolean
   count: number
   display: (id: string) => string
+  isPrivate: (id: string) => boolean
   userName: Map<string, string>
   realName: Map<string, string>
 }
@@ -93,6 +94,10 @@ async function scopeOf(ctx: Ctx<C>): Promise<Scope> {
       (parsed.channelName !== undefined || parsed.dmName !== undefined) && channelId === undefined,
     count: Math.min(100, Math.max(1, Number.parseInt(raw ?? '20', 10) || 20)),
     display,
+    isPrivate: (id) => {
+      const ch = byId.get(id)
+      return ch === undefined || ch.isPrivate || ch.kind !== 'channel'
+    },
     userName,
     realName: new Map(people.map((u) => [u.id, u.realName || u.name])),
   }
@@ -131,6 +136,8 @@ export async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
         m.text !== '' &&
         m.subtype !== 'channel_join' &&
         m.subtype !== 'channel_leave' &&
+        (s.parsed.reaction === undefined ||
+          reactionsOf(m.reactionsJson).some((r) => r.name === s.parsed.reaction)) &&
         withinDates(Number(m.ts), s.parsed),
     )
     .map((m) => ({
@@ -165,10 +172,14 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
     ],
   }
   if (s.channelId !== undefined) where.channelId = s.channelId
-  // search.files has no author field in this model, so a from: query can never
-  // match a file; return an empty set rather than silently ignoring it.
+  // search.files has no author or reaction field in this model, so a from:
+  // or has:: query can never match a file; return an empty set rather than
+  // silently ignoring it.
   const rows: FileRow[] =
-    s.channelMissing || s.parsed.fromName !== undefined || s.parsed.fromId !== undefined
+    s.channelMissing ||
+    s.parsed.fromName !== undefined ||
+    s.parsed.fromId !== undefined ||
+    s.parsed.reaction !== undefined
       ? []
       : await ctx.db.slackFile.findMany({ where, orderBy: { id: 'asc' } })
   const matches = rows
@@ -181,6 +192,12 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
       filetype: f.filetype,
       size: f.size,
       timestamp: f.timestamp,
+      channels: [f.channelId],
+      shares: {
+        [s.isPrivate(f.channelId) ? 'private' : 'public']: {
+          [f.channelId]: [{ ts: f.messageTs, channel_name: s.display(f.channelId) }],
+        },
+      },
     }))
   return {
     status: 200,

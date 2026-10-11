@@ -12,16 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
+import asyncio
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.formatters import channel_dirname, format_grep_results
-from mirage.core.slack.scope import SearchTarget
-from mirage.core.slack.search import search_messages
-from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
+from mirage.core.slack.search import (
+    MAX_PAGES,
+    _search_facts,
+    search_files,
+    search_messages,
+)
+from tests.core.slack.conftest import SEARCHER, FakeSlack
 
 
 @pytest.mark.asyncio
@@ -52,59 +57,155 @@ async def test_search_messages_forwards_explicit_count_and_page():
     assert params["page"] == 3
 
 
-def test_format_grep_results_path_uses_chat_jsonl():
-    raw_payload = {
-        "messages": {
-            "matches": [
-                {
-                    "channel": {"id": "C001", "name": "general"},
-                    "user": "U1",
-                    "ts": "1712707200.0",
-                    "text": "hello",
-                },
+@pytest.mark.asyncio
+async def test_search_files_calls_correct_endpoint():
+    config = SlackConfig(token="xoxb", search_token="xoxp")
+    with patch(
+        "mirage.core.slack.search.slack_get",
+        new_callable=AsyncMock,
+        return_value={"ok": True, "files": {"matches": []}},
+    ) as mock:
+        await search_files(config, "report")
+    args, kwargs = mock.call_args
+    assert args[1] == "search.files"
+    assert kwargs["params"]["query"] == "report"
+    assert "token" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, reads",
+    [
+        (
+            "grep -rlw deploy /slack/channels",
+            ["C1/2025-11-03", "C1/2025-11-06", "C2/2025-11-04"],
+        ),
+        ("grep -rlw rocket /slack/channels/general__C1", ["C1/2025-11-04"]),
+        ("grep -rlw Launch /slack/channels/general__C1", ["C1/2025-11-05"]),
+        (
+            "grep -rlw Launch /slack/channels",
+            ["C1/2025-11-05", "C2/2025-11-07"],
+        ),
+        (
+            "grep -rlw deploy /slack",
+            [
+                "C1/2025-11-03",
+                "C1/2025-11-06",
+                "C2/2025-11-04",
+                "D1/2025-11-03",
             ],
-        },
-    }
-    raw = json.dumps(raw_payload).encode()
-    scope = SearchTarget(
-        container="channels",
-        channel_name="general",
-        channel_id="C001",
-    )
-    lines = format_grep_results(raw, scope, "/slack")
-    assert len(lines) == 1
-    line = lines[0]
-    assert line.startswith(
-        "/slack/channels/general__C001/2024-04-10/chat.jsonl:"
-    ), line
+        ),
+    ],
+)
+async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
+    # A file hit names every day a message shares it, not its upload.
+    full = await slack(line, content_search=False)
+    out, code, read, _ = await slack(line)
+    assert (out, code) == full[:2]
+    assert read == reads
 
 
-def test_a_long_channel_name_reports_the_path_readdir_emits():
-    """A grep hit must name the directory the listing actually contains.
+@pytest.mark.asyncio
+async def test_a_day_is_read_rather_than_searched(slack):
+    line = "grep -rlw deploy /slack/channels/general__C1/2025-11-06"
+    full = await slack(line, content_search=False)
+    fake = FakeSlack()
+    out, code, read, searches = await slack(line, fake)
+    assert (out, code, read) == full[:3]
+    assert (searches, fake.user_lists) == ([], 0)
 
-    The formatter composed ``<name>__<id>`` itself, so a CJK channel name
-    rendered a 613-byte segment where readdir emits a 253-byte one: the
-    reported path could not be opened.
-    """
-    name = "会議" * 100
-    raw = json.dumps(
-        {
-            "messages": {
-                "matches": [
-                    {
-                        "channel": {"id": "C001", "name": name},
-                        "ts": "1712707200.0",
-                        "text": "hello",
-                    }
-                ],
-            },
-        }
-    ).encode()
-    scope = SearchTarget(
-        container="channels", channel_name=name, channel_id="C001"
-    )
-    line = format_grep_results(raw, scope, "/slack")[0]
-    dirname = line.split("/slack/channels/")[1].split("/")[0]
 
-    assert dirname == channel_dirname({"id": "C001", "name": name})
-    assert byte_length(dirname) <= NAME_MAX_BYTES
+@pytest.mark.asyncio
+async def test_the_patterns_of_one_grep_share_one_user_listing(slack):
+    fake = FakeSlack()
+    line = "grep -rlw -e deploy -e lunch /slack/channels"
+    await slack(line, fake, search_token=SEARCHER)
+    assert (fake.user_lists, fake.searcher_lists) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_search_stops_its_user_listing(monkeypatch):
+    # The first pattern fetches in its own task, so stopping it stops the
+    # listing; a pattern waiting on it reads every day instead.
+    listing = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def hang(config, method, params=None, session=None):
+        listing.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr("mirage.core.slack.paginate.slack_get", hang)
+    accessor = SlackAccessor(SlackConfig(token="xoxp-test"))
+    first = asyncio.create_task(_search_facts(accessor))
+    await listing.wait()
+    second = asyncio.create_task(_search_facts(accessor))
+    await asyncio.sleep(0)
+    first.cancel()
+    assert await second is None
+    await asyncio.wait([first])
+    assert first.cancelled()
+    assert stopped.is_set()
+    assert accessor.search_facts is None
+
+
+@pytest.mark.asyncio
+async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
+    *_, searches = await slack("grep -rlw rocket /slack/channels/general__C1")
+    assert searches == [
+        "in:#general rocket",
+        "in:#general ocket",
+        "in:#general rocket",
+        "in:#general ocket",
+        "in:#general has::rocket:",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, fake",
+    [
+        ("grep -rlw text /slack/channels", FakeSlack()),
+        ("grep -rlw Lima /slack/channels", FakeSlack()),
+        ("grep -rlw nothing /slack/channels", FakeSlack()),
+        ("grep -rlw deploy /slack/channels", FakeSlack(pages=MAX_PAGES + 1)),
+        ("grep -rlw acme /slack/channels", FakeSlack()),
+        ("grep -rlw Launch /slack/channels", FakeSlack(shares=False)),
+        (
+            "grep -rlw deploy /slack/channels",
+            FakeSlack(fails=RuntimeError("Slack API error: ratelimited")),
+        ),
+        (
+            "grep -rlw deploy /slack/channels",
+            FakeSlack(fails=aiohttp.ClientConnectionError("reset")),
+        ),
+        (
+            "grep -rlw deploy /slack/channels",
+            FakeSlack(fails=asyncio.TimeoutError()),
+        ),
+        ("grep -rlw deploy /slack/dms", FakeSlack()),
+    ],
+)
+async def test_every_day_is_read_when_search_cannot_answer(slack, line, fake):
+    full = await slack(line, content_search=False)
+    out, code, read, _ = await slack(line, fake)
+    assert (out, code, read) == full[:3]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -rlw deploy /slack/channels",
+        "rg -lw deploy /slack/channels/random__C2",
+    ],
+)
+async def test_a_channel_the_search_user_is_not_in_is_read(slack, line):
+    # random is private and the search token's user is not in it, so no
+    # search names its days; ruling them out would miss its deploy.
+    full = await slack(line, content_search=False)
+    hidden = FakeSlack(hidden=frozenset({"C2"}))
+    out, code, read, _ = await slack(line, hidden, search_token=SEARCHER)
+    assert (out, code, read) == full[:3]

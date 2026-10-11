@@ -101,6 +101,7 @@ const CONFIG: EmailConfig = {
   password: 'p',
   useSsl: false,
   maxMessages: 200,
+  contentSearch: false,
   saveCopy: true,
   sentFolder: null,
 }
