@@ -77,6 +77,19 @@
         "stdout": "",
         "stderr": "ls: cannot access '/db/all/doc-0[12]*': No such file or directory\n"
       }
+    },
+    {
+      "id": "lancedb_window_search_stays_in_the_listing",
+      "seq": 650406,
+      "targets": [
+        "lancedb-window"
+      ],
+      "command": "grep -rlw row /db/all/; grep -rLi ROW /db/all/; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/all/doc-000.md\n/db/all/doc-001.md\n/db/all/doc-002.md\n/db/all/doc-003.md\n/db/all/doc-004.md\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

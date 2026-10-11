@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "lancedb_search_folds_case_and_counts",
+      "seq": 650037,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -ri ORANGE /db/animals; grep -rc grey /db/animals/cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/big/1.md:# a big orange cat\n/db/animals/cat/big/1.md:name: a big orange cat\n/db/animals/cat/big/1.md:0\n/db/animals/cat/small/2.md:2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_search_declines_rendered_words",
+      "seq": 650038,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -rl name /db/animals; grep -rlw true /db/animals; echo rc=$?; rg -l ' grey' /db/animals",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/cat/big/1.md\n/db/animals/cat/small/2.md\n/db/animals/dog/big/3.md\n/db/animals/dog/small/4.md\nrc=1\n/db/animals/cat/small/2.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_search_scopes_a_group",
+      "seq": 650039,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep -rL big /db/animals/dog; rg -c small /db/animals/dog",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/animals/dog/small/4.md\n/db/animals/dog/small/4.md:3\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

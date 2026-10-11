@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "chroma_search_folds_case_and_lists_every_page",
+      "seq": 630057,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -rli BEARER /knowledge/; grep -rc bearer /knowledge/guides/; grep -rL bearer /knowledge/guides/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth.md\n/knowledge/guides/auth.md:1\n/knowledge/guides/quickstart.md:0\n/knowledge/guides/quickstart.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_search_finds_nothing_and_phrases",
+      "seq": 630058,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -rlw nowhere /knowledge/; echo rc=$?; rg -l 'calls per minute' /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/knowledge/guides/auth.md\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
