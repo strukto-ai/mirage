@@ -16,6 +16,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import {
   AbbrevModeError,
+  AmbiguousArgumentError,
   GitError,
   NoWorkspaceError,
   NotAWorkTreeError,
@@ -25,11 +26,11 @@ import {
 } from './errors.ts'
 import { parseFlags, refCommits, select } from './history.ts'
 import { uniqueAbbreviations } from './ref_list.ts'
-import { configBool, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { configLines, type ConfigLine } from './fs.ts'
 import { readFile, readOptional } from './io.ts'
-import { refsNamed, splitRevisions, resolveObject } from './revparse.ts'
+import { mergeBases, resolveCommit, refsNamed, splitRevisions, resolveObject } from './revparse.ts'
 import {
   checkOperands,
   checkSwitches,
@@ -220,8 +221,65 @@ export async function globalSources(
   return sources
 }
 
+async function mergeBaseIds(repo: Repo, revisions: readonly string[]): Promise<[string, string[]]> {
+  const commits = []
+  for (const revision of revisions) {
+    try {
+      commits.push(await commitFacts(repo, await resolveCommit(repo, revision)))
+    } catch (err) {
+      if (!(err instanceof AmbiguousArgumentError)) throw err
+      throw new GitError(`Not a valid object name ${revision}`)
+    }
+  }
+  const [one, other, ...rest] = commits
+  if (one === undefined || other === undefined) throw new GitError('expected two commits')
+  return [one.oid, (await mergeBases(repo, one, other, rest)).map((c) => c.oid)]
+}
+
+export async function mergeBase(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  try {
+    checkSwitches(inv, inv.texts)
+    const repo = await opened(fl, inv.view ?? {})
+    const ancestor = fl.asBool('is_ancestor')
+    const all = fl.asBool('all')
+    if (ancestor && all)
+      throw new GitError("options '--is-ancestor' and '--all' cannot be used together")
+    if (ancestor && inv.texts.length !== 2)
+      throw new GitError('--is-ancestor takes exactly two commits')
+    if (inv.texts.length < 2) throw new UsageError('', verbUsage(inv))
+    const [one, bases] = await mergeBaseIds(repo, inv.texts)
+    if (ancestor)
+      return [
+        null,
+        new IOResult({
+          exitCode: bases.includes(one) ? 0 : 1,
+        }),
+      ]
+    return [
+      ENC.encode((all ? bases : bases.slice(0, 1)).map((oid) => `${oid}\n`).join('')),
+      new IOResult({ exitCode: bases.length ? 0 : 1 }),
+    ]
+  } catch (err) {
+    if (err instanceof GitError) return fatal(err)
+    throw err
+  }
+}
+
 export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
+  if (inv.texts.length > 1)
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: ENC.encode(
+          fl.asBool('get') || fl.asBool('get_regexp')
+            ? 'error: git config value filters are not supported in Mirage\n'
+            : 'error: git config is read-only in Mirage; writes are not supported\n',
+        ),
+      }),
+    ]
   try {
     let sources: { source: string; data: Uint8Array }[]
     if (fl.asBool('global')) sources = await globalSources(inv, fl.asBool('list'))

@@ -15,7 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isFsError, isEnoent } from '../../../errors/fs.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { crc32, deflateRaw } from '../../../utils/compress.ts'
@@ -23,7 +23,9 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
 import { respellOne } from '../../../utils/path.ts'
-import type { MemberKind } from './archive/types.ts'
+import { readArchive, updateArchive } from './archive/zip_update.ts'
+import { ZipUpdateError } from './archive/errors.ts'
+import type { MemberKind, ZipArchive, ZipRecord } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 import { concat } from '../../../utils/bytes.ts'
 
@@ -43,14 +45,13 @@ function writeU32LE(buf: Uint8Array, offset: number, value: number): void {
 
 interface ZipItem {
   name: string
-  data: Uint8Array
+  size: number
   compressed: Uint8Array
   crc: number
   method: number
   // Unix mode bits in the high half of external_attr, which is where
   // Info-ZIP puts them and where a symlink entry is told from a file.
   externalAttr: number
-  localOffset: number
 }
 
 // One entry the plan decided to store, before its bytes are read.
@@ -77,67 +78,32 @@ interface ZipPlan {
 // A zero date has month 0 and day 0, which is no date at all.
 const DOS_EPOCH_DATE = (1 << 5) | 1
 
-function buildZip(items: ZipItem[]): Uint8Array {
-  const parts: Uint8Array[] = []
-  let offset = 0
-  for (const item of items) {
-    item.localOffset = offset
-    const nameBytes = ENC.encode(item.name)
-    const header = new Uint8Array(30 + nameBytes.byteLength)
+function buildZip(items: ZipItem[], original: ZipArchive | null): Uint8Array {
+  const records: ZipRecord[] = items.map((item) => {
+    const name = ENC.encode(item.name)
+    const header = new Uint8Array(30 + name.length)
     writeU32LE(header, 0, 0x04034b50)
     writeU16LE(header, 4, 20)
-    writeU16LE(header, 6, 0)
+    writeU16LE(header, 6, 0x800)
     writeU16LE(header, 8, item.method)
-    writeU16LE(header, 10, 0)
     writeU16LE(header, 12, DOS_EPOCH_DATE)
     writeU32LE(header, 14, item.crc)
-    writeU32LE(header, 18, item.compressed.byteLength)
-    writeU32LE(header, 22, item.data.byteLength)
-    writeU16LE(header, 26, nameBytes.byteLength)
-    writeU16LE(header, 28, 0)
-    header.set(nameBytes, 30)
-    parts.push(header)
-    parts.push(item.compressed)
-    offset += header.byteLength + item.compressed.byteLength
-  }
-  const centralStart = offset
-  for (const item of items) {
-    const nameBytes = ENC.encode(item.name)
-    const central = new Uint8Array(46 + nameBytes.byteLength)
+    writeU32LE(header, 18, item.compressed.length)
+    writeU32LE(header, 22, item.size)
+    writeU16LE(header, 26, name.length)
+    header.set(name, 30)
+
+    const central = new Uint8Array(46 + name.length)
     writeU32LE(central, 0, 0x02014b50)
     // Unix in the high byte, so the mode bits below are read as such.
     writeU16LE(central, 4, (3 << 8) | 20)
-    writeU16LE(central, 6, 20)
-    writeU16LE(central, 8, 0)
-    writeU16LE(central, 10, item.method)
-    writeU16LE(central, 12, 0)
-    writeU16LE(central, 14, DOS_EPOCH_DATE)
-    writeU32LE(central, 16, item.crc)
-    writeU32LE(central, 20, item.compressed.byteLength)
-    writeU32LE(central, 24, item.data.byteLength)
-    writeU16LE(central, 28, nameBytes.byteLength)
-    writeU16LE(central, 30, 0)
-    writeU16LE(central, 32, 0)
-    writeU16LE(central, 34, 0)
-    writeU16LE(central, 36, 0)
+    // Version through extra-field length have the same layout in both headers.
+    central.set(header.subarray(4, 30), 6)
     writeU32LE(central, 38, item.externalAttr)
-    writeU32LE(central, 42, item.localOffset)
-    central.set(nameBytes, 46)
-    parts.push(central)
-    offset += central.byteLength
-  }
-  const centralSize = offset - centralStart
-  const end = new Uint8Array(22)
-  writeU32LE(end, 0, 0x06054b50)
-  writeU16LE(end, 4, 0)
-  writeU16LE(end, 6, 0)
-  writeU16LE(end, 8, items.length)
-  writeU16LE(end, 10, items.length)
-  writeU32LE(end, 12, centralSize)
-  writeU32LE(end, 16, centralStart)
-  writeU16LE(end, 20, 0)
-  parts.push(end)
-  return concat(parts)
+    central.set(name, 46)
+    return { name: item.name, local: concat([header, item.compressed]), central }
+  })
+  return updateArchive(original, records)
 }
 
 // Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
@@ -338,6 +304,16 @@ function warningText(warnings: readonly string[], quiet: boolean): string {
   return warnings.map((line) => WARNING_PREFIX + line + '\n').join('')
 }
 
+function invalidArchive(path: PathSpec): CommandFnResult {
+  return [
+    null,
+    new IOResult({
+      exitCode: 3,
+      stderr: ENC.encode(`\nzip error: Zip file structure invalid (${path.rawPath})\n`),
+    }),
+  ]
+}
+
 export async function zipGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -355,6 +331,14 @@ export async function zipGeneric(
   }
   const archivePath = paths[0]
   if (archivePath === undefined) return [null, new IOResult()]
+  let original: ZipArchive | null = null
+  try {
+    original = readArchive(await materialize(deps.stream(archivePath)))
+  } catch (err) {
+    if (err instanceof ZipUpdateError) return invalidArchive(archivePath)
+    // Only absence means create; a refused or broken read must not overwrite.
+    if (!isEnoent(err)) throw err
+  }
   const quiet = parsed.quiet
   const plan = await planZip(paths.slice(1), archivePath, deps, opts, parsed)
   if (plan.repeated !== '') {
@@ -377,30 +361,37 @@ export async function zipGeneric(
   // `could not open for reading` beside the adding line, and closes with
   // a read/skipped summary that needs every member's size and exit 18;
   // none of that is reproduced.
-  for (const member of plan.members) {
-    let data = new Uint8Array(0)
+  const oldOrder = new Map(original?.records.map((entry, i) => [entry.name, i]))
+  const members = [...plan.members].sort(
+    (a, b) => (oldOrder.get(a.name) ?? oldOrder.size) - (oldOrder.get(b.name) ?? oldOrder.size),
+  )
+  for (const member of members) {
+    let data: Uint8Array = new Uint8Array(0)
     if (member.kind === 'link') {
       data = ENC.encode(member.target)
     } else if (member.path !== null) {
-      const raw = await materialize(deps.stream(member.path))
-      data = new Uint8Array(raw.byteLength)
-      data.set(raw)
+      data = await materialize(deps.stream(member.path))
     }
     const stored = member.kind === 'dir'
     const compressed = stored ? data : await deflateRaw(data)
     items.push({
       name: member.name,
-      data,
+      size: data.length,
       compressed,
       crc: crc32(data),
       method: stored ? 0 : 8,
       externalAttr:
         member.kind === 'dir' ? DIR_MODE : member.kind === 'link' ? LINK_MODE : FILE_MODE,
-      localOffset: 0,
     })
-    outputLines.push(`  adding: ${member.name}`)
+    outputLines.push(`${oldOrder.has(member.name) ? 'updating:' : '  adding:'} ${member.name}`)
   }
-  const archive = buildZip(items)
+  let archive: Uint8Array
+  try {
+    archive = buildZip(items, original)
+  } catch (err) {
+    if (!(err instanceof ZipUpdateError)) throw err
+    return invalidArchive(archivePath)
+  }
   try {
     await deps.write(archivePath, archive)
   } catch (err) {

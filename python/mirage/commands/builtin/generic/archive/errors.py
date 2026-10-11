@@ -1,0 +1,2 @@
+class ZipUpdateError(ValueError):
+    pass

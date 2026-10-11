@@ -34,6 +34,7 @@ from mirage.commands.cli.builtin.git.hash_object import (
 from mirage.commands.cli.builtin.git.init import init
 from mirage.commands.cli.builtin.git.inspect import (
     config,
+    merge_base,
     remote,
     rev_list,
     rev_parse,
@@ -1198,6 +1199,27 @@ GIT = CLI(
                         "match a regular expression",
                     ),
                     Argument("name", nargs="?"),
+                    Argument("value", nargs="?"),
+                    Argument("value-pattern", nargs="?"),
+                ),
+            ),
+            CommandSpec(
+                name="merge-base",
+                description="Find best common ancestors of commits",
+                arguments=(
+                    Argument(
+                        "-a",
+                        "--all",
+                        action="store_true",
+                        help="Show all best common ancestors",
+                    ),
+                    Argument(
+                        "--is-ancestor",
+                        action="store_true",
+                        help="Test whether the first commit is an ancestor "
+                        "of the second",
+                    ),
+                    REVISION,
                 ),
             ),
             CommandSpec(
@@ -1536,6 +1558,7 @@ GIT = CLI(
         "version": CLIHandler(fn=verb(version)),
         "remote": CLIHandler(fn=verb(remote)),
         "config": CLIHandler(fn=verb(config)),
+        "merge-base": CLIHandler(fn=verb(merge_base)),
         "show-ref": CLIHandler(fn=verb(show_ref)),
         "symbolic-ref": CLIHandler(
             fn=verb(symbolic_ref, symbolic_ref_read_only), write=True

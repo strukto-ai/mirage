@@ -58,24 +58,31 @@ async function run(line: string): Promise<[number, string, string]> {
   return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
 }
 
+async function mountRepo(path: string): Promise<Workspace> {
+  const mounted = new Workspace(
+    { '/repo': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: parser },
+  )
+  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
+    await mounted.dispatch(op, path.virtual, args, kwargs),
+    new IOResult(),
+  ]
+  for (const rel of walk(path)) {
+    const target = `/repo/${rel}`
+    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
+    await mounted.dispatch('write', target, [new Uint8Array(readFileSync(join(path, rel)))])
+  }
+  mounted.registerCli('git', GIT)
+  return mounted
+}
+
 beforeAll(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'mirage-git-'))
   repoPath = join(tmp, 'repo')
   execFileSync('bash', [BUILDER, repoPath], { stdio: 'ignore' })
 
-  const ram = new RAMVFS()
   parser = await createShellParser({ engineWasm, grammarWasm })
-  ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
-  for (const rel of walk(repoPath)) {
-    const target = `/repo/${rel}`
-    await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
-    await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repoPath, rel)))])
-  }
-  ws.registerCli('git', GIT)
+  ws = await mountRepo(repoPath)
 })
 
 afterAll(() => {
@@ -146,4 +153,32 @@ it('prints the worktree root in line order among revisions', async () => {
   const head = DEC.decode((await ws.shell('git -C /repo rev-parse HEAD')).stdout)
   const result = await ws.shell('git -C /repo rev-parse HEAD --show-toplevel HEAD')
   expect(DEC.decode(result.stdout)).toBe(`${head}/repo\n${head}`)
+})
+
+it.each([
+  'user.email changed@example.com',
+  "user.name ''",
+  '--global user.email changed@example.com',
+  'user.name changed old',
+])('refuses config writes explicitly: %s', async (form) => {
+  const before = await ws.dispatch('read', '/repo/.git/config')
+  const [code, out, err] = await run(`config ${form}`)
+  expect(code).toBe(1)
+  expect(out).toBe('')
+  expect(err).toContain('git config is read-only in Mirage')
+  expect(await ws.dispatch('read', '/repo/.git/config')).toEqual(before)
+})
+
+it('matches native merge-base on criss-cross, unrelated, multi-tip and clock-skewed graphs', async () => {
+  const graphPath = join(tmp, 'graphs')
+  const builder = BUILDER.replace('gaps.sh', 'merge-base.sh')
+  execFileSync('bash', [builder, graphPath], { env: NATIVE_ENV, stdio: 'ignore' })
+  const graph = await mountRepo(graphPath)
+  const forms = JSON.parse(readFileSync(builder.replace('.sh', '.json'), 'utf8')) as string[]
+  for (const form of forms) {
+    const result = await graph.shell(`git -C /repo ${form}`)
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)], form).toEqual(
+      native(graphPath, form),
+    )
+  }
 })

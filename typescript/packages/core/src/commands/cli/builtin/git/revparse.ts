@@ -54,6 +54,7 @@ const NEGATION = '^'
 const LEFT = 1
 const RIGHT = 2
 const STALE = 4
+const RESULT = 8
 
 /**
  * Split a revision into its base and the operators applied to it.
@@ -495,25 +496,32 @@ export async function rangeCommits(
  * @param repo repository holding the commits
  * @param one one side
  * @param other the other side
+ * @param others further tips of the hypothetical merged side
  */
 export async function mergeBases(
   repo: Repo,
   one: CommitFacts,
   other: CommitFacts,
+  others: readonly CommitFacts[] = [],
 ): Promise<CommitFacts[]> {
   const paint = new Map<string, number>([[one.oid, LEFT]])
-  paint.set(other.oid, (paint.get(other.oid) ?? 0) | RIGHT)
-  const queue = one.oid === other.oid ? [one] : [one, other]
+  const queue = [one]
+  for (const commit of [other, ...others]) {
+    if (!paint.has(commit.oid)) queue.push(commit)
+    paint.set(commit.oid, (paint.get(commit.oid) ?? 0) | RIGHT)
+  }
   const bases: CommitFacts[] = []
   while (queue.some((commit) => !((paint.get(commit.oid) ?? 0) & STALE))) {
     queue.sort((a, b) => b.committerTime - a.committerTime)
     const commit = queue.shift()
     if (commit === undefined) break
-    let flags = paint.get(commit.oid) ?? 0
+    let flags = (paint.get(commit.oid) ?? 0) & (LEFT | RIGHT | STALE)
     if (flags === (LEFT | RIGHT)) {
-      bases.push(commit)
+      if (!((paint.get(commit.oid) ?? 0) & RESULT)) {
+        bases.push(commit)
+        paint.set(commit.oid, (paint.get(commit.oid) ?? 0) | RESULT)
+      }
       flags |= STALE
-      paint.set(commit.oid, flags)
     }
     for (const parent of commit.parents) {
       const had = paint.get(parent) ?? 0
@@ -522,7 +530,8 @@ export async function mergeBases(
       queue.push(await commitFacts(repo, parent))
     }
   }
-  return bases
+  // Clock skew can discover an older common ancestor before its child.
+  return bases.filter((commit) => !((paint.get(commit.oid) ?? 0) & STALE))
 }
 
 /**

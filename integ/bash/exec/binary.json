@@ -1,0 +1,58 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "exec_path_refuses_elf",
+      "seq": 10000006,
+      "command": "printf '\\177ELF\\002\\001\\001\\000binarydata' > /data/issue1556-elf; /data/issue1556-elf; echo rc=$?; echo alive",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=126\nalive\n",
+        "stderr": "/data/issue1556-elf: cannot execute binary file: Exec format error\n"
+      }
+    },
+    {
+      "id": "bash_refuses_binary_script",
+      "seq": 10000007,
+      "command": "bash /data/issue1556-elf",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "/data/issue1556-elf: /data/issue1556-elf: cannot execute binary file\n"
+      }
+    },
+    {
+      "id": "exec_path_refuses_non_elf_binary",
+      "seq": 10000008,
+      "command": "printf 'MZ\\000binarydata' > /data/issue1556-exe; command /data/issue1556-exe",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "/data/issue1556-exe: cannot execute binary file: Exec format error\n"
+      }
+    }
+  ]
+}

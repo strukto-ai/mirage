@@ -27,7 +27,8 @@ import { fsStrerror } from '../../../../errors/fs.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { handleBash } from './bash.ts'
-import { readScriptText, scriptError } from './script.ts'
+import { isBinary, readScriptBytes, scriptError } from './script.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 import type { ExecuteStringFn, Result } from '../types.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
 
@@ -114,15 +115,17 @@ export async function handleExecPath(
   jobTable?: JobTable,
 ): Promise<Result> {
   let session = context.session
-  let script: string
+  let data: Uint8Array
   try {
-    script = await readScriptText(dispatch, path, session.cwd)
+    data = await readScriptBytes(dispatch, path, session.cwd)
   } catch (exc) {
     const strerror = fsStrerror(exc)
     if (strerror === null) throw exc
     const code = (exc as { code?: string }).code
     return scriptError(path, strerror, code === 'ENOENT' ? 127 : 126)
   }
+  if (isBinary(data)) return scriptError(path, 'cannot execute binary file: Exec format error', 126)
+  const script = decodeText(data)
   const target = namespace.follow(resolvePath(path, session.cwd))
   const [vfs, spec] = registry.resolve(target)
   if (vfs instanceof BinViewVFS) {

@@ -67,6 +67,7 @@ def test_tree_shape():
         "version",
         "remote",
         "config",
+        "merge-base",
         "show-ref",
         "symbolic-ref",
         "shortlog",

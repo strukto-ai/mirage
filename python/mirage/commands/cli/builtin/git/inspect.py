@@ -16,6 +16,7 @@ from mirage.commands.cli.builtin.git.constants import GIT_DIR
 from mirage.commands.cli.builtin.git.discover import is_bare
 from mirage.commands.cli.builtin.git.errors import (
     AbbrevModeError,
+    AmbiguousArgumentError,
     GitError,
     NotAWorkTreeError,
     NoWorkspaceError,
@@ -36,7 +37,9 @@ from mirage.commands.cli.builtin.git.ref_list import unique_abbreviations
 from mirage.commands.cli.builtin.git.refs import load_refs, resolve_symbolic
 from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.revparse import (
+    merge_bases,
     refs_named,
+    resolve_commit,
     resolve_object,
     split_revisions,
 )
@@ -283,10 +286,61 @@ async def global_sources(
     return sources
 
 
+def _merge_base_ids(
+    repo: BaseRepo, revisions: tuple[str, ...]
+) -> tuple[bytes, list[bytes]]:
+    commits = []
+    for revision in revisions:
+        try:
+            commits.append(resolve_commit(repo, revision))
+        except AmbiguousArgumentError as exc:
+            raise GitError(f"Not a valid object name {revision}") from exc
+    return commits[0].id, [c.id for c in merge_bases(repo, *commits)]
+
+
+async def merge_base(
+    inv: CLIInvocation[None],
+) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(inv.flags)
+    try:
+        check_switches(inv, inv.texts)
+        repo, _ = await opened(fl, inv.view or CLIView())
+        ancestor = fl.as_bool("is_ancestor")
+        all_bases = fl.as_bool("all")
+        if ancestor and all_bases:
+            raise GitError(
+                "options '--is-ancestor' and '--all' cannot be used together"
+            )
+        if ancestor and len(inv.texts) != 2:
+            raise GitError("--is-ancestor takes exactly two commits")
+        if len(inv.texts) < 2:
+            raise UsageError("", verb_usage(inv))
+        one, bases = await asyncio.to_thread(
+            _merge_base_ids, repo, tuple(inv.texts)
+        )
+        if ancestor:
+            return None, IOResult(exit_code=0 if one in bases else 1)
+        return b"".join(
+            oid + b"\n" for oid in (bases if all_bases else bases[:1])
+        ), IOResult(exit_code=0 if bases else 1)
+    except GitError as exc:
+        return fatal(exc)
+
+
 async def config(
     inv: CLIInvocation[None],
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
+    if len(inv.texts) > 1:
+        return None, IOResult(
+            exit_code=1,
+            stderr=(
+                b"error: git config value filters are not supported in Mirage\n"
+                if fl.as_bool("get") or fl.as_bool("get_regexp")
+                else b"error: git config is read-only in Mirage; "
+                b"writes are not supported\n"
+            ),
+        )
     try:
         if fl.as_bool("global"):
             sources = await global_sources(inv, fl.as_bool("list"))

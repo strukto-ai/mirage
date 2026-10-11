@@ -224,7 +224,10 @@ async def test_stops_at_a_nested_mount_and_says_so():
 
 @pytest.mark.asyncio
 async def test_leaves_the_archive_out_of_itself():
-    tree = _Tree({"/d/a.txt": b"alpha", "/d/old.zip": b"stale"}, dirs=("/d",))
+    tree = _Tree(
+        {"/d/a.txt": b"alpha", "/d/old.zip": b"PK\x05\x06" + b"\0" * 18},
+        dirs=("/d",),
+    )
     _, io_res = await _zip(
         tree, [_spec("/d/old.zip"), _raw("/d", "d")], r=True
     )
@@ -301,3 +304,49 @@ async def test_repeated_name_under_j_names_the_cause_and_q_keeps_the_error():
         b"\nzip error: Invalid command arguments"
         b" (cannot repeat names in zip file)\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_update_replaces_in_place_and_appends_without_losing_members():
+    tree = _Tree({"/a": b"old", "/b": b"keep", "/c": b"new"})
+    archive = _raw("/report.docx", "report.docx")
+    _, result = await _zip(tree, [archive, _raw("/a", "a"), _raw("/b", "b")])
+    assert result.exit_code == 0
+    tree.files["/a"] = b"updated"
+    out, result = await _zip(tree, [archive, _raw("/c", "c"), _raw("/a", "a")])
+    assert result.exit_code == 0
+    assert out == b"updating: a\n  adding: c\n"
+    with zipfile.ZipFile(io.BytesIO(tree.files["/report.docx"])) as zf:
+        assert zf.namelist() == ["a", "b", "c"]
+        assert [zf.read(name) for name in zf.namelist()] == [
+            b"updated",
+            b"keep",
+            b"new",
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "original", [b"", b"not a zip", b"PK\x05\x06" + b"\0" * 10]
+)
+async def test_invalid_existing_archive_is_never_replaced(original):
+    tree = _Tree({"/a": b"new", "/out.zip": original})
+    _, result = await _zip(
+        tree, [_raw("/out.zip", "out.zip"), _raw("/a", "a")], q=True
+    )
+    assert result.exit_code == 3
+    assert (
+        result.stderr == b"\nzip error: Zip file structure invalid (out.zip)\n"
+    )
+    assert tree.files["/out.zip"] == original
+
+
+@pytest.mark.asyncio
+async def test_no_matches_leave_existing_archive_byte_identical():
+    tree = _Tree({"/a": b"old"})
+    archive = _raw("/out.zip", "out.zip")
+    await _zip(tree, [archive, _raw("/a", "a")])
+    original = tree.files["/out.zip"]
+    _, result = await _zip(tree, [archive, _raw("/absent", "absent")], q=True)
+    assert result.exit_code == 12
+    assert tree.files["/out.zip"] == original

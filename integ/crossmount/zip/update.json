@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "zip_update_crossmount_preserves_members",
+      "seq": 10000005,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(mkdir -p /data/zip-cross; cd /data/zip-cross; echo one > a; echo two > b; zip -q /data2/update.zip a b; echo changed > a; zip -X -q /data2/update.zip a; unzip -p /data2/update.zip a b)",
+      "expect": {
+        "exit": 0,
+        "stdout": "changed\ntwo\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

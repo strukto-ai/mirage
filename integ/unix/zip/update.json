@@ -1,0 +1,68 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "zip_update_preserves_document_parts",
+      "seq": 10000001,
+      "command": "(mkdir -p /data/zip-update/word; cd /data/zip-update; echo types > types.xml; echo old > word/document.xml; zip -q report.docx types.xml word/document.xml; echo updated > word/document.xml; echo added > extra.xml; zip -X report.docx extra.xml word/document.xml; unzip -Z1 report.docx; unzip -p report.docx types.xml word/document.xml extra.xml)",
+      "expect": {
+        "exit": 0,
+        "stdout": "updating: word/document.xml\n  adding: extra.xml\ntypes.xml\nword/document.xml\nextra.xml\ntypes\nupdated\nadded\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zip_update_no_extra_long",
+      "seq": 10000002,
+      "command": "(cd /data/zip-update; zip --no-extra -q report.docx word/document.xml; unzip -p report.docx types.xml)",
+      "expect": {
+        "exit": 0,
+        "stdout": "types\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zip_invalid_archive_preserved",
+      "seq": 10000003,
+      "command": "(cd /data/zip-update; echo broken > invalid.zip; zip -q invalid.zip types.xml; echo rc=$?; cat invalid.zip)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=3\nbroken\n",
+        "stderr": "\nzip error: Zip file structure invalid (invalid.zip)\n"
+      }
+    },
+    {
+      "id": "zip_update_missing_keeps_archive",
+      "seq": 10000004,
+      "command": "(cd /data/zip-update; cp report.docx before.zip; zip -q report.docx missing; echo rc=$?; cmp report.docx before.zip)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=12\n",
+        "stderr": "\nzip error: Nothing to do! (report.docx)\n"
+      }
+    }
+  ]
+}

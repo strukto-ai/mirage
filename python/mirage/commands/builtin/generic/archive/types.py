@@ -10,6 +10,20 @@ MemberKind: TypeAlias = Literal["file", "dir", "link"]
 
 
 @dataclass(frozen=True, slots=True)
+class ZipRecord:
+    name: str
+    local: bytes
+    central: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ZipArchive:
+    records: tuple[ZipRecord, ...]
+    prefix: bytes
+    comment: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class Entry:
     """One thing found under an operand, before it is named or filtered.
 
