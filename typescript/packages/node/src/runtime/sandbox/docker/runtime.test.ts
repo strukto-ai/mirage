@@ -116,19 +116,40 @@ describe('DockerRuntime', () => {
   })
 })
 
+// A fake `docker` on PATH running `script`, for the real spawn path.
+async function withFakeDocker(script: string, run: (fake: string) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))
+  const fake = join(dir, 'docker')
+  await writeFile(fake, script, { mode: 0o755 })
+  const savedPath = process.env.PATH
+  process.env.PATH = `${dir}:${savedPath ?? ''}`
+  try {
+    await run(fake)
+  } finally {
+    process.env.PATH = savedPath
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
 // The real spawn path: a container command that exits without draining
 // its stdin EPIPEs the pipe. Without the stdin error guard the stream's
 // unhandled 'error' event crashes the whole process (python suppresses
 // the matching BrokenPipeError inside communicate()). A fake `docker`
 // on PATH that ignores stdin reproduces it against the real spawn.
+describe.skipIf(process.platform === 'win32')('DockerRuntime stdin EPIPE', () => {
+  it('a command that ignores a large stdin resolves instead of crashing', async () => {
+    await withFakeDocker('#!/bin/sh\nexit 0\n', async () => {
+      const runtime = new DockerRuntime({ config: { container: 'cid-42' } })
+      const big = new Uint8Array(4 * 1024 * 1024)
+      const result = await runtime.execLine('head -1', big, {}, '/')
+      expect(result.exitCode).toBe(0)
+    })
+  })
+})
+
 describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
   it('holds docker exec open byte for byte', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))
-    const fake = join(dir, 'docker')
-    await writeFile(fake, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\nexec cat\n`, { mode: 0o755 })
-    const savedPath = process.env.PATH
-    process.env.PATH = `${dir}:${savedPath ?? ''}`
-    try {
+    await withFakeDocker(`#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\nexec cat\n`, async (fake) => {
       const runtime = new DockerRuntime({ config: { container: 'cid-42' } })
       const pipe = await runtime.openPipe('exec sshfs x y')
       const payload = Uint8Array.from({ length: 256 }, (_, i) => i)
@@ -147,28 +168,6 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
         'exec sshfs x y',
         '',
       ])
-    } finally {
-      process.env.PATH = savedPath
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-})
-
-describe.skipIf(process.platform === 'win32')('DockerRuntime stdin EPIPE', () => {
-  it('a command that ignores a large stdin resolves instead of crashing', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))
-    const fake = join(dir, 'docker')
-    await writeFile(fake, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-    const savedPath = process.env.PATH
-    process.env.PATH = `${dir}:${savedPath ?? ''}`
-    try {
-      const runtime = new DockerRuntime({ config: { container: 'cid-42' } })
-      const big = new Uint8Array(4 * 1024 * 1024)
-      const result = await runtime.execLine('head -1', big, {}, '/')
-      expect(result.exitCode).toBe(0)
-    } finally {
-      process.env.PATH = savedPath
-      await rm(dir, { recursive: true, force: true })
-    }
+    })
   })
 })

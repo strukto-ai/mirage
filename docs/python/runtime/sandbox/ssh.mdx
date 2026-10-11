@@ -12,8 +12,8 @@ can already `ssh` into works, with nothing to install on it. See the
 ## Skip the FUSE
 
 The other providers need sshfs (`mount_type`) or Mirage and FUSE inside the
-sandbox to serve the workspace's mounts. SSH is the one provider whose machine usually **is** the
-fileserver: the [ssh VFS](/python/vfs/ssh) already mounts that
+sandbox to serve the workspace's mounts. SSH is the one provider whose
+machine usually **is** the fileserver: the [ssh VFS](/python/vfs/ssh) already mounts that
 machine's directory over SFTP. Mount it at a prefix **equal to its remote
 absolute path**, and the two sides agree about every path with no FUSE, no
 remote Mirage install, and no path rewriting anywhere:

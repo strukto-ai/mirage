@@ -164,9 +164,6 @@ class Feed:
     def write(self, data: bytes) -> None:
         self.reader.feed_data(data)
 
-    def write_eof(self) -> None:
-        self.reader.feed_eof()
-
     def close(self) -> None:
         self.reader.feed_eof()
 

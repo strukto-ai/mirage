@@ -61,9 +61,6 @@ class PtyWriter:
     def write(self, data: bytes) -> None:
         self._queue.put_nowait(bytes(data))
 
-    def write_eof(self) -> None:
-        self._queue.put_nowait(None)
-
     def close(self) -> None:
         self._queue.put_nowait(None)
 
@@ -113,7 +110,7 @@ class E2BRuntime(RemoteSandbox):
         script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
         super().__init__(captures, config, script)
-        self.serve_mounts(self.config.mount_type)
+        self._serve_mounts(self.config.mount_type)
 
     def _api_params(self) -> dict[str, Any]:
         api_key = self.config.api_key

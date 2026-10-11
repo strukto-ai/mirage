@@ -190,21 +190,13 @@ describe('SandboxMounts', () => {
     },
   )
 
-  it('takes any session while the host serves nothing', async () => {
+  it('serves nothing from the host over fuse and takes any session', async () => {
     const sandbox = new FakeSandbox('fuse', ['/data'])
-    const ws = await workspace(sandbox)
+    const ws = await workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     expect((await other.shell('python3 job.py')).exitCode).toBe(0)
-    await ws.close()
-  })
-
-  it('serves nothing from the host over fuse', async () => {
-    const sandbox = new FakeSandbox('fuse', ['/data'])
-    const ws = await workspace(sandbox, ['/my notes/secret'])
-    const agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.pipes).toEqual([])
     await ws.close()
   })

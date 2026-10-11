@@ -103,7 +103,7 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
         merged = {**self.config.env, **env}
         return await self.exec_line(line, stdin, merged, cwd)
 
-    def serve_mounts(self, mount_type: MountType | None) -> None:
+    def _serve_mounts(self, mount_type: MountType | None) -> None:
         """Let the sandbox see the workspace by ``mount_type``.
 
         Args:

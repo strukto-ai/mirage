@@ -96,6 +96,16 @@ def top_prefixes(prefixes: Iterable[str]) -> list[str]:
     return tops
 
 
+def unmount_line(prefix: str) -> str:
+    """The sandbox command that lazily unmounts ``prefix``.
+
+    Args:
+        prefix (str): the mountpoint.
+    """
+    path = single_quote(prefix)
+    return f"fusermount3 -uz {path} || fusermount -uz {path}"
+
+
 class SandboxMounts:
     """The workspace prefixes one sandbox sees, by its ``mount_type``.
 
@@ -198,12 +208,12 @@ class SandboxMounts:
                 raise ImportError(PIPE_SERVER_HINT)
             if (await self._run("command -v sshfs")).exit_code != 0:
                 raise RuntimeError(f"{self._runtime}: {SSHFS_HINT}")
-        try:
-            for prefix in served:
-                await self._serve(files, session, prefix, present)
-        except BaseException:
-            await self._unmount()
-            raise
+            try:
+                for prefix in served:
+                    await self._serve(files, session, prefix, present)
+            except BaseException:
+                await self._unmount()
+                raise
         self._own = own
         self._session_id = session.session_id if served else None
         self._mounted = True
@@ -215,9 +225,9 @@ class SandboxMounts:
         prefix: str,
         present: dict[str, str],
     ) -> None:
-        path = single_quote(prefix)
         if present.get(prefix) == "fuse.sshfs":
-            await self._run(f"fusermount3 -uz {path} || fusermount -uz {path}")
+            await self._run(unmount_line(prefix))
+        path = single_quote(prefix)
         made = await self._run(
             f"mkdir -p {path} 2>/dev/null || {{ sudo -n mkdir -p {path} && "
             f'sudo -n chown "$(id -u):$(id -g)" {path}; }}'
@@ -261,11 +271,8 @@ class SandboxMounts:
         self._session_id = None
         self._own = ()
         for prefix, pipe, task in served:
-            path = single_quote(prefix)
             try:
-                done = await self._run(
-                    f"fusermount3 -uz {path} || fusermount -uz {path}"
-                )
+                done = await self._run(unmount_line(prefix))
                 if done.exit_code != 0:
                     logger.warning(
                         "%s: unmounting %s in the sandbox failed: %s",

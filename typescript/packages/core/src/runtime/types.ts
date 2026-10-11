@@ -199,7 +199,6 @@ export interface RunArgs {
   timeoutSeconds?: number
 }
 
-/** Outcome of one interpreter execution. */
 /** Where a pipe's bytes go: a Node `Writable`, or anything with its two calls. */
 export interface PipeWriter {
   write(data: Uint8Array): void
@@ -216,6 +215,7 @@ export interface SandboxPipe {
   stop(): Promise<void>
 }
 
+/** Outcome of one interpreter execution. */
 export interface RunResult {
   stdout: Uint8Array
   /** Captured standard error, null when empty (mirrors Python). */

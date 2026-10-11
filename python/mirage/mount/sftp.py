@@ -327,7 +327,7 @@ def as_os_error(err: Exception) -> OSError:
 class MirageSFTPServer(asyncssh.SFTPServer):
     """SFTP (and scp) onto a workspace, through the MountCore FUSE uses.
 
-    Every request lands on the one MountCore ``mount`` makes, bound to a
+    Every request lands on the one MountCore ``make_core`` makes, bound to a
     session, so SFTP sees exactly the tree, modes and policies a shell in
     that session sees. Requests run one at a time, in the order they
     arrive.
@@ -340,8 +340,8 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     Args:
         chan (asyncssh.SSHServerChannel[bytes] | None): the SFTP channel,
             None on a pipe.
-        mount (Callable[[], Awaitable[MountCore]]): makes the core on the
-            first request.
+        make_core (Callable[[], Awaitable[MountCore]]): makes the core on
+            the first request.
         run (Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]] | None):
             runs one op on the workspace's loop; None awaits it here.
         on_exit (Callable[[], Awaitable[None]] | None): what the client's
@@ -351,13 +351,13 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     def __init__(
         self,
         chan: asyncssh.SSHServerChannel[bytes] | None,
-        mount: Callable[[], Awaitable[MountCore]],
+        make_core: Callable[[], Awaitable[MountCore]],
         run: Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]]
         | None = None,
         on_exit: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(cast(asyncssh.SSHServerChannel[bytes], chan))
-        self._mount = mount
+        self._make_core = make_core
         self._run = run
         self._on_exit = on_exit
         self._core: MountCore | None = None
@@ -368,7 +368,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
     ) -> T:
         async with self._lock:
             if self._core is None:
-                self._core = await self._mount()
+                self._core = await self._make_core()
             try:
                 if self._run is None:
                     return await op(self._core)
@@ -568,12 +568,12 @@ async def serve_pipe(
     """
     core = MountCore(files, session=session)
 
-    async def mount() -> MountCore:
+    async def make_core() -> MountCore:
         return core
 
     try:
         await run_sftp_server(
-            MirageSFTPServer(None, mount),
+            MirageSFTPServer(None, make_core),
             cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
             cast("asyncssh.SSHWriter[bytes]", writer),
             SFTP_VERSION,

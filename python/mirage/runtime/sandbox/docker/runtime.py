@@ -48,7 +48,7 @@ class DockerRuntime(RemoteSandbox):
         script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
         super().__init__(captures, config, script)
-        self.serve_mounts(self.config.mount_type)
+        self._serve_mounts(self.config.mount_type)
 
     async def _docker(
         self, args: list[str], stdin: bytes | None = None

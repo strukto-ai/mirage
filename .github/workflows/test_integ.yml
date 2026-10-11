@@ -2025,6 +2025,11 @@ jobs:
       - name: Run the sandbox suites on e2b (python)
         run: ./python/.venv/bin/python integ/runtime/run.py sandbox
 
+      - name: Run the sandbox suites on e2b (typescript)
+        if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
+        working-directory: integ
+        run: pnpm exec tsx runtime/run.ts sandbox
+
       - name: Run the sandbox suites on e2b through the CLI and both daemons
         if: ${{ !cancelled() && env.MIRAGE_INTEG_E2B_SANDBOX != '' }}
         run: |

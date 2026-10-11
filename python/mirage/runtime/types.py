@@ -309,11 +309,9 @@ class RunResult:
 
 class PipeWriter(Protocol):
     """Where a pipe's bytes go: an ``asyncio.StreamWriter``, or anything
-    with its three calls."""
+    with its two calls."""
 
     def write(self, data: bytes) -> None: ...
-
-    def write_eof(self) -> None: ...
 
     def close(self) -> None: ...
 

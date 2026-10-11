@@ -38,9 +38,9 @@ const ENC = new TextEncoder()
  * hand). The whole-line entry point is LineExecutor's runLine, and there
  * is no interpreter entry point. Subclasses adapt one provider by
  * implementing connect() and execLine(), and openPipe() for a
- * `mountType`; routing, captures, and per-line scripts are inherited. Constructed like
- * every runtime (captures, config, script); config is how to reach
- * the sandbox, coerced against the provider's own key list.
+ * `mountType`; routing, captures, and per-line scripts are inherited.
+ * Constructed like every runtime (captures, config, script); config is
+ * how to reach the sandbox, coerced against the provider's own key list.
  */
 export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime

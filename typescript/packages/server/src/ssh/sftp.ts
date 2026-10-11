@@ -58,7 +58,7 @@ export function serveSFTP(
     entry = found
     return new MountCore(ws.vfs, { session: ws.getSession(sessionId) })
   }
-  const close = async (): Promise<void> => {
+  const onExit = async (): Promise<void> => {
     try {
       if (entry !== null && registry.has(entry.id) && registry.get(entry.id) === entry) {
         await entry.runner.ws.closeSession(sessionId)
@@ -67,5 +67,5 @@ export function serveSFTP(
       exitZero(sftp)
     }
   }
-  new MirageSFTPServer(sftp, makeCore, close).attach()
+  new MirageSFTPServer(sftp, makeCore, onExit).attach()
 }

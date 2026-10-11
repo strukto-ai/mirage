@@ -24,18 +24,12 @@ from mirage.runtime.sandbox.mounts import mount_table, top_prefixes
 from mirage.runtime.types import RunResult, SandboxPipe
 
 
-class Feed:
-    def __init__(self, reader: asyncio.StreamReader) -> None:
-        self.reader = reader
-
+class Sink:
     def write(self, data: bytes) -> None:
-        self.reader.feed_data(data)
-
-    def write_eof(self) -> None:
-        self.reader.feed_eof()
+        return None
 
     def close(self) -> None:
-        self.reader.feed_eof()
+        return None
 
 
 class FakeSandbox(RemoteSandbox):
@@ -45,7 +39,7 @@ class FakeSandbox(RemoteSandbox):
 
     def __init__(self, mount_type, own=(), sshfs=True):
         super().__init__(captures=["python3"])
-        self.serve_mounts(mount_type)
+        self._serve_mounts(mount_type)
         self.table = {prefix: "tmpfs" for prefix in own}
         self.sshfs = sshfs
         self.commands: list[str] = []
@@ -78,7 +72,7 @@ class FakeSandbox(RemoteSandbox):
         async def stop() -> None:
             requests.feed_eof()
 
-        return SandboxPipe(requests, Feed(asyncio.StreamReader()), stop)
+        return SandboxPipe(requests, Sink(), stop)
 
 
 def workspace(runtime, hide=()):
@@ -171,22 +165,13 @@ async def test_a_rule_under_a_prefix_the_sandbox_serves_refuses_the_line(
 
 
 @pytest.mark.asyncio
-async def test_a_sandbox_served_nothing_takes_any_session():
+async def test_fuse_serves_nothing_from_the_host_and_takes_any_session():
     sandbox = FakeSandbox("fuse", own=["/data"])
-    ws = workspace(sandbox)
+    ws = workspace(sandbox, hide=["/my notes/secret"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert (await other.shell("python3 job.py")).exit_code == 0
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_fuse_serves_nothing_from_the_host():
-    sandbox = FakeSandbox("fuse", own=["/data"])
-    ws = workspace(sandbox, hide=["/my notes/secret"])
-    agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
     assert sandbox.pipes == []
     await ws.close()
 

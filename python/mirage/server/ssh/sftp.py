@@ -47,7 +47,7 @@ def serve_sftp(
     session_id = new_session_id()
     entry: WorkspaceEntry | None = None
 
-    async def mount() -> MountCore:
+    async def make_core() -> MountCore:
         nonlocal entry
         found = login_entry(registry, conn, workspace_id)
         if found is None:
@@ -81,4 +81,4 @@ def serve_sftp(
             # the channel, it is a no-op.
             chan.exit(0)
 
-    return MirageSFTPServer(chan, mount, run, on_exit)
+    return MirageSFTPServer(chan, make_core, run, on_exit)

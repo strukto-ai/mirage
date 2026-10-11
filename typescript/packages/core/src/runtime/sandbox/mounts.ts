@@ -90,6 +90,12 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
   return tops
 }
 
+/** The sandbox command that lazily unmounts `prefix`. */
+function unmountLine(prefix: string): string {
+  const path = singleQuote(prefix)
+  return `fusermount3 -uz ${path} || fusermount -uz ${path}`
+}
+
 function said(bytes: Uint8Array | null): string {
   return bytes === null ? '' : DECODER.decode(bytes).trim()
 }
@@ -213,29 +219,22 @@ export class SandboxMounts {
     const tops = topPrefixes(binding.resolver.prefixes())
     const own = tops.filter((p) => this.mountType !== 'ssh' && present.has(p))
     const served = tops.filter((p) => this.mountType !== 'fuse' && !own.includes(p))
-    if (served.length > 0) await this.serveAll(served, files, session, present)
+    if (served.length > 0) {
+      const server = pipeServer
+      if (server === null) throw new Error(PIPE_SERVER_HINT)
+      if ((await this.run('command -v sshfs')).exitCode !== 0) {
+        throw new Error(`${this.runtime}: ${SSHFS_HINT}`)
+      }
+      try {
+        for (const prefix of served) await this.serve(server, files, session, prefix, present)
+      } catch (err) {
+        await this.unmount()
+        throw err
+      }
+    }
     this.own = own
     this.sessionId = served.length > 0 ? session.sessionId : null
     this.mounted = true
-  }
-
-  private async serveAll(
-    prefixes: readonly string[],
-    files: Files,
-    session: SessionState,
-    present: Map<string, string>,
-  ): Promise<void> {
-    const server = pipeServer
-    if (server === null) throw new Error(PIPE_SERVER_HINT)
-    if ((await this.run('command -v sshfs')).exitCode !== 0) {
-      throw new Error(`${this.runtime}: ${SSHFS_HINT}`)
-    }
-    try {
-      for (const prefix of prefixes) await this.serve(server, files, session, prefix, present)
-    } catch (err) {
-      await this.unmount()
-      throw err
-    }
   }
 
   private async serve(
@@ -245,10 +244,8 @@ export class SandboxMounts {
     prefix: string,
     present: Map<string, string>,
   ): Promise<void> {
+    if (present.get(prefix) === 'fuse.sshfs') await this.run(unmountLine(prefix))
     const path = singleQuote(prefix)
-    if (present.get(prefix) === 'fuse.sshfs') {
-      await this.run(`fusermount3 -uz ${path} || fusermount -uz ${path}`)
-    }
     const made = await this.run(
       `mkdir -p ${path} 2>/dev/null || { sudo -n mkdir -p ${path} && ` +
         `sudo -n chown "$(id -u):$(id -g)" ${path}; }`,
@@ -291,9 +288,8 @@ export class SandboxMounts {
     this.sessionId = null
     this.own = []
     for (const { prefix, pipe, serving } of served) {
-      const path = singleQuote(prefix)
       try {
-        const done = await this.run(`fusermount3 -uz ${path} || fusermount -uz ${path}`)
+        const done = await this.run(unmountLine(prefix))
         if (done.exitCode !== 0) {
           console.warn(
             `${this.runtime}: unmounting ${prefix} in the sandbox failed: ${said(done.stderr)}`,
