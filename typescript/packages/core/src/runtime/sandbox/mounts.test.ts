@@ -204,6 +204,20 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
+  it('keeps the sandbox for a session it served nothing', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = await workspace(sandbox, ['/data', '/my notes'])
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const other = await ws.session('other')
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.pipes).toEqual([])
+    const result = await other.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toContain('give session other a sandbox of its own')
+    expect(sandbox.pipes).toEqual([])
+    await ws.close()
+  })
+
   it('serves over both what the sandbox does not mount itself', async () => {
     const sandbox = new FakeSandbox('both', ['/data'])
     const ws = await workspace(sandbox, ['/my notes/secret'])

@@ -158,9 +158,11 @@ interface Served {
  * Each line first brings the mounts in step with the workspace: a mount
  * added or shown since is served, one hidden is dropped, and a server
  * that ended is started again. What the host serves shows one session's
- * view: one path in a sandbox shows one view, so while the host serves
- * anything, a line of another session is refused rather than shown the
- * first one's.
+ * view, and a program a line starts may outlive it, so under `ssh` and
+ * `both` the sandbox belongs to the first line's session until it is
+ * closed: a line of another session is refused rather than shown, or
+ * showing, the first one's view. Under `fuse` the host serves nothing, and
+ * any session may run.
  */
 export class SandboxMounts {
   private sessionId: string | null = null
@@ -278,7 +280,7 @@ export class SandboxMounts {
       }
     }
     this.own = own
-    this.sessionId = this.served.size > 0 ? session.sessionId : null
+    this.sessionId = this.mountType === 'fuse' ? null : session.sessionId
     this.seen = seen
   }
 

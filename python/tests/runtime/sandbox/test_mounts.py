@@ -155,6 +155,23 @@ async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
 
 
 @pytest.mark.asyncio
+async def test_a_session_served_nothing_still_keeps_the_sandbox():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox, hide=["/data", "/my notes"])
+    agent = await ws.session("agent", profile="agent")
+    other = await ws.session("other")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert sandbox.pipes == []
+    result = await other.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert "give session other a sandbox of its own" in (
+        await result.stderr_str()
+    )
+    assert sandbox.pipes == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_both_serves_what_the_sandbox_does_not_mount_itself():
     sandbox = FakeSandbox("both", own=["/data"])
     ws = workspace(sandbox, hide=["/my notes/secret"])
