@@ -99,6 +99,7 @@ class FakePty {
   private onData: (data: Uint8Array) => void = () => undefined
   private end: () => void = () => undefined
   ended = false
+  refuse = false
   readonly pid = 7
 
   create(opts: {
@@ -119,6 +120,7 @@ class FakePty {
 
   sendInput(pid: number, data: Uint8Array): Promise<void> {
     expect(pid).toBe(this.pid)
+    if (this.refuse) return Promise.reject(new Error('the sandbox went away'))
     this.sent.push(data)
     if (this.sent.length === 1) {
       this.onData(
@@ -198,6 +200,14 @@ describe('E2BRuntime', () => {
     await pipe.stop()
     expect(pty.ended).toBe(true)
     expect((await chunks.read()).done).toBe(true)
+  })
+  it('kills a pty whose command cannot be sent', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const pty = FakeSandbox.last.pty
+    pty.refuse = true
+    await expect(runtime.openPipe('exec sshfs x y')).rejects.toThrow('the sandbox went away')
+    expect(pty.ended).toBe(true)
   })
   it('requires a sandbox id', () => {
     expect(() => new FakedE2BRuntime({ config: {} })).toThrow('sandboxId')

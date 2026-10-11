@@ -16,14 +16,17 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { STATUS } from './constants.ts'
+import { OPEN, STATUS } from './constants.ts'
 import { longname, servePipe, toAttrs, workspacePath } from './sftp.ts'
 
 // SFTP v3 packet types the pipe tests speak.
 const FXP_INIT = 1
+const FXP_OPEN = 3
+const FXP_WRITE = 6
 const FXP_STAT = 17
 const FXP_VERSION = 2
 const FXP_STATUS = 101
+const FXP_HANDLE = 102
 const FXP_ATTRS = 105
 
 function packet(kind: number, body: Buffer): Buffer {
@@ -31,6 +34,18 @@ function packet(kind: number, body: Buffer): Buffer {
   head.writeUInt32BE(body.length + 1)
   head.writeUInt8(kind, 4)
   return Buffer.concat([head, body])
+}
+
+function sftpString(data: Buffer): Buffer {
+  const size = Buffer.alloc(4)
+  size.writeUInt32BE(data.length)
+  return Buffer.concat([size, data])
+}
+
+function uint32(n: number): Buffer {
+  const out = Buffer.alloc(4)
+  out.writeUInt32BE(n)
+  return out
 }
 
 function stat(ident: number, path: string): Buffer {
@@ -153,6 +168,40 @@ describe('servePipe', () => {
     const end = client()
     end.close()
     await servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    await ws.close()
+  })
+
+  it('lands the writes in flight before it returns', async () => {
+    const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.session('agent')
+    const end = client()
+    const served = servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    end.send(packet(FXP_INIT, uint32(3)))
+    await end.answer()
+    const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
+    end.send(
+      packet(
+        FXP_OPEN,
+        Buffer.concat([
+          uint32(1),
+          sftpString(Buffer.from('/notes/out.txt')),
+          uint32(flags),
+          uint32(0),
+        ]),
+      ),
+    )
+    const [kind, body] = await end.answer()
+    expect(kind).toBe(FXP_HANDLE)
+    const offset = Buffer.alloc(8)
+    end.send(
+      packet(
+        FXP_WRITE,
+        Buffer.concat([uint32(2), body.subarray(4), offset, sftpString(Buffer.from('landed'))]),
+      ),
+    )
+    end.close()
+    await served
+    expect(new TextDecoder().decode(await ws.vfs.read('/notes/out.txt'))).toBe('landed')
     await ws.close()
   })
 })

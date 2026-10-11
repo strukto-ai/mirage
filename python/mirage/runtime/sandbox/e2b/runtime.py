@@ -191,11 +191,22 @@ class E2BRuntime(RemoteSandbox):
                 writer.close()
 
         waiter = asyncio.create_task(wait())
-        await pty.send_stdin(handle.pid, f"{PTY_RAW}{command}\n".encode())
 
         async def stop() -> None:
             if not waiter.done():
                 await pty.kill(handle.pid)
             await waiter
 
+        try:
+            await pty.send_stdin(handle.pid, f"{PTY_RAW}{command}\n".encode())
+        except BaseException:
+            try:
+                await stop()
+            except Exception:
+                logger.debug(
+                    "e2b: stopping the PTY for %r failed",
+                    command,
+                    exc_info=True,
+                )
+            raise
         return SandboxPipe(reader, writer, stop)

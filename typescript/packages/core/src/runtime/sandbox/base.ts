@@ -87,7 +87,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   ): Promise<RunResult> {
     await this.ensureConnected(signal)
     if (this.mounts !== null) {
-      const refusal = await this.mounts.admit(this.binding)
+      const refusal = await this.mounts.admit(this.binding, signal)
       if (refusal !== null) {
         return {
           stdout: new Uint8Array(),
@@ -106,7 +106,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     this.mounts = new SandboxMounts(
       this.name,
       mountType,
-      (line) => this.execLine(line, null, { ...this.config.env }, '/'),
+      (line, signal) => this.execLine(line, null, { ...this.config.env }, '/', signal),
       (command) => this.openPipe(command),
     )
   }

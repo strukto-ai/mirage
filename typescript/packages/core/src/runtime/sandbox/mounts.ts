@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { getCurrentSession } from '../../context/session_context.ts'
+import { MountMode } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -72,6 +73,15 @@ export function mountTable(text: string): Map<string, string> {
   return table
 }
 
+/** The mountpoints a sandbox could hold of `prefixes`. */
+function mountPaths(prefixes: Iterable<string>): Set<string> {
+  const paths = new Set<string>()
+  for (const prefix of prefixes) paths.add(rstripSlash(prefix))
+  paths.delete('')
+  paths.delete('/dev')
+  return paths
+}
+
 /**
  * The prefixes a sandbox mounts: each one under no other. A prefix under
  * another is served through it. The root and the workspace's devices are
@@ -79,15 +89,19 @@ export function mountTable(text: string): Map<string, string> {
  * mounted over them.
  */
 export function topPrefixes(prefixes: Iterable<string>): string[] {
-  const paths = new Set<string>()
-  for (const prefix of prefixes) paths.add(rstripSlash(prefix))
-  paths.delete('')
-  paths.delete('/dev')
   const tops: string[] = []
-  for (const prefix of [...paths].sort(compareCodePoints)) {
+  for (const prefix of [...mountPaths(prefixes)].sort(compareCodePoints)) {
     if (!tops.some((top) => prefix.startsWith(top + '/'))) tops.push(prefix)
   }
   return tops
+}
+
+/** Whether the session's profile narrows the mode of `prefix` or of a mount under it. */
+function cappedUnder(session: SessionState, prefix: string): boolean {
+  for (const [path, mode] of session.mountModes ?? []) {
+    if (mode !== MountMode.EXEC && (path === prefix || path.startsWith(prefix + '/'))) return true
+  }
+  return false
 }
 
 /** The sandbox command that lazily unmounts `prefix`. */
@@ -121,10 +135,11 @@ async function within(task: Promise<void>, ms: number): Promise<void> {
 }
 
 interface Served {
-  prefix: string
   pipe: SandboxPipe
+  // Settles when the server ends, never rejecting: `failure` says why.
   serving: Promise<void>
-  done: boolean
+  ended: boolean
+  failure: Error | null
 }
 
 /**
@@ -137,19 +152,21 @@ interface Served {
  * sandbox serves its prefixes itself and the host serves none. `both`: a
  * prefix the sandbox already mounts is its own, and the host serves the
  * rest. A prefix the sandbox serves itself is out of the session's rules'
- * reach, so a line is refused while a hide or rule covers anything under
- * one.
+ * reach, so a line is refused while a hide, rule or mode cap covers
+ * anything under one, hidden mounts included.
  *
- * The mounts are made on the first line. What the host serves shows that
- * line's session: one path in a sandbox shows one view, so while the host
- * serves anything, a line of another session is refused rather than shown
- * the first one's.
+ * Each line first brings the mounts in step with the workspace: a mount
+ * added or shown since is served, one hidden is dropped, and a server
+ * that ended is started again. What the host serves shows one session's
+ * view: one path in a sandbox shows one view, so while the host serves
+ * anything, a line of another session is refused rather than shown the
+ * first one's.
  */
 export class SandboxMounts {
-  private mounted = false
   private sessionId: string | null = null
   private own: readonly string[] = []
-  private served: Served[] = []
+  private readonly served = new Map<string, Served>()
+  private seen: string | null = null
   private lock: Promise<unknown> = Promise.resolve()
 
   /**
@@ -162,37 +179,44 @@ export class SandboxMounts {
   constructor(
     private readonly runtime: string,
     private readonly mountType: MountType,
-    private readonly run: (line: string) => Promise<RunResult>,
+    private readonly run: (line: string, signal?: AbortSignal) => Promise<RunResult>,
     private readonly openPipe: (command: string) => Promise<SandboxPipe>,
   ) {}
 
-  /** Mount on the first line; after that, why a line may not run, or null when it may. */
-  async admit(binding: WorkspaceBinding | null): Promise<string | null> {
+  /** Bring the mounts in step, then say why a line may not run, or null when it may. */
+  async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<string | null> {
     const files = binding?.files ?? null
-    if (binding === null || files === null) {
+    const getSession = binding?.getSession ?? null
+    const mountPrefixes = binding?.mountPrefixes ?? null
+    if (binding === null || files === null || getSession === null || mountPrefixes === null) {
       throw new Error(`${this.runtime}: mountType needs the runtime in a workspace`)
     }
-    const session = getCurrentSession()
-    if (session === null) {
+    const current = getCurrentSession()
+    if (current === null) {
       throw new Error(
         `${this.runtime}: mountType serves a session's view, and this line runs as none`,
       )
     }
     const refusal = await this.locked(async () => {
-      if (!this.mounted) {
-        await this.mount(binding, files, session)
-        return null
+      if (this.sessionId !== null && current.sessionId !== this.sessionId) {
+        return (
+          `this sandbox shows session ${this.sessionId}'s view of the workspace; ` +
+          `give session ${current.sessionId} a sandbox of its own`
+        )
       }
-      if (this.sessionId === null || session.sessionId === this.sessionId) return null
-      return (
-        `this sandbox shows session ${this.sessionId}'s view of the workspace; ` +
-        `give session ${session.sessionId} a sandbox of its own`
+      await this.reconcile(
+        binding,
+        files,
+        getSession(current.sessionId),
+        mountPaths(mountPrefixes()),
+        signal,
       )
+      return null
     })
     if (refusal !== null) return refusal
     const scoped = binding.capture().ns.scoped
     for (const prefix of this.own) {
-      if (scoped?.(prefix) === true) {
+      if (scoped?.(prefix) === true || cappedUnder(current, prefix)) {
         return `${prefix} is served by the sandbox itself, out of reach of this session's rules`
       }
     }
@@ -210,31 +234,52 @@ export class SandboxMounts {
     return next
   }
 
-  private async mount(
+  private async reconcile(
     binding: WorkspaceBinding,
     files: Files,
     session: SessionState,
+    every: Set<string>,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const present = await this.table()
-    const tops = topPrefixes(binding.resolver.prefixes())
-    const own = tops.filter((p) => this.mountType !== 'ssh' && present.has(p))
-    const served = tops.filter((p) => this.mountType !== 'fuse' && !own.includes(p))
-    if (served.length > 0) {
+    const visible = this.mountType === 'fuse' ? [] : topPrefixes(binding.resolver.prefixes())
+    const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
+    const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
+    if (this.seen === seen && ended.length === 0) return
+    const present = await this.table(signal)
+    const own = [...every]
+      .filter((p) => this.mountType !== 'ssh' && present.has(p) && !this.served.has(p))
+      .sort(compareCodePoints)
+    const wanted = visible.filter((p) => !own.includes(p))
+    for (const prefix of wanted) {
+      const under = own.find((o) => o.startsWith(prefix + '/'))
+      if (under !== undefined) {
+        throw new Error(
+          `${this.runtime}: the sandbox mounts ${under} itself, and serving ${prefix} would cover it`,
+        )
+      }
+    }
+    for (const prefix of [...this.served.keys()]) {
+      if (!wanted.includes(prefix) || ended.includes(prefix)) await this.drop(prefix)
+    }
+    const fresh = wanted.filter((p) => !this.served.has(p))
+    if (fresh.length > 0) {
       const server = pipeServer
       if (server === null) throw new Error(PIPE_SERVER_HINT)
-      if ((await this.run('command -v sshfs')).exitCode !== 0) {
+      if ((await this.run('command -v sshfs', signal)).exitCode !== 0) {
         throw new Error(`${this.runtime}: ${SSHFS_HINT}`)
       }
       try {
-        for (const prefix of served) await this.serve(server, files, session, prefix, present)
+        for (const prefix of fresh) {
+          await this.serve(server, files, session, prefix, present, signal)
+        }
       } catch (err) {
         await this.unmount()
         throw err
       }
     }
     this.own = own
-    this.sessionId = served.length > 0 ? session.sessionId : null
-    this.mounted = true
+    this.sessionId = this.served.size > 0 ? session.sessionId : null
+    this.seen = seen
   }
 
   private async serve(
@@ -243,12 +288,14 @@ export class SandboxMounts {
     session: SessionState,
     prefix: string,
     present: Map<string, string>,
+    signal?: AbortSignal,
   ): Promise<void> {
-    if (present.get(prefix) === 'fuse.sshfs') await this.run(unmountLine(prefix))
+    if (present.get(prefix) === 'fuse.sshfs') await this.run(unmountLine(prefix), signal)
     const path = singleQuote(prefix)
     const made = await this.run(
       `mkdir -p ${path} 2>/dev/null || { sudo -n mkdir -p ${path} && ` +
         `sudo -n chown "$(id -u):$(id -g)" ${path}; }`,
+      signal,
     )
     if (made.exitCode !== 0) {
       throw new Error(`${this.runtime}: cannot make ${prefix} in the sandbox: ${said(made.stderr)}`)
@@ -256,23 +303,32 @@ export class SandboxMounts {
     const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
     const source = singleQuote(`mirage:${prefix}`)
     const pipe = await this.openPipe(`exec sshfs -f -o ${SSHFS_OPTIONS} ${source} ${path} 2>${log}`)
-    const entry: Served = { prefix, pipe, serving: Promise.resolve(), done: false }
-    entry.serving = server(files, session, pipe.reader, pipe.writer).finally(() => {
-      entry.done = true
-    })
-    this.served.push(entry)
+    const entry: Served = { pipe, serving: Promise.resolve(), ended: false, failure: null }
+    entry.serving = server(files, session, pipe.reader, pipe.writer).then(
+      () => {
+        entry.ended = true
+      },
+      (err: unknown) => {
+        entry.ended = true
+        entry.failure = err instanceof Error ? err : new Error(String(err))
+      },
+    )
+    this.served.set(prefix, entry)
     const deadline = Date.now() + MOUNT_WAIT_SECONDS * 1000
-    while ((await this.table()).get(prefix) !== 'fuse.sshfs') {
-      if (entry.done || Date.now() > deadline) {
-        const written = await this.run(`cat ${log}`)
-        throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${said(written.stdout)}`)
+    while ((await this.table(signal)).get(prefix) !== 'fuse.sshfs') {
+      if (entry.ended || Date.now() > deadline) {
+        const written = await this.run(`cat ${log}`, signal)
+        let reason = said(written.stdout) || 'no word from sshfs'
+        if (entry.failure !== null) reason += `; the SFTP server failed: ${entry.failure.message}`
+        throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${reason}`)
       }
+      signal?.throwIfAborted()
       await sleep(MOUNT_POLL_SECONDS * 1000)
     }
   }
 
-  private async table(): Promise<Map<string, string>> {
-    const listed = await this.run('cat /proc/mounts')
+  private async table(signal?: AbortSignal): Promise<Map<string, string>> {
+    const listed = await this.run('cat /proc/mounts', signal)
     if (listed.exitCode !== 0) {
       throw new Error(
         `${this.runtime}: cannot read the sandbox's mount table: ${said(listed.stderr)}`,
@@ -281,25 +337,33 @@ export class SandboxMounts {
     return mountTable(DECODER.decode(listed.stdout))
   }
 
+  private async drop(prefix: string): Promise<void> {
+    const entry = this.served.get(prefix)
+    if (entry === undefined) return
+    this.served.delete(prefix)
+    try {
+      const done = await this.run(unmountLine(prefix))
+      if (done.exitCode !== 0) {
+        console.warn(
+          `${this.runtime}: unmounting ${prefix} in the sandbox failed: ${said(done.stderr)}`,
+        )
+      }
+    } catch (err) {
+      console.warn(`${this.runtime}: unmounting ${prefix} in the sandbox failed:`, err)
+    }
+    try {
+      await entry.pipe.stop()
+      await within(entry.serving, UNMOUNT_WAIT_SECONDS * 1000)
+      if (entry.failure !== null) throw entry.failure
+    } catch (err) {
+      console.warn(`${this.runtime}: ending the SFTP server for ${prefix} failed:`, err)
+    }
+  }
+
   private async unmount(): Promise<void> {
-    const served = this.served
-    this.served = []
-    this.mounted = false
+    for (const prefix of [...this.served.keys()]) await this.drop(prefix)
     this.sessionId = null
     this.own = []
-    for (const { prefix, pipe, serving } of served) {
-      try {
-        const done = await this.run(unmountLine(prefix))
-        if (done.exitCode !== 0) {
-          console.warn(
-            `${this.runtime}: unmounting ${prefix} in the sandbox failed: ${said(done.stderr)}`,
-          )
-        }
-        await pipe.stop()
-        await within(serving, UNMOUNT_WAIT_SECONDS * 1000)
-      } catch (err) {
-        console.warn(`${this.runtime}: ending the SFTP server for ${prefix} failed:`, err)
-      }
-    }
+    this.seen = null
   }
 }

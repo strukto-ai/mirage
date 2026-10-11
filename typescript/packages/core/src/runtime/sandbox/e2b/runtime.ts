@@ -220,15 +220,19 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
         feed?.close()
         writer.end()
       })
-    await pty.sendInput(handle.pid, ENC.encode(`${PTY_RAW}${command}\n`))
-    return {
-      reader,
-      writer,
-      stop: async () => {
-        if (!ended) await pty.kill(handle.pid)
-        await waiting
-      },
+    const stop = async (): Promise<void> => {
+      if (!ended) await pty.kill(handle.pid)
+      await waiting
     }
+    try {
+      await pty.sendInput(handle.pid, ENC.encode(`${PTY_RAW}${command}\n`))
+    } catch (err) {
+      await stop().catch((stopErr: unknown) => {
+        console.debug(`e2b: stopping the PTY for ${command} failed`, stopErr)
+      })
+      throw err
+    }
+    return { reader, writer, stop }
   }
 }
 

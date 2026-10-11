@@ -157,6 +157,38 @@
             "stdout": "",
             "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
           }
+        },
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/boxdata"
+              ]
+            }
+          }
+        },
+        {
+          "command": "dash -c 'cat /hostdata/f.txt'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
+          }
+        },
+        {
+          "profile": {
+            "mounts": {
+              "/boxdata": "r"
+            }
+          }
+        },
+        {
+          "command": "dash -c 'cat /hostdata/f.txt'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
+          }
         }
       ]
     }

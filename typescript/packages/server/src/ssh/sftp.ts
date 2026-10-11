@@ -67,5 +67,7 @@ export function serveSFTP(
       exitZero(sftp)
     }
   }
-  new MirageSFTPServer(sftp, makeCore, onExit).attach()
+  new MirageSFTPServer(sftp, makeCore, onExit).attach().catch((err: unknown) => {
+    console.warn(`ssh: ending the SFTP session on ${workspaceId} failed:`, err)
+  })
 }

@@ -100,6 +100,7 @@ class FakePty:
         self.handle = FakePtyHandle(7)
         self.on_data = None
         self.created = None
+        self.refuse = False
 
     async def create(self, size, *, on_data, timeout):
         self.created = (size.rows, size.cols, timeout)
@@ -108,6 +109,8 @@ class FakePty:
 
     async def send_stdin(self, pid, data):
         assert pid == self.handle.pid
+        if self.refuse:
+            raise RuntimeError("the sandbox went away")
         self.sent.append(data)
         if len(self.sent) == 1:
             self.on_data(b"$ stty raw -echo\r\n" + PTY_MARK[:3])
@@ -276,3 +279,14 @@ async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
     await pipe.stop()
     assert pty.handle.ended.is_set()
     assert pipe.reader.at_eof()
+
+
+@pytest.mark.asyncio
+async def test_a_pty_whose_command_cannot_be_sent_is_killed():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    pty = FakeSandbox.last.pty
+    pty.refuse = True
+    with pytest.raises(RuntimeError, match="the sandbox went away"):
+        await runtime.open_pipe("exec sshfs x y")
+    assert pty.handle.ended.is_set()

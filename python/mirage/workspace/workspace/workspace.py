@@ -566,6 +566,8 @@ class Workspace:
             self._sandbox_resolver,
             lambda _binding: self.runtime_context(),
             self._files,
+            self.get_session,
+            self._sandbox_mounts,
         )
         self._runtimes, self._router = wire_runtime_world(
             self._registry, self._runtime_binding, runtimes
@@ -1059,8 +1061,8 @@ class Workspace:
         """Snapshot of the installed CLIs keyed by head word."""
         return self._registry.clis.items()
 
-    def _sandbox_visible_mounts(self) -> list[str]:
-        """The mount prefixes announced to sandboxed runtimes, read live.
+    def _sandbox_mounts(self) -> list[str]:
+        """The mount prefixes a sandboxed runtime may be told of, read live.
 
         Two are withheld, and neither is withheld for being ``/``. An
         explicit root mount is forwarded like any other prefix, and a
@@ -1072,11 +1074,8 @@ class Workspace:
         so arg-less commands and root listing have somewhere to resolve,
         so announcing it as a mount would make every runtime report a
         claim on a VFS the embedder never asked for (TS
-        ``sandboxVisibleMounts``). A mount the bound session hides is
-        withheld too: a runtime that builds its own tree from this list
-        would otherwise show the hidden mount's name.
+        ``sandboxMounts``).
         """
-        vis = session_visibility()
         prefixes: list[str] = []
         for entry in self._registry.mounts():
             if entry.prefix in (
@@ -1087,10 +1086,22 @@ class Workspace:
                 continue
             if self._implicit_root and entry.prefix == "/":
                 continue
-            if not path_visible(vis, entry.prefix.rstrip("/") or "/"):
-                continue
             prefixes.append(entry.prefix)
         return prefixes
+
+    def _sandbox_visible_mounts(self) -> list[str]:
+        """The mount prefixes announced to sandboxed runtimes, read live.
+
+        Those of ``_sandbox_mounts`` the bound session sees: a runtime
+        that builds its own tree from this list would otherwise show a
+        hidden mount's name (TS ``sandboxVisibleMounts``).
+        """
+        vis = session_visibility()
+        return [
+            prefix
+            for prefix in self._sandbox_mounts()
+            if path_visible(vis, prefix.rstrip("/") or "/")
+        ]
 
     def _call_session(self) -> SessionState:
         """The session an op runs under: the bound one, else the default."""

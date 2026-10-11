@@ -550,6 +550,8 @@ export class Workspace {
       sandboxResolver,
       () => this.runtimeContext(),
       this.vfs,
+      (sessionId) => this.getSession(sessionId),
+      () => this.sandboxMounts(),
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
@@ -566,8 +568,8 @@ export class Workspace {
   }
 
   /**
-   * Mount prefixes the sandboxed runtimes (python3 and node/js) may see:
-   * the mounts the embedder actually made.
+   * Mount prefixes the sandboxed runtimes (python3 and node/js) may be told
+   * of: the mounts the embedder actually made.
    *
    * Two are withheld, and neither is withheld for being `/`. An explicit
    * root mount is forwarded like any other prefix, and a runtime that
@@ -578,20 +580,26 @@ export class Workspace {
    * mounted: the workspace adds it so arg-less commands and root listing
    * have somewhere to resolve, so announcing it as a mount would make
    * every runtime report a claim on a VFS the embedder never asked for.
-   * A mount the bound session hides is withheld too: a runtime that builds
-   * its own tree from this list (Pyodide) would otherwise show its name.
    */
-  private sandboxVisibleMounts(): string[] {
-    const vis = sessionVisibility()
+  private sandboxMounts(): string[] {
     const prefixes: string[] = []
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
       if (m.prefix === BIN_PREFIX + '/') continue
       if (this.syntheticRootAnchor && m.prefix === '/') continue
-      if (!pathVisible(vis, rstripSlash(m.prefix) || '/')) continue
       prefixes.push(m.prefix)
     }
     return prefixes
+  }
+
+  /**
+   * Those of `sandboxMounts` the bound session sees: a runtime that builds
+   * its own tree from this list (Pyodide) would otherwise show a hidden
+   * mount's name.
+   */
+  private sandboxVisibleMounts(): string[] {
+    const vis = sessionVisibility()
+    return this.sandboxMounts().filter((prefix) => pathVisible(vis, rstripSlash(prefix) || '/'))
   }
 
   /** The ordered runtime world, first capturer first. */

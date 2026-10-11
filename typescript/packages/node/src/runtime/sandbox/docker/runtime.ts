@@ -87,7 +87,14 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
     const child = spawn('docker', ['exec', '-i', this.config.container, 'sh', '-c', command], {
       stdio: ['pipe', 'pipe', 'ignore'],
     })
-    const exited = once(child, 'close')
+    // A command that ends while an answer is on its way EPIPEs the
+    // pipe; unheard, that error would end the whole process.
+    child.stdin.on('error', (err) => {
+      console.debug(`docker: the pipe for ${command} closed`, err)
+    })
+    const exited = once(child, 'close').catch((err: unknown) => {
+      console.debug(`docker: the pipe for ${command} did not start`, err)
+    })
     return Promise.resolve({
       reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       writer: child.stdin,

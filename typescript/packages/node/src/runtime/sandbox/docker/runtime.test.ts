@@ -170,4 +170,16 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
       ])
     })
   })
+
+  it('outlives a command that ends before its answer is written', async () => {
+    await withFakeDocker('#!/bin/sh\nexit 0\n', async () => {
+      const runtime = new DockerRuntime({ config: { container: 'cid-42' } })
+      const pipe = await runtime.openPipe('exec sshfs x y')
+      const chunks = pipe.reader.getReader()
+      while (!(await chunks.read()).done) continue
+      pipe.writer.write(new Uint8Array(4 * 1024 * 1024))
+      await pipe.stop()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+  })
 })

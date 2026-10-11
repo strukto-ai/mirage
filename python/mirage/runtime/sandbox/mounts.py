@@ -31,6 +31,7 @@ from mirage.runtime.sandbox.constants import (
     UNMOUNT_WAIT_SECONDS,
 )
 from mirage.runtime.types import MountType, RunResult, SandboxPipe
+from mirage.types import MountMode
 from mirage.utils.quote import single_quote
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -89,11 +90,35 @@ def top_prefixes(prefixes: Iterable[str]) -> list[str]:
         prefixes (Iterable[str]): the mount prefixes the session sees.
     """
     tops: list[str] = []
-    paths = {p.rstrip("/") for p in prefixes} - {"", "/dev"}
-    for prefix in sorted(paths):
+    for prefix in sorted(mount_paths(prefixes)):
         if not any(prefix.startswith(top + "/") for top in tops):
             tops.append(prefix)
     return tops
+
+
+def mount_paths(prefixes: Iterable[str]) -> set[str]:
+    """The mountpoints a sandbox could hold of ``prefixes``.
+
+    Args:
+        prefixes (Iterable[str]): mount prefixes.
+    """
+    return {p.rstrip("/") for p in prefixes} - {"", "/dev"}
+
+
+def capped_under(session: SessionState, prefix: str) -> bool:
+    """Whether the session's profile narrows the mode of ``prefix`` or of
+    a mount under it.
+
+    Args:
+        session (SessionState): the line's session.
+        prefix (str): a mountpoint.
+    """
+    modes = session.mount_modes or {}
+    return any(
+        mode is not MountMode.EXEC
+        and (path == prefix or path.startswith(prefix + "/"))
+        for path, mode in modes.items()
+    )
 
 
 def unmount_line(prefix: str) -> str:
@@ -116,13 +141,15 @@ class SandboxMounts:
     mirage in the sandbox serves its prefixes itself and the host serves
     none. ``both``: a prefix the sandbox already mounts is its own, and
     the host serves the rest. A prefix the sandbox serves itself is out
-    of the session's rules' reach, so a line is refused while a hide or
-    rule covers anything under one.
+    of the session's rules' reach, so a line is refused while a hide,
+    rule or mode cap covers anything under one, hidden mounts included.
 
-    The mounts are made on the first line. What the host serves shows that
-    line's session: one path in a sandbox shows one view, so while the
-    host serves anything, a line of another session is refused rather
-    than shown the first one's.
+    Each line first brings the mounts in step with the workspace: a mount
+    added or shown since is served, one hidden is dropped, and a server
+    that ended is started again. What the host serves shows one session's
+    view: one path in a sandbox shows one view, so while the host serves
+    anything, a line of another session is refused rather than shown the
+    first one's.
 
     Args:
         runtime (str): the runtime's name, for messages.
@@ -144,14 +171,14 @@ class SandboxMounts:
         self._mount_type = mount_type
         self._run = run
         self._open_pipe = open_pipe
-        self._mounted = False
         self._session_id: str | None = None
         self._own: tuple[str, ...] = ()
-        self._served: list[tuple[str, SandboxPipe, asyncio.Task[None]]] = []
+        self._served: dict[str, tuple[SandboxPipe, asyncio.Task[None]]] = {}
+        self._seen: tuple[frozenset[str], frozenset[str]] | None = None
         self._lock = asyncio.Lock()
 
     async def admit(self, binding: WorkspaceBinding | None) -> str | None:
-        """Mount on the first line; after that, why a line may not run.
+        """Bring the mounts in step, then say why a line may not run.
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
@@ -159,28 +186,39 @@ class SandboxMounts:
         Returns:
             str | None: the refusal, None when the line may run.
         """
-        if binding is None or binding.files is None:
+        if (
+            binding is None
+            or binding.files is None
+            or binding.get_session is None
+            or binding.mount_prefixes is None
+        ):
             raise RuntimeError(
                 f"{self._runtime}: mount_type needs the runtime in a workspace"
             )
-        session = get_current_session()
-        if session is None:
+        current = get_current_session()
+        if current is None:
             raise RuntimeError(
                 f"{self._runtime}: mount_type serves a session's view, "
                 "and this line runs as none"
             )
         async with self._lock:
-            if not self._mounted:
-                await self._mount(binding, binding.files, session)
-            elif self._session_id not in (None, session.session_id):
+            if self._session_id not in (None, current.session_id):
                 return (
                     f"this sandbox shows session {self._session_id}'s view "
-                    f"of the workspace; give session {session.session_id} "
+                    f"of the workspace; give session {current.session_id} "
                     "a sandbox of its own"
                 )
+            await self._reconcile(
+                binding,
+                binding.files,
+                binding.get_session(current.session_id),
+                mount_paths(binding.mount_prefixes()),
+            )
         scoped = binding.capture().ns.scoped
         for prefix in self._own:
-            if scoped is not None and scoped(prefix):
+            if (scoped is not None and scoped(prefix)) or capped_under(
+                current, prefix
+            ):
                 return (
                     f"{prefix} is served by the sandbox itself, out of "
                     "reach of this session's rules"
@@ -192,31 +230,58 @@ class SandboxMounts:
         async with self._lock:
             await self._unmount()
 
-    async def _mount(
-        self, binding: WorkspaceBinding, files: Files, session: SessionState
+    async def _reconcile(
+        self,
+        binding: WorkspaceBinding,
+        files: Files,
+        session: SessionState,
+        every: set[str],
     ) -> None:
-        present = await self._table()
-        tops = top_prefixes(binding.resolver.prefixes())
-        own = tuple(
-            p for p in tops if self._mount_type != "ssh" and p in present
+        visible = frozenset(
+            top_prefixes(binding.resolver.prefixes())
+            if self._mount_type != "fuse"
+            else ()
         )
-        served = [
-            p for p in tops if self._mount_type != "fuse" and p not in own
-        ]
-        if served:
+        ended = [p for p, (_, task) in self._served.items() if task.done()]
+        if self._seen == (frozenset(every), visible) and not ended:
+            return
+        present = await self._table()
+        own = tuple(
+            sorted(
+                p
+                for p in every
+                if self._mount_type != "ssh"
+                and p in present
+                and p not in self._served
+            )
+        )
+        wanted = sorted(p for p in visible if p not in own)
+        for prefix in wanted:
+            under = [o for o in own if o.startswith(prefix + "/")]
+            if under:
+                raise RuntimeError(
+                    f"{self._runtime}: the sandbox mounts {under[0]} itself, "
+                    f"and serving {prefix} would cover it"
+                )
+        for prefix in [
+            p for p in self._served if p not in wanted or p in ended
+        ]:
+            await self._drop(prefix)
+        new = [p for p in wanted if p not in self._served]
+        if new:
             if serve_pipe is None:
                 raise ImportError(PIPE_SERVER_HINT)
             if (await self._run("command -v sshfs")).exit_code != 0:
                 raise RuntimeError(f"{self._runtime}: {SSHFS_HINT}")
             try:
-                for prefix in served:
+                for prefix in new:
                     await self._serve(files, session, prefix, present)
             except BaseException:
                 await self._unmount()
                 raise
         self._own = own
-        self._session_id = session.session_id if served else None
-        self._mounted = True
+        self._session_id = session.session_id if self._served else None
+        self._seen = (frozenset(every), visible)
 
     async def _serve(
         self,
@@ -245,14 +310,21 @@ class SandboxMounts:
         task = asyncio.create_task(
             serve_pipe(files, session, pipe.reader, pipe.writer)
         )
-        self._served.append((prefix, pipe, task))
+        self._served[prefix] = (pipe, task)
         deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
         while (await self._table()).get(prefix) != "fuse.sshfs":
             if task.done() or asyncio.get_running_loop().time() > deadline:
                 written = await self._run(f"cat {log}")
+                failed = (
+                    task.exception()
+                    if task.done() and not task.cancelled()
+                    else None
+                )
+                reason = said(written.stdout) or "no word from sshfs"
+                if failed is not None:
+                    reason += f"; the SFTP server failed: {failed}"
                 raise RuntimeError(
-                    f"{self._runtime}: sshfs did not mount {prefix}: "
-                    f"{said(written.stdout)}"
+                    f"{self._runtime}: sshfs did not mount {prefix}: {reason}"
                 )
             await asyncio.sleep(MOUNT_POLL_SECONDS)
 
@@ -265,28 +337,39 @@ class SandboxMounts:
             )
         return mount_table(listed.stdout.decode(errors="replace"))
 
-    async def _unmount(self) -> None:
-        served, self._served = self._served, []
-        self._mounted = False
-        self._session_id = None
-        self._own = ()
-        for prefix, pipe, task in served:
-            try:
-                done = await self._run(unmount_line(prefix))
-                if done.exit_code != 0:
-                    logger.warning(
-                        "%s: unmounting %s in the sandbox failed: %s",
-                        self._runtime,
-                        prefix,
-                        said(done.stderr),
-                    )
-                await pipe.stop()
-                await asyncio.wait_for(task, UNMOUNT_WAIT_SECONDS)
-            except Exception:
+    async def _drop(self, prefix: str) -> None:
+        pipe, task = self._served.pop(prefix)
+        try:
+            done = await self._run(unmount_line(prefix))
+            if done.exit_code != 0:
                 logger.warning(
-                    "%s: ending the SFTP server for %s failed",
+                    "%s: unmounting %s in the sandbox failed: %s",
                     self._runtime,
                     prefix,
-                    exc_info=True,
+                    said(done.stderr),
                 )
-                task.cancel()
+        except Exception:
+            logger.warning(
+                "%s: unmounting %s in the sandbox failed",
+                self._runtime,
+                prefix,
+                exc_info=True,
+            )
+        try:
+            await pipe.stop()
+            await asyncio.wait_for(task, UNMOUNT_WAIT_SECONDS)
+        except Exception:
+            logger.warning(
+                "%s: ending the SFTP server for %s failed",
+                self._runtime,
+                prefix,
+                exc_info=True,
+            )
+            task.cancel()
+
+    async def _unmount(self) -> None:
+        for prefix in list(self._served):
+            await self._drop(prefix)
+        self._session_id = None
+        self._own = ()
+        self._seen = None

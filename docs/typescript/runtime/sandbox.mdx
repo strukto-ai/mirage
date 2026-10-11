@@ -105,8 +105,9 @@ runtimes:
 
 ### Served from the workspace (`ssh`)
 
-The first captured line mounts each prefix; closing the workspace unmounts
-them. Every file operation in the sandbox is an operation of the line's
+The first captured line mounts each prefix, and each line after it follows
+mounts added or hidden since; closing the workspace unmounts them. Every
+file operation in the sandbox is an operation of the line's
 session: hides, mount modes and path rules hold as they do in the shell, a
 change on the host shows at once, and a RAM or local-disk mount works like
 any other. No credentials and no Mirage go into the sandbox, only `sshfs`
@@ -154,7 +155,9 @@ mounts fails loud only when a path misses.
 A prefix the sandbox serves itself follows the sandbox's config, mount
 modes included, and this workspace's rules never see it. So under `fuse`
 and `both`, a line is refused while the session's profile hides or narrows
-anything under such a prefix.
+anything under such a prefix, a whole hidden mount included. Under `both`, a
+mount of the sandbox's own nested inside a prefix this workspace serves fails
+loud, since serving the prefix would cover it.
 
 This needs an image with `fuse3` and Mirage plus your backends installed
 (see [The sandbox image](#the-sandbox-image)). The in-sandbox mount is

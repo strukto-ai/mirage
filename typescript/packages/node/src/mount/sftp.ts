@@ -148,7 +148,8 @@ export class MirageSFTPServer {
     private readonly onExit?: () => Promise<void>,
   ) {}
 
-  attach(): void {
+  /** Answer the client's requests; settles once it has left and its handles are released. */
+  attach(): Promise<void> {
     const s = this.sftp
     s.on('REALPATH', (id, path) => {
       this.serve(id, () => this.realpath(id, path))
@@ -219,8 +220,11 @@ export class MirageSFTPServer {
     s.on('EXTENDED', (id) => {
       this.sftp.status(id, STATUS.OP_UNSUPPORTED, 'extension not supported')
     })
-    s.on('end', () => {
-      this.queue = this.queue.then(() => this.exit())
+    return new Promise((resolve, reject) => {
+      s.on('end', () => {
+        this.queue = this.queue.then(() => this.exit())
+        this.queue.then(resolve, reject)
+      })
     })
   }
 
@@ -481,7 +485,7 @@ export async function servePipe(
     { type: 'session', incoming: side(), outgoing: side() },
     { server: true },
   )
-  new MirageSFTPServer(sftp, () => Promise.resolve(core)).attach()
+  const served = new MirageSFTPServer(sftp, () => Promise.resolve(core)).attach()
   const chunks = reader.getReader()
   try {
     for (;;) {
@@ -491,6 +495,7 @@ export async function servePipe(
     }
   } finally {
     sftp.push(null)
+    await served
   }
 }
 

@@ -17,10 +17,12 @@ import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+import type { ProfileMount } from '../../policy/profile.ts'
+import type { SessionState } from '../../workspace/session/session.ts'
 import type { MountType, RunResult, SandboxPipe } from '../types.ts'
 import { RemoteSandbox } from './base.ts'
 import { SSHFS_OPTIONS } from './constants.ts'
-import { mountTable, registerPipeServer, topPrefixes } from './mounts.ts'
+import { mountTable, registerPipeServer, topPrefixes, type PipeServer } from './mounts.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -35,11 +37,16 @@ class FakeSandbox extends RemoteSandbox {
   readonly table = new Map<string, string>()
   readonly commands: string[] = []
   readonly pipes: string[] = []
+  readonly ends = new Map<string, () => void>()
+  readonly stopped: string[] = []
+  failUnmount = false
+  hang = false
 
   constructor(
     mountType: MountType,
     own: readonly string[] = [],
     private readonly sshfs = true,
+    private readonly sshfsMounts = true,
   ) {
     super({ captures: ['python3'] })
     for (const prefix of own) this.table.set(prefix, 'tmpfs')
@@ -50,8 +57,21 @@ class FakeSandbox extends RemoteSandbox {
     return Promise.resolve()
   }
 
-  execLine(line: string): Promise<RunResult> {
+  execLine(
+    line: string,
+    _stdin?: Uint8Array | null,
+    _env?: Record<string, string>,
+    _cwd?: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
     this.commands.push(line)
+    if (line === 'cat /proc/mounts' && this.hang) {
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new Error('aborted'))
+        })
+      })
+    }
     if (line === 'cat /proc/mounts') {
       const rows = [...this.table]
         .map(([p, kind]) => `src ${p.replaceAll(' ', '\\040')} ${kind} rw 0 0\n`)
@@ -65,13 +85,17 @@ class FakeSandbox extends RemoteSandbox {
         exitCode: this.sshfs ? 0 : 1,
       })
     }
-    if (line.startsWith('fusermount3 -uz ')) this.table.delete(words(line)[2] ?? '')
+    if (line.startsWith('fusermount3 -uz ')) {
+      if (this.failUnmount) return Promise.reject(new Error('the sandbox went away'))
+      this.table.delete(words(line)[2] ?? '')
+    }
     return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {
     this.pipes.push(command)
-    this.table.set(words(command)[6] ?? '', 'fuse.sshfs')
+    const prefix = words(command)[6] ?? ''
+    if (this.sshfsMounts) this.table.set(prefix, 'fuse.sshfs')
     let end: () => void = () => undefined
     const reader = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -80,18 +104,28 @@ class FakeSandbox extends RemoteSandbox {
         }
       },
     })
+    this.ends.set(prefix, end)
     return Promise.resolve({
       reader,
       writer: { write: () => undefined, end: () => undefined },
       stop: () => {
+        this.stopped.push(prefix)
         end()
         return Promise.resolve()
       },
     })
   }
+
+  served(): string[] {
+    return this.pipes.map((p) => words(p)[6] ?? '')
+  }
 }
 
-async function workspace(sandbox: FakeSandbox, hide: string[] = []): Promise<Workspace> {
+async function workspace(
+  sandbox: FakeSandbox,
+  hide: string[] = [],
+  mounts?: ReadonlyMap<string, ProfileMount>,
+): Promise<Workspace> {
   return new Workspace(
     {
       '/': new RAMVFS(),
@@ -102,17 +136,22 @@ async function workspace(sandbox: FakeSandbox, hide: string[] = []): Promise<Wor
     {
       mode: MountMode.WRITE,
       shellParser: await getTestParser(),
-      profiles: { agent: { paths: { hide } } },
+      profiles: { agent: { paths: { hide }, ...(mounts === undefined ? {} : { mounts }) } },
       runtimes: [sandbox, 'workspace'],
     },
   )
 }
 
+const sessions: SessionState[] = []
+
+const drain: PipeServer = async (_files, session, reader) => {
+  sessions.push(session)
+  const chunks = reader.getReader()
+  while (!(await chunks.read()).done) continue
+}
+
 beforeAll(() => {
-  registerPipeServer(async (_files, _session, reader) => {
-    const chunks = reader.getReader()
-    while (!(await chunks.read()).done) continue
-  })
+  registerPipeServer(drain)
 })
 
 describe('mountTable', () => {
@@ -170,7 +209,7 @@ describe('SandboxMounts', () => {
     const ws = await workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.pipes.map((p) => words(p)[6])).toEqual(['/my notes'])
+    expect(sandbox.served()).toEqual(['/my notes'])
     await ws.close()
   })
 
@@ -228,6 +267,119 @@ describe('SandboxMounts', () => {
           `sudo -n chown "$(id -u):$(id -g)" '/data'; }`,
       ),
     )
+    await ws.close()
+  })
+
+  it.each(['both', 'fuse'] as const)(
+    'refuses a line under %s while a hidden mount is the sandbox own',
+    async (mountType) => {
+      const sandbox = new FakeSandbox(mountType, ['/data'])
+      const ws = await workspace(sandbox, ['/data'])
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('python3 job.py')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toBe(
+        "fake: /data is served by the sandbox itself, out of reach of this session's rules\n",
+      )
+      await ws.close()
+    },
+  )
+
+  it('refuses a line while a mode cap covers a prefix the sandbox serves', async () => {
+    const sandbox = new FakeSandbox('both', ['/data'])
+    const ws = await workspace(sandbox, [], new Map([['/data/sub', { mode: MountMode.READ }]]))
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toContain('fake: /data is served by the sandbox itself')
+    await ws.close()
+  })
+
+  it('serves the live session to a line with its own cwd', async () => {
+    sessions.length = 0
+    const sandbox = new FakeSandbox('ssh')
+    const ws = await workspace(sandbox)
+    await ws.session('agent', { profile: 'agent' })
+    const result = await ws.shell('python3 job.py', { sessionId: 'agent', cwd: '/data' })
+    expect(result.exitCode).toBe(0)
+    expect(sessions).toHaveLength(2)
+    for (const session of sessions) expect(session).toBe(ws.getSession('agent'))
+    await ws.close()
+  })
+
+  it('fails loud on a mount of its own under a served prefix', async () => {
+    const sandbox = new FakeSandbox('both', ['/data/sub'])
+    const ws = await workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(
+      'fake: the sandbox mounts /data/sub itself, and serving /data would cover it\n',
+    )
+    expect(sandbox.pipes).toEqual([])
+    await ws.close()
+  })
+
+  it('serves a mount added later on the next line', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = await workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    ws.addMount('/extra', new RAMVFS(), MountMode.WRITE)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/extra'])
+    await ws.close()
+  })
+
+  it('starts a server that ended again', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = await workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.ends.get('/data')?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
+    await ws.close()
+  })
+
+  it('stops a pipe whose unmount failed', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = await workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.failUnmount = true
+    await ws.close()
+    expect(sandbox.stopped).toEqual(['/data', '/my notes'])
+  })
+
+  it('says why a server that fails did', async () => {
+    registerPipeServer(() => Promise.reject(new Error('no server here')))
+    try {
+      const sandbox = new FakeSandbox('ssh', [], true, false)
+      const ws = await workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('python3 job.py')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toContain('the SFTP server failed: no server here')
+      await ws.close()
+    } finally {
+      registerPipeServer(drain)
+    }
+  })
+
+  it('lets go of its setup when the line is aborted', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    sandbox.hang = true
+    const ws = await workspace(sandbox)
+    await ws.session('agent', { profile: 'agent' })
+    const abort = new AbortController()
+    const running = ws.shell('python3 job.py', { sessionId: 'agent', signal: abort.signal })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    abort.abort()
+    await expect(running).rejects.toThrow()
+    sandbox.hang = false
+    expect((await ws.shell('python3 job.py', { sessionId: 'agent' })).exitCode).toBe(0)
     await ws.close()
   })
 })
