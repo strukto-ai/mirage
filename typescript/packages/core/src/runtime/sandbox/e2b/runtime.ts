@@ -14,13 +14,73 @@
 
 import { RemoteSandbox } from '../base.ts'
 import { registerRuntime } from '../../table.ts'
-import type { RunResult } from '../../types.ts'
+import type { PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
 import type { RuntimeOptions } from '../../config.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { checkMountType } from '../config.ts'
+import { PTY_MARK, PTY_RAW } from '../constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
 
 const ENC = new TextEncoder()
+
+/** Where the PTY marker ends in `bytes`, or -1 while it has not come. */
+function pastMark(bytes: Uint8Array): number {
+  outer: for (let at = 0; at + PTY_MARK.length <= bytes.length; at++) {
+    for (let i = 0; i < PTY_MARK.length; i++) {
+      if (bytes[at + i] !== PTY_MARK[i]) continue outer
+    }
+    return at + PTY_MARK.length
+  }
+  return -1
+}
+
+/**
+ * A PTY's stdin as a pipe writer. Writes queue, and one loop sends what
+ * has queued in one E2B call, in order: each call is a round trip, so a
+ * reply split into many writes would otherwise cost one trip per write.
+ */
+class PtyWriter implements PipeWriter {
+  private queue: Uint8Array[] = []
+  private ended = false
+  private wake: (() => void) | null = null
+
+  constructor(private readonly send: (data: Uint8Array) => Promise<void>) {
+    void this.loop()
+  }
+
+  write(data: Uint8Array): void {
+    this.queue.push(data.slice())
+    this.wake?.()
+  }
+
+  end(): void {
+    this.ended = true
+    this.wake?.()
+  }
+
+  private async loop(): Promise<void> {
+    for (;;) {
+      if (this.queue.length === 0) {
+        if (this.ended) return
+        await new Promise<void>((resolve) => {
+          this.wake = resolve
+        })
+        this.wake = null
+        continue
+      }
+      const chunks = this.queue
+      this.queue = []
+      try {
+        await this.send(concat(chunks))
+      } catch (err) {
+        console.debug('e2b: the PTY took no more input', err)
+        return
+      }
+    }
+  }
+}
 
 /**
  * An E2B sandbox the user runs as a whole-line runtime.
@@ -29,7 +89,9 @@ const ENC = new TextEncoder()
  * mirage only connects by `sandboxId` and execs lines. `apiKey` falls
  * back to E2B_API_KEY. E2B's exec reports stdout and stderr
  * separately. Piped bytes use native stdin followed by an explicit
- * EOF; no input closes stdin when the command starts.
+ * EOF; no input closes stdin when the command starts. A `mountType`
+ * serves the workspace over a PTY, since E2B's exec decodes output as
+ * text.
  */
 export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   readonly name = 'e2b'
@@ -41,6 +103,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     if (typeof this.config.sandboxId !== 'string' || !this.config.sandboxId.trim()) {
       throw new Error('e2b config needs a nonblank sandboxId')
     }
+    this.serveMounts(checkMountType('e2b', this.config.mountType))
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -116,6 +179,55 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
       stdout: ENC.encode(result.stdout),
       stderr: ENC.encode(result.stderr),
       exitCode: result.exitCode,
+    }
+  }
+
+  override async openPipe(command: string): Promise<SandboxPipe> {
+    if (this.sandbox === null) throw new Error('e2b sandbox not connected')
+    const pty = this.sandbox.pty
+    let feed: ReadableStreamDefaultController<Uint8Array> | null = null
+    const reader = new ReadableStream<Uint8Array>({
+      start(controller) {
+        feed = controller
+      },
+    })
+    let head: Uint8Array | null = new Uint8Array(0)
+    const onData = (data: Uint8Array): void => {
+      if (head === null) {
+        feed?.enqueue(data.slice())
+        return
+      }
+      head = concat([head, data])
+      const past = pastMark(head)
+      if (past < 0) return
+      const rest = head.slice(past)
+      head = null
+      if (rest.byteLength > 0) feed?.enqueue(rest)
+    }
+    const handle = await pty.create({ cols: 80, rows: 24, onData, timeoutMs: 0 })
+    const writer = new PtyWriter((data) => pty.sendInput(handle.pid, data))
+    let ended = false
+    const waiting = handle
+      .wait()
+      .then(
+        () => undefined,
+        (err: unknown) => {
+          console.debug(`e2b: the PTY for ${command} ended`, err)
+        },
+      )
+      .finally(() => {
+        ended = true
+        feed?.close()
+        writer.end()
+      })
+    await pty.sendInput(handle.pid, ENC.encode(`${PTY_RAW}${command}\n`))
+    return {
+      reader,
+      writer,
+      stop: async () => {
+        if (!ended) await pty.kill(handle.pid)
+        await waiting
+      },
     }
   }
 }

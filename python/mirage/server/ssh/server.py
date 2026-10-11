@@ -31,7 +31,7 @@ from mirage.server.ssh.constants import (
 )
 from mirage.server.ssh.keys import load_host_key
 from mirage.server.ssh.session import TunnelSSHServer, handle_process
-from mirage.server.ssh.sftp import MirageSFTPServer
+from mirage.server.ssh.sftp import serve_sftp
 from mirage.server.ssh.stream import ENCODING, ERRORS, MAX_TERMINAL_LINE
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ async def _server_options(
     return {
         "server_host_keys": [await load_host_key(config.host_key_file)],
         "process_factory": functools.partial(serve_channel, registry),
-        "sftp_factory": functools.partial(MirageSFTPServer, registry),
+        "sftp_factory": functools.partial(serve_sftp, registry),
         "allow_scp": True,
         "keepalive_interval": KEEPALIVE_INTERVAL_SECONDS,
         "keepalive_count_max": KEEPALIVE_COUNT_MAX,

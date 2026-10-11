@@ -565,6 +565,7 @@ class Workspace:
             self.dispatch,
             self._sandbox_resolver,
             lambda _binding: self.runtime_context(),
+            self._files,
         )
         self._runtimes, self._router = wire_runtime_world(
             self._registry, self._runtime_binding, runtimes

@@ -52,6 +52,13 @@ export type RuntimeLanguage = 'python' | 'js'
 export type RuntimeReach = 'workspace' | 'process' | 'remote'
 
 /**
+ * How a sandbox sees the workspace: `ssh` serves every prefix from the
+ * host over SFTP, `fuse` leaves them to the sandbox's own mirage, and
+ * `both` serves from the host what the sandbox does not mount itself.
+ */
+export type MountType = 'ssh' | 'fuse' | 'both'
+
+/**
  * The workspace dispatch: run the function `name` against the mount
  * owning `path` and return its result with the accounting IOResult.
  * Defined here, on
@@ -193,6 +200,22 @@ export interface RunArgs {
 }
 
 /** Outcome of one interpreter execution. */
+/** Where a pipe's bytes go: a Node `Writable`, or anything with its two calls. */
+export interface PipeWriter {
+  write(data: Uint8Array): void
+  end(): void
+}
+
+/** A command a sandbox runs with its stdin and stdout held open. */
+export interface SandboxPipe {
+  /** What the command writes. */
+  readonly reader: ReadableStream<Uint8Array>
+  /** What the command reads. */
+  readonly writer: PipeWriter
+  /** Ends the command. */
+  stop(): Promise<void>
+}
+
 export interface RunResult {
   stdout: Uint8Array
   /** Captured standard error, null when empty (mirrors Python). */

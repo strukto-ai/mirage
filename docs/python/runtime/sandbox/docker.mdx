@@ -24,6 +24,11 @@ docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 You can bake `sandbox.yaml` into the image instead of copying it. Sizing, GPUs,
 networks, volumes, and bind mounts belong on your own `docker run` command.
 
+With `mount_type: ssh` the workspace serves its own mounts into the container
+(see [The workspace inside the sandbox](/python/runtime/sandbox#the-workspace-inside-the-sandbox)),
+so the image needs no Mirage and no `sandbox.yaml`, only `sshfs` and the
+same `--cap-add SYS_ADMIN --device /dev/fuse`.
+
 ## Connect from Python
 
 ```python

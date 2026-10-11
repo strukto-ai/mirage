@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeAlias
@@ -71,6 +72,11 @@ Language: TypeAlias = Literal["python", "js"]
 # - "remote": the code runs on another machine and acts on that
 #   machine's world; the gate never sees those effects.
 RuntimeReach: TypeAlias = Literal["workspace", "process", "remote"]
+
+# How a sandbox sees the workspace: ``ssh`` serves every prefix from the
+# host over SFTP, ``fuse`` leaves them to the sandbox's own mirage, and
+# ``both`` serves from the host what the sandbox does not mount itself.
+MountType: TypeAlias = Literal["ssh", "fuse", "both"]
 
 
 class DispatchFn(Protocol):
@@ -299,6 +305,32 @@ class RunResult:
     stdout: bytes
     stderr: bytes | None
     exit_code: int
+
+
+class PipeWriter(Protocol):
+    """Where a pipe's bytes go: an ``asyncio.StreamWriter``, or anything
+    with its three calls."""
+
+    def write(self, data: bytes) -> None: ...
+
+    def write_eof(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxPipe:
+    """A command a sandbox runs with its stdin and stdout held open.
+
+    Args:
+        reader (asyncio.StreamReader): what the command writes.
+        writer (PipeWriter): what the command reads.
+        stop (Callable[[], Awaitable[None]]): ends the command.
+    """
+
+    reader: asyncio.StreamReader
+    writer: PipeWriter
+    stop: Callable[[], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

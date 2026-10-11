@@ -17,15 +17,19 @@ from typing import Any
 AsyncSandbox: Any
 CommandExitException: Any
 NotFoundException: Any
+PtySize: Any
 try:
     from e2b import AsyncSandbox as _AsyncSandbox
     from e2b import CommandExitException as _CommandExitException
     from e2b import NotFoundException as _NotFoundException
+    from e2b import PtySize as _PtySize
 except ImportError:
     AsyncSandbox = None
     CommandExitException = None
     NotFoundException = None
+    PtySize = None
 else:
     AsyncSandbox = _AsyncSandbox
     CommandExitException = _CommandExitException
     NotFoundException = _NotFoundException
+    PtySize = _PtySize

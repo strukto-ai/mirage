@@ -14,7 +14,8 @@
 
 from dataclasses import dataclass
 
-from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
+from mirage.runtime.types import MountType
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -26,6 +27,16 @@ class DockerConfig(SandboxConfig):
             it yourself (`docker run -d ... sleep infinity`); live
             FUSE mounts need `--cap-add SYS_ADMIN --device /dev/fuse`
             and an image with mirage installed.
+        mount_type (MountType | None): how the sandbox sees the
+            workspace: ``ssh`` serves every prefix the session sees from
+            the host over SFTP (the image needs sshfs), ``fuse`` leaves
+            them to a mirage in the sandbox, ``both`` serves from the
+            host what the sandbox does not mount itself. None serves
+            nothing.
     """
 
     container: str
+    mount_type: MountType | None = None
+
+    def __post_init__(self) -> None:
+        check_mount_type("docker", self.mount_type)

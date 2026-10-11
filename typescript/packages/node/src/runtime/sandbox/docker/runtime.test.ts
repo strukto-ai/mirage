@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -102,6 +102,13 @@ describe('DockerRuntime', () => {
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
   })
 
+  it('takes a mountType of ssh, fuse or both', () => {
+    expect(() => new DockerRuntime({ config: { container: 'c', mountType: 'nfs' } })).toThrow(
+      'docker mountType must be one of ssh, fuse, both, not "nfs"',
+    )
+    expect(() => new DockerRuntime({ config: { container: 'c', mountType: 'ssh' } })).not.toThrow()
+  })
+
   it("registers under the config name 'docker'", () => {
     const runtime = buildRuntime('docker', { config: { container: 'cid-42' } })
     expect(runtime).toBeInstanceOf(DockerRuntime)
@@ -114,6 +121,39 @@ describe('DockerRuntime', () => {
 // unhandled 'error' event crashes the whole process (python suppresses
 // the matching BrokenPipeError inside communicate()). A fake `docker`
 // on PATH that ignores stdin reproduces it against the real spawn.
+describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
+  it('holds docker exec open byte for byte', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))
+    const fake = join(dir, 'docker')
+    await writeFile(fake, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\nexec cat\n`, { mode: 0o755 })
+    const savedPath = process.env.PATH
+    process.env.PATH = `${dir}:${savedPath ?? ''}`
+    try {
+      const runtime = new DockerRuntime({ config: { container: 'cid-42' } })
+      const pipe = await runtime.openPipe('exec sshfs x y')
+      const payload = Uint8Array.from({ length: 256 }, (_, i) => i)
+      pipe.writer.write(payload)
+      pipe.writer.end()
+      const got: number[] = []
+      for await (const chunk of pipe.reader) got.push(...chunk)
+      expect(got).toEqual([...payload])
+      await pipe.stop()
+      expect((await readFile(`${fake}.args`, 'utf8')).split('\n')).toEqual([
+        'exec',
+        '-i',
+        'cid-42',
+        'sh',
+        '-c',
+        'exec sshfs x y',
+        '',
+      ])
+    } finally {
+      process.env.PATH = savedPath
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe.skipIf(process.platform === 'win32')('DockerRuntime stdin EPIPE', () => {
   it('a command that ignores a large stdin resolves instead of crashing', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))

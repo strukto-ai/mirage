@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WorkspaceRegistry, type WorkspaceEntry } from '../registry.ts'
 import { mintKeyPair } from './keys.ts'
 import { startSSHServer } from './server.ts'
-import { STATUS, longname, toAttrs, workspacePath } from './sftp.ts'
+import { STATUS } from '@struktoai/mirage-node/mount/constants'
 import type { SSHListener } from './types.ts'
 
 interface Harness {
@@ -152,40 +152,6 @@ afterEach(async () => {
     await h.listener.close()
     await h.registry.closeAll()
   }
-})
-
-describe('helpers', () => {
-  it('normalize client paths without ever leaving /', () => {
-    expect(workspacePath('.')).toBe('/')
-    expect(workspacePath('/d/../d/./sub/')).toBe('/d/sub')
-    expect(workspacePath('/../../etc')).toBe('/etc')
-    expect(workspacePath('//abs')).toBe('/abs')
-  })
-
-  it('carry mode, size and whole-second times', () => {
-    const when = new Date(1_700_000_001_500)
-    const attrs = toAttrs({
-      mtime: when,
-      atime: when,
-      ctime: when,
-      nlink: 1,
-      size: 12,
-      mode: 0o100640,
-      uid: 501,
-      gid: 20,
-      rdev: 0,
-    })
-    expect(attrs).toEqual({
-      mode: 0o100640,
-      uid: 501,
-      gid: 20,
-      size: 12,
-      atime: 1_700_000_001,
-      mtime: 1_700_000_001,
-    })
-    expect(longname('f', attrs).startsWith('-rw-r-----')).toBe(true)
-    expect(longname('f', attrs).endsWith(' f')).toBe(true)
-  })
 })
 
 describe('sftp', () => {

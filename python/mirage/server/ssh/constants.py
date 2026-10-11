@@ -31,11 +31,6 @@ TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
 # How many bytes the HTTPS route relays at a time.
 TUNNEL_CHUNK = 64 * 1024
 
-# The most entry stats one listing keeps in flight. Each is a hop to the
-# workspace loop and, on a mount that keeps no listing index, a backend
-# request, so a wide directory does not put every one on the wire.
-LISTING_CONCURRENCY = 16
-
 # The authorized_keys option that binds a key to one of the workspace's
 # profiles (`mirage-profile="guarded" ssh-ed25519 AAAA...`). The server
 # reads it, never the client, so a key cannot pick a looser profile.

@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from collections.abc import Callable, Sequence
+from typing import Any
+
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import run_cli
 from mirage.runtime.sandbox.docker.config import DockerConfig
 from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunResult, SandboxPipe, ScriptSource
 
 
 class DockerRuntime(RemoteSandbox):
@@ -36,6 +40,15 @@ class DockerRuntime(RemoteSandbox):
     name = "docker"
     config_cls = DockerConfig
     config: DockerConfig
+
+    def __init__(
+        self,
+        captures: Sequence[str] | None = None,
+        config: DockerConfig | dict[str, Any] | None = None,
+        script: Callable[..., Any] | ScriptSource | None = None,
+    ) -> None:
+        super().__init__(captures, config, script)
+        self.serve_mounts(self.config.mount_type)
 
     async def _docker(
         self, args: list[str], stdin: bytes | None = None
@@ -70,3 +83,25 @@ class DockerRuntime(RemoteSandbox):
         args += [self.config.container, "sh", "-c", line]
         stdout, stderr, code = await self._docker(args, stdin=stdin)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            "-i",
+            self.config.container,
+            "sh",
+            "-c",
+            command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        assert process.stdin is not None and process.stdout is not None
+
+        async def stop() -> None:
+            if process.returncode is None:
+                process.terminate()
+            await process.wait()
+
+        return SandboxPipe(process.stdout, process.stdin, stop)

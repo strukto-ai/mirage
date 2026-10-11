@@ -12,8 +12,8 @@ captures.
 
 ## Skip the FUSE
 
-The other providers need Mirage and FUSE inside the sandbox to serve the
-workspace's mounts. SSH is the one provider whose machine usually **is**
+The other providers need sshfs (`mountType`) or Mirage and FUSE inside the
+sandbox to serve the workspace's mounts. SSH is the one provider whose machine usually **is**
 the fileserver: the [ssh VFS](/typescript/setup/ssh) already mounts
 that machine's directory over SFTP. Mount it at a prefix **equal to its
 remote absolute path**, and the two sides agree about every path with no

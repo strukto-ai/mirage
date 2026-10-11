@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { Readable } from 'node:stream'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { checkMountType } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
@@ -38,6 +42,7 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
     if (!this.config.container) {
       throw new Error('docker config needs container: the id or name of a running container')
     }
+    this.serveMounts(checkMountType('docker', this.config.mountType))
   }
 
   // One docker CLI invocation; the seam tests override.
@@ -76,6 +81,21 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
     args.push(this.config.container, 'sh', '-c', line)
     const result = await this.docker(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+  }
+
+  override openPipe(command: string): Promise<SandboxPipe> {
+    const child = spawn('docker', ['exec', '-i', this.config.container, 'sh', '-c', command], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    const exited = once(child, 'close')
+    return Promise.resolve({
+      reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      writer: child.stdin,
+      stop: async () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill()
+        await exited
+      },
+    })
   }
 }
 

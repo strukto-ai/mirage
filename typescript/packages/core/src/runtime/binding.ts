@@ -21,6 +21,7 @@ import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import type { MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
+import type { Files } from '../workspace/files.ts'
 
 /** Local workspace entry points captured for one execution, never guest globals. */
 export interface RuntimeContext {
@@ -37,10 +38,15 @@ export interface RuntimeContext {
 
 /** Live workspace connection; capture creates views scoped to one execution. */
 export class WorkspaceBinding {
+  /**
+   * @param files the workspace's `ws.vfs`, for an adapter that serves the
+   *   mounts as files (a sandbox's SFTP); null outside a workspace.
+   */
   constructor(
     readonly dispatch: BridgeDispatchFn,
     readonly resolver: MountResolver,
     private readonly context?: (binding: WorkspaceBinding) => RuntimeContext,
+    readonly files: Files | null = null,
   ) {}
 
   capture(): RuntimeContext {

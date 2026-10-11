@@ -15,6 +15,8 @@
 import shlex
 import uuid
 
+from mirage.runtime.types import MountType
+
 # Providers whose exec API has no stdin stream (Daytona) upload
 # piped bytes to a per-invocation file and redirect it into the line.
 STDIN_PREFIX = "/tmp/.mirage_stdin"
@@ -69,3 +71,43 @@ def sdk_install_hint(name: str) -> str:
         f"the {name} runtime needs the {name} SDK; install with: "
         f"pip install mirage-ai[{name}]"
     )
+
+
+MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")
+
+# How long a sandbox has to show a served prefix as mounted, and how
+# often it is asked.
+MOUNT_WAIT_SECONDS = 15.0
+MOUNT_POLL_SECONDS = 0.1
+
+# How long a served prefix's SFTP server may take to end once its
+# sandbox side is unmounted.
+UNMOUNT_WAIT_SECONDS = 5.0
+
+# sshfs keeps no copy of its own: every listing, stat and read asks the
+# host, so a file the host changes, or a profile now hides, shows at
+# once, and a file whose size the backend does not know reads whole
+# (direct_io), as the workspace's own FUSE mounts do.
+SSHFS_OPTIONS = (
+    "passive,dir_cache=no,direct_io,"
+    "attr_timeout=0,entry_timeout=0,negative_timeout=0"
+)
+
+# Where sshfs writes its errors in the sandbox, one file per prefix; its
+# stdout is the SFTP stream, so its stderr cannot share the pipe.
+SSHFS_LOG_PREFIX = "/tmp/.mirage_sshfs"
+
+# A PTY carries a served prefix's SFTP where a provider's exec decodes
+# output as text (E2B): the terminal goes raw, so bytes pass unchanged,
+# and the marker ends the shell's own output before sshfs starts.
+PTY_MARK = b"\x01mirage-sftp\x02"
+PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
+
+SSHFS_HINT = (
+    "serving the workspace into a sandbox needs sshfs there; "
+    "install it in the image (apt-get install sshfs)"
+)
+PIPE_SERVER_HINT = (
+    "serving the workspace into a sandbox needs asyncssh; "
+    "install with: pip install mirage-ai[ssh]"
+)

@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.sandbox.constants import MOUNT_TYPES
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,3 +34,18 @@ class SandboxConfig(RuntimeConfig):
     """
 
     env: dict[str, str] = field(default_factory=dict)
+
+
+def check_mount_type(runtime: str, mount_type: str | None) -> None:
+    """Fail loud on a ``mount_type`` other than ssh, fuse or both.
+
+    Args:
+        runtime (str): the runtime's name, for the message.
+        mount_type (str | None): the configured value; None serves
+            nothing.
+    """
+    if mount_type is not None and mount_type not in MOUNT_TYPES:
+        raise ValueError(
+            f"{runtime} mount_type must be one of "
+            f"{', '.join(MOUNT_TYPES)}, not {mount_type!r}"
+        )

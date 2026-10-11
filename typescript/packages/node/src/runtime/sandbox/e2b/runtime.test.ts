@@ -19,6 +19,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
+import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
 
@@ -91,10 +92,56 @@ class FakeCommands {
   }
 }
 
+/** E2B's pty API: the shell echoes its line, then the command speaks. */
+class FakePty {
+  readonly sent: Uint8Array[] = []
+  created: [number, number, number | undefined] | null = null
+  private onData: (data: Uint8Array) => void = () => undefined
+  private end: () => void = () => undefined
+  ended = false
+  readonly pid = 7
+
+  create(opts: {
+    cols: number
+    rows: number
+    onData: (data: Uint8Array) => void
+    timeoutMs?: number
+  }) {
+    this.created = [opts.rows, opts.cols, opts.timeoutMs]
+    this.onData = opts.onData
+    const waiting = new Promise<never>((_, reject) => {
+      this.end = () => {
+        reject(new FakeExitError(-1, '', ''))
+      }
+    })
+    return Promise.resolve({ pid: this.pid, wait: () => waiting })
+  }
+
+  sendInput(pid: number, data: Uint8Array): Promise<void> {
+    expect(pid).toBe(this.pid)
+    this.sent.push(data)
+    if (this.sent.length === 1) {
+      this.onData(
+        new Uint8Array([...new TextEncoder().encode('$ stty raw\r\n'), ...PTY_MARK.slice(0, 3)]),
+      )
+      this.onData(new Uint8Array([...PTY_MARK.slice(3), 0, 115, 102, 116, 112]))
+    }
+    return Promise.resolve()
+  }
+
+  kill(pid: number): Promise<boolean> {
+    expect(pid).toBe(this.pid)
+    this.ended = true
+    this.end()
+    return Promise.resolve(true)
+  }
+}
+
 class FakeSandbox {
   static connected: [string, Record<string, unknown>][] = []
   static last: FakeSandbox
   readonly commands = new FakeCommands()
+  readonly pty = new FakePty()
   static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeSandbox> {
     FakeSandbox.connected.push([sandboxId, params])
     await Promise.resolve()
@@ -127,6 +174,30 @@ describe('E2BRuntime', () => {
     const runtime = new FakedE2BRuntime({ config: { sandboxId: 'sb-live', apiKey: 'k-123' } })
     await runtime.connect()
     expect(FakeSandbox.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
+  })
+  it('takes a mountType of ssh, fuse or both', () => {
+    expect(() => new FakedE2BRuntime({ config: { sandboxId: 'sb', mountType: 'nfs' } })).toThrow(
+      'e2b mountType must be one of ssh, fuse, both, not "nfs"',
+    )
+    expect(
+      () => new FakedE2BRuntime({ config: { sandboxId: 'sb', mountType: 'both' } }),
+    ).not.toThrow()
+  })
+  it("opens a pipe as a raw pty past the shell's own output", async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const pty = FakeSandbox.last.pty
+    const pipe = await runtime.openPipe('exec sshfs x y')
+    expect(pty.created).toEqual([24, 80, 0])
+    expect(pty.sent.map((d) => DEC.decode(d))).toEqual([`${PTY_RAW}exec sshfs x y\n`])
+    const chunks = pipe.reader.getReader()
+    expect([...((await chunks.read()).value ?? [])]).toEqual([0, 115, 102, 116, 112])
+    for (const part of [[97], [0], [99]]) pipe.writer.write(new Uint8Array(part))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pty.sent.slice(1).map((d) => [...d])).toEqual([[97, 0, 99]])
+    await pipe.stop()
+    expect(pty.ended).toBe(true)
+    expect((await chunks.read()).done).toBe(true)
   })
   it('requires a sandbox id', () => {
     expect(() => new FakedE2BRuntime({ config: {} })).toThrow('sandboxId')

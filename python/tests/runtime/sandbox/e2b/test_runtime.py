@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import pytest
 from e2b import CommandExitException, NotFoundException
 
+from mirage.runtime.sandbox.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 
 
@@ -79,12 +80,52 @@ class FakeCommands:
         return handle
 
 
+class FakePtyHandle:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.ended = asyncio.Event()
+
+    async def wait(self):
+        await self.ended.wait()
+        raise CommandExitException(
+            stderr="", stdout="", exit_code=-1, error="killed"
+        )
+
+
+class FakePty:
+    """E2B's pty API: the shell echoes its line, then the command speaks."""
+
+    def __init__(self):
+        self.sent: list[bytes] = []
+        self.handle = FakePtyHandle(7)
+        self.on_data = None
+        self.created = None
+
+    async def create(self, size, *, on_data, timeout):
+        self.created = (size.rows, size.cols, timeout)
+        self.on_data = on_data
+        return self.handle
+
+    async def send_stdin(self, pid, data):
+        assert pid == self.handle.pid
+        self.sent.append(data)
+        if len(self.sent) == 1:
+            self.on_data(b"$ stty raw -echo\r\n" + PTY_MARK[:3])
+            self.on_data(PTY_MARK[3:] + b"\x00sftp")
+
+    async def kill(self, pid):
+        assert pid == self.handle.pid
+        self.handle.ended.set()
+        return True
+
+
 class FakeSandbox:
     connected = []
     last = None
 
     def __init__(self):
         self.commands = FakeCommands()
+        self.pty = FakePty()
 
     @classmethod
     async def connect(cls, sandbox_id, **params):
@@ -210,3 +251,28 @@ def test_invalid_sandbox_id_is_rejected_before_connecting(value):
     with pytest.raises(ValueError, match="nonblank sandbox_id"):
         E2BRuntime(config={"sandbox_id": value})
     assert FakeSandbox.connected == []
+
+
+def test_mount_type_is_one_of_ssh_fuse_both():
+    with pytest.raises(ValueError, match="e2b mount_type must be one of"):
+        E2BRuntime(config={"sandbox_id": "sb", "mount_type": "nfs"})
+    E2BRuntime(config={"sandbox_id": "sb", "mount_type": "both"})
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    pty = FakeSandbox.last.pty
+    pipe = await runtime.open_pipe("exec sshfs x y")
+    assert pty.created == (24, 80, 0)
+    assert pty.sent == [f"{PTY_RAW}exec sshfs x y\n".encode()]
+    assert await pipe.reader.readexactly(5) == b"\x00sftp"
+    for part in (b"a", b"\x00", b"c"):
+        pipe.writer.write(part)
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert pty.sent[1:] == [b"a\x00c"]
+    await pipe.stop()
+    assert pty.handle.ended.is_set()
+    assert pipe.reader.at_eof()

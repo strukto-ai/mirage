@@ -12,16 +12,78 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import sdk_install_hint
+from mirage.runtime.sandbox.constants import (
+    PTY_MARK,
+    PTY_RAW,
+    sdk_install_hint,
+)
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunResult, SandboxPipe, ScriptSource
 
 logger = logging.getLogger(__name__)
+
+
+def past_mark(data: bytes) -> int:
+    """Where the PTY marker ends in ``data``, or -1 while it has not come.
+
+    Args:
+        data (bytes): the PTY's output so far.
+    """
+    at = data.find(PTY_MARK)
+    return -1 if at < 0 else at + len(PTY_MARK)
+
+
+class PtyWriter:
+    """A PTY's stdin as a pipe writer.
+
+    Writes queue, and one task sends what has queued in one E2B call, in
+    order: each call is a round trip, so a reply split into many writes
+    would otherwise cost one trip per write.
+
+    Args:
+        pty (Any): the sandbox's ``pty`` API.
+        pid (int): the PTY's process.
+    """
+
+    def __init__(self, pty: Any, pid: int) -> None:
+        self._pty = pty
+        self._pid = pid
+        self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._task = asyncio.create_task(self._send())
+
+    def write(self, data: bytes) -> None:
+        self._queue.put_nowait(bytes(data))
+
+    def write_eof(self) -> None:
+        self._queue.put_nowait(None)
+
+    def close(self) -> None:
+        self._queue.put_nowait(None)
+
+    async def _send(self) -> None:
+        while (data := await self._queue.get()) is not None:
+            chunks = [data]
+            ended = False
+            while not ended and not self._queue.empty():
+                more = self._queue.get_nowait()
+                if more is None:
+                    ended = True
+                else:
+                    chunks.append(more)
+            try:
+                await self._pty.send_stdin(self._pid, b"".join(chunks))
+            except Exception:
+                logger.debug("e2b: the PTY took no more input", exc_info=True)
+                return
+            if ended:
+                return
 
 
 class E2BRuntime(RemoteSandbox):
@@ -32,6 +94,8 @@ class E2BRuntime(RemoteSandbox):
     ``api_key`` falls back to E2B_API_KEY. E2B's exec reports stdout
     and stderr separately. Piped bytes use native stdin followed by
     an explicit EOF; no input closes stdin when the command starts.
+    A ``mount_type`` serves the workspace over a PTY, since E2B's exec
+    decodes output as text.
 
     Args:
         options (Any): the RemoteSandbox constructor fields.
@@ -41,6 +105,15 @@ class E2BRuntime(RemoteSandbox):
     config_cls = E2BConfig
     config: E2BConfig
     _sandbox: Any = None
+
+    def __init__(
+        self,
+        captures: Sequence[str] | None = None,
+        config: E2BConfig | dict[str, Any] | None = None,
+        script: Callable[..., Any] | ScriptSource | None = None,
+    ) -> None:
+        super().__init__(captures, config, script)
+        self.serve_mounts(self.config.mount_type)
 
     def _api_params(self) -> dict[str, Any]:
         api_key = self.config.api_key
@@ -86,3 +159,46 @@ class E2BRuntime(RemoteSandbox):
             stderr=str(result.stderr).encode(),
             exit_code=int(result.exit_code),
         )
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        reader = asyncio.StreamReader()
+        head = bytearray()
+        started = False
+
+        def on_data(data: bytes) -> None:
+            nonlocal started
+            if started:
+                reader.feed_data(data)
+                return
+            head.extend(data)
+            past = past_mark(bytes(head))
+            if past >= 0:
+                started = True
+                rest = bytes(head[past:])
+                if rest:
+                    reader.feed_data(rest)
+
+        pty = self._sandbox.pty
+        handle = await pty.create(
+            sdk.PtySize(rows=24, cols=80), on_data=on_data, timeout=0
+        )
+        writer = PtyWriter(pty, handle.pid)
+
+        async def wait() -> None:
+            try:
+                await handle.wait()
+            except sdk.CommandExitException as exc:
+                logger.debug("e2b: the PTY for %r ended: %s", command, exc)
+            finally:
+                reader.feed_eof()
+                writer.close()
+
+        waiter = asyncio.create_task(wait())
+        await pty.send_stdin(handle.pid, f"{PTY_RAW}{command}\n".encode())
+
+        async def stop() -> None:
+            if not waiter.done():
+                await pty.kill(handle.pid)
+            await waiter
+
+        return SandboxPipe(reader, writer, stop)

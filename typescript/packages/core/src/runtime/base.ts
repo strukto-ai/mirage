@@ -70,7 +70,7 @@ export abstract class Runtime {
   /** The runtime's coerced implementation knobs. */
   config: RuntimeConfig
   script?: RouteScript
-  private binding: WorkspaceBinding | null = null
+  protected binding: WorkspaceBinding | null = null
   private readonly activity = new Activity()
   private retired = false
 

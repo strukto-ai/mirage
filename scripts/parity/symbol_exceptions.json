@@ -1,5 +1,5 @@
 {
-  "baseline": 3861,
+  "baseline": 3860,
  "modules": {
   "concurrency/worker": {
    "python_only": {
@@ -39,12 +39,43 @@
     "_marshal_utimens": "mfusepy folds a timespec into one number and loses the utimensat markers, so the Python loader swaps in marshalling that reads them; fuse-native marshals in C, fixed by a pnpm patch."
    }
   },
-  "server/ssh/sftp": {
+  "mount/sftp": {
    "python_only": {
-    "epoch_ns": "asyncssh splits an SFTP time into whole seconds and a nanosecond part, which the mount core takes as epoch nanoseconds; ssh2 hands whole seconds, which TypeScript turns into a Date inline."
+    "epoch_ns": "asyncssh splits an SFTP time into whole seconds and a nanosecond part, which the mount core takes as epoch nanoseconds; ssh2 hands whole seconds, which TypeScript turns into a Date inline.",
+    "PipeReader": "asyncssh's SFTP handler reads an SSH channel's stream, so a pipe is wrapped in the three calls it uses; ssh2's SFTP class takes pushed bytes, which TypeScript feeds from the pipe directly."
    },
    "typescript_only": {
-    "modeOf": "ssh2 types every SFTP attribute as present, so TypeScript narrows the permissions a request may omit; asyncssh already reports an omitted one as None."
+    "modeOf": "ssh2 types every SFTP attribute as present, so TypeScript narrows the permissions a request may omit; asyncssh already reports an omitted one as None.",
+    "Ssh2Sftp": "ssh2 exports no type for its SFTP protocol class, which a sandbox pipe runs without an SSH connection; asyncssh runs its handler over any reader and writer.",
+    "loadSftp": "ssh2's SFTP class is loaded from its internal module, an optional peer; asyncssh exports run_sftp_server, imported where it is used."
+   }
+  },
+  "mount/constants": {
+   "python_only": {
+    "ENCODING": "asyncssh hands SFTP paths as bytes, which Python decodes; ssh2 hands them as strings.",
+    "ERRORS": "asyncssh hands SFTP paths as bytes, which Python decodes; ssh2 hands them as strings.",
+    "SFTP_VERSION": "asyncssh's run_sftp_server takes the version it answers; ssh2's SFTP class answers the client's INIT itself."
+   },
+   "typescript_only": {
+    "PIPE_PACKET_SIZE": "ssh2's SFTP class cuts its answers to its channel's packet size, which a sandbox pipe sets; asyncssh writes whole packets.",
+    "SSH2_SFTP_MODULE": "ssh2's SFTP class lives in an internal module of the optional peer; asyncssh exports what Python uses."
+   }
+  },
+  "runtime/sandbox/mounts": {
+   "python_only": {
+    "serve_pipe": "Python imports mount.sftp's serve_pipe here, guarded since asyncssh is an extra; TypeScript's core has no MountCore or ssh2, so node registers its servePipe (registerPipeServer)."
+   },
+   "typescript_only": {
+    "Served": "Python keeps each served prefix as a tuple with its task; TypeScript names the record, whose promise carries no done state of its own.",
+    "pipeServer": "core holds the SFTP server node registers, since MountCore and ssh2 are node's; Python imports serve_pipe directly.",
+    "registerPipeServer": "node registers its servePipe with core, since MountCore and ssh2 are node's; Python imports serve_pipe directly.",
+    "sleep": "asyncio.sleep in Python.",
+    "within": "asyncio.wait_for in Python."
+   }
+  },
+  "runtime/sandbox/e2b/sdk": {
+   "python_only": {
+    "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields."
    }
   },
   "execution/context": {

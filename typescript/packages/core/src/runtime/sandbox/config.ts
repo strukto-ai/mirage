@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RuntimeConfig } from '../config.ts'
+import type { MountType } from '../types.ts'
+import { MOUNT_TYPES } from './constants.ts'
 
 /**
  * How the sandbox machine is built: the fields every provider has.
@@ -33,3 +35,14 @@ export type NormalizedSandboxConfig<C extends SandboxConfig = SandboxConfig> = C
   Required<Pick<SandboxConfig, 'env'>>
 
 export const BASE_CONFIG_KEYS: readonly string[] = ['env']
+
+/** Fail loud on a `mountType` other than ssh, fuse or both; undefined serves nothing. */
+export function checkMountType(runtime: string, mountType: unknown): MountType | null {
+  if (mountType === undefined) return null
+  if (!MOUNT_TYPES.includes(mountType as MountType)) {
+    throw new Error(
+      `${runtime} mountType must be one of ${MOUNT_TYPES.join(', ')}, not ${JSON.stringify(mountType)}`,
+    )
+  }
+  return mountType as MountType
+}

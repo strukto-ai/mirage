@@ -132,9 +132,11 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 | `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
 | `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
 | `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
+| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |
 | `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
 | `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                     |
 | `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                            |
 
 With `INTEG_RUNTIME_STRICT=1` an unmet requirement fails instead of
-skipping.
+skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker or e2b box has sshfs,
+FUSE, and a mount of its own at `/boxdata` holding `own.txt` (`box`).

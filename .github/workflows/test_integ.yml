@@ -1857,7 +1857,16 @@ jobs:
 
       - name: Start the docker sandbox container (user-provisioned)
         if: env.NEEDS_DOCKER == '1'
-        run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:trixie-slim sleep infinity
+        run: |
+          # FUSE in the box, so mount_type can serve the workspace into it
+          # over sshfs; /boxdata is a mount of the box's own, for `both`.
+          docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" \
+            --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
+            debian:trixie-slim sleep infinity
+          docker exec "$MIRAGE_INTEG_DOCKER_CONTAINER" sh -c \
+            'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs >/dev/null &&
+             mkdir -p /boxdata && mount -t tmpfs tmpfs /boxdata && echo box > /boxdata/own.txt'
+          echo "MIRAGE_INTEG_BOX_MOUNTS=1" >> "$GITHUB_ENV"
 
       - name: Start the ssh sandbox host (user-provisioned)
         if: env.NEEDS_SSH == '1'
@@ -1996,8 +2005,18 @@ jobs:
 
           async def main():
               sandbox = await AsyncSandbox.create(timeout=1800)
+              # sshfs, so mount_type can serve the workspace into the
+              # sandbox; /boxdata is a mount of its own, for `both`.
+              await sandbox.commands.run(
+                  "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive "
+                  "apt-get install -y -qq sshfs >/dev/null && sudo mkdir -p /boxdata && "
+                  "sudo mount -t tmpfs tmpfs /boxdata && "
+                  "echo box | sudo tee /boxdata/own.txt >/dev/null",
+                  timeout=300,
+              )
               with open(os.environ["GITHUB_ENV"], "a") as env:
                   env.write(f"MIRAGE_INTEG_E2B_SANDBOX={sandbox.sandbox_id}\n")
+                  env.write("MIRAGE_INTEG_BOX_MOUNTS=1\n")
 
 
           asyncio.run(main())

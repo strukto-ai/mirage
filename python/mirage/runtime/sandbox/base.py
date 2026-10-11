@@ -20,7 +20,14 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig
-from mirage.runtime.types import RunResult, RuntimeReach, ScriptSource
+from mirage.runtime.sandbox.mounts import SandboxMounts
+from mirage.runtime.types import (
+    MountType,
+    RunResult,
+    RuntimeReach,
+    SandboxPipe,
+    ScriptSource,
+)
 
 
 class RemoteSandbox(Runtime, LineExecutorMixin):
@@ -31,18 +38,18 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
 
     Mirage never creates, provisions, or deletes sandboxes: you bring
     your own (a running container, a live Daytona or E2B sandbox) and
-    the provider config says how to reach it. The sandbox is also
-    yours to provision: serve the workspace inside it yourself (run
-    ``mirage workspace create`` in the image entrypoint or by hand)
-    with mounts at the same prefixes as the host workspace, so the
-    session cwd and every path in a line resolve unchanged. Mirage
-    only connects and execs lines: the whole-line entry point is
-    LineExecutorMixin's run_line, and there is no interpreter entry point.
-    Subclasses adapt one provider by implementing connect() and
-    exec_line(); routing, captures, and per-line scripts are
-    inherited. Constructed like every runtime (captures, config,
-    script); config is how to reach the sandbox, coerced through the
-    provider's own config class.
+    the provider config says how to reach it. The workspace reaches
+    the sandbox at the same prefixes as the host's, so the session cwd
+    and every path in a line resolve unchanged: a provider with a
+    ``mount_type`` serves them itself (SandboxMounts), otherwise serve
+    them inside it yourself (``mirage workspace create`` in the image
+    entrypoint or by hand). The whole-line entry point is
+    LineExecutorMixin's run_line, and there is no interpreter entry
+    point. Subclasses adapt one provider by implementing connect() and
+    exec_line(), and open_pipe() for a ``mount_type``; routing,
+    captures, and per-line scripts are inherited. Constructed like
+    every runtime (captures, config, script); config is how to reach
+    the sandbox, coerced through the provider's own config class.
     """
 
     # Lines execute on the provider's machine and act on that
@@ -66,6 +73,7 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
         # next line retries.
         self._connected = False
         self._connect_lock = asyncio.Lock()
+        self._mounts: SandboxMounts | None = None
 
     async def run_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
@@ -84,8 +92,31 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
             cwd (str): the session working directory.
         """
         await self._ensure_connected()
+        if self._mounts is not None:
+            refusal = await self._mounts.admit(self._binding)
+            if refusal is not None:
+                return RunResult(
+                    stdout=b"",
+                    stderr=f"{self.name}: {refusal}\n".encode(),
+                    exit_code=1,
+                )
         merged = {**self.config.env, **env}
         return await self.exec_line(line, stdin, merged, cwd)
+
+    def serve_mounts(self, mount_type: MountType | None) -> None:
+        """Let the sandbox see the workspace by ``mount_type``.
+
+        Args:
+            mount_type (MountType | None): ssh, fuse or both; None
+                serves nothing.
+        """
+        if mount_type is not None:
+            self._mounts = SandboxMounts(
+                self.name, mount_type, self._setup, self.open_pipe
+            )
+
+    async def _setup(self, line: str) -> RunResult:
+        return await self.exec_line(line, None, dict(self.config.env), "/")
 
     async def _ensure_connected(self) -> None:
         async with self._connect_lock:
@@ -109,3 +140,18 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
             cwd (str): the working directory, passed through verbatim.
         """
         raise NotImplementedError
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        """Start a command in the sandbox with its stdin and stdout held
+        open, byte for byte, for a ``mount_type``'s SFTP.
+
+        Args:
+            command (str): the shell command.
+        """
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        """Unmount what the sandbox was served; the sandbox is the user's."""
+        if self._mounts is not None:
+            await self._mounts.close()
+        await super().close()

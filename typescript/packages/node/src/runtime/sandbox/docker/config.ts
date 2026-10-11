@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import type { MountType } from '@struktoai/mirage-core/runtime/types'
 
 /** How to reach the user's running container. */
 export interface DockerConfig extends SandboxConfig {
@@ -23,6 +24,13 @@ export interface DockerConfig extends SandboxConfig {
    * installed.
    */
   container: string
+  /**
+   * How the sandbox sees the workspace: `ssh` serves every prefix the
+   * session sees from the host over SFTP (the image needs sshfs), `fuse`
+   * leaves them to a mirage in the sandbox, `both` serves from the host
+   * what the sandbox does not mount itself. Unset serves nothing.
+   */
+  mountType?: MountType
 }
 
-export const DOCKER_CONFIG_KEYS: readonly string[] = ['env', 'container']
+export const DOCKER_CONFIG_KEYS: readonly string[] = ['env', 'container', 'mountType']

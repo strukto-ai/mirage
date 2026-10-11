@@ -1,0 +1,164 @@
+{
+  "cases": [
+    {
+      "id": "mount_type_ssh_serves_the_sessions_view",
+      "runtimes": [
+        "docker",
+        "e2b"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram",
+            "files": {
+              "plan.txt": "plan\n",
+              "secret.txt": "salaries\n"
+            }
+          },
+          "/served/ro": {
+            "vfs": "ram",
+            "mode": "read"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/served/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "dash -c 'ls /served'",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan.txt\nro\n"
+          }
+        },
+        {
+          "command": "dash -c 'cat /served/secret.txt'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: /served/secret.txt: No such file or directory\n"
+          }
+        },
+        {
+          "command": "dash -c 'echo made > /served/new.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /served/new.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n"
+          }
+        },
+        {
+          "command": "dash -c 'echo x > /served/ro/f'",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr": "dash: 1: cannot create /served/ro/f: Permission denied\n"
+          }
+        },
+        {
+          "command": "rm /served/plan.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "dash -c 'ls /served'",
+          "expect": {
+            "exit": 0,
+            "stdout": "new.txt\nro\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_both_leaves_the_boxs_own_mounts_and_refuses_rules_on_them",
+      "runtimes": [
+        "docker",
+        "e2b"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/boxdata": {
+            "vfs": "ram"
+          },
+          "/hostdata": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "host\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "both"
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/hostdata/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "dash -c 'cat /hostdata/f.txt /boxdata/own.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "host\nbox\n"
+          }
+        },
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/boxdata/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "dash -c 'cat /hostdata/f.txt'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
+          }
+        }
+      ]
+    }
+  ]
+}

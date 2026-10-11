@@ -15,9 +15,12 @@
 import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { Runtime } from '../base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../mixin.ts'
-import type { RunResult } from '../types.ts'
+import type { MountType, RunResult, SandboxPipe } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
+import { SandboxMounts } from './mounts.ts'
+
+const ENC = new TextEncoder()
 
 /**
  * A runtime that executes programs in a sandbox the user runs.
@@ -27,15 +30,15 @@ import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } fr
  *
  * Mirage never creates, provisions, or deletes sandboxes: you bring
  * your own (a running container, a live Daytona or E2B sandbox) and
- * the provider config says how to reach it. The sandbox is also
- * yours to provision: serve the workspace inside it yourself (run
- * `mirage workspace create` in the image entrypoint or by hand) with
- * mounts at the same prefixes as the host workspace, so the session
- * cwd and every path in a line resolve unchanged. Mirage only
- * connects and execs lines: the whole-line entry point is LineExecutor's
- * runLine, and there is no interpreter entry point. Subclasses adapt one
- * provider by implementing connect() and execLine(); routing,
- * captures, and per-line scripts are inherited. Constructed like
+ * the provider config says how to reach it. The workspace reaches the
+ * sandbox at the same prefixes as the host's, so the session cwd and
+ * every path in a line resolve unchanged: a provider with a `mountType`
+ * serves them itself (SandboxMounts), otherwise serve them inside it
+ * yourself (`mirage workspace create` in the image entrypoint or by
+ * hand). The whole-line entry point is LineExecutor's runLine, and there
+ * is no interpreter entry point. Subclasses adapt one provider by
+ * implementing connect() and execLine(), and openPipe() for a
+ * `mountType`; routing, captures, and per-line scripts are inherited. Constructed like
  * every runtime (captures, config, script); config is how to reach
  * the sandbox, coerced against the provider's own key list.
  */
@@ -54,6 +57,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // connect, and a failed connect clears the slot so the next line
   // retries.
   private connecting: Promise<void> | null = null
+  private mounts: SandboxMounts | null = null
 
   constructor(
     options: RuntimeOptions<C> | Record<string, unknown> = {},
@@ -82,8 +86,29 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     signal?: AbortSignal,
   ): Promise<RunResult> {
     await this.ensureConnected(signal)
+    if (this.mounts !== null) {
+      const refusal = await this.mounts.admit(this.binding)
+      if (refusal !== null) {
+        return {
+          stdout: new Uint8Array(),
+          stderr: ENC.encode(`${this.name}: ${refusal}\n`),
+          exitCode: 1,
+        }
+      }
+    }
     const merged = { ...this.config.env, ...env }
     return this.execLine(line, stdin, merged, cwd, signal)
+  }
+
+  /** Let the sandbox see the workspace by `mountType`; null serves nothing. */
+  protected serveMounts(mountType: MountType | null): void {
+    if (mountType === null) return
+    this.mounts = new SandboxMounts(
+      this.name,
+      mountType,
+      (line) => this.execLine(line, null, { ...this.config.env }, '/'),
+      (command) => this.openPipe(command),
+    )
   }
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {
@@ -126,8 +151,16 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     signal?: AbortSignal,
   ): Promise<RunResult>
 
-  /** Release provider client resources; the sandbox itself is the user's. */
-  override close(): Promise<void> {
-    return Promise.resolve()
+  /**
+   * Start a command in the sandbox with its stdin and stdout held open,
+   * byte for byte, for a `mountType`'s SFTP.
+   */
+  openPipe(_command: string): Promise<SandboxPipe> {
+    return Promise.reject(new Error(`${this.name}: this sandbox holds no pipe open`))
+  }
+
+  /** Unmount what the sandbox was served; the sandbox itself is the user's. */
+  override async close(): Promise<void> {
+    await this.mounts?.close()
   }
 }

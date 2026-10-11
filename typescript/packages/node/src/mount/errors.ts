@@ -112,3 +112,19 @@ export function classifyErrno(err: unknown): number {
 export function classifyError(err: unknown): number {
   return -classifyErrno(err)
 }
+
+/**
+ * An SFTP request answered with a status the core cannot express as an
+ * errno: an operation mirage does not offer, or a workspace that is not
+ * there. asyncssh raises its own SFTPError classes for these on the
+ * Python side.
+ */
+export class SFTPStatusError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'SFTPStatusError'
+    this.status = status
+  }
+}

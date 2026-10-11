@@ -364,9 +364,6 @@ export class Workspace {
       () => this.sandboxVisibleMounts(),
       (directory) => this.namespace.linkNamesUnder(directory),
     )
-    this.runtimeBinding = new WorkspaceBinding(this.buildWorkspaceBridge(), sandboxResolver, () =>
-      this.runtimeContext(),
-    )
     rejectConfigScript('routePolicy', options.routePolicy)
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
@@ -547,6 +544,12 @@ export class Workspace {
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
       (path) => this.namespace.followParent(path),
+    )
+    this.runtimeBinding = new WorkspaceBinding(
+      this.buildWorkspaceBridge(),
+      sandboxResolver,
+      () => this.runtimeContext(),
+      this.vfs,
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,

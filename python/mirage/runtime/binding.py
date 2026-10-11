@@ -24,6 +24,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.context_scope import ContextScope
 from mirage.view.types import NamespaceView, SessionView
+from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,8 @@ class WorkspaceBinding:
 
     Dispatch and routing stay live. Capture constructs per-execution views;
     holding the binding never holds a mutable current-session slot.
+    ``files`` is the workspace's ``ws.vfs``, for an adapter that serves the
+    mounts as files (a sandbox's SFTP); None outside a workspace.
     """
 
     def __init__(
@@ -58,10 +61,12 @@ class WorkspaceBinding:
         dispatch: DispatchFn,
         resolver: MountResolver,
         context: Callable[[WorkspaceBinding], RuntimeContext] | None = None,
+        files: Files | None = None,
     ) -> None:
         self.dispatch = dispatch
         self.resolver = resolver
         self._context = context
+        self.files = files
 
     def capture(self) -> RuntimeContext:
         return (

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.runtime.sandbox.docker import DockerRuntime
@@ -74,3 +76,30 @@ async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
         "wc -l",
     ]
     assert stdin == b"a\nb\n"
+
+
+def test_mount_type_is_one_of_ssh_fuse_both():
+    with pytest.raises(ValueError, match="docker mount_type must be one of"):
+        DockerRuntime(config={"container": "c", "mount_type": "nfs"})
+    DockerRuntime(config={"container": "c", "mount_type": "ssh"})
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_holds_docker_exec_open_byte_for_byte(monkeypatch):
+    spawned: list[tuple[str, ...]] = []
+    spawn = asyncio.create_subprocess_exec
+
+    async def as_cat(*argv, **kwargs):
+        spawned.append(argv)
+        return await spawn("cat", **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", as_cat)
+    runtime = DockerRuntime(config={"container": "cid-42"})
+    pipe = await runtime.open_pipe("exec sshfs x y")
+    assert spawned == [
+        ("docker", "exec", "-i", "cid-42", "sh", "-c", "exec sshfs x y")
+    ]
+    payload = bytes(range(256))
+    pipe.writer.write(payload)
+    assert await pipe.reader.readexactly(256) == payload
+    await pipe.stop()

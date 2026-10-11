@@ -5,9 +5,10 @@ icon: /images/e2b-logo.svg
 ---
 
 `E2BRuntime` connects to a live [E2B](https://e2b.dev) sandbox by id. Create
-it with E2B's CLI or SDK. Programs accessing Mirage mounts as ordinary files
-require Mirage and FUSE inside the sandbox, with mounts at the same paths
-as the host workspace. Sandbox creation and cleanup remain with your application.
+it with E2B's CLI or SDK. Programs see Mirage mounts as ordinary files at the
+same paths as the host workspace once `mount_type` serves them into the sandbox,
+or a Mirage you run inside it does. Sandbox creation and cleanup remain with
+your application.
 
 See the [Sandbox overview](/python/runtime/sandbox) for the shared image and
 matching mount-prefix setup.
@@ -47,6 +48,12 @@ runtime = E2BRuntime(
 
 The runtime uses E2B's `AsyncSandbox`, with independent stdin and output
 for concurrent commands.
+
+`mount_type` serves the workspace into the sandbox (see
+[The workspace inside the sandbox](/python/runtime/sandbox#the-workspace-inside-the-sandbox)).
+E2B's exec API reads command output as text, so the runtime carries the
+SFTP stream over a terminal instead, and the sandbox needs only `sshfs`:
+the default template installs it with `sudo apt-get install -y sshfs`.
 
 Use the native E2B SDK runtime for E2B commands. SSH remains useful for
 general remote hosts and persistent MCP stdio connections.

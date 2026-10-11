@@ -71,11 +71,47 @@ judged on `job.py` however it is spelled, and the words after it stay its argv.
 
 ## The workspace inside the sandbox
 
-For the job to see your mounts as ordinary files, the sandbox must serve
-the workspace itself, and provisioning that is yours, like everything else
-about the sandbox. Run Mirage inside it, with the **same mounts at the
-same prefixes** as the host workspace, each FUSE-mounted at its own
-prefix:
+For the job to see your mounts as ordinary files, the sandbox must see the
+workspace at the **same prefixes** as the host. The `docker` and `e2b`
+runtimes can arrange that themselves, by `mount_type`:
+
+| `mount_type` | What the sandbox sees |
+| --- | --- |
+| `ssh` | Every prefix the session sees, served from this workspace over SFTP and mounted with `sshfs`. |
+| `fuse` | Only what a Mirage you run inside the sandbox serves (below). |
+| `both` | The sandbox's own mounts where it has them, and this workspace's over `ssh` everywhere else. |
+| unset | Nothing from Mirage: serve it yourself, as under `fuse`. |
+
+```yaml
+runtimes:
+  - name: e2b
+    captures: ["python3"]
+    config:
+      sandbox_id: ${E2B_SANDBOX_ID}
+      mount_type: ssh
+  - workspace
+```
+
+### Served from the workspace (`ssh`)
+
+The first captured line mounts each prefix; closing the workspace unmounts
+them. Every file operation in the sandbox is an operation of the line's
+session: hides, mount modes and path rules hold as they do in the shell, a
+change on the host shows at once, and a RAM or local-disk mount works like
+any other. No credentials and no Mirage go into the sandbox, only `sshfs`
+(`apt-get install sshfs`) and FUSE; a docker container needs
+`--device /dev/fuse --cap-add SYS_ADMIN`.
+
+Each file operation is a round trip to this workspace, about 150 ms for a
+small file from a laptop to E2B, so serve bulk data from the sandbox itself
+with `both`. The mounts show the first line's session, and a line of another
+session is refused: give each agent a sandbox of its own. The root mount and
+`/dev` are not served, since the sandbox's own come first.
+
+### Served by the sandbox itself (`fuse`)
+
+Run Mirage inside the sandbox, with the same mounts at the same prefixes,
+each FUSE-mounted at its own prefix:
 
 ```yaml
 # sandbox.yaml, inside the sandbox
@@ -103,6 +139,11 @@ a container, credentials can be scoped down, and none of it ever travels
 over the provider's exec API. The flip side is that keeping the prefixes
 in step with the host workspace is your job; a sandbox serving different
 mounts fails loud only when a path misses.
+
+A prefix the sandbox serves itself follows the sandbox's config, mount
+modes included, and this workspace's rules never see it. So under `fuse`
+and `both`, a line is refused while the session's profile hides or narrows
+anything under such a prefix.
 
 This needs an image with `fuse3` and Mirage plus your backends installed
 (see [The sandbox image](#the-sandbox-image)).
