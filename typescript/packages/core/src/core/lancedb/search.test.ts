@@ -137,3 +137,31 @@ it('reads every card when a rendered column is a list or a struct', async () => 
   const { accessor } = animals(null)
   expect(await filesContaining(accessor, 'plain', [scope()], false, false)).toBeNull()
 })
+
+// Twin of test_card_labels_and_durations_read_every_card: every card spells its
+// columns' names and the blob line's extension.
+it('leaves a text a column name or the blob extension holds to the scan', async () => {
+  const driver = {
+    listTables: () => Promise.resolve(['t']),
+    tableColumns: () => Promise.resolve(['id', 'owner name', 'payload']),
+    textColumns: () => Promise.resolve(['owner name']),
+    rowsWhere: () => Promise.resolve([{ id: 1 }]),
+  } as unknown as LanceDriver
+  const accessor = (blob: string | null) =>
+    new LanceDBAccessor(
+      driver,
+      resolveLanceDBConfig({
+        uri: '/tmp/db',
+        table: 't',
+        idColumn: 'id',
+        ...(blob !== null ? { blobColumn: blob } : {}),
+      }),
+    )
+  const named = accessor(null)
+  expect(
+    (await filesContaining(named, 'Jane', [scope()], false, false))?.map((p) => p.virtual),
+  ).toEqual(['/db/1.md'])
+  expect(await filesContaining(named, 'owner', [scope()], true, false)).toBeNull()
+  expect(await filesContaining(named, 'ner na', [scope()], false, false)).toBeNull()
+  expect(await filesContaining(accessor('payload'), 'bin', [scope()], false, false)).toBeNull()
+})

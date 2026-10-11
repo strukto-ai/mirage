@@ -60,8 +60,8 @@ export function hit(accessor: LanceDBAccessor, row: Row): [string[], Uint8Array]
  * A card is `column: value` lines, so a line grep matches holds the text in
  * one value, unless it reaches into the column's name, the title's `# ` or the
  * separator: the text is asked only when `recordQueries` passes it with every
- * rendered column's name and `CARD_WORDS` as keys and it does not start with a
- * space. A value that is not a string spells only digits and signs, or one of
+ * rendered column's name and `CARD_WORDS` as keys, it does not start with a
+ * space, and no column's name or the blob line's extension holds it. A value that is not a string spells only digits and signs, or one of
  * `CARD_WORDS`; a table that renders a list, struct or bytes column reads every
  * card, as does a scope inside a card. Mirrors Python's `files_containing`.
  */
@@ -91,8 +91,10 @@ export async function filesContaining(
       const columns = await textColumns(accessor, table, skipped)
       if (columns === null) return null
       const rendered = (await accessor.driver.tableColumns(table)).filter((c) => !skipped.has(c))
-      const keys = new Set([...rendered.map((c) => c.toLowerCase()), ...CARD_WORDS])
-      const queries = recordQueries(text, keys, wholeWord)
+      const labels = rendered.map((c) => c.toLowerCase())
+      if (config.blobColumn !== null) labels.push(config.blobExt.toLowerCase())
+      if (labels.some((label) => label.includes(text.toLowerCase()))) return null
+      const queries = recordQueries(text, new Set([...labels, ...CARD_WORDS]), wholeWord)
       if (queries === null) return null
       if (columns.length === 0) continue
       const rows = await rowsWhere(

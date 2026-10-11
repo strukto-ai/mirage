@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { ioFor } from '../../test-utils.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { PathSpec } from '../../types.ts'
@@ -63,4 +64,35 @@ it('names the pages a chunk holds the text in', async () => {
   )
   expect(await filesContaining(accessor, 'nowhere', [root], false)).toEqual([])
   expect(await filesContaining(accessor, 'first', [root], true)).toBeNull()
+})
+
+// Twin of test_files_containing_asks_only_the_walked_pages_below_the_root.
+it('asks only the walked pages below the mount root', async () => {
+  const tree = JSON.stringify({ 'guides/quickstart': {}, 'api/reference': {} })
+  const get = vi.fn(
+    (args: {
+      ids?: string[]
+      where?: { page_slug: { $in: string[] } }
+      whereDocument?: { $contains?: string }
+    }) => {
+      if (args.ids !== undefined) return Promise.resolve({ ids: args.ids, documents: [tree] })
+      const kept = args.where?.page_slug.$in ?? []
+      const found = kept.includes('guides/quickstart') ? [{ page_slug: 'guides/quickstart' }] : []
+      return Promise.resolve({ ids: found.map((_, i) => String(i)), metadatas: found })
+    },
+  )
+  const accessor = {
+    config: { slugField: 'page_slug' },
+    getCollection: () => Promise.resolve({ get }),
+  } as unknown as ChromaAccessor
+  const api = new PathSpec({
+    virtual: '/knowledge/api',
+    directory: '/knowledge/api',
+    vfsPath: 'api',
+  })
+  const index = new RAMIndexCacheStore()
+  expect(await filesContaining(accessor, 'first', [api], false, index)).toEqual([])
+  expect(get).toHaveBeenLastCalledWith(
+    expect.objectContaining({ where: { page_slug: { $in: ['api/reference'] } } }),
+  )
 })

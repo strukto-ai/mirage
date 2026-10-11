@@ -222,8 +222,9 @@ async def text_columns(
     accessor: LanceDBAccessor, table: str, skipped: set[str]
 ) -> list[str] | None:
     """The string columns of a table's card, or None when a column the
-    card renders is neither a string nor a scalar (a list, a struct,
-    bytes), whose spelling a filter on strings cannot test.
+    card renders is neither a string nor a scalar spelled in digits and
+    signs (a list, a struct, bytes, a duration's ``2 days``), whose
+    spelling a filter on strings cannot test.
 
     Args:
         accessor (LanceDBAccessor): the mount's accessor.
@@ -244,7 +245,9 @@ async def text_columns(
             or pa.types.is_floating(kind)
             or pa.types.is_boolean(kind)
             or pa.types.is_decimal(kind)
-            or pa.types.is_temporal(kind)
+            or pa.types.is_timestamp(kind)
+            or pa.types.is_date(kind)
+            or pa.types.is_time(kind)
             or pa.types.is_null(kind)
         ):
             return None

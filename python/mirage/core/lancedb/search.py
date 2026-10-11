@@ -77,7 +77,8 @@ async def files_containing(
     text in one value, unless it reaches into the column's name, the
     title's ``# `` or the separator: the text is asked only when
     ``record_queries`` passes it with every rendered column's name and
-    ``CARD_WORDS`` as keys and it does not start with a space. A value
+    ``CARD_WORDS`` as keys, it does not start with a space, and no
+    column's name or the blob line's extension holds it. A value
     that is not a string spells only digits and signs, or one of
     ``CARD_WORDS``; a table that renders a list, struct or bytes column
     reads every card, as does a scope inside a card.
@@ -114,8 +115,14 @@ async def files_containing(
                 for c in await table_columns(accessor, table)
                 if c not in skipped
             ]
-            keys = frozenset(c.lower() for c in rendered) | CARD_WORDS
-            queries = record_queries(text, keys, whole_word)
+            labels = [c.lower() for c in rendered]
+            if config.blob_column:
+                labels.append(config.blob_ext.lower())
+            if any(text.lower() in label for label in labels):
+                return None
+            queries = record_queries(
+                text, frozenset(labels) | CARD_WORDS, whole_word
+            )
             if queries is None:
                 return None
             if not columns:

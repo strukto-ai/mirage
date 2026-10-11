@@ -128,22 +128,30 @@ export function searchResource(
  *
  * A page is its chunks joined by line breaks, so a line, and so any match
  * grep makes, lies within one chunk, and Chroma's `$contains` over the chunks
- * answers exactly. It matches case, so -i reads every page. Mirrors Python's
- * `files_containing`.
+ * answers exactly. It matches case, so -i reads every page. Below the mount's
+ * root only the walked pages are asked. Mirrors Python's `files_containing`.
  */
 export async function filesContaining(
   accessor: ChromaAccessor,
   text: string,
   under: readonly PathSpec[],
   ignoreCase: boolean,
+  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const [first] = under
   if (ignoreCase || first === undefined) return null
-  const collection = await accessor.getCollection()
   const field = accessor.config.slugField
+  let where: Where | undefined
+  if (under.every((scope) => stripSlash(scope.mountPath) !== '')) {
+    const walked = await targetEntries(CHROMA_TREE, accessor, under, index)
+    if (walked.size === 0) return []
+    where = { [field]: { $in: [...walked.keys()].sort(compareCodePoints) } } as Where
+  }
+  const collection = await accessor.getCollection()
   const slugs = new Set<string>()
   for (let offset = 0; ; offset += PAGE_CHUNK_BATCH_SIZE) {
     const result = await collection.get({
+      ...(where !== undefined ? { where } : {}),
       whereDocument: { $contains: text },
       include: ['metadatas'],
       limit: PAGE_CHUNK_BATCH_SIZE,

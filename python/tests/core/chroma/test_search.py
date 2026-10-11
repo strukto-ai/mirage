@@ -69,3 +69,23 @@ async def test_files_containing_names_the_pages_a_chunk_holds_text_in(
         await search.files_containing(chroma_accessor, "first", under, True)
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_files_containing_asks_only_the_walked_pages_below_the_root(
+    chroma_accessor, chroma_index
+):
+    under = [
+        PathSpec.from_str_path(
+            "/knowledge/api", mount_key("/knowledge/api", "/knowledge")
+        )
+    ]
+    assert (
+        await search.files_containing(
+            chroma_accessor, "first", under, False, chroma_index
+        )
+        == []
+    )
+    assert chroma_accessor.collection.get_calls[-1]["where"] == {
+        "page_slug": {"$in": ["api/reference"]}
+    }

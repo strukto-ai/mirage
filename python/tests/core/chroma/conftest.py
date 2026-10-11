@@ -24,11 +24,14 @@ class FakeCollection:
 
         held = (kwargs.get("where_document") or {}).get("$contains")
         if held is not None:
+            kept = ((kwargs.get("where") or {}).get("page_slug") or {}).get(
+                "$in"
+            )
             found = [
                 item
-                for items in self.chunks.values()
+                for slug, items in self.chunks.items()
                 for item in items
-                if held in item["document"]
+                if held in item["document"] and (kept is None or slug in kept)
             ]
             offset = kwargs.get("offset") or 0
             found = found[

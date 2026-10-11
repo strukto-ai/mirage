@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import datetime
+
 import lancedb
 import pytest
 
@@ -124,3 +126,35 @@ async def test_a_list_column_reads_every_card(tmp_path):
     )
     accessor = LanceDBAccessor(LanceDBConfig(uri=uri, id_column="id"))
     assert await _cards(accessor, "plain", [_scope()]) is None
+
+
+# Every card spells its columns' names and the blob line's extension, and
+# a duration spells words ("2 days, 0:00:00"): a text they can hold reads
+# every card.
+@pytest.mark.asyncio
+async def test_card_labels_and_durations_read_every_card(tmp_path):
+    uri = str(tmp_path / "labels")
+    db = lancedb.connect(uri)
+    db.create_table("named", data=[{"id": 1, "owner name": "Jane"}])
+    db.create_table(
+        "blobs", data=[{"id": 1, "name": "plain", "payload": b"x"}]
+    )
+    db.create_table(
+        "timed", data=[{"id": 1, "late": datetime.timedelta(days=2)}]
+    )
+
+    def accessor(table: str, blob: str | None = None) -> LanceDBAccessor:
+        return LanceDBAccessor(
+            LanceDBConfig(
+                uri=uri, table=table, id_column="id", blob_column=blob
+            )
+        )
+
+    named = accessor("named")
+    assert await _cards(named, "Jane", [_scope()]) == ["/db/1.md"]
+    assert await _cards(named, "owner", [_scope()], whole_word=True) is None
+    assert await _cards(named, "ner na", [_scope()]) is None
+    assert (
+        await _cards(accessor("blobs", "payload"), "bin", [_scope()]) is None
+    )
+    assert await _cards(accessor("timed"), "days", [_scope()]) is None

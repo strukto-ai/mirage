@@ -21,10 +21,10 @@ import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 // Arrow's names for a column a card spells as text, and for one it spells as
-// digits, signs or a fixed word; any other type (a list, a struct, bytes) can
-// hold any text.
+// digits, signs or a fixed word; any other type (a list, a struct, bytes, a
+// duration Python spells `2 days`) can hold any text.
 const TEXT_TYPE = /^(Large)?Utf8$/
-const SCALAR_TYPE = /^(Null|U?Int\d*|Float\d*|Bool|Decimal|Date|Time|Timestamp|Duration|Interval)/
+const SCALAR_TYPE = /^(Null|U?Int\d*|Float\d*|Bool|Decimal|Date|Time)/
 
 function textsOf(rows: LanceRow[], column: string): string[] {
   const texts: string[] = []

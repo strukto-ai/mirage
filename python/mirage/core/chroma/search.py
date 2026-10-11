@@ -127,28 +127,37 @@ async def files_containing(
     text: str,
     under: list[PathSpec],
     ignore_case: bool,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec] | None:
     """The pages with a chunk holding ``text``.
 
     A page is its chunks joined by line breaks, so a line, and so any
     match grep makes, lies within one chunk, and Chroma's ``$contains``
     over the chunks answers exactly. It matches case, so -i reads every
-    page.
+    page. Below the mount's root only the walked pages are asked.
 
     Args:
         accessor (ChromaAccessor): the mount's collection.
         text (str): the text searched for.
         under (list[PathSpec]): the directories walked.
         ignore_case (bool): whether case is folded.
+        index (IndexCacheStore): the mount's index.
     """
     if ignore_case:
         return None
-    collection = await accessor.get_collection()
     field = accessor.config.slug_field
+    where: dict[str, Any] | None = None
+    if all(scope.mount_path.strip("/") for scope in under):
+        walked = await target_entries(CHROMA_TREE, accessor, under, index)
+        if not walked:
+            return []
+        where = {field: {"$in": sorted(walked)}}
+    collection = await accessor.get_collection()
     slugs: set[str] = set()
     offset = 0
     while True:
         result = await collection.get(
+            where=where,
             where_document={"$contains": text},
             include=["metadatas"],
             limit=PAGE_CHUNK_BATCH_SIZE,

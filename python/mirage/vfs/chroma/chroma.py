@@ -77,7 +77,9 @@ class ChromaVFS(BaseVFS):
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        return await _files_containing(self.accessor, text, under, ignore_case)
+        return await _files_containing(
+            self.accessor, text, under, ignore_case, index
+        )
 
     async def search_many(
         self,
