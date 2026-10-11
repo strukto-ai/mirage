@@ -159,10 +159,10 @@ interface Served {
  * added or shown since is served, one hidden is dropped, and a server
  * that ended is started again. What the host serves shows one session's
  * view, and a program a line starts may outlive it, so under `ssh` and
- * `both` the sandbox belongs to the first line's session until it is
- * closed: a line of another session is refused rather than shown, or
- * showing, the first one's view. Under `fuse` the host serves nothing, and
- * any session may run.
+ * `both` the sandbox belongs to the first session it serves or runs a line
+ * for, until it is closed: a line of another session is refused rather
+ * than shown, or showing, the first one's view. Under `fuse` the host
+ * serves nothing, and any session may run.
  */
 export class SandboxMounts {
   private sessionId: string | null = null
@@ -199,7 +199,7 @@ export class SandboxMounts {
         `${this.runtime}: mountType serves a session's view, and this line runs as none`,
       )
     }
-    const refusal = await this.locked(async () => {
+    return this.locked(async () => {
       if (this.sessionId !== null && current.sessionId !== this.sessionId) {
         return (
           `this sandbox shows session ${this.sessionId}'s view of the workspace; ` +
@@ -213,21 +213,32 @@ export class SandboxMounts {
         mountPaths(mountPrefixes()),
         signal,
       )
-      return null
-    })
-    if (refusal !== null) return refusal
-    const scoped = binding.capture().ns.scoped
-    for (const prefix of this.own) {
-      if (scoped?.(prefix) === true || cappedUnder(current, prefix)) {
-        return `${prefix} is served by the sandbox itself, out of reach of this session's rules`
+      const refusal = this.refusal(binding.capture().ns.scoped, current)
+      if (this.mountType !== 'fuse' && (refusal === null || this.served.size > 0)) {
+        this.sessionId = current.sessionId
       }
-    }
-    return null
+      return refusal
+    })
   }
 
   /** Unmount every served prefix and end its SFTP server. */
   close(): Promise<void> {
-    return this.locked(() => this.unmount())
+    return this.locked(async () => {
+      await this.unmount()
+      this.sessionId = null
+    })
+  }
+
+  private refusal(
+    scoped: ((path: string) => boolean) | undefined,
+    session: SessionState,
+  ): string | null {
+    for (const prefix of this.own) {
+      if (scoped?.(prefix) === true || cappedUnder(session, prefix)) {
+        return `${prefix} is served by the sandbox itself, out of reach of this session's rules`
+      }
+    }
+    return null
   }
 
   private locked<T>(task: () => Promise<T>): Promise<T> {
@@ -280,7 +291,6 @@ export class SandboxMounts {
       }
     }
     this.own = own
-    this.sessionId = this.mountType === 'fuse' ? null : session.sessionId
     this.seen = seen
   }
 
@@ -364,7 +374,6 @@ export class SandboxMounts {
 
   private async unmount(): Promise<void> {
     for (const prefix of [...this.served.keys()]) await this.drop(prefix)
-    this.sessionId = null
     this.own = []
     this.seen = null
   }

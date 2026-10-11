@@ -172,6 +172,17 @@ async def test_a_session_served_nothing_still_keeps_the_sandbox():
 
 
 @pytest.mark.asyncio
+async def test_a_refused_line_leaves_the_sandbox_free():
+    sandbox = FakeSandbox("both", own=["/data", "/my notes"])
+    ws = workspace(sandbox, hide=["/data"])
+    agent = await ws.session("agent", profile="agent")
+    other = await ws.session("other")
+    assert (await agent.shell("python3 job.py")).exit_code == 1
+    assert (await other.shell("python3 job.py")).exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_both_serves_what_the_sandbox_does_not_mount_itself():
     sandbox = FakeSandbox("both", own=["/data"])
     ws = workspace(sandbox, hide=["/my notes/secret"])

@@ -218,6 +218,16 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
+  it('leaves the sandbox free after a line it refused', async () => {
+    const sandbox = new FakeSandbox('both', ['/data', '/my notes'])
+    const ws = await workspace(sandbox, ['/data'])
+    const agent = await ws.session('agent', { profile: 'agent' })
+    const other = await ws.session('other')
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(1)
+    expect((await other.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.close()
+  })
+
   it('serves over both what the sandbox does not mount itself', async () => {
     const sandbox = new FakeSandbox('both', ['/data'])
     const ws = await workspace(sandbox, ['/my notes/secret'])

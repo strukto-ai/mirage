@@ -148,10 +148,10 @@ class SandboxMounts:
     added or shown since is served, one hidden is dropped, and a server
     that ended is started again. What the host serves shows one session's
     view, and a program a line starts may outlive it, so under ``ssh`` and
-    ``both`` the sandbox belongs to the first line's session until it is
-    closed: a line of another session is refused rather than shown, or
-    showing, the first one's view. Under ``fuse`` the host serves nothing,
-    and any session may run.
+    ``both`` the sandbox belongs to the first session it serves or runs a
+    line for, until it is closed: a line of another session is refused
+    rather than shown, or showing, the first one's view. Under ``fuse`` the
+    host serves nothing, and any session may run.
 
     Args:
         runtime (str): the runtime's name, for messages.
@@ -216,21 +216,31 @@ class SandboxMounts:
                 binding.get_session(current.session_id),
                 mount_paths(binding.mount_prefixes()),
             )
-        scoped = binding.capture().ns.scoped
+            refusal = self._refusal(binding.capture().ns.scoped, current)
+            if self._mount_type != "fuse" and (
+                refusal is None or self._served
+            ):
+                self._session_id = current.session_id
+        return refusal
+
+    async def close(self) -> None:
+        """Unmount every served prefix and end its SFTP server."""
+        async with self._lock:
+            await self._unmount()
+            self._session_id = None
+
+    def _refusal(
+        self, scoped: Callable[[str], bool] | None, session: SessionState
+    ) -> str | None:
         for prefix in self._own:
             if (scoped is not None and scoped(prefix)) or capped_under(
-                current, prefix
+                session, prefix
             ):
                 return (
                     f"{prefix} is served by the sandbox itself, out of "
                     "reach of this session's rules"
                 )
         return None
-
-    async def close(self) -> None:
-        """Unmount every served prefix and end its SFTP server."""
-        async with self._lock:
-            await self._unmount()
 
     async def _reconcile(
         self,
@@ -282,9 +292,6 @@ class SandboxMounts:
                 await self._unmount()
                 raise
         self._own = own
-        self._session_id = (
-            session.session_id if self._mount_type != "fuse" else None
-        )
         self._seen = (frozenset(every), visible)
 
     async def _serve(
@@ -374,6 +381,5 @@ class SandboxMounts:
     async def _unmount(self) -> None:
         for prefix in list(self._served):
             await self._drop(prefix)
-        self._session_id = None
         self._own = ()
         self._seen = None
