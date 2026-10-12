@@ -39,7 +39,13 @@ class LinearVFS(BaseVFS):
     write_prompt: str = WRITE_PROMPT
     # Linear's search answers for issues; comments and the team's other
     # files are always read.
-    searchable = ("teams/*/issues/*/issue.json",)
+    searchable = (
+        "teams/*/issues/*/issue.json",
+        "teams/*/members/*",
+        "teams/*/projects/*",
+        "teams/*/cycles/*",
+        "teams/*/documents/*",
+    )
 
     def __init__(self, config: LinearConfig) -> None:
         super().__init__()
@@ -55,9 +61,13 @@ class LinearVFS(BaseVFS):
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        if not whole_word or not self.config.content_search:
-            return None
-        return await _files_containing(self.accessor, text, under, index)
+        return await _files_containing(
+            self.accessor,
+            text,
+            under,
+            index,
+            ask_linear=whole_word and self.config.content_search,
+        )
 
     async def readdir(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

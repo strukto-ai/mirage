@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
@@ -21,6 +21,8 @@ import { unsearchedText } from './normalize.ts'
 import { SEARCH_LIMIT, filesContaining } from './search.ts'
 
 const TEAM = { id: 'T1', key: 'ENG', name: 'Engineering' }
+const ISSUES_DIR = 'teams/ENG__Engineering__T1/issues'
+const DOCS_DIR = 'teams/ENG__Engineering__T1/documents'
 
 function issue(
   id: string,
@@ -43,9 +45,18 @@ const ISSUES = [
   issue('I2', 'Write release notes', 'Blocked'),
   issue('I3', 'Docs', 'Todo', 'Visit wombat.example.com first'),
 ]
+const DOCUMENTS = [
+  { id: 'D1', title: 'Search plan', content: 'Wombat rollout steps' },
+  { id: 'D2', title: 'Runbook', content: 'Restart the workers' },
+]
+const ALL_ISSUES = ['ENG-1__I1', 'ENG-2__I2', 'ENG-3__I3']
 
-// Answers the team listing, the issue listing and the issue search, recording
-// each searched term.
+function connection(nodes: unknown[]): Record<string, unknown> {
+  return { nodes, pageInfo: { hasNextPage: false, endCursor: null } }
+}
+
+// Answers the listings the walk reaches and the issue search by operation,
+// recording each searched term.
 class FakeTransport implements LinearTransport {
   readonly searched: string[] = []
   constructor(
@@ -56,8 +67,8 @@ class FakeTransport implements LinearTransport {
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
-    const page = { hasNextPage: false, endCursor: null }
-    if (query.includes('searchIssues')) {
+    const op = /(?:query|mutation)\s+(\w+)/.exec(query)?.[1] ?? ''
+    if (op === 'IssueSearch') {
       this.searched.push(String(variables.term))
       if (this.reply instanceof Error) return Promise.reject(this.reply)
       if (this.reply !== undefined) return Promise.resolve(this.reply)
@@ -66,10 +77,12 @@ class FakeTransport implements LinearTransport {
         : (this.named[String(variables.term)] ?? [])
       return Promise.resolve({ searchIssues: { nodes: ids.map((id) => ({ id })) } })
     }
-    if (query.includes('issues(')) {
-      return Promise.resolve({ team: { issues: { nodes: ISSUES, pageInfo: page } } })
-    }
-    return Promise.resolve({ teams: { nodes: [TEAM], pageInfo: page } })
+    if (op === 'TeamIssues') return Promise.resolve({ team: { issues: connection(ISSUES) } })
+    if (op === 'TeamDocuments') return Promise.resolve({ documents: connection(DOCUMENTS) })
+    if (op === 'TeamMembers') return Promise.resolve({ team: { members: connection([]) } })
+    if (op === 'TeamProjects') return Promise.resolve({ team: { projects: connection([]) } })
+    if (op === 'TeamCycles') return Promise.resolve({ team: { cycles: connection([]) } })
+    return Promise.resolve({ teams: connection([TEAM]) })
   }
 }
 
@@ -83,6 +96,7 @@ async function ask(
   named: string[] | Record<string, string[]>,
   under = scope(),
   reply?: Record<string, unknown> | Error,
+  askLinear = true,
 ): Promise<[PathSpec[] | null, string[]]> {
   const transport = new FakeTransport(named, reply)
   const out = await filesContaining(
@@ -90,8 +104,20 @@ async function ask(
     text,
     [under],
     new RAMIndexCacheStore(),
+    askLinear,
   )
   return [out, transport.searched]
+}
+
+function issues(out: PathSpec[] | null): string[] {
+  return (out ?? [])
+    .filter((p) => p.vfsPath.endsWith('/issue.json'))
+    .map((p) => p.vfsPath.split('/').at(-2) ?? '')
+    .sort()
+}
+
+function documents(out: PathSpec[] | null): string[] {
+  return (out ?? []).filter((p) => p.vfsPath.startsWith(DOCS_DIR)).map((p) => p.vfsPath)
 }
 
 // Twin of python/tests/core/linear/test_search.py.
@@ -107,8 +133,7 @@ describe('linear filesContaining', () => {
   // its state, which Linear's search does not read.
   it('answers what Linear names and what the listing kept', async () => {
     const [out, searched] = await ask('Blocked', ['I1'])
-    expect(out?.map((p) => p.vfsPath.split('/').at(-2)).sort()).toEqual(['ENG-1__I1', 'ENG-2__I2'])
-    expect(out?.every((p) => p.vfsPath.endsWith('/issue.json'))).toBe(true)
+    expect(issues(out)).toEqual(['ENG-1__I1', 'ENG-2__I2'])
     expect(searched).toEqual(['blocked', 'locked'])
   })
 
@@ -116,19 +141,41 @@ describe('linear filesContaining', () => {
   // and each word of a phrase is found in either place.
   it('keeps a word inside a link in the listing', async () => {
     const [out, searched] = await ask('visit wombat', { visit: ['I3'] })
-    expect(out?.map((p) => p.vfsPath.split('/').at(-2))).toEqual(['ENG-3__I3'])
+    expect(issues(out)).toEqual(['ENG-3__I3'])
     expect(searched).toEqual(['visit', 'wombat'])
   })
 
-  it.each<[string, string[], string]>([
-    ['title', ['I1'], ''],
-    ['true', ['I1'], ''],
-    ['q4', ['I1'], ''],
-    ['login', [], ''],
-    ['login', Array.from({ length: SEARCH_LIMIT }, (_, i) => `X${String(i)}`), ''],
-    ['login', ['I1'], 'teams/ENG__Engineering__T1/issues/ENG-1__I1'],
-  ])('reads every file for %j when unsure', async (text, named, under) => {
-    const [out] = await ask(text, named, scope(under))
+  // A document's listing entry keeps its text, so a document is read only
+  // when that text holds the word in any case, whether Linear is asked or not.
+  it.each([true, false])(
+    'reads a document whose text holds it, askLinear %s',
+    async (askLinear) => {
+      const [out] = await ask('WOMBAT', ['I3'], scope(), undefined, askLinear)
+      expect(documents(out)).toHaveLength(1)
+      const [none] = await ask('nowhere', [], scope(DOCS_DIR))
+      expect(none).toEqual([])
+    },
+  )
+
+  // Without an answer from Linear every issue is read.
+  it.each<[string, string[], boolean]>([
+    ['title', ['I1'], true],
+    ['true', ['I1'], true],
+    ['q4', ['I1'], true],
+    ['login', [], true],
+    ['login', Array.from({ length: SEARCH_LIMIT }, (_, i) => `X${String(i)}`), true],
+    ['login', ['I1'], false],
+  ])('reads every issue for %j when unsure', async (text, named, askLinear) => {
+    const [out] = await ask(text, named, scope(ISSUES_DIR), undefined, askLinear)
+    expect(issues(out)).toEqual(ALL_ISSUES)
+  })
+
+  // A scope inside an issue and a text that is not ASCII read every file.
+  it.each([
+    ['login', `${ISSUES_DIR}/ENG-1__I1`],
+    ['caf\u00e9', ''],
+  ])('reads every file for %j under %j', async (text, under) => {
+    const [out] = await ask(text, ['I1'], scope(under))
     expect(out).toBeNull()
   })
 
@@ -139,8 +186,13 @@ describe('linear filesContaining', () => {
     [{ searchIssues: null }],
     [{ searchIssues: { nodes: [{ title: 'Fix the login page' }] } }],
     [new SyntaxError('Unexpected token < in JSON')],
-  ])('reads every file for the garbled reply %#', async (reply) => {
-    const [out] = await ask('Blocked', [], scope(), reply)
-    expect(out).toBeNull()
+  ])('reads every issue for the garbled reply %#', async (reply) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const [out] = await ask('Blocked', [], scope(ISSUES_DIR), reply)
+      expect(issues(out)).toEqual(ALL_ISSUES)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

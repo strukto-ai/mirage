@@ -48,6 +48,7 @@ import {
 } from './pathing.ts'
 import { detectScope } from './scope.ts'
 import { jsonlBytesByCreatedAt } from '../render/json.ts'
+import { keptText } from '../../utils/record_search.ts'
 
 export const TEAM_DIRS = ['members', 'issues', 'projects', 'cycles', 'documents'] as const
 
@@ -152,6 +153,7 @@ async function listMembers(
   const users = await listTeamMembers(accessor.transport, match.slots.team_id ?? '')
   return users.map((user): [string, IndexEntry] => {
     const filename = memberFilename(user)
+    const rendered = toJsonBytes(normalizeUser(user))
     return [
       filename,
       new IndexEntry({
@@ -160,7 +162,8 @@ async function listMembers(
         resourceType: 'linear/user',
         remoteTime: pickString(user, 'updatedAt'),
         vfsName: filename,
-        size: toJsonBytes(normalizeUser(user)).length,
+        size: rendered.length,
+        extra: keptText(rendered),
       }),
     ]
   })
@@ -255,12 +258,14 @@ async function listProjects(
       if (projObj.id !== projectId) continue
       projectIssues.push(buildProjectIssue(issue))
     }
-    const rendered = normalizeProject(project, {
-      teamId,
-      teamKey: extraString(entry, 'team_key') || null,
-      teamName: extraString(entry, 'team_name') || null,
-      issues: projectIssues,
-    })
+    const rendered = toJsonBytes(
+      normalizeProject(project, {
+        teamId,
+        teamKey: extraString(entry, 'team_key') || null,
+        teamName: extraString(entry, 'team_name') || null,
+        issues: projectIssues,
+      }),
+    )
     const filename = projectFilename(project)
     return [
       filename,
@@ -270,7 +275,8 @@ async function listProjects(
         resourceType: 'linear/project',
         remoteTime: pickString(project, 'updatedAt'),
         vfsName: filename,
-        size: toJsonBytes(rendered).length,
+        size: rendered.length,
+        extra: keptText(rendered),
       }),
     ]
   })
@@ -285,6 +291,7 @@ async function listCycles(
   const cycles = await listTeamCycles(accessor.transport, teamId)
   return cycles.map((cycle): [string, IndexEntry] => {
     const filename = cycleFilename(cycle)
+    const rendered = toJsonBytes(normalizeCycle(cycle, teamId))
     return [
       filename,
       new IndexEntry({
@@ -293,7 +300,8 @@ async function listCycles(
         resourceType: 'linear/cycle',
         remoteTime: pickString(cycle, 'updatedAt'),
         vfsName: filename,
-        size: toJsonBytes(normalizeCycle(cycle, teamId)).length,
+        size: rendered.length,
+        extra: keptText(rendered),
       }),
     ]
   })
@@ -307,6 +315,7 @@ async function listDocuments(
   const documents = await listTeamDocuments(accessor.transport, match.slots.team_id ?? '')
   return documents.map((document): [string, IndexEntry] => {
     const filename = documentFilename(document)
+    const rendered = toJsonBytes(normalizeDocument(document))
     return [
       filename,
       new IndexEntry({
@@ -315,7 +324,8 @@ async function listDocuments(
         resourceType: 'linear/document',
         remoteTime: pickString(document, 'updatedAt'),
         vfsName: filename,
-        size: toJsonBytes(normalizeDocument(document)).length,
+        size: rendered.length,
+        extra: keptText(rendered),
       }),
     ]
   })

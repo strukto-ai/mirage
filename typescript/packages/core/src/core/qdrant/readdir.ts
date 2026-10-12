@@ -16,6 +16,7 @@ import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { globPrefix, globStemPrefix } from '../../utils/glob_walk.ts'
+import { keptText } from '../../utils/record_search.ts'
 import type { DirListing, Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes } from '../vector/read.ts'
@@ -26,15 +27,6 @@ import { fieldValue } from './payload.ts'
 import { distinctValues, resolveGroup, rowsMatching, tableExists } from './query.ts'
 import { renderJson, renderText } from './render.ts'
 import type { QdrantRow } from './types.ts'
-
-// The largest rendered .json or .txt whose text its entry keeps, lowercased,
-// for grep to check without reading it (`filesContaining`).
-export const KEPT_TEXT_MAX = 8192
-
-function kept(rendered: Uint8Array): Record<string, string> {
-  if (rendered.byteLength > KEPT_TEXT_MAX) return {}
-  return { text: new TextDecoder().decode(rendered).toLowerCase() }
-}
 
 function blobSize(value: unknown): number | null {
   // A payload whose blob column holds something undecodable must not take
@@ -66,7 +58,7 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
         resourceType: 'qdrant/row_json',
         vfsName: `${stem}.json`,
         size: rendered.byteLength,
-        extra: kept(rendered),
+        extra: keptText(rendered),
       }),
     ])
     if (
@@ -83,7 +75,7 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
           resourceType: 'qdrant/row_text',
           vfsName: `${stem}.txt`,
           size: text.byteLength,
-          extra: kept(text),
+          extra: keptText(text),
         }),
       ])
     }

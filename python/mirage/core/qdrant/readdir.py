@@ -33,13 +33,10 @@ from mirage.core.vector.readdir import dir_entry
 from mirage.core.vector.scope import filters_of, table_of
 from mirage.types import JsonValue
 from mirage.utils.glob_walk import glob_prefix, glob_stem_prefix
+from mirage.utils.record_search import kept_text
 from mirage.vfs.qdrant.config import QdrantConfig
 
 logger = logging.getLogger(__name__)
-
-# The largest rendered .json or .txt whose text its entry keeps, lowercased,
-# for grep to check without reading it (``files_containing``).
-KEPT_TEXT_MAX = 8192
 
 
 def _blob_size(value: JsonValue) -> int | None:
@@ -53,12 +50,6 @@ def _blob_size(value: JsonValue) -> int | None:
             "qdrant: unsizeable blob value (%s); size stays unknown", exc
         )
         return None
-
-
-def _kept(rendered: bytes) -> dict[str, JsonValue]:
-    if len(rendered) > KEPT_TEXT_MAX:
-        return {}
-    return {"text": rendered.decode().lower()}
 
 
 def _row_entries(
@@ -82,7 +73,7 @@ def _row_entries(
                     resource_type="qdrant/row_json",
                     vfs_name=f"{stem}.json",
                     size=len(rendered),
-                    extra=_kept(rendered),
+                    extra=kept_text(rendered),
                 ),
             )
         )
@@ -100,7 +91,7 @@ def _row_entries(
                         resource_type="qdrant/row_text",
                         vfs_name=f"{stem}.txt",
                         size=len(text),
-                        extra=_kept(text),
+                        extra=kept_text(text),
                     ),
                 )
             )

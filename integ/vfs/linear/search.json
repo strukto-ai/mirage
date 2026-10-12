@@ -12,6 +12,19 @@
         "stdout": "/issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json\n/issues/teams/WEB__Web__team_web/issues/WEB-1__iss_web_1/issue.json\nrc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "linear_search_checks_the_listing_text_of_projects_and_documents",
+      "seq": 944002,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "grep -rli search /issues/teams/PLAT__Platform__team_plat/projects /issues/teams/PLAT__Platform__team_plat/documents | sort; grep -rlw nowhere /issues/teams/PLAT__Platform__team_plat/members; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/issues/teams/PLAT__Platform__team_plat/documents/Search_Architecture__doc_plat_arch.json\n/issues/teams/PLAT__Platform__team_plat/projects/Search__prj_search.json\nrc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

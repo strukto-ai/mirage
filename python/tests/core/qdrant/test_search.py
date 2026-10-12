@@ -1,6 +1,6 @@
 import pytest
 
-import mirage.core.qdrant.readdir as readdir_mod
+import mirage.utils.record_search as record_search_mod
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.qdrant.search import files_containing
 from mirage.core.qdrant.tree import TREE, readdir
@@ -84,7 +84,7 @@ async def test_only_files_whose_text_holds_it_are_read(accessor):
 
 @pytest.mark.asyncio
 async def test_a_file_too_large_to_keep_is_read(accessor, monkeypatch):
-    monkeypatch.setattr(readdir_mod, "KEPT_TEXT_MAX", 10)
+    monkeypatch.setattr(record_search_mod, "KEPT_TEXT_MAX", 10)
     found = await _containing(accessor, "orange", "/db/animals/cat/small")
     assert found == [
         "/db/animals/cat/small/2.json",

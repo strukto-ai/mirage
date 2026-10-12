@@ -150,13 +150,19 @@ With `content_search=True` (YAML `content_search: true`), `grep -rw` and
 hold every word, where the search names it or the listing keeps it. The listing
 keeps the issue's other fields (team, project, cycle, state, people, labels,
 dates, link) and each title or description word the search can miss, such as
-one inside a link. Comments, members, projects, cycles and documents are always
-read.
+one inside a link.
 
 Every issue is read when the word is a key of the issue JSON (`title`,
 `priority`) or a JSON literal, has a digit or only the letters a to f, which an
 id can hold, and when a search fails, returns 250 issues or finds nothing. It
 is off by default: Linear indexes a write some time after it lands.
+
+Members, projects, cycles and documents are listed with their whole JSON, so
+each entry keeps its text, and `grep -r` and `rg` read only the files whose
+text holds the pattern's text in any case, with or without `content_search`.
+A file over 8 KiB, and every file for a text that is not ASCII, is read as
+usual. Comments are always read: they are fetched per issue, and Linear's
+comment search can miss a word inside a link.
 
 ## Cache
 

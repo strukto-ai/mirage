@@ -41,83 +41,58 @@ export const RECORD_KEYS: ReadonlySet<string> = new Set([
   'null',
 ])
 
-// Each issue directory under `scope` with its kept text, by issue id; null for
-// a scope inside an issue or a listing that keeps no unsearched text.
-async function issueDirs(
+// A team's directories whose files' listing entries keep their text
+// (`keptText`).
+export const KEPT_DIRS: readonly string[] = ['members', 'projects', 'cycles', 'documents']
+
+function child(directory: PathSpec, name: string): PathSpec {
+  return mountedPath(directory, `${directory.mountPath.replace(/\/+$/, '')}/${name}`)
+}
+
+// The `issues` directories and the kept-text directories under `scope`; null
+// for a scope inside an issue.
+async function walked(
   accessor: LinearAccessor,
   scope: PathSpec,
   index: IndexCacheStore | undefined,
-): Promise<Map<string, [PathSpec, string]> | null> {
+): Promise<[PathSpec[], PathSpec[]] | null> {
   const match = detectScope(scope)
-  const base = scope.mountPath.replace(/\/+$/, '')
   let teams: PathSpec[]
   if (match.kind === ROOT || match.kind === 'teams') {
     const root = mountedPath(scope, '/teams')
     teams = (await readdir(accessor, root, index)).map((name) =>
-      mountedPath(root, `/teams/${name.split('/').at(-1) ?? name}/issues`),
+      child(root, name.split('/').at(-1) ?? name),
     )
   } else if (match.kind === 'team') {
-    teams = [mountedPath(scope, `${base}/issues`)]
-  } else if (match.kind === 'issues') {
     teams = [scope]
-  } else if (['members', 'projects', 'cycles', 'documents'].includes(match.kind)) {
-    teams = []
+  } else if (match.kind === 'issues') {
+    return [[scope], []]
+  } else if (KEPT_DIRS.includes(match.kind)) {
+    return [[], [scope]]
   } else {
     return null
   }
-  const dirs = new Map<string, [PathSpec, string]>()
-  for (const issues of teams) {
-    const parent = issues.mountPath.replace(/\/+$/, '')
-    for (const listed of await readdir(accessor, issues, index)) {
-      const child = mountedPath(issues, `${parent}/${listed.split('/').at(-1) ?? listed}`)
-      const entry = await resolveEntry(readdir, accessor, child, index)
-      const kept = entry?.extra.unsearched
-      if (entry === null || typeof kept !== 'string') return null
-      dirs.set(entry.id, [child, kept])
-    }
-  }
-  return dirs
+  return [
+    teams.map((team) => child(team, 'issues')),
+    teams.flatMap((team) => KEPT_DIRS.map((kind) => child(team, kind))),
+  ]
 }
 
-/**
- * The `issue.json` files under `under` whose issue Linear's search names, or
- * whose other fields hold `text`.
- *
- * Linear searches an issue's title and description by word, so each word is
- * asked on its own, and an issue is read when each word is either named there
- * or held by the text the listing kept (`unsearchedText`): the rest of its
- * JSON (team, project, cycle, state, people, labels, dates, link), and the
- * words of those two the search may split otherwise. The text goes through
- * `recordQueries` for its key names and escapes. Null when the text cannot be
- * searched, a scope lies inside an issue, a search answers a full page or
- * fails, or nothing is found, since Linear indexes a write some time after it
- * lands. Mirrors Python's `files_containing`.
- */
-export async function filesContaining(
+// Each searched text's words, and the issues Linear names for each word; null
+// when the text cannot be searched or a search fails or answers a full page.
+async function named(
   accessor: LinearAccessor,
   text: string,
-  under: readonly PathSpec[],
-  index?: IndexCacheStore,
-): Promise<PathSpec[] | null> {
+): Promise<[string[][], Map<string, Set<string>>] | null> {
   const queries = recordQueries(text, RECORD_KEYS, true)
   if (queries === null) return null
   const asked = queries.map((query) => query.toLowerCase().split(/\s+/).filter(Boolean))
-  const found: PathSpec[] = []
+  const found = new Map<string, Set<string>>()
   try {
-    const named = new Map<string, Set<string>>()
     for (const word of [...new Set(asked.flat())].sort(compareCodePoints)) {
       const nodes = await searchIssues(accessor.transport, word, SEARCH_LIMIT)
       if (nodes.length >= SEARCH_LIMIT) return null
-      named.set(word, new Set(nodes.map((node) => String(node.id))))
-    }
-    for (const scope of under) {
-      const dirs = await issueDirs(accessor, scope, index)
-      if (dirs === null) return null
-      for (const [issueId, [path, kept]] of dirs) {
-        if (mayHold(asked, named, issueId, kept)) {
-          found.push(mountedPath(path, `${path.mountPath.replace(/\/+$/, '')}/issue.json`))
-        }
-      }
+      found.set(word, new Set(nodes.map((node) => String(node.id))))
     }
   } catch (err) {
     // fetch rejects with a TypeError when the connection fails and a
@@ -130,8 +105,100 @@ export async function filesContaining(
       err instanceof DOMException ||
       err instanceof SyntaxError
     if (!failed) throw err
-    console.warn(`linear search failed (${String(err)}); reading every file`)
+    console.warn(`linear search failed (${String(err)}); reading every issue`)
     return null
   }
-  return found.length > 0 ? found : null
+  return [asked, found]
+}
+
+async function found(
+  accessor: LinearAccessor,
+  needle: string,
+  under: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+  askLinear: boolean,
+): Promise<PathSpec[] | null> {
+  const issueDirs: PathSpec[] = []
+  const keptDirs: PathSpec[] = []
+  for (const scope of under) {
+    const dirs = await walked(accessor, scope, index)
+    if (dirs === null) return null
+    issueDirs.push(...dirs[0])
+    keptDirs.push(...dirs[1])
+  }
+  const issues: [string, PathSpec, string | null][] = []
+  for (const directory of issueDirs) {
+    for (const listed of await readdir(accessor, directory, index)) {
+      const path = child(directory, listed.split('/').at(-1) ?? listed)
+      const entry = await resolveEntry(readdir, accessor, path, index)
+      if (entry === null) return null
+      const kept = entry.extra.unsearched
+      issues.push([entry.id, path, typeof kept === 'string' ? kept : null])
+    }
+  }
+  const answer = askLinear && issues.length > 0 ? await named(accessor, needle) : null
+  const held = issues
+    .filter(
+      ([issueId, , kept]) =>
+        answer !== null && (kept === null || mayHold(answer[0], answer[1], issueId, kept)),
+    )
+    .map(([, path]) => path)
+  const out = (held.length > 0 ? held : issues.map(([, path]) => path)).map((path) =>
+    child(path, 'issue.json'),
+  )
+  for (const directory of keptDirs) {
+    for (const listed of await readdir(accessor, directory, index)) {
+      const path = child(directory, listed.split('/').at(-1) ?? listed)
+      const entry = await resolveEntry(readdir, accessor, path, index)
+      if (entry === null) return null
+      const kept = entry.extra.text
+      if (typeof kept !== 'string' || kept.includes(needle)) out.push(path)
+    }
+  }
+  return out
+}
+
+/**
+ * The files under `under` that may hold `text`: the `issue.json` files
+ * Linear's search names or whose other fields hold it, and the member,
+ * project, cycle and document files whose text holds it.
+ *
+ * Linear searches an issue's title and description by word, so with
+ * `askLinear` each word is asked on its own, and an issue is read when each
+ * word is either named there or held by the text the listing kept
+ * (`unsearchedText`): the rest of its JSON (team, project, cycle, state,
+ * people, labels, dates, link), and the words of those two the search may
+ * split otherwise. The text goes through `recordQueries` for its key names and
+ * escapes. Every issue is read without `askLinear`, when the text cannot be
+ * searched, a search fails or answers a full page, or nothing is found, since
+ * Linear indexes a write some time after it lands. A member, project, cycle or
+ * document file is read when the text its listing entry kept (`keptText`)
+ * holds `text` in any case, or when it was too large to keep. null for a text
+ * that is not ASCII or a scope inside an issue. Mirrors Python's
+ * `files_containing`.
+ */
+export async function filesContaining(
+  accessor: LinearAccessor,
+  text: string,
+  under: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+  askLinear: boolean,
+): Promise<PathSpec[] | null> {
+  if (/[\u0080-\uffff]/.test(text)) return null
+  try {
+    return await found(accessor, text.toLowerCase(), under, index, askLinear)
+  } catch (err) {
+    // fetch rejects with a TypeError when the connection fails and a
+    // DOMException when its timeout aborts it; a body that is not JSON
+    // rejects with a SyntaxError
+    const failed =
+      isFsError(err) ||
+      err instanceof LinearApiError ||
+      err instanceof TypeError ||
+      err instanceof DOMException ||
+      err instanceof SyntaxError
+    if (!failed) throw err
+    console.warn(`linear listing failed (${String(err)}); reading every file`)
+    return null
+  }
 }

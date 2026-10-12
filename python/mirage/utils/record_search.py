@@ -14,6 +14,8 @@
 
 import re
 
+from mirage.types import JsonValue
+
 _HEX_LETTERS = frozenset("abcdef")
 # The letters a JSON escape ends with: ``\b \f \n \r \t``, and the hex
 # digit closing a ``\u00XX`` control character. Each can run into the word
@@ -21,6 +23,8 @@ _HEX_LETTERS = frozenset("abcdef")
 _ESCAPE_LETTERS = frozenset("abcdefnrt")
 # A word a provider's search reads as grep -w does: ASCII letters and
 # digits, with sentence punctuation around them at most.
+# The largest rendered file whose text a listing entry keeps (``kept_text``).
+KEPT_TEXT_MAX = 8192
 _PLAIN_WORD = re.compile(r"[.,;:!?\"'()\[\]]*[A-Za-z0-9]+[.,;:!?\"'()\[\]]*")
 
 
@@ -97,3 +101,16 @@ def may_hold(
         all(record_id in named[word] or word in kept for word in words)
         for words in asked
     )
+
+
+def kept_text(rendered: bytes) -> dict[str, JsonValue]:
+    """A listing entry's ``extra`` keeping its file's rendered text,
+    lowercased, so grep can check the file without reading it; empty past
+    ``KEPT_TEXT_MAX`` bytes, where the file is read as usual.
+
+    Args:
+        rendered (bytes): the file as a read renders it.
+    """
+    if len(rendered) > KEPT_TEXT_MAX:
+        return {}
+    return {"text": rendered.decode().lower()}

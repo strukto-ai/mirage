@@ -47,7 +47,13 @@ export class LinearVFS extends BaseVFS {
   override readonly accessor: LinearAccessor
   // Linear's search answers for issues; comments and the team's other files
   // are always read.
-  override readonly searchable: readonly string[] = ['teams/*/issues/*/issue.json']
+  override readonly searchable: readonly string[] = [
+    'teams/*/issues/*/issue.json',
+    'teams/*/members/*',
+    'teams/*/projects/*',
+    'teams/*/cycles/*',
+    'teams/*/documents/*',
+  ]
 
   constructor(config: LinearConfig) {
     super()
@@ -66,8 +72,13 @@ export class LinearVFS extends BaseVFS {
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return linearFilesContaining(this.accessor, text, under, index)
+    return linearFilesContaining(
+      this.accessor,
+      text,
+      under,
+      index,
+      opts.wholeWord && this.config.contentSearch === true,
+    )
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

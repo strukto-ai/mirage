@@ -146,7 +146,7 @@ instead, and grep exits 2.
 | Slack | `search.messages`, `search.files` | `-w`, channel and DM days (`channels/*/*/chat.jsonl`, `dms/*/*/chat.jsonl`) | `content_search` |
 | Gmail | the listing's message text | messages (`*/*/*.gmail.json`), an ASCII text | `content_search` |
 | Google Calendar | events `q`, per word | `-w`, events (`*/*/*.gcal.json`), a word with no digit | `content_search` |
-| Linear | `searchIssues`, per word | `-w`, issues (`teams/*/issues/*/issue.json`) | `content_search` |
+| Linear | `searchIssues`, per word; the listing's text | `-w`, issues (`teams/*/issues/*/issue.json`) with `content_search`; members, projects, cycles and documents up to 8 KiB, an ASCII text | `content_search` for issues |
 | Trello | `/1/search`, per word | `-w`, cards (`workspaces/*/boards/*/lists/*/cards/*/card.json`) | `content_search` |
 | PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a table or view whose columns each hold the text as their cast spells it, or never spell it (a number, date or time) | always |
 | MongoDB | `$expr` over keys and strings (`lines_containing`) | `documents.jsonl` of a collection or view | always |

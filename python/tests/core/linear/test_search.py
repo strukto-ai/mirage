@@ -25,6 +25,8 @@ from mirage.core.linear.search import SEARCH_LIMIT, files_containing
 from mirage.types import JsonValue, PathSpec
 
 TEAM = {"id": "T1", "key": "ENG", "name": "Engineering"}
+ISSUES_DIR = "teams/ENG__Engineering__T1/issues"
+DOCS_DIR = "teams/ENG__Engineering__T1/documents"
 
 
 def _issue(
@@ -45,6 +47,11 @@ ISSUES = [
     _issue("I2", "Write release notes", "Blocked"),
     _issue("I3", "Docs", "Todo", "Visit wombat.example.com first"),
 ]
+DOCUMENTS = [
+    {"id": "D1", "title": "Search plan", "content": "Wombat rollout steps"},
+    {"id": "D2", "title": "Runbook", "content": "Restart the workers"},
+]
+ALL_ISSUES = ["ENG-1__I1", "ENG-2__I2", "ENG-3__I3"]
 
 
 def _scope(vfs_path: str = "") -> PathSpec:
@@ -57,6 +64,7 @@ async def _ask(
     named: list[str] | dict[str, list[str]],
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
+    ask_linear: bool = True,
 ):
     accessor = LinearAccessor(LinearConfig(api_key="k", content_search=True))
 
@@ -73,21 +81,43 @@ async def _ask(
         if reply is None
         else AsyncMock(side_effect=[reply])
     )
+    readdir = "mirage.core.linear.readdir"
     with (
+        patch(f"{readdir}.list_teams", AsyncMock(return_value=[TEAM])),
+        patch(f"{readdir}.list_team_issues", AsyncMock(return_value=ISSUES)),
+        patch(f"{readdir}.list_team_members", AsyncMock(return_value=[])),
+        patch(f"{readdir}.list_team_projects", AsyncMock(return_value=[])),
+        patch(f"{readdir}.list_team_cycles", AsyncMock(return_value=[])),
         patch(
-            "mirage.core.linear.readdir.list_teams",
-            AsyncMock(return_value=[TEAM]),
-        ),
-        patch(
-            "mirage.core.linear.readdir.list_team_issues",
-            AsyncMock(return_value=ISSUES),
+            f"{readdir}.list_team_documents",
+            AsyncMock(return_value=DOCUMENTS),
         ),
         patch("mirage.core.linear.client.graphql_request", found),
     ):
         out = await files_containing(
-            accessor, text, under or [_scope()], RAMIndexCacheStore()
+            accessor,
+            text,
+            under or [_scope()],
+            RAMIndexCacheStore(),
+            ask_linear=ask_linear,
         )
     return out, [call.args[2]["term"] for call in found.await_args_list]
+
+
+def _issues(out) -> list[str]:
+    return sorted(
+        p.vfs_path.rsplit("/", 2)[-2]
+        for p in out
+        if p.vfs_path.endswith("/issue.json")
+    )
+
+
+def _documents(out) -> list[str]:
+    return sorted(
+        p.vfs_path.rsplit("/", 1)[-1]
+        for p in out
+        if p.vfs_path.startswith(DOCS_DIR)
+    )
 
 
 def test_unsearched_text_leaves_out_title_and_description():
@@ -102,11 +132,7 @@ def test_unsearched_text_leaves_out_title_and_description():
 async def test_hits_are_what_linear_names_and_what_the_listing_kept():
     out, asked = await _ask("Blocked", ["I1"])
     assert out is not None
-    assert sorted(p.vfs_path.rsplit("/", 2)[-2] for p in out) == [
-        "ENG-1__I1",
-        "ENG-2__I2",
-    ]
-    assert all(p.vfs_path.endswith("/issue.json") for p in out)
+    assert _issues(out) == ["ENG-1__I1", "ENG-2__I2"]
     assert asked == ["blocked", "locked"]
 
 
@@ -116,24 +142,54 @@ async def test_hits_are_what_linear_names_and_what_the_listing_kept():
 async def test_a_word_in_a_link_is_kept_by_the_listing():
     out, asked = await _ask("visit wombat", {"visit": ["I3"]})
     assert out is not None
-    assert [p.vfs_path.rsplit("/", 2)[-2] for p in out] == ["ENG-3__I3"]
+    assert _issues(out) == ["ENG-3__I3"]
     assert asked == ["visit", "wombat"]
+
+
+# A document's listing entry keeps its text, so a document is read only when
+# that text holds the word in any case, whether Linear is asked or not.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ask_linear", [True, False])
+async def test_a_document_is_read_when_its_text_holds_it(ask_linear):
+    out, _ = await _ask("WOMBAT", ["I3"], ask_linear=ask_linear)
+    assert out is not None
+    assert len(_documents(out)) == 1
+    out, _ = await _ask("nowhere", [], [_scope(DOCS_DIR)])
+    assert out == []
+
+
+# Without an answer from Linear every issue is read; a scope inside an issue
+# and a text that is not ASCII read every file.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text, named, ask_linear",
+    [
+        ("title", ["I1"], True),
+        ("true", ["I1"], True),
+        ("q4", ["I1"], True),
+        ("login", [], True),
+        ("login", [f"X{i}" for i in range(SEARCH_LIMIT)], True),
+        ("login", ["I1"], False),
+    ],
+)
+async def test_an_unsure_answer_reads_every_issue(text, named, ask_linear):
+    out, _ = await _ask(
+        text, named, [_scope(ISSUES_DIR)], ask_linear=ask_linear
+    )
+    assert out is not None
+    assert _issues(out) == ALL_ISSUES
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "text, named, under",
+    "text, under",
     [
-        ("title", ["I1"], ""),
-        ("true", ["I1"], ""),
-        ("q4", ["I1"], ""),
-        ("login", [], ""),
-        ("login", [f"X{i}" for i in range(SEARCH_LIMIT)], ""),
-        ("login", ["I1"], "teams/ENG__Engineering__T1/issues/ENG-1__I1"),
+        ("login", f"{ISSUES_DIR}/ENG-1__I1"),
+        ("caf\u00e9", ""),
     ],
 )
-async def test_an_unsure_answer_reads_every_file(text, named, under):
-    out, _ = await _ask(text, named, [_scope(under)])
+async def test_every_file_is_read_when_the_walk_cannot_answer(text, under):
+    out, _ = await _ask(text, ["I1"], [_scope(under)])
     assert out is None
 
 
@@ -149,6 +205,7 @@ async def test_an_unsure_answer_reads_every_file(text, named, under):
         json.JSONDecodeError("Expecting value", "<html>", 0),
     ],
 )
-async def test_a_garbled_reply_reads_every_file(reply):
-    out, _ = await _ask("Blocked", [], reply=reply)
-    assert out is None
+async def test_a_garbled_reply_reads_every_issue(reply):
+    out, _ = await _ask("Blocked", [], [_scope(ISSUES_DIR)], reply=reply)
+    assert out is not None
+    assert _issues(out) == ALL_ISSUES

@@ -49,6 +49,7 @@ from mirage.core.linear.pathing import (
 )
 from mirage.core.linear.scope import detect_scope
 from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.utils.record_search import kept_text
 
 TEAM_DIRS = ("members", "issues", "projects", "cycles", "documents")
 
@@ -145,6 +146,7 @@ async def _list_members(
     entries = []
     for user in users:
         filename = member_filename(user)
+        rendered = to_json_bytes(normalize_user(user))
         entries.append(
             (
                 filename,
@@ -156,7 +158,8 @@ async def _list_members(
                     resource_type="linear/user",
                     remote_time=user.get("updatedAt") or "",
                     vfs_name=filename,
-                    size=len(to_json_bytes(normalize_user(user))),
+                    size=len(rendered),
+                    extra=kept_text(rendered),
                 ),
             )
         )
@@ -251,12 +254,14 @@ async def _list_projects(
     )
     entries = []
     for project in projects:
-        rendered = normalize_project(
-            project,
-            team_id=team_id,
-            team_key=entry.extra.get("team_key"),
-            team_name=entry.extra.get("team_name"),
-            issues=project_issue_rows(team_issues, project.get("id")),
+        rendered = to_json_bytes(
+            normalize_project(
+                project,
+                team_id=team_id,
+                team_key=entry.extra.get("team_key"),
+                team_name=entry.extra.get("team_name"),
+                issues=project_issue_rows(team_issues, project.get("id")),
+            )
         )
         filename = project_filename(project)
         entries.append(
@@ -268,7 +273,8 @@ async def _list_projects(
                     resource_type="linear/project",
                     remote_time=project.get("updatedAt") or "",
                     vfs_name=filename,
-                    size=len(to_json_bytes(rendered)),
+                    size=len(rendered),
+                    extra=kept_text(rendered),
                 ),
             )
         )
@@ -285,6 +291,7 @@ async def _list_cycles(
     entries = []
     for cycle in cycles:
         filename = cycle_filename(cycle)
+        rendered = to_json_bytes(normalize_cycle(cycle, team_id=team_id))
         entries.append(
             (
                 filename,
@@ -294,9 +301,8 @@ async def _list_cycles(
                     resource_type="linear/cycle",
                     remote_time=cycle.get("updatedAt") or "",
                     vfs_name=filename,
-                    size=len(
-                        to_json_bytes(normalize_cycle(cycle, team_id=team_id))
-                    ),
+                    size=len(rendered),
+                    extra=kept_text(rendered),
                 ),
             )
         )
@@ -312,6 +318,7 @@ async def _list_documents(
     entries = []
     for document in documents:
         filename = document_filename(document)
+        rendered = to_json_bytes(normalize_document(document))
         entries.append(
             (
                 filename,
@@ -321,7 +328,8 @@ async def _list_documents(
                     resource_type="linear/document",
                     remote_time=document.get("updatedAt") or "",
                     vfs_name=filename,
-                    size=len(to_json_bytes(normalize_document(document))),
+                    size=len(rendered),
+                    extra=kept_text(rendered),
                 ),
             )
         )

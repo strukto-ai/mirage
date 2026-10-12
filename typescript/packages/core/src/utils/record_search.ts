@@ -17,6 +17,9 @@ const HEX_LETTERS = /^[a-f]+$/
 // closing a `\u00XX` control character. Each can run into the word after it,
 // so `\nice` holds "nice" where the message holds "ice".
 const ESCAPE_LETTERS = new Set('abcdefnrt')
+// The largest rendered file whose text a listing entry keeps (`keptText`).
+export const KEPT_TEXT_MAX = 8192
+
 // A word a provider's search reads as grep -w does: ASCII letters and digits,
 // with sentence punctuation around them at most.
 const PLAIN_WORD = /^[.,;:!?"'()[\]]*[A-Za-z0-9]+[.,;:!?"'()[\]]*$/
@@ -79,4 +82,14 @@ export function mayHold(
   return asked.some((words) =>
     words.every((word) => named.get(word)?.has(recordId) === true || kept.includes(word)),
   )
+}
+
+/**
+ * A listing entry's `extra` keeping its file's rendered text, lowercased, so
+ * grep can check the file without reading it; empty past `KEPT_TEXT_MAX`
+ * bytes, where the file is read as usual.
+ */
+export function keptText(rendered: Uint8Array): Record<string, string> {
+  if (rendered.byteLength > KEPT_TEXT_MAX) return {}
+  return { text: new TextDecoder().decode(rendered).toLowerCase() }
 }
