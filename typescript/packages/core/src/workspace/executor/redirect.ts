@@ -47,6 +47,8 @@ import { getText, literalWord } from '../../shell/helpers.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { CycleError } from '../../utils/path.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -253,6 +255,8 @@ export async function handleRedirect(
   // Whether bash forks to run the command (a program or a subshell), so a
   // closed output pipe ends it alone rather than the shell.
   forked = false,
+  // The namespace's links, so a link to a pipe streams as the pipe does.
+  links: NamespaceLinks | null = null,
 ): Promise<Result> {
   const session = context.session
   const badFd = unsupportedDescriptor(redirects)
@@ -449,7 +453,7 @@ export async function handleRedirect(
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
-      const file = new FileDescription(scope, r.append || (await isPipe(dispatch, scope)))
+      const file = new FileDescription(scope, r.append || (await isPipe(dispatch, scope, links)))
       file.opened = true
       if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
       files.push(file)
@@ -468,7 +472,7 @@ export async function handleRedirect(
     [2, Channel.STDERR],
   ] as const) {
     const file = outputs.get(fd)
-    if (file instanceof FileDescription && (await isPipe(dispatch, file.scope)))
+    if (file instanceof FileDescription && (await isPipe(dispatch, file.scope, links)))
       streams.set(channel, file.scope)
   }
   const forward = new Map<Channel, Channel>()
@@ -549,8 +553,9 @@ export async function handleRedirect(
       } catch (error) {
         if (!(error instanceof PipeClosed)) throw error
         // SIGPIPE: a program or a subshell writing into an output pipe whose
-        // reader has gone ends alone with its status; a builtin or a compound
-        // is the shell's own, and the shell dies with it, as bash's does.
+        // reader has gone ends alone with its status (a program inside a
+        // compound already has); a builtin's write is the shell's own, in a
+        // function or a group too, and the shell dies with it, as bash's does.
         if (!forked) throw new ExitSignal(141)
         io = new IOResult({ exitCode: 141 })
       }
@@ -836,13 +841,25 @@ export async function redirectStdin(
 
 /**
  * Whether an output target is a live pipe, whose writes stream. Only a
- * descriptor path is asked, so an ordinary target costs no round trip; a
- * target reached some other way (a link to a pipe) still reaches it through
- * the device mount's own write, just not streamed. A descriptor no longer
- * there is no pipe: its open answers for it. Mirrors Python's _is_pipe.
+ * descriptor path, named or behind a link, is asked: the links are the
+ * namespace's own table, followed without a backend call, so an ordinary
+ * target costs no round trip. A descriptor no longer there is no pipe, nor is
+ * a link loop: the open answers for either. Mirrors Python's _is_pipe.
  */
-async function isPipe(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
-  if (!scope.virtual.startsWith('/dev/fd/')) return false
+async function isPipe(
+  dispatch: DispatchFn,
+  scope: PathSpec,
+  links: NamespaceLinks | null,
+): Promise<boolean> {
+  let followed: string
+  try {
+    followed = links === null ? scope.virtual : links.follow(scope.virtual)
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    logger.debug(`pipe probe met a link loop at ${scope.rawPath}: ${String(err)}`)
+    return false
+  }
+  if (!followed.startsWith('/dev/fd/')) return false
   let stat: unknown
   try {
     ;[stat] = await dispatch('stat', scope)

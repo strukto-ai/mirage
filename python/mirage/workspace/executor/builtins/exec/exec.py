@@ -23,6 +23,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
+from mirage.io.errors import PipeClosed
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -44,7 +45,7 @@ from mirage.shell.descriptors import (
     unsupported_descriptor,
 )
 from mirage.shell.errors import ExitSignal
-from mirage.shell.helpers import get_redirects
+from mirage.shell.helpers import get_negated_command, get_redirects
 from mirage.shell.join import shell_join
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
@@ -65,7 +66,11 @@ from mirage.workspace.executor.builtins.shared import builtin_error
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.find_action_dispatch import program_head
-from mirage.workspace.executor.statement import Written, record_status
+from mirage.workspace.executor.statement import (
+    Written,
+    forks,
+    record_status,
+)
 from mirage.workspace.executor.traps import clear_traps
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
@@ -581,8 +586,11 @@ async def divert_statement(
     stderr's own binding and makes the statement's status 1, which `$?`
     shows. An unwritable stderr fails only a statement that sent its own
     stdout there (``>&2``); a lost diagnostic leaves the status the
-    command earned. Returns what is left for the terminal, in the order
-    it was written.
+    command earned. A stream bound to a pipe whose reader has gone is
+    SIGPIPE for the writer: a program or subshell ends with 141 and
+    nothing more it wrote is delivered, while the shell's own write (a
+    builtin, a function, a compound command) ends the shell with 141.
+    Returns what is left for the terminal, in the order it was written.
 
     Args:
         dispatch (DispatchFn | None): op dispatcher, None for a loop
@@ -607,7 +615,15 @@ async def divert_statement(
         data = b"".join(chunk[1] for chunk in run)
         if kept:
             rest.append((channel, data, True))
-        elif await _routed(dispatch, session, channel, data, rest):
+            continue
+        try:
+            refused = await _routed(dispatch, session, channel, data, rest)
+        except PipeClosed:
+            if not _writer_forks(statement, session):
+                raise ExitSignal(141) from None
+            io.exit_code = 141
+            break
+        if refused:
             failed = failed or channel == Channel.STDOUT
             unwritable = unwritable or channel == Channel.STDERR
     if failed:
@@ -623,6 +639,25 @@ async def divert_statement(
     if io.exit_code != earned:
         record_status(session, io.exit_code)
     return rest
+
+
+def _writer_forks(statement: TSNodeLike | None, session: SessionState) -> bool:
+    """Whether what a statement wrote came from a child bash forks for
+    it, so a pipe closing under the write ends that writer alone: a
+    program or a subshell, redirected or negated too, or a pipeline,
+    whose commands are each a child of their own.
+
+    Args:
+        statement (TSNodeLike | None): the statement that wrote.
+        session (SessionState): whose functions a name may call.
+    """
+    if statement is None:
+        return False
+    if statement.type == NT.REDIRECTED_STATEMENT:
+        return _writer_forks(get_redirects(statement)[0], session)
+    if statement.type == NT.NEGATED_COMMAND:
+        return _writer_forks(get_negated_command(statement), session)
+    return statement.type == NT.PIPELINE or forks(statement, session)
 
 
 async def _routed(

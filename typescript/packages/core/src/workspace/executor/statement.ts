@@ -31,8 +31,11 @@ import {
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
+import { getParts, getText } from '../../shell/helpers.ts'
+import { literalText } from '../../shell/parse/names.ts'
+import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { abortedLine, lineStatusWriter } from '../abort.ts'
 import { makeAbortError } from '../../utils/abort.ts'
@@ -162,6 +165,42 @@ export function restoreStatus(
  */
 export function carryStatus(session: SessionState): void {
   session.pipeStatusPending = session.pipeStatus
+}
+
+/**
+ * Whether bash forks to run a command, so what fails there fails that
+ * command alone: its redirects expand in the child, and a pipe closing under
+ * its writes ends only it. A subshell or a program forks; a builtin, a
+ * function or another compound command is the shell's own, which expands
+ * its redirects itself and discards the line on an error, and ends with a
+ * pipe its own write closed. `command -v` is the builtin itself; `command X`
+ * is X with functions masked; a name only an expansion spells is taken for
+ * a program. Mirrors Python's forks.
+ */
+export function forks(command: TSNodeLike | null, session: SessionState): boolean {
+  if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
+  let words = getParts(command).filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
+  let functions = true
+  while (words[0] !== undefined && getText(words[0]) === 'command') {
+    words = words.slice(1)
+    functions = false
+    while (words[0] !== undefined && getText(words[0]).startsWith('-')) {
+      const option = getText(words[0])
+      words = words.slice(1)
+      if (option === '--') break
+      if (option.includes('v') || option.includes('V')) return false
+    }
+  }
+  let head = words[0]
+  if (head === undefined) return false
+  if (head.type === NT.COMMAND_NAME && head.namedChildren[0] !== undefined) {
+    head = head.namedChildren[0]
+  }
+  const name = literalText(head)
+  return (
+    name === null ||
+    (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
+  )
 }
 
 /**

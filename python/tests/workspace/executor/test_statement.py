@@ -20,6 +20,7 @@ from mirage.workspace.executor.statement import (
     assignment_status,
     errexit_acts,
     finish_statement,
+    forks,
     ignoring_errexit,
     restore_status,
     snapshot_status,
@@ -113,6 +114,24 @@ def test_errexit_acts_where_set_e_ends_the_shell(line, status, errexit, acts):
     session = SessionState(session_id="s", shell_options={"errexit": errexit})
     node = parse(line).children[0]
     assert errexit_acts(node, status, session) is acts
+
+
+@pytest.mark.parametrize(
+    ("line", "forked"),
+    [
+        ("head -c 1 f", True),
+        ("(printf x)", True),
+        ("printf x", False),
+        ("g", False),
+        ("command g", True),
+        ("command -v head", False),
+        ("{ head f; }", False),
+        ("x=1", False),
+    ],
+)
+def test_forks_where_bash_runs_a_child(line, forked):
+    session = SessionState(session_id="s", functions={"g": "g() { :; }"})
+    assert forks(parse(line).children[0], session) is forked
 
 
 def test_ignoring_errexit_scopes_the_context():

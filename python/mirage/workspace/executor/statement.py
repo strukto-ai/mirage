@@ -32,10 +32,14 @@ from mirage.shell.descriptors import (
     deliver,
     unreadable_stdin,
 )
+from mirage.shell.helpers import get_parts, get_text
 from mirage.shell.node_kind import pipeline_transparent
+from mirage.shell.parse.names import literal_text
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.abort import line_status_writer
 from mirage.workspace.frame import ExecutionFrame
+from mirage.workspace.lookup.constants import BASH_BUILTINS
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode, StatusWriter
 
@@ -200,6 +204,48 @@ def errexit_acts(node: TSNodeLike, status: int, session: SessionState) -> bool:
     if acts:
         session.errexit_exiting = True
     return acts
+
+
+def forks(command: TSNodeLike | None, session: SessionState) -> bool:
+    """Whether bash forks to run a command, so what fails there fails that
+    command alone: its redirects expand in the child, and a pipe closing
+    under its writes ends only it. A subshell or a program forks; a
+    builtin, a function or another compound command is the shell's own,
+    which expands its redirects itself and discards the line on an error,
+    and ends with a pipe its own write closed. ``command -v`` is the
+    builtin itself; ``command X`` is X with functions masked; a name only
+    an expansion spells is taken for a program.
+
+    Args:
+        command (TSNodeLike | None): the command, None for none.
+        session (SessionState): whose functions a name may call.
+    """
+    if command is None or command.type != NT.COMMAND:
+        return command is not None and command.type == NT.SUBSHELL
+    words = [
+        part
+        for part in get_parts(command)
+        if part.type != NT.VARIABLE_ASSIGNMENT
+    ]
+    functions = True
+    while words and get_text(words[0]) == "command":
+        words, functions = words[1:], False
+        while words and get_text(words[0]).startswith("-"):
+            option = get_text(words.pop(0))
+            if option == "--":
+                break
+            if "v" in option or "V" in option:
+                return False
+    if not words:
+        return False
+    head = words[0]
+    if head.type == NT.COMMAND_NAME and head.named_children:
+        head = head.named_children[0]
+    name = literal_text(head)
+    return name is None or (
+        name not in BASH_BUILTINS
+        and not (functions and name in session.functions)
+    )
 
 
 async def finish_statement(

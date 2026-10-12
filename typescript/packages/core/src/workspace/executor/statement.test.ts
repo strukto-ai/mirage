@@ -22,6 +22,7 @@ import {
   assignmentStatus,
   errexitActs,
   finishStatement,
+  forks,
   ignoringErrexit,
   restoreStatus,
   snapshotStatus,
@@ -104,6 +105,23 @@ describe('snapshotStatus / restoreStatus', () => {
     // The line that did stamp last still puts its own back.
     restoreStatus(session, before, theirs)
     expect(session.lastExitCode).toBe(1)
+  })
+})
+
+describe('forks', () => {
+  it.each([
+    ['head -c 1 f', true],
+    ['(printf x)', true],
+    ['printf x', false],
+    ['g', false],
+    ['command g', true],
+    ['command -v head', false],
+    ['{ head f; }', false],
+    ['x=1', false],
+  ] as const)('%s: %s', async (line, forked) => {
+    const session = new SessionState({ sessionId: 's', functions: { g: 'g() { :; }' } })
+    const node = (await getTestParser()).parse(line).children[0]
+    expect(node !== undefined && forks(node, session)).toBe(forked)
   })
 })
 

@@ -36,10 +36,8 @@ import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { literalText } from '../../shell/parse/names.ts'
-import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import { assignmentStatus, ignoringErrexit, recordStatus } from '../executor/statement.ts'
+import { assignmentStatus, forks, ignoringErrexit, recordStatus } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
@@ -72,7 +70,7 @@ import {
 import { expandRedirect } from '../expand/redirects.ts'
 import { expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
-import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
+import { ExitSignal, ArithError, PipeClosed, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { landedArith } from '../session/elements.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -604,7 +602,7 @@ async function runRedirected(
   }
   const pipeNode =
     (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
-  const forked = forks(command, context)
+  const forked = forks(command, context.session)
   const expand = (redirect: Redirect) =>
     expandRedirect(
       redirect,
@@ -665,6 +663,7 @@ async function runRedirected(
           name,
           args,
           forked,
+          namespace,
         )
       ;[stdout, io, execNode] = await runWithRedirectPaths(
         command,
@@ -695,6 +694,7 @@ async function runRedirected(
         '',
         [],
         forked,
+        namespace,
       )
     }
     if (simple && context.frame.diagnostics.length > 0) {
@@ -852,42 +852,6 @@ function isBareExec(command: TSNodeLike | null): boolean {
   if (command?.type !== NT.COMMAND) return false
   const named = getParts(command)
   return named.length === 1 && named[0]?.type === NT.COMMAND_NAME && getText(named[0]) === 'exec'
-}
-
-/**
- * Whether bash forks to run a redirected command, so its redirects expand
- * in the child and an error there fails that command alone: a subshell or a
- * program. A builtin, a function or another compound command is the shell's
- * own, which expands its redirects itself and discards the line on an
- * error. `command -v` is the builtin itself; `command X` is X with functions
- * masked; a name only an expansion spells is taken for a program. Mirrors
- * Python's _forks.
- */
-function forks(command: TSNodeLike | null, context: EvaluationContext): boolean {
-  const session = context.session
-  if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
-  let words = getParts(command).filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
-  let functions = true
-  while (words[0] !== undefined && getText(words[0]) === 'command') {
-    words = words.slice(1)
-    functions = false
-    while (words[0] !== undefined && getText(words[0]).startsWith('-')) {
-      const option = getText(words[0])
-      words = words.slice(1)
-      if (option === '--') break
-      if (option.includes('v') || option.includes('V')) return false
-    }
-  }
-  let head = words[0]
-  if (head === undefined) return false
-  if (head.type === NT.COMMAND_NAME && head.namedChildren[0] !== undefined) {
-    head = head.namedChildren[0]
-  }
-  const name = literalText(head)
-  return (
-    name === null ||
-    (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
-  )
 }
 
 export async function executeNode(
@@ -1198,28 +1162,40 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.COMMAND) {
-    const ran = await runInCommandScope(() =>
-      executeCommand(
-        recurse,
-        dispatch,
-        registry,
-        deps.namespace,
-        executeFn,
-        node,
-        context,
-        stdin,
-        callStack,
-        jobTable,
-        deps.runtimeBindings,
-        deps.routingDecision,
-        deps.signal,
-        deps.parser,
-        agentId,
-        deps.handed,
-        sink,
-      ),
-    )
-    return sink === undefined ? ran : drained(sink, ...ran)
+    try {
+      const ran = await runInCommandScope(() =>
+        executeCommand(
+          recurse,
+          dispatch,
+          registry,
+          deps.namespace,
+          executeFn,
+          node,
+          context,
+          stdin,
+          callStack,
+          jobTable,
+          deps.runtimeBindings,
+          deps.routingDecision,
+          deps.signal,
+          deps.parser,
+          agentId,
+          deps.handed,
+          sink,
+        ),
+      )
+      return sink === undefined ? ran : await drained(sink, ...ran)
+    } catch (err) {
+      // SIGPIPE: a program writing into a pipe whose reader has gone dies
+      // of it alone, and its caller goes on; a builtin or a function writes
+      // as the shell, which goes down with it.
+      if (!(err instanceof PipeClosed) || !forks(node, session)) throw err
+      return [
+        null,
+        new IOResult({ exitCode: 141 }),
+        new ExecutionNode({ command: getText(node), exitCode: 141 }),
+      ]
+    }
   }
 
   if (kind === NodeKind.PIPELINE) {

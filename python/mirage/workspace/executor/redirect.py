@@ -57,6 +57,8 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.path import CycleError
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
@@ -349,6 +351,7 @@ async def handle_redirect(
     name: str = "",
     args: tuple[str, ...] = (),
     forked: bool = False,
+    links: NamespaceLinks | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Apply ordered descriptor bindings for one command and restore them.
 
@@ -381,6 +384,8 @@ async def handle_redirect(
         args (tuple[str, ...]): expanded command arguments.
         forked (bool): whether bash forks to run the command (a program
             or a subshell), so a closed output pipe ends it alone.
+        links (NamespaceLinks | None): the namespace's links, so a link
+            to a pipe streams as the pipe does.
     """
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
@@ -604,7 +609,7 @@ async def handle_redirect(
                         inputs[fd] = emptied
             file = FileDescription(
                 scope,
-                append=r.append or await _is_pipe(dispatch, scope),
+                append=r.append or await _is_pipe(dispatch, scope, links),
                 opened=True,
             )
             if len(expanded) == len(redirects) and _output_only(name, args):
@@ -620,7 +625,7 @@ async def handle_redirect(
         channel: pipe_file.scope
         for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR))
         if isinstance(pipe_file := outputs[fd], FileDescription)
-        and await _is_pipe(dispatch, pipe_file.scope)
+        and await _is_pipe(dispatch, pipe_file.scope, links)
     }
     forward = {}
     live = bool(streams) or bool(piped)
@@ -699,9 +704,10 @@ async def handle_redirect(
                 refused = exec_node.refused
             except PipeClosed:
                 # SIGPIPE: a program or a subshell writing into an output
-                # pipe whose reader has gone ends alone with its status;
-                # a builtin or a compound is the shell's own, and the
-                # shell dies with it, as bash's does.
+                # pipe whose reader has gone ends alone with its status (a
+                # program inside a compound already has); a builtin's
+                # write is the shell's own, in a function or a group too,
+                # and the shell dies with it, as bash's does.
                 if not forked:
                     raise ExitSignal(141) from None
                 io = IOResult(exit_code=141)
@@ -1095,19 +1101,31 @@ async def redirect_stdin(
     return sources.get(FD_STDIN)
 
 
-async def _is_pipe(dispatch: DispatchFn, scope: PathSpec) -> bool:
+async def _is_pipe(
+    dispatch: DispatchFn, scope: PathSpec, links: NamespaceLinks | None
+) -> bool:
     """Whether an output target is a live pipe, whose writes stream.
 
-    Only a descriptor path is asked, so an ordinary target costs no
-    round trip; a target reached some other way (a link to a pipe) still
-    reaches it through the device mount's own write, just not streamed.
-    A descriptor no longer there is no pipe: its open answers for it.
+    Only a descriptor path, named or behind a link, is asked: the links
+    are the namespace's own table, followed without a backend call, so
+    an ordinary target costs no round trip. A descriptor no longer there
+    is no pipe, nor is a link loop: the open answers for either.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
         scope (PathSpec): the redirect target.
+        links (NamespaceLinks | None): the namespace's links.
     """
-    if not scope.virtual.startswith("/dev/fd/"):
+    try:
+        followed = (
+            scope.virtual if links is None else links.follow(scope.virtual)
+        )
+    except CycleError as exc:
+        logger.debug(
+            "pipe probe met a link loop at %s: %s", scope.raw_path, exc
+        )
+        return False
+    if not followed.startswith("/dev/fd/"):
         return False
     try:
         stat, _ = await dispatch("stat", scope)

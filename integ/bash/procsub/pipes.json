@@ -76,6 +76,142 @@
       }
     },
     {
+      "id": "procsub_closed_output_through_symlink_ends_only_the_writer",
+      "seq": 1346083,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ln -s \"$1\" {mount}/procsub-alias; head -c 200000 /dev/zero > {mount}/procsub-alias; echo st:$?; rm {mount}/procsub-alias; }; f >(head -c 1 > /dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "st:141\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_only_the_program_in_group",
+      "seq": 1346084,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ head -c 200000 /dev/zero; echo st:$? >&2; } > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": "st:141\n"
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_only_the_program_in_function",
+      "seq": 1346085,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "g() { head -c 200000 /dev/zero; echo g:$? >&2; }; g > >(head -c 1 >/dev/null); echo st:$?; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "st:0\nafter\n",
+        "stderr": "g:141\n"
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_each_program_in_loop",
+      "seq": 1346086,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "for i in 1 2; do head -c 200000 /dev/zero; echo \"st$i:$?\" >&2; done > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": "st1:141\nst2:141\n"
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_only_the_subshell_in_group",
+      "seq": 1346087,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ ( printf %200000s x; echo more >&2 ); echo st:$? >&2; } > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": "st:141\n"
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_the_shell_for_a_builtin_in_function",
+      "seq": 1346088,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "g() { printf %200000s x; echo g-after >&2; }; g > >(head -c 1 >/dev/null); echo st:$?; echo after",
+      "expect": {
+        "exit": 141,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_closed_ends_only_the_program",
+      "seq": 1346089,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { (exec >\"$1\"; head -c 200000 /dev/zero; echo st:$? >&2); echo sub:$?; }; f >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub:0\nafter\n",
+        "stderr": "st:141\n"
+      }
+    },
+    {
+      "id": "procsub_exec_output_closed_ends_the_subshell_for_a_builtin",
+      "seq": 1346090,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { (exec >\"$1\"; printf %200000s x; echo st:$? >&2); echo sub:$?; }; f >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub:141\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_closed_in_a_function",
+      "seq": 1346091,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "g() { head -c 200000 /dev/zero; echo g-after >&2; }; f() { (exec >\"$1\"; g; echo st:$? >&2); echo sub:$?; }; f >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub:141\nafter\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"sub:0\\nafter\" with \"g-after\\nst:0\" on stderr, because only head dies of SIGPIPE. Mirage delivers what an exec redirect sends into a pipe as each of the subshell's statements ends, so the closed reader is met by the function call g, a write of the shell's own, and the subshell ends with 141."
+    },
+    {
       "id": "procsub_output_exec_in_subshell",
       "seq": 1346044,
       "targets": [

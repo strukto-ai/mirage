@@ -34,6 +34,7 @@ from mirage.context import (
 from mirage.context.session_context import redirect_syntax_for
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
+from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
@@ -70,7 +71,6 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
-from mirage.shell.parse.names import literal_text
 from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
@@ -109,6 +109,7 @@ from mirage.workspace.executor.pipes import (
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.executor.statement import (
     assignment_status,
+    forks,
     ignoring_errexit,
     record_status,
 )
@@ -122,7 +123,6 @@ from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.types import ExecuteFn
-from mirage.workspace.lookup.constants import BASH_BUILTINS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import execute_assignment
@@ -750,7 +750,7 @@ async def _run_redirected(
     pipe_node = next(
         (r.pipeline for r in redirects if r.pipeline is not None), None
     )
-    forked = _forks(command, context)
+    forked = forks(command, context.session)
     expand = partial(
         expand_redirect,
         context=context,
@@ -814,6 +814,7 @@ async def _run_redirected(
                     name=name,
                     args=args,
                     forked=forked,
+                    links=namespace,
                 )
 
             token = set_redirect_paths(
@@ -842,6 +843,7 @@ async def _run_redirected(
                 sink=sink if pipe_node is None else None,
                 expand=expand,
                 forked=forked,
+                links=namespace,
             )
         if simple and command is not None and context.frame.diagnostics:
             err = diagnostic_stderr(command, context)
@@ -975,48 +977,6 @@ def _is_bare_exec(command: TSNodeLike | None) -> bool:
         len(named) == 1
         and named[0].type == NT.COMMAND_NAME
         and get_text(named[0]) == "exec"
-    )
-
-
-def _forks(command: TSNodeLike | None, context: EvaluationContext) -> bool:
-    """Whether bash forks to run a redirected command, so its redirects
-    expand in the child and an error there fails that command alone: a
-    subshell or a program. A builtin, a function or another compound
-    command is the shell's own, which expands its redirects itself and
-    discards the line on an error. ``command -v`` is the builtin itself;
-    ``command X`` is X with functions masked; a name only an expansion
-    spells is taken for a program.
-
-    Args:
-        command (Any): the command under the redirect, None for none.
-        context (EvaluationContext): whose functions a name may call.
-    """
-    session = context.session
-    if command is None or command.type != NT.COMMAND:
-        return command is not None and command.type == NT.SUBSHELL
-    words = [
-        part
-        for part in get_parts(command)
-        if part.type != NT.VARIABLE_ASSIGNMENT
-    ]
-    functions = True
-    while words and get_text(words[0]) == "command":
-        words, functions = words[1:], False
-        while words and get_text(words[0]).startswith("-"):
-            option = get_text(words.pop(0))
-            if option == "--":
-                break
-            if "v" in option or "V" in option:
-                return False
-    if not words:
-        return False
-    head = words[0]
-    if head.type == NT.COMMAND_NAME and head.named_children:
-        head = head.named_children[0]
-    name = literal_text(head)
-    return name is None or (
-        name not in BASH_BUILTINS
-        and not (functions and name in session.functions)
     )
 
 
@@ -1318,25 +1278,37 @@ async def _execute_node(
         )
 
     if kind == NodeKind.COMMAND:
-        async with command_scope():
-            ran = await execute_command(
-                recurse,
-                dispatch,
-                registry,
-                namespace,
-                execute_fn,
-                node,
-                context,
-                stdin,
-                cs,
-                job_table,
-                cancel=cancel,
-                routing_decision=routing_decision,
-                agent_id=agent_id,
-                handed=handed,
-                sink=sink,
+        try:
+            async with command_scope():
+                ran = await execute_command(
+                    recurse,
+                    dispatch,
+                    registry,
+                    namespace,
+                    execute_fn,
+                    node,
+                    context,
+                    stdin,
+                    cs,
+                    job_table,
+                    cancel=cancel,
+                    routing_decision=routing_decision,
+                    agent_id=agent_id,
+                    handed=handed,
+                    sink=sink,
+                )
+            return ran if sink is None else await drained(sink, *ran)
+        except PipeClosed:
+            # SIGPIPE: a program writing into a pipe whose reader has
+            # gone dies of it alone, and its caller goes on; a builtin
+            # or a function writes as the shell, which goes down with it.
+            if not forks(node, session):
+                raise
+            return (
+                None,
+                IOResult(exit_code=141),
+                ExecutionNode(command=get_text(node), exit_code=141),
             )
-        return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.PIPELINE:
         # `! a | b` parses as pipeline(negated_command(a), b), and a

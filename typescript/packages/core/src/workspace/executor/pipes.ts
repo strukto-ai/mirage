@@ -526,8 +526,11 @@ export async function handleSubshell(
         mergedIo,
       )
     } catch (err) {
-      if (!(err instanceof ExitSignal || err instanceof ReturnSignal)) throw err
-      ;[mergedIo, lastExec] = await subshellEnded(err, recorder, session, sink, allStdout, mergedIo)
+      // The subshell's own write (a builtin's) into a pipe whose reader has
+      // gone: SIGPIPE ends the subshell, with 141.
+      const sig = err instanceof PipeClosed ? new ExitSignal(141) : err
+      if (!(sig instanceof ExitSignal || sig instanceof ReturnSignal)) throw err
+      ;[mergedIo, lastExec] = await subshellEnded(sig, recorder, session, sink, allStdout, mergedIo)
       break
     }
     if (errexitActs(child, io.exitCode, session)) break

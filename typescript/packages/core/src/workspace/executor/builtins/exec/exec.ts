@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SharedInput, share } from '../../../../io/async_line_iterator.ts'
+import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -25,11 +26,11 @@ import {
   unsupportedDescriptor,
 } from '../../../../shell/descriptors.ts'
 import { Channel } from '../../../../shell/console/index.ts'
-import { recordStatus, type Written } from '../../statement.ts'
+import { forks, recordStatus, type Written } from '../../statement.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { PathSpec } from '../../../../types.ts'
-import { getRedirects } from '../../../../shell/helpers.ts'
+import { getNegatedCommand, getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -423,11 +424,14 @@ function stdoutToStderr(node: TSNodeLike): boolean {
  * stderr's own binding and makes the statement's status 1, which `$?`
  * shows. An unwritable stderr fails only a statement that sent its own
  * stdout there (`>&2`); a lost diagnostic leaves the status the command
- * earned. `command` is the statement's recorded line; its first word names
- * the writer in a write error. `written` is the statement's output in
- * order; what went to the terminal through a copy keeps its place. Returns
- * what is left for the terminal, in the order it was written. Mirrors
- * Python's divert_statement.
+ * earned. A stream bound to a pipe whose reader has gone is SIGPIPE for the
+ * writer: a program or subshell ends with 141 and nothing more it wrote is
+ * delivered, while the shell's own write (a builtin, a function, a compound
+ * command) ends the shell with 141. `command` is the statement's recorded
+ * line; its first word names the writer in a write error. `written` is the
+ * statement's output in order; what went to the terminal through a copy
+ * keeps its place. Returns what is left for the terminal, in the order it
+ * was written. Mirrors Python's divert_statement.
  */
 export async function divertStatement(
   dispatch: DispatchFn | undefined,
@@ -444,8 +448,20 @@ export async function divertStatement(
   let failed = false
   let unwritable = false
   for (const [channel, data, kept] of runs(written)) {
-    if (kept) rest.push([channel, data, true])
-    else if (await routed(dispatch, session, channel, data, rest)) {
+    if (kept) {
+      rest.push([channel, data, true])
+      continue
+    }
+    let refused: boolean
+    try {
+      refused = await routed(dispatch, session, channel, data, rest)
+    } catch (err) {
+      if (!(err instanceof PipeClosed)) throw err
+      if (!writerForks(statement, session)) throw new ExitSignal(141)
+      io.exitCode = 141
+      break
+    }
+    if (refused) {
       failed ||= channel === Channel.STDOUT
       unwritable ||= channel === Channel.STDERR
     }
@@ -461,6 +477,21 @@ export async function divertStatement(
   }
   if (io.exitCode !== earned) recordStatus(session, io.exitCode)
   return rest
+}
+
+/**
+ * Whether what a statement wrote came from a child bash forks for it, so a
+ * pipe closing under the write ends that writer alone: a program or a
+ * subshell, redirected or negated too, or a pipeline, whose commands are each
+ * a child of their own. Mirrors Python's _writer_forks.
+ */
+function writerForks(statement: TSNodeLike | null, session: SessionState): boolean {
+  if (statement === null) return false
+  if (statement.type === NT.REDIRECTED_STATEMENT)
+    return writerForks(getRedirects(statement)[0], session)
+  if (statement.type === NT.NEGATED_COMMAND)
+    return writerForks(getNegatedCommand(statement), session)
+  return statement.type === NT.PIPELINE || forks(statement, session)
 }
 
 /** Adjacent chunks of one stream and one kind joined, in order. */

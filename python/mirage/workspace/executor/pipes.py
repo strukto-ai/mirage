@@ -549,6 +549,13 @@ async def handle_subshell(
                 sig, recorder, session, sink, all_stdout, merged_io
             )
             break
+        except PipeClosed:
+            # The subshell's own write (a builtin's) into a pipe whose
+            # reader has gone: SIGPIPE ends the subshell, with 141.
+            merged_io, last_exec = await _subshell_ended(
+                ExitSignal(141), recorder, session, sink, all_stdout, merged_io
+            )
+            break
         if errexit_acts(child, io.exit_code, session):
             break
     cleanup = await run_exit_trap(
