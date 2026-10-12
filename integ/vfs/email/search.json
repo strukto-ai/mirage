@@ -77,6 +77,19 @@
         "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json\n/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "em_search_asks_every_folder_from_the_root",
+      "seq": 540252,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rlw Standup /mail | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
     }
   ]
 }

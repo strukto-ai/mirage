@@ -50,7 +50,7 @@ SCOPES = (
 detect_scope = make_detect_scope(SCOPES)
 
 # Kinds the mailbox search may answer for: a folder or one of its days.
-# IMAP search selects a folder, so the mount root cannot be asked; a day
-# is asked for its whole folder, whose hits on other days are never
-# walked.
+# IMAP search selects a folder, so the mount root is asked folder by
+# folder; a day is asked for its whole folder, whose hits on other days
+# are never walked.
 NATIVE_KINDS = frozenset({"folder", "day"})

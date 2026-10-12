@@ -136,7 +136,6 @@ async def test_a_hit_is_the_file_the_folder_lists(key):
 @pytest.mark.parametrize(
     "text, key",
     [
-        ("budget", ""),
         ("budget", "/INBOX/2026-01-05/Q2_Budget__3.email.json"),
         ("subject", "/INBOX"),
         ("seen", "/INBOX"),
@@ -146,6 +145,41 @@ async def test_a_hit_is_the_file_the_folder_lists(key):
 async def test_a_scope_or_text_imap_cannot_vouch_for_is_not_asked(text, key):
     hits, uids, _ = await _ask(text, key)
     assert hits is None
+    uids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_root_is_asked_folder_by_folder():
+    folders = AsyncMock(return_value=["INBOX", "Archive"])
+    uids = AsyncMock(side_effect=[["3"], []])
+    named = AsyncMock(side_effect=[HEADERS[:1], []])
+    with (
+        patch("mirage.core.email.search.list_folders", folders),
+        patch("mirage.core.email.search.list_message_uids", uids),
+        patch("mirage.core.email.search.fetch_headers", named),
+    ):
+        hits = await files_containing(ACCESSOR, "invoice", [_scope("")], True)
+    assert [hit.virtual for hit in hits] == [
+        "/mail/INBOX/2026-01-05/Q2_Budget__3.email.json"
+    ]
+    assert [call.args[1] for call in uids.await_args_list] == [
+        "INBOX",
+        "Archive",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_root_whose_folders_cannot_be_listed_is_no_answer():
+    failed = AsyncMock(side_effect=OSError("connection reset"))
+    uids = AsyncMock()
+    with (
+        patch("mirage.core.email.search.list_folders", failed),
+        patch("mirage.core.email.search.list_message_uids", uids),
+    ):
+        assert (
+            await files_containing(ACCESSOR, "invoice", [_scope("")], True)
+            is None
+        )
     uids.assert_not_awaited()
 
 

@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import { ROOT } from '@struktoai/mirage-core/core/hierarchy/scope'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { recordQueries } from '@struktoai/mirage-core/utils/record_search'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchHeaders, listMessageUids, quoteString, type FetchedMessage } from './client.ts'
+import { listFolders } from './folders.ts'
 import { dateBucket, msgFilename } from './readdir.ts'
 import { NATIVE_KINDS, detectScope } from './scope.ts'
 
@@ -124,8 +126,9 @@ export function buildVfsPath(prefix: string, folder: string, msg: FetchedMessage
  *
  * IMAP matches a substring of the headers or body in any case, so each hit
  * is a message that may hold `text`; its file is named from its Subject and
- * Date, fetched alone. A day is asked for its whole folder. null when a scope
- * is not a folder or a day, when `text` could match the JSON outside the
+ * Date, fetched alone. The root is asked folder by folder, and a day for its
+ * whole folder. null when a scope is not the root, a folder or a day, when
+ * `text` could match the JSON outside the
  * headers and body (`recordQueries`), when more than `maxMessages` match (the
  * newest would leave out older ones a cached listing still holds), or when
  * the server fails. Mirrors Python's `files_containing`.
@@ -139,7 +142,22 @@ export async function filesContaining(
   const queries = recordQueries(text, RECORD_KEYS, wholeWord)
   if (queries === null) return null
   const found: PathSpec[] = []
+  const scopes: PathSpec[] = []
   for (const scope of under) {
+    if (detectScope(scope).kind !== ROOT) {
+      scopes.push(scope)
+      continue
+    }
+    let folders: string[]
+    try {
+      folders = await listFolders(accessor)
+    } catch (err) {
+      console.warn(`imap search failed (${String(err)}); reading every file`)
+      return null
+    }
+    for (const name of folders) scopes.push(mountedPath(scope, `/${name}`))
+  }
+  for (const scope of scopes) {
     const match = detectScope(scope)
     const folder = match.slots.folder
     if (!NATIVE_KINDS.has(match.kind) || folder === undefined) return null

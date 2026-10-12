@@ -22,8 +22,10 @@ from mirage.core.email.client import (
     list_message_uids,
     quote_string,
 )
+from mirage.core.email.folders import list_folders
 from mirage.core.email.readdir import _date_bucket, _msg_filename
 from mirage.core.email.scope import NATIVE_KINDS, detect_scope
+from mirage.core.hierarchy.scope import ROOT
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.record_search import record_queries
@@ -164,8 +166,9 @@ async def files_containing(
 
     IMAP matches a substring of the headers or body in any case, so each
     hit is a message that may hold ``text``; its file is named from its
-    Subject and Date, fetched alone. A day is asked for its whole folder.
-    None when a scope is not a folder or a day, when ``text`` could match
+    Subject and Date, fetched alone. The root is asked folder by folder,
+    and a day for its whole folder. None when a scope is not the root, a
+    folder or a day, when ``text`` could match
     the JSON outside the headers and body (``record_queries``), when more
     than ``max_messages`` match (the newest would leave out older ones a
     cached listing still holds), or when the server fails.
@@ -180,7 +183,18 @@ async def files_containing(
     if queries is None:
         return None
     found: list[PathSpec] = []
+    scopes: list[PathSpec] = []
     for scope in under:
+        if detect_scope(scope).kind != ROOT:
+            scopes.append(scope)
+            continue
+        try:
+            folders = await list_folders(accessor)
+        except (OSError, ValueError, asyncio.TimeoutError) as exc:
+            logger.warning("imap search failed (%s); reading every file", exc)
+            return None
+        scopes.extend(mounted_path(scope, f"/{name}") for name in folders)
+    for scope in scopes:
         match = detect_scope(scope)
         if match.kind not in NATIVE_KINDS:
             return None

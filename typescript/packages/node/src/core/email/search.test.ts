@@ -21,15 +21,18 @@ vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
   return { ...actual, listMessageUids: vi.fn(), fetchHeaders: vi.fn() }
 })
+vi.mock('./folders.ts', () => ({ listFolders: vi.fn() }))
 
 import type { EmailAccessor } from '../../accessor/email.ts'
 import * as client from './client.ts'
+import * as folderList from './folders.ts'
 import { msgFilename } from './readdir.ts'
 import { buildSearchCriteria, buildVfsPath, filesContaining } from './search.ts'
 
 const { parseSearchCriteria } = client
 const uids = vi.mocked(client.listMessageUids)
 const named = vi.mocked(client.fetchHeaders)
+const folders = vi.mocked(folderList.listFolders)
 
 const CJK_SUBJECT = '会議の記録'.repeat(40)
 const MSG = { subject: CJK_SUBJECT, uid: '7', date: 'Mon, 5 Jan 2026 10:00:00 +0000' }
@@ -114,13 +117,29 @@ describe('filesContaining', () => {
   )
 
   it.each([
-    ['budget', ''],
     ['budget', '/INBOX/2026-01-05/Q2_Budget__3.email.json'],
     ['subject', '/INBOX'],
     ['seen', '/INBOX'],
     ['deploy 42', '/INBOX'],
   ])('does not ask for %j under %j', async (text, key) => {
     expect(await filesContaining(accessor, text, [scope(key)], false)).toBeNull()
+    expect(uids).not.toHaveBeenCalled()
+  })
+
+  it('asks the root folder by folder', async () => {
+    folders.mockResolvedValueOnce(['INBOX', 'Archive'])
+    uids.mockResolvedValueOnce(['3']).mockResolvedValueOnce([])
+    named.mockResolvedValueOnce(headers.slice(0, 1) as never).mockResolvedValueOnce([])
+    const hits = await filesContaining(accessor, 'invoice', [scope('')], true)
+    expect(hits?.map((hit) => hit.virtual)).toEqual([
+      '/mail/INBOX/2026-01-05/Q2_Budget__3.email.json',
+    ])
+    expect(uids.mock.calls.map((call) => call[1])).toEqual(['INBOX', 'Archive'])
+  })
+
+  it('reads a root whose folders cannot be listed as no answer', async () => {
+    folders.mockRejectedValueOnce(new Error('connection reset'))
+    expect(await filesContaining(accessor, 'invoice', [scope('')], true)).toBeNull()
     expect(uids).not.toHaveBeenCalled()
   })
 
