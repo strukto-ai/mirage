@@ -4,8 +4,9 @@ icon: /images/docker-logo.svg
 description: Connect either Mirage SDK to an existing Docker container.
 ---
 
-Start the container yourself. Live FUSE mounts require `SYS_ADMIN` and
-`/dev/fuse` on Linux. Details: [Python](/python/runtime/sandbox/docker) ·
+Start the container yourself, with `SYS_ADMIN` and `/dev/fuse` for its FUSE
+mounts. With `mount_type: ssh` the image needs only `sshfs`; otherwise run the
+Mirage FUSE image. Details: [Python](/python/runtime/sandbox/docker) ·
 [TypeScript](/typescript/runtime/sandbox/docker).
 
 ```bash

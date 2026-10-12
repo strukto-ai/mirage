@@ -21,28 +21,9 @@ container run -d --cap-add SYS_ADMIN \
   --name my-sandbox mirage-python-fuse sleep infinity
 ```
 
-`mirage-python-fuse` is the local image name assigned by `-t` during the
-build. The image contains Python, Mirage, and FUSE (Filesystem in Userspace),
-which makes workspace backends accessible as ordinary files inside the
-container.
-
-<Note>
-  The example reuses Mirage's shared Python image to serve workspace mounts
-  inside the container. Your host application can use either SDK, including
-  TypeScript; the two communicate through `container exec`.
-</Note>
-
-| Part of `container run` | Meaning |
-| --- | --- |
-| `-d` | Run the container in the background. |
-| `--cap-add SYS_ADMIN` | Allow the FUSE mounts used to expose workspace files. |
-| `--name my-sandbox` | Give this container a name; use it in the runtime's `container` config. |
-| `mirage-python-fuse` | Use the image built above. |
-| `sleep infinity` | Keep the container running while Mirage sends commands through `container exec`. |
-
-This starts the container. Follow the Python or TypeScript guide above to
-copy your workspace configuration into it and mount your backends before
-running commands that use workspace files.
+`mirage-python-fuse` is [the sandbox image](/python/runtime/sandbox#the-sandbox-image):
+Python, Mirage and FUSE. Then copy your workspace config into the container
+and mount your backends, as the guides above describe.
 
 <Tabs>
   <Tab title="Python SDK" icon="/images/python-logo.svg">

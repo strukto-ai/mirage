@@ -4,11 +4,10 @@ icon: /images/e2b-logo.svg
 description: Connect either Mirage SDK to an existing E2B sandbox.
 ---
 
-Use the native E2B SDK runtime for E2B commands. It is async in Python,
-Node, and browsers; Node and browser share the `mirage-core` implementation.
-
-Create the sandbox from a template, then connect by ID. Details:
-[Python](/python/runtime/sandbox/e2b) · [TypeScript](/typescript/runtime/sandbox/e2b).
+Create the sandbox from a template, then connect by ID. The runtime runs in
+Python, Node and browsers. With `mount_type: ssh` (not in browsers) the
+sandbox needs only `sshfs`. Details: [Python](/python/runtime/sandbox/e2b) ·
+[TypeScript](/typescript/runtime/sandbox/e2b).
 
 <Tabs>
   <Tab title="Python SDK" icon="/images/python-logo.svg">

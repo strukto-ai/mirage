@@ -1,25 +1,18 @@
 ---
 title: JavaScript
-description: Run node/js inside the workspace on quickjs, a sandboxed JavaScript engine for small scripts and pipe transforms.
+description: Run node/js in the workspace on quickjs, a sandboxed JavaScript engine for small scripts and pipe transforms.
 icon: js
 ---
 
-Shell lines like `node script.mjs` or `js -e "..."` need a JavaScript
-engine. Mirage calls that engine a **runtime**, and `node` and `js` are
-two names for the same command family. One runtime ships today:
+`node` and `js` are two names for one command, run by the `quickjs` runtime
+(the default): [quickjs-emscripten](https://github.com/justjake/quickjs-emscripten),
+QuickJS compiled to WebAssembly, in Node and browsers. It sees the workspace
+mounts, and no host files or network.
 
-| Runtime | Engine | Filesystem | Default |
-| --- | --- | --- | --- |
-| `quickjs` | [quickjs-emscripten](https://github.com/justjake/quickjs-emscripten), quickjs compiled to WebAssembly (browser + Node) | Workspace mounts only, bridged through Mirage; no host filesystem, no network | Yes |
-
-## What it is for
-
-`node`/`js` runs **small, self-contained scripts and pipe transforms**:
-compute, JSON munging, regex text processing, code generation. It is a
-bare modern engine (ES2023 syntax, ES modules, `JSON`, `Promise`,
-top-level await), **not** Node: there is no `require`, no npm, no
-`process`, no `fs`, no `fetch`. Anything that needs those belongs in a
-sandboxed deployment, not the workspace runtime.
+It is for **small scripts and pipe transforms**: compute, JSON, regex text
+processing, code generation. It is a bare ES2023 engine (ES modules, `JSON`,
+`Promise`, top-level await), **not** Node: no `require`, npm, `process`,
+`fs` or `fetch`.
 
 ```bash
 js -e "console.log(6 * 7)"                 # inline
@@ -27,70 +20,50 @@ node /data/transform.mjs arg1 arg2         # a mounted script, args in scriptArg
 cat data.json | node -e "const d = JSON.parse(std.in.readAsString()); console.log(d.length)"
 ```
 
-Three input forms, mirroring `python3`:
+## Programs
 
-- **`-e <code>`** evaluates the argument.
-- **A file** (`node script.js`) is read through the workspace before the
-  run, so a mounted script executes.
-- **stdin** with no `-e` or file runs the piped text as the program.
+- `-e <code>` runs the argument, a file runs a mounted script, and with
+  neither, piped stdin is the program.
+- A `.mjs` file runs as an ES module; `.js` and `-e` run as classic scripts.
+  `-m` (`--module`) forces module mode:
+  `js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"`.
+- `scriptArgs` holds the words after the code or script, and
+  `std.in.readAsString()` reads stdin.
+- Output follows the real engine: `console.log` and `print` add a newline,
+  `std.out.puts`/`std.err.puts` write raw, `std.out.printf`/`std.err.printf`
+  return the characters written, and there is no `console.error`.
+- A run starts in the session's cwd (a direct `run()` can pass
+  `RunArgs.cwd`). `os.getcwd()` returns `[directory, 0]`, and
+  `os.chdir(path)` returns `0` or a negative WASI errno; a change lasts for
+  the run only.
 
-`scriptArgs` holds the arguments after the code or script,
-`std.in.readAsString()` reads piped stdin, and `std.open`/`os.readdir`
-reach workspace mounts (see [Isolation](#isolation)). Output follows the
-real engine: `console.log` and the `print` global append a newline,
-`std.out.puts`/`std.err.puts` write raw, `std.out.printf`/`std.err.printf` C-format and return the characters written, and there is no `console.error`
-(write stderr with `std.err.puts`). These match the Python `quickjs`
-runtime, so a script behaves the same in both languages.
+Scripts behave the same in the Python `quickjs` runtime.
 
-Relative paths start at the Mirage session's working directory. Direct
-`run()` calls can override it with `RunArgs.cwd`; one-shot `eval()` calls
-inherit the current workspace directory. `os.getcwd()` returns
-`[directory, 0]`, and `os.chdir(path)` returns `0` or negative WASI errno.
-A guest directory change lasts for that execution and leaves the Mirage
-session and host process directories unchanged.
+## Files
 
-## Modules
+- `std.open('/data/f.txt', 'r')` reads the mount, `os.readdir('/data')` lists
+  it, and `os.stat`, `os.mkdir`, `os.rename`, `os.remove` and `os.utimes`
+  change it (0 or a negative WASI errno). A write shows to every command once
+  the file is closed.
+- File calls get the same cache and write modes as `cat`. On a read-only
+  mount, or a session narrowed to read, `std.open` returns `null`.
+- There are no extended-attribute calls; use `getfattr` and `setfattr`.
 
-A `.mjs` file runs as an ES module automatically (top-level
-`import`/`export`/`await`); `.js` and `-e` run as a classic script. Pass
-`-m`/`--module` to force module mode for inline code:
-
-```bash
-js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"
-```
-
-## Isolation
-
-The engine runs under WebAssembly capability isolation: it sees only what
-the run passes it. Host files and the network are invisible.
-
-Workspace mounts are visible with no setup: `std.open('/data/f.txt', 'r')`
-reads the mount, `os.readdir('/data')` lists it, and `os.stat`/`os.mkdir`/`os.rename`/`os.remove`/`os.utimes` stat and mutate it (0 or -errno in WASI numbering, like the real engine), bridged through the
-workspace dispatch so the code sees exactly what `cat` sees, with the same
-cache and write modes. Writes are visible to every command once the file is
-closed, and a read-only mount (or a session narrowed to read) fails the
-open, so `std.open` returns `null` instead of writing. The engine runs on
-quickjs-emscripten's asyncify build, which lets `std.open` suspend the run
-while a mount read or write awaits the dispatch, matching the Python
-`quickjs` runtime's live file I/O. The engine's `os` module has no
-extended-attribute calls; run `getfattr` or `setfattr` in the shell
-instead.
-
-This is capability isolation, not a VFS sandbox: the sandboxed code
-cannot reach your files or the network, but CPU and memory are bounded only
-by soft engine caps and `command_limits` timeouts. For untrusted code or
-hard resource limits, run behind a sandboxed deployment.
+The engine is capability-isolated: it cannot reach host files or the
+network, but only soft engine caps and `command_limits` bound its CPU and
+memory. Run untrusted or heavy code in a
+[sandbox runtime](/typescript/runtime/sandbox).
 
 ## Setup
 
-The runtime needs the optional `quickjs-emscripten` peer dependency (it
-bundles its own wasm, so there is nothing else to download):
+`quickjs-emscripten` is an optional peer dependency that bundles its own
+WebAssembly:
 
 ```bash
-npm install quickjs-emscripten
+pnpm add quickjs-emscripten
 ```
 
-Select it per workspace (it is already the default):
+`quickjs` is in the default runtimes. To list it explicitly:
 
 ```ts
 const ws = new Workspace(mounts, {
@@ -99,14 +72,8 @@ const ws = new Workspace(mounts, {
 })
 ```
 
-## Selecting in YAML
-
-Server workspace config files take a top-level `runtimes` list; the
-JavaScript runtime is just another entry:
-
 ```yaml
 runtimes:
-  - monty
   - quickjs
   - workspace
 mounts:
@@ -119,18 +86,13 @@ mounts:
 
 ## Resource limits
 
-`node`/`js` is a command like any other: the same `command_limits`
-that guard `cat` or `python3` guard it, enforced at the same central
-point. A run that exceeds `timeout_seconds` answers with exit 124, and
-`max_bytes`/`max_lines` cap its output.
-
-One caveat: the guard bounds how long a run may *answer*, not the engine
-itself. Give untrusted code a finite workload, or run it behind a
-sandboxed deployment.
+`command_limits` apply to `node` and `js` as to any command: past
+`timeout_seconds` a run exits 124, and `max_bytes` and `max_lines` cap its
+output. The deadline bounds the answer, not the engine, so give untrusted
+code a finite workload.
 
 ## Route policy
 
-The quickjs runtime carries the evaluator capability, so a JS-only
-world has a [route policy](/home/policy/route-policy): `route_policy: ./policy.js`
-evaluates JavaScript per line with `ctx` bound as a global, and the
-completion value (the last expression) names the runtime.
+`quickjs` can evaluate expressions, so it can run a
+[route policy](/home/policy/route-policy): `route_policy: ./policy.js` runs per line
+with `ctx` as a global, and the last expression names the runtime.

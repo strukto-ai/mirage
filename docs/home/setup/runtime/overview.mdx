@@ -1,0 +1,52 @@
+---
+title: Runtimes
+sidebarTitle: Overview
+description: Where the programs in a line run, and how they reach the workspace's files.
+icon: microchip
+---
+
+A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pipes, redirects) run in the workspace itself; `python3`, `node` and any other program go to the runtime that captures them. Each runtime reaches the workspace's files its own way.
+
+<div className="my-6">
+  <img noZoom src="/images/runtime-light.svg" alt="Three kinds of runtime reach one core, the Workspace. In-process engines (monty, wasi, pyodide, quickjs) call it through the VFS bridge. Host programs (local, sandlock) reach it through a FUSE folder. Sandboxes (Docker, Apple Container, smolvm, Daytona, E2B, SSH) reach it over SFTP with mount_type: ssh." className="block dark:hidden w-full" />
+  <img noZoom src="/images/runtime-dark.svg" alt="Three kinds of runtime reach one core, the Workspace. In-process engines (monty, wasi, pyodide, quickjs) call it through the VFS bridge. Host programs (local, sandlock) reach it through a FUSE folder. Sandboxes (Docker, Apple Container, smolvm, Daytona, E2B, SSH) reach it over SFTP with mount_type: ssh." className="hidden dark:block w-full" />
+</div>
+
+| Runtime | Runs | Where | SDK |
+| --- | --- | --- | --- |
+| `workspace` | Mirage's own commands | in-process | both |
+| [`monty`](/home/setup/runtime/python) | `python3`, a Python subset | in-process | Python (default), TypeScript |
+| [`wasi`](/home/setup/runtime/python) | `python3`, full CPython on wasmtime | in-process | Python |
+| [`pyodide`](/home/setup/runtime/python) | `python3`, full CPython in WebAssembly | in-process | TypeScript (default) |
+| [`quickjs`](/home/setup/runtime/javascript) | `node` and `js` | in-process | both (default) |
+| [`local`](/home/setup/runtime/python) | the host's `python3` | host | Python, Node |
+| [`sandlock`](/home/setup/runtime/sandbox/sandlock) | native programs, confined | host (Linux) | Python, Node |
+| [Sandboxes](/home/setup/runtime/sandbox) | native programs | another machine | Python, Node |
+
+## Routing
+
+`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in Python and `[pyodide, quickjs, workspace]` in TypeScript.
+
+```yaml
+runtimes:
+  - monty
+  - name: docker
+    config:
+      container: my-sandbox
+      mount_type: ssh
+  - workspace
+```
+
+- Python engines capture `python3` and `python`; `quickjs` captures `node` and `js`.
+- Sandboxes and Sandlock capture `@external`: any program name Mirage does not know.
+- A [route policy](/home/route-policy) can pick the runtime per line.
+
+## Files
+
+| Where | Reaches the workspace through | Outside the workspace |
+| --- | --- | --- |
+| In-process | the VFS bridge: every file call is a workspace call | nothing: no host files, no network |
+| Host | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network |
+| Sandbox | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`), or a Mirage inside the sandbox | that machine's disk and network |
+
+Mount modes, profiles and policies hold for every call that reaches the workspace. Only in-process runtimes have no other way out, so agent code cannot get around them only when every runtime in the list is in-process.

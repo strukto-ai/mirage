@@ -4,9 +4,10 @@ icon: server
 description: Set up an external sandbox runtime for either Mirage SDK.
 ---
 
-You create and provision the container, VM, or cloud sandbox; Mirage only
-connects to it. Serve the same workspace mounts at the same paths inside the
-sandbox, then choose a provider below.
+You create the container, VM or cloud sandbox; Mirage only connects to it.
+Programs there need the workspace mounts at the same paths: `docker` and
+`e2b` serve them with `mount_type: ssh`, and otherwise a Mirage inside the
+sandbox serves them. Then choose a provider below.
 
 Full architecture: [Python](/python/runtime/sandbox) ·
 [TypeScript](/typescript/runtime/sandbox)

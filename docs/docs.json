@@ -235,6 +235,7 @@
           {
             "group": "Runtimes",
             "pages": [
+              "home/setup/runtime/overview",
               "home/setup/runtime/python",
               "home/setup/runtime/javascript",
               {
@@ -663,6 +664,7 @@
                 "icon": "server",
                 "pages": [
                   "typescript/runtime/sandbox",
+                  "typescript/runtime/sandbox/sandlock",
                   "typescript/runtime/sandbox/docker",
                   "typescript/runtime/sandbox/apple_container",
                   "typescript/runtime/sandbox/smolvm",

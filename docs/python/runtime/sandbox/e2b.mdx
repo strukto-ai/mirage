@@ -4,14 +4,11 @@ description: Run captured command lines in an existing E2B sandbox.
 icon: /images/e2b-logo.svg
 ---
 
-`E2BRuntime` connects to a live [E2B](https://e2b.dev) sandbox by id. Create
-it with E2B's CLI or SDK. Programs see Mirage mounts as ordinary files at the
-same paths as the host workspace once `mount_type` serves them into the sandbox,
-or a Mirage you run inside it does. Sandbox creation and cleanup remain with
-your application.
-
-See the [Sandbox overview](/python/runtime/sandbox) for the shared image and
-matching mount-prefix setup.
+`E2BRuntime` connects to a live [E2B](https://e2b.dev) sandbox by id; create
+it with E2B's CLI or SDK, and clean it up from your application. Programs
+there see the workspace mounts at the host's paths once `mount_type` serves
+them, or a Mirage inside the sandbox does. See the
+[Sandbox overview](/python/runtime/sandbox).
 
 ## Install
 
@@ -28,48 +25,42 @@ runtimes:
     config:
       sandbox_id: ${E2B_SANDBOX_ID}
       api_key: ${E2B_API_KEY}
+      mount_type: ssh
   - workspace
 ```
-
-`api_key` is optional when `E2B_API_KEY` is set. The runtime connects on the
-first captured line and reuses the sandbox client until the workspace closes.
-Closing the workspace leaves the sandbox running.
-
-The same configuration in application code is:
 
 ```python
 from mirage.runtime.sandbox.e2b import E2BRuntime
 
 runtime = E2BRuntime(
     captures=["python3", "pip"],
-    config={"sandbox_id": "sandbox-id"},
+    config={"sandbox_id": "sandbox-id", "mount_type": "ssh"},
 )
 ```
 
-The runtime uses E2B's `AsyncSandbox`, with independent stdin and output
-for concurrent commands.
+- `api_key` falls back to `E2B_API_KEY`.
+- The runtime connects on the first captured line and keeps the client until
+  the workspace closes, which leaves the sandbox running.
+- Commands run concurrently on E2B's `AsyncSandbox`, each with its own stdin
+  and output.
+- Templates, sizing, networking and lifecycle stay E2B settings.
 
-`mount_type` serves the workspace into the sandbox (see
-[The workspace inside the sandbox](/python/runtime/sandbox#the-workspace-inside-the-sandbox)).
-E2B's exec API reads command output as text, so the runtime carries the
-SFTP stream over a terminal instead, and the sandbox needs only `sshfs`:
-the default template installs it with `sudo apt-get install -y sshfs`.
+## Serving the workspace
 
-Use the native E2B SDK runtime for E2B commands. SSH remains useful for
-general remote hosts and persistent MCP stdio connections.
-
-Templates, CPU and memory sizing, networking, and lifecycle controls remain
-E2B settings.
+With `mount_type` set to `ssh` or `both` (see
+[The workspace inside the sandbox](/python/runtime/sandbox#the-workspace-inside-the-sandbox)),
+the sandbox needs only `sshfs`; on the default template,
+`sudo apt-get install -y sshfs`. E2B's exec API reads output as text, so the
+SFTP stream runs over a terminal.
 
 ## Standard input
 
-Piped input goes directly to stdin, followed by EOF. Commands without input
-start with stdin closed.
+Piped input goes to stdin, followed by EOF. Without input, stdin starts
+closed.
 
 <Warning>
-  Cancellation attempts to kill the foreground E2B command and disconnects
-  its event stream. It does not guarantee termination of every descendant
-  process. E2B also applies its SDK command timeout, currently 60 seconds by default, to
-  both runaway and legitimate long-running commands. See
+  A timeout or cancellation tries to kill the E2B command and drops its
+  output stream; descendant processes may survive. E2B also applies its SDK
+  command timeout, 60 seconds by default, to every command. See
   [Resource limits](/python/runtime/sandbox#resource-limits).
 </Warning>

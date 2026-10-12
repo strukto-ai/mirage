@@ -15,8 +15,9 @@ the sandbox.
 
 ## Start the container
 
-Install the tool and start its services once, then build the sandbox image
-from the Mirage repository root:
+Install the tool and start its services once, then build
+[the sandbox image](/python/runtime/sandbox#the-sandbox-image) from the Mirage
+repository root:
 
 ```bash
 brew install container
@@ -24,18 +25,6 @@ container system start
 container build -f docker/sandbox/Dockerfile --target fuse \
   -t mirage-python-fuse .
 ```
-
-`--target fuse` selects the Dockerfile's FUSE build stage. `-t mirage-python-fuse`
-assigns a local name to the resulting image, which contains Python, Mirage,
-and FUSE (Filesystem in Userspace). FUSE makes workspace backends accessible
-as ordinary files inside the container.
-
-<Note>
-  This example reuses Mirage's shared Python image to serve the workspace
-  mounts. You can control it from the TypeScript SDK: the host SDK and the
-  Mirage implementation inside the container are independent. For a custom
-  image, see [The sandbox image](/python/runtime/sandbox#the-sandbox-image).
-</Note>
 
 Start a container from that image:
 
@@ -52,18 +41,15 @@ container run -d --cap-add SYS_ADMIN \
 | `mirage-python-fuse` | Use the image built above. |
 | `sleep infinity` | Keep the container running while Mirage sends commands through `container exec`. |
 
-Create `sandbox.yaml` with your backends and mount paths, following
-[The workspace inside the sandbox](/python/runtime/sandbox#the-workspace-inside-the-sandbox).
-Then copy it into the container and start the workspace:
+Write `sandbox.yaml` for your mounts
+([The workspace inside the sandbox](/python/runtime/sandbox#the-workspace-inside-the-sandbox)),
+then copy it in and start the workspace, which FUSE-mounts your backends at
+their prefixes:
 
 ```bash
 container cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml
 container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 ```
-
-The last command starts Mirage inside the container and FUSE-mounts your
-backends at the configured paths, so programs there can read and write your
-workspace files.
 
 Host directories reach the container only if you pass them at start with
 `--volume`; the guest otherwise sees nothing from the host filesystem. A
