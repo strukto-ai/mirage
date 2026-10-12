@@ -14,7 +14,8 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, resolve } from 'node:path'
+import { access, stat } from 'node:fs/promises'
+import { delimiter, isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
@@ -53,12 +54,16 @@ function onHostPath(name: string): string {
   return name
 }
 
-/** Whether a resolved program is an executable file. */
-function isExecutable(program: string): boolean {
-  if (!program.includes('/')) return false
+/**
+ * Whether a resolved program is an executable file. Asynchronous, as is
+ * every check `runProcess` makes, so a path on this process's own FUSE
+ * folder never blocks the loop that answers it.
+ */
+async function isExecutable(program: string): Promise<boolean> {
+  if (!isAbsolute(program)) return false
   try {
-    if (statSync(program, { throwIfNoEntry: false })?.isFile() !== true) return false
-    accessSync(program, constants.X_OK)
+    if (!(await stat(program)).isFile()) return false
+    await access(program, constants.X_OK)
     return true
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === undefined) throw err
@@ -127,18 +132,20 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     )
   }
 
-  runProcess(request: ProcessExecution): Promise<RunResult> {
+  async runProcess(request: ProcessExecution): Promise<RunResult> {
     request.signal?.throwIfAborted()
     const name = request.argv[0]
     const program = onHostPath(name)
-    if (!isExecutable(program)) return Promise.resolve(notRun(`${name}: command not found\n`, 127))
+    if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     // The session cwd is a workspace path. Running somewhere else instead
     // would point a relative path at the wrong files.
     const cwd = request.cwd.virtual
-    if (statSync(cwd, { throwIfNoEntry: false })?.isDirectory() !== true) {
-      return Promise.resolve(
-        notRun(`${name}: the working directory ${cwd} is not on this host\n`, 126),
-      )
+    const here = await stat(cwd).catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException).code === undefined) throw err
+      return null
+    })
+    if (here?.isDirectory() !== true) {
+      return notRun(`${name}: the working directory ${cwd} is not on this host\n`, 126)
     }
     return this.spawnProgram(
       program,

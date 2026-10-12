@@ -207,6 +207,34 @@ async def test_a_captured_program_runs_on_the_host(
 
 
 @pytest.mark.asyncio
+async def test_a_program_found_through_a_relative_path_entry_runs_elsewhere(
+    tmp_path, monkeypatch
+):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    probe = tools / "mirage-probe"
+    probe.write_text(f"#!{sys.executable}\nprint('probe')\n")
+    probe.chmod(0o755)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setenv("PATH", "tools")
+    monkeypatch.chdir(tmp_path)
+    runtime = LocalRuntime(captures=["@external"])
+    try:
+        result = await runtime.run_process(
+            ProcessExecution(
+                argv=("mirage-probe",),
+                cwd=PathSpec.from_str_path(str(work)),
+                env={},
+                stdin=None,
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stdout) == (0, b"probe\n")
+
+
+@pytest.mark.asyncio
 async def test_a_bare_home_found_through_an_empty_path_entry_runs(
     tmp_path, monkeypatch
 ):

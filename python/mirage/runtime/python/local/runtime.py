@@ -124,9 +124,12 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         if not request.argv:
             raise ValueError("process argv must not be empty")
         name = request.argv[0]
-        program = shutil.which(name)
-        if program is None:
+        found = shutil.which(name)
+        if found is None:
             return _not_run(f"{name}: command not found\n", 127)
+        # Absolute: a relative PATH entry names a file here, and the
+        # program starts in the session's cwd.
+        program = os.path.abspath(found)
         # The session cwd is a workspace path. Running somewhere else
         # instead would point a relative path at the wrong files.
         cwd = request.cwd.virtual

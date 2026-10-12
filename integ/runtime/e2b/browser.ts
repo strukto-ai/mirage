@@ -40,7 +40,6 @@ try {
         formats: ['es'],
         fileName: () => 'check.js',
       },
-      rollupOptions: { external: ['@pydantic/monty'] },
     },
   })
   await writeFile(

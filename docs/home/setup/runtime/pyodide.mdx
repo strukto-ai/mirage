@@ -53,7 +53,7 @@ the package from the Pyodide CDN; Node keeps it beside the installed
 | --- | --- |
 | `packages` | Load these when each interpreter starts, before the program runs. |
 | `auto_load_from_imports` | Load what a program imports. Default `true`; `false` loads only `packages`. |
-| `deny_packages` | Never load these; importing one raises `ModuleNotFoundError`. |
+| `deny_packages` | Never download these for an import. An import still works when the package is reachable another way, such as through `sys_path`. |
 | `sys_path` | Mount paths to put first on `sys.path`: directories, globs, or pure-Python `.whl` files. |
 | `package_base_url` | Where packages download from; point it at your own copy to work offline. |
 

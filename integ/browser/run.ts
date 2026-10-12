@@ -38,7 +38,6 @@ try {
         formats: ['es'],
         fileName: () => 'suite.js',
       },
-      rollupOptions: { external: ['@pydantic/monty'] },
     },
   })
   await writeFile(join(output, 'index.html'), '<!doctype html><title>Mirage shell</title>')

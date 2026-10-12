@@ -25,11 +25,9 @@ dotenv.config({ path: resolve(here, '../../../.env.development') })
 export default defineConfig({
   worker: { format: 'es' },
   optimizeDeps: {
-    // The dev server's pre-bundler follows core's dynamic import of the
-    // optional monty runtime and fails on the undeclared
-    // @bjorn3/browser_wasi_shim import inside it, which takes every page
-    // down with 504s. Left un-bundled it is only fetched when a python3
-    // run selects monty, the same deal the production build makes below.
+    // The dev server serves core, the browser package and the optional
+    // monty runtime as they are, so monty is fetched only when a python3
+    // run selects it.
     exclude: ['@struktoai/mirage-browser', '@struktoai/mirage-core', '@pydantic/monty'],
   },
   define: {
@@ -59,11 +57,6 @@ export default defineConfig({
   build: {
     target: 'esnext',
     rollupOptions: {
-      // Optional monty runtime: its browser entry imports
-      // @bjorn3/browser_wasi_shim without declaring it, so bundling it
-      // breaks. Left external, selecting monty fails into the exit-127
-      // "runtime unavailable" path at runtime instead.
-      external: ['@pydantic/monty'],
       input: {
         main: resolve(here, 'index.html'),
         mongodb: resolve(here, 'mongodb.html'),

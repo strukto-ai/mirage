@@ -129,7 +129,7 @@ page. The others:
 
 | Key (YAML) | Meaning |
 | --- | --- |
-| `home` | Where the distribution loads from. Default: the installed package in Node, the pinned CDN in browsers, then `MIRAGE_PYODIDE_HOME`. |
+| `home` | Where the distribution loads from. Without it, `MIRAGE_PYODIDE_HOME`, then the installed package in Node or the pinned CDN in browsers. |
 | `max_concurrency` | Active top-level calls, default 1. |
 | `lockFileURL` | A custom `pyodide-lock.json` (this one key is camelCase in YAML too). |
 | `bootstrap_code` | Python run when each interpreter starts. |
