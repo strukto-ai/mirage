@@ -1555,29 +1555,60 @@ def selftest_shard() -> None:
             sorted(ran) == want,
             f"{sorted(set(ran) ^ set(want))}",
         )
+        shared = shard.launched(
+            manifest, json.loads(shard.FAKES.read_text()), host
+        )
         for shards in (2, 3):
-            parts = shard.split(items, shards)
-            spread = [
-                target_id
-                for part in parts
-                for ids, _ in part
-                for target_id in ids
-            ]
-            check(
-                f"shard ({host}): {shards} shards partition the split",
-                sorted(spread) == sorted(ran),
-                f"{len(spread)} vs {len(ran)}",
-            )
-            check(
-                f"shard ({host}): each of {shards} shards gets a target",
-                all(parts),
-                f"{[len(part) for part in parts]}",
-            )
-        shared = shard.launched(manifest, host)
+            for fakes in (None, shared):
+                parts = shard.split(items, shards, fakes)
+                label = f"{shards} shards" + (
+                    "" if fakes is None else ", fakes first"
+                )
+                spread = [
+                    target_id
+                    for part in parts
+                    for ids, _ in part
+                    for target_id in ids
+                ]
+                check(
+                    f"shard ({host}): {label} partition the split",
+                    sorted(spread) == sorted(ran),
+                    f"{len(spread)} vs {len(ran)}",
+                )
+                check(
+                    f"shard ({host}): {label}, each shard gets a target",
+                    all(parts),
+                    f"{[len(part) for part in parts]}",
+                )
+                check(
+                    f"shard ({host}): {label}, each shard runs largest first",
+                    all(
+                        [w for _, w in part]
+                        == sorted((w for _, w in part), reverse=True)
+                        for part in parts
+                    ),
+                    f"{[[w for _, w in part] for part in parts]}",
+                )
         check(
             f"shard ({host}): the launcher serves box and sharepoint, not s3",
             {"box", "sharepoint"} <= shared and not {"ram", "s3"} & shared,
             f"{sorted(shared)}",
+        )
+        check(
+            f"shard ({host}): a renamed instance answers for the fake it builds",
+            "github"
+            in shard.launched(manifest, {"gh-cli": {"fake": "github"}}, host),
+            "github missing",
+        )
+        check(
+            f"shard ({host}): a renamed token answers for no other service",
+            "github"
+            not in shard.launched(
+                manifest,
+                {"github": {"token": "GITHUB_WATCH_URL"}},
+                host,
+            ),
+            "github still launched",
         )
         fake_load = [
             sum(weight for ids, weight in part if shared & set(ids))

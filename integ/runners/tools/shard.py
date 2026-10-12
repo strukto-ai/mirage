@@ -157,16 +157,22 @@ def idle_facets(
     return sorted(set(facets) - seen)
 
 
-def launched(manifest: dict, host: str) -> set[str]:
+def launched(manifest: dict, fakes: dict, host: str) -> set[str]:
     """The targets whose service the job's one fake launcher answers.
+
+    An instance announces its `token`, or else the URL variable of the
+    fake it builds, which `fake` names when it differs from the key.
 
     Args:
         manifest (dict): targets.json.
+        fakes (dict): the launcher config, `ci/fakes.json`.
         host (str): `python` or `typescript`, the runner's language.
     """
-    fakes = json.loads(FAKES.read_text())
     tokens = {
-        spec.get("token", f"{name.upper().replace('-', '_')}_URL")
+        spec.get(
+            "token",
+            f"{spec.get('fake', name).upper().replace('-', '_')}_URL",
+        )
         for name, spec in fakes.items()
         if not name.startswith("_")
     }
@@ -276,7 +282,8 @@ def main() -> None:
             f"--facet puts no {args.host} target in the split: "
             f"{', '.join(idle)}"
         )
-    mine = split(items, args.shards, launched(manifest, args.host))[args.shard]
+    shared = launched(manifest, json.loads(FAKES.read_text()), args.host)
+    mine = split(items, args.shards, shared)[args.shard]
     if not mine:
         print(
             f"shard {args.shard} of {args.shards} got no targets",
