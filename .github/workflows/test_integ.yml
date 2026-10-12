@@ -1554,23 +1554,31 @@ jobs:
         run: uv sync --extra fuse
 
       - name: Run the fskit mount and check
+        id: fskit
         # The known hosted-runner limit surfaces as exactly one signature:
         # the readiness TimeoutError (the module never engages, libfuse
         # emits nothing). That case is a skip; any other failure is real.
         run: |
-          ./python/.venv/bin/python integ/fuse/fskit.py > /tmp/fskit.out 2>&1 || true
+          probe_status=0
+          ./python/.venv/bin/python integ/fuse/fskit.py > /tmp/fskit.out 2>&1 || probe_status=$?
           cat /tmp/fskit.out
           if grep -q "did not become ready" /tmp/fskit.out; then
             echo "SKIP: this runner cannot engage the macFUSE FSKit module" \
                  "(known hosted-runner limit; verified locally instead)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          if [ "$probe_status" -ne 0 ]; then
+            exit "$probe_status"
           fi
           ./python/.venv/bin/python integ/check_json.py \
             integ/fuse/truth_fskit.json < /tmp/fskit.out
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Run the CLI fskit battery (workspace YAML with an fskit mount)
-        # Same classification as above: the script itself reports SKIP with
-        # exit 0 when the daemon's mount never engages the FSKit module.
+        # A runner that could not mount above cannot run the dependent CLI
+        # checks. Unknown probe failures still fail before publishing ready.
+        if: ${{ steps.fskit.outputs.ready == 'true' }}
         run: bash integ/fuse/cli_fskit.sh "python/.venv/bin/mirage"
 
       - name: Host state after the probe
