@@ -40,13 +40,17 @@ function pastMark(bytes: Uint8Array): number {
  * A PTY's stdin as a pipe writer. Writes queue, and one loop sends what
  * has queued in one E2B call, in order: each call is a round trip, so a
  * reply split into many writes would otherwise cost one trip per write.
+ * A send that fails hands its error to `fail` and sends nothing more.
  */
 class PtyWriter implements PipeWriter {
   private queue: Uint8Array[] = []
   private ended = false
   private wake: (() => void) | null = null
 
-  constructor(private readonly send: (data: Uint8Array) => Promise<void>) {
+  constructor(
+    private readonly send: (data: Uint8Array) => Promise<void>,
+    private readonly fail: (err: unknown) => Promise<void>,
+  ) {
     void this.loop()
   }
 
@@ -75,7 +79,7 @@ class PtyWriter implements PipeWriter {
       try {
         await this.send(concat(chunks))
       } catch (err) {
-        console.debug('e2b: the PTY took no more input', err)
+        await this.fail(err)
         return
       }
     }
@@ -205,7 +209,15 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
       if (rest.byteLength > 0) feed?.enqueue(rest)
     }
     const handle = await pty.create({ cols: 80, rows: 24, onData, timeoutMs: 0 })
-    const writer = new PtyWriter((data) => pty.sendInput(handle.pid, data))
+    let failed = false
+    const fail = async (err: unknown): Promise<void> => {
+      failed = true
+      feed?.error(err)
+      await stop().catch((stopErr: unknown) => {
+        console.debug(`e2b: stopping the PTY for ${command} failed`, stopErr)
+      })
+    }
+    const writer = new PtyWriter((data) => pty.sendInput(handle.pid, data), fail)
     let ended = false
     const waiting = handle
       .wait()
@@ -217,7 +229,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
       )
       .finally(() => {
         ended = true
-        feed?.close()
+        if (!failed) feed?.close()
         writer.end()
       })
     const stop = async (): Promise<void> => {

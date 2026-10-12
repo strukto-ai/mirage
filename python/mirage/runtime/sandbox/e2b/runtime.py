@@ -14,7 +14,7 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -45,16 +45,25 @@ class PtyWriter:
 
     Writes queue, and one task sends what has queued in one E2B call, in
     order: each call is a round trip, so a reply split into many writes
-    would otherwise cost one trip per write.
+    would otherwise cost one trip per write. A send that fails hands its
+    error to ``fail`` and sends nothing more.
 
     Args:
         pty (Any): the sandbox's ``pty`` API.
         pid (int): the PTY's process.
+        fail (Callable[[Exception], Awaitable[None]]): ends the pipe with
+            the send's error.
     """
 
-    def __init__(self, pty: Any, pid: int) -> None:
+    def __init__(
+        self,
+        pty: Any,
+        pid: int,
+        fail: Callable[[Exception], Awaitable[None]],
+    ) -> None:
         self._pty = pty
         self._pid = pid
+        self._fail = fail
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._task = asyncio.create_task(self._send())
 
@@ -76,8 +85,8 @@ class PtyWriter:
                     chunks.append(more)
             try:
                 await self._pty.send_stdin(self._pid, b"".join(chunks))
-            except Exception:
-                logger.debug("e2b: the PTY took no more input", exc_info=True)
+            except Exception as exc:
+                await self._fail(exc)
                 return
             if ended:
                 return
@@ -179,7 +188,19 @@ class E2BRuntime(RemoteSandbox):
         handle = await pty.create(
             sdk.PtySize(rows=24, cols=80), on_data=on_data, timeout=0
         )
-        writer = PtyWriter(pty, handle.pid)
+
+        async def fail(exc: Exception) -> None:
+            reader.set_exception(exc)
+            try:
+                await stop()
+            except Exception:
+                logger.debug(
+                    "e2b: stopping the PTY for %r failed",
+                    command,
+                    exc_info=True,
+                )
+
+        writer = PtyWriter(pty, handle.pid, fail)
 
         async def wait() -> None:
             try:

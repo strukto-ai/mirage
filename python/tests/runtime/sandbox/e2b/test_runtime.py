@@ -282,6 +282,20 @@ async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
 
 
 @pytest.mark.asyncio
+async def test_a_reply_that_cannot_be_sent_ends_the_pipe_with_its_error():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    pty = FakeSandbox.last.pty
+    pipe = await runtime.open_pipe("exec sshfs x y")
+    assert await pipe.reader.readexactly(5) == b"\x00sftp"
+    pty.refuse = True
+    pipe.writer.write(b"reply")
+    with pytest.raises(RuntimeError, match="the sandbox went away"):
+        await asyncio.wait_for(pipe.reader.read(1), 1)
+    assert pty.handle.ended.is_set()
+
+
+@pytest.mark.asyncio
 async def test_a_pty_whose_command_cannot_be_sent_is_killed():
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()

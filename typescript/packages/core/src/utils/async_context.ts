@@ -37,7 +37,7 @@ interface TaskStorage<T> {
   getStore(): T | undefined
 }
 
-type ALSCtor = new <T>() => TaskStorage<T>
+type ALSCtor = (new <T>() => TaskStorage<T>) & { snapshot?: () => ContextCall }
 
 /**
  * The browser storage: no task isolation, one frame stack per storage.
@@ -187,6 +187,18 @@ const resolved = await resolveCtor()
 export const asyncContextIsolatesTasks: boolean = resolved !== null && (await isolates(resolved))
 
 const verifiedCtor: ALSCtor | null = asyncContextIsolatesTasks ? resolved : null
+
+const unbound: ContextCall | null = verifiedCtor?.snapshot?.() ?? null
+
+/**
+ * Run `fn` with no store bound, as this module loaded: for work a line
+ * starts that outlives it and must not carry the line's state, such as
+ * a sandbox's SFTP server. Without task isolation there is nothing to
+ * leave, so `fn` runs as called.
+ */
+export function runDetached<R>(fn: () => R | Promise<R>): R | Promise<R> {
+  return unbound === null ? fn() : unbound(fn)
+}
 
 export function createAsyncContext<T>(): AsyncStorage<T> {
   return verifiedCtor === null ? new FallbackStorage<T>() : new IsolatedStorage<T>(verifiedCtor)

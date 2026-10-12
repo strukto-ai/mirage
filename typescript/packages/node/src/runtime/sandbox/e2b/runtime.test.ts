@@ -201,6 +201,18 @@ describe('E2BRuntime', () => {
     expect(pty.ended).toBe(true)
     expect((await chunks.read()).done).toBe(true)
   })
+  it('ends the pipe with the error of a reply it cannot send', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const pty = FakeSandbox.last.pty
+    const pipe = await runtime.openPipe('exec sshfs x y')
+    const chunks = pipe.reader.getReader()
+    await chunks.read()
+    pty.refuse = true
+    pipe.writer.write(new Uint8Array([1]))
+    await expect(chunks.read()).rejects.toThrow('the sandbox went away')
+    expect(pty.ended).toBe(true)
+  })
   it('kills a pty whose command cannot be sent', async () => {
     const runtime = makeRuntime()
     await runtime.connect()

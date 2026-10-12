@@ -14,6 +14,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getAdmission, getCurrentSession, lineRunning } from '../../context/session_context.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -253,6 +254,20 @@ describe('SandboxMounts', () => {
     },
   )
 
+  it('refuses a line once the sandbox mounts a ruled prefix itself', async () => {
+    const sandbox = new FakeSandbox('fuse')
+    const ws = await workspace(sandbox, ['/data/secret.csv'])
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.table.set('/data', 'fuse')
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(
+      "fake: /data is served by the sandbox itself, out of reach of this session's rules\n",
+    )
+    await ws.close()
+  })
+
   it('serves nothing from the host over fuse and takes any session', async () => {
     const sandbox = new FakeSandbox('fuse', ['/data'])
     const ws = await workspace(sandbox, ['/my notes/secret'])
@@ -329,6 +344,28 @@ describe('SandboxMounts', () => {
     expect(sessions).toHaveLength(2)
     for (const session of sessions) expect(session).toBe(ws.getSession('agent'))
     await ws.close()
+  })
+
+  it('runs a server outside the line that started it', async () => {
+    const bound: unknown[] = []
+    registerPipeServer(async (_files, _session, reader) => {
+      bound.push([getCurrentSession(), getAdmission(), lineRunning()])
+      const chunks = reader.getReader()
+      while (!(await chunks.read()).done) continue
+    })
+    try {
+      const sandbox = new FakeSandbox('ssh')
+      const ws = await workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      expect(bound).toEqual([
+        [null, null, false],
+        [null, null, false],
+      ])
+      await ws.close()
+    } finally {
+      registerPipeServer(drain)
+    }
   })
 
   it('fails loud on a mount of its own under a served prefix', async () => {

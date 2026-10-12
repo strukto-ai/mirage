@@ -17,6 +17,7 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
+from contextvars import Context
 from typing import Any
 
 from mirage.context import get_current_session
@@ -146,7 +147,11 @@ class SandboxMounts:
 
     Each line first brings the mounts in step with the workspace: a mount
     added or shown since is served, one hidden is dropped, and a server
-    that ended is started again. What the host serves shows one session's
+    that ended is started again. While a rule reaches under a prefix, the
+    sandbox's own mounts are read again for each line, so one it mounted
+    since is refused too. A server runs outside the line that started it,
+    so it answers as the session alone and never with a grant that line
+    was given. What the host serves shows one session's
     view, and a program a line starts may outlive it, so under ``ssh`` and
     ``both`` the sandbox belongs to the first session it serves or runs a
     line for, until it is closed: a line of another session is refused
@@ -210,13 +215,22 @@ class SandboxMounts:
                     f"of the workspace; give session {current.session_id} "
                     "a sandbox of its own"
                 )
+            every = mount_paths(binding.mount_prefixes())
+            scoped = binding.capture().ns.scoped
+            ruled = frozenset(
+                p
+                for p in every
+                if (scoped is not None and scoped(p))
+                or capped_under(current, p)
+            )
             await self._reconcile(
                 binding,
                 binding.files,
                 binding.get_session(current.session_id),
-                mount_paths(binding.mount_prefixes()),
+                every,
+                ruled,
             )
-            refusal = self._refusal(binding.capture().ns.scoped, current)
+            refusal = self._refusal(ruled)
             if self._mount_type != "fuse" and (
                 refusal is None or self._served
             ):
@@ -229,13 +243,9 @@ class SandboxMounts:
             await self._unmount()
             self._session_id = None
 
-    def _refusal(
-        self, scoped: Callable[[str], bool] | None, session: SessionState
-    ) -> str | None:
+    def _refusal(self, ruled: frozenset[str]) -> str | None:
         for prefix in self._own:
-            if (scoped is not None and scoped(prefix)) or capped_under(
-                session, prefix
-            ):
+            if prefix in ruled:
                 return (
                     f"{prefix} is served by the sandbox itself, out of "
                     "reach of this session's rules"
@@ -248,6 +258,7 @@ class SandboxMounts:
         files: Files,
         session: SessionState,
         every: set[str],
+        ruled: frozenset[str],
     ) -> None:
         visible = frozenset(
             top_prefixes(binding.resolver.prefixes())
@@ -255,7 +266,11 @@ class SandboxMounts:
             else ()
         )
         ended = [p for p, (_, task) in self._served.items() if task.done()]
-        if self._seen == (frozenset(every), visible) and not ended:
+        if (
+            self._seen == (frozenset(every), visible)
+            and not ended
+            and (self._mount_type == "ssh" or not ruled)
+        ):
             return
         present = await self._table()
         own = tuple(
@@ -319,7 +334,8 @@ class SandboxMounts:
             f"exec sshfs -f -o {SSHFS_OPTIONS} {source} {path} 2>{log}"
         )
         task = asyncio.create_task(
-            serve_pipe(files, session, pipe.reader, pipe.writer)
+            serve_pipe(files, session, pipe.reader, pipe.writer),
+            context=Context(),
         )
         self._served[prefix] = (pipe, task)
         deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS

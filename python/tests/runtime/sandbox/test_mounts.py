@@ -18,6 +18,7 @@ import shlex
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.context import get_admission, get_current_session, line_running
 from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import SSHFS_OPTIONS
@@ -211,6 +212,22 @@ async def test_a_rule_under_a_prefix_the_sandbox_serves_refuses_the_line(
 
 
 @pytest.mark.asyncio
+async def test_a_mount_the_sandbox_makes_later_under_a_rule_refuses_the_line():
+    sandbox = FakeSandbox("fuse")
+    ws = workspace(sandbox, hide=["/data/secret.csv"])
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.table["/data"] = "fuse"
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == (
+        "fake: /data is served by the sandbox itself, out of reach of this "
+        "session's rules\n"
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_fuse_serves_nothing_from_the_host_and_takes_any_session():
     sandbox = FakeSandbox("fuse", own=["/data"])
     ws = workspace(sandbox, hide=["/my notes/secret"])
@@ -296,6 +313,23 @@ async def test_a_line_with_its_own_cwd_serves_the_live_session(monkeypatch):
     assert result.exit_code == 0
     assert len(sessions) == 2
     assert all(s is ws.get_session("agent") for s in sessions)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_server_runs_outside_the_line_that_started_it(monkeypatch):
+    bound = []
+
+    async def serve(files, session, reader, writer):
+        bound.append((get_current_session(), get_admission(), line_running()))
+        await reader.read()
+
+    monkeypatch.setattr(mounts, "serve_pipe", serve)
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert bound == [(None, None, False), (None, None, False)]
     await ws.close()
 
 

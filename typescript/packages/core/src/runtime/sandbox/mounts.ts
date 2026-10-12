@@ -17,6 +17,7 @@ import { MountMode } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { runDetached } from '../../utils/async_context.ts'
 import type { Files } from '../../workspace/files.ts'
 import type { SessionState } from '../../workspace/session/session.ts'
 import type { WorkspaceBinding } from '../binding.ts'
@@ -157,8 +158,11 @@ interface Served {
  *
  * Each line first brings the mounts in step with the workspace: a mount
  * added or shown since is served, one hidden is dropped, and a server
- * that ended is started again. What the host serves shows one session's
- * view, and a program a line starts may outlive it, so under `ssh` and
+ * that ended is started again. While a rule reaches under a prefix, the
+ * sandbox's own mounts are read again for each line, so one it mounted
+ * since is refused too. A server runs outside the line that started it,
+ * so it answers as the session alone and never with a grant that line was
+ * given. What the host serves shows one session's view, and a program a line starts may outlive it, so under `ssh` and
  * `both` the sandbox belongs to the first session it serves or runs a line
  * for, until it is closed: a line of another session is refused rather
  * than shown, or showing, the first one's view. Under `fuse` the host
@@ -206,14 +210,13 @@ export class SandboxMounts {
           `give session ${current.sessionId} a sandbox of its own`
         )
       }
-      await this.reconcile(
-        binding,
-        files,
-        getSession(current.sessionId),
-        mountPaths(mountPrefixes()),
-        signal,
+      const every = mountPaths(mountPrefixes())
+      const scoped = binding.capture().ns.scoped
+      const ruled = new Set(
+        [...every].filter((p) => scoped?.(p) === true || cappedUnder(current, p)),
       )
-      const refusal = this.refusal(binding.capture().ns.scoped, current)
+      await this.reconcile(binding, files, getSession(current.sessionId), every, ruled, signal)
+      const refusal = this.refusal(ruled)
       if (this.mountType !== 'fuse' && (refusal === null || this.served.size > 0)) {
         this.sessionId = current.sessionId
       }
@@ -229,12 +232,9 @@ export class SandboxMounts {
     })
   }
 
-  private refusal(
-    scoped: ((path: string) => boolean) | undefined,
-    session: SessionState,
-  ): string | null {
+  private refusal(ruled: ReadonlySet<string>): string | null {
     for (const prefix of this.own) {
-      if (scoped?.(prefix) === true || cappedUnder(session, prefix)) {
+      if (ruled.has(prefix)) {
         return `${prefix} is served by the sandbox itself, out of reach of this session's rules`
       }
     }
@@ -252,12 +252,19 @@ export class SandboxMounts {
     files: Files,
     session: SessionState,
     every: Set<string>,
+    ruled: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<void> {
     const visible = this.mountType === 'fuse' ? [] : topPrefixes(binding.resolver.prefixes())
     const seen = JSON.stringify([[...every].sort(compareCodePoints), visible])
     const ended = [...this.served].filter(([, entry]) => entry.ended).map(([prefix]) => prefix)
-    if (this.seen === seen && ended.length === 0) return
+    if (
+      this.seen === seen &&
+      ended.length === 0 &&
+      (this.mountType === 'ssh' || ruled.size === 0)
+    ) {
+      return
+    }
     const present = await this.table(signal)
     const own = [...every]
       .filter((p) => this.mountType !== 'ssh' && present.has(p) && !this.served.has(p))
@@ -316,7 +323,9 @@ export class SandboxMounts {
     const source = singleQuote(`mirage:${prefix}`)
     const pipe = await this.openPipe(`exec sshfs -f -o ${SSHFS_OPTIONS} ${source} ${path} 2>${log}`)
     const entry: Served = { pipe, serving: Promise.resolve(), ended: false, failure: null }
-    entry.serving = server(files, session, pipe.reader, pipe.writer).then(
+    entry.serving = Promise.resolve(
+      runDetached(() => server(files, session, pipe.reader, pipe.writer)),
+    ).then(
       () => {
         entry.ended = true
       },
