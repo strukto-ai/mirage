@@ -282,20 +282,25 @@ def holding_clause(
 
 
 async def rows_where(
-    accessor: LanceDBAccessor, table: str, clause: str, columns: list[str]
-) -> list[LanceRow]:
-    """Every row of ``table`` the clause keeps, ``columns`` selected.
+    accessor: LanceDBAccessor,
+    table: str,
+    clause: str,
+    columns: list[str],
+    limit: int,
+) -> list[LanceRow] | None:
+    """Every row of ``table`` the clause keeps, ``columns`` selected, or
+    None when more than ``limit`` do.
 
     Args:
         accessor (LanceDBAccessor): the mount's accessor.
         table (str): the table.
         clause (str): the where clause.
         columns (list[str]): the columns returned.
+        limit (int): the most rows answered.
     """
     tbl = await accessor.table(table)
     rows: list[LanceRow] = []
-    async for batch in (
-        await tbl.query().select(columns).where(clause).to_batches()
-    ):
+    query = tbl.query().select(columns).where(clause).limit(limit + 1)
+    async for batch in await query.to_batches():
         rows.extend(batch.to_pylist())
-    return rows
+    return rows if len(rows) <= limit else None

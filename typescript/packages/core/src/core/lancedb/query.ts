@@ -96,14 +96,19 @@ export function textColumns(
   return accessor.driver.textColumns(table, skipped)
 }
 
-/** Every row the clause keeps, `columns` selected. Mirrors Python's `rows_where`. */
-export function rowsWhere(
+/**
+ * Every row the clause keeps, `columns` selected, or null when more than
+ * `limit` do. Mirrors Python's `rows_where`.
+ */
+export async function rowsWhere(
   accessor: LanceDBAccessor,
   table: string,
   clause: string,
   columns: string[],
-): Promise<LanceRow[]> {
-  return accessor.driver.rowsWhere(table, clause, columns)
+  limit: number,
+): Promise<LanceRow[] | null> {
+  const rows = await accessor.driver.rowsWhere(table, clause, columns, limit + 1)
+  return rows.length <= limit ? rows : null
 }
 
 export async function tableExists(accessor: LanceDBAccessor, name: string): Promise<boolean> {

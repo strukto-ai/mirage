@@ -158,3 +158,48 @@ async def test_card_labels_and_durations_read_every_card(tmp_path):
         await _cards(accessor("blobs", "payload"), "bin", [_scope()]) is None
     )
     assert await _cards(accessor("timed"), "days", [_scope()]) is None
+
+
+# A title drawn from the blob column is a card line like any other, so the
+# search keeps that column.
+@pytest.mark.asyncio
+async def test_a_blob_title_is_searched(tmp_path):
+    uri = str(tmp_path / "titled")
+    lancedb.connect(uri).create_table(
+        "t",
+        data=[
+            {"id": 1, "body": "orangeXX", "name": "plain"},
+            {"id": 2, "body": "grey", "name": "plain"},
+        ],
+    )
+    accessor = LanceDBAccessor(
+        LanceDBConfig(
+            uri=uri,
+            table="t",
+            id_column="id",
+            blob_column="body",
+            title_column="body",
+        )
+    )
+    assert await _cards(accessor, "orange", [_scope()]) == ["/db/1.md"]
+
+
+# A listing shows max_rows cards, so a text more rows hold reads the listed
+# cards rather than fetching rows the walk never reaches.
+@pytest.mark.asyncio
+async def test_more_hits_than_a_listing_shows_read_every_card(tmp_path):
+    uri = str(tmp_path / "wide")
+    lancedb.connect(uri).create_table(
+        "t", data=[{"id": i, "name": "plain row"} for i in range(5)]
+    )
+
+    def capped(max_rows: int) -> LanceDBAccessor:
+        return LanceDBAccessor(
+            LanceDBConfig(
+                uri=uri, table="t", id_column="id", max_rows=max_rows
+            )
+        )
+
+    assert await _cards(capped(4), "plain", [_scope()]) is None
+    found = await _cards(capped(5), "plain", [_scope()])
+    assert sorted(found or []) == [f"/db/{i}.md" for i in range(5)]

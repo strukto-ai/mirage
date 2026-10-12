@@ -81,7 +81,11 @@ async def files_containing(
     column's name or the blob line's extension holds it. A value
     that is not a string spells only digits and signs, or one of
     ``CARD_WORDS``; a table that renders a list, struct or bytes column
-    reads every card, as does a scope inside a card.
+    reads every card, as does a scope inside a card. The title column is
+    searched even when it is the vector or blob column, since the title
+    line renders it. More rows holding the text than a listing shows
+    (``max_rows``) reads every card too, rather than fetching rows the
+    walk never reaches.
 
     Args:
         accessor (LanceDBAccessor): the mount's accessor.
@@ -93,7 +97,11 @@ async def files_containing(
     if text.startswith(" "):
         return None
     config = accessor.config
-    skipped = {c for c in (config.vector_column, config.blob_column) if c}
+    skipped = {
+        c
+        for c in (config.vector_column, config.blob_column)
+        if c and c != config.title_column
+    }
     found: list[PathSpec] = []
     for scope in under:
         match = detect_for(accessor)(scope.mount_path)
@@ -132,7 +140,10 @@ async def files_containing(
                 table,
                 holding_clause(columns, queries, ignore_case, filters),
                 [config.id_column, *config.group_by],
+                config.max_rows,
             )
+            if rows is None:
+                return None
             base = "" if config.table else f"/{table}"
             for row in rows:
                 if row.get(config.id_column) is None or any(

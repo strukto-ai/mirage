@@ -101,8 +101,9 @@ describe('lancedb store card search', () => {
     expect(await store.textColumns('tagged', new Set(['tags']))).toEqual(['name'])
   })
 
-  it('returns the rows a clause keeps', async () => {
-    const rows = await store.rowsWhere('plain', "`name` LIKE '%orange%'", ['id'])
+  it('returns at most limit rows a clause keeps', async () => {
+    const rows = await store.rowsWhere('plain', "`name` LIKE '%orange%'", ['id'], 5)
     expect(rows.map((row) => Number(row.id))).toEqual([1])
+    expect(await store.rowsWhere('plain', "`name` LIKE '%'", ['id'], 1)).toHaveLength(1)
   })
 })

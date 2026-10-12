@@ -41,8 +41,8 @@ export interface LanceDriver {
    * spelling a filter on strings cannot test. Mirrors Python's `text_columns`.
    */
   textColumns(table: string, skipped: ReadonlySet<string>): Promise<string[] | null>
-  /** Every row the clause keeps, `columns` selected. Mirrors Python's `rows_where`. */
-  rowsWhere(table: string, clause: string, columns: string[]): Promise<LanceRow[]>
+  /** At most `limit` rows the clause keeps, `columns` selected. */
+  rowsWhere(table: string, clause: string, columns: string[], limit: number): Promise<LanceRow[]>
   search(table: string, query: string, limit: number): Promise<LanceRow[]>
   close(): Promise<void>
 }

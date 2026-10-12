@@ -156,9 +156,14 @@ export class LanceDBStore implements LanceDriver {
     return texts
   }
 
-  async rowsWhere(table: string, clause: string, columns: string[]): Promise<LanceRow[]> {
+  async rowsWhere(
+    table: string,
+    clause: string,
+    columns: string[],
+    limit: number,
+  ): Promise<LanceRow[]> {
     const tbl = await this.table(table)
-    return (await tbl.query().select(columns).where(clause).toArray()) as LanceRow[]
+    return (await tbl.query().select(columns).where(clause).limit(limit).toArray()) as LanceRow[]
   }
 
   async rowRecord(table: string, idColumn: string, rowId: string): Promise<LanceRow | null> {

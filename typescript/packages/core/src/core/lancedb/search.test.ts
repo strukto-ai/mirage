@@ -165,3 +165,57 @@ it('leaves a text a column name or the blob extension holds to the scan', async 
   expect(await filesContaining(named, 'ner na', [scope()], false, false)).toBeNull()
   expect(await filesContaining(accessor('payload'), 'bin', [scope()], false, false)).toBeNull()
 })
+
+// Twin of test_a_blob_title_is_searched: a title drawn from the blob column is
+// a card line like any other, so the search keeps that column.
+it('searches a title drawn from the blob column', async () => {
+  const asked: string[][] = []
+  const driver = {
+    listTables: () => Promise.resolve(['t']),
+    tableColumns: () => Promise.resolve(['id', 'body', 'name']),
+    textColumns: (_table: string, skipped: ReadonlySet<string>) => {
+      const texts = ['body', 'name'].filter((c) => !skipped.has(c))
+      asked.push(texts)
+      return Promise.resolve(texts)
+    },
+    rowsWhere: () => Promise.resolve([{ id: 1 }]),
+  } as unknown as LanceDriver
+  const config = resolveLanceDBConfig({
+    uri: '/tmp/db',
+    table: 't',
+    idColumn: 'id',
+    blobColumn: 'body',
+    titleColumn: 'body',
+  })
+  const found = await filesContaining(
+    new LanceDBAccessor(driver, config),
+    'orange',
+    [scope()],
+    false,
+    false,
+  )
+  expect(found?.map((p) => p.virtual)).toEqual(['/db/1.md'])
+  expect(asked).toEqual([['body', 'name']])
+})
+
+// Twin of test_more_hits_than_a_listing_shows_read_every_card: a listing shows
+// maxRows cards, so a text more rows hold reads the listed cards rather than
+// fetching rows the walk never reaches.
+it('reads every card when more rows hold the text than a listing shows', async () => {
+  const rows = [0, 1, 2, 3, 4].map((id) => ({ id }))
+  const driver = {
+    listTables: () => Promise.resolve(['t']),
+    tableColumns: () => Promise.resolve(['id', 'name']),
+    textColumns: () => Promise.resolve(['name']),
+    rowsWhere: (_table: string, _clause: string, _columns: string[], limit: number) =>
+      Promise.resolve(rows.slice(0, limit)),
+  } as unknown as LanceDriver
+  const capped = (maxRows: number) =>
+    new LanceDBAccessor(
+      driver,
+      resolveLanceDBConfig({ uri: '/tmp/db', table: 't', idColumn: 'id', maxRows }),
+    )
+  expect(await filesContaining(capped(4), 'plain', [scope()], false, false)).toBeNull()
+  const found = await filesContaining(capped(5), 'plain', [scope()], false, false)
+  expect(found?.map((p) => p.virtual)).toEqual(rows.map(({ id }) => `/db/${String(id)}.md`))
+})

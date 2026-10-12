@@ -63,7 +63,10 @@ export function hit(accessor: LanceDBAccessor, row: Row): [string[], Uint8Array]
  * rendered column's name and `CARD_WORDS` as keys, it does not start with a
  * space, and no column's name or the blob line's extension holds it. A value that is not a string spells only digits and signs, or one of
  * `CARD_WORDS`; a table that renders a list, struct or bytes column reads every
- * card, as does a scope inside a card. Mirrors Python's `files_containing`.
+ * card, as does a scope inside a card. The title column is searched even when it
+ * is the vector or blob column, since the title line renders it. More rows
+ * holding the text than a listing shows (`maxRows`) reads every card too, rather
+ * than fetching rows the walk never reaches. Mirrors Python's `files_containing`.
  */
 export async function filesContaining(
   accessor: LanceDBAccessor,
@@ -74,7 +77,11 @@ export async function filesContaining(
 ): Promise<PathSpec[] | null> {
   if (text.startsWith(' ')) return null
   const config = accessor.config
-  const skipped = new Set([config.vectorColumn, config.blobColumn].filter((c) => c !== null))
+  const skipped = new Set(
+    [config.vectorColumn, config.blobColumn].filter(
+      (c): c is string => c !== null && c !== config.titleColumn,
+    ),
+  )
   const found: PathSpec[] = []
   for (const scope of under) {
     const match = detectFor(accessor)(scope.mountPath)
@@ -102,7 +109,9 @@ export async function filesContaining(
         table,
         holdingClause(columns, queries, ignoreCase, filters),
         [config.idColumn, ...config.groupBy],
+        config.maxRows,
       )
+      if (rows === null) return null
       const base = config.table !== null ? '' : `/${table}`
       for (const row of rows) {
         const id = row[config.idColumn]
