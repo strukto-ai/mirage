@@ -1198,16 +1198,19 @@ describe('a line beside another session’s paused line on the fallback storage'
     try {
       await ws.vfs.mkdir('/data/review')
       await ws.vfs.write('/data/review/f', 'reviewed\n')
-      const alone = await ws.shell('cat /data/review/f', { sessionId: asker.sessionId })
+      await ws.vfs.mkdir('/data/review/sub')
+      await ws.vfs.write('/data/review/sub/x', 'x')
+      const line = 'cat /data/review/f; ls /data/review/sub'
+      const alone = await ws.shell(line, { sessionId: asker.sessionId })
       const paused = ws.shell('pause', { sessionId: other.sessionId })
       await holds.get('b')?.[2]
-      const overlapped = await ws.shell('cat /data/review/f', { sessionId: asker.sessionId })
+      const overlapped = await ws.shell(line, { sessionId: asker.sessionId })
       holds.get('b')?.[1]()
       await paused
-      expect([alone.exitCode, alone.stdoutText]).toEqual([0, 'reviewed\n'])
+      expect([alone.exitCode, alone.stdoutText]).toEqual([0, 'reviewed\nx\n'])
       expect([overlapped.exitCode, overlapped.stdoutText, overlapped.stderrText]).toEqual([
         0,
-        'reviewed\n',
+        'reviewed\nx\n',
         '',
       ])
     } finally {

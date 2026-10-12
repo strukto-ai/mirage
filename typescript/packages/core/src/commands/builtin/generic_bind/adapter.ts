@@ -40,6 +40,7 @@ import {
   walkProbeFor,
 } from '../../../context/session_context.ts'
 import { METADATA_OPS } from '../../../policy/constants.ts'
+import type { EntryGate } from '../../../policy/types.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
@@ -1116,7 +1117,7 @@ export function withCommandGuards<A extends Accessor>(
   prefix?: string,
 ): CommandIO<A> {
   const probe = ops.walkProbe ?? (prefix === undefined ? null : walkProbeFor(prefix))
-  const scope = opPolicyScope(prefix ?? null, ops.access)
+  const scope = opPolicyScope(prefix ?? null, ops.access, ops.admission)
   const prepared = namespaceOps({ ...ops, readdir: policyCall(scope, ops.readdir, 'readdir') })
   const guarded = { ...prepared }
   for (const slot of ['readBytes', 'readRange', 'stat', 'exists', 'readdir'] as const) {
@@ -1169,13 +1170,20 @@ interface OpPolicyScope {
   prefix: string | null
   sessionId: string
   access?: SessionAccess
+  /** The command's own gate, where the wrap site knows it: a once grant is
+   * remembered there, not by whatever gate is live beside it. */
+  gate?: EntryGate | null
 }
 
 /**
  * The scope to consult for this op call: null is the fast path (no
  * dispatched command bound policies, or none of them override preVfs).
  */
-function opPolicyScope(prefix: string | null, access?: SessionAccess): OpPolicyScope | null {
+function opPolicyScope(
+  prefix: string | null,
+  access?: SessionAccess,
+  gate?: EntryGate | null,
+): OpPolicyScope | null {
   const policies = getOpPolicies()
   if (!policies?.wants('preVfs')) return null
   return {
@@ -1183,6 +1191,7 @@ function opPolicyScope(prefix: string | null, access?: SessionAccess): OpPolicyS
     prefix,
     sessionId: access?.sessionId ?? getCurrentSession()?.sessionId ?? '',
     ...(access === undefined ? {} : { access }),
+    ...(gate === undefined ? {} : { gate }),
   }
 }
 
@@ -1228,6 +1237,7 @@ async function policyAdmit(
   await preVfsGate(scope.policies, call, path, write, prefix, scope.sessionId, undefined, {
     checkHidden: false,
     ...(scope.access === undefined ? {} : { access: scope.access }),
+    ...(scope.gate === undefined ? {} : { gate: scope.gate }),
   })
 }
 
