@@ -810,7 +810,6 @@ async function setVar(
     }
   }
   const written: SessionContext = {
-    plane: 'env',
     verb: 'set',
     key: name,
     value: gateRendering(shaped),
@@ -904,7 +903,6 @@ async function unsetVar(
     throw new ReadonlyVariableError(name)
   }
   const written: SessionContext = {
-    plane: 'env',
     verb: 'unset',
     key: name,
     value: null,
@@ -1195,7 +1193,6 @@ async function markVar(
   if (followRef && attr !== VarAttr.Nameref) name = deref(session, name) || name
   ensureVarVisible(session, name)
   const written: SessionContext = {
-    plane: 'env',
     verb: 'set',
     key: name,
     value: null,
@@ -1297,7 +1294,6 @@ export async function gateRestoredVars(
   for (const [name, variable] of Object.entries(table)) {
     if (SHELL_BOOKKEEPING.has(name)) continue
     await preSessionGate(policies, {
-      plane: 'env',
       verb: 'set',
       key: name,
       value: gateRendering(variable.value),

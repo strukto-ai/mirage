@@ -31,7 +31,7 @@ import { handleRedirect } from '../executor/redirect.ts'
 import { sessionView } from '../session/state.ts'
 
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { RouteContext } from '../../runtime/routing/types.ts'
+import type { RouteContext } from '../../policy/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { Admitted, admit } from './admission.ts'
 import { claimantFor } from './occurrence.ts'

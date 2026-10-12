@@ -1,31 +1,118 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { WordKind } from '../commands/spec/types.ts'
+import type { WorkspaceBinding } from '../runtime/binding.ts'
+import type * as ScriptModule from '../runtime/script.ts'
+import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
+import { LanguageRuntime } from '../runtime/language.ts'
 import { PrefixResolver } from '../runtime/resolver.ts'
-import { ScriptSource } from '../runtime/types.ts'
-import type { BridgeDispatchFn } from '../runtime/types.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../types.ts'
-import type { Policy } from './base.ts'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
-import { Policies } from './policies.ts'
 import {
-  ScriptPolicy,
-  definedHooks,
-  hookCall,
-  hookProbe,
-  opsScriptContext,
-  scriptAction,
-  scriptContext,
-  sessionScriptContext,
-} from './script.ts'
+  ScriptSource,
+  type BridgeDispatchFn,
+  type CodeExecution,
+  type ExecutionRequest,
+  type RunResult,
+} from '../runtime/types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../types.ts'
+import type { NamespaceView, SessionView } from '../view/types.ts'
+import { CALLS } from '../workspace/dispatcher/constants.ts'
+import type { VfsCall } from '../vfs/types.ts'
+import { CTX_ENV, DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
+import { Policies } from './policies.ts'
+import { ScriptPolicy, scriptAction, scriptContext } from './script.ts'
 import {
   CommandWord,
   type CommandContext,
-  type VfsContext,
   type ProfileScript,
+  type ProfileScripts,
+  type RouteContext,
   type SessionContext,
+  type VfsContext,
 } from './types.ts'
-import { WordKind } from '../commands/spec/types.ts'
-import { CALLS } from '../workspace/dispatcher/constants.ts'
-import type { VfsCall } from '../vfs/types.ts'
+
+// Mirrors python/tests/policy/test_script.py.
+
+const built = vi.hoisted(() => ({
+  factory: null as null | ((runtime: string, config: Readonly<Record<string, unknown>>) => unknown),
+}))
+
+vi.mock('../runtime/script.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof ScriptModule>()
+  return {
+    ...real,
+    scriptEngine: (
+      script: ScriptSource,
+      runtime: string,
+      config: Readonly<Record<string, unknown>> = {},
+    ) =>
+      built.factory === null
+        ? real.scriptEngine(script, runtime, config)
+        : built.factory(runtime, config),
+  }
+})
+
+/** Stands in for a policy runtime, recording each run it was handed. */
+class FakeProgram extends LanguageRuntime {
+  readonly name = 'fake'
+  readonly language = 'python' as const
+  readonly requests: CodeExecution[] = []
+  attached: WorkspaceBinding | null = null
+  closed = false
+
+  constructor(
+    private readonly stdout = '',
+    private readonly exitCode = 0,
+    private readonly delayMs = 0,
+  ) {
+    super()
+  }
+
+  override bind(binding: WorkspaceBinding): void {
+    super.bind(binding)
+    this.attached = binding
+  }
+
+  override async execute(request: ExecutionRequest): Promise<RunResult> {
+    if (request.kind !== 'code') throw new Error('a policy program is a code run')
+    this.requests.push(request)
+    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs))
+    return {
+      stdout: new TextEncoder().encode(this.stdout),
+      stderr: this.exitCode === 0 ? null : new TextEncoder().encode('Traceback'),
+      exitCode: this.exitCode,
+    }
+  }
+
+  run(): Promise<RunResult> {
+    throw new Error('unused')
+  }
+
+  override close(): Promise<void> {
+    this.closed = true
+    return Promise.resolve()
+  }
+}
+
+const ENCODE = new TextEncoder()
+
+function answer(fields: Record<string, string>): string {
+  return JSON.stringify(fields)
+}
+
+function bytes(text: string): Uint8Array {
+  return ENCODE.encode(text)
+}
+
+function entry(
+  runtime = 'monty',
+  source = 'SOURCE',
+  config: Record<string, unknown> = {},
+): ProfileScript {
+  return { profile: 'release', script: new ScriptSource(source, 'python'), runtime, config }
+}
+
+function scripts(programs: ProfileScripts): { scriptsOf: () => ProfileScripts } {
+  return { scriptsOf: () => programs }
+}
 
 function callOf(name: string): VfsCall {
   const call = CALLS.get(name)
@@ -33,66 +120,415 @@ function callOf(name: string): VfsCall {
   return call
 }
 
-// A policy is a program defining the hook it answers at, the way a
-// coded Policy does, and it answers with return.
-const JUDGE = `\
-function preCommand(ctx) {
-  const c = ctx.command
-  if (c.name === 'cat' && c.paths.some((p) => p.startsWith('/repo/sealed/'))) {
-    return { deny: 'sealed by ' + ctx.profile }
+function refused(): Promise<void> {
+  return Promise.reject(new Error('read only'))
+}
+
+function sessionView(cwd = '/data'): SessionView {
+  const env: Record<string, string> = { TEAM: 'core', HOME: '/home/agent' }
+  return {
+    get: (name) => env[name] ?? null,
+    snapshot: () => ({ ...env }),
+    set: refused,
+    unset: refused,
+    mark: refused,
+    isReadonly: (name) => name === 'HOME',
+    profile: () => 'reviewer',
+    cwd: () => cwd,
   }
-  return c.name === 'shred' ? { ask: 'sign-off' } : null
-}
-`
-
-function path(virtual: string): PathSpec {
-  return new PathSpec({
-    virtual,
-    directory: virtual,
-    vfsPath: '',
-    rawPath: virtual,
-    resolved: true,
-  })
 }
 
-function ctx(command = 'cat', sessionId = 's'): CommandContext {
+function ns(): NamespaceView {
+  return {
+    mounts: {
+      descendants: () => ['/data', '/vault'],
+      visibleDescendants: () => ['/data'],
+      isRoot: (path) => path === '/data' || path === '/vault',
+      rootOf: () => '/data',
+    },
+  }
+}
+
+function ctx(
+  command = 'cat',
+  extra: Partial<CommandContext> = {},
+  sessionId = 's',
+): CommandContext {
+  const sealed = PathSpec.fromStrPath('/repo/sealed/k')
   return {
     command,
-    paths: [path('/repo/sealed/k')],
+    paths: [sealed],
     words: [
       new CommandWord(command, WordKind.NAME),
-      new CommandWord('/repo/sealed/k', WordKind.OPERAND, null, path('/repo/sealed/k')),
+      new CommandWord('/repo/sealed/k', WordKind.OPERAND, null, sealed),
     ],
     argv: ['/repo/sealed/k'],
     cwd: '/repo',
+    line: `${command} /repo/sealed/k`,
     sessionId,
     agentId: 'agent-1',
     tokens: [command, '/repo/sealed/k'],
     program: [command],
+    ...extra,
   }
 }
 
-// A python judge that reads what the operand holds, not what it is
-// called: the shape a content policy takes when it is a program.
-const READER_PY = `\
-def pre_command(ctx):
-    for p in ctx['command']['paths']:
-        try:
-            body = open(p).read()
-        except OSError:
-            continue
-        if 'payload' in body:
-            return {'ask': 'sign-off on payload'}
-    return None
-`
-
-function entry(
-  source = JUDGE,
-  runtime = 'quickjs',
-  language: 'js' | 'python' = 'js',
-): ProfileScript {
-  return { profile: 'release', script: new ScriptSource(source, language), runtime }
+function opsCtx(op = 'write', virtual = '/scratch/frozen/f', write = true): VfsContext {
+  return {
+    call: callOf(op),
+    path: PathSpec.fromStrPath(virtual),
+    write,
+    prefix: '/scratch',
+    sessionId: 's',
+  }
 }
+
+function sessionCtx(key = 'AWS_KEY'): SessionContext {
+  return { verb: 'set', key, value: 'v', sessionId: 's' }
+}
+
+/** A policy whose every program runs on the given fake, in order. */
+function policyWith(method: keyof ProfileScripts, ...engines: FakeProgram[]): ScriptPolicy {
+  const queue = [...engines]
+  built.factory = () => queue.shift() ?? engines[engines.length - 1]
+  const programs = engines.map((_, i) => entry('monty', `SOURCE ${String(i)}`, { slot: i }))
+  return track(new ScriptPolicy(scripts({ [method]: programs })))
+}
+
+const open: ScriptPolicy[] = []
+
+function track(policy: ScriptPolicy): ScriptPolicy {
+  open.push(policy)
+  return policy
+}
+
+afterEach(async () => {
+  built.factory = null
+  for (const policy of open.splice(0)) await policy.close()
+})
+
+describe('scriptAction', () => {
+  it('reads nothing printed as no opinion', () => {
+    expect(scriptAction(bytes(''), 'preCommand')).toBeNull()
+    expect(scriptAction(bytes('  \n'), 'preCommand')).toBeNull()
+    expect(scriptAction(bytes('null\n'), 'preCommand')).toBeNull()
+  })
+
+  it('reads a deny or an ask with its reason', () => {
+    expect(scriptAction(bytes(answer({ kind: 'deny', reason: 'no' })), 'preVfs')).toEqual({
+      kind: 'deny',
+      reason: 'no',
+    })
+    expect(scriptAction(bytes(answer({ kind: 'ask', reason: 'nod' })), 'preVfs')).toEqual({
+      kind: 'ask',
+      reason: 'nod',
+    })
+  })
+
+  it("gives a reason left out the document's default", () => {
+    expect(scriptAction(bytes(answer({ kind: 'deny' })), 'preCommand')).toEqual({
+      kind: 'deny',
+      reason: DEFAULT_DENY_REASON,
+    })
+    expect(scriptAction(bytes(answer({ kind: 'ask' })), 'preCommand')).toEqual({
+      kind: 'ask',
+      reason: DEFAULT_ASK_REASON,
+    })
+  })
+
+  it('places a line at preExecute only', () => {
+    const printed = bytes(answer({ kind: 'route', runtime: 'docker' }))
+    expect(scriptAction(printed, 'preExecute')).toEqual({ kind: 'route', runtime: 'docker' })
+    expect(() => scriptAction(printed, 'preCommand')).toThrow('cannot answer route at pre_command')
+  })
+
+  it.each([
+    'deny',
+    '"deny"',
+    '{"deny": "x"}',
+    '{"kind": "allow"}',
+    '{"kind": "route"}',
+    '{"kind": "deny", "runtime": "docker"}',
+    '{"kind": "deny", "reason": "x", "policy": "Mine"}',
+    '{"kind": "deny"}\n{"kind": "ask"}',
+  ])('refuses anything else: %s', (printed) => {
+    expect(() => scriptAction(bytes(printed), 'preExecute')).toThrow('must print a JSON answer')
+  })
+})
+
+describe('scriptContext', () => {
+  it('reads a context as its fields, with the session as data', () => {
+    const data = scriptContext(ctx('cat', { session: sessionView(), ns: ns() }))
+    expect(data.command).toBe('cat')
+    expect(data.line).toBe('cat /repo/sealed/k')
+    expect(data.paths).toEqual(['/repo/sealed/k'])
+    expect(data.words).toEqual([
+      { text: 'cat', kind: 'name', option: null, path: null },
+      { text: '/repo/sealed/k', kind: 'operand', option: null, path: '/repo/sealed/k' },
+    ])
+    expect(data.session_id).toBe('s')
+    expect(data.agent_id).toBe('agent-1')
+    expect(data.cwd).toBe('/data')
+    expect(data.env).toEqual({ TEAM: 'core', HOME: '/home/agent' })
+    expect(data.profile).toBe('reviewer')
+    expect(data.mounts).toEqual(['/data'])
+    expect(Object.keys(data)).not.toContain('session')
+    expect(Object.keys(data)).not.toContain('ns')
+  })
+
+  it('lists each command of a line as preCommand reads it', () => {
+    const line: RouteContext = {
+      line: 'cat /repo/sealed/k',
+      commands: [ctx('cat', { session: sessionView() })],
+      sessionId: 's',
+      agentId: 'agent-1',
+      session: sessionView(),
+    }
+    const data = scriptContext(line)
+    expect(data.line).toBe('cat /repo/sealed/k')
+    const [first] = data.commands as Record<string, unknown>[]
+    expect(first?.command).toBe('cat')
+    expect(Object.keys(first ?? {})).not.toContain('session')
+    expect(data.cwd).toBe('/data')
+  })
+
+  it('reads an op and a variable write as their fields', () => {
+    const op = scriptContext(opsCtx())
+    expect((op.call as Record<string, unknown>).name).toBe('write')
+    expect((op.call as Record<string, unknown>).effect).toBe('write')
+    expect(op.path).toBe('/scratch/frozen/f')
+    expect(op.write).toBe(true)
+    expect([op.cwd, op.env, op.mounts]).toEqual(['/', {}, []])
+    const written = scriptContext(sessionCtx())
+    expect([written.verb, written.key, written.value]).toEqual(['set', 'AWS_KEY', 'v'])
+  })
+})
+
+describe('ScriptPolicy', () => {
+  it('runs nothing at a method without a program', async () => {
+    const engine = new FakeProgram(answer({ kind: 'deny' }))
+    const policy = policyWith('preCommand', engine)
+    expect(await policy.preVfs(opsCtx())).toBeNull()
+    expect(await policy.preSession(sessionCtx())).toBeNull()
+    expect(engine.requests).toEqual([])
+  })
+
+  it('runs a program unedited, with its context in the env and on stdin', async () => {
+    const engine = new FakeProgram(answer({ kind: 'deny', reason: 'sealed' }))
+    const policy = policyWith('preCommand', engine)
+    const judged = ctx('cat', { session: sessionView('/'), ns: ns() })
+    expect(await policy.preCommand(judged)).toEqual({ kind: 'deny', reason: 'sealed' })
+    const [request] = engine.requests
+    if (request === undefined) throw new Error('the program never ran')
+    expect(request.code).toBe('SOURCE 0')
+    expect(request.language).toBe('python')
+    expect(request.cwd?.virtual).toBe('/')
+    const payload = request.env[CTX_ENV] ?? ''
+    expect(JSON.parse(payload)).toEqual(scriptContext(judged))
+    expect(new TextDecoder().decode(request.stdin ?? new Uint8Array())).toBe(payload)
+    expect(request.env.TEAM).toBe('core')
+  })
+
+  it('lets the first deny win over an ask before it', async () => {
+    const policy = policyWith(
+      'preCommand',
+      new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
+      new FakeProgram(answer({ kind: 'deny', reason: 'no' })),
+    )
+    expect(await policy.preCommand(ctx())).toEqual({ kind: 'deny', reason: 'no' })
+  })
+
+  it('holds an ask when nothing denies', async () => {
+    const policy = policyWith(
+      'preVfs',
+      new FakeProgram(''),
+      new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
+    )
+    expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
+  })
+
+  it('needs every route to agree', async () => {
+    const line: RouteContext = {
+      line: 'python3 job.py',
+      commands: [],
+      sessionId: 's',
+      agentId: 'a',
+    }
+    const agree = policyWith(
+      'preExecute',
+      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
+      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
+    )
+    expect(await agree.preExecute(line)).toEqual({ kind: 'route', runtime: 'docker' })
+    const differ = policyWith(
+      'preExecute',
+      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
+      new FakeProgram(answer({ kind: 'route', runtime: 'monty' })),
+    )
+    expect(await differ.preExecute(line)).toEqual({
+      kind: 'deny',
+      reason: "profile 'release' policy places the line on 'docker' and 'monty'",
+    })
+  })
+
+  it('fails closed on a program that exits non-zero', async () => {
+    const policy = policyWith('preCommand', new FakeProgram('', 3))
+    expect(await policy.preCommand(ctx())).toEqual({
+      kind: 'deny',
+      reason: "profile 'release' policy exited 3",
+    })
+  })
+
+  it('fails closed on a program that timed out', async () => {
+    const seconds = SCRIPT_EVAL_TIMEOUT.seconds
+    SCRIPT_EVAL_TIMEOUT.seconds = 0.01
+    try {
+      const policy = policyWith('preCommand', new FakeProgram('', 0, 1000))
+      expect(await policy.preCommand(ctx())).toEqual({
+        kind: 'deny',
+        reason: "profile 'release' policy timed out after 0.01s",
+      })
+    } finally {
+      SCRIPT_EVAL_TIMEOUT.seconds = seconds
+    }
+  })
+
+  it('fails closed on a wrong answer', async () => {
+    const policy = policyWith('preCommand', new FakeProgram('{"deny": "x"}'))
+    const action = await policy.preCommand(ctx())
+    expect(action?.kind).toBe('deny')
+    expect(action !== null && 'reason' in action ? action.reason : '').toMatch(
+      /^profile 'release' policy must print a JSON answer at pre_command/,
+    )
+  })
+
+  it('fails closed on a runtime policies do not run on', async () => {
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('quickjs')] })))
+    expect(await policy.preCommand(ctx())).toEqual({
+      kind: 'deny',
+      reason:
+        "profile 'release' policy names runtime 'quickjs'; a policy program runs on monty or pyodide",
+    })
+  })
+
+  it('fails closed on a runtime it cannot build', async () => {
+    built.factory = (runtime) => {
+      throw new Error(`script names runtime '${runtime}': nope`)
+    }
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] })))
+    expect(await policy.preCommand(ctx())).toEqual({
+      kind: 'deny',
+      reason: "profile 'release' policy names runtime 'pyodide': nope",
+    })
+  })
+
+  it('builds a runtime once per name and settings, and closes it', async () => {
+    const engines: FakeProgram[] = []
+    built.factory = () => {
+      const engine = new FakeProgram()
+      engines.push(engine)
+      return engine
+    }
+    const policy = track(
+      new ScriptPolicy(
+        scripts({
+          preCommand: [
+            entry('pyodide', 'a', { home: '/a' }),
+            entry('pyodide', 'b', { home: '/a' }),
+            entry('pyodide', 'c', { home: '/b' }),
+          ],
+        }),
+      ),
+    )
+    await policy.preCommand(ctx())
+    await policy.preCommand(ctx())
+    expect(engines.map((engine) => engine.requests.length)).toEqual([4, 2])
+    await policy.close()
+    expect(engines.every((engine) => engine.closed)).toBe(true)
+  })
+
+  it('attaches the entry points it is wired to, and a bare policy none', async () => {
+    const wired = new FakeProgram()
+    built.factory = () => wired
+    const bridge: BridgeDispatchFn = () => Promise.resolve(null)
+    const resolver = new PrefixResolver(() => ['/repo/'])
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [entry()] }), { bridge: () => bridge, resolver }),
+    )
+    expect(await policy.preCommand(ctx())).toBeNull()
+    expect(wired.attached?.resolver).toBe(resolver)
+    const bare = new FakeProgram()
+    built.factory = () => bare
+    expect(
+      await track(new ScriptPolicy(scripts({ preCommand: [entry()] }))).preCommand(ctx()),
+    ).toBeNull()
+    expect(bare.attached).toBeNull()
+  })
+
+  it('lets an op carrying its own token through, and judges every other', async () => {
+    const engine = new FakeProgram(answer({ kind: 'deny', reason: 'frozen' }))
+    built.factory = () => engine
+    const stamped: symbol[] = []
+    const policy = track(
+      new ScriptPolicy(scripts({ preVfs: [entry()] }), {
+        bridge: (issuer) => {
+          stamped.push(issuer)
+          return () => Promise.resolve(null)
+        },
+        resolver: new PrefixResolver(() => ['/repo/']),
+      }),
+    )
+    expect(await policy.preVfs(opsCtx('read', '/repo/a', false))).toEqual({
+      kind: 'deny',
+      reason: 'frozen',
+    })
+    const [token] = stamped
+    if (token === undefined) throw new Error('the bridge was never built')
+    expect(await policy.preVfs({ ...opsCtx('read', '/repo/a', false), issuer: token })).toBeNull()
+    expect(engine.requests).toHaveLength(1)
+  })
+
+  it('says which sessions a method speaks for', async () => {
+    const policy = track(
+      new ScriptPolicy({
+        scriptsOf: (id) => (id === 's' ? { preCommand: [entry()] } : {}),
+      }),
+    )
+    expect(await policy.wantsFor('preCommand', 's')).toBe(true)
+    expect(await policy.wantsFor('preVfs', 's')).toBe(false)
+    expect(await policy.wantsFor('preCommand', 't')).toBe(false)
+    expect(await policy.wantsFor('postVfs', 's')).toBe(false)
+    const policies = new Policies([policy])
+    expect(policies.wants('preSession')).toBe(true)
+    expect(await policies.wantsFor('preSession', 's')).toBe(false)
+    expect(await policies.wantsFor('preCommand', 's')).toBe(true)
+  })
+
+  it("starts a program in the session's directory", async () => {
+    const engine = new FakeProgram()
+    const policy = policyWith('preCommand', engine)
+    await policy.preCommand(ctx('cat', { session: sessionView('/data') }))
+    expect(engine.requests[0]?.cwd?.virtual).toBe('/data')
+  })
+})
+
+// A program that asks about what an operand holds, not what it is called:
+// the shape a content policy takes when it is a program.
+const READER = `\
+import json
+import os
+
+ctx = json.loads(os.environ['${CTX_ENV}'])
+verdict = None
+for p in ctx['paths']:
+    try:
+        body = open(p).read()
+    except OSError:
+        continue
+    if 'payload' in body:
+        verdict = {'kind': 'ask', 'reason': 'sign-off on payload'}
+print(json.dumps(verdict))
+`
 
 /**
  * A read-only dispatcher over a few files, answering ENOENT for the rest. An
@@ -114,13 +550,13 @@ function bridgeOver(files: Record<string, string>): BridgeDispatchFn {
     if (body === undefined) {
       return Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
     }
-    const bytes = new TextEncoder().encode(body)
-    if (op === 'read') return Promise.resolve(bytes)
+    const content = ENCODE.encode(body)
+    if (op === 'read') return Promise.resolve(content)
     if (op === 'stat') {
       return Promise.resolve(
         new FileStat({
           name: path,
-          size: bytes.length,
+          size: content.length,
           type: FileType.FILE,
           content: ContentType.TEXT,
         }),
@@ -130,152 +566,10 @@ function bridgeOver(files: Record<string, string>): BridgeDispatchFn {
   }
 }
 
-function policyOf(script: ProfileScript | null): ScriptPolicy {
-  return new ScriptPolicy({ scriptOf: () => script }, () => ['/repo/', '/scratch/'])
-}
-
-const open: ScriptPolicy[] = []
-
-function track(policy: ScriptPolicy): ScriptPolicy {
-  open.push(policy)
-  return policy
-}
-
-afterEach(async () => {
-  for (const policy of open.splice(0)) await policy.close()
-})
-
-describe('scriptContext', () => {
-  it('is the command context as data', () => {
-    expect(scriptContext('release', ctx(), ['/repo/', '/scratch/'])).toEqual({
-      profile: 'release',
-      command: {
-        name: 'cat',
-        words: [
-          { text: 'cat', kind: 'name', option: null, path: null },
-          { text: '/repo/sealed/k', kind: 'operand', option: null, path: '/repo/sealed/k' },
-        ],
-        paths: ['/repo/sealed/k'],
-        walks: false,
-      },
-      session: { id: 's', agent: 'agent-1', cwd: '/repo', env: {} },
-      mounts: ['/repo/', '/scratch/'],
-    })
-  })
-})
-
-describe('scriptAction', () => {
-  it.each([[null], ['allow']])('reads %j as no opinion', (value) => {
-    expect(scriptAction(value)).toBeNull()
-  })
-
-  it('turns a deny answer into a whole-command deny', () => {
-    expect(scriptAction({ deny: 'sealed' })).toEqual({ kind: 'deny', reason: 'sealed' })
-  })
-
-  it('takes an ask answer to the approval ledger', () => {
-    const action = scriptAction({ ask: 'sign-off' })
-    expect(action).toEqual({ kind: 'ask', reason: 'sign-off' })
-  })
-
-  it("gives the bare verbs the document's default reasons", () => {
-    expect(scriptAction('deny')).toEqual({ kind: 'deny', reason: DEFAULT_DENY_REASON })
-    expect(scriptAction('ask')).toEqual({ kind: 'ask', reason: DEFAULT_ASK_REASON })
-  })
-
-  it.each([
-    [[1, 2]],
-    [7],
-    ['nope'],
-    [{}],
-    [{ deny: '' }],
-    [{ deny: 3 }],
-    [{ allow: true }],
-    [{ deny: 'a', ask: 'b' }],
-  ])('refuses %j', (value) => {
-    expect(() => scriptAction(value)).toThrow(/must answer allow, deny or ask/)
-  })
-})
-
-describe('ScriptPolicy', () => {
-  it('does not judge a session without a script', async () => {
-    const policy = track(policyOf(null))
-    expect(await policy.preCommand(ctx())).toBeNull()
-  })
-
-  it('refuses a command with a deny it computed', async () => {
-    const policy = track(policyOf(entry()))
-    expect(await policy.preCommand(ctx('cat'))).toEqual({
-      kind: 'deny',
-      reason: 'sealed by release',
-    })
-  })
-
-  it('stays silent on a command the script allows', async () => {
-    const policy = track(policyOf(entry()))
-    expect(await policy.preCommand(ctx('ls'))).toBeNull()
-  })
-
-  it('takes an ask it computed to the entry point', async () => {
-    const policy = track(policyOf(entry()))
-    expect(await policy.preCommand(ctx('shred'))).toEqual({ kind: 'ask', reason: 'sign-off' })
-  })
-
-  it('fails closed when the script throws', async () => {
-    // Silence on failure would run exactly the commands the script
-    // existed to judge, so every failure arm refuses instead.
-    const policy = track(policyOf(entry("function preCommand() { throw new Error('boom') }")))
-    const action = await policy.preCommand(ctx())
-    expect(action).toMatchObject({ kind: 'deny' })
-    expect((action as { reason: string }).reason).toMatch(/profile 'release' policy failed/)
-  })
-
-  it('fails closed on a wrong answer shape', async () => {
-    const policy = track(policyOf(entry('function preCommand() { return [1, 2] }')))
-    const action = await policy.preCommand(ctx())
-    expect((action as { reason: string }).reason).toMatch(/profile 'release' policy must answer/)
-  })
-
-  it('fails closed on a program that defines no hook', async () => {
-    // A verdict as a bare last expression was the old contract; a policy
-    // defines the hooks it answers at, and a program defining none is
-    // refused at every entry point rather than read for a value it never meant.
-    const policy = track(policyOf(entry('null')))
-    expect(await policy.preCommand(ctx())).toEqual({
-      kind: 'deny',
-      reason: "profile 'release' policy defines no hook: preCommand, preVfs or preSession",
-    })
-  })
-
-  it('fails closed on an engine it cannot build', async () => {
-    const policy = track(policyOf(entry(JUDGE, 'ghost')))
-    const action = await policy.preCommand(ctx())
-    expect((action as { reason: string }).reason).toMatch(
-      /profile 'release' policy names runtime 'ghost'/,
-    )
-  })
-
-  it('fails closed on an engine that cannot evaluate', async () => {
-    const policy = track(policyOf(entry(JUDGE, 'workspace')))
-    const action = await policy.preCommand(ctx())
-    expect((action as { reason: string }).reason).toMatch(/cannot evaluate one/)
-  })
-
-  it('reuses one engine across commands and closes it', async () => {
-    const policy = policyOf(entry())
-    expect(await policy.preCommand(ctx('cat'))).not.toBeNull()
-    expect(await policy.preCommand(ctx('ls'))).toBeNull()
-    await policy.close()
-  })
-})
-
-describe('ScriptPolicy wiring', () => {
+describe('a policy program on monty', () => {
   it('reads the workspace through the entry points it is wired to', async () => {
-    // The facts name the path; the engine opens it. The read arrives
-    // on the bridge the workspace handed over, the way an agent's own
-    // program reaches a mount.
     const policy = track(
-      new ScriptPolicy({ scriptOf: () => entry(READER_PY, 'monty', 'python') }, () => ['/repo/'], {
+      new ScriptPolicy(scripts({ preCommand: [entry('monty', READER)] }), {
         bridge: () => bridgeOver({ '/repo/sealed/k': 'subject: invoice\n\na payload\n' }),
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
@@ -286,286 +580,8 @@ describe('ScriptPolicy wiring', () => {
     })
   }, 60_000)
 
-  it('a bare policy has no entry point, and its program reads no file', async () => {
-    // Unwired, the engine sees no mount: the open misses, the policy's
-    // own except arm runs, and nothing is judged on content it never
-    // saw. The workspace is what supplies the entry points.
-    const policy = track(policyOf(entry(READER_PY, 'monty', 'python')))
+  it('reads no file when unwired, so nothing is judged on content it never saw', async () => {
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('monty', READER)] })))
     expect(await policy.preCommand(ctx('cat'))).toBeNull()
-  }, 60_000)
-})
-
-// A program at the op and session views and nowhere else.
-const GATES = `\
-function preVfs(ctx) {
-  const call = ctx.call
-  return call.write && call.path.startsWith('/scratch/frozen/') ? { deny: 'frozen by ' + ctx.profile } : null
-}
-function preSession(ctx) {
-  return ctx.write.key.startsWith('AWS_') ? 'deny' : null
-}
-`
-
-function opsCtx(op = 'write', virtual = '/scratch/frozen/f', write = true): VfsContext {
-  return { call: callOf(op), path: path(virtual), write, prefix: '/scratch', sessionId: 's' }
-}
-
-function sessionCtx(key = 'AWS_KEY'): SessionContext {
-  return { plane: 'env', verb: 'set', key, value: 'v', sessionId: 's' }
-}
-
-describe('the hooks a program defines', () => {
-  it("spells the call and the probe in the program's language", () => {
-    const py = new ScriptSource('x', 'python')
-    const js = new ScriptSource('x', 'js')
-    expect(hookCall(py, 'preVfs')).toBe('pre_vfs(ctx)')
-    expect(hookCall(js, 'preVfs')).toBe('preVfs(ctx)')
-    expect(hookProbe(py)).toContain('try:\n    pre_session\n')
-    expect(hookProbe(py).endsWith('_mirage_hooks')).toBe(true)
-    expect(hookProbe(js)).toContain('typeof preCommand')
-  })
-
-  it("reads the probe's answer as the Policy interface spells it", () => {
-    expect(definedHooks(new ScriptSource('x', 'python'), ['pre_vfs'])).toEqual(new Set(['preVfs']))
-    expect(definedHooks(new ScriptSource('x', 'js'), ['preCommand', 'preSession'])).toEqual(
-      new Set(['preCommand', 'preSession']),
-    )
-    expect(definedHooks(new ScriptSource('x', 'js'), [])).toEqual(new Set())
-  })
-
-  it.each([[null], ['pre_vfs'], [['nope']], [[1]]])('refuses %j as a probe answer', (value) => {
-    expect(() => definedHooks(new ScriptSource('x', 'python'), value)).toThrow(
-      /hook probe answered/,
-    )
-  })
-})
-
-describe('opsScriptContext and sessionScriptContext', () => {
-  it('are the op and session contexts as data', () => {
-    expect(opsScriptContext('release', opsCtx(), ['/scratch/'])).toEqual({
-      profile: 'release',
-      call: {
-        name: 'write',
-        effect: 'write',
-        target: 'file',
-        creates: true,
-        subtree: false,
-        path: '/scratch/frozen/f',
-        write: true,
-        prefix: '/scratch',
-      },
-      session: { id: 's', cwd: '', env: {} },
-      mounts: ['/scratch/'],
-    })
-    expect(sessionScriptContext('release', sessionCtx(), ['/scratch/'])).toEqual({
-      profile: 'release',
-      write: { plane: 'env', verb: 'set', key: 'AWS_KEY', value: 'v' },
-      session: { id: 's', cwd: '', env: {} },
-      mounts: ['/scratch/'],
-    })
-  })
-})
-
-describe('scriptAction at every hook', () => {
-  it('answers in one vocabulary whichever hook gave it', () => {
-    // Every hook may ask, so the answer reads the same whichever hook
-    // gave it.
-    expect(scriptAction({ deny: 'frozen' })).toEqual({ kind: 'deny', reason: 'frozen' })
-    expect(scriptAction({ ask: 'nod' })).toEqual({ kind: 'ask', reason: 'nod' })
-    expect(scriptAction(null)).toBeNull()
-  })
-})
-
-describe('ScriptPolicy at the op and session views', () => {
-  it('a hook the program leaves out is silence', async () => {
-    const policy = track(policyOf(entry()))
-    expect(await policy.preVfs(opsCtx())).toBeNull()
-    expect(await policy.preSession(sessionCtx())).toBeNull()
-    expect(await policy.preCommand(ctx('cat'))).toMatchObject({ kind: 'deny' })
-  })
-
-  it('judges an op with the deny it computed', async () => {
-    const policy = track(policyOf(entry(GATES)))
-    expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'deny', reason: 'frozen by release' })
-    expect(await policy.preVfs(opsCtx('read', '/scratch/frozen/f', false))).toBeNull()
-    expect(await policy.preVfs(opsCtx('write', '/scratch/open/f'))).toBeNull()
-    // No command hook: a command is silence, not a refusal.
-    expect(await policy.preCommand(ctx('cat'))).toBeNull()
-  })
-
-  it('judges an env write with the deny it computed', async () => {
-    const policy = track(policyOf(entry(GATES)))
-    expect(await policy.preSession(sessionCtx())).toEqual({
-      kind: 'deny',
-      reason: DEFAULT_DENY_REASON,
-    })
-    expect(await policy.preSession(sessionCtx('HOME'))).toBeNull()
-  })
-
-  it('an op hook may ask', async () => {
-    // The entry point puts it to the host where no line is running, and refuses
-    // it inside one.
-    const policy = track(policyOf(entry("function preVfs() { return { ask: 'nod' } }")))
-    expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
-  })
-
-  it('fails closed at every entry point on a program that defines no hook', async () => {
-    const policy = track(policyOf(entry('null')))
-    const refused = {
-      kind: 'deny',
-      reason: "profile 'release' policy defines no hook: preCommand, preVfs or preSession",
-    }
-    expect(await policy.preVfs(opsCtx())).toEqual(refused)
-    expect(await policy.preSession(sessionCtx())).toEqual(refused)
-  })
-})
-
-describe('wantsFor', () => {
-  it('says which sessions a hook speaks for', async () => {
-    // The per-session refinement the secret fill asks: the hook is
-    // defined for everyone, but speaks only for a session whose program
-    // defines the hook.
-    const policy = track(policyOf(entry()))
-    expect(await policy.wantsFor('preCommand', 's')).toBe(true)
-    expect(await policy.wantsFor('preSession', 's')).toBe(false)
-    expect(await policy.wantsFor('preVfs', 's')).toBe(false)
-    expect(await policy.wantsFor('postVfs', 's')).toBe(false)
-    expect(await track(policyOf(null)).wantsFor('preSession', 's')).toBe(false)
-  })
-
-  it('counts a program the dispatcher will refuse', async () => {
-    // No hook at all, or a probe that failed: the dispatcher refuses every
-    // write for this program, which is speaking.
-    expect(await track(policyOf(entry('null'))).wantsFor('preSession', 's')).toBe(true)
-    expect(
-      await track(policyOf(entry("throw new Error('boom')"))).wantsFor('preSession', 's'),
-    ).toBe(true)
-  })
-
-  it('remembers the hook set per language', async () => {
-    // One text, two programs: the probe asks in each language's own
-    // spelling, so what it found in one says nothing about the other.
-    // `pre_command = 1` binds the python hook's name and no JavaScript
-    // hook's, so the js profile fails closed at every entry point and the
-    // python one speaks at the command hook alone.
-    const text = 'pre_command = 1'
-    const scripts: Record<string, ProfileScript> = {
-      j: { profile: 'j', script: new ScriptSource(text, 'js'), runtime: 'quickjs' },
-      p: { profile: 'p', script: new ScriptSource(text, 'python'), runtime: 'monty' },
-    }
-    const policy = track(
-      new ScriptPolicy({ scriptOf: (id) => scripts[id] ?? null }, () => ['/repo/']),
-    )
-    expect(await policy.wantsFor('preSession', 'j')).toBe(true)
-    expect(await policy.wantsFor('preSession', 'p')).toBe(false)
-  }, 60_000)
-
-  it('refines Policies.wants per session', async () => {
-    const policies = new Policies([track(policyOf(entry()))])
-    expect(policies.wants('preSession')).toBe(true)
-    expect(await policies.wantsFor('preSession', 's')).toBe(false)
-    expect(await policies.wantsFor('preCommand', 's')).toBe(true)
-    // A coded policy speaks for every session and settles it.
-    const coded: Policy = { preSession: () => null }
-    expect(await new Policies([track(policyOf(entry())), coded]).wantsFor('preSession', 's')).toBe(
-      true,
-    )
-  })
-})
-
-// A program that reads at the command hook and refuses at the dispatcher,
-// so its own read is exactly what its op hook would deadlock on.
-const READER_AND_GATE_PY = `\
-def pre_command(ctx):
-    try:
-        open('/repo/a').read()
-    except OSError:
-        pass
-    return None
-
-def pre_vfs(ctx):
-    return {'deny': 'judged ' + ctx['call']['path']}
-`
-
-interface HeldDispatch {
-  dispatch: BridgeDispatchFn
-  /** Settles when the engine's read of `/repo/a` reaches the dispatcher. */
-  arrived: Promise<void>
-  /** Lets that read answer. */
-  release: () => void
-}
-
-/**
- * A dispatcher over one file, `/repo/a`, whose read waits until the test
- * releases it: the window in which the policy's own read is in flight.
- */
-function heldDispatch(): HeldDispatch {
-  let arrive!: () => void
-  let release!: () => void
-  const arrived = new Promise<void>((resolve) => {
-    arrive = resolve
-  })
-  const held = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const body = new TextEncoder().encode('hello')
-  const dispatch: BridgeDispatchFn = async (op, p) => {
-    if (op === 'readdir') return ['/repo/a']
-    if (p !== '/repo/a') throw Object.assign(new Error(p), { code: 'ENOENT' })
-    if (op === 'stat') {
-      return new FileStat({
-        name: p,
-        size: body.length,
-        type: FileType.FILE,
-        content: ContentType.TEXT,
-      })
-    }
-    if (op === 'read') {
-      arrive()
-      await held
-      return body
-    }
-    throw Object.assign(new Error(`${op} ${p}`), { code: 'EROFS' })
-  }
-  return { dispatch, arrived, release }
-}
-
-describe("a policy's own reads at its dispatcher", () => {
-  it('lets through an op carrying its token and judges every other', async () => {
-    // The token is what the bridge built for this policy stamps on each
-    // op, and what the dispatcher hands back on the op's context. Another
-    // caller's identical op (same name, same path) inside the read's
-    // window is not the policy's and is judged: it waits for the
-    // evaluation the read belongs to, then gets the hook's answer. So is
-    // an op carrying a token from anywhere else.
-    const stamped: symbol[] = []
-    const { dispatch, arrived, release } = heldDispatch()
-    const policy = track(
-      new ScriptPolicy(
-        { scriptOf: () => entry(READER_AND_GATE_PY, 'monty', 'python') },
-        () => ['/repo/'],
-        {
-          bridge: (issuer) => {
-            stamped.push(issuer)
-            return dispatch
-          },
-          resolver: new PrefixResolver(() => ['/repo/']),
-        },
-      ),
-    )
-    const judging = policy.preCommand(ctx('cat'))
-    await arrived
-    const [token] = stamped
-    if (token === undefined) throw new Error('the bridge was never built')
-    expect(await policy.preVfs({ ...opsCtx('read', '/repo/a', false), issuer: token })).toBeNull()
-    const other = policy.preVfs(opsCtx('read', '/repo/a', false))
-    const forged = policy.preVfs({
-      ...opsCtx('read', '/repo/a', false),
-      issuer: Symbol('policy read'),
-    })
-    release()
-    expect(await judging).toBeNull()
-    expect(await other).toEqual({ kind: 'deny', reason: 'judged /repo/a' })
-    expect(await forged).toEqual({ kind: 'deny', reason: 'judged /repo/a' })
   }, 60_000)
 })

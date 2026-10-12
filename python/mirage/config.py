@@ -464,22 +464,26 @@ def _load_script_source(value: str) -> ScriptSource:
 
 
 def _load_profile_policy(profile: SessionProfile) -> SessionProfile:
-    """Embed a profile's path-form policy program as source.
+    """Embed a profile's path-form policy programs as source.
 
     Args:
         profile (SessionProfile): the profile as validated; returned
-            as is when it states no policy or already carries source.
+            as is when it states no policy.
     """
-    policy = profile.policy
-    if policy is None or not isinstance(policy.script, str):
+    if profile.policy is None:
         return profile
-    return profile.model_copy(
-        update={
-            "policy": policy.model_copy(
-                update={"script": _load_script_source(policy.script)}
+    loaded = {
+        method: [
+            program.model_copy(
+                update={"script": _load_script_source(program.script)}
             )
-        }
-    )
+            if isinstance(program.script, str)
+            else program
+            for program in programs
+        ]
+        for method, programs in profile.policy.items()
+    }
+    return profile.model_copy(update={"policy": loaded})
 
 
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
@@ -523,11 +527,16 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     profiles = raw.get("profiles")
     if isinstance(profiles, dict):
         for block in profiles.values():
-            # A profile's policy block carries its program the way a
-            # clis entry does, so its script rebases the same way.
+            # A profile's policy programs carry their scripts the way a
+            # clis entry does, so each rebases the same way.
             policy = block.get("policy") if isinstance(block, dict) else None
             if isinstance(policy, dict):
-                _absolutize_script_key(policy, base)
+                for programs in policy.values():
+                    for program in (
+                        programs if isinstance(programs, list) else ()
+                    ):
+                        if isinstance(program, dict):
+                            _absolutize_script_key(program, base)
 
 
 def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:

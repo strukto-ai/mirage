@@ -13,27 +13,35 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import Any
+import dataclasses
+from collections.abc import Awaitable, Callable, Sequence
 
 from mirage.policy.decisions import op_question
 from mirage.policy.policies import agreed, settled
-from mirage.policy.types import Abandoned, Ask, Claimant, Deny, Pending, Route
+from mirage.policy.types import (
+    Abandoned,
+    Ask,
+    Claimant,
+    CommandContext,
+    Deny,
+    Pending,
+    Route,
+    RouteContext,
+)
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import (
-    ParsedCommand,
-    RouteContext,
     RouteDecision,
     RouteError,
     decide_line,
     evaluate_script,
-    parsed_commands,
 )
 from mirage.runtime.table import catch_all, runtime_bindings_for
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.lookup import Consumer, lookup
+from mirage.view.types import NamespaceView, SessionView
+from mirage.workspace.files import Files
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
 
@@ -67,13 +75,12 @@ class Router:
 
     async def decide(
         self,
-        ast: Any,
         command: str,
         runtime: str | None,
         session: SessionState,
-        session_id: str,
         agent_id: str,
         inherited: RouteDecision[Runtime] | None,
+        judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
         held: Callable[[], Awaitable[bool]] | None = None,
         claimant: Claimant | None = None,
         cancel: asyncio.Event | None = None,
@@ -95,15 +102,18 @@ class Router:
         on the static bindings, unplaced, for the gate to answer.
 
         Args:
-            ast: the parsed tree-sitter root node.
             command (str): the raw command line.
             runtime (str | None): the execute() runtime argument, which
                 wins over the policy.
             session (SessionState): the effective session (cwd, env).
-            session_id (str): session hosting the line.
             agent_id (str): agent the line runs as.
             inherited (RouteDecision | None): the calling line's
                 decision, for nested evals.
+            judged (Callable[[], Awaitable[Sequence[tuple[Walked,
+                list[Judged]]]]]): the line pass's reading of the line
+                (``line_judgments``), which gives ``pre_execute`` its
+                commands; awaited only when there is a placement to
+                consult.
             held (Callable[[], Awaitable[bool]] | None): the line's
                 admission, whether some command of it is refused or
                 waits on the host; awaited only when there is a
@@ -122,7 +132,7 @@ class Router:
             return inherited
         entries = self._runtimes.entries
         policies = self._registry.policies
-        placing = policies.wants("pre_execute")
+        placing = await policies.wants_for("pre_execute", session.session_id)
         placed = None if runtime is None else self._placed(entries, runtime)
         if placed is not None and not placing:
             return placed
@@ -134,7 +144,7 @@ class Router:
             return None
         if held is not None and await held():
             return placed
-        ctx = self.context(ast, command, session_id, agent_id)
+        ctx = self.context(command, session, agent_id, await judged())
         said, route = await policies.pre_execute(
             ctx, placed=placed is not None
         )
@@ -152,16 +162,15 @@ class Router:
         if placed is not None:
             return placed
         if route is not None:
-            return await self._validated(entries, route.runtime, ctx, session)
-        return await self._scripted(entries, ctx, session)
+            return await self._validated(entries, route.runtime, ctx)
+        return await self._scripted(entries, ctx)
 
     async def placement(
         self,
-        ast: Any,
         command: str,
         session: SessionState,
-        session_id: str,
         agent_id: str,
+        judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
     ) -> tuple[
         tuple[Deny | Ask | Route, ...],
         RouteDecision[Runtime] | Deny | Pending | None,
@@ -171,22 +180,22 @@ class Router:
         ledger's settled records alone and records nothing.
 
         Args:
-            ast: the parsed tree-sitter root node.
             command (str): the raw command line.
             session (SessionState): the effective session.
-            session_id (str): session hosting the line.
             agent_id (str): agent the line runs as.
+            judged (Callable[[], Awaitable[Sequence[tuple[Walked,
+                list[Judged]]]]]): the line pass's reading of the line,
+                as ``decide`` takes it.
 
         Raises:
             RouteError: an unknown runtime name or a failing policy.
         """
         entries = self._runtimes.entries
         policies = self._registry.policies
-        if not policies.wants("pre_execute") and not any(
-            e.script is not None for e in entries
-        ):
+        placing = await policies.wants_for("pre_execute", session.session_id)
+        if not placing and not any(e.script is not None for e in entries):
             return (), None
-        ctx = self.context(ast, command, session_id, agent_id)
+        ctx = self.context(command, session, agent_id, await judged())
         answers = await policies.answers("pre_execute", ctx)
         winner = settled(answers)
         if isinstance(winner, Ask):
@@ -197,16 +206,14 @@ class Router:
         if isinstance(winner, Deny):
             return answers, winner
         if isinstance(winner, Route):
-            checked = await self._validated(
-                entries, winner.runtime, ctx, session
-            )
+            checked = await self._validated(entries, winner.runtime, ctx)
             if isinstance(checked, Deny):
                 return (*answers, checked), checked
             return answers, checked
-        return answers, await self._scripted(entries, ctx, session)
+        return answers, await self._scripted(entries, ctx)
 
     async def _scripted(
-        self, entries: list[Runtime], ctx: RouteContext, session: SessionState
+        self, entries: list[Runtime], ctx: RouteContext
     ) -> RouteDecision[Runtime]:
         """The entry scripts' decision, for a line no policy placed: each
         runtime's ``script:`` says whether it takes the line.
@@ -214,19 +221,12 @@ class Router:
         Args:
             entries (list[Runtime]): the workspace's ordered runtimes.
             ctx (RouteContext): the placement stage's payload.
-            session (SessionState): the effective session.
 
         Raises:
             RouteError: a script that fails or answers a verdict shape.
         """
         try:
-            return await decide_line(
-                entries,
-                None,
-                ctx,
-                self._registry.runtime_bindings,
-                self._external(ctx.commands, session),
-            )
+            return await decide_line(entries, ctx)
         except RouteError:
             raise
         except (ValueError, ImportError) as exc:
@@ -237,7 +237,6 @@ class Router:
         entries: list[Runtime],
         name: str,
         ctx: RouteContext,
-        session: SessionState,
     ) -> RouteDecision[Runtime] | Deny:
         """The decision placing a line on the runtime ``name``, once the
         runtime agrees: its own ``script:``, when it has one, must take
@@ -248,7 +247,6 @@ class Router:
             entries (list[Runtime]): the workspace's ordered runtimes.
             name (str): the runtime entry the line is placed on.
             ctx (RouteContext): the placement stage's payload.
-            session (SessionState): the effective session.
 
         Raises:
             RouteError: no entry has the name, or its script fails or
@@ -259,13 +257,7 @@ class Router:
         if entry is None or entry.script is None:
             return placed
         try:
-            willing = await evaluate_script(
-                entry.script,
-                ctx,
-                entry,
-                entries,
-                self._external(ctx.commands, session),
-            )
+            willing = await evaluate_script(entry.script, ctx, entry, entries)
         except RouteError:
             raise
         except (ValueError, ImportError) as exc:
@@ -323,61 +315,49 @@ class Router:
             fallback=catch_all(entries),
         )
 
-    def _external(
-        self, commands: tuple[ParsedCommand, ...], session: SessionState
-    ) -> list[str]:
-        """The stages workspace lookup leaves to the external fallback.
-
-        Args:
-            commands (tuple[ParsedCommand, ...]): the line's commands.
-            session (SessionState): the effective session.
-        """
-        return [
-            parsed.command
-            for parsed in commands
-            if "/" not in parsed.command
-            and parsed.command not in self._registry.runtime_bindings
-            and lookup(parsed.command, session, self._registry)
-            is Consumer.EXTERNAL
-        ]
-
     def context(
         self,
-        ast: Any,
-        command: str,
-        session_id: str,
+        line: str,
+        session: SessionState,
         agent_id: str,
+        judged: Sequence[tuple[Walked, list[Judged]]],
     ) -> RouteContext:
         """What ``pre_execute`` sees of one line, and ``post_execute``
-        before what came back: its commands, and the session, its
-        namespace and its files, which a runtime's entry script reads
-        as plain data too.
+        before what came back: the line, every command in it as the gate
+        that runs it will read it, each with the session it would be
+        judged in, and the session, its namespace and its files, which a
+        script reads as plain data too.
 
         Args:
-            ast: the parsed tree-sitter root node.
-            command (str): the raw command line.
-            session_id (str): session hosting the line.
+            line (str): the raw command line.
+            session (SessionState): the effective session.
             agent_id (str): agent the line runs as.
+            judged (Sequence[tuple[Walked, list[Judged]]]): the line pass's
+                reading of the line (``line_judgments``).
         """
-        commands = parsed_commands(
-            ast,
-            self._registry.clis.names(),
-            self._registry.match_command_prefix,
-        )
         views = self._registry.policies.views
-        session, ns, vfs = (views(session_id, None) if views else None) or (
-            None,
-            None,
-            None,
-        )
+
+        def handles(
+            walked: SessionState,
+        ) -> tuple[SessionView | None, NamespaceView | None, Files | None]:
+            found = views(walked.session_id, walked) if views else None
+            return found or (None, None, None)
+
+        commands: list[CommandContext] = []
+        for item, explained in judged:
+            view, ns, vfs = handles(item.session)
+            commands.extend(
+                dataclasses.replace(one.ctx, session=view, ns=ns, vfs=vfs)
+                for one in explained
+                if one.ctx is not None
+            )
+        view, ns, vfs = handles(session)
         return RouteContext(
-            line=command,
-            commands=commands,
-            command=commands[0].command if commands else "",
-            builtin=commands[0].builtin if commands else False,
-            session_id=session_id,
+            line=line,
+            commands=tuple(commands),
+            session_id=session.session_id,
             agent_id=agent_id,
-            session=session,
+            session=view,
             ns=ns,
             vfs=vfs,
         )

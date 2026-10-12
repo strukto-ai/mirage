@@ -7,7 +7,8 @@ icon: /images/policy-icon.svg
 
 Policy decides what an agent may do in the virtual terminal: the commands
 it runs, the files it reads and writes, and the variables it sets. A
-policy is a class with a pair of methods for each thing an agent does:
+policy is a class with a pair of methods for each thing an agent does, or
+[programs](/home/policy/scripts) a profile names for the `pre_` ones:
 
 | The agent | Methods |
 | --- | --- |
@@ -42,6 +43,8 @@ filesystem, so it sees what that string only implies.
 
 - [Policies](/home/policy/policies): write one: its methods, what each can
   answer, and asks.
+- [Scripts](/home/policy/scripts): write one as a program that runs
+  sandboxed on monty or Python on wasm, with the same context as JSON.
 - [Explain](/home/policy/explain): what the agent sees of policy, and how
   it asks what a line would do before running it.
 - [Route policy](/home/policy/route-policy): choose the runtime for a

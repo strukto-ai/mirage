@@ -651,7 +651,7 @@ async function restoreNodes(ws: WorkspaceLike, state: WorkspaceStateDict): Promi
  * own profile compiled, which was the source deployment's and does not
  * land: the live session's for an id the target already has, and the
  * default profile's for one the restore will create, which is what
- * `scriptOf` answers for an id the manager does not know and the
+ * `scriptsOf` answers for an id the manager does not know and the
  * profile `restoreSessions` then puts the created session under.
  * Returns the parsed session tables and the template, null when the
  * snapshot carries none. Mirrors Python `_gate_restored_state`.

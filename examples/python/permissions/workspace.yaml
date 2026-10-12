@@ -1,5 +1,5 @@
 # The reviewer's policy as a document: the block policy.py passes in
-# code, with the program in guard.py beside this file. One file, read by
+# code, with a program per method beside this file. One file, read by
 # both implementations:
 #
 #   ./python/.venv/bin/python examples/python/permissions/policy_yaml.py
@@ -16,5 +16,7 @@ mounts:
 profiles:
   reviewer:
     policy:
-      script: guard.py
-      runtime: monty
+      pre_command:
+        - {script: guard.py, runtime: monty}
+      pre_session:
+        - {script: credentials.py, runtime: monty}

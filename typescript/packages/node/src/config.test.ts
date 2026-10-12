@@ -1315,14 +1315,15 @@ describe('CLI to daemon round trip', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('rebases a profile policy path onto the config dir before loading it', async () => {
-    // The check entry point validates the profile without reading its policy:
-    // reading at validation resolved `roles/x.js` against the process
-    // cwd (this test's cwd is the package, not the config dir), so
-    // checking a file config from anywhere else failed with ENOENT.
+  it('rebases each policy program path onto the config dir before loading it', async () => {
+    // The check entry point validates the profile without reading its
+    // programs: reading at validation resolved `roles/x.py` against the
+    // process cwd (this test's cwd is the package, not the config dir),
+    // so checking a file config from anywhere else failed with ENOENT.
     const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-policy-'))
     mkdirSync(join(dir, 'roles'))
-    writeFileSync(join(dir, 'roles', 'x.js'), 'function preCommand() { return null }\n')
+    writeFileSync(join(dir, 'roles', 'x.py'), "print('')\n")
+    writeFileSync(join(dir, 'roles', 'y.py'), 'pass\n')
     const file = join(dir, 'w.yaml')
     writeFileSync(
       file,
@@ -1331,20 +1332,30 @@ describe('CLI to daemon round trip', () => {
         '  /data:',
         '    vfs: ram',
         'profiles:',
-        '  release: {policy: {script: roles/x.js, runtime: quickjs}}',
+        '  release:',
+        '    policy:',
+        '      pre_command:',
+        '        - {script: roles/x.py, runtime: monty}',
+        '        - {script: roles/y.py, runtime: {name: pyodide, config: {}}}',
         '',
       ].join('\n'),
     )
     const wire = checkWorkspaceConfigFile(file)
-    const profiles = wire.profiles as Record<string, { policy: Record<string, unknown> }>
-    expect(profiles.release?.policy.script).toBe(join(dir, 'roles', 'x.js'))
+    const profiles = wire.profiles as Record<
+      string,
+      { policy: Record<string, { script: string }[]> }
+    >
+    expect(profiles.release?.policy.pre_command?.map((p) => p.script)).toEqual([
+      join(dir, 'roles', 'x.py'),
+      join(dir, 'roles', 'y.py'),
+    ])
     const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(file))
-    const release = args.options.profiles?.release
-    expect(release?.policy?.script).toBeInstanceOf(ScriptSource)
-    expect((release?.policy?.script as ScriptSource).source).toBe(
-      'function preCommand() { return null }\n',
-    )
-    expect(release?.policy?.runtime).toBe('quickjs')
+    const [first, second] = args.options.profiles?.release?.policy?.preCommand ?? []
+    expect(first?.script).toBeInstanceOf(ScriptSource)
+    expect((first?.script as ScriptSource).source).toBe("print('')\n")
+    expect(first?.runtime).toBe('monty')
+    expect((second?.script as ScriptSource).source).toBe('pass\n')
+    expect(second?.runtime).toEqual({ name: 'pyodide', config: {} })
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1360,11 +1371,13 @@ describe('CLI to daemon round trip', () => {
         '  /data:',
         '    vfs: ram',
         'profiles:',
-        '  release: {policy: {script: roles/x.js}}',
+        '  release: {policy: {pre_command: [{script: roles/x.py}]}}',
         '',
       ].join('\n'),
     )
-    expect(() => checkWorkspaceConfigFile(file)).toThrow(/runtime names the engine the policy/)
+    expect(() => checkWorkspaceConfigFile(file)).toThrow(
+      /runtime names the runtime the program runs on/,
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1382,7 +1395,7 @@ describe('CLI to daemon round trip', () => {
         '',
       ].join('\n'),
     )
-    expect(() => checkWorkspaceConfigFile(file)).toThrow(/now one policy block/)
+    expect(() => checkWorkspaceConfigFile(file)).toThrow(/now a policy block/)
     rmSync(dir, { recursive: true, force: true })
   })
 })

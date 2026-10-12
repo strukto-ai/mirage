@@ -81,3 +81,24 @@ export const SUBTREE_COMMANDS: ReadonlySet<string> = new Set(['rm', 'rmdir', 'mv
  * tier's probe; `stat` is pinned like SUBTREE_OPS's VFS ops.
  */
 export const METADATA_OPS: ReadonlySet<string> = new Set(['stat', 'exists'])
+
+/**
+ * The methods a profile's policy names programs for, the pre_ four
+ * answered before the action runs: the Policy interface's spelling to
+ * the document's.
+ */
+export const METHODS = {
+  preExecute: 'pre_execute',
+  preCommand: 'pre_command',
+  preVfs: 'pre_vfs',
+  preSession: 'pre_session',
+} as const
+
+/** The runtimes a policy program runs on: monty, and Python on wasm. */
+export const PROGRAM_RUNTIMES: ReadonlySet<string> = new Set(['monty', 'pyodide'])
+
+/**
+ * The environment variable a policy program reads its context from, as
+ * JSON; the same text arrives on stdin.
+ */
+export const CTX_ENV = 'MIRAGE_POLICY_CTX'

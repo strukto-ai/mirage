@@ -612,9 +612,6 @@ declare module '../policy/types.ts' {
   interface SessionContext {
     vfs?: Files
   }
-}
-
-declare module '../runtime/routing/types.ts' {
   interface RouteContext {
     vfs?: Files
   }

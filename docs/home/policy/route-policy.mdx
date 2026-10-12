@@ -24,84 +24,63 @@ route_policy: ./policy.py
 ```python policy.py
 # Jobs under /jobs need the container's packages; anything else
 # stays on the fast in-process sandbox. The LAST EXPRESSION is
-# the verdict.
-stage = ctx["commands"][0]
-in_jobs = any(p.startswith("/jobs/") for p in stage["paths"])
-"docker" if in_jobs else "monty"
+# the answer.
+paths = [p for c in ctx["commands"] for p in c["paths"]]
+"docker" if any(p.startswith("/jobs/") for p in paths) else "monty"
 ```
 
 `python3 /jobs/train.py` runs in the container; `cat data.csv | python3
 -c ...` stays on monty.
 
-## Input: the line's context
+## Input and answers
 
-The script reads one global, `ctx`:
+The script reads one global, `ctx`: the line, each of its commands with
+its words and resolved paths, and the session, the same context a
+[policy program](/home/policy/scripts#ctx) gets at `pre_execute`. Its last
+expression is the answer:
 
-```json
-{
-  "line": "python3 /jobs/train.py --epochs 3",
-  "commands": [
-    {
-      "command": "python3",
-      "words": ["python3", "/jobs/train.py", "--epochs", "3"],
-      "builtin": true,
-      "paths": ["/jobs/train.py"]
-    }
-  ],
-  "command": "python3",
-  "builtin": true,
-  "session_id": "019fb2fc-19a3-77cf-bbbe-c76069eed523",
-  "agent_id": "",
-  "session": {"cwd": "/", "env": {}},
-  "mounts": ["/.bash_history", "/data", "/dev", "/usr/bin"]
-}
-```
-
-`commands` has one entry per pipeline stage; `command` and `builtin`
-mirror the first. `session` is the session's cwd and environment, and
-`mounts` the mount roots the session can see. A coded policy reads the
-same through `ctx.session` and `ctx.ns`. The line's own fields
-round-trip through JSON (`RouteContext.from_dict`) for tests.
-
-## Output: the verdict
-
-| Verdict | Effect |
+| Answer | Effect |
 | --- | --- |
-| `"docker"` or `{"runtime": "docker"}` | that runtime serves every command it captures |
+| `"docker"` | that runtime serves every command it captures |
 | `None` | the first capturer in `runtimes` order serves each command |
-| `{"deny": reason}` | refused before it runs: `<cmd>: Permission denied`, exit 126 |
 | anything else | the line fails with a routing error |
 
-In code the typed forms are `RouteResult` and `DenyResult`:
+Refusing a line is not the route policy's: a policy's `pre_execute`
+denies it ([Admit, then route](#admit-then-route)).
+
+In code, `route_policy=` takes a plain function, sync or async, returning
+the same:
 
 ```python
-from mirage.runtime.routing import (DenyResult, RouteContext, RouteOutcome,
-                                   RouteResult)
+from mirage.policy import RouteContext
 
-def policy(ctx: RouteContext) -> RouteOutcome | None:
-    if any(p.startswith("/prod/") for p in ctx.commands[0].paths):
-        return DenyResult("writes under /prod are blocked")
-    return RouteResult("docker") if "/jobs/" in ctx.line else None
+def policy(ctx: RouteContext) -> str | None:
+    paths = [p.virtual for c in ctx.commands for p in c.paths]
+    return "docker" if any(p.startswith("/jobs/") for p in paths) else None
+
+ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 ```
 
 A runtime entry's own `script:` answers a yes or no: will it serve this
-line? With no placement, the first willing capturer wins. A runtime a
-policy places the line on must also say yes, or the line is refused with
-`runtimes.<name>` as the refusal's policy. The caller's `runtime=`
-argument skips the scripts.
+line? It gets the same `ctx` plus `runtime`, its `name` and `captures`,
+so it can find the commands it would run. With no placement, the first
+willing capturer wins. A runtime a policy places the line on must also say
+yes, or the line is refused with `runtimes.<name>` as the refusal's
+policy. The caller's `runtime=` argument skips the scripts.
 
 ## Admit, then route
 
 The route policy is the built-in answer to the
 [policy's](/home/policy/policies#lifecycle) `pre_execute` method, asked before
-any coded policy. A coded policy places a line the same way:
+any coded policy. A coded policy places or refuses a line there:
 
 ```python
-from mirage.policy import Deny, Policy, Route
-from mirage.runtime.routing import RouteContext
+from mirage.policy import Deny, Policy, Route, RouteContext
 
-class HeavyOnDocker(Policy):
+class JobsOnDocker(Policy):
     async def pre_execute(self, ctx: RouteContext) -> Route | Deny | None:
+        if "/prod/" in ctx.line:
+            return Deny("the prod tree is read only")
         return Route("docker") if "/jobs/" in ctx.line else None
 ```
 
@@ -118,20 +97,6 @@ A script runs on an **evaluator runtime** from the `runtimes` list: a
 TypeScript), a `.js` one on the first JavaScript evaluator (quickjs).
 With no evaluator the first decision fails. A script that runs past 10
 seconds fails the line.
-
-In code, `route_policy=` also takes a plain function, sync or async,
-called directly; a runtime's `script=` takes `(ctx) -> bool`:
-
-```python
-from mirage.runtime.routing import RouteContext
-
-def policy(ctx: RouteContext) -> str | None:
-    stage = ctx.commands[0]
-    in_jobs = any(p.startswith("/jobs/") for p in stage.paths)
-    return "docker" if in_jobs else "monty"
-
-ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
-```
 
 ## Bring your own
 

@@ -39,7 +39,8 @@ from mirage.policy.profile import (
     ProfilePolicy,
     SessionProfile,
 )
-from mirage.runtime.routing import RouteContext
+from mirage.policy.script import script_context
+from mirage.policy.types import RouteContext
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
 from mirage.types import Limit, MountMode, OnExceed, PathSpec, Refusal
@@ -957,50 +958,70 @@ async def test_a_bare_name_under_deny_refuses_with_the_default_reason():
         await ws.close()
 
 
+# What every policy program starts with: its context, as JSON.
+CONTEXT = """\
+import json
+import os
+
+ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
+"""
+
 # A per-command judge: deny cat under /data/sealed/ with a computed
 # reason, take shred to the approval ledger, stay silent otherwise. A
-# policy defines the hook it answers at, and answers with return.
-JUDGE = """\
-def pre_command(ctx):
-    c = ctx['command']
-    for p in c['paths']:
-        if c['name'] == 'cat' and p.startswith('/data/sealed/'):
-            return {'deny': 'sealed by ' + ctx['profile']}
-    if c['name'] == 'shred':
-        return {'ask': 'sign-off'}
+# program prints its answer, and null is silence.
+JUDGE = (
+    CONTEXT
+    + """
+def answer():
+    for p in ctx['paths']:
+        if ctx['command'] == 'cat' and p.startswith('/data/sealed/'):
+            return {'kind': 'deny', 'reason': 'sealed by ' + ctx['profile']}
+    if ctx['command'] == 'shred':
+        return {'kind': 'ask', 'reason': 'sign-off'}
     return None
+
+print(json.dumps(answer()))
 """
+)
 
 # A judge that reads what the operand holds, not what it is called:
 # the shape a content policy takes when it is a program.
-READER = """\
-def pre_command(ctx):
-    for p in ctx['command']['paths']:
+READER = (
+    CONTEXT
+    + """
+def answer():
+    for p in ctx['paths']:
         try:
             body = open(p).read()
         except OSError:
             continue
         if 'payload' in body:
-            return {'ask': 'sign-off on payload'}
+            return {'kind': 'ask', 'reason': 'sign-off on payload'}
     return None
+
+print(json.dumps(answer()))
 """
+)
 
 
 def _scripted(
-    source: str = JUDGE, runtime: str = "monty"
+    programs: dict[str, str] | None = None, runtime: str = "monty"
 ) -> dict[str, dict[str, object]]:
     """One profile named release with a policy and nothing else, so
     what runs is purely the policy's decision.
 
     Args:
-        source (str): the policy program called per command.
-        runtime (str): the engine it runs on.
+        programs (dict[str, str] | None): each method's program; the
+            judge at pre_command when None.
+        runtime (str): the runtime every program runs on.
     """
     return {
         "release": {
             "policy": {
-                "script": ScriptSource(source),
-                "runtime": runtime,
+                method: [{"script": ScriptSource(source), "runtime": runtime}]
+                for method, source in (
+                    programs or {"pre_command": JUDGE}
+                ).items()
             },
         }
     }
@@ -1101,7 +1122,9 @@ async def test_a_profile_script_reads_what_the_line_names():
     # file holds. A directory operand is not its business, and a file
     # without the marker runs.
     ws = Workspace(
-        {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=_scripted(READER)
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles=_scripted({"pre_command": READER}),
     )
     try:
         await ws.shell(
@@ -1187,9 +1210,7 @@ async def test_a_broken_script_fails_closed_per_command():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_scripted(
-            source="def pre_command(ctx):\n    raise ValueError('boom')"
-        ),
+        profiles=_scripted({"pre_command": "raise ValueError('boom')"}),
     )
     try:
         ws.create_session("s", profile="release")
@@ -1197,14 +1218,16 @@ async def test_a_broken_script_fails_closed_per_command():
         assert refused.exit_code == 126
         assert refused.stderr == b"echo: Permission denied\n"
         assert refused.refusal is not None
-        assert "profile 'release' policy failed" in refused.refusal.reason
+        assert refused.refusal.reason.startswith(
+            "profile 'release' policy exited "
+        )
         assert (await ws.shell("echo hi")).exit_code == 0
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_an_engine_that_cannot_evaluate_fails_closed():
+async def test_a_runtime_policies_do_not_run_on_fails_closed():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
@@ -1216,7 +1239,10 @@ async def test_an_engine_that_cannot_evaluate_fails_closed():
         assert refused.exit_code == 126
         assert refused.stderr == b"echo: Permission denied\n"
         assert refused.refusal is not None
-        assert "cannot evaluate one" in refused.refusal.reason
+        assert refused.refusal.reason == (
+            "profile 'release' policy names runtime 'local'; a policy "
+            "program runs on monty or wasi"
+        )
     finally:
         await ws.close()
 
@@ -1227,7 +1253,13 @@ async def test_a_profile_policy_states_its_runtime():
         Workspace(
             {"/data/": RAMVFS()},
             mode=MountMode.WRITE,
-            profiles={"release": {"policy": {"script": ScriptSource(JUDGE)}}},
+            profiles={
+                "release": {
+                    "policy": {
+                        "pre_command": [{"script": ScriptSource(JUDGE)}]
+                    }
+                }
+            },
         )
 
 
@@ -1235,7 +1267,7 @@ def test_the_old_script_and_runtime_keys_are_told_the_new_block():
     # Shipped first as `script` with `runtime` beside it, a word for
     # what the file is rather than what it does and an engine that read
     # as the profile's own; the refusal says where they went.
-    with pytest.raises(ValueError, match="now one policy block"):
+    with pytest.raises(ValueError, match="now a policy block"):
         Workspace(
             {"/data/": RAMVFS()},
             mode=MountMode.WRITE,
@@ -1249,23 +1281,21 @@ def test_the_old_script_and_runtime_keys_are_told_the_new_block():
 
 
 @pytest.mark.asyncio
-async def test_a_policy_defining_no_hook_fails_closed():
-    # A verdict as a bare last expression was the old contract; a policy
-    # defines the hooks it answers at, and a program defining none is
-    # refused at every entry point rather than read for a value it never meant.
+async def test_a_program_printing_something_else_fails_closed():
+    # stdout is the answer: anything but one JSON answer or nothing is
+    # refused rather than guessed at.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_scripted(source="None"),
+        profiles=_scripted({"pre_command": "print('looks fine to me')"}),
     )
     try:
         ws.create_session("s", profile="release")
         refused = await ws.shell("echo hi", session_id="s")
         assert refused.exit_code == 126
         assert refused.refusal is not None
-        assert refused.refusal.reason == (
-            "profile 'release' policy defines no hook: pre_command, pre_vfs "
-            "or pre_session"
+        assert refused.refusal.reason.startswith(
+            "profile 'release' policy must print a JSON answer at pre_command"
         )
     finally:
         await ws.close()
@@ -1279,43 +1309,38 @@ async def test_an_inline_document_may_not_add_a_policy():
             ws.create_session(
                 "s",
                 permissions=SessionProfile(
-                    policy=ProfilePolicy(
-                        script=ScriptSource(JUDGE), runtime="monty"
-                    )
+                    policy={
+                        "pre_command": [
+                            ProfilePolicy(
+                                script=ScriptSource(JUDGE), runtime="monty"
+                            )
+                        ]
+                    }
                 ),
             )
     finally:
         await ws.close()
 
 
-# A program at the op and session views and nowhere else: writes under
+# Programs at the op and session views and nowhere else: writes under
 # /data/frozen are refused, so is an AWS_* variable, and a command is
 # never judged.
-GATES = """\
-def pre_vfs(ctx):
-    op = ctx['call']
-    if op['write'] and op['path'].startswith('/data/frozen/'):
-        return {'deny': 'frozen by ' + ctx['profile']}
-    return None
-
-def pre_session(ctx):
-    if ctx['write']['key'].startswith('AWS_'):
-        return {'deny': 'credentials are set by the operator'}
-    return None
-"""
-
-# The content judge with an op hook beside it: its own reads have to
-# pass the dispatcher its pre_vfs guards.
-READER_AND_GATE = (
-    READER
+FROZEN = (
+    CONTEXT
     + """
-def pre_vfs(ctx):
-    op = ctx['call']
-    if op['write'] and op['path'].startswith('/data/frozen/'):
-        return {'deny': 'frozen'}
-    return None
+if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
+    print(json.dumps({'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}))
 """
 )
+CREDENTIALS = (
+    CONTEXT
+    + """
+if ctx['key'].startswith('AWS_'):
+    reason = 'credentials are set by the operator'
+    print(json.dumps({'kind': 'deny', 'reason': reason}))
+"""
+)
+GATES = {"pre_vfs": FROZEN, "pre_session": CREDENTIALS}
 
 
 @pytest.mark.asyncio
@@ -1372,7 +1397,7 @@ async def test_a_policys_own_read_passes_the_dispatcher_its_op_hook_guards():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_scripted(READER_AND_GATE),
+        profiles=_scripted({"pre_command": READER, "pre_vfs": FROZEN}),
     )
     try:
         await ws.shell(
@@ -1769,7 +1794,7 @@ async def test_a_route_policy_reads_the_session_as_data():
     seen: list[dict] = []
 
     def route(ctx: RouteContext) -> None:
-        seen.append(ctx.to_dict())
+        seen.append(script_context(ctx))
         return None
 
     ws = Workspace(
@@ -1778,8 +1803,8 @@ async def test_a_route_policy_reads_the_session_as_data():
     try:
         await ws.shell("cd /data; export TEAM=core")
         await ws.shell("echo hi")
-        assert seen[-1]["session"]["cwd"] == "/data"
-        assert seen[-1]["session"]["env"]["TEAM"] == "core"
+        assert seen[-1]["cwd"] == "/data"
+        assert seen[-1]["env"]["TEAM"] == "core"
         assert "/data" in seen[-1]["mounts"]
     finally:
         await ws.close()

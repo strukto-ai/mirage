@@ -24,7 +24,7 @@ import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
-import type { RouteContext } from '../../../runtime/routing/types.ts'
+import type { RouteContext } from '../../../policy/types.ts'
 import { ScriptSource, type ProcessExecution, type RunResult } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
@@ -404,14 +404,12 @@ describe('external command routing regressions', () => {
     it.each([false, true])('resolves its full command with source=%s', async (source) => {
       const script = source
         ? new ScriptSource(
-            "ctx['command'] == 'trello board list' and " +
-              "ctx['commands'][-1]['command'] == 'trello board list' and " +
-              "ctx['commands'][-1]['words'][-1] == '/allowed'",
+            "[w['text'] for w in ctx['commands'][-1]['words']] == " +
+              "['trello', 'board', 'list', '/allowed']",
           )
         : (ctx: RouteContext) =>
-            ctx.command === 'trello board list' &&
-            ctx.commands.at(-1)?.command === 'trello board list' &&
-            ctx.commands.at(-1)?.words.at(-1) === '/allowed'
+            (ctx.commands.at(-1)?.words ?? []).map((w) => w.text).join(' ') ===
+            'trello board list /allowed'
       const options = { captures: ['trello board list'], script }
       const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
       const ws = await workspace(probe, [new MontyRuntime({ captures: [] })])
@@ -440,8 +438,8 @@ describe('external command routing regressions', () => {
       const seen: string[] = []
       const probe = new ProcessProbe({
         script: (ctx) => {
-          seen.push(ctx.command)
-          return ctx.command === 'native-tool'
+          seen.push(ctx.commands.map((c) => c.command).join(' '))
+          return ctx.commands.some((c) => c.command === 'native-tool')
         },
       })
       const named = new ProcessProbe({ captures: ['python3'] })
@@ -461,7 +459,7 @@ describe('external command routing regressions', () => {
         seen.length = 0
         expect((await ws.shell(head + ' | native-tool')).exitCode).toBe(0)
         expect(probe.requests).toHaveLength(1)
-        expect(seen).toEqual(['native-tool'])
+        expect(seen).toEqual([`${head.split(' ')[0] ?? ''} native-tool`])
         probe.requests.length = 0
         expect((await ws.shell(head + ' | denied-tool')).exitCode).toBe(126)
         expect(probe.requests).toHaveLength(0)

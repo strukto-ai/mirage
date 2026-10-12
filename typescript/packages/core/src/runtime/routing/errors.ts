@@ -24,17 +24,3 @@ export class RouteError extends Error {
     this.name = 'RouteError'
   }
 }
-
-/**
- * The policy refused the line before anything ran.
- *
- * A legitimate policy outcome, not a mistake: execute() folds it into
- * the line's result (exit 126, `Permission denied` on stderr, the reason
- * on the `refusal` record) instead of propagating like RouteError.
- */
-export class RouteDeny extends Error {
-  constructor(readonly reason: string) {
-    super(reason)
-    this.name = 'RouteDeny'
-  }
-}

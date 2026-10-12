@@ -1,0 +1,187 @@
+---
+title: Scripts
+description: Write a policy as a program that runs sandboxed on monty or Python on wasm, reads the same context a coded policy reads as JSON, and prints its answer.
+icon: code
+---
+
+A policy can be a program instead of a class. A profile names a list of
+programs for each method it answers at, and the runtime each one runs on.
+A program reads the same `ctx` a [coded policy](/home/policy/policies)
+reads, as JSON, and prints its answer. Three places take a script:
+
+| Where | Asked | Answers |
+| --- | --- | --- |
+| a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_session`, for the sessions under that profile | deny or ask; a route at `pre_execute` |
+| `route_policy:` | at `pre_execute`, for every session | a runtime name, or `None` |
+| a runtime's `script:` | for a line no policy placed: does this runtime take it? | true or false |
+
+## A profile's policy
+
+```yaml workspace.yaml
+profiles:
+  reviewer:
+    policy:
+      pre_command:
+        - {script: guard.py, runtime: monty}
+      pre_session:
+        - {script: credentials.py, runtime: monty}
+      pre_vfs:
+        - {script: locked.py, runtime: {name: wasi, config: {home: /opt/cpython-wasi}}}
+```
+
+```python guard.py
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+
+def contents(path):
+    try:
+        return open(path).read()
+    except OSError:
+        return ""
+
+if any("marker" in contents(path) for path in ctx["paths"]):
+    reason = "marked files are not read by " + ctx["profile"]
+    print(json.dumps({"kind": "deny", "reason": reason}))
+```
+
+Each entry names its program and its runtime: a name, or `{name, config}`
+when the runtime needs settings, as in a `runtimes` entry. A method's
+programs are asked in order: the first deny wins, then the first ask, and
+every route must agree. A method with no program is never asked and costs
+nothing.
+
+In code, a profile takes the same block, with a `ScriptSource` for each
+program:
+
+<CodeGroup>
+```python Python
+profiles={
+    "reviewer": {
+        "policy": {
+            "pre_command": [{"script": ScriptSource(Path("guard.py").read_text()), "runtime": "monty"}],
+        },
+    },
+}
+```
+
+```ts TypeScript
+profiles: {
+  reviewer: {
+    policy: {
+      preCommand: [{ script: new ScriptSource(readFileSync('guard.py', 'utf8'), 'python'), runtime: 'monty' }],
+    },
+  },
+}
+```
+</CodeGroup>
+
+## The program
+
+A program runs the way any program runs on its runtime. Mirage never edits
+it:
+
+- **Input:** `ctx` as JSON, in the environment variable `MIRAGE_POLICY_CTX`
+  and on stdin. On monty, which has no `sys.stdin`, stdin arrives as a
+  `stdin` variable, so read the environment variable to run anywhere. The
+  variable exists only in that run; the session never sees it.
+- **Session:** the program starts in the session's working directory, with
+  the session's variables, so `os.getcwd()` and `os.environ` are the
+  session's.
+- **Answer:** printed on stdout. Nothing, or `null`, is no opinion.
+
+| Prints | Effect |
+| --- | --- |
+| nothing | no opinion |
+| `{"kind": "deny", "reason": "..."}` | refuses |
+| `{"kind": "ask", "reason": "..."}` | holds the action until a host approves it |
+| `{"kind": "route", "runtime": "docker"}` | at `pre_execute`: runs the line on that runtime |
+
+A deny or an ask without a `reason` gets the default one. Anything else on
+stdout, such as a debug line, fails the program; write those to stderr.
+
+## ctx
+
+Every field a coded policy reads, under the Python names, as plain data.
+For `cat notes.txt | wc -l` in `/data`, `pre_execute` gets:
+
+```json
+{
+  "line": "cat notes.txt | wc -l",
+  "commands": [
+    {
+      "command": "cat",
+      "line": "cat notes.txt | wc -l",
+      "words": [
+        {"text": "cat", "kind": "name", "option": null, "path": null},
+        {"text": "notes.txt", "kind": "operand", "option": null, "path": "/data/notes.txt"}
+      ],
+      "paths": ["/data/notes.txt"],
+      "walks": false,
+      "argv": ["notes.txt"],
+      ...
+    },
+    {"command": "wc", "words": [...], "paths": [], ...}
+  ],
+  "session_id": "agent",
+  "agent_id": "",
+  "cwd": "/data",
+  "env": {"PWD": "/data", "TEAM": "core", "OLDPWD": "/"},
+  "profile": "reviewer",
+  "mounts": ["/.bash_history", "/data", "/dev", "/usr/bin"]
+}
+```
+
+`pre_command` gets one entry of `commands`, with the session fields beside
+it:
+
+| Method | `ctx` holds |
+| --- | --- |
+| `pre_execute` | `line`, `commands`, `agent_id` |
+| `pre_command` | `line`, `command`, `words`, `paths`, `walks`, `agent_id` |
+| `pre_vfs` | `call` (`name`, `effect`, `target`, `creates`, `subtree`), `path`, `write` |
+| `pre_session` | `verb`, `key`, `value` |
+
+Every `ctx` also has `session_id`, `cwd`, `env`, `profile` and `mounts`,
+the mount roots the session can see. A runtime's `script:` also gets
+`runtime`: its `name` and `captures`.
+
+## Files and the session
+
+A program reads the workspace as the session it judges for:
+
+- `open()`, `os.listdir()` and `os.stat()` go through the workspace. A
+  hidden path does not exist, path rules apply, and a write is refused
+  (`EROFS`).
+- Its own reads are not judged again by its profile's `pre_vfs`.
+- Monty has no `os.path`, `os.walk` or `Path.glob`; use `Path.exists()`,
+  `Path.is_dir()` and `Path.iterdir()`, which run on every runtime.
+
+## When a program fails
+
+A program that exits non-zero, runs past 10 seconds, prints anything but
+an answer its method can give, or names a runtime that cannot run here
+refuses the action. The reason names the profile and what went wrong, such
+as `profile 'reviewer' policy exited 1`, and the program's stderr goes to
+the log. Silence on failure would let through exactly what the policy is
+there to judge.
+
+`route_policy:` and runtime scripts are deployment settings, so the same
+mistakes fail the line with a routing error instead.
+
+## Runtimes
+
+| Runtime | What it is | Hosts |
+| --- | --- | --- |
+| `monty` | a small Python interpreter, a sandboxed subset of the language | Python, TypeScript |
+| `wasi` | full CPython on wasm, run by wasmtime | Python |
+| `pyodide` | full CPython on wasm | TypeScript |
+
+Each runtime is the policy's own, built from the name and settings the
+profile gives and never shared with the agent. `wasi` needs a CPython WASI
+build: its folder as `config: {home: ...}`, or in `MIRAGE_WASI_HOME`.
+
+Monty runs a program in about a millisecond. `wasi` starts CPython on every
+run, 100 to 300 ms, so it suits the methods asked less often; `pre_vfs`,
+asked for every file call from outside a line, is usually monty's.

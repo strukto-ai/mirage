@@ -31,6 +31,7 @@ from mirage.policy.types import (
     CommandRule,
     HideReason,
     ProfileScript,
+    ProfileScripts,
 )
 from mirage.process.config import ProcessPermissions
 from mirage.types import (
@@ -479,33 +480,46 @@ def _modes(profile: SessionProfile) -> dict[str, MountMode] | None:
     return modes or None
 
 
-def compile_script(
-    effective: SessionProfile, name: str
-) -> ProfileScript | None:
-    """The profile's per-command script, compiled onto the session.
+def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
+    """The profile's policy programs by method, compiled onto the
+    session.
 
     Args:
         effective (SessionProfile): the resolved profile.
         name (str): the profile's name, empty for a document passed
-            without one; what the script reads as ``ctx["profile"]``.
+            without one; what a program reads as ``ctx["profile"]``.
 
     Raises:
-        PolicyError: the policy is still a path, which means it reached
+        PolicyError: a program is still a path, which means it reached
             the workspace without passing the config loader that loads
             one.
     """
-    policy = effective.policy
-    if policy is None:
-        return None
-    if isinstance(policy.script, str):
-        raise PolicyError(
-            f"profile {name!r} names a policy by path "
-            f"({policy.script!r}); only the config loader loads one, pass "
-            f"ScriptSource in code"
-        )
-    return ProfileScript(
-        profile=name, script=policy.script, runtime=policy.runtime
-    )
+    compiled: dict[str, tuple[ProfileScript, ...]] = {}
+    for method, programs in (effective.policy or {}).items():
+        entries: list[ProfileScript] = []
+        for program in programs:
+            if isinstance(program.script, str):
+                raise PolicyError(
+                    f"profile {name!r} names a policy by path "
+                    f"({program.script!r}); only the config loader loads "
+                    f"one, pass ScriptSource in code"
+                )
+            runtime = program.runtime
+            entries.append(
+                ProfileScript(
+                    profile=name,
+                    script=program.script,
+                    runtime=runtime
+                    if isinstance(runtime, str)
+                    else runtime["name"],
+                    config={}
+                    if isinstance(runtime, str)
+                    else dict(runtime.get("config") or {}),
+                )
+            )
+        if entries:
+            compiled[method] = tuple(entries)
+    return compiled
 
 
 def compile_profile(
@@ -518,7 +532,7 @@ def compile_profile(
             inline document already added; None is an unrestricted
             session.
         name (str): the profile's name, empty for a document passed
-            without one; carried onto its script for ``ctx["profile"]``,
+            without one; carried onto its programs for ``ctx["profile"]``,
             for refusals to print, and onto the session as the group an
             owner-rendering command shows.
     """
@@ -544,7 +558,7 @@ def compile_profile(
         policies=ProfilePolicies(
             mount_modes=_modes(effective),
             commands=commands,
-            script=compile_script(effective, name),
+            scripts=compile_scripts(effective, name),
             command_limits=effective.command_limits,
             processes=processes,
         ),
@@ -576,7 +590,7 @@ def narrow(session: SessionState, compiled: CompiledProfile) -> None:
     session.visibility = compiled.visibility
     session.hide_reasons = compiled.hide_reasons
     session.commands = policies.commands
-    session.script = policies.script
+    session.scripts = policies.scripts
     session.profile = compiled.profile
     session.command_limits = dict(policies.command_limits or {})
     session.processes = policies.processes

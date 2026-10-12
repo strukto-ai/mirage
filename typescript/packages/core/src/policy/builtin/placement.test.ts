@@ -13,44 +13,41 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { RouteContext, RoutePolicy } from '../../runtime/routing/types.ts'
+import type { RoutePolicy } from '../../runtime/routing/types.ts'
+import type { RouteContext } from '../types.ts'
 import { PlacementPolicy } from './placement.ts'
 
 function line(text: string): RouteContext {
-  return {
-    line: text,
-    commands: [],
-    command: text.split(' ')[0] ?? '',
-    builtin: false,
-    sessionId: '',
-    agentId: '',
-  }
+  return { line: text, commands: [], sessionId: '', agentId: '' }
 }
 
 describe('PlacementPolicy', () => {
-  it('a route verdict is a placement answer', async () => {
+  it('places the line on a runtime name and says nothing on null', async () => {
     const policy = new PlacementPolicy(
-      (ctx) => {
-        if (ctx.line.includes('heavy')) return 'beta'
-        if (ctx.line.includes('secret')) return { deny: 'secrets stay put' }
-        return null
-      },
+      (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
       () => [],
     )
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
       runtime: 'beta',
     })
-    expect(await policy.preExecute(line('cat secret'))).toEqual({
-      kind: 'deny',
-      reason: 'secrets stay put',
-    })
     expect(await policy.preExecute(line('echo hi'))).toBeNull()
-    // A mistake in the route policy is the deployment's, not a refusal.
+  })
+
+  it.each([
+    '',
+    { route: 'beta' },
+    { deny: 'no' },
+    { kind: 'route', runtime: 'beta' },
+    { kind: 'deny', reason: 'no' },
+    42,
+  ])("treats anything but a name or null as the deployment's mistake: %j", async (verdict) => {
+    // Refusing a line is a policy's answer, not the router's; a route
+    // policy that answers anything else is misconfigured, not a refusal.
     await expect(
-      new PlacementPolicy((() => ({ runtme: 'x' })) as unknown as RoutePolicy, () => []).preExecute(
+      new PlacementPolicy((() => verdict) as unknown as RoutePolicy, () => []).preExecute(
         line('echo hi'),
       ),
-    ).rejects.toThrow(/unknown policy verdict keys/)
+    ).rejects.toThrow(/a runtime name or None/)
   })
 })

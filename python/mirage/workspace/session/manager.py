@@ -19,7 +19,7 @@ from typing import Any
 
 from mirage.context.session_context import SessionOwner
 from mirage.policy.profile import CompiledProfile
-from mirage.policy.types import AdmissionRules, Decision, ProfileScript
+from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
@@ -188,9 +188,9 @@ class SessionManager(SessionOwner):
             )
         return session.commands
 
-    def script_of(self, session_id: str) -> ProfileScript | None:
-        """The profile script one session runs under
-        (SessionScriptsQuery).
+    def scripts_of(self, session_id: str) -> ProfileScripts:
+        """The policy programs of the profile one session runs under, by
+        method (SessionScriptsQuery).
 
         The default profile's for an id this manager does not know, the
         same fallback ``commands_of`` makes and for the same reason: an
@@ -203,11 +203,11 @@ class SessionManager(SessionOwner):
         session = self._sessions.get(session_id)
         if session is None:
             return (
-                self._default_profile.policies.script
+                self._default_profile.policies.scripts
                 if self._default_profile is not None
-                else None
+                else {}
             )
-        return session.script
+        return session.scripts
 
     def decision_sessions(self) -> tuple[str, ...]:
         """Every session id holding ledger records
@@ -326,7 +326,7 @@ class SessionManager(SessionOwner):
                     default.visibility = stored.visibility
                     default.hide_reasons = stored.hide_reasons
                     default.commands = stored.commands
-                    default.script = stored.script
+                    default.scripts = stored.scripts
                     # The host's standing answers are session state
                     # like cwd: dropped here, an approved line would
                     # ask again after a restart and the next flush

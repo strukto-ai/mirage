@@ -25,17 +25,13 @@ from mirage.policy import (
     Route,
     ShellExplanation,
 )
+from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.routing import (
-    DenyResult,
-    RouteContext,
-    RouteResult,
-)
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 from mirage.runtime.workspace import WorkspaceRuntime
 
@@ -291,9 +287,11 @@ async def test_empty_captures_serve_nothing():
 
 
 @pytest.mark.asyncio
-async def test_script_sees_its_own_stage_on_pipelines():
+async def test_script_finds_its_stage_among_the_commands():
     alpha = AlphaRuntime()
-    alpha.script = lambda ctx: ctx.command == "python3"
+    alpha.script = lambda ctx: any(
+        c.command == "python3" for c in ctx.commands
+    )
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[alpha, "workspace"]
     )
@@ -340,17 +338,19 @@ async def test_global_route_names_the_runtime():
         await ws.close()
 
 
+class NoPython(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Deny | None:
+        names = [c.command for c in ctx.commands]
+        return Deny("python3 is blocked") if "python3" in names else None
+
+
 @pytest.mark.asyncio
 async def test_policy_deny_folds_into_the_line_result():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         runtimes=[AlphaRuntime(), "workspace"],
-        route_policy=lambda ctx: (
-            {"deny": "python3 is blocked"}
-            if ctx.command == "python3"
-            else None
-        ),
+        policies=[NoPython()],
     )
     try:
         io = await ws.shell("python3 -c 'x'")
@@ -376,7 +376,7 @@ async def test_syntax_error_gates_before_policy():
 
     def deny_all(ctx):
         calls.append(ctx.line)
-        return {"deny": "nothing runs"}
+        return None
 
     ws = Workspace(
         {"/": RAMVFS()},
@@ -394,16 +394,13 @@ async def test_syntax_error_gates_before_policy():
 
 
 @pytest.mark.asyncio
-async def test_policy_result_arms_route_and_deny():
+async def test_a_coded_route_policy_places_beside_a_policys_deny():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
-        route_policy=lambda ctx: (
-            DenyResult("secrets stay put")
-            if "secret" in ctx.line
-            else RouteResult("beta")
-        ),
+        route_policy=lambda ctx: "beta",
+        policies=[NoSecrets()],
     )
     try:
         io = await ws.shell("python3 -c 'x'")
@@ -553,7 +550,7 @@ async def test_admission_comes_before_placement():
 
     def away(ctx):
         seen.append(ctx.line)
-        return {"deny": "routed away"}
+        return None
 
     ws = Workspace(
         {"/": RAMVFS()},
@@ -576,8 +573,7 @@ async def test_admission_comes_before_placement():
         assert io.refusal.reason == "no deletes"
         assert seen == []
         io = await ws.shell("echo ok", session_id="agent")
-        assert io.refusal is not None
-        assert io.refusal.reason == "routed away"
+        assert io.exit_code == 0
         assert seen == ["echo ok"]
     finally:
         await ws.close()
@@ -653,27 +649,36 @@ async def test_add_runtime_appends_and_rebinds():
 def test_config_inline_script_is_rejected():
     with pytest.raises(ValueError, match=r"reference a \.py/\.js file"):
         _build_runtime_entries(
-            [{"name": "local", "script": "ctx['command'] == 'python3'"}]
+            [
+                {
+                    "name": "local",
+                    "script": "ctx['commands'][0]['command'] == 'python3'",
+                }
+            ]
         )
 
 
 def test_config_script_path_form_embeds_content(tmp_path):
     script = tmp_path / "policy.py"
-    script.write_text("ctx['command'] == 'python3'")
+    script.write_text("ctx['commands'][0]['command'] == 'python3'")
     entries = _build_runtime_entries(
         [
             {"name": "local", "script": str(script)},
             {"name": "workspace", "script": str(script)},
         ]
     )
-    assert entries[0].script == ScriptSource("ctx['command'] == 'python3'")
+    assert entries[0].script == ScriptSource(
+        "ctx['commands'][0]['command'] == 'python3'"
+    )
     assert isinstance(entries[1], WorkspaceRuntime)
-    assert entries[1].script == ScriptSource("ctx['command'] == 'python3'")
+    assert entries[1].script == ScriptSource(
+        "ctx['commands'][0]['command'] == 'python3'"
+    )
 
 
 def test_code_string_script_is_rejected():
     fallback = WorkspaceRuntime()
-    fallback.script = "ctx['command'] == 'python3'"
+    fallback.script = "ctx['commands'][0]['command'] == 'python3'"
     with pytest.raises(TypeError, match="reference a .py file"):
         Workspace({"/ram": RAMVFS()}, runtimes=[fallback])
 

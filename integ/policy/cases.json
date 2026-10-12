@@ -306,10 +306,10 @@
    ]
   },
   {
-   "id": "a_profile_script_decides_at_each_of_its_hooks",
+   "id": "a_profile_policy_answers_at_each_pre_method",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"env": {"MODE": "safe"}, "policy": {"script": {"source": "def pre_command(ctx):\n    name = ctx['command']['name']\n    if name == 'touch':\n        return {'deny': 'script says no'}\n    if name == 'mkdir':\n        return {'ask': 'mkdir needs a nod'}\n    if name == 'rm' and ctx['session']['env'].get('MODE') == 'safe':\n        return {'deny': 'safe mode'}\n    return None\n\ndef pre_vfs(ctx):\n    if ctx['call']['path'] == '/data/s':\n        return {'deny': 'script guards s'}\n    if ctx['call']['path'] == '/data/held':\n        return {'ask': 'held needs a nod'}\n    return None\n\ndef pre_session(ctx):\n    if ctx['write']['key'] == 'MODE':\n        return {'deny': 'mode is fixed'}\n    if ctx['write']['key'] == 'HELD':\n        return {'ask': 'HELD needs a nod'}\n    return None\n", "language": "python"}, "runtime": "monty"}}},
+    {"op": "session", "id": "agent", "profile": {"env": {"MODE": "safe"}, "policy": {"pre_command": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\ndef answer():\n    name = ctx['command']\n    if name == 'touch':\n        return {'kind': 'deny', 'reason': 'script says no'}\n    if name == 'mkdir':\n        return {'kind': 'ask', 'reason': 'mkdir needs a nod'}\n    if name == 'rm' and ctx['env'].get('MODE') == 'safe':\n        return {'kind': 'deny', 'reason': 'safe mode'}\n    return None\n\nprint(json.dumps(answer()))\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\ndef answer():\n    if ctx['path'] == '/data/s':\n        return {'kind': 'deny', 'reason': 'script guards s'}\n    if ctx['path'] == '/data/held':\n        return {'kind': 'ask', 'reason': 'held needs a nod'}\n    return None\n\nprint(json.dumps(answer()))\n", "language": "python"}, "runtime": "monty"}], "pre_session": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\ndef answer():\n    if ctx['key'] == 'MODE':\n        return {'kind': 'deny', 'reason': 'mode is fixed'}\n    if ctx['key'] == 'HELD':\n        return {'kind': 'ask', 'reason': 'HELD needs a nod'}\n    return None\n\nprint(json.dumps(answer()))\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo s > /data/s", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "script says no"}}},
     {"op": "exec", "session": "agent", "command": "cat /data/s", "expect": {"value": {"exit_code": 0, "stdout": "s\n", "stderr": "", "refusal": null}}},
@@ -332,6 +332,23 @@
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/held"}, "expect": {"value": {"data_base64": "aAo="}}},
     {"op": "exec", "session": "agent", "command": "cat /data/held", "expect": {"value": {"exit_code": 0, "stdout": "h\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
+   "id": "a_profile_policy_runs_each_program_with_the_session",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nnames = [c['command'] for c in ctx['commands']]\nif 'false' in names and ctx['cwd'] == '/data':\n    reason = 'no false in /data: ' + ' '.join(names)\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n", "language": "python"}, "runtime": "monty"}], "pre_command": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'hostname':\n    reason = 'cwd ' + os.getcwd() + ' team ' + str(os.environ.get('TEAM'))\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] in ('hostname', 'whoami'):\n    print(json.dumps({'kind': 'ask', 'reason': ctx['command'] + ' needs a nod'}))\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['call']['name'] == 'read' and 'secret' in open(ctx['path']).read():\n    print(json.dumps({'kind': 'deny', 'reason': 'secret text'}))\n", "language": "python"}, "runtime": "monty"}], "pre_session": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nteam = ctx['env'].get('TEAM')\nif ctx['key'] == 'TEAM' and team is not None:\n    print(json.dumps({'kind': 'deny', 'reason': 'TEAM was ' + team}))\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "exec", "command": "echo secret > /data/x; echo plain > /data/y", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data && export TEAM=core", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "hostname", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "hostname: Permission denied\n", "refusal": "cwd /data team core"}}},
+    {"op": "exec", "session": "agent", "command": "whoami", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "whoami: Permission denied\n", "refusal": "whoami needs a nod"}}},
+    {"op": "exec", "session": "agent", "command": "true && false", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "true: Permission denied\n", "refusal": "no false in /data: true false"}}},
+    {"op": "exec", "session": "agent", "command": "export TEAM=ops", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "TEAM: permission denied\n", "refusal": "TEAM was core"}}},
+    {"op": "exec", "session": "agent", "command": "echo $TEAM", "expect": {"value": {"exit_code": 0, "stdout": "core\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo ${MIRAGE_POLICY_CTX:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "unset\n", "stderr": "", "refusal": null}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/x"}, "expect": {"errno": "EACCES", "reason": "secret text"}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/y"}, "expect": {"value": {"data_base64": "cGxhaW4K"}}}
    ]
   },
   {

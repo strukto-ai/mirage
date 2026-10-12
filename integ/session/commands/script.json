@@ -56,26 +56,28 @@
       }
     },
     {
-      "id": "scriptjs_silence_runs_the_command",
+      "id": "scriptwasm_silence_runs_the_command",
       "seq": 923258,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedjs",
-      "command": "echo judged-by-js",
+      "session": "scriptedwasm",
+      "command": "echo judged-by-wasm",
       "expect": {
         "exit": 0,
-        "stdout": "judged-by-js\n",
+        "stdout": "judged-by-wasm\n",
         "stderr": ""
       }
     },
     {
-      "id": "scriptjs_only_profile_installs_every_command",
+      "id": "scriptwasm_only_profile_installs_every_command",
       "seq": 923259,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedjs",
+      "session": "scriptedwasm",
       "command": "touch /scratch/z && rm /scratch/z",
       "expect": {
         "exit": 0,
@@ -84,12 +86,13 @@
       }
     },
     {
-      "id": "scriptjs_denies_with_a_reason_it_computed",
+      "id": "scriptwasm_denies_with_a_reason_it_computed",
       "seq": 923260,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedjs",
+      "session": "scriptedwasm",
       "command": "cat /repo/sealed/k",
       "expect": {
         "exit": 126,
@@ -98,12 +101,13 @@
       }
     },
     {
-      "id": "scriptjs_deny_follows_the_cwd",
+      "id": "scriptwasm_deny_follows_the_cwd",
       "seq": 923261,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedjs",
+      "session": "scriptedwasm",
       "command": "cd /repo && cat sealed/k",
       "expect": {
         "exit": 126,
@@ -112,12 +116,13 @@
       }
     },
     {
-      "id": "scriptjs_silence_reaches_a_pipeline",
+      "id": "scriptwasm_silence_reaches_a_pipeline",
       "seq": 923262,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedjs",
+      "session": "scriptedwasm",
       "command": "echo alpha | head -1",
       "expect": {
         "exit": 0,
@@ -279,10 +284,11 @@
       }
     },
     {
-      "id": "scriptopsjs_prep",
+      "id": "scriptopswasm_prep",
       "seq": 923278,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
       "command": "mkdir -p /scratch/cold /scratch/drop && echo keep > /scratch/cold/k",
       "expect": {
@@ -292,26 +298,28 @@
       }
     },
     {
-      "id": "scriptopsjs_undefined_command_hook_is_silence",
+      "id": "scriptopswasm_a_method_without_a_program_is_silence",
       "seq": 923279,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedopsjs",
-      "command": "echo judged-by-js-ops",
+      "session": "scriptedopswasm",
+      "command": "echo judged-by-wasm-ops",
       "expect": {
         "exit": 0,
-        "stdout": "judged-by-js-ops\n",
+        "stdout": "judged-by-wasm-ops\n",
         "stderr": ""
       }
     },
     {
-      "id": "scriptopsjs_read_passes_the_dispatcher",
+      "id": "scriptopswasm_read_passes_the_dispatcher",
       "seq": 923281,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedopsjs",
+      "session": "scriptedopswasm",
       "command": "cat /scratch/cold/k",
       "expect": {
         "exit": 0,
@@ -320,12 +328,13 @@
       }
     },
     {
-      "id": "scriptopsjs_env_write_is_refused_at_the_session_view",
+      "id": "scriptopswasm_env_write_is_refused_at_the_session_view",
       "seq": 923282,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedopsjs",
+      "session": "scriptedopswasm",
       "command": "export AWS_SECRET=x",
       "expect": {
         "exit": 1,
@@ -334,12 +343,13 @@
       }
     },
     {
-      "id": "scriptopsjs_other_env_writes_land",
+      "id": "scriptopswasm_other_env_writes_land",
       "seq": 923283,
       "targets": [
-        "ram-scripted"
+        "ram-scripted",
+        "ram-scripted-pyodide"
       ],
-      "session": "scriptedopsjs",
+      "session": "scriptedopswasm",
       "command": "export SAFE_X=1 && echo $SAFE_X",
       "expect": {
         "exit": 0,

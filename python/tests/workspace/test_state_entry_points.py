@@ -321,7 +321,7 @@ class DenySecretEnv(Policy):
     """Veto env writes to SECRET_* names through the session view."""
 
     async def pre_session(self, ctx: SessionContext) -> Action | None:
-        if ctx.plane == "env" and ctx.key.startswith("SECRET"):
+        if ctx.key.startswith("SECRET"):
             return Deny("SECRET_* refused by policy\n")
         return None
 

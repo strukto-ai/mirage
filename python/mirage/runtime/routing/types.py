@@ -12,207 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Container, Mapping
-from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Generic, TypeVar
 
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.policy.types import RouteContext
 from mirage.runtime.types import RuntimeIdentity, ScriptSource
-from mirage.view.types import NamespaceView, SessionView
-
-if TYPE_CHECKING:
-    from mirage.workspace.files import Files
-
-
-@dataclass(frozen=True, slots=True)
-class ParsedCommand:
-    """One command of the line being routed, distilled from the parse.
-
-    Args:
-        command (str): the registered command prefix, or the first word
-            when no longer prefix matches.
-        words (tuple[str, ...]): every word of the command, name first.
-        builtin (bool): whether the command has a builtin spec.
-        paths (tuple[str, ...]): absolute-path operands.
-        cli (str | None): the installed CLI named by the first word,
-            None otherwise. Lets a policy steer an installed name
-            between the virtual CLI and a runtime capturing the same
-            word.
-    """
-
-    command: str
-    words: tuple[str, ...]
-    builtin: bool
-    paths: tuple[str, ...]
-    cli: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RouteContext:
-    """What a policy may consult about the line, parse-before-policy.
-
-    For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``,
-    monty's script (monty captures ``python3``) is consulted with::
-
-        ctx.line      == "cat /data/logs.txt | python3 process.py"
-        ctx.commands  == (
-            ParsedCommand(command="cat",
-                          words=("cat", "/data/logs.txt"),
-                          builtin=True,
-                          paths=("/data/logs.txt",)),
-            ParsedCommand(command="python3",
-                          words=("python3", "process.py"),
-                          builtin=True,
-                          paths=()),
-        )
-        ctx.command   == "python3"  # monty's first captured stage
-        ctx.builtin   == True
-        ctx.session.cwd() == "/data"
-
-    The global policy script sees the same context with
-    ``ctx.command == "cat"``, the line's first stage. A monty-source
-    script gets this as the ``ctx`` dict (see to_dict), with
-    ``ctx["runtime"]`` naming the runtime being asked.
-
-    Args:
-        line (str): the raw command line.
-        commands (tuple[ParsedCommand, ...]): parsed commands, empty on
-            a syntax error.
-        command (str): the stage addressed to the consulted party: an
-            entry script sees its runtime's first captured stage (see
-            for_runtime), the global policy sees the line's first
-            command. "" when unparsable.
-        builtin (bool): whether ``command`` has a builtin spec.
-        session_id (str): session hosting the line.
-        agent_id (str): agent executing the line.
-        session (SessionView | None): the session (cwd, env), read
-            only: a write through it is refused.
-        ns (NamespaceView | None): the session's namespace.
-        vfs (Files | None): the session's files, read only.
-    """
-
-    line: str
-    commands: tuple[ParsedCommand, ...]
-    command: str
-    builtin: bool
-    session_id: str
-    agent_id: str
-    session: SessionView | None = None
-    ns: NamespaceView | None = None
-    vfs: "Files | None" = None
-
-    def for_runtime(
-        self, runtime: RuntimeIdentity, external_commands: Container[str] = ()
-    ) -> "RouteContext":
-        """The context as one runtime's script sees it.
-
-        ``command``/``builtin`` become the first stage the runtime
-        captures, so `ctx.command == 'python3'` means what it reads as
-        even on `cat x | python3`. A runtime with no captured stage on
-        the line (including the catch-all workspace) keeps the line's first
-        stage.
-
-        Args:
-            runtime (RuntimeIdentity): the runtime being consulted.
-            external_commands (Container[str]): stages resolved to the
-                external fallback by the workspace's command lookup.
-        """
-        for parsed in self.commands:
-            if (
-                parsed.command in runtime.captures
-                or EXTERNAL_COMMANDS in runtime.captures
-                and parsed.command in external_commands
-            ):
-                return replace(
-                    self, command=parsed.command, builtin=parsed.builtin
-                )
-        return self
-
-    def to_dict(
-        self, runtime: RuntimeIdentity | None = None
-    ) -> dict[str, Any]:
-        """The ctx payload as any evaluator's script sees it.
-
-        This is the policy context WIRE SCHEMA, a public contract:
-        JSON-shaped (strings, bools, lists, dicts), snake_case keys,
-        identical in both languages, so a script in any evaluator's
-        language (and any transport, in-process or remote) receives
-        the same structure. Keys: line, commands (command/words/
-        builtin/paths/cli per stage), command, builtin, session_id,
-        agent_id, session (cwd, env), mounts (the mount roots under
-        ``/`` the session may be told about), plus runtime
-        (name/captures) for per-runtime scripts.
-        from_dict is the inverse for the line's own fields, so a
-        payload can be stored as JSON and replayed.
-
-        Args:
-            runtime (RuntimeIdentity | None): the runtime being asked, added as
-                ctx["runtime"] for per-runtime scripts.
-        """
-        payload: dict[str, Any] = {
-            "line": self.line,
-            "commands": [
-                {
-                    "command": c.command,
-                    "words": list(c.words),
-                    "builtin": c.builtin,
-                    "paths": list(c.paths),
-                    "cli": c.cli,
-                }
-                for c in self.commands
-            ],
-            "command": self.command,
-            "builtin": self.builtin,
-            "session_id": self.session_id,
-            "agent_id": self.agent_id,
-            "session": {
-                "cwd": self.session.cwd() if self.session else "",
-                "env": self.session.snapshot() if self.session else {},
-            },
-            "mounts": (
-                self.ns.mounts.visible_descendants("/")
-                if self.ns and self.ns.mounts
-                else []
-            ),
-        }
-        if runtime is not None:
-            payload["runtime"] = {
-                "name": runtime.name,
-                "captures": list(runtime.captures),
-            }
-        return payload
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "RouteContext":
-        """Rebuild a context from its wire-schema payload.
-
-        The inverse of to_dict for the line's own fields (the payload's
-        ``session`` and ``mounts`` come from live handles and its
-        ``runtime`` block from the consultation, so they are ignored),
-        so a stored JSON payload replays through scripts and routes in
-        tests or debugging.
-
-        Args:
-            payload (dict[str, Any]): a to_dict-shaped payload.
-        """
-        return cls(
-            line=str(payload["line"]),
-            commands=tuple(
-                ParsedCommand(
-                    command=str(c["command"]),
-                    words=tuple(c["words"]),
-                    builtin=bool(c["builtin"]),
-                    paths=tuple(c["paths"]),
-                    cli=(str(c["cli"]) if c.get("cli") is not None else None),
-                )
-                for c in payload["commands"]
-            ),
-            command=str(payload["command"]),
-            builtin=bool(payload["builtin"]),
-            session_id=str(payload["session_id"]),
-            agent_id=str(payload["agent_id"]),
-        )
-
 
 # A per-runtime willingness script, answering "do I want this line?".
 # In code: a callable (sync or async) on the RouteContext returning a
@@ -221,7 +26,7 @@ class RouteContext:
 # RouteScript.
 #
 #     def wants(ctx: RouteContext) -> bool:
-#         return ctx.builtin and "/secret" not in ctx.line
+#         return "/secret" not in ctx.line
 #
 #     WorkspaceRuntime(script=wants)
 #
@@ -231,61 +36,21 @@ class RouteContext:
 #         script: guard.py
 RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | ScriptSource
 
+# What the route policy answers: a runtime name places the line, None
+# leaves each command to its first capturer. Refusing a line is a
+# policy's (a pre_execute Deny), not the router's. Mirrors the TS
+# RouteVerdict.
+RouteVerdict = str | None
 
-class RouteOutcome:
-    """The typed spelling of a policy verdict, one subclass per arm.
-
-    Code policies return an arm instance (or the plain-shape sugar
-    below); config scripts return the wire dict, since class instances
-    cannot cross the evaluator sandbox. Each arm serializes to one
-    wire key, and future powers grow as fields on the arm they ride
-    (attachments on RouteResult, kubernetes-admission style).
-    """
-
-
-@dataclass(frozen=True, slots=True)
-class RouteResult(RouteOutcome):
-    """The affirmative arm: this runtime serves the line.
-
-    Args:
-        runtime (str): name of the entry that serves every command it
-            captures on this line. Wire form: {"runtime": name}.
-    """
-
-    runtime: str
-
-
-@dataclass(frozen=True, slots=True)
-class DenyResult(RouteOutcome):
-    """The negative arm: refuse the line before anything runs.
-
-    The line exits 126 with ``<command>: Permission denied`` on
-    stderr and the reason on the result's ``refusal`` record. Wire
-    form: {"deny": reason}.
-
-    Args:
-        reason (str): why the line was denied.
-    """
-
-    reason: str
-
-
-# What the global policy may answer: a RouteOutcome arm, a runtime
-# name, None to pass, or the verdict dict (the wire spelling of the
-# arms, the only form a config script can return). Dict keys are
-# mutually exclusive: {"runtime": name} places the line, {"deny":
-# reason} refuses it. New powers grow as arm fields and dict keys,
-# never as new return types. Mirrors the TS RouteVerdict.
-RouteVerdict = RouteOutcome | str | Mapping[str, Any] | None
-
-# The global policy, answering "who takes this line?". In code: a
+# The route policy, answering "who takes this line?". In code: a
 # callable (sync or async) on the RouteContext returning a
 # RouteVerdict. From config: a .py file reference, loaded as
 # ScriptSource (its last expression is the verdict). Mirrors the TS
 # RoutePolicy.
 #
 #     def policy(ctx: RouteContext) -> str | None:
-#         return "wasi" if ctx.command == "python3" else None
+#         names = [c.command for c in ctx.commands]
+#         return "wasi" if "python3" in names else None
 #
 #     Workspace(..., route_policy=policy)
 #

@@ -431,15 +431,13 @@ async def test_boundary_expansion_preserves_command_tokens(
 async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
     script = (
         ScriptSource(
-            "ctx['command'] == 'trello board list' and "
-            "ctx['commands'][-1]['command'] == 'trello board list' and "
-            "ctx['commands'][-1]['words'][-1] == '/allowed'"
+            "[w['text'] for w in ctx['commands'][-1]['words']] == "
+            "['trello', 'board', 'list', '/allowed']"
         )
         if source
         else lambda ctx: (
-            ctx.command == "trello board list"
-            and ctx.commands[-1].command == "trello board list"
-            and ctx.commands[-1].words[-1] == "/allowed"
+            [w.text for w in ctx.commands[-1].words]
+            == ["trello", "board", "list", "/allowed"]
         )
     )
     probe = kind(captures=("trello board list",), script=script)
@@ -484,10 +482,13 @@ async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
         "python3",
     ],
 )
-async def test_external_script_sees_first_unresolved_stage(head):
+async def test_external_script_sees_every_stage(head):
     seen = []
     probe = ProcessProbe(
-        script=lambda ctx: seen.append(ctx) or ctx.command == "native-tool"
+        script=lambda ctx: (
+            seen.append(ctx)
+            or any(c.command == "native-tool" for c in ctx.commands)
+        )
     )
     named = ProcessProbe(captures=("python3",))
     named.name = "named"
@@ -508,14 +509,11 @@ async def test_external_script_sees_first_unresolved_stage(head):
         result = await ws.shell(head + " | native-tool")
         assert result.exit_code == 0
         assert len(probe.requests) == 1
-        assert seen[0].command == "native-tool"
-        assert not seen[0].builtin
         assert seen[0].line == head + " | native-tool"
-        assert seen[0].commands[0].command == (
-            "trello board list"
-            if head == "trello board list"
-            else head.split()[0]
-        )
+        assert [c.command for c in seen[0].commands] == [
+            head.split()[0],
+            "native-tool",
+        ]
         probe.requests.clear()
         denied = await ws.shell(head + " | denied-tool")
         assert denied.exit_code == 126

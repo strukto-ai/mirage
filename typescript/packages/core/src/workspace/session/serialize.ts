@@ -18,7 +18,10 @@ import type {
   Decision,
   Outcome,
   ProfileScript,
+  ProfileScripts,
+  ScriptMethod,
 } from '../../policy/types.ts'
+import { METHODS } from '../../policy/constants.ts'
 import type { Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import type { RuntimeLanguage } from '../../runtime/types.ts'
@@ -72,12 +75,13 @@ export function commandsFromJSON(data: CommandsJSON): AdmissionRules {
   }
 }
 
-/** A session's profile script as the record stores it (the Python spelling). */
+/** One of a session's policy programs as the record stores it (the Python spelling). */
 export interface ScriptJSON {
   profile: string
   language: string
   source: string
   runtime: string
+  config?: Record<string, unknown>
 }
 
 export function scriptToJSON(entry: ProfileScript): ScriptJSON {
@@ -86,6 +90,7 @@ export function scriptToJSON(entry: ProfileScript): ScriptJSON {
     language: entry.script.language,
     source: entry.script.source,
     runtime: entry.runtime,
+    config: { ...entry.config },
   }
 }
 
@@ -94,7 +99,21 @@ export function scriptFromJSON(data: ScriptJSON): ProfileScript {
     profile: data.profile,
     script: new ScriptSource(data.source, data.language as RuntimeLanguage),
     runtime: data.runtime,
+    config: { ...(data.config ?? {}) },
   }
+}
+
+/** A session's policy programs read back from a record, keyed by the document's method names. */
+export function scriptsFromJSON(data: Record<string, ScriptJSON[]>): ProfileScripts {
+  const methods: Record<string, ScriptMethod> = Object.fromEntries(
+    Object.entries(METHODS).map(([method, key]) => [key, method as ScriptMethod]),
+  )
+  return Object.fromEntries(
+    Object.entries(data).map(([key, entries]) => [
+      methods[key] ?? key,
+      entries.map(scriptFromJSON),
+    ]),
+  )
 }
 
 /** A ledger record as the session record stores it (the Python spelling). */

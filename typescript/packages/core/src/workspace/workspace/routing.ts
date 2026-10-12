@@ -13,23 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  parsedCommands,
   decideLine,
   evaluateScript,
   RouteError,
-  type RouteContext,
   type RouteDecision,
 } from '../../runtime/routing/index.ts'
-import type { ParsedCommand } from '../../runtime/routing/types.ts'
-import type { Ask, Claimant, Deny, Pending, Route } from '../../policy/types.ts'
+import type {
+  Ask,
+  Claimant,
+  CommandContext,
+  Deny,
+  Pending,
+  Route,
+  RouteContext,
+} from '../../policy/types.ts'
 import { opQuestion } from '../../policy/decisions.ts'
 import { agreed, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { Consumer, lookup } from '../lookup/index.ts'
+import type { Judged, Walked } from '../node/explain.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
@@ -51,7 +55,10 @@ import { makeAbortError } from '../../utils/abort.ts'
  * it), but a coded policy's Deny or Ask still holds the line. A runtime a
  * policy names must take the line itself (`validated`). Admission comes
  * first: a line `held` reports refused or waiting on a question is left
- * on the static bindings, unplaced, for the gate to answer. `claimant` is
+ * on the static bindings, unplaced, for the gate to answer. `judged` is
+ * the line pass's reading of the line (`lineJudgments`), which gives
+ * `preExecute` its commands; awaited only when there is a placement to
+ * consult. `claimant` is
  * the line as a whole on its hand-off, so an approval of the line is
  * claimed there like a command's: kept for the retry of a line still
  * waiting on another question, spent when the line ends.
@@ -68,23 +75,23 @@ export class Router {
   }
 
   async decide(
-    root: TSNodeLike,
     command: string,
     options: ExecuteOptions,
     session: SessionState,
+    judged: () => Promise<readonly [Walked, Judged[]][]>,
     held?: () => Promise<boolean>,
     claimant: Claimant | null = null,
     signal?: AbortSignal,
   ): Promise<RouteDecision<Runtime> | Deny | Pending | null> {
     if (options.routingDecision !== undefined) return options.routingDecision
     const policies = this.registry.policies
-    const placing = policies.wants('preExecute')
+    const placing = await policies.wantsFor('preExecute', session.sessionId)
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
     if (placed !== null && !placing) return placed
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (placed === null && !placing && !hasScripts) return null
     if (held !== undefined && (await held())) return placed
-    const ctx = this.context(root, command, options, session)
+    const ctx = this.context(command, options, session, await judged())
     const [said, route] = await policies.preExecute(ctx, placed !== null)
     const action =
       said?.kind === 'ask'
@@ -93,8 +100,8 @@ export class Router {
     if (action?.kind === 'abandoned') throw makeAbortError()
     if (action !== null) return action
     if (placed !== null) return placed
-    if (route !== null) return this.validated(route.runtime, ctx, session)
-    return this.scripted(ctx, session)
+    if (route !== null) return this.validated(route.runtime, ctx)
+    return this.scripted(ctx)
   }
 
   /**
@@ -104,14 +111,15 @@ export class Router {
    * `Router.placement`.
    */
   async placement(
-    root: TSNodeLike,
     command: string,
     session: SessionState,
+    judged: () => Promise<readonly [Walked, Judged[]][]>,
   ): Promise<[readonly (Deny | Ask | Route)[], RouteDecision<Runtime> | Deny | Pending | null]> {
     const policies = this.registry.policies
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
-    if (!hasScripts && !policies.wants('preExecute')) return [[], null]
-    const ctx = this.context(root, command, {}, session)
+    const placing = await policies.wantsFor('preExecute', session.sessionId)
+    if (!hasScripts && !placing) return [[], null]
+    const ctx = this.context(command, {}, session, await judged())
     const answers = await policies.answers('preExecute', ctx)
     let winner = settled(answers)
     if (winner?.kind === 'ask') {
@@ -121,10 +129,10 @@ export class Router {
     }
     if (winner?.kind === 'deny') return [answers, winner]
     if (winner?.kind === 'route') {
-      const checked = await this.validated(winner.runtime, ctx, session)
+      const checked = await this.validated(winner.runtime, ctx)
       return 'kind' in checked ? [[...answers, checked], checked] : [answers, checked]
     }
-    return [answers, await this.scripted(ctx, session)]
+    return [answers, await this.scripted(ctx)]
   }
 
   /**
@@ -134,22 +142,12 @@ export class Router {
    * policies placing it apart refuse it. Mirrors Python's
    * `Router._validated`.
    */
-  private async validated(
-    name: string,
-    ctx: RouteContext,
-    session: SessionState,
-  ): Promise<RouteDecision<Runtime> | Deny> {
+  private async validated(name: string, ctx: RouteContext): Promise<RouteDecision<Runtime> | Deny> {
     const placed = this.placed(name)
     const entries = this.runtimes.entries
     const entry = entries.find((e) => e.name === name)
     if (entry?.script === undefined) return placed
-    const willing = await evaluateScript(
-      entry.script,
-      ctx,
-      entry,
-      entries,
-      this.external(ctx.commands, session),
-    )
+    const willing = await evaluateScript(entry.script, ctx, entry, entries)
     if (willing) return placed
     return {
       kind: 'deny',
@@ -163,14 +161,8 @@ export class Router {
    * runtime's `script:` says whether it takes the line. Mirrors Python's
    * `Router._scripted`.
    */
-  private scripted(ctx: RouteContext, session: SessionState): Promise<RouteDecision<Runtime>> {
-    return decideLine(
-      this.runtimes.entries,
-      null,
-      ctx,
-      this.runtimes.bindings,
-      this.external(ctx.commands, session),
-    )
+  private scripted(ctx: RouteContext): Promise<RouteDecision<Runtime>> {
+    return decideLine(this.runtimes.entries, ctx)
   }
 
   /**
@@ -207,43 +199,33 @@ export class Router {
     }
   }
 
-  /** The stages workspace lookup leaves to the external fallback. */
-  private external(commands: readonly ParsedCommand[], session: SessionState): string[] {
-    return commands
-      .filter((parsed) => {
-        const name = parsed.command
-        return (
-          !name.includes('/') &&
-          !Object.hasOwn(this.runtimes.bindings, name) &&
-          lookup(name, session, this.registry) === Consumer.EXTERNAL
-        )
-      })
-      .map((parsed) => parsed.command)
-  }
-
   /**
    * What `preExecute` sees of one line, and `postExecute` before what came
-   * back: its commands, and the session, its namespace and its files, which
-   * a runtime's entry script reads as plain data too.
+   * back: the line, every command in it as the gate that runs it will read
+   * it, each with the session it would be judged in, and the session, its
+   * namespace and its files, which a script reads as plain data too.
+   * `judged` is the line pass's reading of the line (`lineJudgments`).
    */
   context(
-    root: TSNodeLike,
     command: string,
     options: ExecuteOptions,
     session: SessionState,
+    judged: readonly [Walked, Judged[]][],
   ): RouteContext {
-    const commands = parsedCommands(root, this.registry.clis.names(), (words) =>
-      this.registry.matchCommandPrefix(words),
-    )
-    const handles = this.registry.policies.views?.(session.sessionId, session) ?? null
+    const views = this.registry.policies.views
+    const commands: CommandContext[] = []
+    for (const [item, explained] of judged) {
+      const handles = views?.(item.session.sessionId, item.session) ?? null
+      for (const one of explained) {
+        if (one.ctx !== undefined) commands.push({ ...one.ctx, ...handles })
+      }
+    }
     return {
       line: command,
       commands,
-      command: commands[0]?.command ?? '',
-      builtin: commands[0]?.builtin ?? false,
       sessionId: session.sessionId,
       agentId: options.agentId ?? this.agentId ?? '',
-      ...handles,
+      ...views?.(session.sessionId, session),
     }
   }
 }

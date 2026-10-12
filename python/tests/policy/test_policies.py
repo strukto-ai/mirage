@@ -47,8 +47,7 @@ from mirage.policy.policies import (
     set_op_policies,
 )
 from mirage.policy.rule import RulePolicy
-from mirage.policy.types import SessionContext
-from mirage.runtime.routing import RouteContext
+from mirage.policy.types import RouteContext, SessionContext
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.dispatcher.constants import CALLS
@@ -364,8 +363,6 @@ async def test_post_execute_gate_merges_user_limits():
         ExecuteResultContext(
             line="echo",
             commands=(),
-            command="echo",
-            builtin=True,
             session_id="",
             agent_id="",
             producer=Producer(command="echo"),
@@ -431,8 +428,6 @@ async def test_pre_execute_routes_agree_and_an_ask_holds_the_line():
     line = RouteContext(
         line="python3 x",
         commands=(),
-        command="python3",
-        builtin=False,
         session_id="",
         agent_id="",
     )

@@ -46,6 +46,7 @@ from mirage.policy.types import (
     Deny,
     ExecuteResultContext,
     Route,
+    RouteContext,
     Scope,
     SessionContext,
     SessionResultContext,
@@ -56,7 +57,6 @@ from mirage.policy.types import (
     VfsResultContext,
 )
 from mirage.process.types import SpawnRequest
-from mirage.runtime.routing import RouteContext
 from mirage.runtime.types import ScriptSource
 from mirage.server import io_serde
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME
@@ -281,9 +281,13 @@ def profile_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Embed a JSON policy program as the ordinary config loader does."""
     doc = dict(raw)
     if doc.get("policy") is not None:
-        policy = dict(doc["policy"])
-        policy["script"] = ScriptSource(**policy["script"])
-        doc["policy"] = policy
+        doc["policy"] = {
+            method: [
+                {**program, "script": ScriptSource(**program["script"])}
+                for program in programs
+            ]
+            for method, programs in doc["policy"].items()
+        }
     return doc
 
 

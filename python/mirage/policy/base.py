@@ -17,12 +17,12 @@ from mirage.policy.types import (
     CommandContext,
     CommandResultContext,
     ExecuteResultContext,
+    RouteContext,
     SessionContext,
     SessionResultContext,
     VfsContext,
     VfsResultContext,
 )
-from mirage.runtime.routing.types import RouteContext
 
 
 class Policy:

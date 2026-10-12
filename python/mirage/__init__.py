@@ -64,7 +64,7 @@ if TYPE_CHECKING:
         ShellNode,
         VfsExplanation,
     )
-    from mirage.policy.types import VfsContext
+    from mirage.policy.types import RouteContext, VfsContext
     from mirage.runtime.base import Runtime
     from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
     from mirage.runtime.config import RuntimeConfig
@@ -76,7 +76,6 @@ if TYPE_CHECKING:
         LineExecutorMixin,
         ProcessExecutorMixin,
     )
-    from mirage.runtime.routing import DenyResult, RouteContext, RouteResult
     from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
     from mirage.runtime.table import (
         build_runtime,
@@ -208,7 +207,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.commands.errors": ("UsageError",),
     "mirage.commands.spec.types": ("UsageStyle",),
     "mirage.io": ("IOResult",),
-    "mirage.policy.types": ("VfsContext",),
+    "mirage.policy.types": ("RouteContext", "VfsContext"),
     "mirage.vfs.base": ("BaseVFS",),
     "mirage.vfs.testing": (
         "ReadFixture",
@@ -233,7 +232,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "LineExecutorMixin",
         "ProcessExecutorMixin",
     ),
-    "mirage.runtime.routing": ("DenyResult", "RouteContext", "RouteResult"),
     "mirage.runtime.sandbox": ("RemoteSandbox", "SandboxConfig"),
     "mirage.runtime.table": (
         "build_runtime",
@@ -302,7 +300,6 @@ __all__ = [
     "DEFAULT_MAX_GLOB_MATCHES",
     "Decision",
     "Decisions",
-    "DenyResult",
     "DriftPolicy",
     "EvaluatorMixin",
     "Explanation",
@@ -333,7 +330,6 @@ __all__ = [
     "RemoteSandbox",
     "VFSName",
     "RouteContext",
-    "RouteResult",
     "CodeExecution",
     "ShellRequest",
     "ProcessExecution",

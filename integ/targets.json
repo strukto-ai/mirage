@@ -185,12 +185,6 @@
         "QDRANT_HOST"
       ]
     },
-    "quickjs": {
-      "python": [
-        "MIRAGE_QUICKJS_HOME"
-      ],
-      "typescript": []
-    },
     "redis": {
       "python": [],
       "typescript": []
@@ -231,6 +225,12 @@
         "TRELLO_URL"
       ],
       "shared": true
+    },
+    "wasi": {
+      "python": [
+        "MIRAGE_WASI_HOME"
+      ],
+      "typescript": []
     }
   },
   "targets": [
@@ -3277,29 +3277,59 @@
         },
         "scripted": {
           "policy": {
-            "script": {
-              "language": "python",
-              "source": "def pre_command(ctx):\n    c = ctx['command']\n    for p in c['paths']:\n        if c['name'] == 'cat' and p.startswith('/repo/sealed/'):\n            return {'deny': 'written by ' + ctx['profile']}\n    return None\n"
-            },
-            "runtime": "monty"
+            "pre_command": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        print(json.dumps({'kind': 'deny', 'reason': 'written by ' + ctx['profile']}))\n        break\n"
+                },
+                "runtime": "monty"
+              }
+            ]
           }
         },
         "scriptedask": {
           "policy": {
-            "script": {
-              "language": "python",
-              "source": "def pre_command(ctx):\n    c = ctx['command']\n    for p in c['paths']:\n        if c['name'] == 'rm' and p.startswith('/scratch/askme/'):\n            return {'ask': 'scripted sign-off'}\n    return None\n"
-            },
-            "runtime": "monty"
+            "pre_command": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'rm' and p.startswith('/scratch/askme/'):\n        print(json.dumps({'kind': 'ask', 'reason': 'scripted sign-off'}))\n        break\n"
+                },
+                "runtime": "monty"
+              }
+            ]
           }
         },
         "scriptedops": {
           "policy": {
-            "script": {
-              "language": "python",
-              "source": "def pre_command(ctx):\n    for p in ctx['command']['paths']:\n        if 'marker' in contents(p):\n            return {'deny': 'marked by ' + ctx['profile']}\n    return None\n\ndef pre_vfs(ctx):\n    op = ctx['call']\n    if op['write'] and op['path'].startswith('/scratch/cold/'):\n        return {'deny': 'cold by ' + ctx['profile']}\n    if op['name'] in READS and op['path'].startswith('/scratch/drop/'):\n        return {'deny': 'drop box by ' + ctx['profile']}\n    if op['name'] == 'readdir' and op['path'].startswith('/scratch/vault'):\n        return {'deny': 'vault by ' + ctx['profile']}\n    return None\n\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\n\ndef pre_session(ctx):\n    if ctx['write']['key'].startswith('AWS_'):\n        return {'deny': 'credentials are set by the operator'}\n    return None\n\ndef contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n"
-            },
-            "runtime": "monty"
+            "pre_command": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\ndef contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n\nfor p in ctx['paths']:\n    if 'marker' in contents(p):\n        print(json.dumps({'kind': 'deny', 'reason': 'marked by ' + ctx['profile']}))\n        break\n"
+                },
+                "runtime": "monty"
+              }
+            ],
+            "pre_vfs": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name in READS and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                },
+                "runtime": "monty"
+              }
+            ],
+            "pre_session": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['key'].startswith('AWS_'):\n    reason = 'credentials are set by the operator'\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                },
+                "runtime": "monty"
+              }
+            ]
           }
         },
         "speaker": {
@@ -3340,10 +3370,9 @@
     {
       "id": "ram-scripted",
       "hosts": [
-        "python",
-        "typescript-node"
+        "python"
       ],
-      "service": "quickjs",
+      "service": "wasi",
       "mounts": [
         {
           "path": "/repo",
@@ -3357,8 +3386,8 @@
         }
       ],
       "sessions": {
-        "scriptedjs": "scriptedjs",
-        "scriptedopsjs": "scriptedopsjs"
+        "scriptedwasm": "scriptedwasm",
+        "scriptedopswasm": "scriptedopswasm"
       },
       "profile": "default",
       "profiles": {
@@ -3375,22 +3404,112 @@
             ]
           }
         },
-        "scriptedjs": {
+        "scriptedwasm": {
           "policy": {
-            "script": {
-              "language": "js",
-              "source": "function preCommand(ctx) {\n  const c = ctx.command\n  const hit = c.name === 'cat' && c.paths.some((p) => p.startsWith('/repo/sealed/'))\n  return hit ? {deny: 'sealed by ' + ctx.profile} : null\n}\n"
-            },
-            "runtime": "quickjs"
+            "pre_command": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        print(json.dumps({'kind': 'deny', 'reason': 'written by ' + ctx['profile']}))\n        break\n"
+                },
+                "runtime": "wasi"
+              }
+            ]
           }
         },
-        "scriptedopsjs": {
+        "scriptedopswasm": {
           "policy": {
-            "script": {
-              "language": "js",
-              "source": "function preVfs(ctx) {\n  const op = ctx.call\n  if (op.write && op.path.startsWith('/scratch/cold/')) return {deny: 'cold by ' + ctx.profile}\n  if (op.name === 'readdir' && op.path.startsWith('/scratch/vault')) return {deny: 'vault by ' + ctx.profile}\n  const reads = ['read', 'read_bytes', 'read_stream', 'read_range']\n  return reads.includes(op.name) && op.path.startsWith('/scratch/drop/') ? {deny: 'drop box by ' + ctx.profile} : null\n}\nfunction preSession(ctx) {\n  return ctx.write.key.startsWith('AWS_') ? {deny: 'credentials are set by the operator'} : null\n}\n"
-            },
-            "runtime": "quickjs"
+            "pre_vfs": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name in READS and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                },
+                "runtime": "wasi"
+              }
+            ],
+            "pre_session": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['key'].startswith('AWS_'):\n    reason = 'credentials are set by the operator'\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                },
+                "runtime": "wasi"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "ram-scripted-pyodide",
+      "hosts": [
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "vfs": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ],
+      "sessions": {
+        "scriptedwasm": "scriptedwasm",
+        "scriptedopswasm": "scriptedopswasm"
+      },
+      "profile": "default",
+      "profiles": {
+        "default": {
+          "commands": {
+            "allow": [
+              "ls",
+              "cat",
+              "echo",
+              "head",
+              "mkdir",
+              "touch",
+              "rm"
+            ]
+          }
+        },
+        "scriptedwasm": {
+          "policy": {
+            "pre_command": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        print(json.dumps({'kind': 'deny', 'reason': 'written by ' + ctx['profile']}))\n        break\n"
+                },
+                "runtime": "pyodide"
+              }
+            ]
+          }
+        },
+        "scriptedopswasm": {
+          "policy": {
+            "pre_vfs": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name in READS and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                },
+                "runtime": "pyodide"
+              }
+            ],
+            "pre_session": [
+              {
+                "script": {
+                  "language": "python",
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['key'].startswith('AWS_'):\n    reason = 'credentials are set by the operator'\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                },
+                "runtime": "pyodide"
+              }
+            ]
           }
         }
       }

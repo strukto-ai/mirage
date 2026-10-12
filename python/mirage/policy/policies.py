@@ -57,13 +57,13 @@ from mirage.policy.types import (
     Outcome,
     Pending,
     Route,
+    RouteContext,
     SessionContext,
     SessionResultContext,
     VfsContext,
     VfsExplanation,
     VfsResultContext,
 )
-from mirage.runtime.routing.types import RouteContext
 from mirage.types import Limit, MountMode, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
@@ -405,8 +405,8 @@ async def pre_session_gate(
 
     Args:
         policies (Policies | None): the workspace's admission policies.
-        ctx (SessionContext): the mutation, built by the session view so the
-            plane, verb, rendering and session identity are stated in
+        ctx (SessionContext): the mutation, built by the session view so
+            the verb, rendering and session identity are stated in
             exactly one place.
 
     Raises:
@@ -692,7 +692,7 @@ class Policies:
                 ``_chain`` takes it.
         """
         base = getattr(Policy, hook)
-        for policy in tuple(self._policies):
+        for policy in (*self._policies, *filter(None, [self._placement])):
             if rules_only and not isinstance(policy, PermissionsPolicy):
                 continue
             if getattr(type(policy), hook) is base:

@@ -401,7 +401,7 @@ cd integ && npx tsx server/launcher/main.ts --config ci/fakes.json
 
 The core facet also needs redis and mongo on their default ports (CI uses a
 `mongo:8` service container; `docker run -d -p 27017:27017 mongo:8` matches
-it) and `MIRAGE_QUICKJS_HOME` pointing at the quickjs-ng WASI build for the
+it) and `MIRAGE_WASI_HOME` pointing at the CPython WASI build for the
 scripted target. If a pinned port is taken locally, copy `ci/fakes.json` and
 move that one entry.
 

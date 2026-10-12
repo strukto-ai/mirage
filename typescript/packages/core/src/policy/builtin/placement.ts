@@ -14,22 +14,20 @@
 
 import type { Runtime } from '../../runtime/base.ts'
 import { evaluatePolicy } from '../../runtime/routing/decide.ts'
-import { RouteDeny } from '../../runtime/routing/errors.ts'
-import type { RouteContext, RoutePolicy } from '../../runtime/routing/types.ts'
+import { RouteError } from '../../runtime/routing/errors.ts'
+import type { RoutePolicy } from '../../runtime/routing/types.ts'
 import type { Policy } from '../base.ts'
-import type { Deny, Route } from '../types.ts'
+import type { Action, RouteContext } from '../types.ts'
 
 /**
  * The workspace's `routePolicy`, answering at `preExecute`. The workspace
  * compiles the configured callable or script into this built-in
- * (`Policies.place`), so a route verdict is one more placement answer: a runtime name
- * (`{ runtime: name }`, `RouteResult`) is a Route, `{ deny: reason }`
- * (`DenyResult`) a Deny, null silence. Its payload and its verdict shapes
- * are the route policy's own. A mistake in it (an unknown verdict key, a
- * script that does not parse) throws `RouteError` to the caller rather
- * than failing closed, since a misconfigured route policy is the
- * deployment's to fix and not a refusal to show an agent. Mirrors the
- * Python `PlacementPolicy`.
+ * (`Policies.place`), so a route verdict is one more `preExecute` answer:
+ * a runtime name is a Route, null silence. A mistake in it (any other
+ * answer, a script that does not parse) throws `RouteError` to the caller
+ * rather than failing closed, since a misconfigured route policy is the
+ * deployment's to fix and not a refusal to show an agent.
+ * Mirrors the Python `PlacementPolicy`.
  */
 export class PlacementPolicy implements Policy {
   /**
@@ -42,14 +40,12 @@ export class PlacementPolicy implements Policy {
     private readonly entries: () => readonly Runtime[],
   ) {}
 
-  async preExecute(ctx: RouteContext): Promise<Deny | Route | null> {
-    let name: string | null
-    try {
-      name = await evaluatePolicy(this.route, ctx, this.entries())
-    } catch (err) {
-      if (err instanceof RouteDeny) return { kind: 'deny', reason: err.reason }
-      throw err
-    }
-    return name === null ? null : { kind: 'route', runtime: name }
+  async preExecute(ctx: RouteContext): Promise<Action | null> {
+    const verdict: unknown = await evaluatePolicy(this.route, ctx, this.entries())
+    if (verdict === null || verdict === undefined) return null
+    if (typeof verdict === 'string' && verdict !== '') return { kind: 'route', runtime: verdict }
+    throw new RouteError(
+      `route policy must answer a runtime name or None, got ${JSON.stringify(verdict)}`,
+    )
   }
 }

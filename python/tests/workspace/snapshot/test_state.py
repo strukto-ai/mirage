@@ -497,7 +497,7 @@ class DenyGate(Policy):
     """Refuse env writes to GATE_* names, the deployment's rule."""
 
     async def pre_session(self, ctx: SessionContext) -> Action | None:
-        if ctx.plane == "env" and ctx.key.startswith("GATE_"):
+        if ctx.key.startswith("GATE_"):
             return Deny("GATE_* refused by policy\n")
         return None
 
@@ -633,8 +633,10 @@ async def test_a_session_the_restore_creates_runs_under_the_default_profile():
         restored = target.get_session("s2")
         assert restored.profile == "default"
         assert restored.commands is compiled.policies.commands
-        assert restored.script is compiled.policies.script
-        assert target._session_mgr.script_of("s2") is compiled.policies.script
+        assert restored.scripts is compiled.policies.scripts
+        assert (
+            target._session_mgr.scripts_of("s2") is compiled.policies.scripts
+        )
         assert restored.env.get("PUBLIC_A") == "1"
         refused = await target.shell("rm /f.txt", session_id="s2")
         assert refused.exit_code == 126

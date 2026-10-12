@@ -317,13 +317,18 @@ function scriptedProfile(doc: unknown): unknown {
   if (typeof doc !== 'object' || doc === null) return doc
   const policy = (doc as { policy?: unknown }).policy
   if (typeof policy !== 'object' || policy === null) return doc
-  const { script, runtime } = policy as { script?: unknown; runtime?: unknown }
-  if (typeof script !== 'object' || script === null) return doc
-  const { source, language } = script as { source: string; language?: 'python' | 'js' }
-  return {
-    ...(doc as object),
-    policy: { script: new ScriptSource(source, language ?? 'python'), runtime },
-  }
+  const loaded = Object.fromEntries(
+    Object.entries(policy as Record<string, unknown[]>).map(([method, programs]) => [
+      method,
+      programs.map((program) => {
+        const { script, runtime } = program as { script?: unknown; runtime?: unknown }
+        if (typeof script !== 'object' || script === null) return program
+        const { source, language } = script as { source: string; language?: 'python' | 'js' }
+        return { script: new ScriptSource(source, language ?? 'python'), runtime }
+      }),
+    ]),
+  )
+  return { ...(doc as object), policy: loaded }
 }
 
 function permissionOptions(target: Target): {

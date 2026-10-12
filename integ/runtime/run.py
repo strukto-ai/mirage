@@ -51,12 +51,13 @@ from mirage.policy.types import (  # noqa: E402
     Deny,
     ExecuteResultContext,
     Route,
+    RouteContext,
     VfsContext,
     VfsResultContext,
 )
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
-from mirage.runtime.routing import RouteContext, ScriptSource  # noqa: E402
+from mirage.runtime.routing import ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime, register_runtime  # noqa: E402
 from mirage.runtime.types import RunResult  # noqa: E402
 from mirage.types import FileStat, Limit, PathSpec  # noqa: E402

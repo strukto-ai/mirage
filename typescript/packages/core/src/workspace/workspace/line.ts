@@ -20,7 +20,7 @@ import { materialize } from '../../io/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { LineExecutor } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
-import type { RouteContext } from '../../runtime/routing/types.ts'
+import type { RouteContext } from '../../policy/types.ts'
 import {
   type Claimant,
   type Policies,

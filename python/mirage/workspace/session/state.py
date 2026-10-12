@@ -1004,7 +1004,6 @@ async def gate_restored_vars(
         await pre_session_gate(
             policies,
             SessionContext(
-                plane="env",
                 verb="set",
                 key=name,
                 value=gate_rendering(var.value),
@@ -1105,7 +1104,6 @@ async def set_var(
             await _land_coercion(session, store, coercion)
             raise
     written = SessionContext(
-        plane="env",
         verb="set",
         key=name,
         value=gate_rendering(value),
@@ -1227,7 +1225,6 @@ async def unset_var(
     if env_is_readonly(session, name, follow_ref=False):
         raise ReadonlyVariableError(name)
     written = SessionContext(
-        plane="env",
         verb="unset",
         key=name,
         value=None,
@@ -1599,7 +1596,6 @@ async def mark_var(
         name = deref(session, name) or name
     ensure_var_visible(session, name)
     written = SessionContext(
-        plane="env",
         verb="set",
         key=name,
         value=None,

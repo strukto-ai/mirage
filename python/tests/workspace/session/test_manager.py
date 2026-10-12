@@ -316,11 +316,11 @@ async def test_manager_default_adopts_stored_path_axis():
 
 
 @pytest.mark.asyncio
-async def test_manager_default_adopts_stored_script():
-    # The profile script is a durable restriction like the hidden
+async def test_manager_default_adopts_stored_scripts():
+    # The profile's programs are a durable restriction like the hidden
     # shapes: a store written by a scripted deployment must not wake a
     # daemon configured without a default profile unjudged, and the
-    # next flush must not erase the script from the record.
+    # next flush must not erase the programs from the record.
     store = RAMSessionStore()
     await store.set(
         "default",
@@ -328,23 +328,33 @@ async def test_manager_default_adopts_stored_script():
             "session_id": "default",
             "cwd": "/w",
             "env": {},
-            "script": {
-                "profile": "judge",
-                "language": "python",
-                "source": "None",
-                "runtime": "monty",
+            "scripts": {
+                "pre_command": [
+                    {
+                        "profile": "judge",
+                        "language": "python",
+                        "source": "pass",
+                        "runtime": "wasi",
+                        "config": {"home": "/w"},
+                    }
+                ],
             },
         },
     )
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
-    expected = ProfileScript(
-        profile="judge",
-        script=ScriptSource("None", language="python"),
-        runtime="monty",
-    )
-    assert mgr.get("default").script == expected
-    assert mgr.script_of("default") == expected
+    expected = {
+        "pre_command": (
+            ProfileScript(
+                profile="judge",
+                script=ScriptSource("pass", language="python"),
+                runtime="wasi",
+                config={"home": "/w"},
+            ),
+        )
+    }
+    assert mgr.get("default").scripts == expected
+    assert mgr.scripts_of("default") == expected
 
 
 def test_manager_default_profile_shapes_the_default_session():
@@ -752,11 +762,15 @@ async def test_profile_changes_publish_only_after_persistence(
         policies=ProfilePolicies(
             mount_modes={"/data": MountMode.READ},
             commands=AdmissionRules(allow=("cat",)),
-            script=ProfileScript(
-                profile="judge",
-                script=ScriptSource("None", language="python"),
-                runtime="monty",
-            ),
+            scripts={
+                "pre_command": (
+                    ProfileScript(
+                        profile="judge",
+                        script=ScriptSource("pass", language="python"),
+                        runtime="monty",
+                    ),
+                )
+            },
         ),
     )
     mgr.default_profile = original
@@ -781,7 +795,7 @@ async def test_profile_changes_publish_only_after_persistence(
         await asyncio.wait_for(entered.wait(), 5)
         assert session.to_dict() == before
         assert mgr.commands_of("") == original.policies.commands
-        assert mgr.script_of("") == original.policies.script
+        assert mgr.scripts_of("") == original.policies.scripts
         session.cwd = "/changed-during-write"
         release.set()
         if failure:
@@ -791,13 +805,13 @@ async def test_profile_changes_publish_only_after_persistence(
             assert session.to_dict() == before
             assert await store.load() == persisted
             assert mgr.commands_of("") == original.policies.commands
-            assert mgr.script_of("") == original.policies.script
+            assert mgr.scripts_of("") == original.policies.scripts
         else:
             assert await updating is session
             assert session.mount_modes is None
             assert session.visibility.paths is None
             assert mgr.commands_of("") is None
-            assert mgr.script_of("") is None
+            assert mgr.scripts_of("") == {}
         assert session.cwd == "/changed-during-write"
         monkeypatch.setattr(store, "cas_set", cas_set)
         await mgr.flush()

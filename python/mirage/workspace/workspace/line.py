@@ -28,9 +28,9 @@ from mirage.policy import (
     render_deny,
     resolve_limit,
 )
+from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.routing import RouteContext
 from mirage.runtime.types import ShellRequest
 from mirage.types import Limit, PathSpec, Producer
 from mirage.workspace.mount import MountEntry

@@ -15,8 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TSNodeLike } from '../../shell/types.ts'
-import { commandNodes, parsedCommands } from './facts.ts'
-import { routeContextFromPayload, routeContextPayload, type RouteContext } from './types.ts'
+import { commandNodes } from './facts.ts'
 
 // Mirrors python/tests/runtime/routing/test_facts.py.
 
@@ -28,53 +27,6 @@ function command(...words: string[]): TSNodeLike {
   const children = words.map((w, i) => word(i === 0 ? 'command_name' : 'word', w))
   return { type: 'command', text: words.join(' '), children, namedChildren: children }
 }
-
-function line(...commands: TSNodeLike[]): TSNodeLike {
-  return { type: 'program', text: '', children: commands, namedChildren: commands }
-}
-
-describe('parsedCommands', () => {
-  it('distills words, builtin, and paths per command', () => {
-    const root = line(command('cat', '/a/big.csv'), command('python3', '/r/x.py', '1'))
-    const commands = parsedCommands(root)
-    expect(commands.map((c) => c.command)).toEqual(['cat', 'python3'])
-    expect(commands[0]?.paths).toEqual(['/a/big.csv'])
-    expect(commands[1]?.words).toEqual(['python3', '/r/x.py', '1'])
-    expect(commands.every((c) => c.cli === null)).toBe(true)
-  })
-
-  it('tags installed CLI heads, and only heads', () => {
-    const root = line(command('slack', 'send', 'hi'), command('cat', '/x/slack'))
-    const commands = parsedCommands(root, new Set(['slack']))
-    expect(commands[0]?.cli).toBe('slack')
-    expect(commands[1]?.cli).toBeNull()
-  })
-})
-
-describe('policy context wire schema', () => {
-  it('round-trips the cli fact through the payload', () => {
-    const ctx: RouteContext = {
-      line: 'slack send /data/x',
-      commands: [
-        {
-          command: 'slack',
-          words: ['slack', 'send', '/data/x'],
-          builtin: false,
-          paths: ['/data/x'],
-          cli: 'slack',
-        },
-      ],
-      command: 'slack',
-      builtin: false,
-      sessionId: 's1',
-      agentId: 'a1',
-    }
-    const replayed = routeContextFromPayload(
-      JSON.parse(JSON.stringify(routeContextPayload(ctx))) as Record<string, unknown>,
-    )
-    expect(replayed).toEqual(ctx)
-  })
-})
 
 describe('commandNodes', () => {
   it('walks nested commands in source order', () => {

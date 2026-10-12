@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Mapping
+from typing import Any
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.table import NAMED, build_runtime
 from mirage.runtime.types import EvalValue, ScriptSource
@@ -32,13 +35,11 @@ async def eval_with_ctx(
 
     The one place the config-script calling convention is written down:
     the payload arrives as a single global named ``ctx``, and the
-    script's last expression is its answer. Every config script speaks
-    it (the runtime router's ``policy:``, a runtime's entry script, a
-    profile's ``script:``), and they used to spell it out one at a time,
-    which is a convention two callers can drift apart on: the
-    TypeScript profile scripts passed the payload's keys as separate
-    globals for exactly one release, so ``ctx`` was undefined on that
-    host alone.
+    script's last expression is its answer. Both evaluated config
+    scripts speak it (``route_policy`` and a runtime's entry script),
+    and spelling it out per caller is a convention two callers can drift
+    apart on. A profile's policy programs are run, not evaluated
+    (``script_engine``).
 
     Deliberately raises rather than words its failures. Each caller
     refuses in its own voice and its own error type (the runtime
@@ -67,59 +68,58 @@ async def eval_with_ctx(
     return result.value
 
 
-def script_engine(script: ScriptSource, runtime: str) -> Runtime:
-    """Build the engine a config script runs on: the one the config
-    named, and the config always names one.
+def script_engine(
+    script: ScriptSource,
+    runtime: str,
+    config: Mapping[str, Any] | None = None,
+) -> LanguageRuntime:
+    """Build the runtime a config program runs on: the one the config
+    named, with the settings it gave, and the config always names one.
 
-    There is no default engine to fall back to: a script without a
+    There is no default runtime to fall back to: a program without a
     ``runtime`` is refused where the config is validated, because a
-    default the operator never wrote is an engine they never chose. The
-    engine is built fresh and never picked out of a workspace's runtime
+    default the operator never wrote is a runtime they never chose. The
+    runtime is built fresh and never picked out of a workspace's runtime
     world: the world is the ordered set that serves *agent* code, it is
     mutable after construction, and an entry drops out of it silently
     when an optional dependency is missing. The mismatch checks run
-    before the build: an engine that cannot be installed here would
+    before the build: a runtime that cannot be installed here would
     otherwise report its missing dependency for a config that names the
-    wrong engine, which sends the operator after the wrong fix.
+    wrong one, which sends the operator after the wrong fix.
 
     Args:
         script (ScriptSource): the program, carrying its language.
-        runtime (str): the engine the config named.
-
-    Returns:
-        Runtime: the engine, which every arm above has proved carries
-        the evaluator capability. Typed as the Runtime it also is,
-        because ``name`` and ``close`` are the runtime's and the mixin
-        is capability-only; the caller narrows once to evaluate.
+        runtime (str): the runtime the config named.
+        config (Mapping[str, Any] | None): its settings, the ``config``
+            block a ``runtimes`` entry carries.
 
     Raises:
-        ValueError: the named engine is unknown, cannot evaluate,
+        ValueError: the named runtime is unknown, runs no programs,
             speaks another language, or its dependency is missing. The
             message is a clause about "script", for the caller to
             prefix with whose script it is.
     """
     named = NAMED.get(runtime)
     if named is not None:
-        if not issubclass(named, EvaluatorMixin):
+        if not issubclass(named, LanguageRuntime):
             raise ValueError(
-                f"script names runtime {runtime!r}, which runs programs but "
-                f"cannot evaluate one"
+                f"script names runtime {runtime!r}, which runs no programs"
             )
-        spoken = getattr(named, "language", None)
-        if spoken is not None and spoken != script.language:
+        if named.language != script.language:
             raise ValueError(
                 f"script is {script.language}, but names runtime {runtime!r}, "
-                f"which speaks {spoken}"
+                f"which speaks {named.language}"
             )
     try:
-        built = build_runtime(runtime)
-    except (ValueError, ImportError, OSError) as exc:
-        # An engine reports a missing dependency as its own error
-        # (ImportError for an absent extra, FileNotFoundError for
-        # quickjs's absent wasm), and each carries its own install hint.
+        built = build_runtime(runtime, config=dict(config or {}))
+    except (ValueError, TypeError, ImportError, OSError) as exc:
+        # A runtime reports a missing dependency as its own error
+        # (ImportError for an absent extra, FileNotFoundError for an
+        # absent wasm build), and each carries its own install hint; an
+        # unknown setting is a TypeError from its config.
         raise ValueError(f"script names runtime {runtime!r}: {exc}") from exc
-    if not isinstance(built, EvaluatorMixin):
+    if not isinstance(built, LanguageRuntime):
         raise ValueError(
-            f"script names runtime {runtime!r}, which cannot evaluate"
+            f"script names runtime {runtime!r}, which runs no programs"
         )
     return built

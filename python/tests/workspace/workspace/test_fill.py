@@ -25,10 +25,9 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.io import IOResult
 from mirage.policy.match import Outcome
-from mirage.policy.types import Decision, Scope
+from mirage.policy.types import Decision, RouteContext, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.routing.types import RouteContext
 from mirage.runtime.types import RunResult, ScriptSource
 from mirage.secrets import registry
 from mirage.secrets.errors import SecretsError
@@ -2130,26 +2129,24 @@ async def test_a_bad_instance_config_fails_the_lines_that_read_it():
 # first is a session-write gate, and only for the sessions under its
 # profile.
 SESSION_GATE = """\
-def pre_session(ctx):
-    if ctx['write']['key'].startswith('AWS_'):
-        return 'deny'
-    return None
-"""
+import json
+import os
 
-COMMAND_JUDGE = """\
-def pre_command(ctx):
-    return None
+ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
+if ctx['key'].startswith('AWS_'):
+    print(json.dumps({'kind': 'deny'}))
 """
 
 
-def _scripted_ws(env, source: str) -> Workspace:
+def _scripted_ws(env, method: str, source: str) -> Workspace:
     return _ws(
         env,
         profiles={
             "release": {
                 "policy": {
-                    "script": ScriptSource(source),
-                    "runtime": "monty",
+                    method: [
+                        {"script": ScriptSource(source), "runtime": "monty"}
+                    ]
                 }
             }
         },
@@ -2163,7 +2160,9 @@ async def test_a_profile_policy_at_the_session_view_drops_the_masks():
     # value is fetched, as under a coded pre_session policy.
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
-    ws = _scripted_ws({"TOKEN": {"from": "fake", "ref": "r"}}, SESSION_GATE)
+    ws = _scripted_ws(
+        {"TOKEN": {"from": "fake", "ref": "r"}}, "pre_session", SESSION_GATE
+    )
     try:
         io = await ws.shell("TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
@@ -2179,7 +2178,9 @@ async def test_a_profile_policy_away_from_the_session_view_keeps_the_masks():
     # and no source is contacted.
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
-    ws = _scripted_ws({"TOKEN": {"from": "fake", "ref": "r"}}, COMMAND_JUDGE)
+    ws = _scripted_ws(
+        {"TOKEN": {"from": "fake", "ref": "r"}}, "pre_command", "pass\n"
+    )
     try:
         io = await ws.shell("TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"

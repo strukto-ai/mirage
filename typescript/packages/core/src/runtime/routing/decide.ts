@@ -13,25 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../base.ts'
-import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { evalWithCtx } from '../script.ts'
-import { bindCommands, catchAll, runtimeBindingsFor } from '../table.ts'
+import { bindCommands, catchAll } from '../table.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
+import { scriptContext } from '../../policy/script.ts'
+import type { RouteContext } from '../../policy/types.ts'
 import { EvalError } from '../errors.ts'
 import { isEvaluator, type Evaluator } from '../mixin.ts'
 import { ScriptSource, type EvalValue } from '../types.ts'
-import { RouteDeny, RouteError } from './errors.ts'
-import {
-  DenyResult,
-  RouteResult,
-  routeContextPayload,
-  type RouteDecision,
-  type RouteContext,
-  type RoutePolicy,
-  type RouteScript,
-} from './types.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { RouteError } from './errors.ts'
+import type { RouteDecision, RoutePolicy, RouteScript, RouteVerdict } from './types.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../constants.ts'
 
 /**
@@ -123,51 +115,31 @@ async function evalSource(
 }
 
 /**
- * The context as one runtime's script sees it: command/builtin become
- * the first stage the runtime captures, so `ctx.command === 'python3'`
- * means what it reads as even on `cat x | python3`. A runtime with no
- * captured stage on the line (including the catch-all workspace) keeps the
- * line's first stage.
- */
-function ctxForRuntime(
-  ctx: RouteContext,
-  runtime: Runtime,
-  externalCommands: readonly string[],
-): RouteContext {
-  for (const parsed of ctx.commands) {
-    if (
-      runtime.captures.includes(parsed.command) ||
-      (runtime.captures.includes(EXTERNAL_COMMANDS) && externalCommands.includes(parsed.command))
-    ) {
-      return { ...ctx, command: parsed.command, builtin: parsed.builtin }
-    }
-  }
-  return ctx
-}
-
-/**
  * Ask one runtime's script whether it wants the line.
  *
- * A script answering with a policy verdict shape (an object, Map, or a
- * RouteOutcome arm) fails loud: a deny-dict is truthy, so coercing it
- * would mean "willing", the opposite of intent.
+ * The script sees the line's context with `runtime` added (its name and
+ * captures), so it can find the commands it would serve. A script
+ * answering with a policy answer (an object or Map) fails loud: a
+ * deny-dict is truthy, so coercing it would mean "willing", the
+ * opposite of intent.
  */
 export async function evaluateScript(
   script: RouteScript,
   ctx: RouteContext,
   runtime: Runtime,
   entries: readonly Runtime[],
-  externalCommands: readonly string[],
 ): Promise<boolean> {
-  const view = ctxForRuntime(ctx, runtime, externalCommands)
   const verdict: unknown =
     script instanceof ScriptSource
       ? await evalSource(
           script.source,
-          routeContextPayload(view, runtime),
+          {
+            ...scriptContext(ctx),
+            runtime: { name: runtime.name, captures: [...runtime.captures] },
+          },
           evaluatorOf(entries, script.language),
         )
-      : await script(view)
+      : await script(ctx)
   if (
     verdict !== null &&
     typeof verdict === 'object' &&
@@ -175,118 +147,44 @@ export async function evaluateScript(
     !(verdict instanceof Uint8Array)
   ) {
     throw new RouteError(
-      'entry scripts answer a boolean (deny and placement belong to ' +
-        `the global policy), got ${JSON.stringify(verdict)} from '${runtime.name}'`,
+      "entry scripts answer a boolean (placement is the route policy's, " +
+        `refusal a policy's), got ${JSON.stringify(verdict)} from '${runtime.name}'`,
     )
   }
   return Boolean(verdict)
 }
 
-/**
- * Normalize a policy verdict to a runtime name or null to pass.
- *
- * The object form is the extensible spelling: `{runtime: name}` places
- * the line, `{deny: reason}` refuses it, and the keys are mutually
- * exclusive. Unknown keys fail loud so a typo never silently passes.
- */
-export function parseVerdict(verdict: unknown): string | null {
-  if (verdict === null) return null
-  if (typeof verdict === 'string') return verdict
-  if (verdict instanceof RouteResult) return verdict.runtime
-  if (verdict instanceof DenyResult) throw new RouteDeny(verdict.reason)
-  if (verdict instanceof Map) {
-    // A custom evaluator may hand python dicts back as Map (the monty
-    // engine did before its boundary normalized); fold to the plain
-    // object wire shape instead of misreading Map as an empty dict.
-    const folded: Record<string, unknown> = {}
-    for (const [key, value] of verdict) folded[String(key)] = value
-    return parseVerdict(folded)
-  }
-  if (typeof verdict === 'object' && !Array.isArray(verdict) && !(verdict instanceof Uint8Array)) {
-    const obj = verdict as Record<string, unknown>
-    const unknown = Object.keys(obj)
-      .filter((key) => key !== 'runtime' && key !== 'deny')
-      .sort(compareCodePoints)
-    if (unknown.length > 0) {
-      throw new RouteError(`unknown policy verdict keys: ${JSON.stringify(unknown)}`)
-    }
-    if ('deny' in obj && 'runtime' in obj) {
-      throw new RouteError('policy verdict cannot both place and deny')
-    }
-    if ('deny' in obj) throw new RouteDeny(String(obj.deny))
-    if (typeof obj.runtime === 'string') return obj.runtime
-    throw new RouteError("policy verdict dict needs a 'runtime' name or a 'deny' reason")
-  }
-  throw new RouteError(
-    `policy must return a runtime name, a verdict dict, or null, got ${JSON.stringify(verdict)}`,
-  )
-}
-
-/** Run the global policy, returning a runtime name or null to pass. */
+/** Run the route policy and return what it answered, unread. */
 export async function evaluatePolicy(
   policy: RoutePolicy,
   ctx: RouteContext,
   entries: readonly Runtime[],
-): Promise<string | null> {
+): Promise<RouteVerdict | EvalValue> {
   // An untyped JS policy can return undefined for "pass"; `?? null`
   // folds it into python's None instead of erroring.
-  const verdict =
-    policy instanceof ScriptSource
-      ? await evalSource(
-          policy.source,
-          routeContextPayload(ctx),
-          evaluatorOf(entries, policy.language),
-        )
-      : ((await policy(ctx)) ?? null)
-  return parseVerdict(verdict)
+  return policy instanceof ScriptSource
+    ? await evalSource(policy.source, scriptContext(ctx), evaluatorOf(entries, policy.language))
+    : ((await policy(ctx)) ?? null)
 }
 
 /**
- * Resolve the policy ladder for one line: policy, then scripts.
+ * The runtimes' own scripts' decision, for a line no policy placed.
  *
- * A policy verdict overlays the named runtime's captures on the static
- * bindings (an affirmative choice, never a refusal). With no verdict,
- * per-runtime scripts filter the entry list: an entry with no script
- * is always willing, and the willing entries re-bind in list order.
- * The workspace runtime is filtered exactly like the others; a command left
+ * Each runtime's script filters the entry list: an entry with no script
+ * is always willing, and the willing entries re-bind in list order. The
+ * workspace runtime is filtered exactly like the others; a command left
  * without a willing runtime is an admission failure at dispatch.
  * Config-borne scripts run on the world's evaluator (evaluatorOf),
  * never on a hardcoded interpreter.
  */
 export async function decideLine(
   entries: readonly Runtime[],
-  policy: RoutePolicy | null,
   ctx: RouteContext,
-  staticBindings: Record<string, Runtime>,
-  externalCommands: readonly string[] = [],
 ): Promise<RouteDecision<Runtime>> {
-  if (policy !== null) {
-    const name = await evaluatePolicy(policy, ctx, entries)
-    if (name !== null) {
-      let overlay: Record<string, Runtime>
-      try {
-        overlay = runtimeBindingsFor(entries, name)
-      } catch (caught) {
-        throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
-          cause: caught,
-        })
-      }
-      return {
-        bindings: Object.assign(
-          Object.create(null) as Record<string, Runtime>,
-          staticBindings,
-          overlay,
-        ),
-        fallback: catchAll(entries),
-      }
-    }
-  }
   const willing: Runtime[] = []
   for (const entry of entries) {
     const wants =
-      entry.script === undefined
-        ? true
-        : await evaluateScript(entry.script, ctx, entry, entries, externalCommands)
+      entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, entries)
     if (wants) willing.push(entry)
   }
   // Every captured command resolves: to its first willing capturer, or

@@ -626,31 +626,32 @@ jobs:
       EMAIL_HOST: 127.0.0.1
       MAIL_URL: http://127.0.0.1:5085
       MONGODB_URI: mongodb://localhost:27017
-      QUICKJS_BUILD: v0.16.2
-      MIRAGE_QUICKJS_HOME: /tmp/quickjs
+      WASI_BUILD: python-3.14.7-wasi_sdk-24
+      MIRAGE_WASI_HOME: /tmp/cpython-wasi
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/integ-battery-setup
         with:
           build-packages: "false"
 
-      # The ram-scripted target's js profile script runs on quickjs,
-      # which on the python host is the quickjs-ng WASI build.
-      - name: Cache the quickjs WASI build
-        id: quickjs-cache
+      # The ram-scripted target's profile programs run on wasi, the
+      # CPython WASI build.
+      - name: Cache the CPython WASI build
+        id: wasi-cache
         uses: actions/cache@v6
         with:
-          path: /tmp/quickjs
-          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+          path: /tmp/cpython-wasi
+          key: cpython-wasi-${{ env.WASI_BUILD }}
 
-      - name: Download the quickjs WASI build
-        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+      - name: Download the CPython WASI build
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p /tmp/quickjs
-          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
-            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+          mkdir -p /tmp/cpython-wasi
+          gh release download v3.14.7 -R brettcannon/cpython-wasi-build \
+            -p "$WASI_BUILD.zip" -O /tmp/wasi-build.zip
+          unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
 
       # One runner process per target, four at a time: a runner's
       # --target-jobs lanes share one core, and the battery is CPU-bound

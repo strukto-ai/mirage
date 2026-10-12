@@ -37,9 +37,8 @@ import {
   runWithOpPolicies,
 } from './policies.ts'
 import { RulePolicy } from './rule.ts'
-import type { RouteContext } from '../runtime/routing/index.ts'
-import { routeContextPayload } from '../runtime/routing/types.ts'
-import { Outcome } from './types.ts'
+import { scriptContext } from './script.ts'
+import { Outcome, type RouteContext } from './types.ts'
 import type {
   Action,
   Ask,
@@ -565,8 +564,6 @@ describe('Limit', () => {
     const [deny, bound] = await postExecuteGate(policies, {
       line: 'echo',
       commands: [],
-      command: 'echo',
-      builtin: true,
       sessionId: '',
       agentId: '',
       producer: { command: 'echo', prefixes: [], declared: null },
@@ -843,8 +840,6 @@ describe('Ask in the chain', () => {
     const line: RouteContext = {
       line: 'python3 x',
       commands: [],
-      command: 'python3',
-      builtin: false,
       sessionId: '',
       agentId: '',
     }
@@ -1287,7 +1282,7 @@ describe('what a hook sees', () => {
         mode: MountMode.WRITE,
         shellParser: parser,
         routePolicy: (ctx: RouteContext) => {
-          seen.push(routeContextPayload(ctx))
+          seen.push(scriptContext(ctx))
           return null
         },
       },
@@ -1295,9 +1290,9 @@ describe('what a hook sees', () => {
     try {
       await ws.shell('cd /data; export TEAM=core')
       await ws.shell('echo hi')
-      const payload = seen.at(-1) as { session: { cwd: string; env: Record<string, string> } }
-      expect(payload.session.cwd).toBe('/data')
-      expect(payload.session.env.TEAM).toBe('core')
+      const payload = seen.at(-1) as { cwd: string; env: Record<string, string> }
+      expect(payload.cwd).toBe('/data')
+      expect(payload.env.TEAM).toBe('core')
       expect(seen.at(-1)?.mounts).toContain('/data')
     } finally {
       await ws.close()

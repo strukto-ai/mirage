@@ -151,6 +151,7 @@ from mirage.workspace.node.explain import (
     explain_line,
     explained_line,
     holds,
+    line_judgments,
 )
 from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
@@ -403,7 +404,6 @@ class Workspace:
         )
         self._script_policy = ScriptPolicy(
             self._session_mgr,
-            self._mount_prefixes,
             dispatch=self.dispatch,
             resolver=self._sandbox_resolver,
         )
@@ -674,12 +674,14 @@ class Workspace:
         )
         if holds([one.judgment for one in verdicts]):
             return explained_line(line, judged, verdicts, lambda command: "")
+        agent = self._default_agent_id or ""
         answers, placed = await self._router.placement(
-            ast,
             line,
             session,
-            session.session_id,
-            self._default_agent_id or "",
+            agent,
+            lambda: line_judgments(
+                ast, session, self._registry, self._namespace, HandOff(), agent
+            ),
         )
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
@@ -1941,7 +1943,7 @@ class Workspace:
 
     def _profile_name(self, profile: str | SessionProfile | None) -> str:
         """The name of the profile ``_base_profile`` resolves, which its
-        script reads as ``ctx["profile"]`` and the session reports as
+        programs read as ``ctx["profile"]`` and the session reports as
         its group; empty for a profile document passed without one.
 
         Args:
@@ -1955,12 +1957,6 @@ class Workspace:
         if profile is None and DEFAULT_PROFILE in self._profiles:
             return DEFAULT_PROFILE
         return ""
-
-    def _mount_prefixes(self) -> list[str]:
-        """The mount prefixes a profile policy reads as
-        ``ctx["mounts"]``, read per evaluation so a later mount shows.
-        """
-        return [entry.prefix for entry in self._registry.mounts()]
 
     def get_session(self, session_id: str) -> SessionState:
         return self._session_mgr.get(session_id)

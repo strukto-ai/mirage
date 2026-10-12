@@ -18,6 +18,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.langchain.backend import LangchainWorkspace
+from mirage.policy import CommandContext, Deny, Policy
 
 
 @pytest.fixture
@@ -226,6 +227,11 @@ async def test_upload_and_download(backend):
     assert down_results[1].content == b"content2"
 
 
+class NoLists(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Deny | None:
+        return Deny("no lists") if ctx.command == "ls" else None
+
+
 @pytest.mark.asyncio
 async def test_als_names_the_reason_beside_a_refusal():
     # stderr is bash's bare `Permission denied`; the reason rides the
@@ -233,9 +239,7 @@ async def test_als_names_the_reason_beside_a_refusal():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
-        route_policy=lambda ctx: (
-            {"deny": "no lists"} if ctx.command == "ls" else None
-        ),
+        policies=[NoLists()],
     )
     result = await LangchainWorkspace(ws).als("/")
     assert result.entries is None

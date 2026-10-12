@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mirage.policy.match import Outcome
@@ -21,6 +21,7 @@ from mirage.policy.types import (
     CommandRule,
     Decision,
     ProfileScript,
+    ProfileScripts,
     Scope,
 )
 from mirage.runtime.types import ScriptSource
@@ -94,6 +95,7 @@ def script_to_dict(entry: ProfileScript) -> dict[str, Any]:
         "language": entry.script.language,
         "source": entry.script.source,
         "runtime": entry.runtime,
+        "config": dict(entry.config),
     }
 
 
@@ -107,7 +109,23 @@ def script_from_dict(data: Mapping[str, Any]) -> ProfileScript:
         profile=data.get("profile", ""),
         script=ScriptSource(data["source"], language=data["language"]),
         runtime=data["runtime"],
+        config=dict(data.get("config") or {}),
     )
+
+
+def scripts_from_dict(
+    data: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> ProfileScripts:
+    """A session's policy programs read back from a record.
+
+    Args:
+        data (Mapping[str, Sequence[Mapping[str, Any]]]): each method's
+            programs, as ``script_to_dict`` wrote them.
+    """
+    return {
+        method: tuple(script_from_dict(entry) for entry in entries)
+        for method, entries in data.items()
+    }
 
 
 def decision_to_dict(record: Decision) -> dict[str, Any]:

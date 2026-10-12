@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
 import type { VfsCall } from '../vfs/types.ts'
-import type { RouteContext } from '../runtime/routing/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
 import type { WordKind } from '../commands/spec/types.ts'
@@ -445,31 +445,64 @@ export interface SessionCommandsQuery {
   commandsOf(sessionId: string): AdmissionRules | null
 }
 
+/** A method a profile's policy names programs for, as the Policy interface spells it. */
+export type ScriptMethod = 'preExecute' | 'preCommand' | 'preVfs' | 'preSession'
+
 /**
- * One profile's policy, as a session carries it: the program, the
- * engine it runs on, and the profile it speaks for. Compiled off the
- * profile's policy block beside the admission rules; `ScriptPolicy`
- * calls the admission hooks it defines (`preCommand`, `preVfs`,
- * `preSession`) with the entry point's facts, and a hook returns allow (no
- * opinion), deny, or at the command gate ask. `profile` is
- * the profile's name, which the policy reads as `ctx.profile`; empty
- * for a profile document passed to `createSession` without a name.
+ * One program of a profile's policy, as a session carries it: the
+ * program, the runtime it runs on with that runtime's settings, and the
+ * profile it speaks for. Compiled off the profile's policy block beside
+ * the admission rules, one per entry of a method's list, and run by
+ * `ScriptPolicy` at that method with the context as JSON
+ * (`scriptContext`) in `MIRAGE_POLICY_CTX` and on stdin; `scriptAction`
+ * reads the answer it prints. `profile` is the profile's name, which
+ * every refusal about its program prints; empty for a profile document
+ * passed to `createSession` without a name.
  */
 export interface ProfileScript {
   readonly profile: string
   readonly script: ScriptSource
   readonly runtime: string
+  readonly config: Readonly<Record<string, unknown>>
 }
+
+/** A session's policy programs, by method. */
+export type ProfileScripts = Readonly<Partial<Record<ScriptMethod, readonly ProfileScript[]>>>
 
 /**
  * The one session question the script policy asks, satisfied the same
- * way `SessionCommandsQuery` is: the policy reads a session's script by
- * the id the entry point put in the context, falling back to the default
- * profile's for an id the manager does not know.
+ * way `SessionCommandsQuery` is: the policy reads a session's programs
+ * by the id the entry point put in the context, falling back to the
+ * default profile's for an id the manager does not know.
  */
 export interface SessionScriptsQuery {
-  scriptOf(sessionId: string): ProfileScript | null
+  scriptsOf(sessionId: string): ProfileScripts
 }
+
+/**
+ * A policy answer as JSON carries it: its kind and its own fields. What a
+ * policy program prints, and what the server's entry points send
+ * (`answerToDict`, which adds the policy that spoke). A deny or an ask
+ * may leave the reason out for the default one; a route names its
+ * runtime. Mirrors the Python `Answer`.
+ */
+export const Answer = z
+  .strictObject({
+    kind: z.enum(['deny', 'ask', 'route']),
+    reason: z.string().nullable().optional(),
+    runtime: z.string().nullable().optional(),
+  })
+  .superRefine((answer, check) => {
+    if (answer.kind === 'route') {
+      if (!answer.runtime || (answer.reason ?? null) !== null) {
+        check.addIssue({ code: 'custom', message: 'a route names its runtime and nothing else' })
+      }
+    } else if ((answer.runtime ?? null) !== null) {
+      check.addIssue({ code: 'custom', message: `a ${answer.kind} carries no runtime` })
+    }
+  })
+
+export type Answer = z.infer<typeof Answer>
 
 /**
  * One word of a command line, as the grammar read it: the word as the
@@ -502,6 +535,12 @@ export class CommandWord {
 
 /** Facts about one classified command, as preCommand hooks see it. */
 export interface CommandContext {
+  /**
+   * The line the command was parsed from: the line the agent typed, or
+   * for a command a line runs in turn (`eval`, `$( )`, a function body)
+   * that line's text. Absent outside a line.
+   */
+  line?: string
   command: string
   /**
    * Every path the line names: the positional operands first, then the
@@ -555,6 +594,36 @@ export interface CommandContext {
   /** The session, read only: a write through it is refused. Filled when a hook is asked. */
   session?: SessionView
   /** The session's namespace, as a command gets it in `opts.ns`. Filled when a hook is asked. */
+  ns?: NamespaceView
+}
+
+/**
+ * One line, as preExecute hooks see it: the line and every command in
+ * it, each as `preCommand` will see it. `commands` lists them in source
+ * order, nested ones included, each read as the gate that runs it will
+ * read it: its words expanded where the text alone says what they are,
+ * its paths resolved; a command whose name only the run expands is left
+ * out. A script gets the same as plain data (`scriptContext`), with
+ * `ctx.runtime` naming the runtime when a runtime's own `script:` is
+ * asked.
+ *
+ * For `cat /data/logs.txt | python3 process.py` typed in `/data`:
+ *
+ * ```
+ * ctx.line === 'cat /data/logs.txt | python3 process.py'
+ * ctx.commands.map((c) => c.command)  // ['cat', 'python3']
+ * ctx.commands[1].paths.map((p) => p.virtual)  // ['/data/process.py']
+ * ctx.session.cwd() === '/data'
+ * ```
+ */
+export interface RouteContext {
+  line: string
+  commands: readonly CommandContext[]
+  sessionId: string
+  agentId: string
+  /** The session, read only: a write through it is refused. */
+  session?: SessionView
+  /** The session's namespace. */
   ns?: NamespaceView
 }
 
@@ -639,7 +708,6 @@ export interface ExecuteResultContext extends RouteContext {
  * rule to one agent (deny `set` for session X).
  */
 export interface SessionContext {
-  plane: string
   verb: string
   key: string
   value: string | null

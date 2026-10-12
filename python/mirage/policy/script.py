@@ -13,332 +13,204 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
+import json
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping
 from contextvars import ContextVar
+from enum import Enum
 from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from mirage.io import IOResult, OpReport
 from mirage.policy.base import Policy
 from mirage.policy.constants import (
+    CTX_ENV,
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
+    PROGRAM_RUNTIMES,
 )
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
+    VALIDITY,
     Action,
+    Answer,
     Ask,
     CommandContext,
     Deny,
     ProfileScript,
+    Route,
+    RouteContext,
     SessionContext,
     SessionScriptsQuery,
     VfsContext,
 )
-from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
-from mirage.runtime.errors import EvalError
-from mirage.runtime.mixin import EvaluatorMixin
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.script import eval_with_ctx, script_engine
-from mirage.runtime.types import DispatchFn, EvalValue, ScriptSource
+from mirage.runtime.script import script_engine
+from mirage.runtime.types import CodeExecution, DispatchFn, EvalValue
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
 
-# The admission hooks a policy program may define, python spelling to
-# JavaScript spelling. The output hooks (post_vfs, post_execute) stay
-# coded: they answer with a Limit over a live result.
-HOOKS: Mapping[str, str] = {
-    "pre_command": "preCommand",
-    "pre_vfs": "preVfs",
-    "pre_session": "preSession",
-}
+# The live handles every context carries, which a program reads as
+# data instead: the session as its cwd, env and profile, the namespace
+# as the mounts it shows, the files through the program's own open().
+_LIVE = frozenset({"session", "ns", "vfs"})
 
 # Set for the duration of one op the policy's own engine dispatches, so
 # the policy's ``pre_vfs`` lets the read through: the policy is the one
-# asking, and judging its own read would re-enter the evaluation that
-# is waiting on it.
+# asking, and judging its own read would re-enter the run that is
+# waiting on it.
 _POLICY_READ: ContextVar[bool] = ContextVar(
     "mirage_policy_read", default=False
 )
 
 
+def _plain(value: Any) -> EvalValue:
+    """A value as a program reads it: JSON-shaped data, bytes as text,
+    a path as its virtual spelling, a model or record as its fields
+    (the live handles left out).
+
+    Args:
+        value (Any): what a context holds.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    if isinstance(value, Enum):
+        return _plain(value.value)
+    if isinstance(value, PathSpec):
+        return value.virtual
+    if isinstance(value, BaseModel):
+        return _plain(value.model_dump())
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: _plain(getattr(value, f.name))
+            for f in dataclasses.fields(value)
+            if f.name not in _LIVE
+        }
+    if isinstance(value, tuple) and hasattr(value, "_asdict"):
+        return _plain(value._asdict())
+    if isinstance(value, Mapping):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_plain(item) for item in value]
+    return str(value)
+
+
 def script_context(
-    profile: str, ctx: CommandContext, mounts: Sequence[str]
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
 ) -> dict[str, EvalValue]:
-    """What a profile's policy is told about one command: the
-    ``CommandContext`` the coded hooks read, as plain data.
+    """A policy context as a program reads it: every field a coded
+    policy reads, under the same name, as plain data.
 
-    The same facts on both hosts, JSON-shaped because the script runs
-    inside a sandboxed engine that a live object cannot cross into.
-    Paths are spelled as resolved virtual paths, so a script matches
-    what the command will actually touch, not what was typed; the
-    words, each with its kind, are in ``words``.
-    The session's environment is in ``session.env``.
+    The live handles become data: the session its ``cwd``, ``env`` and
+    ``profile``, the namespace the ``mounts`` the session sees. The
+    files are the program's own ``open()``, which reads as the session.
 
     Args:
-        profile (str): the profile the script speaks for.
-        ctx (CommandContext): the classified command, as the gate built
-            it.
-        mounts (Sequence[str]): the workspace's mount prefixes.
+        ctx (CommandContext | RouteContext | VfsContext | SessionContext):
+            the context a method was handed, a ``post_`` one included.
     """
-    return {
-        "profile": profile,
-        "command": {
-            "name": ctx.command,
-            "words": [
-                {key: value for key, value in word.to_dict().items()}
-                for word in ctx.words
-            ],
-            "paths": [path.virtual for path in ctx.paths],
-            "walks": ctx.walks,
-        },
-        "session": {
-            "id": ctx.session_id,
-            "agent": ctx.agent_id,
-            "cwd": ctx.cwd,
-            "env": dict(ctx.session.snapshot()) if ctx.session else {},
-        },
-        "mounts": list(mounts),
-    }
-
-
-def ops_script_context(
-    profile: str, ctx: VfsContext, mounts: Sequence[str]
-) -> dict[str, EvalValue]:
-    """What a profile's policy is told about one VFS op: the
-    ``VfsContext`` the coded hooks read, as plain data.
-
-    Args:
-        profile (str): the profile the script speaks for.
-        ctx (VfsContext): the op about to run, as the dispatcher built it.
-        mounts (Sequence[str]): the workspace's mount prefixes.
-    """
-    return {
-        "profile": profile,
-        "call": {
-            "name": ctx.call.name,
-            "effect": ctx.call.effect.value,
-            "target": ctx.call.target.value,
-            "creates": ctx.call.creates,
-            "subtree": ctx.call.subtree,
-            "path": ctx.path.virtual,
-            "write": ctx.write,
-            "prefix": ctx.prefix,
-        },
-        "session": {
-            "id": ctx.session_id,
-            "cwd": ctx.session.cwd() if ctx.session else "",
-            "env": dict(ctx.session.snapshot()) if ctx.session else {},
-        },
-        "mounts": list(mounts),
-    }
-
-
-def session_script_context(
-    profile: str, ctx: SessionContext, mounts: Sequence[str]
-) -> dict[str, EvalValue]:
-    """What a profile's policy is told about one session-state write:
-    the ``SessionContext`` the coded hooks read, as plain data.
-
-    Args:
-        profile (str): the profile the script speaks for.
-        ctx (SessionContext): the write about to land, as the session view
-            built it.
-        mounts (Sequence[str]): the workspace's mount prefixes.
-    """
-    return {
-        "profile": profile,
-        "write": {
-            "plane": ctx.plane,
-            "verb": ctx.verb,
-            "key": ctx.key,
-            "value": ctx.value,
-        },
-        "session": {
-            "id": ctx.session_id,
-            "cwd": ctx.session.cwd() if ctx.session else "",
-            "env": dict(ctx.session.snapshot()) if ctx.session else {},
-        },
-        "mounts": list(mounts),
-    }
-
-
-def hook_name(script: ScriptSource, hook: str) -> str:
-    """A hook's name in the program's own language: ``pre_vfs`` in
-    python, ``preVfs`` in JavaScript.
-
-    Args:
-        script (ScriptSource): the policy program, carrying its
-            language.
-        hook (str): the hook in python spelling, a key of ``HOOKS``.
-    """
-    return HOOKS[hook] if script.language == "js" else hook
-
-
-def hook_call(script: ScriptSource, hook: str) -> str:
-    """The call that runs one of a policy's hooks, in its language's own
-    spelling.
-
-    A policy program defines the hooks it answers at, the way a coded
-    Policy overrides only the hooks it cares about: ``pre_command(ctx)``
-    in python, ``preCommand(ctx)`` in JavaScript, returning the verdict.
-    The program is evaluated whole, with this call appended as its last
-    expression, so the definitions run and the call's return is what
-    the evaluator hands back.
-
-    Args:
-        script (ScriptSource): the policy program, carrying its
-            language.
-        hook (str): the hook in python spelling, a key of ``HOOKS``.
-    """
-    return f"{hook_name(script, hook)}(ctx)"
-
-
-def hook_probe(script: ScriptSource) -> str:
-    """The expression that lists which hooks a policy program defines.
-
-    Appended to the program once, before its first judgment, so a hook
-    the program leaves out is silence at that entry point rather than a call
-    that fails, and the dispatcher in particular is never charged an
-    evaluation for a program that only judges commands. Spelled per
-    language and in the engines' common subset: monty has neither
-    ``globals()`` nor ``callable()``, so python asks each name and
-    catches the NameError; JavaScript asks ``typeof``, behind a ``;``
-    that ends whatever statement the program left open, since a
-    bracket on the next line would otherwise index its last value. A
-    name the program binds is a hook it defines, whatever it bound.
-
-    Args:
-        script (ScriptSource): the policy program, carrying its
-            language.
-    """
-    names = [hook_name(script, hook) for hook in HOOKS]
-    if script.language == "js":
-        pairs = ", ".join(f"['{name}', typeof {name}]" for name in names)
-        return (
-            f";[{pairs}].filter((h) => h[1] !== 'undefined').map((h) => h[0])"
-        )
-    arms = "".join(
-        f"try:\n    {name}\n    _mirage_hooks.append('{name}')\n"
-        f"except NameError:\n    pass\n"
-        for name in names
+    data = _plain(ctx)
+    assert isinstance(data, dict)
+    session, ns = ctx.session, ctx.ns
+    if session is not None:
+        data["cwd"] = session.cwd()
+        data["env"] = dict(session.snapshot())
+        data["profile"] = session.profile() or ""
+    else:
+        data.setdefault("cwd", "/")
+        data["env"] = {}
+        data["profile"] = ""
+    data["mounts"] = (
+        list(ns.mounts.visible_descendants("/"))
+        if ns is not None and ns.mounts is not None
+        else []
     )
-    return f"_mirage_hooks = []\n{arms}_mirage_hooks"
+    return data
 
 
-def defined_hooks(script: ScriptSource, value: EvalValue) -> frozenset[str]:
-    """The hooks ``hook_probe`` found, in python spelling.
+def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
+    """The answer a policy program printed at one method.
+
+    Nothing (or ``null``) is no opinion. Anything else is one JSON
+    answer (``Answer``): ``{"kind": "deny", "reason": ...}``,
+    ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
+    ``{"kind": "route", "runtime": ...}``. A deny or an ask without a
+    reason carries the document's default one.
 
     Args:
-        script (ScriptSource): the probed program, carrying its
-            language.
-        value (EvalValue): what the probe evaluated to.
+        output (bytes): what the program wrote to stdout.
+        method (str): the method it answered at.
 
     Raises:
-        ValueError: the value is not a list of the probe's names. The
+        ValueError: the output is not an answer the method may give. The
             message is a clause about "script", for the caller to prefix
             with whose policy it is.
     """
-    spelled = {hook_name(script, hook): hook for hook in HOOKS}
-    if isinstance(value, list):
-        names = [
-            name for name in value if isinstance(name, str) and name in spelled
-        ]
-        if len(names) == len(value):
-            return frozenset(spelled[name] for name in names)
-    raise ValueError(f"script hook probe answered {value!r}")
-
-
-def script_action(value: EvalValue) -> Deny | Ask | None:
-    """The policy answer a policy's hook returns.
-
-    The vocabulary is the coded hook's own, spelled as data: ``None``
-    or ``'allow'`` is no opinion (the command runs unless another rule
-    refuses it, and can never override one that does), ``'deny'`` /
-    ``{'deny': reason}`` refuses, and ``'ask'`` / ``{'ask': reason}``
-    takes it to the approval ledger, as every hook may (``VALIDITY``).
-    The bare strings carry the document's default reasons, the same
-    ones a rule stating no reason gets.
-
-    Args:
-        value (EvalValue): what the script evaluated to.
-
-    Raises:
-        ValueError: the value is none of the hook's shapes. The message
-            is a clause about "script", for the caller to prefix with
-            whose policy it is.
-    """
-    if value is None or value == "allow":
+    text = output.decode(errors="replace").strip()
+    if not text or text == "null":
         return None
-    if value == "deny":
-        return Deny(DEFAULT_DENY_REASON)
-    if value == "ask":
-        return Ask(DEFAULT_ASK_REASON)
-    if isinstance(value, Mapping) and len(value) == 1:
-        verb, reason = next(iter(value.items()))
-        if isinstance(reason, str) and reason:
-            if verb == "deny":
-                return Deny(reason)
-            if verb == "ask":
-                return Ask(reason)
-    raise ValueError(
-        f"script must answer allow, deny or ask: None or 'allow', "
-        f"'deny', 'ask', {{'deny': reason}} or {{'ask': reason}}; "
-        f"got {value!r}"
-    )
+    try:
+        answer = Answer.model_validate_json(text)
+    except ValidationError as exc:
+        raise ValueError(
+            f"script must print a JSON answer at {method}, "
+            f'{{"kind": "deny" | "ask" | "route", ...}}'
+        ) from exc
+    if answer.kind not in VALIDITY[method]:
+        raise ValueError(f"script cannot answer {answer.kind} at {method}")
+    if answer.kind == Deny.kind:
+        return Deny(answer.reason or DEFAULT_DENY_REASON)
+    if answer.kind == Ask.kind:
+        return Ask(answer.reason or DEFAULT_ASK_REASON)
+    assert answer.runtime is not None
+    return Route(answer.runtime)
 
 
 class ScriptPolicy(Policy, SessionScopedMixin):
-    """Each profile's policy, enforced at the admission gates.
+    """Each profile's policy programs, run at the ``pre_`` methods.
 
     The scripted twin of ``PermissionsPolicy``, registered right after
     it: where that policy evaluates the document's declarative rules,
-    this one calls the profile's policy program with the same facts. A
-    program defines the hooks it answers at, the way a coded Policy
-    overrides only the hooks it cares about: ``pre_command`` per
-    command (``script_context``), ``pre_vfs`` per VFS op
-    (``ops_script_context``), ``pre_session`` per env write
-    (``session_script_context``). Which ones it defines is probed once
-    per program (``hook_probe``), so a hook it leaves out is silence at
-    that entry point and costs no evaluation, and a program defining none
-    fails closed at every entry point. It reads the session's policy through
-    the narrow ``SessionScriptsQuery`` by the session id the entry point put
-    in the context, so a session whose profile states no policy costs
-    one lookup and nothing else.
+    this one runs the profile's programs. A profile names, per method,
+    a list of programs and the runtime each runs on; they are asked in
+    order, the first deny wins, then the first ask, and every route
+    must agree. A method with no program is silence and costs nothing.
+    It reads the session's programs through the narrow
+    ``SessionScriptsQuery`` by the session id the entry point put in the
+    context.
 
-    Every failure fails closed: a policy that raised, timed out,
-    answered with the wrong shape, defines no hook, or names an engine
-    that cannot be built refuses the command, op or write with a reason
-    naming the profile, and is logged. Silence on failure would run
-    exactly what the policy existed to judge.
+    A program runs as any program does on its runtime: never edited,
+    with the context as JSON (``script_context``) in ``CTX_ENV`` and on
+    stdin, the session's cwd and environment, and its answer printed on
+    stdout (``script_action``). Every failure fails closed: a program
+    that exits non-zero, runs past the timeout, prints something else,
+    or names a runtime that cannot be built refuses the action with a
+    reason naming the profile, and is logged.
 
-    The facts name the paths; the engine can open them. It is wired to
-    the workspace's files the way an agent's runtime is (``dispatch``
-    and ``resolver``, attached before its first evaluation exactly as
-    ``Runtimes`` attaches an agent's engine), so a policy may read what
-    an operand holds and answer for its content, not only its name. A
-    read from a policy clears the dispatcher like any other, except this
-    policy's own ``pre_vfs``: the policy is the one asking, and judging
-    its own read would re-enter the evaluation waiting on it.
-
-    Engines are built lazily on the first judgment that needs one,
-    shared per engine name, and closed by the workspace's own close.
-    Evaluations are serialized: the engines are worker processes, and
-    two concurrent evals on one would interleave.
+    The runtime is the policy's own, built from the name and settings
+    the profile gives, shared across sessions and never the agent's. It
+    is wired to the workspace's files the way an agent's runtime is, so
+    a program reads what an operand holds as the session reads it: a
+    hidden path is absent and a write is refused. A read from a program
+    clears the dispatcher like any other, except this policy's own
+    ``pre_vfs``: the policy is the one asking, and judging its own read
+    would re-enter the run waiting on it. Runs are serialized.
 
     Args:
         sessions (SessionScriptsQuery): the session manager, answering
-            ``script_of(session_id)``.
-        mounts (Callable[[], Sequence[str]]): the workspace's mount
-            prefixes, read per evaluation so a mount added after
-            construction is visible to the script.
+            ``scripts_of(session_id)``.
         dispatch (DispatchFn | None): the workspace's op dispatch, the
-            entry point a policy's ``open()`` reads the mounts through; None
-            for a ScriptPolicy outside a workspace, whose programs see
-            no file.
+            entry point a program's ``open()`` reads the mounts through;
+            None for a ScriptPolicy outside a workspace, whose programs
+            see no file.
         resolver (MountResolver | None): the live mount routing table
             the dispatch is attached with. Travels with ``dispatch``:
             one without the other is refused.
@@ -351,7 +223,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     def __init__(
         self,
         sessions: SessionScriptsQuery,
-        mounts: Callable[[], Sequence[str]],
         dispatch: DispatchFn | None = None,
         resolver: MountResolver | None = None,
     ) -> None:
@@ -360,61 +231,36 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                 "a script policy's dispatch and resolver travel together"
             )
         self._sessions = sessions
-        self._mounts = mounts
         self._dispatch = dispatch
         self._resolver = resolver
-        self._engines: dict[str, Runtime] = {}
-        self._defined: dict[tuple[str, str, str], frozenset[str]] = {}
+        self._engines: dict[tuple[str, str], LanguageRuntime] = {}
         self._lock = asyncio.Lock()
 
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        return await self._judge("pre_execute", ctx)
+
     async def pre_command(self, ctx: CommandContext) -> Action | None:
-        return await self._judge(
-            "pre_command",
-            ctx.session_id,
-            lambda entry: script_context(entry.profile, ctx, self._mounts()),
-        )
+        return await self._judge("pre_command", ctx)
 
     async def pre_vfs(self, ctx: VfsContext) -> Action | None:
         if _POLICY_READ.get():
             return None
-        return await self._judge(
-            "pre_vfs",
-            ctx.session_id,
-            lambda entry: ops_script_context(
-                entry.profile, ctx, self._mounts()
-            ),
-        )
+        return await self._judge("pre_vfs", ctx)
 
     async def pre_session(self, ctx: SessionContext) -> Action | None:
-        return await self._judge(
-            "pre_session",
-            ctx.session_id,
-            lambda entry: session_script_context(
-                entry.profile, ctx, self._mounts()
-            ),
-        )
+        return await self._judge("pre_session", ctx)
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
-        """Whether this session's policy speaks at ``hook``: it has a
-        program, and the program defines the hook, or defines none and
-        so refuses at every entry point. A probe that fails answers True for
-        the same reason: the entry point will refuse.
+        """Whether this session's profile names a program at ``hook``.
 
         Args:
-            hook (str): the hook in python spelling.
-            session_id (str): the session the dispatcher serves.
+            hook (str): the method in python spelling.
+            session_id (str): the session the entry point serves.
         """
-        entry = self._sessions.script_of(session_id)
-        if entry is None or hook not in HOOKS:
-            return False
-        try:
-            defined = await self._hooks_of(entry)
-        except (asyncio.TimeoutError, EvalError, ValueError):
-            return True
-        return not defined or hook in defined
+        return bool(self._sessions.scripts_of(session_id).get(hook))
 
     async def close(self) -> None:
-        """Close every engine a script was evaluated on."""
+        """Close every runtime a program ran on."""
         engines = list(self._engines.values())
         self._engines.clear()
         for engine in engines:
@@ -422,98 +268,135 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
     async def _judge(
         self,
-        hook: str,
-        session_id: str,
-        facts: Callable[[ProfileScript], dict[str, EvalValue]],
+        method: str,
+        ctx: CommandContext | RouteContext | VfsContext | SessionContext,
     ) -> Action | None:
-        """One hook of the session's policy, with the entry point's facts.
+        """Every program the session's profile names at one method.
 
         Args:
-            hook (str): the hook the entry point fired, in python spelling.
-            session_id (str): the session the dispatcher serves.
-            facts (Callable[[ProfileScript], dict[str, EvalValue]]):
-                builds what the program sees as ``ctx``, given the
-                policy it speaks for.
+            method (str): the method the entry point fired.
+            ctx (CommandContext | RouteContext | VfsContext |
+                SessionContext): its context.
         """
-        entry = self._sessions.script_of(session_id)
-        if entry is None:
+        programs = self._sessions.scripts_of(ctx.session_id).get(method, ())
+        if not programs:
             return None
+        payload = json.dumps(script_context(ctx))
+        cwd = await self._cwd(ctx)
+        env = dict(ctx.session.snapshot()) if ctx.session is not None else {}
+        asked: Ask | None = None
+        routed: Route | None = None
+        for entry in programs:
+            answer = await self._run(entry, method, payload, cwd, env)
+            if isinstance(answer, Deny):
+                return answer
+            if isinstance(answer, Ask) and asked is None:
+                asked = answer
+            if isinstance(answer, Route):
+                if routed is not None and routed.runtime != answer.runtime:
+                    return self._failed(
+                        entry,
+                        f"places the line on {routed.runtime!r} and "
+                        f"{answer.runtime!r}",
+                    )
+                routed = routed or answer
+        return asked or routed
+
+    async def _cwd(
+        self, ctx: CommandContext | RouteContext | VfsContext | SessionContext
+    ) -> str:
+        """The directory a program starts in: the session's, or ``/``
+        once the session's has gone, since a runtime that enters it
+        first (wasi) cannot start in a directory that is not there.
+
+        Args:
+            ctx (CommandContext | RouteContext | VfsContext |
+                SessionContext): the method's context.
+        """
+        cwd = ctx.session.cwd() if ctx.session is not None else "/"
+        if (
+            cwd != "/"
+            and ctx.vfs is not None
+            and not await ctx.vfs.exists(cwd)
+        ):
+            return "/"
+        return cwd
+
+    async def _run(
+        self,
+        entry: ProfileScript,
+        method: str,
+        payload: str,
+        cwd: str,
+        env: dict[str, str],
+    ) -> Deny | Ask | Route | None:
+        """One program at one method, failing closed.
+
+        Args:
+            entry (ProfileScript): the program.
+            method (str): the method it answers at.
+            payload (str): the context as JSON.
+            cwd (str): the directory it starts in.
+            env (dict[str, str]): the session's environment.
+        """
         try:
-            defined = await self._hooks_of(entry)
-            if not defined:
-                names = [hook_name(entry.script, name) for name in HOOKS]
-                return self._failed(
-                    entry,
-                    f"defines no hook: {', '.join(names[:-1])} or {names[-1]}",
+            async with self._lock:
+                engine = self._engine(entry)
+                result = await asyncio.wait_for(
+                    engine.execute(
+                        CodeExecution(
+                            language=entry.script.language,
+                            code=entry.script.source,
+                            args=[],
+                            cwd=PathSpec.from_str_path(cwd),
+                            env={**env, CTX_ENV: payload},
+                            stdin=payload.encode(),
+                        )
+                    ),
+                    timeout=SCRIPT_EVAL_TIMEOUT_SECONDS,
                 )
-            if hook not in defined:
-                return None
-            value = await self._evaluate(
-                entry, hook_call(entry.script, hook), facts(entry)
-            )
         except asyncio.TimeoutError:
             return self._failed(
                 entry, f"timed out after {SCRIPT_EVAL_TIMEOUT_SECONDS:g}s"
             )
-        except EvalError as exc:
-            arm = "syntax error" if exc.syntax else "failed"
-            return self._failed(entry, f"{arm}: {exc}")
         except ValueError as exc:
-            # script_engine's refusal (the engine cannot be built) or the
-            # probe's (the program answered it with something else).
+            # script_engine's refusal: the runtime cannot be built here.
             return self._failed(entry, _clause(exc))
-        try:
-            return script_action(value)
-        except ValueError as exc:
-            return self._failed(entry, _clause(exc))
-
-    async def _hooks_of(self, entry: ProfileScript) -> frozenset[str]:
-        """The hooks one profile's program defines, probed on its first
-        judgment and remembered by runtime, program text and language.
-        A runtime change must probe again, including its validation;
-        a cached absent hook must never bypass a broken new engine.
-
-        Args:
-            entry (ProfileScript): the session's policy.
-        """
-        key = (entry.runtime, entry.script.language, entry.script.source)
-        defined = self._defined.get(key)
-        if defined is None:
-            value = await self._evaluate(entry, hook_probe(entry.script), {})
-            defined = defined_hooks(entry.script, value)
-            self._defined[key] = defined
-        return defined
-
-    async def _evaluate(
-        self, entry: ProfileScript, tail: str, ctx: dict[str, EvalValue]
-    ) -> EvalValue:
-        """The program whole, then ``tail`` as its last expression,
-        on the profile's engine, serialized.
-
-        Args:
-            entry (ProfileScript): the session's policy.
-            tail (str): the hook call or the probe.
-            ctx (dict[str, EvalValue]): what the program sees as
-                ``ctx``.
-        """
-        async with self._lock:
-            engine = self._engines.get(entry.runtime)
-            if engine is None:
-                engine = script_engine(entry.script, entry.runtime)
-                if self._dispatch is not None and self._resolver is not None:
-                    engine.bind(
-                        WorkspaceBinding(self._reading, self._resolver)
-                    )
-                self._engines[entry.runtime] = engine
-            # script_engine refuses anything that cannot evaluate, so
-            # this narrows a fact already established.
-            assert isinstance(engine, EvaluatorMixin)
-            return await eval_with_ctx(
-                f"{entry.script.source}\n\n{tail}\n",
-                ctx,
-                engine,
-                SCRIPT_EVAL_TIMEOUT_SECONDS,
+        if result.exit_code != 0:
+            stderr = (result.stderr or b"").decode(errors="replace")
+            return self._failed(
+                entry, f"exited {result.exit_code}", stderr[-2000:]
             )
+        try:
+            return script_action(result.stdout, method)
+        except ValueError as exc:
+            return self._failed(entry, _clause(exc))
+
+    def _engine(self, entry: ProfileScript) -> LanguageRuntime:
+        """The policy's own runtime for one program, built on first use
+        and shared by every program naming the same runtime and
+        settings.
+
+        Args:
+            entry (ProfileScript): the program.
+
+        Raises:
+            ValueError: the runtime is not one a policy program runs on,
+                or cannot be built here.
+        """
+        if entry.runtime not in PROGRAM_RUNTIMES:
+            raise ValueError(
+                f"script names runtime {entry.runtime!r}; a policy program "
+                f"runs on {' or '.join(sorted(PROGRAM_RUNTIMES))}"
+            )
+        key = (entry.runtime, json.dumps(dict(entry.config), sort_keys=True))
+        engine = self._engines.get(key)
+        if engine is None:
+            engine = script_engine(entry.script, entry.runtime, entry.config)
+            if self._dispatch is not None and self._resolver is not None:
+                engine.bind(WorkspaceBinding(self._reading, self._resolver))
+            self._engines[key] = engine
+        return engine
 
     async def _reading(
         self,
@@ -524,12 +407,12 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        """The entry point the policy's engine reads through: the workspace's
-        dispatch, with the op marked as the policy's own for as long as
-        it runs, so ``pre_vfs`` above lets it through.
+        """The entry point the policy's runtime reads through: the
+        workspace's dispatch, with the op marked as the policy's own for
+        as long as it runs, so ``pre_vfs`` above lets it through.
 
         Args:
-            name (str): the function the engine asked for.
+            name (str): the function the runtime asked for.
             path (PathSpec): the resolved virtual path.
             report (OpReport | None): the caller's accounting, which a
                 runtime never passes.
@@ -542,22 +425,26 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         finally:
             _POLICY_READ.reset(token)
 
-    def _failed(self, entry: ProfileScript, detail: str) -> Deny:
-        """The fail-closed refusal: one wording, logged.
+    def _failed(
+        self, entry: ProfileScript, detail: str, stderr: str = ""
+    ) -> Deny:
+        """The fail-closed refusal: one wording, logged with what the
+        program wrote to stderr.
 
         Args:
-            entry (ProfileScript): the policy that failed.
+            entry (ProfileScript): the program that failed.
             detail (str): what went wrong, as the clause after
                 "policy".
+            stderr (str): the tail of the program's stderr, if any.
         """
         reason = f"profile {entry.profile!r} policy {detail}"
-        logger.error("%s", reason)
+        logger.error("%s%s", reason, f"\n{stderr}" if stderr else "")
         return Deny(reason)
 
 
 def _clause(exc: Exception) -> str:
-    """An error's message as the clause after "policy": the engine entry point
-    and the answer reader both speak of "script", which is the
+    """An error's message as the clause after "policy": the runtime
+    builder and the answer reader both speak of "script", which is the
     program's generic name, and the profile's word for its program is
     policy.
 

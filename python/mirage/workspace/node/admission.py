@@ -363,6 +363,7 @@ async def gate(
     unread: frozenset[str] = frozenset(),
     every: bool = False,
     rules_only: bool = False,
+    line: str = "",
 ) -> tuple[CommandContext, Deny | Ask | None, tuple[Deny | Ask, ...]]:
     """Everything the gate decides about one command before anything is
     spent on it: the classified context, and the policy chain's answer
@@ -399,6 +400,8 @@ async def gate(
             that judges a line before it runs; a policy's own
             ``pre_command`` is asked once, by the gate that runs the
             command.
+        line (str): the line the command was parsed from, empty
+            outside a line.
 
     Returns:
         The context, the chain's answer (the first Deny, else the first
@@ -446,6 +449,7 @@ async def gate(
         ),
         argv=tuple(args),
         cwd=session.cwd,
+        line=line,
         session_id=session.session_id,
         agent_id=agent_id,
         tokens=tokens,
@@ -546,6 +550,7 @@ async def admit(
         intrinsic=intrinsic,
         unread=unread,
         rules_only=rules_only,
+        line=claimant.occurrence.source if claimant is not None else "",
     )
     ctx, asked, _ = gated
     # An Ask is the chain's answer only after every Deny had its say;

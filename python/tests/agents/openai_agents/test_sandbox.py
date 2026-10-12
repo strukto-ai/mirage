@@ -41,6 +41,7 @@ from mirage.agents.openai_agents.sandbox import (
     combined_output,
     shell_line,
 )
+from mirage.policy import CommandContext, Deny, Policy
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -107,6 +108,11 @@ def test_session_running_state():
     asyncio.run(_run())
 
 
+class NoDeletes(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Deny | None:
+        return Deny("no deletes") if ctx.command == "rm" else None
+
+
 def test_exec_names_the_reason_beside_a_refused_command():
     # stderr is bash's bare `Permission denied`; the reason rides the
     # refusal record, and a byte surface appends it as one more line.
@@ -115,9 +121,7 @@ def test_exec_names_the_reason_beside_a_refused_command():
         ws = Workspace(
             {"/": (RAMVFS(), MountMode.WRITE)},
             mode=MountMode.WRITE,
-            route_policy=lambda ctx: (
-                {"deny": "no deletes"} if ctx.command == "rm" else None
-            ),
+            policies=[NoDeletes()],
         )
         session = await MirageSandboxClient(ws).create()
         result = await session.exec("rm", "/x", shell=False)

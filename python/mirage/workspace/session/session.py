@@ -23,7 +23,7 @@ from mirage.policy.types import (
     AdmissionRules,
     Decision,
     HideReason,
-    ProfileScript,
+    ProfileScripts,
 )
 from mirage.process.config import ProcessPermissions
 from mirage.secrets.config import EnvVar
@@ -70,8 +70,8 @@ from mirage.workspace.session.serialize import (
     commands_to_dict,
     decision_from_dict,
     decision_to_dict,
-    script_from_dict,
     script_to_dict,
+    scripts_from_dict,
 )
 from mirage.workspace.types import StatusWriter
 
@@ -342,10 +342,10 @@ class SessionState:
     # so there is nothing above it to join with. A durable restriction
     # like hidden_paths, so it persists with the session record.
     commands: AdmissionRules | None = None
-    # The profile's per-command script, evaluated by ScriptPolicy at the
-    # admission gate. A durable restriction like commands, so it
-    # persists with the session record.
-    script: ProfileScript | None = None
+    # The profile's policy programs by method, run by ScriptPolicy at
+    # that method. A durable restriction like commands, so it persists
+    # with the session record.
+    scripts: ProfileScripts = field(default_factory=dict)
     # The name of the profile the session runs under, None for an
     # unrestricted session. What an owner-rendering command prints as
     # the group. Stamped by the profile like script, so it persists.
@@ -595,8 +595,11 @@ class SessionState:
             }
         if self.commands is not None:
             data["commands"] = commands_to_dict(self.commands)
-        if self.script is not None:
-            data["script"] = script_to_dict(self.script)
+        if self.scripts:
+            data["scripts"] = {
+                method: [script_to_dict(entry) for entry in entries]
+                for method, entries in self.scripts.items()
+            }
         if self.command_limits:
             data["command_limits"] = {
                 name: limit.model_dump()
@@ -659,7 +662,7 @@ class SessionState:
         reasons = data.get("hide_reasons")
         vars_ = data.get("hidden_vars")
         commands = data.get("commands")
-        script = data.get("script")
+        scripts = data.get("scripts")
         decisions = data.get("decisions")
         limits = data.get("command_limits")
         processes = data.get("processes")
@@ -682,8 +685,8 @@ class SessionState:
             )
         if commands is not None:
             data["commands"] = commands_from_dict(commands)
-        if script is not None:
-            data["script"] = script_from_dict(script)
+        if scripts is not None:
+            data["scripts"] = scripts_from_dict(scripts)
         if decisions is not None:
             data["decisions"] = tuple(decision_from_dict(d) for d in decisions)
         if limits is not None:

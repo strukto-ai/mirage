@@ -12,13 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import subprocess
 import sys
-
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing.types import ParsedCommand, RouteContext
-from mirage.runtime.types import RunArgs, RunResult
 
 
 def test_routing_types_import_without_loading_the_runtime():
@@ -26,7 +21,7 @@ def test_routing_types_import_without_loading_the_runtime():
         [
             sys.executable,
             "-c",
-            "import sys; from mirage.runtime.routing import RouteContext; "
+            "import sys; from mirage.runtime.routing import RouteDecision; "
             "assert 'mirage.runtime.base' not in sys.modules; "
             "assert 'mirage.runtime.routing.decide' not in sys.modules; "
             "from mirage.runtime.base import Runtime",
@@ -36,50 +31,3 @@ def test_routing_types_import_without_loading_the_runtime():
         check=False,
     )
     assert result.returncode == 0, result.stderr
-
-
-class StubRuntime(Runtime):
-    name = "monty"
-    captures = ("python3",)
-
-    async def run(self, args: RunArgs) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
-
-
-def sample_ctx() -> RouteContext:
-    return RouteContext(
-        line="slack send /data/x | python3 p.py",
-        commands=(
-            ParsedCommand(
-                command="slack",
-                words=("slack", "send", "/data/x"),
-                builtin=False,
-                paths=("/data/x",),
-                cli="slack",
-            ),
-            ParsedCommand(
-                command="python3",
-                words=("python3", "p.py"),
-                builtin=True,
-                paths=(),
-            ),
-        ),
-        command="slack",
-        builtin=False,
-        session_id="s1",
-        agent_id="a1",
-    )
-
-
-def test_wire_schema_round_trips_through_json():
-    """The to_dict payload survives a JSON file and from_dict replay."""
-    ctx = sample_ctx()
-    payload = json.loads(json.dumps(ctx.to_dict()))
-    assert RouteContext.from_dict(payload) == ctx
-
-
-def test_from_dict_ignores_the_runtime_decoration():
-    ctx = sample_ctx()
-    payload = ctx.to_dict(StubRuntime())
-    assert payload["runtime"] == {"name": "monty", "captures": ["python3"]}
-    assert RouteContext.from_dict(payload) == ctx

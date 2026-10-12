@@ -302,7 +302,7 @@ describe('compileProfile', () => {
       policies: {
         mountModes: null,
         commands: null,
-        script: null,
+        scripts: {},
         commandLimits: null,
         processes: DEFAULT_PROCESS_PERMISSIONS,
       },

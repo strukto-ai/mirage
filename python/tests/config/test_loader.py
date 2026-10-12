@@ -333,7 +333,9 @@ async def test_vfs_built_via_registry_has_correct_type():
 @pytest.mark.asyncio
 async def test_script_paths_resolve_against_config_dir(tmp_path):
     (tmp_path / "policy.py").write_text("'local'")
-    (tmp_path / "entry.py").write_text("ctx['command'] == 'python3'")
+    (tmp_path / "entry.py").write_text(
+        "ctx['commands'][0]['command'] == 'python3'"
+    )
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
@@ -349,7 +351,9 @@ runtimes:
     kwargs = cfg.to_workspace_kwargs()
     assert kwargs["route_policy"] == ScriptSource("'local'")
     entry = kwargs["runtimes"][0]
-    assert entry.script == ScriptSource("ctx['command'] == 'python3'")
+    assert entry.script == ScriptSource(
+        "ctx['commands'][0]['command'] == 'python3'"
+    )
 
 
 @pytest.mark.asyncio
@@ -997,31 +1001,35 @@ def test_shared_acceptance_fixture_is_accepted(fixture: str):
 
 
 def test_profile_policy_path_rebases_on_the_config_dir(tmp_path, monkeypatch):
-    # `policy: roles/x.py` means "next to the config file", the same
+    # `script: roles/x.py` means "next to the config file", the same
     # build-context rule the cli path form follows; without rebasing it
     # resolves against the process cwd and only works by luck.
     (tmp_path / "roles").mkdir()
-    (tmp_path / "roles" / "x.py").write_text(
-        "def pre_command(ctx):\n    return None\n"
-    )
+    (tmp_path / "roles" / "x.py").write_text("print('')\n")
+    (tmp_path / "roles" / "y.py").write_text("pass\n")
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     vfs: ram
 profiles:
-  release: {policy: {script: roles/x.py, runtime: monty}}
+  release:
+    policy:
+      pre_command:
+        - {script: roles/x.py, runtime: monty}
+        - {script: roles/y.py, runtime: {name: wasi, config: {home: /w}}}
 """)
     monkeypatch.chdir(tmp_path.parent)
     cfg = load_config(cfg_file)
     release = cfg.to_workspace_kwargs()["profiles"]["release"]
     assert release.policy is not None
-    assert isinstance(release.policy.script, ScriptSource)
-    assert (
-        release.policy.script.source
-        == "def pre_command(ctx):\n    return None\n"
-    )
-    assert release.policy.runtime == "monty"
+    first, second = release.policy["pre_command"]
+    assert isinstance(first.script, ScriptSource)
+    assert first.script.source == "print('')\n"
+    assert first.runtime == "monty"
+    assert isinstance(second.script, ScriptSource)
+    assert second.script.source == "pass\n"
+    assert second.runtime == {"name": "wasi", "config": {"home": "/w"}}
 
 
 def test_profile_policy_states_its_runtime(tmp_path):
@@ -1035,7 +1043,7 @@ mounts:
   /data:
     vfs: ram
 profiles:
-  release: {policy: {script: roles/x.py}}
+  release: {policy: {pre_command: [{script: roles/x.py}]}}
 """)
     with pytest.raises(ValueError, match="runtime"):
         load_config(cfg_file)
@@ -1050,7 +1058,7 @@ mounts:
 profiles:
   release: {script: roles/x.py, runtime: monty}
 """)
-    with pytest.raises(ValueError, match="now one policy block"):
+    with pytest.raises(ValueError, match="now a policy block"):
         load_config(cfg_file)
 
 

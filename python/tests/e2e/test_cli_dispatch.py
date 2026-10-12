@@ -21,10 +21,11 @@ from pydantic import BaseModel
 from mirage import CLI, CLIInvocation, Workspace
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLIHandler
-from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec, WordKind
 from mirage.config import load_config
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.policy import Deny, Policy, RouteContext
 from mirage.policy.match import Outcome
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.types import ScriptSource
@@ -264,20 +265,32 @@ async def test_yaml_unknown_cli_key_fails_loud():
         Workspace(**cfg.to_workspace_kwargs())
 
 
-@pytest.mark.asyncio
-async def test_policy_sees_the_cli_fact():
-    denied: list[str | None] = []
+class FrozenSends(Policy):
+    """Refuses a line sending a message, recording the verbs it saw."""
 
-    def policy(ctx):
-        denied.append(ctx.commands[0].cli if ctx.commands else None)
-        if ctx.commands and ctx.commands[0].cli == "slack-eng":
-            return {"deny": "cli lines are frozen"}
+    def __init__(self, denied: list[str | None]) -> None:
+        self.denied = denied
+
+    async def pre_execute(self, ctx: RouteContext) -> Deny | None:
+        verbs = [
+            w.text
+            for c in ctx.commands
+            for w in c.words
+            if w.kind is WordKind.SUBCOMMAND
+        ]
+        self.denied.append(" ".join(verbs) or None)
+        if verbs[:2] == ["message", "send"]:
+            return Deny("cli lines are frozen")
         return None
 
+
+@pytest.mark.asyncio
+async def test_policy_sees_the_cli_verbs():
+    denied: list[str | None] = []
     workspace = Workspace(
         {"/data": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
-        route_policy=policy,
+        policies=[FrozenSends(denied)],
     )
     workspace.register_cli("slack-eng", make_tree(), config={"token": "tok"})
     io = await workspace.shell("slack-eng message send -t x hi")
@@ -285,7 +298,7 @@ async def test_policy_sees_the_cli_fact():
     err = await materialize(io.stderr) if io.stderr else b""
     assert err == b"slack-eng: Permission denied\n"
     assert io.refusal is not None and io.refusal.kind == "deny"
-    assert denied[-1] == "slack-eng"
+    assert denied[-1] == "message send"
     io = await workspace.shell("echo unaffected")
     assert io.exit_code == 0
     assert denied[-1] is None

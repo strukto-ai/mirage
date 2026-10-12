@@ -369,6 +369,7 @@ async function judgeWords(
     unread,
     every,
     !every,
+    occurrence.source,
   )
   const [ctx, asked, answers] = gated
   const out: Judged[] = [

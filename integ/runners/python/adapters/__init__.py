@@ -3477,18 +3477,27 @@ def scripted_profiles(profiles: dict | None) -> dict | None:
     out: dict = {}
     for name, doc in profiles.items():
         policy = doc.get("policy") if isinstance(doc, dict) else None
-        script = policy.get("script") if isinstance(policy, dict) else None
-        if isinstance(policy, dict) and isinstance(script, dict):
-            # Only the program is loaded; the block around it (its
+        if isinstance(policy, dict):
+            # Only each program is loaded; the block around it (its
             # runtime) is the document's and stays as written.
             doc = {
                 **doc,
                 "policy": {
-                    **policy,
-                    "script": ScriptSource(
-                        script["source"],
-                        language=script.get("language", "python"),
-                    ),
+                    method: [
+                        {
+                            **program,
+                            "script": ScriptSource(
+                                program["script"]["source"],
+                                language=program["script"].get(
+                                    "language", "python"
+                                ),
+                            ),
+                        }
+                        if isinstance(program.get("script"), dict)
+                        else program
+                        for program in programs
+                    ]
+                    for method, programs in policy.items()
                 },
             }
         out[name] = doc

@@ -756,7 +756,7 @@ describe('savedVfsBuild', () => {
 /** Refuse env writes to GATE_* names, the deployment's rule. */
 class DenyGate implements Policy {
   preSession(ctx: SessionContext): Action | null {
-    if (ctx.plane === 'env' && ctx.key.startsWith('GATE_')) {
+    if (ctx.key.startsWith('GATE_')) {
       return { kind: 'deny', reason: 'GATE_* refused by policy' }
     }
     return null
@@ -849,7 +849,7 @@ describe('applyStateDict and the deployment', () => {
 
   // A session the restore had to create was a bare one, under no
   // profile, while its table had cleared the gate under the default
-  // profile's policy (`scriptOf` for an id the manager does not know);
+  // profile's policy (`scriptsOf` for an id the manager does not know);
   // the created session now runs under that profile, so what the gate
   // judged is what lands, and a restored session no longer wakes
   // unrestricted.
@@ -877,8 +877,8 @@ describe('applyStateDict and the deployment', () => {
     const restored = target.getSession('s2')
     expect(restored.profile).toBe('default')
     expect(restored.commands).toBe(compiled?.policies.commands)
-    expect(restored.script).toBe(compiled?.policies.script)
-    expect(target.sessionManager.scriptOf('s2')).toBe(compiled?.policies.script)
+    expect(restored.scripts).toBe(compiled?.policies.scripts)
+    expect(target.sessionManager.scriptsOf('s2')).toBe(compiled?.policies.scripts)
     expect(restored.env.PUBLIC_A).toBe('1')
     const refused = await target.shell('rm /data/f.txt', { sessionId: 's2' })
     expect(refused.exitCode).toBe(126)

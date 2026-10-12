@@ -526,10 +526,10 @@ async function runPreparedLine(
             // isolation the binding would reach other tasks.
             const decide = (): ReturnType<typeof env.router.decide> =>
               env.router.decide(
-                rootNode,
                 command,
                 options,
                 effectiveSession,
+                judged,
                 held,
                 claimantFor(rootNode, handed),
                 mergeSignals(options.signal, context.frame.abortSignal),
@@ -647,7 +647,20 @@ async function runPreparedLine(
                     true,
                     null,
                     env.registry.policies.wants('postExecute')
-                      ? env.router.context(substitutionTree, cmd, innerOpts, session)
+                      ? env.router.context(
+                          cmd,
+                          innerOpts,
+                          session,
+                          await lineJudgments(
+                            substitutionTree as unknown as TSNodeLike,
+                            session,
+                            env.registry,
+                            env.namespace,
+                            innerOpts.agentId ?? env.agentId ?? '',
+                            innerOpts.handed ?? handed,
+                            (source) => substitutionParser.parse(source) as unknown as TSNodeLike,
+                          ),
+                        )
                       : null,
                   )
                   io.stdout = stdout
@@ -972,6 +985,9 @@ async function runParsedLine(
         const filled = await fillManaged([rootNode], true, new Set(), false)
         if (filled !== null) return filled
       }
+      const route = env.registry.policies.wants('postExecute')
+        ? env.router.context(command, options, effectiveSession, await judged())
+        : null
       const result = await abortable(
         runWithRefusalSink(note, () =>
           runWholeLine(
@@ -985,9 +1001,7 @@ async function runParsedLine(
             killed,
             env.registry.commandLimits,
             claimantFor(rootNode, handed),
-            env.registry.policies.wants('postExecute')
-              ? env.router.context(rootNode, command, options, effectiveSession)
-              : null,
+            route,
           ),
         ),
         killed,
@@ -1085,7 +1099,7 @@ async function runParsedLine(
           false,
           options.callStack ?? null,
           env.registry.policies.wants('postExecute')
-            ? env.router.context(rootNode, command, options, context.session)
+            ? env.router.context(command, options, context.session, await judged())
             : null,
         ).finally(release)
         const result = await joinOrAbort(running, killed)

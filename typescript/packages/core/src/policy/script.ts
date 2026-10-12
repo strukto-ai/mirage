@@ -12,450 +12,375 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WorkspaceBinding } from '../runtime/binding.ts'
+import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError } from '../errors/types.ts'
-import type { Runtime } from '../runtime/base.ts'
-import { EvalError } from '../runtime/errors.ts'
-import type { Evaluator } from '../runtime/mixin.ts'
-import type { MountResolver } from '../runtime/resolver.ts'
-import type { ScriptSource } from '../runtime/types.ts'
-import { evalWithCtx, scriptEngine } from '../runtime/script.ts'
-import type { BridgeDispatchFn, EvalValue } from '../runtime/types.ts'
-import type { Policy } from './base.ts'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
-import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
+import { WorkspaceBinding } from '../runtime/binding.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
+import type { LanguageRuntime } from '../runtime/language.ts'
+import type { MountResolver } from '../runtime/resolver.ts'
+import { scriptEngine } from '../runtime/script.ts'
+import type { BridgeDispatchFn, EvalValue, RunResult } from '../runtime/types.ts'
+import { PathSpec } from '../types.ts'
+import { compareCodePoints } from '../utils/sort.ts'
+import type { Policy } from './base.ts'
 import {
+  CTX_ENV,
+  DEFAULT_ASK_REASON,
+  DEFAULT_DENY_REASON,
+  METHODS,
+  PROGRAM_RUNTIMES,
+} from './constants.ts'
+import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
+import {
+  Answer,
+  VALIDITY,
   type Action,
   type Ask,
   type CommandContext,
   type Deny,
-  type VfsContext,
   type PolicyHook,
   type ProfileScript,
+  type Route,
+  type RouteContext,
+  type ScriptMethod,
   type SessionContext,
   type SessionScriptsQuery,
+  type VfsContext,
 } from './types.ts'
 
-/** The admission hooks a policy program may define, as the Policy interface spells them. */
-export type ScriptHook = 'preCommand' | 'preVfs' | 'preSession'
+const DECODER = new TextDecoder()
+const ENCODER = new TextEncoder()
+
+// The live handles every context carries, which a program reads as data
+// instead: the session as its cwd, env and profile, the namespace as the
+// mounts it shows, the files through the program's own open().
+const LIVE = new Set(['session', 'ns', 'vfs'])
 
 /**
- * The admission hooks a policy program may define, JavaScript spelling
- * to python spelling. The output hooks (postVfs, postExecute) stay
- * coded: they answer with a Limit over a live result.
+ * A value as a program reads it: JSON-shaped data, bytes as text, a path
+ * as its virtual spelling, a record as its fields under the Python
+ * names (the live handles left out). Mirrors the Python `_plain`.
  */
-export const HOOKS: Readonly<Record<ScriptHook, string>> = {
-  preCommand: 'pre_command',
-  preVfs: 'pre_vfs',
-  preSession: 'pre_session',
+function plain(value: unknown): EvalValue {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'bigint') return Number(value)
+  if (value instanceof Uint8Array) return DECODER.decode(value)
+  if (value instanceof PathSpec) return value.virtual
+  if (Array.isArray(value) || value instanceof Set) return [...value].map(plain)
+  if (value instanceof Map) {
+    return Object.fromEntries([...value].map(([key, item]) => [String(key), plain(item)]))
+  }
+  if (typeof value === 'object') {
+    const own = value as { toDict?: () => unknown; toJSON?: () => unknown }
+    if (typeof own.toDict === 'function') return plain(own.toDict())
+    if (typeof own.toJSON === 'function') return plain(own.toJSON())
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(
+          ([key, item]) =>
+            !LIVE.has(key) &&
+            item !== undefined &&
+            typeof item !== 'function' &&
+            typeof item !== 'symbol',
+        )
+        // Under the field names the document and the Python host spell.
+        .map(([key, item]) => [
+          key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+          plain(item),
+        ]),
+    )
+  }
+  return null
 }
 
-const SCRIPT_HOOKS = Object.keys(HOOKS) as readonly ScriptHook[]
-
 /**
- * What a profile's script is told about one command: the
- * `CommandContext` the coded hooks read, as plain data.
- *
- * The same facts on both hosts, JSON-shaped because the script runs
- * inside a sandboxed engine that a live object cannot cross into.
- * Paths are spelled as resolved virtual paths, so a script matches what
- * the command will actually touch, not what was typed; the words, each
- * with its kind, are in `words`.
+ * A policy context as a program reads it: every field a coded policy
+ * reads, under the Python name, as plain data. The live handles become
+ * data: the session its `cwd`, `env` and `profile`, the namespace the
+ * `mounts` the session sees. The files are the program's own `open()`,
+ * which reads as the session. Mirrors the Python `script_context`.
  */
 export function scriptContext(
-  profile: string,
-  ctx: CommandContext,
-  mounts: readonly string[],
+  ctx: CommandContext | RouteContext | VfsContext | SessionContext,
 ): Record<string, EvalValue> {
-  return {
-    profile,
-    command: {
-      name: ctx.command,
-      words: (ctx.words ?? []).map((word) => word.toDict()),
-      paths: ctx.paths.map((path) => path.virtual),
-      walks: ctx.walks ?? false,
-    },
-    session: {
-      id: ctx.sessionId ?? '',
-      agent: ctx.agentId ?? '',
-      cwd: ctx.cwd,
-      env: ctx.session?.snapshot() ?? {},
-    },
-    mounts: [...mounts],
+  const data = plain(ctx) as Record<string, EvalValue>
+  const session = ctx.session
+  if (session !== undefined) {
+    data.cwd = session.cwd()
+    data.env = { ...session.snapshot() }
+    data.profile = session.profile() ?? ''
+  } else {
+    data.cwd ??= '/'
+    data.env = {}
+    data.profile = ''
   }
+  data.mounts = [...(ctx.ns?.mounts?.visibleDescendants('/') ?? [])]
+  return data
 }
 
 /**
- * What a profile's script is told about one VFS op: the `VfsContext`
- * the coded hooks read, as plain data.
- */
-export function opsScriptContext(
-  profile: string,
-  ctx: VfsContext,
-  mounts: readonly string[],
-): Record<string, EvalValue> {
-  return {
-    profile,
-    call: {
-      name: ctx.call.name,
-      effect: ctx.call.effect,
-      target: ctx.call.target,
-      creates: ctx.call.creates,
-      subtree: ctx.call.subtree,
-      path: ctx.path.virtual,
-      write: ctx.write,
-      prefix: ctx.prefix,
-    },
-    session: {
-      id: ctx.sessionId ?? '',
-      cwd: ctx.session?.cwd() ?? '',
-      env: ctx.session?.snapshot() ?? {},
-    },
-    mounts: [...mounts],
-  }
-}
-
-/**
- * What a profile's script is told about one session-state write: the
- * `SessionContext` the coded hooks read, as plain data.
- */
-export function sessionScriptContext(
-  profile: string,
-  ctx: SessionContext,
-  mounts: readonly string[],
-): Record<string, EvalValue> {
-  return {
-    profile,
-    write: { plane: ctx.plane, verb: ctx.verb, key: ctx.key, value: ctx.value },
-    session: {
-      id: ctx.sessionId,
-      cwd: ctx.session?.cwd() ?? '',
-      env: ctx.session?.snapshot() ?? {},
-    },
-    mounts: [...mounts],
-  }
-}
-
-/**
- * The policy answer a policy's hook returns.
+ * The answer a policy program printed at one method.
  *
- * The vocabulary is the coded hook's own, spelled as data: null or
- * `'allow'` is no opinion (the command runs unless another rule refuses
- * it, and can never override one that does), `'deny'` / `{deny: reason}`
- * refuses, and `'ask'` / `{ask: reason}` takes it to the approval ledger,
- * as every hook may (`VALIDITY`). The bare strings carry the document's
- * default reasons, the same ones a rule stating no reason gets.
- *
- * Throws a plain Error whose message is a clause about "script", for
- * the caller to prefix with whose policy it is.
+ * Nothing (or `null`) is no opinion. Anything else is one JSON answer
+ * (`Answer`): `{"kind": "deny", "reason": ...}`, `{"kind": "ask",
+ * "reason": ...}`, or at `preExecute` `{"kind": "route", "runtime": ...}`.
+ * A deny or an ask without a reason carries the document's default one.
+ * Throws a plain Error whose message is a clause about "script", for the
+ * caller to prefix with whose policy it is. Mirrors the Python
+ * `script_action`.
  */
-export function scriptAction(value: EvalValue): Deny | Ask | null {
-  if (value === null || value === 'allow') return null
-  if (value === 'deny') return { kind: 'deny', reason: DEFAULT_DENY_REASON }
-  if (value === 'ask') return { kind: 'ask', reason: DEFAULT_ASK_REASON }
-  if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Uint8Array)) {
-    const entries = Object.entries(value)
-    if (entries.length === 1) {
-      const first = entries[0]
-      if (first !== undefined) {
-        const [verb, reason] = first
-        if (typeof reason === 'string' && reason !== '') {
-          if (verb === 'deny') return { kind: 'deny', reason }
-          if (verb === 'ask') return { kind: 'ask', reason }
-        }
-      }
-    }
+export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | Ask | Route | null {
+  const text = DECODER.decode(output).trim()
+  if (text === '' || text === 'null') return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    parsed = undefined
   }
-  throw new Error(
-    `script must answer allow, deny or ask: null or 'allow', 'deny', 'ask', ` +
-      `{deny: reason} or {ask: reason}; got ${JSON.stringify(value)}`,
-  )
+  const answer = Answer.safeParse(parsed)
+  const name = METHODS[method]
+  if (!answer.success) {
+    throw new Error(
+      `script must print a JSON answer at ${name}, ` + '{"kind": "deny" | "ask" | "route", ...}',
+    )
+  }
+  const { kind, reason, runtime } = answer.data
+  if (!VALIDITY[method].has(kind)) throw new Error(`script cannot answer ${kind} at ${name}`)
+  if (kind === 'deny') return { kind, reason: reason ?? DEFAULT_DENY_REASON }
+  if (kind === 'ask') return { kind, reason: reason ?? DEFAULT_ASK_REASON }
+  return { kind, runtime: runtime ?? '' }
 }
 
 /**
- * The workspace's file calls, for the engine a profile policy runs on.
+ * The workspace's file calls, for the runtime a profile's programs run on.
  *
- * A policy judges a line before it runs, and some judgments are about
- * what a file holds rather than what it is called. The engine is
- * attached with these exactly as `Runtimes` attaches an agent's, so
- * the policy's `open()` reads the mounts through the same entry point an
- * agent's program would, and a read from a policy clears the dispatcher
- * like any other. The bridge is built for one `issuer`, the policy's
- * own token: every op it dispatches carries the token to the dispatcher
- * (`VfsContext.issuer`), which is how the policy's `preVfs` tells its
- * own read from anyone else's. The workspace supplies them; a bare
- * ScriptPolicy (outside a workspace) has none, and its programs see no
- * file.
+ * Some judgments are about what a file holds rather than what it is
+ * called. The runtime is attached with these exactly as `Runtimes`
+ * attaches an agent's, so a program's `open()` reads the mounts through
+ * the same entry point an agent's program would, and a read from a policy
+ * clears the dispatcher like any other. The bridge is built for one
+ * `issuer`, the policy's own token: every op it dispatches carries the
+ * token to the dispatcher (`VfsContext.issuer`), which is how the
+ * policy's `preVfs` tells its own read from anyone else's. The workspace
+ * supplies them; a bare ScriptPolicy (outside a workspace) has none, and
+ * its programs see no file.
  */
 export interface ScriptWiring {
   bridge: (issuer: symbol) => BridgeDispatchFn
   resolver: MountResolver
 }
 
-/** A hook's name in the program's own language: `preVfs` in JavaScript, `pre_vfs` in python. */
-export function hookName(script: ScriptSource, hook: ScriptHook): string {
-  return script.language === 'js' ? hook : HOOKS[hook]
-}
-
 /**
- * The call that runs one of a policy's hooks, in its language's own
- * spelling.
- *
- * A policy program defines the hooks it answers at, the way a coded
- * Policy defines only the hooks it cares about: `pre_command(ctx)` in
- * python, `preCommand(ctx)` in JavaScript, returning the verdict. The
- * program is evaluated whole, with this call appended as its last
- * expression, so the definitions run and the call's return is what the
- * evaluator hands back.
- */
-export function hookCall(script: ScriptSource, hook: ScriptHook): string {
-  return `${hookName(script, hook)}(ctx)`
-}
-
-/**
- * The expression that lists which hooks a policy program defines.
- *
- * Appended to the program once, before its first judgment, so a hook
- * the program leaves out is silence at that entry point rather than a call
- * that fails, and the dispatcher in particular is never charged an
- * evaluation for a program that only judges commands. Spelled per
- * language and in the engines' common subset: monty has neither
- * `globals()` nor `callable()`, so python asks each name and catches
- * the NameError; JavaScript asks `typeof`, behind a `;` that ends
- * whatever statement the program left open, since a bracket on the
- * next line would otherwise index its last value. A name the program
- * binds is a hook it defines, whatever it bound.
- */
-export function hookProbe(script: ScriptSource): string {
-  const names = SCRIPT_HOOKS.map((hook) => hookName(script, hook))
-  if (script.language === 'js') {
-    const pairs = names.map((name) => `['${name}', typeof ${name}]`).join(', ')
-    return `;[${pairs}].filter((h) => h[1] !== 'undefined').map((h) => h[0])`
-  }
-  const arms = names
-    .map(
-      (name) =>
-        `try:\n    ${name}\n    _mirage_hooks.append('${name}')\nexcept NameError:\n    pass\n`,
-    )
-    .join('')
-  return `_mirage_hooks = []\n${arms}_mirage_hooks`
-}
-
-/**
- * The hooks `hookProbe` found, as the Policy interface spells them.
- * Throws a plain Error, a clause about "script", when the value is not
- * a list of the probe's names.
- */
-export function definedHooks(script: ScriptSource, value: EvalValue): ReadonlySet<ScriptHook> {
-  const spelled = new Map(SCRIPT_HOOKS.map((hook) => [hookName(script, hook), hook] as const))
-  if (Array.isArray(value)) {
-    const hooks = value.map((name) => (typeof name === 'string' ? spelled.get(name) : undefined))
-    if (hooks.every((hook): hook is ScriptHook => hook !== undefined)) return new Set(hooks)
-  }
-  throw new Error(`script hook probe answered ${JSON.stringify(value)}`)
-}
-
-/**
- * Each profile's policy, enforced at the admission gates.
+ * Each profile's policy programs, run at the `pre` methods.
  *
  * The scripted twin of `PermissionsPolicy`, registered right after it:
- * where that policy evaluates the document's declarative rules, this
- * one calls the profile's policy program with the same facts. A program
- * defines the hooks it answers at, the way a coded Policy defines only
- * the hooks it cares about: `preCommand` per command (`scriptContext`),
- * `preVfs` per VFS op (`opsScriptContext`), `preSession` per env write
- * (`sessionScriptContext`). Which ones it defines is probed once per
- * program (`hookProbe`), so a hook it leaves out is silence at that
- * entry point and costs no evaluation, and a program defining none fails
- * closed at every entry point. It reads the session's policy through the
- * narrow `SessionScriptsQuery` by the session id the entry point put in the
- * context, so a session whose profile states no policy costs one lookup
- * and nothing else.
+ * where that policy evaluates the document's declarative rules, this one
+ * runs the profile's programs. A profile names, per method, a list of
+ * programs and the runtime each runs on; they are asked in order, the
+ * first deny wins, then the first ask, and every route must agree. A
+ * method with no program is silence and costs nothing. It reads the
+ * session's programs through the narrow `SessionScriptsQuery` by the
+ * session id the entry point put in the context.
  *
- * The facts name the paths; the engine can open them. It is wired to
- * the workspace's files the way an agent's runtime is (`ScriptWiring`),
- * so a policy may read what an operand holds and answer for its
- * content, not only its name. A read from a policy clears the dispatcher
- * like any other, except this policy's own `preVfs`: the policy is the
- * one asking, and judging its own read would re-enter the evaluation
- * waiting on it. It knows its own read by `issuer`, a token only its
- * bridge stamps and that rides each op as an argument: a mark kept in
- * ambient context would be whatever op another task dispatched while
- * a read was in flight on a runtime with no task isolation.
+ * A program runs as any program does on its runtime: never edited, with
+ * the context as JSON (`scriptContext`) in `CTX_ENV` and on stdin, the
+ * session's cwd and environment, and its answer printed on stdout
+ * (`scriptAction`). Every failure fails closed: a program that exits
+ * non-zero, runs past the timeout, prints something else, or names a
+ * runtime that cannot be built refuses the action with a reason naming
+ * the profile, and is logged.
  *
- * Every failure fails closed: a policy that threw, timed out, answered
- * with the wrong shape, defines no hook, or names an engine that cannot
- * be built refuses the command, op or write with a reason naming the
- * profile. Silence on failure would run exactly what the policy existed
- * to judge.
- *
- * Engines are built lazily on the first judgment that needs one, shared
- * per engine name, and closed by the workspace's own close.
- * Evaluations are serialized: the engines are workers, and two
- * concurrent evals on one would interleave.
+ * The runtime is the policy's own, built from the name and settings the
+ * profile gives, shared across sessions and never the agent's. It is
+ * wired to the workspace's files the way an agent's runtime is
+ * (`ScriptWiring`), so a program reads what an operand holds as the
+ * session reads it. A read from a program clears the dispatcher like any
+ * other, except this policy's own `preVfs`: the policy is the one
+ * asking, and judging its own read would re-enter the run waiting on it.
+ * It knows its own read by `issuer`, a token only its bridge stamps and
+ * that rides each op as an argument: a mark kept in ambient context would
+ * be whatever op another task dispatched while a read was in flight on a
+ * runtime with no task isolation. Runs are serialized. Mirrors the Python
+ * `ScriptPolicy`.
  */
 export class ScriptPolicy implements Policy, SessionScoped {
   readonly [SESSION_SCOPED] = true as const
   private readonly sessions: SessionScriptsQuery
-  private readonly mounts: () => readonly string[]
   private readonly wiring: ScriptWiring | null
-  private readonly engines = new Map<string, Runtime & Evaluator>()
-  private readonly defined = new Map<string, ReadonlySet<ScriptHook>>()
-  // The mark on every op this policy's own engines dispatch, and
-  // nothing else's: unexported, so only the bridge built for it can
-  // stamp it.
+  private readonly engines = new Map<string, LanguageRuntime>()
+  // The mark on every op this policy's own runtimes dispatch, and nothing
+  // else's: unexported, so only the bridge built for it can stamp it.
   private readonly issuer = Symbol('policy read')
   private queue: Promise<unknown> = Promise.resolve()
 
-  constructor(
-    sessions: SessionScriptsQuery,
-    mounts: () => readonly string[],
-    wiring: ScriptWiring | null = null,
-  ) {
+  constructor(sessions: SessionScriptsQuery, wiring: ScriptWiring | null = null) {
     this.sessions = sessions
-    this.mounts = mounts
     this.wiring = wiring
   }
 
+  async preExecute(ctx: RouteContext): Promise<Action | null> {
+    return this.judge('preExecute', ctx)
+  }
+
   async preCommand(ctx: CommandContext): Promise<Action | null> {
-    return this.judge('preCommand', ctx.sessionId ?? '', (entry) =>
-      scriptContext(entry.profile, ctx, this.mounts()),
-    )
+    return this.judge('preCommand', ctx)
   }
 
   async preVfs(ctx: VfsContext): Promise<Action | null> {
     if (ctx.issuer === this.issuer) return null
-    return this.judge('preVfs', ctx.sessionId ?? '', (entry) =>
-      opsScriptContext(entry.profile, ctx, this.mounts()),
-    )
+    return this.judge('preVfs', ctx)
   }
 
   async preSession(ctx: SessionContext): Promise<Action | null> {
-    return this.judge('preSession', ctx.sessionId, (entry) =>
-      sessionScriptContext(entry.profile, ctx, this.mounts()),
-    )
+    return this.judge('preSession', ctx)
   }
 
-  /**
-   * Whether this session's policy speaks at `hook`: it has a program,
-   * and the program defines the hook, or defines none and so refuses at
-   * every entry point. A probe that fails answers true for the same reason:
-   * the entry point will refuse.
-   */
-  async wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
-    const entry = this.sessions.scriptOf(sessionId)
-    if (entry === null || !(hook in HOOKS)) return false
-    let defined: ReadonlySet<ScriptHook>
-    try {
-      defined = await this.hooksOf(entry)
-    } catch {
-      // The entry point reports the failure itself, as a refusal naming the
-      // profile; here the answer is only that it will speak.
-      return true
-    }
-    return defined.size === 0 || defined.has(hook as ScriptHook)
+  /** Whether this session's profile names a program at `hook`. */
+  wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
+    const programs = hook in METHODS ? this.sessions.scriptsOf(sessionId)[hook as ScriptMethod] : []
+    return Promise.resolve((programs?.length ?? 0) > 0)
   }
 
-  /** Close every engine a script was evaluated on. */
+  /** Close every runtime a program ran on. */
   async close(): Promise<void> {
     const engines = [...this.engines.values()]
     this.engines.clear()
     for (const engine of engines) await engine.close()
   }
 
-  /** One hook of the session's policy, with the entry point's facts as `ctx`. */
+  /** Every program the session's profile names at one method. */
   private async judge(
-    hook: ScriptHook,
-    sessionId: string,
-    facts: (entry: ProfileScript) => Record<string, EvalValue>,
+    method: ScriptMethod,
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
   ): Promise<Action | null> {
-    const entry = this.sessions.scriptOf(sessionId)
-    if (entry === null) return null
-    let value: EvalValue
-    try {
-      const defined = await this.hooksOf(entry)
-      if (defined.size === 0) {
-        const names = SCRIPT_HOOKS.map((name) => hookName(entry.script, name))
-        return failed(
-          entry,
-          `defines no hook: ${names.slice(0, -1).join(', ')} or ${names[names.length - 1] ?? ''}`,
-        )
+    const programs = this.sessions.scriptsOf(ctx.sessionId ?? '')[method] ?? []
+    if (programs.length === 0) return null
+    const payload = JSON.stringify(scriptContext(ctx))
+    const cwd = await this.cwd(ctx)
+    const env = { ...(ctx.session?.snapshot() ?? {}) }
+    let asked: Ask | null = null
+    let routed: Route | null = null
+    for (const entry of programs) {
+      const answer = await this.run(entry, method, payload, cwd, env)
+      if (answer === null) continue
+      if (answer.kind === 'deny') return answer
+      if (answer.kind === 'ask') asked ??= answer
+      if (answer.kind === 'route') {
+        if (routed !== null && routed.runtime !== answer.runtime) {
+          return failed(entry, `places the line on '${routed.runtime}' and '${answer.runtime}'`)
+        }
+        routed ??= answer
       }
-      if (!defined.has(hook)) return null
-      value = await this.evaluate(entry, hookCall(entry.script, hook), facts(entry))
+    }
+    return asked ?? routed
+  }
+
+  /**
+   * The directory a program starts in: the session's, or `/` once the
+   * session's has gone, since a runtime that enters it first cannot start
+   * in a directory that is not there.
+   */
+  private async cwd(
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+  ): Promise<string> {
+    const cwd = ctx.session?.cwd() ?? '/'
+    if (cwd !== '/' && ctx.vfs !== undefined && !(await ctx.vfs.exists(cwd))) return '/'
+    return cwd
+  }
+
+  /** One program at one method, failing closed. */
+  private async run(
+    entry: ProfileScript,
+    method: ScriptMethod,
+    payload: string,
+    cwd: string,
+    env: Record<string, string>,
+  ): Promise<Deny | Ask | Route | null> {
+    let result: RunResult
+    try {
+      result = await this.serialized(async () => {
+        const engine = this.engine(entry)
+        return runWithTimeout(
+          engine.execute({
+            kind: 'code',
+            language: entry.script.language,
+            code: entry.script.source,
+            args: [],
+            cwd: PathSpec.fromStrPath(cwd),
+            env: { ...env, [CTX_ENV]: payload },
+            stdin: ENCODER.encode(payload),
+          }),
+          SCRIPT_EVAL_TIMEOUT.seconds,
+          `profile '${entry.profile}' policy`,
+        )
+      })
     } catch (err) {
       if (err instanceof CommandTimeoutError) {
         return failed(entry, `timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
       }
-      if (err instanceof EvalError) {
-        return failed(entry, `${err.syntax ? 'syntax error' : 'failed'}: ${err.message}`)
-      }
-      // scriptEngine's refusal (the engine cannot be built) or the
-      // probe's (the program answered it with something else) is a
-      // clause about "script"; the profile's word for it is policy.
+      // scriptEngine's refusal: the runtime cannot be built here.
       return failed(entry, clause(err))
     }
+    if (result.exitCode !== 0) {
+      const stderr = DECODER.decode(result.stderr ?? new Uint8Array())
+      return failed(entry, `exited ${String(result.exitCode)}`, stderr.slice(-2000))
+    }
     try {
-      return scriptAction(value)
+      return scriptAction(result.stdout, method)
     } catch (err) {
       return failed(entry, clause(err))
     }
   }
 
   /**
-   * The hooks one profile's program defines, probed on its first
-   * judgment and remembered by runtime, program text and language.
-   * A runtime change must probe again, including its validation;
-   * a cached absent hook must never bypass a broken new engine.
+   * The policy's own runtime for one program, built on first use and
+   * shared by every program naming the same runtime and settings. Throws
+   * a clause about "script" when the runtime is not one a policy program
+   * runs on, or cannot be built here.
    */
-  private async hooksOf(entry: ProfileScript): Promise<ReadonlySet<ScriptHook>> {
-    const key = JSON.stringify([entry.runtime, entry.script.language, entry.script.source])
-    let defined = this.defined.get(key)
-    if (defined === undefined) {
-      defined = definedHooks(entry.script, await this.evaluate(entry, hookProbe(entry.script), {}))
-      this.defined.set(key, defined)
+  private engine(entry: ProfileScript): LanguageRuntime {
+    if (!PROGRAM_RUNTIMES.has(entry.runtime)) {
+      throw new Error(
+        `script names runtime '${entry.runtime}'; a policy program runs on ` +
+          [...PROGRAM_RUNTIMES].sort(compareCodePoints).join(' or '),
+      )
     }
-    return defined
+    const settings = Object.entries(entry.config).sort(([a], [b]) => compareCodePoints(a, b))
+    const key = JSON.stringify([entry.runtime, settings])
+    let engine = this.engines.get(key)
+    if (engine === undefined) {
+      engine = scriptEngine(entry.script, entry.runtime, entry.config)
+      // Keep policy-origin attribution on the binding's dispatch.
+      if (this.wiring !== null) {
+        engine.bind(new WorkspaceBinding(this.wiring.bridge(this.issuer), this.wiring.resolver))
+      }
+      this.engines.set(key, engine)
+    }
+    return engine
   }
 
-  /** The program whole, then `tail` as its last expression, on the profile's engine, serialized. */
-  private async evaluate(
-    entry: ProfileScript,
-    tail: string,
-    ctx: Record<string, EvalValue>,
-  ): Promise<EvalValue> {
-    const run = this.queue.then(async () => {
-      let engine = this.engines.get(entry.runtime)
-      if (engine === undefined) {
-        engine = scriptEngine(entry.script, entry.runtime)
-        // Keep policy-origin attribution on the binding's dispatch.
-        if (this.wiring !== null) {
-          engine.bind(new WorkspaceBinding(this.wiring.bridge(this.issuer), this.wiring.resolver))
-        }
-        this.engines.set(entry.runtime, engine)
-      }
-      return evalWithCtx(
-        `${entry.script.source}\n\n${tail}\n`,
-        ctx,
-        engine,
-        SCRIPT_EVAL_TIMEOUT.seconds,
-        `profile '${entry.profile}' policy`,
-      )
-    })
+  /** `work` after every run before it: the runtimes are workers, and two runs on one would interleave. */
+  private serialized<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(work)
     this.queue = run.catch(() => undefined)
     return run
   }
 }
 
-/** The fail-closed refusal: one wording however the policy broke. */
-function failed(entry: ProfileScript, detail: string): Deny {
-  return { kind: 'deny', reason: `profile '${entry.profile}' policy ${detail}` }
+/** The fail-closed refusal: one wording however the program broke, logged with its stderr. */
+function failed(entry: ProfileScript, detail: string, stderr = ''): Deny {
+  const reason = `profile '${entry.profile}' policy ${detail}`
+  console.error(stderr === '' ? reason : `${reason}\n${stderr}`)
+  return { kind: 'deny', reason }
 }
 
 /**
- * An error's message as the clause after "policy": the engine entry point and
- * the answer reader both speak of "script", which is the program's
+ * An error's message as the clause after "policy": the runtime builder
+ * and the answer reader both speak of "script", which is the program's
  * generic name, and the profile's word for its program is policy.
  */
 function clause(err: unknown): string {

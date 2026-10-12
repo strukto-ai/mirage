@@ -294,7 +294,17 @@ async def recurse(
                     command_substitution=True,
                     execution_scope=execution_scope,
                     route=ws.router.context(
-                        tree, cmd, session.session_id, agent_id or ""
+                        cmd,
+                        session,
+                        agent_id or "",
+                        await line_judgments(
+                            tree,
+                            session,
+                            ws.registry,
+                            ws.namespace,
+                            inner if inner is not None else HandOff(),
+                            agent_id or "",
+                        ),
                     )
                     if ws.registry.policies.wants("post_execute")
                     else None,
@@ -786,13 +796,12 @@ async def run_prepared_line(
         held = False
         try:
             placed = await ws.router.decide(
-                ast,
                 command,
                 runtime,
                 effective_session,
-                session_id,
                 agent or "",
                 routing_decision,
+                judged,
                 admission_holds,
                 claimant_for(ast, line_handed),
                 cancel,
@@ -880,7 +889,9 @@ async def run_prepared_line(
                     ws.registry.command_limits,
                     claimant_for(ast, handed),
                     cancel,
-                    ws.router.context(ast, command, session_id, agent or "")
+                    ws.router.context(
+                        command, effective_session, agent or "", await judged()
+                    )
                     if ws.registry.policies.wants("post_execute")
                     else None,
                 )
@@ -1011,7 +1022,9 @@ async def run_prepared_line(
                 sink=sink,
                 call_stack=call_stack,
                 execution_scope=execution_scope,
-                route=ws.router.context(ast, command, session_id, agent or "")
+                route=ws.router.context(
+                    command, effective_session, agent or "", await judged()
+                )
                 if ws.registry.policies.wants("post_execute")
                 else None,
             )

@@ -12,31 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# The reviewer's policy program, named by workspace.yaml. Any of the
-# three admission hooks may be defined; each is handed the entry point's facts
-# as ctx and answers with return: None for no opinion, {"deny": reason}
-# to refuse. It runs on the engine the document names, and open() reads
-# through the workspace.
+import json
+import os
 
+# The reviewer's command program, named by workspace.yaml at
+# pre_command. It reads its context as JSON, the same fields a coded
+# policy reads, and prints its answer: nothing for no opinion, a deny to
+# refuse. It runs on the runtime the document names, and open() reads
+# through the workspace as the session.
 
-def pre_command(ctx):
-    for path in ctx["command"]["paths"]:
-        if "marker" in contents(path):
-            return {"deny": "marked files are not read by " + ctx["profile"]}
-    return None
-
-
-def pre_vfs(ctx):
-    call = ctx["call"]
-    if call["write"] and call["path"].startswith("/scratch/cold/"):
-        return {"deny": "the cold store is frozen"}
-    return None
-
-
-def pre_session(ctx):
-    if ctx["write"]["key"].startswith("AWS_"):
-        return {"deny": "credentials are set by the operator"}
-    return None
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 
 
 def contents(path):
@@ -44,3 +29,8 @@ def contents(path):
         return open(path).read()
     except OSError:
         return ""
+
+
+if any("marker" in contents(path) for path in ctx["paths"]):
+    reason = "marked files are not read by " + ctx["profile"]
+    print(json.dumps({"kind": "deny", "reason": reason}))

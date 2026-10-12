@@ -444,6 +444,7 @@ export {
   type Deny,
   type Explanation,
   Outcome,
+  type RouteContext,
   Scope,
   type SessionContext,
   type ShellExplanation,
@@ -459,12 +460,7 @@ export { type MountResolver, PrefixResolver } from '@struktoai/mirage-core/runti
 export { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 export { CrossMountError } from '@struktoai/mirage-core/runtime/errors'
 export type { RunArgs, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
-export {
-  DenyResult,
-  type RouteContext,
-  type RoutePolicy,
-  RouteResult,
-} from '@struktoai/mirage-core/runtime/routing/types'
+export type { RoutePolicy } from '@struktoai/mirage-core/runtime/routing/types'
 export {
   type ExecuteOptions,
   ExecuteResult,

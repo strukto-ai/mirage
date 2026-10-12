@@ -17,24 +17,21 @@ import asyncio
 import pytest
 
 import mirage.runtime.routing.decide as decide_mod
+from mirage.commands.spec.types import WordKind
+from mirage.policy.types import CommandContext, CommandWord, Deny, RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.routing import (
-    DenyResult,
-    RouteContext,
-    RouteDeny,
     RouteError,
-    RouteResult,
     ScriptSource,
+    command_nodes,
     decide_line,
     evaluate_policy,
     evaluate_script,
     evaluator_of,
-    parse_verdict,
-    parsed_commands,
     runtime_for_language,
 )
 from mirage.runtime.types import RunArgs, RunResult
@@ -59,14 +56,28 @@ class BetaRuntime(Runtime):
 
 
 def ctx_for(line: str) -> RouteContext:
-    commands = parsed_commands(parse(line))
+    commands = []
+    for node in command_nodes(parse(line)):
+        words = [
+            child.text.decode()
+            for child in node.children
+            if child.type in ("command_name", "word") and child.text
+        ]
+        commands.append(
+            CommandContext(
+                command=words[0],
+                paths=(),
+                argv=tuple(words[1:]),
+                cwd="/",
+                line=line,
+                words=(
+                    CommandWord(words[0], WordKind.NAME),
+                    *(CommandWord(w, WordKind.OPERAND) for w in words[1:]),
+                ),
+            )
+        )
     return RouteContext(
-        line=line,
-        commands=commands,
-        command=commands[0].command if commands else "",
-        builtin=commands[0].builtin if commands else False,
-        session_id="s",
-        agent_id="a",
+        line=line, commands=tuple(commands), session_id="s", agent_id="a"
     )
 
 
@@ -88,7 +99,8 @@ async def test_script_source_last_expression_is_verdict():
     runtime = AlphaRuntime()
     evaluator = MontyRuntime()
     script = ScriptSource(
-        "ctx['runtime']['name'] == 'alpha' and ctx['command'] == 'cat'"
+        "ctx['runtime']['name'] == 'alpha' "
+        "and ctx['commands'][0]['command'] == 'cat'"
     )
     assert await evaluate_script(
         script, ctx_for("cat /a"), runtime, [evaluator]
@@ -225,7 +237,7 @@ async def test_hung_policy_script_times_out(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_policy_returns_name_none_or_verdict_dict():
+async def test_policy_answers_come_back_unread():
     assert await evaluate_policy(lambda c: None, ctx_for("x"), []) is None
     assert (
         await evaluate_policy(
@@ -233,45 +245,17 @@ async def test_policy_returns_name_none_or_verdict_dict():
         )
         == "beta"
     )
-    assert (
-        await evaluate_policy(lambda c: {"runtime": "beta"}, ctx_for("x"), [])
-        == "beta"
-    )
-    with pytest.raises(ValueError, match="verdict dict, or None"):
-        await evaluate_policy(lambda c: 42, ctx_for("x"), [])
-
-
-@pytest.mark.asyncio
-async def test_policy_deny_verdict_raises_with_reason():
-    with pytest.raises(RouteDeny) as caught:
-        await evaluate_policy(
-            lambda c: {"deny": "blocked here"}, ctx_for("x"), []
-        )
-    assert caught.value.reason == "blocked here"
-    with pytest.raises(RouteDeny, match="no python3"):
-        await evaluate_policy(
-            ScriptSource(
-                "{'deny': 'no python3'} "
-                "if ctx['command'] == 'python3' else None"
-            ),
-            ctx_for("python3 x"),
-            [MontyRuntime()],
-        )
-
-
-@pytest.mark.asyncio
-async def test_policy_result_arms_parse():
-    assert parse_verdict(RouteResult("beta")) == "beta"
-    with pytest.raises(RouteDeny, match="not here"):
-        parse_verdict(DenyResult("not here"))
-    assert (
-        await evaluate_policy(lambda c: RouteResult("beta"), ctx_for("x"), [])
-        == "beta"
-    )
-    with pytest.raises(RouteDeny, match="blocked"):
-        await evaluate_policy(
-            lambda c: DenyResult("blocked"), ctx_for("x"), []
-        )
+    assert await evaluate_policy(
+        lambda c: {"route": "beta"}, ctx_for("x"), []
+    ) == {"route": "beta"}
+    assert await evaluate_policy(
+        ScriptSource(
+            "{'deny': 'no python3'} "
+            "if ctx['commands'][0]['command'] == 'python3' else None"
+        ),
+        ctx_for("python3 x"),
+        [MontyRuntime()],
+    ) == {"deny": "no python3"}
 
 
 @pytest.mark.asyncio
@@ -284,7 +268,7 @@ async def test_entry_script_verdict_shapes_fail_loud():
         )
     with pytest.raises(RouteError, match="answer a boolean"):
         await evaluate_script(
-            lambda c: DenyResult("x"), ctx_for("python3 x"), runtime, []
+            lambda c: Deny("x"), ctx_for("python3 x"), runtime, []
         )
     with pytest.raises(RouteError, match="answer a boolean"):
         await evaluate_script(
@@ -295,40 +279,12 @@ async def test_entry_script_verdict_shapes_fail_loud():
         )
 
 
-def test_parse_verdict_raises_policy_error():
-    """Direct callers get RouteError, mirroring the TS parseVerdict."""
-    with pytest.raises(RouteError):
-        parse_verdict(42)
-
-
-def test_parse_verdict_fails_loud_on_bad_dicts():
-    with pytest.raises(ValueError, match="unknown policy verdict keys"):
-        parse_verdict({"runtme": "beta"})
-    with pytest.raises(ValueError, match="both place and deny"):
-        parse_verdict({"runtime": "beta", "deny": "no"})
-    with pytest.raises(ValueError, match="needs a 'runtime' name"):
-        parse_verdict({})
-
-
-@pytest.mark.asyncio
-async def test_decide_route_overlays_static_bindings():
-    alpha, beta = AlphaRuntime(), BetaRuntime()
-    routing = await decide_line(
-        [alpha, beta, WorkspaceRuntime()],
-        lambda c: "beta",
-        ctx_for("python3 x"),
-        {"python3": alpha},
-    )
-    assert routing.bindings["python3"] is beta
-    assert isinstance(routing.fallback, WorkspaceRuntime)
-
-
 @pytest.mark.asyncio
 async def test_decide_scripts_filter_in_list_order():
     alpha, beta = AlphaRuntime(), BetaRuntime()
     alpha.script = lambda c: False
     routing = await decide_line(
-        [alpha, beta, WorkspaceRuntime()], None, ctx_for("python3 x"), {}
+        [alpha, beta, WorkspaceRuntime()], ctx_for("python3 x")
     )
     assert routing.bindings["python3"] is beta
 
@@ -338,7 +294,7 @@ async def test_decide_all_refuse_resolves_command_to_none():
     alpha = AlphaRuntime()
     alpha.script = lambda c: False
     routing = await decide_line(
-        [alpha, WorkspaceRuntime()], None, ctx_for("python3 x"), {}
+        [alpha, WorkspaceRuntime()], ctx_for("python3 x")
     )
     assert routing.bindings["python3"] is None
     assert isinstance(routing.fallback, WorkspaceRuntime)
@@ -347,8 +303,8 @@ async def test_decide_all_refuse_resolves_command_to_none():
 @pytest.mark.asyncio
 async def test_decide_vfs_entry_script_gates_vfs():
     vfs = WorkspaceRuntime(script=lambda c: "/secret" not in c.line)
-    allowed = await decide_line([vfs], None, ctx_for("cat /notes"), {})
-    denied = await decide_line([vfs], None, ctx_for("cat /secret/x"), {})
+    allowed = await decide_line([vfs], ctx_for("cat /notes"))
+    denied = await decide_line([vfs], ctx_for("cat /secret/x"))
     assert allowed.fallback is vfs
     assert denied.fallback is None
 
@@ -356,26 +312,19 @@ async def test_decide_vfs_entry_script_gates_vfs():
 @pytest.mark.asyncio
 async def test_decide_declared_captures_turn_the_catch_all_off():
     vfs = WorkspaceRuntime(captures=["grep"])
-    routing = await decide_line([vfs], None, ctx_for("grep x /a"), {})
+    routing = await decide_line([vfs], ctx_for("grep x /a"))
     assert routing.bindings["grep"] is vfs
     assert routing.fallback is None
 
 
 @pytest.mark.asyncio
-async def test_scripts_see_their_own_stage_on_pipelines():
+async def test_scripts_see_every_command_of_a_pipeline():
     alpha = AlphaRuntime()
-    seen: list[str] = []
-    alpha.script = lambda c: seen.append(c.command) or True
-    await decide_line(
-        [alpha, WorkspaceRuntime()],
-        None,
-        ctx_for("cat /a.txt | python3 x"),
-        {},
+    seen: list[list[str]] = []
+    alpha.script = lambda c: (
+        seen.append([x.command for x in c.commands]) or True
     )
-    assert seen == ["python3"]
-
-
-def test_for_runtime_keeps_first_stage_for_the_catch_all():
-    ctx = ctx_for("cat /a.txt | python3 x")
-    assert ctx.for_runtime(WorkspaceRuntime()).command == "cat"
-    assert ctx.for_runtime(AlphaRuntime()).command == "python3"
+    await decide_line(
+        [alpha, WorkspaceRuntime()], ctx_for("cat /a.txt | python3 x")
+    )
+    assert seen == [["cat", "python3"]]

@@ -12,20 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SPECS } from '../../commands/spec/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { ParsedCommand } from './types.ts'
-
-const WORD_TYPES: ReadonlySet<string> = new Set([
-  'command_name',
-  'word',
-  'string',
-  'raw_string',
-  'ansi_c_string',
-  'translated_string',
-  'number',
-  'concatenation',
-])
 
 /**
  * Every command node of a parsed line, in source order, nested ones
@@ -44,36 +31,4 @@ export function commandNodes(root: TSNodeLike): TSNodeLike[] {
     }
   }
   return nodes
-}
-
-/**
- * Distill a parsed line into one ParsedCommand per command. `clis`
- * holds the installed CLI head words; a command whose name is one of
- * them carries it as `cli`. The workspace supplies its command-prefix
- * matcher; without it, names consist of the first word.
- */
-export function parsedCommands(
-  root: TSNodeLike,
-  clis: ReadonlySet<string> = new Set(),
-  matchCommandPrefix?: (words: string[]) => number,
-): ParsedCommand[] {
-  const commands: ParsedCommand[] = []
-  for (const node of commandNodes(root)) {
-    const words = node.children.filter((c) => WORD_TYPES.has(c.type)).map((c) => c.text)
-    const [head] = words
-    if (head !== undefined) {
-      const consumed = matchCommandPrefix?.(words) ?? 1
-      const command = words.slice(0, consumed).join(' ')
-      commands.push({
-        command,
-        words,
-        // hasOwn, not `in`: a command named after an Object.prototype
-        // key (`toString`) must not report as a builtin.
-        builtin: Object.hasOwn(SPECS, command),
-        paths: words.slice(consumed).filter((w) => w.startsWith('/')),
-        cli: clis.has(head) ? head : null,
-      })
-    }
-  }
-  return commands
 }

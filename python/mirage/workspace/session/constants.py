@@ -44,7 +44,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "visibility",
     "hide_reasons",
     "commands",
-    "script",
+    "scripts",
     "profile",
     "command_limits",
     "terminal_output",

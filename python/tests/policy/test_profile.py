@@ -2850,14 +2850,16 @@ def test_a_policy_alone_is_a_whole_profile():
     profile = SessionProfile.model_validate(
         {
             "policy": {
-                "script": ScriptSource("None"),
-                "runtime": "monty",
+                "pre_command": [
+                    {"script": ScriptSource("pass"), "runtime": "monty"}
+                ],
             },
         }
     )
     assert profile.policy is not None
-    assert isinstance(profile.policy.script, ScriptSource)
-    assert profile.policy.runtime == "monty"
+    [program] = profile.policy["pre_command"]
+    assert isinstance(program.script, ScriptSource)
+    assert program.runtime == "monty"
     assert profile.commands is None
 
 
@@ -2866,22 +2868,47 @@ def test_a_policy_rides_beside_the_document():
         {
             "commands": {"allow": ["ls"]},
             "policy": {
-                "script": ScriptSource("None"),
-                "runtime": "monty",
+                "pre_vfs": [
+                    {"script": ScriptSource("pass"), "runtime": "monty"},
+                    {
+                        "script": ScriptSource("pass"),
+                        "runtime": {"name": "wasi", "config": {"home": "/w"}},
+                    },
+                ],
             },
         }
     )
     assert profile.policy is not None
-    assert isinstance(profile.policy.script, ScriptSource)
+    assert [p.runtime for p in profile.policy["pre_vfs"]] == [
+        "monty",
+        {"name": "wasi", "config": {"home": "/w"}},
+    ]
     assert profile.commands is not None
 
 
-def test_a_policy_without_a_runtime_is_refused():
-    # There is no default engine, so a policy that names none is a
+def test_a_policy_program_without_a_runtime_is_refused():
+    # There is no default runtime, so a program that names none is a
     # config error, not a guess.
     with pytest.raises(ValidationError, match="runtime"):
         SessionProfile.model_validate(
-            {"policy": {"script": ScriptSource("None")}}
+            {"policy": {"pre_command": [{"script": ScriptSource("pass")}]}}
+        )
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [{"config": {}}, {"name": "wasi", "captures": ["python3"]}, {"name": 1}],
+)
+def test_a_policy_runtime_is_a_name_or_name_and_config(runtime):
+    with pytest.raises(ValidationError, match="name or"):
+        SessionProfile.model_validate(
+            {
+                "policy": {
+                    "pre_command": [
+                        {"script": ScriptSource("pass"), "runtime": runtime}
+                    ]
+                }
+            }
         )
 
 
@@ -2890,15 +2917,32 @@ def test_a_policy_is_a_block_not_a_path():
         SessionProfile.model_validate({"policy": "roles/x.py"})
 
 
+def test_a_policy_names_its_programs_per_pre_method():
+    with pytest.raises(ValidationError, match="per method"):
+        SessionProfile.model_validate(
+            {"policy": {"script": ScriptSource("pass"), "runtime": "monty"}}
+        )
+    with pytest.raises(ValidationError, match="post_vfs"):
+        SessionProfile.model_validate(
+            {
+                "policy": {
+                    "post_vfs": [
+                        {"script": ScriptSource("pass"), "runtime": "monty"}
+                    ]
+                }
+            }
+        )
+
+
 def test_the_old_script_and_runtime_keys_are_told_where_they_went():
     # Shipped first as `script` with `runtime` beside it; the refusal
     # says where they went.
-    with pytest.raises(ValidationError, match="now one policy block"):
+    with pytest.raises(ValidationError, match="now a policy block"):
         SessionProfile.model_validate(
             {
                 "script": ScriptSource("None"),
                 "runtime": "monty",
             }
         )
-    with pytest.raises(ValidationError, match="now one policy block"):
+    with pytest.raises(ValidationError, match="now a policy block"):
         SessionProfile.model_validate({"runtime": "monty"})

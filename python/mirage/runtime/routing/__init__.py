@@ -21,19 +21,13 @@ if TYPE_CHECKING:
         evaluate_policy,
         evaluate_script,
         evaluator_of,
-        parse_verdict,
         runtime_for_language,
     )
-    from mirage.runtime.routing.errors import RouteDeny, RouteError
-    from mirage.runtime.routing.facts import command_nodes, parsed_commands
+    from mirage.runtime.routing.errors import RouteError
+    from mirage.runtime.routing.facts import command_nodes
     from mirage.runtime.routing.types import (
-        DenyResult,
-        ParsedCommand,
-        RouteContext,
         RouteDecision,
-        RouteOutcome,
         RoutePolicy,
-        RouteResult,
         RouteScript,
         RouteVerdict,
     )
@@ -45,19 +39,13 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "evaluate_policy",
         "evaluate_script",
         "evaluator_of",
-        "parse_verdict",
         "runtime_for_language",
     ),
-    "mirage.runtime.routing.errors": ("RouteDeny", "RouteError"),
-    "mirage.runtime.routing.facts": ("command_nodes", "parsed_commands"),
+    "mirage.runtime.routing.errors": ("RouteError",),
+    "mirage.runtime.routing.facts": ("command_nodes",),
     "mirage.runtime.routing.types": (
-        "DenyResult",
-        "ParsedCommand",
-        "RouteContext",
         "RouteDecision",
-        "RouteOutcome",
         "RoutePolicy",
-        "RouteResult",
         "RouteScript",
         "RouteVerdict",
     ),
@@ -68,21 +56,13 @@ _MODULE_OF = {
 }
 
 __all__ = [
-    "ParsedCommand",
     "ScriptSource",
     "RouteDecision",
-    "RouteContext",
     "RoutePolicy",
     "RouteScript",
     "RouteError",
-    "RouteDeny",
     "RouteVerdict",
-    "RouteOutcome",
-    "RouteResult",
-    "DenyResult",
-    "parse_verdict",
     "command_nodes",
-    "parsed_commands",
     "decide_line",
     "evaluate_policy",
     "evaluate_script",

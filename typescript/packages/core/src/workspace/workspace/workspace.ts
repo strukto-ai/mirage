@@ -118,7 +118,7 @@ import { isEvaluator } from '../../runtime/mixin.ts'
 import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
-import { explainLine, explainedLine, holds } from '../node/explain.ts'
+import { explainLine, explainedLine, holds, lineJudgments } from '../node/explain.ts'
 import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
 import { abortable, hasAborted, makeAbortError } from '../../utils/abort.ts'
@@ -383,12 +383,13 @@ export class Workspace {
       const legacy = profile as { script?: unknown; runtime?: unknown }
       if (legacy.script !== undefined || legacy.runtime !== undefined) {
         throw new PolicyError(
-          `profile '${name}': script and runtime are now one policy block, ` +
-            `policy: {script: <file>, runtime: <engine>}; its program defines ` +
-            `pre_command(ctx) and answers with return`,
+          `profile '${name}': script and runtime are now a policy block, ` +
+            `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
         )
       }
-      if (profile.policy != null) parseProfilePolicy(profile.policy, `profile '${name}' policy`)
+      if (profile.policy != null) {
+        parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
+      }
     }
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: the document's command tiers
@@ -401,7 +402,6 @@ export class Workspace {
     this.registry.policies.add(new PermissionsPolicy(this.sessionManager))
     this.scriptPolicy = new ScriptPolicy(
       this.sessionManager,
-      () => this.mounts().map((entry) => entry.prefix),
       // The entry points the runtime world attaches, so a profile policy reads
       // the mounts an agent's program would, and through the same gate,
       // with its ops stamped as its own for its `preVfs` to recognize.
@@ -924,8 +924,8 @@ export class Workspace {
   }
 
   /**
-   * The name of the profile `baseProfile` resolves, which its script
-   * reads as `ctx.profile`; empty for a profile document passed without
+   * The name of the profile `baseProfile` resolves, which its programs
+   * read as `ctx.profile`; empty for a profile document passed without
    * one.
    */
   private profileName(profile: string | SessionProfile | null): string {
@@ -1133,7 +1133,17 @@ export class Workspace {
       if (holds(verdicts.map((one) => one.judgment))) {
         return explainedLine(line, judged, verdicts, () => '', reparse)
       }
-      const [answers, placed] = await this.router.placement(root, line, session)
+      const [answers, placed] = await this.router.placement(line, session, () =>
+        lineJudgments(
+          root,
+          session,
+          this.registry,
+          this.namespace,
+          '',
+          { claimed: [], parent: null, origin: null },
+          reparse,
+        ),
+      )
       if (placed !== null && 'kind' in placed) {
         const refused = placementRefused(placed, line)
         return {

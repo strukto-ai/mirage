@@ -28,8 +28,9 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
+from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteContext, RouteDecision
+from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack

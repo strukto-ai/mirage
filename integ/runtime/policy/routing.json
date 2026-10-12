@@ -215,7 +215,7 @@
         "runtimes": [
           {
             "name": "monty",
-            "script": "ctx['command'] == 'python3'"
+            "script": "any(c['command'] == 'python3' for c in ctx['commands'])"
           },
           "workspace"
         ],
@@ -425,7 +425,13 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "{'deny': 'python3 is blocked here'} if ctx['command'] == 'python3' else None"
+        "policies": [
+          {
+            "name": "place_line",
+            "contains": "python3",
+            "deny": "python3 is blocked here"
+          }
+        ]
       },
       "steps": [
         {
@@ -456,7 +462,7 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "{'runtime': 'monty'}"
+        "route_policy": "'monty'"
       },
       "steps": [
         {
@@ -486,7 +492,7 @@
         {
           "command": "python3 -c \"print(1)\"",
           "expect": {
-            "throws_contains": "unknown policy verdict keys"
+            "throws_contains": "route policy must answer"
           }
         }
       ]
@@ -637,7 +643,7 @@
     },
     {
       "id": "admission_comes_before_placement",
-      "note": "A line a rule refuses is never shown to a placing policy: the rule's refusal arrives in GNU's words, not the route policy's deny, which still answers every line the rules admit.",
+      "note": "A line a rule refuses is never shown to a pre_execute policy: the rule's refusal arrives in GNU's words, not the policy's deny, which still answers every line the rules admit.",
       "world": {
         "runtimes": [
           "monty",
@@ -649,7 +655,13 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "{'deny': 'routed away'}",
+        "policies": [
+          {
+            "name": "place_line",
+            "contains": "echo",
+            "deny": "routed away"
+          }
+        ],
         "profiles": {
           "sealed": {
             "commands": {

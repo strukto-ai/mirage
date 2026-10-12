@@ -53,7 +53,7 @@ import {
 } from './types.ts'
 import { makeAbortError } from '../utils/abort.ts'
 import type { VfsCall } from '../vfs/types.ts'
-import type { RouteContext } from '../runtime/routing/types.ts'
+import type { RouteContext } from './types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { posixPhrase } from '../errors/posix.ts'
 
@@ -504,9 +504,8 @@ export class Policies {
    * `chain` takes it.
    */
   async wantsFor(hook: Hook, sessionId: string, rulesOnly = false): Promise<boolean> {
-    for (const policy of this.policies.filter(
-      (p) => p instanceof PermissionsPolicy || !rulesOnly,
-    )) {
+    const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
+    for (const policy of policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)) {
       if (policy[hook] === undefined) continue
       if (!isSessionScoped(policy)) return true
       if (await policy.wantsFor(hook, sessionId)) return true

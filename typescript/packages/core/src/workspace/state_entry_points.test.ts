@@ -262,7 +262,7 @@ describe('name-plane writes go through the dispatcher', () => {
 /** Veto env writes to SECRET_* names through the session view. */
 class DenySecretEnv implements Policy {
   preSession(ctx: SessionContext): Action | null {
-    if (ctx.plane === 'env' && ctx.key.startsWith('SECRET')) {
+    if (ctx.key.startsWith('SECRET')) {
       return { kind: 'deny', reason: 'SECRET_* refused by policy' }
     }
     return null

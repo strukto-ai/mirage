@@ -30,7 +30,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
-import type { RouteContext } from '../../runtime/routing/types.ts'
+import type { RouteContext } from '../../policy/types.ts'
 import type { AskHandler } from '../../policy/decisions.ts'
 import { Outcome, Scope, type Decision, type SessionContext } from '../../policy/types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../fixtures/workspace_fixture.ts'
@@ -1918,18 +1918,19 @@ describe('declared source instances', () => {
 // first is a session-write gate, and only for the sessions under its
 // profile.
 const SESSION_GATE = `\
-def pre_session(ctx):
-    if ctx['write']['key'].startswith('AWS_'):
-        return 'deny'
-    return None
+import json
+import os
+
+ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
+if ctx['key'].startswith('AWS_'):
+    print(json.dumps({'kind': 'deny'}))
 `
 
-const COMMAND_JUDGE = `\
-def pre_command(ctx):
-    return None
-`
-
-async function scriptedWs(env: EnvEntries, source: string): Promise<Workspace> {
+async function scriptedWs(
+  env: EnvEntries,
+  method: 'preCommand' | 'preSession',
+  source: string,
+): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
     { '/': new RAMVFS() },
@@ -1938,7 +1939,9 @@ async function scriptedWs(env: EnvEntries, source: string): Promise<Workspace> {
       shellParser: parser,
       env,
       profiles: {
-        release: { policy: { script: new ScriptSource(source, 'python'), runtime: 'monty' } },
+        release: {
+          policy: { [method]: [{ script: new ScriptSource(source, 'python'), runtime: 'monty' }] },
+        },
       } as never,
       profile: 'release',
     },
@@ -1951,7 +1954,11 @@ describe('fillEnv under a profile policy', () => {
     // value is fetched, as under a coded preSession policy.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-scripted-gate', FakeConfig, fetch)
-    const ws = await scriptedWs({ TOKEN: { from: 'fake-scripted-gate', ref: 'r' } }, SESSION_GATE)
+    const ws = await scriptedWs(
+      { TOKEN: { from: 'fake-scripted-gate', ref: 'r' } },
+      'preSession',
+      SESSION_GATE,
+    )
     try {
       const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
@@ -1967,7 +1974,11 @@ describe('fillEnv under a profile policy', () => {
     // hold and no source is contacted.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-scripted-judge', FakeConfig, fetch)
-    const ws = await scriptedWs({ TOKEN: { from: 'fake-scripted-judge', ref: 'r' } }, COMMAND_JUDGE)
+    const ws = await scriptedWs(
+      { TOKEN: { from: 'fake-scripted-judge', ref: 'r' } },
+      'preCommand',
+      'pass\n',
+    )
     try {
       const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')

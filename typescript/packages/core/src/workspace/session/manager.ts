@@ -19,7 +19,7 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMSessionStore } from './ram.ts'
 import { applyProfile, narrow } from './resolve.ts'
 import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
-import type { AdmissionRules, Decision, ProfileScript } from '../../policy/types.ts'
+import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
@@ -174,17 +174,18 @@ export class SessionManager extends SessionOwner {
   }
 
   /**
-   * The profile script one session runs under (SessionScriptsQuery).
+   * The policy programs of the profile one session runs under, by
+   * method (SessionScriptsQuery).
    * The default profile's for an id this manager does not know, the
    * same fallback `commandsOf` makes and for the same reason: an entry point
    * that names no session is judged like a session that named no
    * profile.
    */
-  scriptOf(sessionId: string): ProfileScript | null {
+  scriptsOf(sessionId: string): ProfileScripts {
     const session = this.sessions.get(sessionId)
     return session === undefined
-      ? (this.defaultProfileInternal?.policies.script ?? null)
-      : session.script
+      ? (this.defaultProfileInternal?.policies.scripts ?? {})
+      : session.scripts
   }
 
   /**
@@ -289,7 +290,7 @@ export class SessionManager extends SessionOwner {
         dflt.visibility = stored.visibility
         dflt.hideReasons = stored.hideReasons
         dflt.commands = stored.commands
-        dflt.script = stored.script
+        dflt.scripts = stored.scripts
         // The host's standing answers are session state like cwd:
         // dropped here, an approved line would ask again after a
         // restart and the next flush would erase the grant from the

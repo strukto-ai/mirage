@@ -1,7 +1,7 @@
 import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import { Runtime } from './base.ts'
 import { LanguageRuntime } from './language.ts'
-import { isEvaluator, type Evaluator } from './mixin.ts'
+import type { Evaluator } from './mixin.ts'
 import type { ScriptSource } from './types.ts'
 import { buildRuntime } from './table.ts'
 import type { EvalValue } from './types.ts'
@@ -9,38 +9,37 @@ import type { EvalValue } from './types.ts'
 export const CTX_GLOBAL = 'ctx'
 
 /**
- * Build the engine a config script runs on: the one the config named,
- * and the config always names one.
+ * Build the runtime a config program runs on: the one the config named,
+ * with the settings it gave, and the config always names one.
  *
- * There is no default engine to fall back to: a script without a
+ * There is no default runtime to fall back to: a program without a
  * `runtime` is refused where the config is validated, because a default
- * the operator never wrote is an engine they never chose. The engine is
+ * the operator never wrote is a runtime they never chose. The runtime is
  * built fresh and never picked out of a workspace's runtime world: the
- * world is the ordered set that serves *agent* code, it is mutable
- * after construction, and an entry drops out of it silently when an
- * optional dependency is missing. Throws a plain Error whose message is
- * a clause about "script", for the caller to prefix with whose script
- * it is.
+ * world is the ordered set that serves *agent* code, it is mutable after
+ * construction, and an entry drops out of it silently when an optional
+ * dependency is missing. Throws a plain Error whose message is a clause
+ * about "script", for the caller to prefix with whose script it is.
+ * Mirrors the Python `script_engine`.
  */
-export function scriptEngine(script: ScriptSource, runtime: string): Runtime & Evaluator {
+export function scriptEngine(
+  script: ScriptSource,
+  runtime: string,
+  config: Readonly<Record<string, unknown>> = {},
+): LanguageRuntime {
   let built: Runtime
   try {
-    built = buildRuntime(runtime)
+    built = buildRuntime(runtime, Object.keys(config).length === 0 ? {} : { config })
   } catch (err) {
-    // An engine reports a missing dependency as its own error, each
+    // A runtime reports a missing dependency as its own error, each
     // carrying its own install hint.
     const detail = err instanceof Error ? err.message : String(err)
     throw new Error(`script names runtime '${runtime}': ${detail}`)
   }
-  if (!isEvaluator(built)) {
-    throw new Error(
-      `script names runtime '${runtime}', which runs programs but cannot evaluate one`,
-    )
+  if (!(built instanceof LanguageRuntime)) {
+    throw new Error(`script names runtime '${runtime}', which runs no programs`)
   }
-  // `language` is declared by LanguageRuntime, not by Runtime, so an
-  // engine that interprets no language at all cannot answer here and
-  // is left to the evaluation arm rather than compared against nothing.
-  if (built instanceof LanguageRuntime && built.language !== script.language) {
+  if (built.language !== script.language) {
     throw new Error(
       `script is ${script.language}, but names runtime '${runtime}', which speaks ${built.language}`,
     )
@@ -53,12 +52,10 @@ export function scriptEngine(script: ScriptSource, runtime: string): Runtime & E
  *
  * The one place the config-script calling convention is written down:
  * the payload arrives as a single global named `ctx`, and the script's
- * last expression is its answer. Every config script speaks it (the
- * runtime router's `policy:`, a runtime's entry script, a profile's
- * `script:`), and they used to spell it out one at a time, which is a
- * convention two callers can drift apart on: this host passed the
- * payload's keys as separate globals for exactly one release, so `ctx`
- * was undefined here and defined in Python.
+ * last expression is its answer. Both evaluated config scripts speak it
+ * (`routePolicy` and a runtime's entry script), and spelling it out per
+ * caller is a convention two callers can drift apart on. A profile's
+ * policy programs are run, not evaluated (`scriptEngine`).
  *
  * Deliberately throws rather than wording its failures. Each caller
  * refuses in its own voice and its own error type (the runtime router's

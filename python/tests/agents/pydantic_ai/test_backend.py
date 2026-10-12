@@ -20,6 +20,7 @@ from pydantic_ai.workspaces.conformance import WorkspaceBackendSuite
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.pydantic_ai.backend import MirageWorkspaceBackend
+from mirage.policy import CommandContext, Deny, Policy, RouteContext
 from mirage.workspace.files import Files
 
 
@@ -60,14 +61,22 @@ async def test_a_command_runs_in_a_clone_of_the_session(workspace):
     assert await backend.working_dir() == "/"
 
 
+class NoLists(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Deny | None:
+        return Deny("no lists") if ctx.command == "ls" else None
+
+
+class NoCommands(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Deny:
+        return Deny("no commands")
+
+
 @pytest.mark.anyio
 async def test_a_refusal_is_appended_to_stderr():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
-        route_policy=lambda ctx: (
-            {"deny": "no lists"} if ctx.command == "ls" else None
-        ),
+        policies=[NoLists()],
     )
     result = await MirageWorkspaceBackend(ws).run(["ls", "/"])
     assert (result.exit_code, result.stderr) == (
@@ -124,7 +133,7 @@ async def test_files_and_links_need_no_commands():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
-        route_policy=lambda ctx: {"deny": "no commands"},
+        policies=[NoCommands()],
     )
     backend = MirageWorkspaceBackend(ws)
     await backend.make_dir("/real")

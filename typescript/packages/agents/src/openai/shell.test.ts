@@ -67,7 +67,12 @@ describe('MirageShell', () => {
     // stderr is bash's bare `Permission denied`; the reason rides the
     // refusal record, and a text surface appends it as one more line.
     const ws = mkWs({
-      routePolicy: (ctx) => (ctx.command === 'rm' ? { deny: 'no deletes' } : null),
+      policies: [
+        {
+          preCommand: (ctx) =>
+            ctx.command === 'rm' ? { kind: 'deny', reason: 'no deletes' } : null,
+        },
+      ],
     })
     const shell = new MirageShell(ws)
     const result = await shell.run({ commands: ['rm /x'] })

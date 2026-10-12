@@ -1,21 +1,19 @@
 import asyncio
+import json
 
 import pytest
 
 from mirage.commands.spec.types import WordKind
-from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
+from mirage.policy.constants import (
+    CTX_ENV,
+    DEFAULT_ASK_REASON,
+    DEFAULT_DENY_REASON,
+)
 from mirage.policy.script import (
     _POLICY_READ,
-    HOOKS,
     ScriptPolicy,
-    defined_hooks,
-    hook_call,
-    hook_name,
-    hook_probe,
-    ops_script_context,
     script_action,
     script_context,
-    session_script_context,
 )
 from mirage.policy.types import (
     Ask,
@@ -23,157 +21,164 @@ from mirage.policy.types import (
     CommandWord,
     Deny,
     ProfileScript,
+    Route,
+    RouteContext,
     SessionContext,
     VfsContext,
 )
-from mirage.runtime.binding import WorkspaceBinding
-from mirage.runtime.errors import EvalError
+from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.resolver import MountResolver, PrefixResolver
 from mirage.runtime.types import (
+    CodeExecution,
     DispatchFn,
-    EvalResult,
-    EvalValue,
+    ExecutionRequest,
     RunArgs,
     RunResult,
     ScriptSource,
 )
 from mirage.types import PathSpec
+from mirage.view.types import MountView, NamespaceView, SessionView
 from mirage.workspace.dispatcher.constants import CALLS
 
-DENY_ANSWER = {"deny": "sealed"}
 
-
-class FakeEngine(EvaluatorMixin):
-    """Stands in for a built engine, recording what it saw."""
-
-    built: list["FakeEngine"] = []
-
-    def __init__(
-        self,
-        value: EvalValue = None,
-        error: Exception | None = None,
-        delay: float = 0.0,
-        hooks: tuple[str, ...] = ("pre_command",),
-    ) -> None:
-        self.value = value
-        self.error = error
-        self.delay = delay
-        self.hooks = hooks
-        self.seen: dict[str, EvalValue] = {}
-        self.code = ""
-        self.evals = 0
-        self.closed = False
-        FakeEngine.built.append(self)
-
-    async def eval(
-        self,
-        code: str,
-        *,
-        inputs: dict[str, EvalValue] | None = None,
-        session: str | None = None,
-    ) -> EvalResult:
-        self.code = code
-        self.seen = dict(inputs or {})
-        self.evals += 1
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        if self.error is not None:
-            raise self.error
-        # The probe asks which hooks the program defines; every other
-        # evaluation ends in a hook call and gets the configured answer.
-        if not code.rstrip().endswith("(ctx)"):
-            return EvalResult(value=list(self.hooks))
-        return EvalResult(value=self.value)
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-class FakeLanguageEngine(LanguageRuntime, EvaluatorMixin):
-    """An interpreter engine, recording the entry points it was attached to."""
+class FakeProgram(LanguageRuntime):
+    """Stands in for a policy runtime, recording each run it was handed."""
 
     language = "python"
     name = "fake"
+    built: list["FakeProgram"] = []
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        stdout: bytes = b"",
+        exit_code: int = 0,
+        stderr: bytes | None = None,
+        delay: float = 0.0,
+    ) -> None:
         super().__init__()
+        self.stdout = stdout
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.delay = delay
+        self.requests: list[CodeExecution] = []
         self.attached: tuple[DispatchFn, MountResolver] | None = None
+        self.closed = False
+        FakeProgram.built.append(self)
 
     def bind(self, binding: WorkspaceBinding) -> None:
         super().bind(binding)
         self.attached = (binding.dispatch, binding.resolver)
 
+    async def execute(
+        self, request: ExecutionRequest, context: RuntimeContext | None = None
+    ) -> RunResult:
+        assert isinstance(request, CodeExecution)
+        self.requests.append(request)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return RunResult(
+            stdout=self.stdout, stderr=self.stderr, exit_code=self.exit_code
+        )
+
     async def run(self, args: RunArgs) -> RunResult:
         raise NotImplementedError
 
-    async def eval(
-        self,
-        code: str,
-        *,
-        inputs: dict[str, EvalValue] | None = None,
-        session: str | None = None,
-    ) -> EvalResult:
-        # A program defining the command hook alone, silent when called.
-        if not code.rstrip().endswith("(ctx)"):
-            return EvalResult(value=["pre_command"])
-        return EvalResult(value=None)
-
     async def close(self) -> None:
-        pass
+        self.closed = True
 
 
-async def _dispatch(op, path, **kwargs):
-    raise AssertionError("the entry point is attached, never called here")
+class Programs:
+    """A sessions query holding the same programs for every session."""
+
+    def __init__(self, scripts: dict[str, tuple[ProfileScript, ...]]) -> None:
+        self.scripts = scripts
+
+    def scripts_of(
+        self, session_id: str
+    ) -> dict[str, tuple[ProfileScript, ...]]:
+        return self.scripts
 
 
-class OneScript:
-    """A sessions query holding one script for every known session."""
+class ProgramsBySession:
+    """A sessions query holding programs per session."""
 
-    def __init__(self, entry: ProfileScript | None) -> None:
-        self.entry = entry
+    def __init__(
+        self, scripts: dict[str, dict[str, tuple[ProfileScript, ...]]]
+    ) -> None:
+        self.scripts = scripts
 
-    def script_of(self, session_id: str) -> ProfileScript | None:
-        return self.entry
-
-
-class ScriptsBySession:
-    """A sessions query holding one script per session."""
-
-    def __init__(self, entries: dict[str, ProfileScript]) -> None:
-        self.entries = entries
-
-    def script_of(self, session_id: str) -> ProfileScript | None:
-        return self.entries.get(session_id)
+    def scripts_of(
+        self, session_id: str
+    ) -> dict[str, tuple[ProfileScript, ...]]:
+        return self.scripts.get(session_id, {})
 
 
 @pytest.fixture(autouse=True)
 def _reset_built():
-    FakeEngine.built = []
+    FakeProgram.built = []
 
 
-def _entry(runtime: str = "monty") -> ProfileScript:
+def _answer(**fields: str) -> bytes:
+    return json.dumps(fields).encode()
+
+
+def _entry(
+    runtime: str = "monty", source: str = "SOURCE", config: dict | None = None
+) -> ProfileScript:
     return ProfileScript(
-        profile="release", script=ScriptSource("SOURCE"), runtime=runtime
+        profile="release",
+        script=ScriptSource(source),
+        runtime=runtime,
+        config=config or {},
     )
 
 
 def _path(virtual: str) -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory="/",
-        vfs_path=virtual.lstrip("/"),
-        raw_path=virtual,
+    return PathSpec.from_str_path(virtual)
+
+
+async def _refused(*args: object, **kwargs: object) -> None:
+    raise PermissionError("read only")
+
+
+def _session(cwd: str = "/data") -> SessionView:
+    env = {"TEAM": "core", "HOME": "/home/agent"}
+    return SessionView(
+        get=env.get,
+        snapshot=lambda: dict(env),
+        set=_refused,
+        unset=_refused,
+        mark=_refused,
+        is_readonly=lambda name, follow_ref=True: name == "HOME",
+        profile=lambda: "reviewer",
+        cwd=lambda: cwd,
     )
 
 
-def _ctx(command: str = "cat", session_id: str = "s") -> CommandContext:
+def _ns() -> NamespaceView:
+    return NamespaceView(
+        mounts=MountView(
+            descendants=lambda path: ["/data", "/vault"],
+            visible_descendants=lambda path: ["/data"],
+            is_root=lambda path: path in ("/data", "/vault"),
+            root_of=lambda path: "/data",
+        )
+    )
+
+
+def _ctx(
+    command: str = "cat",
+    session_id: str = "s",
+    session: SessionView | None = None,
+    ns: NamespaceView | None = None,
+) -> CommandContext:
     return CommandContext(
         command=command,
         paths=(_path("/repo/sealed/k"),),
         argv=("/repo/sealed/k",),
         cwd="/repo",
+        line=f"{command} /repo/sealed/k",
         words=(
             CommandWord(command, WordKind.NAME),
             CommandWord(
@@ -186,236 +191,296 @@ def _ctx(command: str = "cat", session_id: str = "s") -> CommandContext:
         agent_id="agent-1",
         tokens=(command, "/repo/sealed/k"),
         program=(command,),
+        session=session,
+        ns=ns,
     )
-
-
-def _mounts() -> list[str]:
-    return ["/repo/", "/scratch/"]
-
-
-def _policy(
-    value: EvalValue = None,
-    error: Exception | None = None,
-    delay: float = 0.0,
-    entry: ProfileScript | None = None,
-    hooks: tuple[str, ...] = ("pre_command",),
-) -> ScriptPolicy:
-    policy = ScriptPolicy(
-        OneScript(entry if entry is not None else _entry()), _mounts
-    )
-    policy._engines["monty"] = FakeEngine(value, error, delay, hooks)
-    return policy
 
 
 def _ops_ctx(
-    op: str = "write",
-    path: str = "/scratch/frozen/f",
-    write: bool = True,
-    session_id: str = "s",
+    op: str = "write", path: str = "/scratch/frozen/f", write: bool = True
 ) -> VfsContext:
     return VfsContext(
         call=CALLS[op],
         path=_path(path),
         write=write,
         prefix="/scratch",
-        session_id=session_id,
+        session_id="s",
     )
 
 
-def _session_ctx(
-    key: str = "AWS_KEY", session_id: str = "s"
-) -> SessionContext:
-    return SessionContext(
-        plane="env", verb="set", key=key, value="v", session_id=session_id
+def _session_ctx(key: str = "AWS_KEY") -> SessionContext:
+    return SessionContext(verb="set", key=key, value="v", session_id="s")
+
+
+def _policy(
+    method: str = "pre_command",
+    *engines: FakeProgram,
+    entries: tuple[ProfileScript, ...] | None = None,
+) -> ScriptPolicy:
+    programs = entries if entries is not None else (_entry(),) * len(engines)
+    policy = ScriptPolicy(Programs({method: programs}))
+    for entry, engine in zip(programs, engines, strict=False):
+        key = (entry.runtime, json.dumps(dict(entry.config), sort_keys=True))
+        policy._engines.setdefault(key, engine)
+    return policy
+
+
+def test_nothing_printed_is_no_opinion():
+    assert script_action(b"", "pre_command") is None
+    assert script_action(b"  \n", "pre_command") is None
+    assert script_action(b"null\n", "pre_command") is None
+
+
+def test_a_deny_or_an_ask_is_read_with_its_reason():
+    assert script_action(_answer(kind="deny", reason="no"), "pre_vfs") == Deny(
+        "no"
+    )
+    assert script_action(_answer(kind="ask", reason="nod"), "pre_vfs") == Ask(
+        "nod"
     )
 
 
-def test_script_context_is_the_command_context_as_data():
-    ctx = script_context("release", _ctx(), _mounts())
-    assert ctx == {
-        "profile": "release",
-        "command": {
-            "name": "cat",
-            "words": [
-                {"text": "cat", "kind": "name", "option": None, "path": None},
-                {
-                    "text": "/repo/sealed/k",
-                    "kind": "operand",
-                    "option": None,
-                    "path": "/repo/sealed/k",
-                },
-            ],
-            "paths": ["/repo/sealed/k"],
-            "walks": False,
-        },
-        "session": {
-            "id": "s",
-            "agent": "agent-1",
-            "cwd": "/repo",
-            "env": {},
-        },
-        "mounts": ["/repo/", "/scratch/"],
-    }
+def test_a_reason_left_out_is_the_documents_default():
+    assert script_action(_answer(kind="deny"), "pre_command") == Deny(
+        DEFAULT_DENY_REASON
+    )
+    assert script_action(_answer(kind="ask"), "pre_command") == Ask(
+        DEFAULT_ASK_REASON
+    )
 
 
-@pytest.mark.parametrize("value", [None, "allow"])
-def test_allow_and_silence_are_no_opinion(value):
-    assert script_action(value) is None
-
-
-def test_a_deny_answer_becomes_a_whole_command_deny():
-    action = script_action({"deny": "sealed"})
-    assert action == Deny("sealed")
-
-
-def test_an_ask_answer_goes_to_the_approval_entry_point():
-    action = script_action({"ask": "sign-off"})
-    assert action == Ask("sign-off")
-    assert action.rule is None
-
-
-def test_bare_verbs_carry_the_documents_default_reasons():
-    assert script_action("deny") == Deny(DEFAULT_DENY_REASON)
-    assert script_action("ask") == Ask(DEFAULT_ASK_REASON)
+def test_a_route_places_the_line_at_pre_execute_only():
+    printed = _answer(kind="route", runtime="docker")
+    assert script_action(printed, "pre_execute") == Route("docker")
+    with pytest.raises(ValueError, match="cannot answer route at pre_command"):
+        script_action(printed, "pre_command")
 
 
 @pytest.mark.parametrize(
-    "value",
+    "printed",
     [
-        [1, 2],
-        7,
-        "nope",
-        {},
-        {"deny": ""},
-        {"deny": 3},
-        {"allow": True},
-        {"deny": "a", "ask": "b"},
+        b"deny",
+        b'"deny"',
+        b'{"deny": "x"}',
+        b'{"kind": "allow"}',
+        b'{"kind": "route"}',
+        b'{"kind": "deny", "runtime": "docker"}',
+        b'{"kind": "deny", "reason": "x", "policy": "Mine"}',
+        b'{"kind": "deny"}\n{"kind": "ask"}',
     ],
 )
-def test_anything_else_is_refused(value):
-    with pytest.raises(ValueError, match="must answer allow, deny or ask"):
-        script_action(value)
+def test_anything_else_is_refused(printed):
+    with pytest.raises(ValueError, match="must print a JSON answer"):
+        script_action(printed, "pre_execute")
+
+
+def test_a_context_reads_as_its_fields_with_the_session_as_data():
+    data = script_context(_ctx(session=_session(), ns=_ns()))
+    assert data["command"] == "cat"
+    assert data["line"] == "cat /repo/sealed/k"
+    assert data["paths"] == ["/repo/sealed/k"]
+    assert data["words"] == [
+        {"text": "cat", "kind": "name", "option": None, "path": None},
+        {
+            "text": "/repo/sealed/k",
+            "kind": "operand",
+            "option": None,
+            "path": "/repo/sealed/k",
+        },
+    ]
+    assert data["session_id"] == "s"
+    assert data["agent_id"] == "agent-1"
+    assert data["cwd"] == "/data"
+    assert data["env"] == {"TEAM": "core", "HOME": "/home/agent"}
+    assert data["profile"] == "reviewer"
+    assert data["mounts"] == ["/data"]
+    assert not {"session", "ns", "vfs"} & set(data)
+    json.dumps(data)
+
+
+def test_a_line_lists_each_command_as_pre_command_reads_it():
+    line = RouteContext(
+        line="cat /repo/sealed/k",
+        commands=(_ctx(session=_session()),),
+        session_id="s",
+        agent_id="agent-1",
+        session=_session(),
+    )
+    data = script_context(line)
+    assert data["line"] == "cat /repo/sealed/k"
+    assert [c["command"] for c in data["commands"]] == ["cat"]
+    assert "session" not in data["commands"][0]
+    assert data["cwd"] == "/data"
+
+
+def test_an_op_and_a_variable_write_read_as_their_fields():
+    op = script_context(_ops_ctx())
+    assert op["call"]["name"] == "write"
+    assert op["call"]["effect"] == "write"
+    assert op["path"] == "/scratch/frozen/f"
+    assert op["write"] is True
+    assert op["cwd"] == "/" and op["env"] == {} and op["mounts"] == []
+    written = script_context(_session_ctx())
+    assert (written["verb"], written["key"], written["value"]) == (
+        "set",
+        "AWS_KEY",
+        "v",
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_session_without_a_script_is_not_judged():
-    policy = ScriptPolicy(OneScript(None), _mounts)
-    assert await policy.pre_command(_ctx()) is None
-    assert FakeEngine.built == []
+async def test_a_method_without_a_program_runs_nothing():
+    engine = FakeProgram(_answer(kind="deny"))
+    policy = _policy("pre_command", engine)
+    assert await policy.pre_vfs(_ops_ctx()) is None
+    assert await policy.pre_session(_session_ctx()) is None
+    assert engine.requests == []
 
 
 @pytest.mark.asyncio
-async def test_the_policy_is_shown_the_commands_facts_and_its_hook_is_called():
-    policy = _policy(None)
-    assert await policy.pre_command(_ctx()) is None
-    engine = FakeEngine.built[0]
-    # The program whole, then the call to the hook it defines, so its
-    # return is the value the evaluator hands back.
-    assert engine.code == "SOURCE\n\npre_command(ctx)\n"
-    assert engine.seen == {"ctx": script_context("release", _ctx(), _mounts())}
-
-
-def test_the_hook_is_called_in_the_programs_own_language():
-    py, js = ScriptSource("x"), ScriptSource("x", language="js")
-    assert hook_call(py, "pre_command") == "pre_command(ctx)"
-    assert hook_call(js, "pre_command") == "preCommand(ctx)"
-    assert hook_call(py, "pre_vfs") == "pre_vfs(ctx)"
-    assert hook_call(js, "pre_vfs") == "preVfs(ctx)"
-    assert hook_name(py, "pre_session") == "pre_session"
-    assert hook_name(js, "pre_session") == "preSession"
+async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
+    engine = FakeProgram(_answer(kind="deny", reason="sealed"))
+    policy = _policy("pre_command", engine)
+    ctx = _ctx(session=_session(cwd="/"), ns=_ns())
+    assert await policy.pre_command(ctx) == Deny("sealed")
+    [request] = engine.requests
+    assert request.code == "SOURCE"
+    assert request.language == "python"
+    assert request.cwd.virtual == "/"
+    payload = request.env[CTX_ENV]
+    assert json.loads(payload) == script_context(ctx)
+    assert request.stdin == payload.encode()
+    assert request.env["TEAM"] == "core"
 
 
 @pytest.mark.asyncio
-async def test_a_deny_it_computed_refuses_the_command():
-    policy = _policy(DENY_ANSWER)
-    assert await policy.pre_command(_ctx()) == Deny("sealed")
+async def test_the_first_deny_wins_over_an_ask_before_it():
+    asks = FakeProgram(_answer(kind="ask", reason="nod"))
+    denies = FakeProgram(_answer(kind="deny", reason="no"))
+    entries = (_entry("monty"), _entry("wasi"))
+    policy = ScriptPolicy(Programs({"pre_command": entries}))
+    policy._engines[("monty", "{}")] = asks
+    policy._engines[("wasi", "{}")] = denies
+    assert await policy.pre_command(_ctx()) == Deny("no")
 
 
 @pytest.mark.asyncio
-async def test_an_ask_it_computed_reaches_the_dispatcher():
-    policy = _policy({"ask": "sign-off"})
-    assert await policy.pre_command(_ctx()) == Ask("sign-off")
+async def test_an_ask_holds_when_nothing_denies():
+    silent = FakeProgram(b"")
+    asks = FakeProgram(_answer(kind="ask", reason="nod"))
+    policy = ScriptPolicy(
+        Programs({"pre_vfs": (_entry("monty"), _entry("wasi"))})
+    )
+    policy._engines[("monty", "{}")] = silent
+    policy._engines[("wasi", "{}")] = asks
+    assert await policy.pre_vfs(_ops_ctx()) == Ask("nod")
 
 
 @pytest.mark.asyncio
-async def test_the_engine_is_built_once_and_reused():
-    policy = _policy(None)
-    await policy.pre_command(_ctx("cat"))
-    await policy.pre_command(_ctx("ls"))
-    assert len(FakeEngine.built) == 1
-    # One probe for the program's hooks, then one evaluation per command.
-    assert FakeEngine.built[0].evals == 3
+async def test_routes_must_agree():
+    line = RouteContext(
+        line="python3 job.py", commands=(), session_id="s", agent_id="a"
+    )
+    entries = (_entry("monty"), _entry("wasi"))
+    agree = ScriptPolicy(Programs({"pre_execute": entries}))
+    agree._engines[("monty", "{}")] = FakeProgram(
+        _answer(kind="route", runtime="docker")
+    )
+    agree._engines[("wasi", "{}")] = FakeProgram(
+        _answer(kind="route", runtime="docker")
+    )
+    assert await agree.pre_execute(line) == Route("docker")
+    differ = ScriptPolicy(Programs({"pre_execute": entries}))
+    differ._engines[("monty", "{}")] = FakeProgram(
+        _answer(kind="route", runtime="docker")
+    )
+    differ._engines[("wasi", "{}")] = FakeProgram(
+        _answer(kind="route", runtime="monty")
+    )
+    assert await differ.pre_execute(line) == Deny(
+        "profile 'release' policy places the line on 'docker' and 'monty'"
+    )
 
 
 @pytest.mark.asyncio
-async def test_close_closes_the_engines():
-    policy = _policy(None)
-    await policy.pre_command(_ctx())
-    await policy.close()
-    assert FakeEngine.built[0].closed
+async def test_a_program_that_exits_non_zero_fails_closed():
+    policy = _policy("pre_command", FakeProgram(b"", 3, b"Traceback"))
+    assert await policy.pre_command(_ctx()) == Deny(
+        "profile 'release' policy exited 3"
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_script_that_raised_fails_closed():
-    # Silence on failure would run exactly the commands the script
-    # existed to judge, so every failure arm refuses instead.
-    policy = _policy(error=EvalError("boom"))
-    action = await policy.pre_command(_ctx())
-    assert action == Deny("profile 'release' policy failed: boom")
-
-
-@pytest.mark.asyncio
-async def test_a_syntax_error_is_named_as_one():
-    policy = _policy(error=EvalError("bad token", syntax=True))
-    action = await policy.pre_command(_ctx())
-    assert isinstance(action, Deny)
-    assert "profile 'release' policy syntax error" in action.reason
-
-
-@pytest.mark.asyncio
-async def test_a_script_that_timed_out_fails_closed(monkeypatch):
+async def test_a_program_that_timed_out_fails_closed(monkeypatch):
     monkeypatch.setattr(
         "mirage.policy.script.SCRIPT_EVAL_TIMEOUT_SECONDS", 0.01
     )
-    policy = _policy(None, delay=0.2)
-    action = await policy.pre_command(_ctx())
-    assert isinstance(action, Deny)
-    assert "profile 'release' policy timed out" in action.reason
+    policy = _policy("pre_command", FakeProgram(delay=1.0))
+    assert await policy.pre_command(_ctx()) == Deny(
+        "profile 'release' policy timed out after 0.01s"
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_wrong_answer_shape_fails_closed():
-    policy = _policy([1, 2])
+async def test_a_wrong_answer_fails_closed():
+    policy = _policy("pre_command", FakeProgram(b'{"deny": "x"}'))
     action = await policy.pre_command(_ctx())
     assert isinstance(action, Deny)
-    assert "profile 'release' policy must answer" in action.reason
+    assert action.reason.startswith(
+        "profile 'release' policy must print a JSON answer at pre_command"
+    )
 
 
-def _no_engine(script: ScriptSource, runtime: str) -> FakeEngine:
+@pytest.mark.asyncio
+async def test_a_runtime_policies_do_not_run_on_fails_closed():
+    policy = ScriptPolicy(Programs({"pre_command": (_entry("quickjs"),)}))
+    assert await policy.pre_command(_ctx()) == Deny(
+        "profile 'release' policy names runtime 'quickjs'; a policy program "
+        "runs on monty or wasi"
+    )
+
+
+def _no_engine(script, runtime, config):
     raise ValueError(f"script names runtime {runtime!r}: nope")
 
 
 @pytest.mark.asyncio
-async def test_an_engine_it_cannot_build_fails_closed(monkeypatch):
+async def test_a_runtime_it_cannot_build_fails_closed(monkeypatch):
     monkeypatch.setattr("mirage.policy.script.script_engine", _no_engine)
-    policy = ScriptPolicy(OneScript(_entry("ghost")), _mounts)
-    action = await policy.pre_command(_ctx())
-    assert isinstance(action, Deny)
-    assert (
-        action.reason == "profile 'release' policy names runtime 'ghost': nope"
+    policy = ScriptPolicy(Programs({"pre_command": (_entry("wasi"),)}))
+    assert await policy.pre_command(_ctx()) == Deny(
+        "profile 'release' policy names runtime 'wasi': nope"
     )
 
 
 @pytest.mark.asyncio
-async def test_a_wired_policy_attaches_the_entry_points_to_the_engine(
+async def test_a_runtime_is_built_once_per_name_and_settings(monkeypatch):
+    def build(script, runtime, config):
+        return FakeProgram()
+
+    monkeypatch.setattr("mirage.policy.script.script_engine", build)
+    entries = (
+        _entry("wasi", config={"home": "/a"}),
+        _entry("wasi", config={"home": "/a"}),
+        _entry("wasi", config={"home": "/b"}),
+    )
+    policy = ScriptPolicy(Programs({"pre_command": entries}))
+    await policy.pre_command(_ctx())
+    await policy.pre_command(_ctx())
+    assert len(FakeProgram.built) == 2
+    assert [len(e.requests) for e in FakeProgram.built] == [4, 2]
+    await policy.close()
+    assert all(e.closed for e in FakeProgram.built)
+
+
+@pytest.mark.asyncio
+async def test_a_wired_policy_attaches_the_entry_points_to_its_runtime(
     monkeypatch,
 ):
-    # The facts name the path; the engine opens it. Attached before the
-    # first evaluation, as Runtimes attaches an agent's engine, so the
-    # script's open() reads the mounts through the same entry point.
-    engine = FakeLanguageEngine()
+    engine = FakeProgram()
     monkeypatch.setattr(
-        "mirage.policy.script.script_engine", lambda script, runtime: engine
+        "mirage.policy.script.script_engine",
+        lambda script, runtime, config: engine,
     )
     resolver = PrefixResolver(lambda: ["/repo/"])
     marked: list[bool] = []
@@ -425,16 +490,14 @@ async def test_a_wired_policy_attaches_the_entry_points_to_the_engine(
         return None, None
 
     policy = ScriptPolicy(
-        OneScript(_entry()), _mounts, dispatch=backend, resolver=resolver
+        Programs({"pre_command": (_entry(),)}),
+        dispatch=backend,
+        resolver=resolver,
     )
     assert await policy.pre_command(_ctx()) is None
     assert engine.attached is not None
     dispatch, attached = engine.attached
     assert attached is resolver
-    # The entry point is the workspace's, reached through the policy's own
-    # wrapper, which marks the op as the policy's read for as long as it
-    # runs so the policy's pre_vfs lets it through; outside the call the
-    # mark is down.
     await dispatch("read", _path("/repo/sealed/k"))
     assert marked == [True]
     assert _POLICY_READ.get() is False
@@ -442,244 +505,55 @@ async def test_a_wired_policy_attaches_the_entry_points_to_the_engine(
 
 @pytest.mark.asyncio
 async def test_a_bare_policy_attaches_nothing(monkeypatch):
-    # Outside a workspace there is no entry point to hand over, and the
-    # engine is left as built: its scripts see no file.
-    engine = FakeLanguageEngine()
+    engine = FakeProgram()
     monkeypatch.setattr(
-        "mirage.policy.script.script_engine", lambda script, runtime: engine
+        "mirage.policy.script.script_engine",
+        lambda script, runtime, config: engine,
     )
-    policy = ScriptPolicy(OneScript(_entry()), _mounts)
+    policy = ScriptPolicy(Programs({"pre_command": (_entry(),)}))
     assert await policy.pre_command(_ctx()) is None
     assert engine.attached is None
 
 
 def test_dispatch_and_resolver_travel_together():
+    async def dispatch(op, path, **kwargs):
+        return None, None
+
     with pytest.raises(ValueError, match="travel together"):
-        ScriptPolicy(OneScript(None), _mounts, dispatch=_dispatch)
+        ScriptPolicy(Programs({}), dispatch=dispatch)
     with pytest.raises(ValueError, match="travel together"):
-        ScriptPolicy(
-            OneScript(None), _mounts, resolver=PrefixResolver(lambda: [])
-        )
-
-
-def test_ops_script_context_is_the_op_context_as_data():
-    assert ops_script_context("release", _ops_ctx(), _mounts()) == {
-        "profile": "release",
-        "call": {
-            "name": "write",
-            "effect": "write",
-            "target": "file",
-            "creates": True,
-            "subtree": False,
-            "path": "/scratch/frozen/f",
-            "write": True,
-            "prefix": "/scratch",
-        },
-        "session": {"id": "s", "cwd": "", "env": {}},
-        "mounts": ["/repo/", "/scratch/"],
-    }
-
-
-def test_session_script_context_is_the_session_context_as_data():
-    assert session_script_context("release", _session_ctx(), _mounts()) == {
-        "profile": "release",
-        "write": {
-            "plane": "env",
-            "verb": "set",
-            "key": "AWS_KEY",
-            "value": "v",
-        },
-        "session": {"id": "s", "cwd": "", "env": {}},
-        "mounts": ["/repo/", "/scratch/"],
-    }
-
-
-def test_the_probe_asks_for_every_hook_in_the_programs_own_language():
-    probe = hook_probe(ScriptSource("x"))
-    for name in HOOKS:
-        assert f"try:\n    {name}\n" in probe
-    assert probe.endswith("_mirage_hooks")
-    js = hook_probe(ScriptSource("x", language="js"))
-    for name in HOOKS.values():
-        assert f"typeof {name}" in js
-
-
-def test_defined_hooks_reads_the_probes_answer_in_python_spelling():
-    assert defined_hooks(ScriptSource("x"), ["pre_vfs"]) == {"pre_vfs"}
-    assert defined_hooks(
-        ScriptSource("x", language="js"), ["preCommand", "preSession"]
-    ) == {"pre_command", "pre_session"}
-    assert defined_hooks(ScriptSource("x"), []) == frozenset()
-
-
-@pytest.mark.parametrize("value", [None, "pre_vfs", ["nope"], [1]])
-def test_defined_hooks_refuses_anything_else(value):
-    with pytest.raises(ValueError, match="hook probe answered"):
-        defined_hooks(ScriptSource("x"), value)
-
-
-def test_every_hook_answers_in_one_vocabulary():
-    # Every hook may ask, so the answer reads the same whichever hook
-    # gave it.
-    assert script_action({"deny": "frozen"}) == Deny("frozen")
-    assert script_action({"ask": "nod"}) == Ask("nod")
-    assert script_action(None) is None
+        ScriptPolicy(Programs({}), resolver=PrefixResolver(lambda: []))
 
 
 @pytest.mark.asyncio
-async def test_a_hook_the_program_leaves_out_is_silence_without_an_evaluation():
-    # The probe found pre_command alone, so the op and session views
-    # cost no evaluation: a program that judges commands is not charged
-    # per op for a hook it never wrote.
-    policy = _policy(DENY_ANSWER)
-    assert await policy.pre_vfs(_ops_ctx()) is None
-    assert await policy.pre_session(_session_ctx()) is None
-    assert FakeEngine.built[0].evals == 1
-    assert await policy.pre_command(_ctx()) == Deny("sealed")
-    assert FakeEngine.built[0].evals == 2
-
-
-@pytest.mark.asyncio
-async def test_an_op_hook_it_defines_judges_the_op_with_its_facts():
-    policy = _policy({"deny": "frozen"}, hooks=("pre_vfs",))
-    assert await policy.pre_vfs(_ops_ctx()) == Deny("frozen")
-    engine = FakeEngine.built[0]
-    assert engine.code == "SOURCE\n\npre_vfs(ctx)\n"
-    assert engine.seen == {
-        "ctx": ops_script_context("release", _ops_ctx(), _mounts())
-    }
-    # The command hook, which the program leaves out, is silence.
-    assert await policy.pre_command(_ctx()) is None
-
-
-@pytest.mark.asyncio
-async def test_a_session_hook_it_defines_judges_the_write_with_its_facts():
-    policy = _policy("deny", hooks=("pre_session",))
-    assert await policy.pre_session(_session_ctx()) == Deny(
-        DEFAULT_DENY_REASON
-    )
-    engine = FakeEngine.built[0]
-    assert engine.code == "SOURCE\n\npre_session(ctx)\n"
-    assert engine.seen == {
-        "ctx": session_script_context("release", _session_ctx(), _mounts())
-    }
-
-
-@pytest.mark.asyncio
-async def test_an_op_hook_may_ask():
-    # The entry point puts it to the host where no line is running, and refuses
-    # it inside one.
-    policy = _policy({"ask": "nod"}, hooks=("pre_vfs",))
-    assert await policy.pre_vfs(_ops_ctx()) == Ask("nod")
-
-
-@pytest.mark.asyncio
-async def test_a_program_defining_no_hook_fails_closed_at_every_entry_point():
-    policy = _policy(None, hooks=())
-    for action in (
-        await policy.pre_command(_ctx()),
-        await policy.pre_vfs(_ops_ctx()),
-        await policy.pre_session(_session_ctx()),
-    ):
-        assert action == Deny(
-            "profile 'release' policy defines no hook: "
-            "pre_command, pre_vfs or pre_session"
-        )
-    # One probe; nothing else was evaluated.
-    assert FakeEngine.built[0].evals == 1
-
-
-@pytest.mark.asyncio
-async def test_the_no_hook_refusal_speaks_the_programs_language():
-    entry = ProfileScript(
-        profile="release",
-        script=ScriptSource("x", language="js"),
-        runtime="quickjs",
-    )
-    policy = ScriptPolicy(OneScript(entry), _mounts)
-    policy._engines["quickjs"] = FakeEngine(None, hooks=())
-    assert await policy.pre_command(_ctx()) == Deny(
-        "profile 'release' policy defines no hook: preCommand, preVfs or "
-        "preSession"
-    )
-
-
-@pytest.mark.asyncio
-async def test_the_probe_runs_once_per_program():
-    policy = _policy(None, hooks=("pre_vfs",))
-    await policy.pre_vfs(_ops_ctx())
-    await policy.pre_vfs(_ops_ctx("read", write=False))
-    await policy.pre_command(_ctx())
-    # The probe, then two op judgments; the command hook was silence.
-    assert FakeEngine.built[0].evals == 3
-
-
-@pytest.mark.asyncio
-async def test_the_hook_set_is_remembered_per_language():
-    # One text, two programs: the probe asks in each language's own
-    # spelling, so what it found in one says nothing about the other.
-    # Here the js probe finds no hook and the python probe finds one.
-    text = "pre_command = 1"
-    policy = ScriptPolicy(
-        ScriptsBySession(
-            {
-                "j": ProfileScript(
-                    profile="j",
-                    script=ScriptSource(text, language="js"),
-                    runtime="quickjs",
-                ),
-                "p": ProfileScript(
-                    profile="p", script=ScriptSource(text), runtime="monty"
-                ),
-            }
-        ),
-        _mounts,
-    )
-    policy._engines["quickjs"] = FakeEngine(None, hooks=())
-    policy._engines["monty"] = FakeEngine(None, hooks=("pre_command",))
-    assert await policy.wants_for("pre_session", "j") is True
-    assert await policy.wants_for("pre_session", "p") is False
-
-
-@pytest.mark.asyncio
-async def test_the_policys_own_read_is_not_judged_by_its_op_hook():
-    # The mark the reading entry point raises is what pre_vfs reads first, so a
-    # read the engine issues never re-enters the evaluation waiting on
-    # it; the same op from anyone else is judged.
-    policy = _policy({"deny": "frozen"}, hooks=("pre_vfs",))
+async def test_the_policys_own_read_is_not_judged_by_its_vfs_program():
+    engine = FakeProgram(_answer(kind="deny", reason="frozen"))
+    policy = _policy("pre_vfs", engine)
     token = _POLICY_READ.set(True)
     try:
         assert await policy.pre_vfs(_ops_ctx("read", write=False)) is None
     finally:
         _POLICY_READ.reset(token)
-    assert FakeEngine.built[0].evals == 0
+    assert engine.requests == []
     assert await policy.pre_vfs(_ops_ctx("read", write=False)) == Deny(
         "frozen"
     )
 
 
 @pytest.mark.asyncio
-async def test_wants_for_says_which_sessions_a_hook_speaks_for():
-    # The per-session refinement the secret fill asks: the hook is
-    # overridden for everyone, but speaks only for a session whose
-    # program defines the hook.
-    policy = _policy(None, hooks=("pre_command",))
-    assert await policy.wants_for("pre_command", "s") is True
-    assert await policy.wants_for("pre_session", "s") is False
-    assert await policy.wants_for("pre_vfs", "s") is False
-    assert await policy.wants_for("post_vfs", "s") is False
-    assert (
-        await ScriptPolicy(OneScript(None), _mounts).wants_for(
-            "pre_session", "s"
-        )
-        is False
+async def test_wants_for_says_which_sessions_a_method_speaks_for():
+    policy = ScriptPolicy(
+        ProgramsBySession({"s": {"pre_command": (_entry(),)}, "t": {}})
     )
+    assert await policy.wants_for("pre_command", "s") is True
+    assert await policy.wants_for("pre_vfs", "s") is False
+    assert await policy.wants_for("pre_command", "t") is False
+    assert await policy.wants_for("pre_command", "unknown") is False
 
 
 @pytest.mark.asyncio
-async def test_wants_for_counts_a_program_the_dispatcher_will_refuse():
-    # No hook at all, or a probe that failed: the dispatcher refuses every
-    # write for this program, which is speaking.
-    assert await _policy(None, hooks=()).wants_for("pre_session", "s") is True
-    broken = _policy(error=EvalError("boom"))
-    assert await broken.wants_for("pre_session", "s") is True
+async def test_a_program_starts_in_the_sessions_directory():
+    engine = FakeProgram()
+    policy = _policy("pre_command", engine)
+    await policy.pre_command(_ctx(session=_session(cwd="/data")))
+    assert engine.requests[0].cwd.virtual == "/data"

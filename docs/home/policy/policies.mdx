@@ -112,19 +112,30 @@ flowchart LR
 
 ## Context
 
-Each method gets one argument, `ctx`. TypeScript spells its fields in
-camelCase (`ctx.sessionId`, `ctx.exitCode`).
+Each method gets one argument, `ctx`. Every `ctx` carries the session,
+plus what its method is about, and a `post_` method adds what came back.
+TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
 
-| Method | `ctx` holds |
+| Methods | What it is about | `post_` adds |
+| --- | --- | --- |
+| `pre_execute`, `post_execute` | `line`, `agent_id`, and `commands`: every command of the line | `exit_code`, `output`, `results` |
+| `pre_command`, `post_command` | `line`, `agent_id`, and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
+| `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
+| `pre_session`, `post_session` | `verb`, `key`, `value` | `old` |
+
+`pre_command` is `pre_execute` narrowed to one command: each entry of
+`ctx.commands` is the context `pre_command` gets for that command, read
+before the line runs, so a word only the run can expand (`$X`) is not
+resolved there yet.
+
+Every `ctx` also carries:
+
+| Field | What it is |
 | --- | --- |
-| `pre_execute` | `line`, `commands`, `agent_id` |
-| `post_execute` | the same, plus `exit_code`, `output`, `results`, `producer` |
-| `pre_command` | `command`, `words`, `paths`, `cwd` |
-| `post_command` | the same, plus `exit_code`, `stderr`, `records` |
-| `pre_vfs` | `call`, `path`, `write` |
-| `post_vfs` | the same, plus `result` |
-| `pre_session` | `verb`, `key`, `value` |
-| `post_session` | the same, plus `old` |
+| `session_id` | the session the action runs as |
+| `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
+| `ns` | the session's namespace, as commands get it: mounts, links, the stat overlay, hides applied |
+| `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`; unset on a TypeScript runtime that does not isolate async tasks (the browser fallback) |
 
 `words` is the command line word by word, after expansion. Each word has
 a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or
@@ -140,9 +151,10 @@ For `tar -cf a.tar -C /mnt /data`:
 | `/mnt` | `value` | `-C` | `/mnt` |
 | `/data` | `operand` | | `/data` |
 
-`paths` is every path the command reaches, flat: its words' paths, the
-targets of links it names, and the working directory a bare `ls` reads.
-
+- `paths` is every path the command reaches, flat: its words' paths, the
+  targets of links it names, and the working directory a bare `ls` reads.
+- `line` is the line the command was parsed from: the line the agent
+  typed, or for `eval`, `$( )` and a function body, that text.
 - `results` is the line's execution tree: a node per command with its
   exit code, stderr and records.
 - `records` are the calls a command made, one dict each: `op`, `path`,
@@ -152,17 +164,11 @@ targets of links it names, and the working directory a bare `ls` reads.
   Every function a VFS marks reaches `pre_vfs` and `post_vfs`: `find`,
   `du_size`, `search` and `copy` too.
 
-Every `ctx` also carries:
-
-| Field | What it is |
-| --- | --- |
-| `session_id` | the session the action runs as |
-| `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
-| `ns` | the session's namespace, as commands get it: mounts, links, the stat overlay, hides applied |
-| `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`; unset on a TypeScript runtime that does not isolate async tasks (the browser fallback) |
-
 A method only reads. A write it makes through Mirage is refused (`EROFS`
 for a file, `EACCES` for a variable), and its reads are not judged again.
+
+A policy written as a program, on monty or Python on wasm, gets the same
+`ctx` as JSON: see [Scripts](/home/policy/scripts).
 
 ## Examples
 
@@ -171,12 +177,12 @@ for a file, `EACCES` for a variable), and its reads are not judged again.
 <CodeGroup>
 
 ```python Python
-from mirage.policy import Policy, Route
-from mirage.runtime.routing import RouteContext
+from mirage.policy import Policy, Route, RouteContext
 
 class JobsInDocker(Policy):
     async def pre_execute(self, ctx: RouteContext) -> Route | None:
-        if any(p.startswith("/jobs/") for c in ctx.commands for p in c.paths):
+        paths = [p.virtual for c in ctx.commands for p in c.paths]
+        if any(p.startswith("/jobs/") for p in paths):
             return Route("docker")
         return None
 ```
@@ -184,7 +190,7 @@ class JobsInDocker(Policy):
 ```typescript TypeScript
 const jobsInDocker: Policy = {
   preExecute(ctx) {
-    const jobs = ctx.commands.some((c) => c.paths.some((p) => p.startsWith('/jobs/')))
+    const jobs = ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/')))
     return jobs ? { kind: 'route', runtime: 'docker' } : null
   },
 }

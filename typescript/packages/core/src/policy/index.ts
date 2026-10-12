@@ -65,6 +65,7 @@ export {
   type Abandoned,
   type Pending,
   type Route,
+  type RouteContext,
   type Decision,
   type Claim,
   type Claimant,

@@ -30,13 +30,13 @@ from mirage.vfs.ram import RAMVFS
 #
 #   a coded Policy     a class passed as ``policies=[...]``. It runs in
 #                      this process, needs no engine, may define any of
-#                      the eight hooks, and speaks for every session:
+#                      the eight methods, and speaks for every session:
 #                      the operator's own rule.
-#   a profile policy   a program passed as a profile's ``policy`` block,
-#                      source plus the engine that runs it. It runs
-#                      sandboxed on that engine, defines any of the
-#                      three admission hooks, and speaks only for the
-#                      sessions under that profile.
+#   a profile policy   programs passed as a profile's ``policy`` block,
+#                      a list per pre_ method, each with the runtime that
+#                      runs it. They run sandboxed on that runtime, read
+#                      the same ctx as JSON, print their answer, and
+#                      speak only for the sessions under that profile.
 #
 # The same block spelled as a document is policy_yaml.py, beside this
 # file.
@@ -51,29 +51,36 @@ class OperatorOwnsCredentials(Policy):
         return None
 
 
-# The reviewer's program: python source, run on monty. It defines the
-# two hooks it has an opinion at and stays silent at the third. A hook
-# answers with return: None for no opinion, {"deny": reason} to refuse.
-# ``open()`` reads through the workspace, so the command gate can judge
+# The reviewer's programs: python source, run on monty, one for each
+# method it has an opinion at. Each reads its context as JSON, the same
+# fields a coded policy reads, and prints its answer: nothing for no
+# opinion, {"kind": "deny", "reason": ...} to refuse. ``open()`` reads
+# through the workspace as the session, so the command program can judge
 # what a file holds, not only what it is called.
-REVIEWER = ScriptSource("""
-def pre_command(ctx):
-    for path in ctx["command"]["paths"]:
-        if "marker" in contents(path):
-            return {"deny": "marked files are not read by " + ctx["profile"]}
-    return None
+MARKED = ScriptSource("""
+import json
+import os
 
-def pre_vfs(ctx):
-    call = ctx["call"]
-    if call["write"] and call["path"].startswith("/scratch/cold/"):
-        return {"deny": "the cold store is frozen"}
-    return None
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 
 def contents(path):
     try:
         return open(path).read()
     except OSError:
         return ""
+
+if any("marker" in contents(path) for path in ctx["paths"]):
+    reason = "marked files are not read by " + ctx["profile"]
+    print(json.dumps({"kind": "deny", "reason": reason}))
+""")
+
+COLD = ScriptSource("""
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if ctx["write"] and ctx["path"].startswith("/scratch/cold/"):
+    print(json.dumps({"kind": "deny", "reason": "the cold store is frozen"}))
 """)
 
 SEED = [
@@ -103,7 +110,7 @@ LINES = [
     (
         "reviewer",
         "export SAFE=1 && echo $SAFE",
-        "silence where no hook objects",
+        "silence where no method objects",
     ),
     ("host", "cat /repo/flagged.txt", "no profile, so no program"),
     (
@@ -138,8 +145,8 @@ async def main() -> None:
         profiles={
             "reviewer": {
                 "policy": {
-                    "script": REVIEWER,
-                    "runtime": "monty",
+                    "pre_command": [{"script": MARKED, "runtime": "monty"}],
+                    "pre_vfs": [{"script": COLD, "runtime": "monty"}],
                 },
             },
         },

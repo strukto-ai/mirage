@@ -63,3 +63,14 @@ SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
 # ``exists`` is the command tier's probe; ``stat`` is pinned like
 # SUBTREE_OPS's VFS ops.
 METADATA_OPS = frozenset({"stat", "exists"})
+
+# The methods a profile's policy names programs for: the pre_ four,
+# answered before the action runs.
+METHODS = ("pre_execute", "pre_command", "pre_vfs", "pre_session")
+
+# The runtimes a policy program runs on: monty, and Python on wasm.
+PROGRAM_RUNTIMES = frozenset({"monty", "wasi"})
+
+# The environment variable a policy program reads its context from, as
+# JSON; the same text arrives on stdin.
+CTX_ENV = "MIRAGE_POLICY_CTX"

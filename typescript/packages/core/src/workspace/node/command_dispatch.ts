@@ -283,7 +283,6 @@ export async function executeCommand(
       // below goes through `seedVar`, which is the ungated entry point, so this
       // loop is the only place the rule can be asked.
       await preSessionGate(registry.policies, {
-        plane: 'env',
         verb: 'set',
         key: k,
         value: v,
@@ -304,7 +303,7 @@ export async function executeCommand(
       const old = olds.get(k) ?? null
       await postSessionGate(
         registry.policies,
-        { plane: 'env', verb: 'set', key: k, value: v, sessionId: session.sessionId },
+        { verb: 'set', key: k, value: v, sessionId: session.sessionId },
         old === null ? null : gateRendering(old.value),
       )
     }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RouteContext } from '../runtime/routing/types.ts'
+import type { RouteContext } from './types.ts'
 import type {
   Action,
   CommandContext,

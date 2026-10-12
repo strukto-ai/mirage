@@ -34,7 +34,7 @@ import type {
   SessionDecisionsQuery,
 } from './types.ts'
 import { DryRun, Scope } from './types.ts'
-import type { RouteContext } from '../runtime/routing/types.ts'
+import type { RouteContext } from './types.ts'
 
 const ABANDONED: Abandoned = { kind: 'abandoned' }
 
@@ -131,9 +131,9 @@ export function askRule(
   ask: Ask,
 ): CommandRule {
   if (ask.rule != null) return ask.rule
-  if ('plane' in ctx) return { reason: ask.reason, commands: [ctx.key] }
+  if ('verb' in ctx) return { reason: ask.reason, commands: [ctx.key] }
   if ('call' in ctx) return { reason: ask.reason, paths: [ctx.path.virtual] }
-  if ('line' in ctx) return { reason: ask.reason, commands: [ctx.line] }
+  if ('commands' in ctx) return { reason: ask.reason, commands: [ctx.line] }
   const program = (ctx.program ?? [ctx.command]).join(' ')
   return { reason: ask.reason, commands: [program] }
 }
@@ -235,7 +235,7 @@ export function opQuestion(
   if ('call' in ctx) {
     words = [ctx.path.virtual]
     paths = [ctx.path]
-  } else if ('plane' in ctx) {
+  } else if ('verb' in ctx) {
     words = ctx.value === null ? [ctx.key] : [ctx.key, ctx.value]
   } else {
     words = [ctx.line]
@@ -471,7 +471,7 @@ export class Decisions {
     if (explaining() === DryRun.DECIDING) return this.heldOp(ctx, ask)
     const [asked, keyed] = opQuestion(ctx, ask)
     const sessionId = ctx.sessionId ?? ''
-    const call = asyncContextIsolatesTasks || !('plane' in ctx) ? getOpCall(this, sessionId) : null
+    const call = asyncContextIsolatesTasks || !('verb' in ctx) ? getOpCall(this, sessionId) : null
     const claimant: Claimant | null =
       call === null
         ? null

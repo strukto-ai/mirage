@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { CommandTimeoutError } from '../errors/types.ts'
 import { EvalError } from './errors.ts'
-import { EVALUATOR, isEvaluator, type Evaluator } from './mixin.ts'
+import { EVALUATOR, type Evaluator } from './mixin.ts'
+import { LanguageRuntime } from './language.ts'
 import { ScriptSource } from './types.ts'
 import { CTX_GLOBAL, evalWithCtx, scriptEngine } from './script.ts'
 import type { EvalResult, EvalValue } from './types.ts'
@@ -67,11 +68,11 @@ describe('scriptEngine', () => {
   it('builds the named runtime', () => {
     const engine = scriptEngine(new ScriptSource('...', 'python'), 'monty')
     expect(engine.name).toBe('monty')
-    expect(isEvaluator(engine)).toBe(true)
+    expect(engine).toBeInstanceOf(LanguageRuntime)
   })
 
   it.each<[string, 'js' | 'python', string, RegExp]>([
-    ['one that cannot evaluate', 'js', 'workspace', /cannot evaluate one/],
+    ['one that runs no programs', 'js', 'workspace', /runs no programs/],
     ['an unknown one', 'js', 'nope', /unknown runtime/],
     ['one of the wrong language', 'python', 'quickjs', /python, but names runtime/],
   ])('refuses a runtime: %s', (_name, language, runtime, refusal) => {

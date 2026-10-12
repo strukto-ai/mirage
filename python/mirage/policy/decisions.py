@@ -36,12 +36,12 @@ from mirage.policy.types import (
     HandOff,
     Occurrence,
     Pending,
+    RouteContext,
     Scope,
     SessionContext,
     SessionDecisionsQuery,
     VfsContext,
 )
-from mirage.runtime.routing.types import RouteContext
 from mirage.types import PathSpec
 
 # A host that answers an Ask inside the line.

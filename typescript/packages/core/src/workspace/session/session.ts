@@ -36,13 +36,20 @@ import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
-import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../policy/types.ts'
+import type {
+  AdmissionRules,
+  Decision,
+  HideReason,
+  ProfileScripts,
+  ScriptMethod,
+} from '../../policy/types.ts'
+import { METHODS } from '../../policy/constants.ts'
 import {
   commandsFromJSON,
   commandsToJSON,
   decisionFromJSON,
   decisionToJSON,
-  scriptFromJSON,
+  scriptsFromJSON,
   scriptToJSON,
   type CommandsJSON,
   type DecisionJSON,
@@ -137,11 +144,10 @@ export interface SessionInit {
    */
   commands?: AdmissionRules | null
   /**
-   * The profile's per-command script, evaluated by ScriptPolicy at the
-   * admission gate. A durable restriction like commands, so it
-   * persists.
+   * The profile's policy programs by method, run by ScriptPolicy at
+   * that method. A durable restriction like commands, so it persists.
    */
-  script?: ProfileScript | null
+  scripts?: ProfileScripts
   /**
    * The name of the profile the session runs under, null for an
    * unrestricted session. What an owner-rendering command prints as the
@@ -520,7 +526,7 @@ export class SessionState {
   visibility: Visibility
   hideReasons: readonly HideReason[]
   commands: AdmissionRules | null
-  script: ProfileScript | null
+  scripts: ProfileScripts
   profile: string | null
   commandLimits: Readonly<Record<string, Limit>>
   terminalOutput = true
@@ -551,7 +557,7 @@ export class SessionState {
     this.visibility = { ...DEFAULT_VISIBILITY, ...init.visibility }
     this.hideReasons = init.hideReasons ?? []
     this.commands = init.commands ?? null
-    this.script = init.script ?? null
+    this.scripts = init.scripts ?? {}
     this.processId = init.processId ?? null
     this.shellPid = init.shellPid ?? null
     this.processDepth = init.processDepth ?? 0
@@ -625,7 +631,7 @@ export class SessionState {
       visibility: overrides.visibility ?? this.visibility,
       hideReasons: overrides.hideReasons ?? this.hideReasons,
       commands: overrides.commands ?? this.commands,
-      script: overrides.script ?? this.script,
+      scripts: overrides.scripts ?? this.scripts,
       profile: overrides.profile ?? this.profile,
       commandLimits: overrides.commandLimits ?? this.commandLimits,
       processes: overrides.processes ?? this.processes,
@@ -921,7 +927,14 @@ export class SessionState {
       }
     }
     if (this.commands !== null) data.commands = commandsToJSON(this.commands)
-    if (this.script !== null) data.script = scriptToJSON(this.script)
+    if (Object.keys(this.scripts).length > 0) {
+      data.scripts = Object.fromEntries(
+        Object.entries(this.scripts).map(([method, entries]) => [
+          METHODS[method as ScriptMethod],
+          entries.map(scriptToJSON),
+        ]),
+      )
+    }
     if (Object.keys(this.commandLimits).length > 0)
       data.command_limits = commandLimitsToJSON(this.commandLimits)
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))
@@ -944,7 +957,7 @@ export class SessionState {
     hide_reasons?: { patterns?: string[]; reason?: string }[] | null
     hidden_vars?: { names?: string[]; patterns?: string[] } | null
     commands?: CommandsJSON | null
-    script?: ScriptJSON | null
+    scripts?: Record<string, ScriptJSON[]> | null
     profile?: string | null
     command_limits?: unknown
     processes?: ProcessPermissions
@@ -1001,7 +1014,7 @@ export class SessionState {
           ? data.hide_reasons.map((g) => ({ patterns: g.patterns ?? [], reason: g.reason ?? '' }))
           : [],
       commands,
-      script: data.script != null ? scriptFromJSON(data.script) : null,
+      scripts: scriptsFromJSON(data.scripts ?? {}),
       profile: data.profile ?? null,
       commandLimits: parseCommandLimits(data.command_limits),
       processes,

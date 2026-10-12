@@ -15,11 +15,11 @@
 from collections.abc import Callable
 
 from mirage.policy.base import Policy
-from mirage.policy.types import Deny, Route
+from mirage.policy.types import Action, Route, RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing.decide import evaluate_policy
-from mirage.runtime.routing.errors import RouteDeny
-from mirage.runtime.routing.types import RouteContext, RoutePolicy
+from mirage.runtime.routing.errors import RouteError
+from mirage.runtime.routing.types import RoutePolicy
 
 
 class PlacementPolicy(Policy):
@@ -27,14 +27,11 @@ class PlacementPolicy(Policy):
 
     The workspace compiles the configured callable or script into this
     built-in (``Policies.place``), so a route verdict is one more
-    placement answer: a runtime
-    name (``{"runtime": name}``, ``RouteResult``) is a Route, ``{"deny":
-    reason}`` (``DenyResult``) a Deny, None silence. Its payload and its
-    verdict shapes are the route policy's own. A mistake in it (an
-    unknown verdict key, a script that does not parse) raises
-    ``RouteError`` to the caller rather than failing closed, since a
-    misconfigured route policy is the deployment's to fix and not a
-    refusal to show an agent.
+    ``pre_execute`` answer: a runtime name is a Route, None silence.
+    A mistake in it (any other answer, a script that does not parse)
+    raises ``RouteError`` to the caller rather than failing closed,
+    since a misconfigured route policy is the deployment's to fix and
+    not a refusal to show an agent.
 
     Args:
         route (RoutePolicy): the configured callable or script.
@@ -49,9 +46,12 @@ class PlacementPolicy(Policy):
         self._route = route
         self._entries = entries
 
-    async def pre_execute(self, ctx: RouteContext) -> Deny | Route | None:
-        try:
-            name = await evaluate_policy(self._route, ctx, self._entries())
-        except RouteDeny as exc:
-            return Deny(exc.reason)
-        return None if name is None else Route(name)
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        verdict = await evaluate_policy(self._route, ctx, self._entries())
+        if verdict is None:
+            return None
+        if isinstance(verdict, str) and verdict:
+            return Route(verdict)
+        raise RouteError(
+            f"route policy must answer a runtime name or None, got {verdict!r}"
+        )

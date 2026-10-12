@@ -15,14 +15,15 @@
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 import type { Limit } from '../types.ts'
 import { parseCommandLimits } from './builtin/output_cap.ts'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
-import type { CommandRule, AdmissionRules, ProfileScript } from './types.ts'
+import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS } from './constants.ts'
+import type { CommandRule, AdmissionRules, ProfileScripts, ScriptMethod } from './types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
 import { norm } from '../utils/path.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 /**
  * `paths:` of a profile, or of one of its mount sections. `hide` entries
@@ -135,38 +136,43 @@ export interface SessionProfile {
   readonly vars?: VarsBlock | null
   readonly commands?: CommandsBlock | null
   /**
-   * The profile's policy: a program defining the admission hooks it
-   * answers at, the way a coded Policy defines only the hooks it cares
-   * about: `preCommand(ctx)` per command, `preVfs(ctx)` per VFS op,
-   * `preSession(ctx)` per env write (`pre_command`, `pre_vfs`,
-   * `pre_session` in python). Each is handed the entry point's facts as `ctx`
-   * and answers with `return`: null or 'allow' for no opinion, 'deny' /
-   * {deny: reason}, and at the command gate 'ask' / {ask: reason}. A block
-   * naming the program and the engine it runs on, the shape a `clis`
-   * entry has. The document is optional beside it: a profile stating
-   * only a policy hides nothing, and the policy is its whole admission
-   * policy.
+   * The profile's policy: for each `pre` method it answers at
+   * (`preExecute`, `preCommand`, `preVfs`, `preSession`; `pre_execute`,
+   * ... in the document), a list of programs, each with the runtime it
+   * runs on, the shape a `clis` entry has. A program reads the method's
+   * context as JSON and prints its answer: nothing for no opinion, a
+   * deny, an ask, or at `preExecute` a route. They are asked in order and
+   * the first deny wins. The document is optional beside it: a profile
+   * stating only a policy hides nothing, and the policy is its whole
+   * admission policy.
    */
-  readonly policy?: ProfilePolicySpec | null
+  readonly policy?: ProfilePolicy | null
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
   /** A bare scope for both `list` and `kill`, or any of the fields. */
   readonly processes?: ProcessScope | Partial<ProcessPermissions> | null
 }
 
 /**
- * A profile's policy as the document states it: the program, and the
- * engine that runs it.
+ * One program of a profile's policy, as the document states it: the
+ * program, and the runtime that runs it.
  *
  * `script` is the path form the config loader accepts and loads; code
  * passes the loaded ScriptSource, so a path still spelled as a string
  * when the workspace reads it means the config layer never saw it.
- * `runtime` is required: there is no default engine, because an engine
- * the operator never chose should not be the one their policy runs on.
+ * `runtime` is a name, or `{name, config}` for one that needs settings,
+ * the shape a `runtimes` entry has. Required: there is no default
+ * runtime, because one the operator never chose should not be the one
+ * their policy runs on.
  */
 export interface ProfilePolicySpec {
   readonly script: ScriptSource | string
-  readonly runtime: string
+  readonly runtime:
+    | string
+    | { readonly name: string; readonly config?: Readonly<Record<string, unknown>> }
 }
+
+/** A profile's policy: each `pre` method's programs, asked in order. */
+export type ProfilePolicy = Readonly<Partial<Record<ScriptMethod, readonly ProfilePolicySpec[]>>>
 
 /**
  * What a profile seeds a new session with; the agent's to change
@@ -181,14 +187,14 @@ export interface ProfileSetup {
  * What a profile lets a session do, for the policy chain to judge.
  * `mountModes` is the mode each mount section states (a mount absent
  * from the map keeps its own); `commands` the admission rules, its own
- * and its mount sections' in one list; `script` its policy program,
- * which `ScriptPolicy` calls at the admission gate; `processes` whose
+ * and its mount sections' in one list; `scripts` its policy programs by
+ * method, which `ScriptPolicy` runs at that method; `processes` whose
  * processes the session may stop and how many it may hold.
  */
 export interface ProfilePolicies {
   readonly mountModes: ReadonlyMap<string, MountMode> | null
   readonly commands: AdmissionRules | null
-  readonly script: ProfileScript | null
+  readonly scripts: ProfileScripts
   readonly commandLimits: Readonly<Record<string, Limit>> | null
   readonly processes: ProcessPermissions
 }
@@ -227,7 +233,7 @@ const PROFILE_FIELDS = [
   'command_limits',
   'processes',
 ] as const
-const POLICY_FIELDS = ['script', 'runtime'] as const
+const PROGRAM_FIELDS = ['script', 'runtime'] as const
 
 // A document mapping, not merely "an object": a Set, a Date or any class
 // instance has no own enumerable string keys, so Object.entries would read
@@ -550,30 +556,77 @@ export function parseProfileMounts(
 
 /** Validate one profile (a `profiles.<name>` block, or an inline document). */
 /**
- * Validate a profile's `policy` block: the program and the engine that
- * runs it, both required. A block, not a path: with no default engine
- * a path alone would name a program nothing could run.
+ * Validate a profile's `policy` block: per method, a list of programs,
+ * each naming its program and the runtime that runs it, both required.
+ * A config file spells the methods as the document does
+ * (`pre_command`); code, with `code` set, as the interface does
+ * (`preCommand`).
  */
-export function parseProfilePolicy(raw: unknown, where: string): ProfilePolicySpec {
+export function parseProfilePolicy(raw: unknown, where: string, code = false): ProfilePolicy {
+  const spelling: Record<string, ScriptMethod> = Object.fromEntries(
+    Object.entries(METHODS).map(([method, key]) => [code ? method : key, method as ScriptMethod]),
+  )
   if (typeof raw === 'string' || raw instanceof ScriptSource) {
-    throw new Error(
-      `${where} names the program and the engine that runs it: ` +
-        `{script: <file>, runtime: <engine>}`,
-    )
+    throw new Error(`${where} must be a mapping of method to programs`)
   }
   const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, POLICY_FIELDS, where)
-  if (obj.script === undefined || obj.script === null) {
-    throw new Error(`${where}.script names the policy's program, and is required`)
+  if ('script' in obj || 'runtime' in obj) {
+    throw new Error(
+      `${where} names its programs per method, policy: ` +
+        `{pre_command: [{script: <file>, runtime: <runtime>}]}`,
+    )
   }
-  if (!(obj.script instanceof ScriptSource) && typeof obj.script !== 'string') {
-    throw new Error(`${where}.script must be a script path or source`)
+  const unknown = Object.keys(obj).filter((key) => !(key in spelling))
+  if (unknown.length > 0) {
+    throw new Error(
+      `${where} names ${unknown.sort(compareCodePoints).join(', ')}; a program answers at ` +
+        Object.keys(spelling).join(', '),
+    )
   }
-  if (obj.runtime === undefined || obj.runtime === null) {
-    throw new Error(`${where}.runtime names the engine the policy runs on, and is required`)
+  const out: Partial<Record<ScriptMethod, readonly ProfilePolicySpec[]>> = {}
+  for (const [key, method] of Object.entries(spelling)) {
+    const programs = obj[key]
+    if (programs === undefined) continue
+    if (!Array.isArray(programs)) throw new Error(`${where}.${key} must be a list of programs`)
+    out[method] = programs.map((raw, i): ProfilePolicySpec => {
+      const at = `${where}.${key}[${String(i)}]`
+      const program = asObject(raw, at)
+      rejectUnknownKeys(program, PROGRAM_FIELDS, at)
+      const script = program.script
+      if (script === undefined || script === null) {
+        throw new Error(`${at}.script names the policy's program, and is required`)
+      }
+      if (!(script instanceof ScriptSource) && typeof script !== 'string') {
+        throw new Error(`${at}.script must be a script path or source`)
+      }
+      const runtime = program.runtime
+      if (runtime === undefined || runtime === null) {
+        throw new Error(`${at}.runtime names the runtime the program runs on, and is required`)
+      }
+      if (typeof runtime === 'string') return { script, runtime }
+      const named = asObject(runtime, `${at}.runtime`)
+      const settings = named.config
+      if (
+        Object.keys(named).some((field) => field !== 'name' && field !== 'config') ||
+        typeof named.name !== 'string' ||
+        (settings !== undefined &&
+          (typeof settings !== 'object' || settings === null || Array.isArray(settings)))
+      ) {
+        throw new Error(
+          `${at}.runtime: a policy runtime is a name or {name, config}, got ` +
+            JSON.stringify(runtime),
+        )
+      }
+      return {
+        script,
+        runtime:
+          settings === undefined
+            ? { name: named.name }
+            : { name: named.name, config: settings as Record<string, unknown> },
+      }
+    })
   }
-  if (typeof obj.runtime !== 'string') throw new Error(`${where}.runtime must be a string`)
-  return { script: obj.script, runtime: obj.runtime }
+  return out
 }
 
 /** Validate one profile (a `profiles.<name>` block, or an inline document). */
@@ -585,9 +638,8 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   // rather than as two more unknown keys.
   if (obj.script !== undefined || obj.runtime !== undefined) {
     throw new Error(
-      `${where}: script and runtime are now one policy block, ` +
-        `policy: {script: <file>, runtime: <engine>}; its program defines ` +
-        `pre_command(ctx) and answers with return`,
+      `${where}: script and runtime are now a policy block, ` +
+        `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
     )
   }
   rejectUnknownKeys(obj, PROFILE_FIELDS, where)
@@ -598,7 +650,7 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     paths?: PathsBlock | null
     vars?: VarsBlock | null
     commands?: CommandsBlock | null
-    policy?: ProfilePolicySpec | null
+    policy?: ProfilePolicy | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: ProcessPermissions
   } = {}

@@ -17,18 +17,18 @@
           "/ram": {
             "vfs": "ram",
             "files": {
-              "deny.txt": "node\n"
+              "route.txt": "quickjs\n"
             }
           }
         },
-        "route_policy": "const f = std.open('/ram/deny.txt', 'r'); const blocked = f !== null && f.readAsString().includes(ctx.command); if (f !== null) f.close(); blocked ? {deny: 'listed in /ram/deny.txt'} : null"
+        "route_policy": "const f = std.open('/ram/route.txt', 'r'); const name = f !== null ? f.readAsString().trim() : 'ghost'; if (f !== null) f.close(); ctx.commands.some((c) => c.command === 'node') ? name : null"
       },
       "steps": [
         {
           "command": "node -e \"console.log(1)\"",
           "expect": {
-            "exit": 126,
-            "stderr": "node: Permission denied\n"
+            "exit": 0,
+            "stdout": "1\n"
           }
         },
         {
@@ -41,7 +41,7 @@
       ]
     },
     {
-      "id": "js_policy_deny",
+      "id": "js_policy_places_the_line",
       "world": {
         "runtimes": [
           "quickjs",
@@ -52,14 +52,14 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "ctx.command === 'node' ? {deny: 'no js here'} : null"
+        "route_policy": "ctx.commands.some((c) => c.command === 'node') ? 'quickjs' : null"
       },
       "steps": [
         {
           "command": "node -e \"console.log(1)\"",
           "expect": {
-            "exit": 126,
-            "stderr": "node: Permission denied\n"
+            "exit": 0,
+            "stdout": "1\n"
           }
         },
         {

@@ -56,7 +56,13 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "{'deny': 'nothing runs'}"
+        "policies": [
+          {
+            "name": "place_line",
+            "contains": "echo",
+            "deny": "nothing runs"
+          }
+        ]
       },
       "steps": [
         {

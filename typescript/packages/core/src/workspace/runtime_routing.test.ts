@@ -29,7 +29,6 @@ import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { RunArgs, RunResult } from '../runtime/types.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
-import { DenyResult, parseVerdict, RouteDeny, RouteResult } from '../runtime/routing/index.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
@@ -39,7 +38,7 @@ import { Workspace } from './workspace/workspace.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
 import type { Deny, Route, ShellExplanation } from '../policy/types.ts'
-import type { RouteContext } from '../runtime/routing/index.ts'
+import type { RouteContext } from '../policy/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -289,17 +288,18 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new MontyRuntime(), new QuickJsRuntime(), 'workspace'],
+        // JavaScript a python evaluator could not parse: the line places
+        // only because the JS evaluator read it.
         routePolicy: new ScriptSource(
-          "ctx.command === 'node' ? {deny: 'js-engine-picked'} : null",
+          "ctx.commands.some((c) => c.command === 'node') ? 'quickjs' : null",
           'js',
         ),
       },
     )
     try {
-      const denied = await ws.shell('node -e "1"')
-      expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('node: Permission denied\n')
-      expect(denied.refusal?.reason).toBe('js-engine-picked')
+      const placed = await ws.shell('node -e "console.log(1)"')
+      expect(placed.exitCode).toBe(0)
+      expect(DEC.decode(placed.stdout)).toBe('1\n')
       const ok = await ws.shell('echo fine')
       expect(ok.exitCode).toBe(0)
     } finally {
@@ -356,20 +356,21 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new QuickJsRuntime(), 'workspace'],
+        // The runtime name comes from a mounted file; a read that missed
+        // would name a runtime that does not exist and fail the line.
         routePolicy: new ScriptSource(
-          "const f = std.open('/deny.txt', 'r'); " +
-            'const blocked = f !== null && f.readAsString().includes(ctx.command); ' +
+          "const f = std.open('/route.txt', 'r'); " +
+            "const name = f === null ? 'ghost' : f.readAsString().trim(); " +
             'if (f !== null) f.close(); ' +
-            "blocked ? { deny: 'listed in /deny.txt' } : null",
+            "ctx.commands.some((c) => c.command === 'node') ? name : null",
         ),
       },
     )
     try {
-      await ws.shell('echo node > /deny.txt')
-      const denied = await ws.shell('node -e "1"')
-      expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('node: Permission denied\n')
-      expect(denied.refusal?.reason).toBe('listed in /deny.txt')
+      await ws.shell('echo quickjs > /route.txt')
+      const placed = await ws.shell('node -e "console.log(1)"')
+      expect(placed.exitCode).toBe(0)
+      expect(DEC.decode(placed.stdout)).toBe('1\n')
       const ok = await ws.shell('echo ok')
       expect(DEC.decode(ok.stdout)).toBe('ok\n')
       expect(ok.exitCode).toBe(0)
@@ -378,7 +379,7 @@ describe('routing ladder', () => {
     }
   })
 
-  it('a deny verdict folds into the line result', async () => {
+  it("a policy's deny folds into the line result", async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
@@ -386,7 +387,14 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
-        routePolicy: (ctx) => (ctx.command === 'python3' ? { deny: 'python3 is blocked' } : null),
+        policies: [
+          {
+            preExecute: (ctx) =>
+              ctx.commands.some((c) => c.command === 'python3')
+                ? { kind: 'deny', reason: 'python3 is blocked' }
+                : null,
+          },
+        ],
       },
     )
     try {
@@ -407,7 +415,7 @@ describe('routing ladder', () => {
     }
   })
 
-  it('a runtime verdict object places the line', async () => {
+  it('a runtime name places the line', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
@@ -415,7 +423,7 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
-        routePolicy: () => ({ runtime: 'beta' }),
+        routePolicy: () => 'beta',
       },
     )
     try {
@@ -437,7 +445,7 @@ describe('routing ladder', () => {
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
         routePolicy: (ctx) => {
           calls.push(ctx.line)
-          return { deny: 'nothing runs' }
+          return null
         },
       },
     )
@@ -451,9 +459,7 @@ describe('routing ladder', () => {
     }
   })
 
-  it('the typed arms parse like their wire dicts', async () => {
-    expect(parseVerdict(new RouteResult('beta'))).toBe('beta')
-    expect(() => parseVerdict(new DenyResult('not here'))).toThrow(RouteDeny)
+  it("a coded route policy places beside a policy's deny", async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
@@ -461,10 +467,13 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
-        routePolicy: (ctx) =>
-          ctx.line.includes('secret')
-            ? new DenyResult('secrets stay put')
-            : new RouteResult('beta'),
+        routePolicy: () => 'beta',
+        policies: [
+          {
+            preExecute: (ctx) =>
+              ctx.line.includes('secret') ? { kind: 'deny', reason: 'secrets stay put' } : null,
+          },
+        ],
       },
     )
     try {
@@ -496,18 +505,6 @@ describe('routing ladder', () => {
     } finally {
       await ws.close()
     }
-  })
-
-  it('parseVerdict folds a Map verdict into the wire object', () => {
-    expect(parseVerdict(new Map([['runtime', 'beta']]))).toBe('beta')
-    expect(() => parseVerdict(new Map([['deny', 'nope']]))).toThrow(RouteDeny)
-  })
-
-  it('parseVerdict fails loud on bad verdict objects', () => {
-    expect(() => parseVerdict({ runtme: 'beta' })).toThrow('unknown policy verdict keys')
-    expect(() => parseVerdict({ runtime: 'beta', deny: 'no' })).toThrow('both place and deny')
-    expect(() => parseVerdict({})).toThrow("needs a 'runtime' name")
-    expect(() => parseVerdict(42)).toThrow('verdict dict, or null')
   })
 
   it('nested evals inherit the typed line decision', async () => {
@@ -713,7 +710,7 @@ describe('the placement stage', () => {
     const ws = await placed({
       routePolicy: (ctx) => {
         seen.push(ctx.line)
-        return { deny: 'routed away' }
+        return null
       },
     })
     try {
@@ -725,7 +722,7 @@ describe('the placement stage', () => {
       expect(rm.refusal?.reason).toBe('no deletes')
       expect(seen).toEqual([])
       const echo = await ws.shell('echo ok', { sessionId: 'agent' })
-      expect(echo.refusal?.reason).toBe('routed away')
+      expect(echo.exitCode).toBe(0)
       expect(seen).toEqual(['echo ok'])
     } finally {
       await ws.close()
@@ -781,10 +778,10 @@ describe('workspace runtime overrides', () => {
 })
 
 describe('script context', () => {
-  it('a script sees its own stage on pipelines', async () => {
+  it('a script finds its stage among the commands', async () => {
     const parser = await getTestParser()
     const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = (ctx) => ctx.command === 'python3'
+    alpha.script = (ctx) => ctx.commands.some((c) => c.command === 'python3')
     const ws = new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, 'workspace'] },

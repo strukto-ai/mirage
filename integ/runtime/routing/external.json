@@ -36,7 +36,7 @@
         "runtimes": [
           {
             "name": "processbox",
-            "script": "ctx['command'] == 'native-tool' and not ctx['builtin']"
+            "script": "any(c['command'] == 'native-tool' for c in ctx['commands'])"
           },
           {
             "name": "monty",

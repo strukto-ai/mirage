@@ -28,13 +28,13 @@ import {
 //
 //   a coded Policy     an object passed as `policies: [...]`. It runs in
 //                      this process, needs no engine, may define any of
-//                      the eight hooks, and speaks for every session: the
+//                      the eight methods, and speaks for every session: the
 //                      operator's own rule.
-//   a profile policy   a program passed as a profile's `policy` block,
-//                      source plus the engine that runs it. It runs
-//                      sandboxed on that engine, defines any of the
-//                      three admission hooks, and speaks only for the
-//                      sessions under that profile.
+//   a profile policy   programs passed as a profile's `policy` block, a
+//                      list per pre_ method, each with the runtime that
+//                      runs it. They run sandboxed on that runtime, read
+//                      the same ctx as JSON, print their answer, and speak
+//                      only for the sessions under that profile.
 //
 // The same block spelled as a document is policy_yaml.ts, beside this
 // file.
@@ -48,29 +48,36 @@ const operatorOwnsCredentials: Policy = {
   },
 }
 
-// The reviewer's program: python source, run on monty. It defines the
-// two hooks it has an opinion at and stays silent at the third. A hook
-// answers with return: None for no opinion, {"deny": reason} to refuse.
-// `open()` reads through the workspace, so the command gate can judge
+// The reviewer's programs: python source, run on monty, one for each
+// method it has an opinion at. Each reads its context as JSON, the same
+// fields a coded policy reads, and prints its answer: nothing for no
+// opinion, {"kind": "deny", "reason": ...} to refuse. `open()` reads
+// through the workspace as the session, so the command program can judge
 // what a file holds, not only what it is called.
-const REVIEWER = new ScriptSource(`
-def pre_command(ctx):
-    for path in ctx["command"]["paths"]:
-        if "marker" in contents(path):
-            return {"deny": "marked files are not read by " + ctx["profile"]}
-    return None
+const MARKED = new ScriptSource(`
+import json
+import os
 
-def pre_vfs(ctx):
-    call = ctx["call"]
-    if call["write"] and call["path"].startswith("/scratch/cold/"):
-        return {"deny": "the cold store is frozen"}
-    return None
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 
 def contents(path):
     try:
         return open(path).read()
     except OSError:
         return ""
+
+if any("marker" in contents(path) for path in ctx["paths"]):
+    reason = "marked files are not read by " + ctx["profile"]
+    print(json.dumps({"kind": "deny", "reason": reason}))
+`)
+
+const COLD = new ScriptSource(`
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if ctx["write"] and ctx["path"].startswith("/scratch/cold/"):
+    print(json.dumps({"kind": "deny", "reason": "the cold store is frozen"}))
 `)
 
 const SEED = [
@@ -85,7 +92,7 @@ const LINES: [string, string, string][] = [
   ['reviewer', 'cat /repo/notes.txt', 'pre_command read the file and found no marker'],
   ['reviewer', 'cat /repo/flagged.txt', 'and refuses one that holds it; the reason is for the operator'],
   ['reviewer', 'export AWS_SECRET=x', 'the coded policy, at the session view'],
-  ['reviewer', 'export SAFE=1 && echo $SAFE', 'silence where no hook objects'],
+  ['reviewer', 'export SAFE=1 && echo $SAFE', 'silence where no method objects'],
   ['host', 'cat /repo/flagged.txt', 'no profile, so no program'],
   ['host', 'export AWS_SECRET=x', 'the coded policy speaks for every session'],
 ]
@@ -112,7 +119,12 @@ async function main(): Promise<void> {
       // here rather than in the constructor, as in permissions.ts.
       profiles: {
         reviewer: parseSessionProfile(
-          { policy: { script: REVIEWER, runtime: 'monty' } },
+          {
+            policy: {
+              pre_command: [{ script: MARKED, runtime: 'monty' }],
+              pre_vfs: [{ script: COLD, runtime: 'monty' }],
+            },
+          },
           'profile `reviewer`',
         ),
       },

@@ -13,17 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
+from mirage.policy.constants import (
+    DEFAULT_ASK_REASON,
+    DEFAULT_DENY_REASON,
+    METHODS,
+)
 from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
     HideReason,
-    ProfileScript,
+    ProfileScripts,
+    ScriptMethod,
 )
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
@@ -550,9 +555,9 @@ class ProfileMount(BaseModel):
 
 
 class ProfilePolicy(BaseModel):
-    """A profile's policy as the document states it: the program, and
-    the engine that runs it. A block, not a path: with no default engine
-    a path alone would name a program nothing could run.
+    """One program of a profile's policy, as the document states it: the
+    program, and the runtime that runs it. A block, not a path: with no
+    default runtime a path alone would name a program nothing could run.
 
     Args:
         script (ScriptSource | str): the policy program. A ``str`` is
@@ -560,15 +565,31 @@ class ProfilePolicy(BaseModel):
             passes the loaded ``ScriptSource``, so a path still spelled
             as a string when the workspace reads it means the config
             layer never saw it, and is refused there.
-        runtime (str): the engine the program runs on. Required: there
-            is no default engine, because an engine the operator never
-            chose should not be the one their policy runs on.
+        runtime (str | dict[str, Any]): the runtime the program runs on:
+            a name, or ``{name, config}`` for one that needs settings,
+            the shape a ``runtimes`` entry has. Required: there is no
+            default runtime, because one the operator never chose should
+            not be the one their policy runs on.
     """
 
     model_config = _DOC
 
     script: ScriptSource | str
-    runtime: str
+    runtime: str | dict[str, Any]
+
+    @field_validator("runtime")
+    @classmethod
+    def _v_runtime(cls, v: str | dict[str, Any]) -> str | dict[str, Any]:
+        if isinstance(v, str):
+            return v
+        unknown = sorted(set(v) - {"name", "config"})
+        if unknown or not isinstance(v.get("name"), str):
+            raise ValueError(
+                f"a policy runtime is a name or {{name, config}}, got {v!r}"
+            )
+        if not isinstance(v.get("config", {}), dict):
+            raise ValueError("a policy runtime's config is a mapping")
+        return v
 
 
 class SessionProfile(BaseModel):
@@ -591,19 +612,17 @@ class SessionProfile(BaseModel):
     hide, is read by anchor depth: the deeper entry wins, ties break by
     verb.
 
-    A profile may also state a ``policy``: a program defining the
-    admission hooks it answers at, the way a coded Policy overrides only
-    the hooks it cares about: ``pre_command(ctx)`` per command,
-    ``pre_vfs(ctx)`` per VFS op, ``pre_session(ctx)`` per env write
-    (``preCommand``, ``preVfs``, ``preSession`` in JavaScript). Each is
-    handed the entry point's facts as ``ctx`` and answers with ``return``:
-    allow (no opinion), deny, or at the command gate ask, so it
-    expresses the conditions a declarative rule cannot; like every
-    policy, it can only restrict, never grant past a deny. A block
-    naming the program and the engine it runs on (``ProfilePolicy``),
-    the shape a ``clis`` entry has. The document is optional beside it:
-    a profile stating only a policy hides nothing, and the policy is its
-    whole admission policy.
+    A profile may also state a ``policy``: for each ``pre_`` method it
+    answers at (``pre_execute``, ``pre_command``, ``pre_vfs``,
+    ``pre_session``), a list of programs, each with the runtime it runs
+    on (``ProfilePolicy``, the shape a ``clis`` entry has). A program
+    reads the method's context as JSON and prints its answer: nothing
+    for no opinion, a deny, an ask, or at ``pre_execute`` a route. They
+    are asked in order and the first deny wins, so a policy expresses
+    the conditions a declarative rule cannot; like every policy, it can
+    only restrict, never grant past a deny. The document is optional
+    beside it: a profile stating only a policy hides nothing, and the
+    policy is its whole admission policy.
 
     Args:
         cwd (str | None): the session's working directory at creation.
@@ -617,8 +636,9 @@ class SessionProfile(BaseModel):
         vars (VarsBlock | None): the profile's hidden variables.
         commands (CommandsBlock | None): the profile's allow list and its
             ask / deny rules, absolute paths.
-        policy (ProfilePolicy | None): the profile's policy: its program
-            and the engine that runs it.
+        policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the
+            profile's policy: each ``pre_`` method's programs, asked in
+            order.
     """
 
     model_config = _DOC
@@ -629,7 +649,7 @@ class SessionProfile(BaseModel):
     paths: PathsBlock | None = None
     vars: VarsBlock | None = None
     commands: CommandsBlock | None = None
-    policy: ProfilePolicy | None = None
+    policy: dict[ScriptMethod, list[ProfilePolicy]] | None = None
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
 
@@ -642,11 +662,30 @@ class SessionProfile(BaseModel):
         # spelling rather than as two more unknown keys.
         if isinstance(data, dict) and ("script" in data or "runtime" in data):
             raise ValueError(
-                "script and runtime are now one policy block, policy: "
-                "{script: <file>, runtime: <engine>}; its program defines "
-                "pre_command(ctx) and answers with return"
+                "script and runtime are now a policy block, policy: "
+                "{pre_command: [{script: <file>, runtime: <runtime>}]}"
             )
         return data
+
+    @field_validator("policy", mode="before")
+    @classmethod
+    def _v_policy(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if not isinstance(v, Mapping):
+            raise ValueError("policy must be a mapping of method to programs")
+        if "script" in v or "runtime" in v:
+            raise ValueError(
+                "policy names its programs per method, policy: "
+                "{pre_command: [{script: <file>, runtime: <runtime>}]}"
+            )
+        unknown = sorted(str(k) for k in v if k not in METHODS)
+        if unknown:
+            raise ValueError(
+                f"policy names {', '.join(unknown)}; a program answers at "
+                f"{', '.join(METHODS)}"
+            )
+        return v
 
     @field_validator("mounts", mode="before")
     @classmethod
@@ -721,8 +760,8 @@ class ProfilePolicies:
             section states; a mount absent from the map keeps its own.
         commands (AdmissionRules | None): the admission rules, its own
             and its mount sections' in one list.
-        script (ProfileScript | None): the profile's policy program,
-            which ``ScriptPolicy`` calls at the admission gate.
+        scripts (ProfileScripts): the profile's policy programs by
+            method, which ``ScriptPolicy`` runs at that method.
         command_limits (Mapping[str, Limit] | None): per-command output
             bounds.
         processes (ProcessPermissions): whose processes the session may
@@ -731,7 +770,7 @@ class ProfilePolicies:
 
     mount_modes: dict[str, MountMode] | None = None
     commands: AdmissionRules | None = None
-    script: ProfileScript | None = None
+    scripts: ProfileScripts = field(default_factory=dict)
     command_limits: Mapping[str, Limit] | None = None
     processes: ProcessPermissions = ProcessPermissions()
 

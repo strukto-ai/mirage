@@ -57,7 +57,7 @@ import {
   type ShellNode,
   type VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
-import type { RouteContext } from '@struktoai/mirage-core/runtime/routing/types'
+import type { RouteContext } from '@struktoai/mirage-core/policy/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
@@ -222,11 +222,16 @@ interface ScriptDocument {
 function profileDocument(raw: Record<string, unknown>) {
   const doc = { ...raw }
   if (doc.policy != null) {
-    const policy = doc.policy as { script: ScriptDocument; runtime: string }
-    doc.policy = {
-      ...policy,
-      script: new ScriptSource(policy.script.source, policy.script.language),
-    }
+    const policy = doc.policy as Record<string, { script: ScriptDocument; runtime: unknown }[]>
+    doc.policy = Object.fromEntries(
+      Object.entries(policy).map(([method, programs]) => [
+        method,
+        programs.map((program) => ({
+          ...program,
+          script: new ScriptSource(program.script.source, program.script.language),
+        })),
+      ]),
+    )
   }
   return parseSessionProfile(doc)
 }

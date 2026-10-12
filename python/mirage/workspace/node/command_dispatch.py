@@ -311,7 +311,6 @@ async def execute_command(
             await pre_session_gate(
                 registry.policies,
                 SessionContext(
-                    plane="env",
                     verb="set",
                     key=k,
                     value=v,
@@ -330,7 +329,6 @@ async def execute_command(
             await post_session_gate(
                 registry.policies,
                 SessionContext(
-                    plane="env",
                     verb="set",
                     key=k,
                     value=v,

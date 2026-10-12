@@ -16,37 +16,40 @@ import pytest
 
 from mirage.policy import Deny, Route
 from mirage.policy.builtin.placement import PlacementPolicy
-from mirage.runtime.routing import RouteContext, RouteError
+from mirage.policy.types import RouteContext
+from mirage.runtime.routing import RouteError
 
 
 def _line(line: str) -> RouteContext:
     return RouteContext(
         line=line,
         commands=(),
-        command=line.split()[0],
-        builtin=False,
         session_id="",
         agent_id="",
     )
 
 
 @pytest.mark.asyncio
-async def test_a_route_verdict_is_a_placement_answer():
+async def test_a_runtime_name_places_the_line_and_none_says_nothing():
     def route(ctx: RouteContext):
-        if "heavy" in ctx.line:
-            return "beta"
-        if "secret" in ctx.line:
-            return {"deny": "secrets stay put"}
-        return None
+        return "beta" if "heavy" in ctx.line else None
 
     policy = PlacementPolicy(route, list)
     assert await policy.pre_execute(_line("python3 heavy")) == Route("beta")
-    assert await policy.pre_execute(_line("cat secret")) == Deny(
-        "secrets stay put"
-    )
     assert await policy.pre_execute(_line("echo hi")) is None
-    # A mistake in the route policy is the deployment's, not a refusal.
-    with pytest.raises(RouteError, match="unknown policy verdict keys"):
-        await PlacementPolicy(lambda ctx: {"runtme": "x"}, list).pre_execute(
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verdict",
+    ["", {"route": "beta"}, {"deny": "no"}, Route("beta"), Deny("no"), 42],
+)
+async def test_anything_but_a_name_or_none_is_the_deployments_mistake(
+    verdict,
+):
+    # Refusing a line is a policy's answer, not the router's; a route
+    # policy that answers anything else is misconfigured, not a refusal.
+    with pytest.raises(RouteError, match="a runtime name or None"):
+        await PlacementPolicy(lambda ctx: verdict, list).pre_execute(
             _line("echo hi")
         )

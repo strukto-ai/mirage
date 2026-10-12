@@ -61,18 +61,20 @@ def test_commands_round_trips_and_keeps_an_absent_allow_list():
     assert commands_from_dict({}) == AdmissionRules()
 
 
-def test_script_round_trips_with_its_language_and_engine():
+def test_script_round_trips_with_its_runtime_and_settings():
     entry = ProfileScript(
         profile="release",
-        script=ScriptSource("None\n", language="js"),
-        runtime="quickjs",
+        script=ScriptSource("pass\n"),
+        runtime="wasi",
+        config={"home": "/w"},
     )
     data = script_to_dict(entry)
     assert data == {
         "profile": "release",
-        "language": "js",
-        "source": "None\n",
-        "runtime": "quickjs",
+        "language": "python",
+        "source": "pass\n",
+        "runtime": "wasi",
+        "config": {"home": "/w"},
     }
     assert script_from_dict(data) == entry
 

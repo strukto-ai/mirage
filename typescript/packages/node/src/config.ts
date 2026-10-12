@@ -614,7 +614,7 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
 }
 
 /**
- * Load each profile's path-form policy into a ScriptSource.
+ * Load each profile's path-form policy programs into ScriptSources.
  *
  * By this entry point the path is absolute for a file config (the check entry point
  * rebased it onto the config file's directory); an object config's
@@ -628,9 +628,21 @@ function loadProfileScripts(
   for (const [name, profile] of Object.entries(profiles)) {
     const policy = profile.policy
     out[name] =
-      policy != null && typeof policy.script === 'string'
-        ? { ...profile, policy: { ...policy, script: loadScriptSource(policy.script) } }
-        : profile
+      policy == null
+        ? profile
+        : {
+            ...profile,
+            policy: Object.fromEntries(
+              Object.entries(policy).map(([method, programs]) => [
+                method,
+                programs.map((program) =>
+                  typeof program.script === 'string'
+                    ? { ...program, script: loadScriptSource(program.script) }
+                    : program,
+                ),
+              ]),
+            ),
+          }
   }
   return out
 }
@@ -925,10 +937,14 @@ export function absolutizeScripts(raw: Record<string, unknown>, base: string): v
   }
   if (isPlainObject(raw.profiles)) {
     for (const block of Object.values(raw.profiles)) {
-      // A profile's policy block carries its program the way a clis
-      // entry does, so its `script` rebases the same way.
-      if (isPlainObject(block) && isPlainObject(block.policy)) {
-        absolutizeScriptKey(block.policy, base)
+      // A profile's policy programs carry their scripts the way a clis
+      // entry does, so each `script` rebases the same way.
+      if (!isPlainObject(block) || !isPlainObject(block.policy)) continue
+      for (const programs of Object.values(block.policy)) {
+        if (!Array.isArray(programs)) continue
+        for (const program of programs) {
+          if (isPlainObject(program)) absolutizeScriptKey(program, base)
+        }
       }
     }
   }

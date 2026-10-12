@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from mirage.commands.spec.types import WordKind
-from mirage.runtime.routing.types import RouteContext
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 from mirage.vfs.types import VfsCall
@@ -284,6 +285,36 @@ class Ask:
 # None to stay silent; each hook accepts a fixed set of kinds
 # (VALIDITY), enforced loud.
 Action = Hide | Deny | Limit | Ask | Route
+
+
+class Answer(BaseModel):
+    """A policy answer as JSON carries it: its kind and its own fields.
+
+    What a policy program prints, and what the server's entry points
+    send (``answer_to_dict``, which adds the policy that spoke). A deny
+    or an ask may leave the reason out for the default one; a route
+    names its runtime.
+
+    Args:
+        kind (Literal["deny", "ask", "route"]): which answer.
+        reason (str | None): why, for a deny or an ask.
+        runtime (str | None): the runtime a route places the line on.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["deny", "ask", "route"]
+    reason: str | None = None
+    runtime: str | None = None
+
+    @model_validator(mode="after")
+    def _v_fields(self) -> "Answer":
+        if self.kind == Route.kind:
+            if not self.runtime or self.reason is not None:
+                raise ValueError("a route names its runtime and nothing else")
+        elif self.runtime is not None:
+            raise ValueError(f"a {self.kind} carries no runtime")
+        return self
 
 
 class Scope(StrEnum):
@@ -554,28 +585,31 @@ LiveRules = Sequence[tuple[Outcome, CommandRule]]
 
 @dataclass(frozen=True, slots=True)
 class ProfileScript:
-    """One profile's script, as a session carries it: the program, the
-    engine it runs on, and the profile it speaks for.
+    """One program of a profile's policy, as a session carries it: the
+    program, the runtime it runs on, and the profile it speaks for.
 
     Compiled off ``SessionProfile.policy`` beside the admission rules,
-    and evaluated by ``ScriptPolicy`` at the admission hooks the program
-    defines (``pre_command``, ``pre_vfs``, ``pre_session``) with the
-    entry point's facts as ``ctx``; its answer is allow (no opinion), deny, or
-    at the command gate ask.
+    one per entry of a method's list, and run by ``ScriptPolicy`` at
+    that method with the context as JSON (``script_context``) in
+    ``MIRAGE_POLICY_CTX`` and on stdin; ``script_action`` reads the
+    answer it prints.
 
     Args:
-        profile (str): the profile's name, which the script reads as
-            ``ctx["profile"]`` and every refusal about it prints; empty
-            for a profile document passed to ``create_session`` without
-            a name.
+        profile (str): the profile's name, which every refusal about
+            its program prints; empty for a profile document passed to
+            ``create_session`` without a name.
         script (ScriptSource): the program, as the config loader loaded
             it.
-        runtime (str): the engine the profile named for it.
+        runtime (str): the runtime the profile named for it.
+        config (Mapping[str, Any]): that runtime's settings, as a
+            ``runtimes`` entry's ``config`` block states them; empty for
+            none.
     """
 
     profile: str
     script: ScriptSource
     runtime: str
+    config: Mapping[str, Any] = field(default_factory=dict)
 
 
 class SessionCommandsQuery(Protocol):
@@ -597,18 +631,25 @@ class SessionCommandsQuery(Protocol):
         ...
 
 
+# A method a profile's policy names programs for: the pre_ four.
+ScriptMethod = Literal["pre_execute", "pre_command", "pre_vfs", "pre_session"]
+
+# A session's policy programs, by method.
+ProfileScripts = Mapping[str, tuple[ProfileScript, ...]]
+
+
 class SessionScriptsQuery(Protocol):
     """The one session question the script policy asks.
 
     The SessionManager satisfies it structurally, the same way it
     satisfies ``SessionCommandsQuery``, so the policy reads a session's
-    script by the id the entry point put in the context.
+    programs by the id the entry point put in the context.
     """
 
-    def script_of(self, session_id: str) -> "ProfileScript | None":
-        """The script of the profile one session runs under; the
-        default profile's for an id the manager does not know, None for
-        a profile that states none.
+    def scripts_of(self, session_id: str) -> ProfileScripts:
+        """The programs of the profile one session runs under, by
+        method; the default profile's for an id the manager does not
+        know, empty for a profile that states none.
 
         Args:
             session_id (str): the session, empty when none is bound.
@@ -653,6 +694,9 @@ class CommandContext:
     """Facts about one classified command, as pre_command hooks see it.
 
     Args:
+        line (str): the line the command was parsed from: the line the
+            agent typed, or for a command a line runs in turn (``eval``,
+            ``$( )``, a function body) that line's text.
         command (str): the command name.
         paths (tuple[PathSpec, ...]): every path the line names, the
             positional operands first and then the values of any
@@ -705,6 +749,7 @@ class CommandContext:
     paths: tuple[PathSpec, ...]
     argv: tuple[str, ...]
     cwd: str
+    line: str = ""
     words: tuple[CommandWord, ...] = ()
     session_id: str = ""
     agent_id: str = ""
@@ -733,6 +778,47 @@ class CommandResultContext(CommandContext):
     exit_code: int = 0
     stderr: str = ""
     records: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RouteContext:
+    """One line, as pre_execute hooks see it: the line and every
+    command in it, each as ``pre_command`` will see it.
+
+    For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``::
+
+        ctx.line == "cat /data/logs.txt | python3 process.py"
+        [c.command for c in ctx.commands] == ["cat", "python3"]
+        [w.text for w in ctx.commands[1].words] == ["python3", "process.py"]
+        [p.virtual for p in ctx.commands[1].paths] == ["/data/process.py"]
+        ctx.session.cwd() == "/data"
+
+    A script gets the same as plain data (``script_context``), with
+    ``ctx["runtime"]`` naming the runtime when a runtime's own
+    ``script:`` is asked.
+
+    Args:
+        line (str): the line as typed.
+        commands (tuple[CommandContext, ...]): every command of the
+            line in source order, nested ones included, each read as
+            the gate that runs it will read it: its words expanded where
+            the text alone says what they are, its paths resolved. A
+            command whose name only the run expands is left out.
+        session_id (str): the session hosting the line.
+        agent_id (str): the agent the line runs as.
+        session (SessionView | None): the session, read only: a write
+            through it is refused.
+        ns (NamespaceView | None): the session's namespace.
+        vfs (Files | None): the session's files, read only.
+    """
+
+    line: str
+    commands: tuple[CommandContext, ...]
+    session_id: str
+    agent_id: str
+    session: SessionView | None = None
+    ns: NamespaceView | None = None
+    vfs: "Files | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -823,8 +909,7 @@ class SessionContext:
     path and match it by accident.
 
     Args:
-        plane (str): the state plane being written (``env``).
-        verb (str): the mutation (``set``, ``unset``).
+        verb (str): the mutation (``set``, ``unset``, ``mark``).
         key (str): the state key (a variable name).
         value (str | None): the value being written, None for unset.
         session_id (str): which session is writing, so a policy can
@@ -834,7 +919,6 @@ class SessionContext:
         vfs (Files | None): the session's files, read only.
     """
 
-    plane: str
     verb: str
     key: str
     value: str | None

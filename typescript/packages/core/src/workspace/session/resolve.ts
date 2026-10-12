@@ -21,7 +21,14 @@ import {
 import type { Limit } from '../../types.ts'
 import { checkRules } from './validate.ts'
 import { PolicyError } from '../../policy/errors.ts'
-import type { CommandRule, AdmissionRules, HideReason, ProfileScript } from '../../policy/types.ts'
+import type {
+  CommandRule,
+  AdmissionRules,
+  HideReason,
+  ProfileScript,
+  ProfileScripts,
+  ScriptMethod,
+} from '../../policy/types.ts'
 import type { HiddenPaths, MountMode, ShowEntry, ShownPaths } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { classifyPaths, classifyShows, classifyVars } from '../../utils/hidden.ts'
@@ -32,7 +39,7 @@ import {
   type MountCommandsBlock,
   type PathsBlock,
   type ProfileMount,
-  type ProfilePolicySpec,
+  type ProfilePolicy,
   type SessionProfile,
   type VarsBlock,
 } from '../../policy/profile.ts'
@@ -212,7 +219,7 @@ export function withInline(
     paths?: PathsBlock | null
     vars?: VarsBlock | null
     commands?: CommandsBlock | null
-    policy?: ProfilePolicySpec | null
+    policy?: ProfilePolicy | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: ProcessPermissions
   } = {}
@@ -366,23 +373,36 @@ function modesOf(profile: SessionProfile): Map<string, MountMode> | null {
 }
 
 /**
- * The profile's policy program, compiled onto the session. `name` is
- * the profile's name, empty for a document passed without one; what the
- * policy reads as `ctx.profile`.
+ * The profile's policy programs by method, compiled onto the session.
+ * `name` is the profile's name, empty for a document passed without one;
+ * what a program reads as `ctx.profile`.
  *
- * @throws PolicyError - the policy is still a path, which means it
+ * @throws PolicyError - a program is still a path, which means it
  * reached the workspace without passing the config loader that loads one.
  */
-export function compileScript(effective: SessionProfile, name: string): ProfileScript | null {
-  const policy = effective.policy
-  if (policy === undefined || policy === null) return null
-  if (typeof policy.script === 'string') {
-    throw new PolicyError(
-      `profile '${name}' names a policy by path ('${policy.script}'); ` +
-        `only the config loader loads one, pass ScriptSource in code`,
-    )
+export function compileScripts(effective: SessionProfile, name: string): ProfileScripts {
+  const compiled: Partial<Record<ScriptMethod, readonly ProfileScript[]>> = {}
+  for (const [method, programs] of Object.entries(effective.policy ?? {})) {
+    const entries = programs.map((program): ProfileScript => {
+      if (typeof program.script === 'string') {
+        throw new PolicyError(
+          `profile '${name}' names a policy by path ('${program.script}'); ` +
+            `only the config loader loads one, pass ScriptSource in code`,
+        )
+      }
+      const runtime = program.runtime
+      return typeof runtime === 'string'
+        ? { profile: name, script: program.script, runtime, config: {} }
+        : {
+            profile: name,
+            script: program.script,
+            runtime: runtime.name,
+            config: { ...(runtime.config ?? {}) },
+          }
+    })
+    if (entries.length > 0) compiled[method as ScriptMethod] = entries
   }
-  return { profile: name, script: policy.script, runtime: policy.runtime }
+  return compiled
 }
 
 /** The session fields a profile compiles to. */
@@ -395,7 +415,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       policies: {
         mountModes: null,
         commands: null,
-        script: null,
+        scripts: {},
         commandLimits: null,
         processes: DEFAULT_PROCESS_PERMISSIONS,
       },
@@ -421,7 +441,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
     policies: {
       mountModes: modesOf(effective),
       commands,
-      script: compileScript(effective, name),
+      scripts: compileScripts(effective, name),
       commandLimits: effective.commandLimits ?? null,
       processes,
     },
@@ -445,7 +465,7 @@ export function narrow(session: SessionState, compiled: CompiledProfile): void {
   session.visibility = compiled.visibility
   session.hideReasons = compiled.hideReasons
   session.commands = policies.commands
-  session.script = policies.script
+  session.scripts = policies.scripts
   session.profile = compiled.profile
   session.commandLimits = { ...policies.commandLimits }
   session.processes = policies.processes

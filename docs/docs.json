@@ -88,6 +88,7 @@
             "pages": [
               "home/policy/overview",
               "home/policy/policies",
+              "home/policy/scripts",
               "home/policy/explain",
               "home/policy/route-policy"
             ]

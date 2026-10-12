@@ -384,7 +384,8 @@ export function redirectPaths(
  * for `explain`; the gate's own answers end at the first Deny.
  * `rulesOnly` asks the profile's rules alone, for a pass that judges a line
  * before it runs; a policy's own `preCommand` is asked once, by the gate
- * that runs the command.
+ * that runs the command. `line` is the line the command was parsed from,
+ * empty outside a line.
  */
 export async function gate(
   name: string,
@@ -400,6 +401,7 @@ export async function gate(
   unread: ReadonlySet<string> = new Set(),
   every = false,
   rulesOnly = false,
+  line = '',
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
   const tool = intrinsic || isTool(name, session)
   const [tokens, program] = programTokens(registry, name, [...args], session.cwd)
@@ -408,6 +410,7 @@ export async function gate(
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
       : null
   const ctx: CommandContext = {
+    line,
     command: name,
     paths: seen(
       session,
@@ -481,6 +484,7 @@ export async function admit(
     unread,
     false,
     rulesOnly,
+    claimant?.occurrence.source ?? '',
   )
   const [ctx, asked] = gated
   // An Ask is the chain's answer only after every Deny had its say; the

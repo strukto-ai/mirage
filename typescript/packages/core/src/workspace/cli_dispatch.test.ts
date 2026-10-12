@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../commands/spec/types.ts'
+import { CommandSpec, WordKind } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 
 import { Outcome } from '../policy/index.ts'
@@ -357,7 +357,7 @@ describe('script CLI e2e', () => {
 })
 
 describe('policy cli fact', () => {
-  it('the policy sees the installed head on ctx.commands', async () => {
+  it('the policy sees the CLI verbs on ctx.commands', async () => {
     const seen: (string | null)[] = []
     const ram = new RAMVFS()
     const ws = new Workspace(
@@ -365,11 +365,20 @@ describe('policy cli fact', () => {
       {
         mode: MountMode.WRITE,
         shellParser: parser,
-        routePolicy: (ctx) => {
-          seen.push(ctx.commands[0]?.cli ?? null)
-          if (ctx.commands[0]?.cli === 'slack-eng') return { deny: 'cli lines are frozen' }
-          return null
-        },
+        policies: [
+          {
+            preExecute: (ctx) => {
+              const verbs = ctx.commands.flatMap((c) =>
+                (c.words ?? []).filter((w) => w.kind === WordKind.SUBCOMMAND).map((w) => w.text),
+              )
+              seen.push(verbs.join(' ') || null)
+              if (verbs[0] === 'message' && verbs[1] === 'send') {
+                return { kind: 'deny', reason: 'cli lines are frozen' }
+              }
+              return null
+            },
+          },
+        ],
       },
     )
     ws.registerCli('slack-eng', makeTree(), { token: 'tok' })
@@ -377,7 +386,7 @@ describe('policy cli fact', () => {
     expect(r.exitCode).toBe(126)
     expect(r.stderrText).toBe('slack-eng: Permission denied\n')
     expect(r.refusal?.kind).toBe('deny')
-    expect(seen.at(-1)).toBe('slack-eng')
+    expect(seen.at(-1)).toBe('message send')
     const ok = await ws.shell('echo unaffected')
     expect(ok.exitCode).toBe(0)
     expect(seen.at(-1)).toBeNull()

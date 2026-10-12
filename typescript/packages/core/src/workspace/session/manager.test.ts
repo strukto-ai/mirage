@@ -199,27 +199,42 @@ describe('SessionManager with a SessionStore', () => {
     expect(dflt.visibility.vars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
   })
 
-  it('default session adopts a stored profile script', async () => {
-    // The profile script is a durable restriction like the hidden
+  it("default session adopts a stored profile's programs", async () => {
+    // The profile's programs are a durable restriction like the hidden
     // shapes: a store written by a scripted deployment must not wake a
     // daemon configured without a default profile unjudged, and the
-    // next flush must not erase the script from the record.
+    // next flush must not erase the programs from the record.
     const store = new RAMSessionStore()
     await store.set('def', {
       session_id: 'def',
       cwd: '/w',
       env: {},
-      script: { profile: 'judge', language: 'js', source: 'null', runtime: 'quickjs' },
+      scripts: {
+        pre_command: [
+          {
+            profile: 'judge',
+            language: 'python',
+            source: 'pass',
+            runtime: 'pyodide',
+            config: { home: '/w' },
+          },
+        ],
+      },
     })
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     const expected = {
-      profile: 'judge',
-      script: new ScriptSource('null', 'js'),
-      runtime: 'quickjs',
+      preCommand: [
+        {
+          profile: 'judge',
+          script: new ScriptSource('pass', 'python'),
+          runtime: 'pyodide',
+          config: { home: '/w' },
+        },
+      ],
     }
-    expect(m.get('def').script).toEqual(expected)
-    expect(m.scriptOf('def')).toEqual(expected)
+    expect(m.get('def').scripts).toEqual(expected)
+    expect(m.scriptsOf('def')).toEqual(expected)
   })
 
   it('default session adopts a stored path axis', async () => {
@@ -646,7 +661,16 @@ it.each([false, true])(
       {
         mountModes: new Map([['/data', MountMode.READ]]),
         commands: { allow: ['cat'], ask: [], deny: [] },
-        script: { profile: 'judge', script: new ScriptSource('null', 'js'), runtime: 'quickjs' },
+        scripts: {
+          preCommand: [
+            {
+              profile: 'judge',
+              script: new ScriptSource('pass', 'python'),
+              runtime: 'monty',
+              config: {},
+            },
+          ],
+        },
       },
       {
         paths: { paths: ['/data/secret'], patterns: [] },
@@ -682,7 +706,7 @@ it.each([false, true])(
       await entered
       expect(session.toJSON()).toEqual(before)
       expect(manager.commandsOf('')).toEqual(original.policies.commands)
-      expect(manager.scriptOf('')).toEqual(original.policies.script)
+      expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       session.cwd = '/changed-during-write'
       resume()
       if (failure) {
@@ -690,13 +714,13 @@ it.each([false, true])(
         expect(session.toJSON()).toEqual({ ...before, cwd: session.cwd })
         expect(await store.load()).toEqual(persisted)
         expect(manager.commandsOf('')).toEqual(original.policies.commands)
-        expect(manager.scriptOf('')).toEqual(original.policies.script)
+        expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       } else {
         expect(await updating).toBe(session)
         expect(session.mountModes).toBeNull()
         expect(session.visibility.paths).toBeNull()
         expect(manager.commandsOf('')).toBeNull()
-        expect(manager.scriptOf('')).toBeNull()
+        expect(manager.scriptsOf('')).toEqual({})
       }
       expect(session.cwd).toBe('/changed-during-write')
       spy.mockRestore()

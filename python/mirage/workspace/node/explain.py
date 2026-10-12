@@ -405,6 +405,7 @@ async def _judge_words(
         unread=unread,
         every=every,
         rules_only=not every,
+        line=occurrence.source,
     )
     ctx, asked, answers = gated
     out = [

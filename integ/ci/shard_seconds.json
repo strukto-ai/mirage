@@ -94,7 +94,7 @@
     "ram-nested": 7,
     "ram-redis-cache": 10,
     "ram-root": 7,
-    "ram-scripted": 12,
+    "ram-scripted-pyodide": 12,
     "redis": 300,
     "s3": 324,
     "s3-prefix": 356,
