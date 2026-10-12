@@ -66,6 +66,7 @@ def accessor(config):
 async def test_list_folders(accessor):
     mock_imap = AsyncMock()
     mock_response = MagicMock()
+    mock_response.result = "OK"
     mock_response.lines = [
         b'(\\HasNoChildren) "/" "INBOX"',
         b'(\\HasNoChildren) "/" "Sent"',
@@ -82,9 +83,24 @@ async def test_list_folders(accessor):
 
 
 @pytest.mark.asyncio
+async def test_a_refused_folder_list_raises(accessor):
+    mock_imap = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.result = "NO"
+    mock_response.lines = [b"LIST not allowed"]
+    mock_imap.list.return_value = mock_response
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
+
+    with pytest.raises(ValueError):
+        await list_folders(accessor)
+
+
+@pytest.mark.asyncio
 async def test_list_folder_entries_reports_special_use_attributes(accessor):
     mock_imap = AsyncMock()
     mock_response = MagicMock()
+    mock_response.result = "OK"
     mock_response.lines = [
         b'(\\HasNoChildren) "/" "INBOX"',
         b'(\\HasNoChildren \\Sent) "/" "[Gmail]/Sent Mail"',

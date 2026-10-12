@@ -1,6 +1,11 @@
 {
   "baseline": 3861,
  "modules": {
+  "core/render/json": {
+   "python_only": {
+    "ecma_numbers": "orjson writes a float its own way; TypeScript's JSON.stringify already spells each number as ECMAScript does."
+   }
+  },
   "concurrency/worker": {
    "python_only": {
     "HEADER": "Python frames pickle requests over process pipes; Web Workers use structured messages."

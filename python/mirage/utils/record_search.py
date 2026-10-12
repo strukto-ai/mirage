@@ -25,6 +25,7 @@ _ESCAPE_LETTERS = frozenset("abcdefnrt")
 # digits, with sentence punctuation around them at most.
 # The largest rendered file whose text a listing entry keeps (``kept_text``).
 KEPT_TEXT_MAX = 8192
+_ASCII_SPACE = re.compile(r"[ \t\n\r\f\v]+")
 _PLAIN_WORD = re.compile(r"[.,;:!?\"'()\[\]]*[A-Za-z0-9]+[.,;:!?\"'()\[\]]*")
 
 
@@ -72,12 +73,17 @@ def record_queries(
 def non_plain_words(text: str) -> list[str]:
     """The words of ``text`` a provider's search may split otherwise than
     grep -w: a link, an address, markup, an entity, a hyphenated or
-    non-ASCII word.
+    non-ASCII word. Words split at ASCII whitespace only, so both hosts
+    split alike and a non-ASCII space stays inside its word.
 
     Args:
         text (str): a field the provider's search reads.
     """
-    return [word for word in text.split() if not _PLAIN_WORD.fullmatch(word)]
+    return [
+        word
+        for word in _ASCII_SPACE.split(text)
+        if word and not _PLAIN_WORD.fullmatch(word)
+    ]
 
 
 def may_hold(

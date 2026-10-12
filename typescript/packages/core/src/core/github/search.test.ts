@@ -155,7 +155,7 @@ describe('narrowPaths', () => {
   })
 
   it('returns null when the only scope fails, and says why', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     search.mockRejectedValueOnce(new Error('boom'))
     expect(await narrowPaths(makeAccessor(SMALL), 'needle', [scope('src')])).toBeNull()
     expect(warn).toHaveBeenCalledWith(

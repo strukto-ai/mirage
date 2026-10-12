@@ -191,7 +191,7 @@ async def files_containing(
         try:
             folders = await list_folders(accessor)
         except (OSError, ValueError, asyncio.TimeoutError) as exc:
-            logger.warning("imap search failed (%s); reading every file", exc)
+            logger.debug("imap search failed (%s); reading every file", exc)
             return None
         scopes.extend(mounted_path(scope, f"/{name}") for name in folders)
     for scope in scopes:
@@ -214,7 +214,7 @@ async def files_containing(
                 accessor, folder, sorted(uids, key=int), header_only=True
             )
         except (OSError, ValueError, asyncio.TimeoutError) as exc:
-            logger.warning("imap search failed (%s); reading every file", exc)
+            logger.debug("imap search failed (%s); reading every file", exc)
             return None
         found.extend(
             mounted_path(scope, "/" + _build_vfs_path("", segment, msg))

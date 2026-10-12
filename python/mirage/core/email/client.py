@@ -125,6 +125,10 @@ async def list_folder_entries(
 ) -> list[tuple[str, tuple[str, ...]]]:
     imap = await accessor.get_imap()
     response = await imap.list('""', "*")
+    if response.result != "OK":
+        # A refused LIST must not read as "no folders", which would hide
+        # every message behind an empty root.
+        raise ValueError("IMAP refused the folder list")
     entries: list[tuple[str, tuple[str, ...]]] = []
     for line in response.lines:
         parsed = parse_folder_line(line)

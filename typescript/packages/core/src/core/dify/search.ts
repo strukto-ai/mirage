@@ -182,7 +182,7 @@ function recordPath(
   try {
     normalized = normalizeSlug(rawPath, SLUG_NOUN)
   } catch (err) {
-    console.warn(`Skipping Dify record with invalid slug/name: ${rawPath}: ${String(err)}`)
+    console.debug(`Skipping Dify record with invalid slug/name: ${rawPath}: ${String(err)}`)
     return null
   }
   const prefix = rstripSlash(mountPrefix)

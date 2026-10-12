@@ -24,6 +24,7 @@ import { type ReaddirFn, entriesUnder } from '../hierarchy/probe.ts'
 import { GoogleApiError } from './client.ts'
 import { RENDERED_WORDS, TOP_LEVEL_DIRS } from './constants.ts'
 import { searchFiles } from './drive.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 function noFolder(_entry: IndexEntry): boolean {
   return false
@@ -90,7 +91,7 @@ export async function filesContaining<A extends GoogleApiAccessor>(
       const walked = await entriesUnder(readdir, accessor, corpus, index, noFolder)
       // An unfinished listing caches its entries but not the directory, and
       // grep's own walk lists it again.
-      const listing = await index?.listDir(corpus.virtual.replace(/\/+$/, ''))
+      const listing = await index?.listDir(rstripSlash(corpus.virtual))
       if (walked === null || (listing?.entries ?? null) === null) return null
       for (const [path, entry] of walked) if (named.has(entry.id)) found.push(path)
     }
@@ -103,7 +104,7 @@ export async function filesContaining<A extends GoogleApiAccessor>(
       err instanceof TypeError ||
       err instanceof DOMException
     if (!failed) throw err
-    console.warn(`drive search failed (${String(err)}); reading every file`)
+    console.debug(`drive search failed (${String(err)}); reading every file`)
     return null
   }
   return found.length > 0 ? found : null

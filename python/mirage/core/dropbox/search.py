@@ -53,9 +53,7 @@ async def files_containing(
                 accessor.token_manager, text, path=scope_api
             )
         except DropboxApiError as exc:
-            logger.warning(
-                "dropbox search failed (%s); reading every file", exc
-            )
+            logger.debug("dropbox search failed (%s); reading every file", exc)
             return None
         if truncated:
             return None

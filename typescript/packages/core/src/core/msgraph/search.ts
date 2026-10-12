@@ -72,7 +72,7 @@ export async function filesContaining<A extends Accessor>(
       err instanceof TypeError ||
       err instanceof DOMException
     if (!failed) throw err
-    console.warn(`graph search failed (${String(err)}); reading every file`)
+    console.debug(`graph search failed (${String(err)}); reading every file`)
     return null
   }
   return found.length > 0 ? found : null

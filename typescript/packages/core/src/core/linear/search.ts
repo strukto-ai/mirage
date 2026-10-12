@@ -24,6 +24,7 @@ import { ROOT } from '../hierarchy/scope.ts'
 import { LinearApiError, searchIssues } from './client.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 // The most issues one search answers; a full page may have left some out.
 export const SEARCH_LIMIT = 250
@@ -46,7 +47,7 @@ export const RECORD_KEYS: ReadonlySet<string> = new Set([
 export const KEPT_DIRS: readonly string[] = ['members', 'projects', 'cycles', 'documents']
 
 function child(directory: PathSpec, name: string): PathSpec {
-  return mountedPath(directory, `${directory.mountPath.replace(/\/+$/, '')}/${name}`)
+  return mountedPath(directory, `${rstripSlash(directory.mountPath)}/${name}`)
 }
 
 // The `issues` directories and the kept-text directories under `scope`; null
@@ -105,7 +106,7 @@ async function named(
       err instanceof DOMException ||
       err instanceof SyntaxError
     if (!failed) throw err
-    console.warn(`linear search failed (${String(err)}); reading every issue`)
+    console.debug(`linear search failed (${String(err)}); reading every issue`)
     return null
   }
   return [asked, found]
@@ -198,7 +199,7 @@ export async function filesContaining(
       err instanceof DOMException ||
       err instanceof SyntaxError
     if (!failed) throw err
-    console.warn(`linear listing failed (${String(err)}); reading every file`)
+    console.debug(`linear listing failed (${String(err)}); reading every file`)
     return null
   }
 }

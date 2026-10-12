@@ -187,7 +187,7 @@ describe('linear filesContaining', () => {
     [{ searchIssues: { nodes: [{ title: 'Fix the login page' }] } }],
     [new SyntaxError('Unexpected token < in JSON')],
   ])('reads every issue for the garbled reply %#', async (reply) => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
       const [out] = await ask('Blocked', [], scope(ISSUES_DIR), reply)
       expect(issues(out)).toEqual(ALL_ISSUES)

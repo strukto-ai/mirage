@@ -66,7 +66,7 @@ async def files_containing(
                 accessor.token_manager, text, folder_id
             )
         except BoxApiError as exc:
-            logger.warning("box search failed (%s); reading every file", exc)
+            logger.debug("box search failed (%s); reading every file", exc)
             return None
         if truncated:
             return None

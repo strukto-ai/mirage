@@ -25,6 +25,7 @@ import { ROOT } from '../hierarchy/scope.ts'
 import { TrelloApiError, searchCards } from './client.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 // The most cards one search answers; a full page may have left some out.
 export const SEARCH_LIMIT = 1000
@@ -68,7 +69,7 @@ async function cards(
   }
   if (kind === 'card_json' || kind === 'comments_jsonl') return null
   if (!WALKED.has(kind) && kind !== 'cards') return []
-  const base = scope.mountPath.replace(/\/+$/, '')
+  const base = rstripSlash(scope.mountPath)
   const found: [PathSpec, IndexEntry][] = []
   for (const listed of await readdir(accessor, scope, index)) {
     const leaf = listed.split('/').at(-1) ?? listed
@@ -116,7 +117,7 @@ export async function filesContaining(
       for (const [path, entry] of walked) {
         const kept = entry.extra.unsearched
         if (typeof kept === 'string' && mayHold(asked, named, entry.id, kept)) {
-          found.push(mountedPath(path, `${path.mountPath.replace(/\/+$/, '')}/card.json`))
+          found.push(mountedPath(path, `${rstripSlash(path.mountPath)}/card.json`))
         }
       }
     }
@@ -131,7 +132,7 @@ export async function filesContaining(
       err instanceof DOMException ||
       err instanceof SyntaxError
     if (!failed) throw err
-    console.warn(`trello search failed (${String(err)}); reading every file`)
+    console.debug(`trello search failed (${String(err)}); reading every file`)
     return null
   }
   return found.length > 0 ? found : null

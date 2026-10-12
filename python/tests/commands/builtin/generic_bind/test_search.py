@@ -344,26 +344,27 @@ def test_a_path_pinned_to_a_revision_is_always_read():
     assert sorted(vfs.reads) == ["d/a.txt", "d/c.txt", "d/sub/d.txt"]
 
 
+async def _grep_after_edit(vfs: RAMVFS) -> tuple[bytes, list[str]]:
+    vfs.caches_reads = True
+    vfs._store.dirs.update({"/d", "/d/sub"})
+    vfs._store.files.update(TREE | {"/d/c.txt": b"ada cached\n"})
+    ws = Workspace({"/": vfs})
+    try:
+        await ws.shell("cat /d/c.txt")
+        vfs._store.files["/d/c.txt"] = b"nothing\n"
+        reads = getattr(vfs, "reads", [])
+        reads.clear()
+        result = await ws.shell("grep -rl ada /d")
+        return result.stdout, sorted(reads)
+    finally:
+        await ws.close()
+
+
 def test_a_cached_file_is_always_read():
     # A search sees the current content and a read serves the cached
     # copy, so a file edited since it was cached is read, not ruled out.
-    async def grep_after_edit(vfs: RAMVFS) -> tuple[bytes, list[str]]:
-        vfs.caches_reads = True
-        vfs._store.dirs.update({"/d", "/d/sub"})
-        vfs._store.files.update(TREE | {"/d/c.txt": b"ada cached\n"})
-        ws = Workspace({"/": vfs})
-        try:
-            await ws.shell("cat /d/c.txt")
-            vfs._store.files["/d/c.txt"] = b"nothing\n"
-            reads = getattr(vfs, "reads", [])
-            reads.clear()
-            result = await ws.shell("grep -rl ada /d")
-            return result.stdout, sorted(reads)
-        finally:
-            await ws.close()
-
-    narrowed, reads = asyncio.run(grep_after_edit(SearchRAM(lines=None)))
-    scanned, _ = asyncio.run(grep_after_edit(RAMVFS()))
+    narrowed, reads = asyncio.run(_grep_after_edit(SearchRAM(lines=None)))
+    scanned, _ = asyncio.run(_grep_after_edit(RAMVFS()))
     assert narrowed == scanned == b"/d/a.txt\n/d/c.txt\n/d/sub/d.txt\n"
     assert reads == ["d/a.txt", "d/sub/d.txt"]
 

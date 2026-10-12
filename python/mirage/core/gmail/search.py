@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import re
 
 import aiohttp
 
@@ -31,10 +32,64 @@ logger = logging.getLogger(__name__)
 # The directories above a message, walked down to its files.
 WALKED = frozenset({ROOT, "label", "day"})
 
+# Gmail's system label ids, lowercased. With the account's own labels,
+# ``Label_<n>``, they are all a message's labels field spells, and a
+# message's labels change after the listing kept its text.
+SYSTEM_LABELS = frozenset(
+    {
+        "inbox",
+        "spam",
+        "trash",
+        "unread",
+        "starred",
+        "important",
+        "sent",
+        "draft",
+        "chat",
+        "category_personal",
+        "category_social",
+        "category_promotions",
+        "category_updates",
+        "category_forums",
+    }
+)
+USER_LABEL = re.compile(r"[label_]*\d*")
+
 
 def _child_of(directory: PathSpec, name: str) -> PathSpec:
     return mounted_path(
         directory, f"{directory.mount_path.rstrip('/')}/{name}"
+    )
+
+
+async def _label_ids(
+    accessor: GmailAccessor, scope: PathSpec, index: IndexCacheStore
+) -> set[str] | None:
+    """The account's label ids, lowercased, from the mount root's listing;
+    None when the listing does not hold one.
+    """
+    root = mounted_path(scope, "/")
+    ids: set[str] = set()
+    for listed in await readdir(accessor, root, index):
+        entry = await resolve_entry(
+            readdir,
+            accessor,
+            _child_of(root, listed.rsplit("/", 1)[-1]),
+            index,
+        )
+        if entry is None:
+            return None
+        ids.add(entry.id.lower())
+    return ids
+
+
+def _in_labels(needle: str, labels: set[str]) -> bool:
+    """Whether ``needle`` may lie in a message's labels field: across its
+    quotes and commas, in a ``Label_<n>`` id, or in a label id."""
+    return (
+        any(char in needle for char in '"[],')
+        or USER_LABEL.fullmatch(needle) is not None
+        or any(needle in label for label in SYSTEM_LABELS | labels)
     )
 
 
@@ -51,9 +106,11 @@ async def files_containing(
     text/plain body a .gmail.json renders, such as one inside a link or
     one only that part holds, so it is not asked. The listing fetches
     every message in full anyway and, with ``content_search``, keeps each
-    one's rendered text, lowercased; the files are picked from that. None
-    for a text that is not ASCII, whose case a lowercased copy may not
-    keep, when a listing kept no text, or when a listing fails.
+    one's rendered text, lowercased, without its labels; the files are
+    picked from that. None for a text that is not ASCII, whose case a
+    lowercased copy may not keep, a text that may lie in a labels field
+    (``_in_labels``), which changes after the listing, when a listing kept
+    no text, or when a listing fails.
 
     Args:
         accessor (GmailAccessor): the account.
@@ -61,12 +118,15 @@ async def files_containing(
         under (list[PathSpec]): the directories walked.
         index (IndexCacheStore): the listings the walk filled.
     """
-    if not text.isascii():
+    if not text.isascii() or not under:
         return None
     needle = text.lower()
     found: list[PathSpec] = []
     pending = [scope for scope in under if detect_scope(scope).kind in WALKED]
     try:
+        labels = await _label_ids(accessor, under[0], index)
+        if labels is None or _in_labels(needle, labels):
+            return None
         while pending:
             current = pending.pop()
             for listed in await readdir(accessor, current, index):
@@ -84,6 +144,6 @@ async def files_containing(
                     if needle in kept:
                         found.append(child)
     except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        logger.warning("gmail listing failed (%s); reading every file", exc)
+        logger.debug("gmail listing failed (%s); reading every file", exc)
         return None
     return found

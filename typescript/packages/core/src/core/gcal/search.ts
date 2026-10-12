@@ -28,6 +28,7 @@ import { PAGE_LIMIT, listEvents } from './client.ts'
 import { dayBounds } from './day.ts'
 import { bucketZone, calendarIndex, normalize, readdir, scopedBucket } from './readdir.ts'
 import { detectScope } from './scope.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 // The bucket directories under `scope`; null for a scope inside a bucket or a
 // calendar's file.
@@ -38,7 +39,7 @@ async function buckets(
 ): Promise<PathSpec[] | null> {
   const match = detectScope(normalize(scope)[1])
   if (match.kind === 'bucket') return [scope]
-  const base = scope.mountPath.replace(/\/+$/, '')
+  const base = rstripSlash(scope.mountPath)
   let calendars: PathSpec[]
   if (match.kind === ROOT) {
     calendars = (await readdir(accessor, scope, index)).map((name) =>
@@ -51,7 +52,7 @@ async function buckets(
   }
   const found: PathSpec[] = []
   for (const calendar of calendars) {
-    const parent = calendar.mountPath.replace(/\/+$/, '')
+    const parent = rstripSlash(calendar.mountPath)
     for (const listed of await readdir(accessor, calendar, index)) {
       const leaf = listed.split('/').at(-1) ?? listed
       if (leaf !== CALENDAR_FILE) found.push(mountedPath(calendar, `${parent}/${leaf}`))
@@ -123,7 +124,7 @@ export async function filesContaining(
         )
       }
       for (const bucket of listed) {
-        const parent = bucket.mountPath.replace(/\/+$/, '')
+        const parent = rstripSlash(bucket.mountPath)
         for (const child of await readdir(accessor, bucket, index)) {
           const path = mountedPath(bucket, `${parent}/${child.split('/').at(-1) ?? child}`)
           const entry = await resolveEntry(readdir, accessor, path, index)
@@ -146,7 +147,7 @@ export async function filesContaining(
       err instanceof SyntaxError ||
       (err instanceof Error && err.message === PAGE_LIMIT)
     if (!failed) throw err
-    console.warn(`calendar search failed (${String(err)}); reading every file`)
+    console.debug(`calendar search failed (${String(err)}); reading every file`)
     return null
   }
   return found.length > 0 ? found : null

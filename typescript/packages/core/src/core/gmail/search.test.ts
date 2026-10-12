@@ -282,6 +282,20 @@ describe('filesContaining', () => {
     expect(searches).toEqual([])
   })
 
+  // Twin of test_a_text_a_label_may_hold_reads_every_message: a message's
+  // labels change after the listing kept its text, so the kept text leaves
+  // them out and a text that may lie in a labels field reads every message.
+  it.each([
+    'grep -rl inbox /gmail',
+    'grep -rlw STARRED /gmail',
+    'grep -rl Label_1 /gmail',
+    'grep -rl abel /gmail',
+    `grep -rlF '","' /gmail`,
+  ])('reads every message for %s', async (line) => {
+    const full = await onGmail(line, new FakeGmail(), false)
+    expect((await onGmail(line)).slice(0, 3)).toEqual(full.slice(0, 3))
+  })
+
   it('reads every message for a text that is not ASCII', async () => {
     const line = 'grep -rl caf\u00e9 /gmail'
     const full = await onGmail(line, new FakeGmail(), false)

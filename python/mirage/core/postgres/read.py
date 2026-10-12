@@ -28,6 +28,7 @@ from mirage.core.postgres._schema_json import (
 from mirage.core.postgres.scope import detect_scope
 from mirage.core.postgres.semantic import build_entity_semantic_json
 from mirage.core.postgres.stat import stat
+from mirage.core.render.json import ecma_numbers
 from mirage.errors.fs import efbig
 from mirage.types import PathSpec
 
@@ -95,12 +96,14 @@ async def _read_entity_rows(
 
 
 def row_line(row: dict[str, Any]) -> str:
-    """One row as rows.jsonl spells it.
+    """One row as rows.jsonl spells it, each number as ECMAScript's
+    ``Number::toString`` does (``number_text``), as TypeScript's
+    ``JSON.stringify`` writes it.
 
     Args:
         row (dict[str, Any]): a canonicalized row.
     """
-    return orjson.dumps(row, default=str).decode()
+    return orjson.dumps(ecma_numbers(row), default=str).decode()
 
 
 async def read_rows(

@@ -152,7 +152,7 @@ export async function filesContaining(
     try {
       folders = await listFolders(accessor)
     } catch (err) {
-      console.warn(`imap search failed (${String(err)}); reading every file`)
+      console.debug(`imap search failed (${String(err)}); reading every file`)
       return null
     }
     for (const name of folders) scopes.push(mountedPath(scope, `/${name}`))
@@ -174,7 +174,7 @@ export async function filesContaining(
       const ordered = [...uids].sort((a, b) => Number(a) - Number(b))
       named = await fetchHeaders(accessor, folder, ordered, true)
     } catch (err) {
-      console.warn(`imap search failed (${String(err)}); reading every file`)
+      console.debug(`imap search failed (${String(err)}); reading every file`)
       return null
     }
     for (const msg of named) found.push(mountedPath(scope, `/${buildVfsPath('', segment, msg)}`))

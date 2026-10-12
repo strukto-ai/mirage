@@ -22,6 +22,7 @@ export const KEPT_TEXT_MAX = 8192
 
 // A word a provider's search reads as grep -w does: ASCII letters and digits,
 // with sentence punctuation around them at most.
+const ASCII_SPACE = /[ \t\n\r\f\v]+/
 const PLAIN_WORD = /^[.,;:!?"'()[\]]*[A-Za-z0-9]+[.,;:!?"'()[\]]*$/
 
 /**
@@ -62,10 +63,12 @@ export function recordQueries(
 
 /**
  * The words of `text` a provider's search may split otherwise than grep -w: a
- * link, an address, markup, an entity, a hyphenated or non-ASCII word.
+ * link, an address, markup, an entity, a hyphenated or non-ASCII word. Words
+ * split at ASCII whitespace only, so both hosts split alike and a non-ASCII
+ * space stays inside its word.
  */
 export function nonPlainWords(text: string): string[] {
-  return text.split(/\s+/).filter((word) => word !== '' && !PLAIN_WORD.test(word))
+  return text.split(ASCII_SPACE).filter((word) => word !== '' && !PLAIN_WORD.test(word))
 }
 
 /**

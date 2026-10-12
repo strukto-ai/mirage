@@ -586,7 +586,7 @@ export async function filesContaining(
     ) {
       throw err
     }
-    console.warn(`slack search failed (${String(err)}); reading every file`)
+    console.debug(`slack search failed (${String(err)}); reading every file`)
     return null
   }
 }

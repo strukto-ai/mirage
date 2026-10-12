@@ -98,7 +98,7 @@ describe('gdrive filesContaining', () => {
   ])('answers null for %s', async (name, breakIt) => {
     fake.add('a.txt', 'root', undefined, ENC.encode(name === 'no hit' ? 'nothing' : 'wombat'))
     breakIt()
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     expect(await ask([scope()])).toBeNull()
   })
 })

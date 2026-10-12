@@ -302,28 +302,29 @@ it('always reads a path pinned to a revision', async () => {
   expect([...vfs.reads].sort()).toEqual(['d/a.txt', 'd/c.txt', 'd/sub/d.txt'])
 })
 
+async function grepAfterEdit(vfs: RAMVFS): Promise<[string, string[]]> {
+  Object.assign(vfs, { cachesReads: true })
+  for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
+  for (const [key, data] of Object.entries({ ...TREE, '/d/c.txt': 'ada cached\n' })) {
+    vfs.store.files.set(key, ENC.encode(data))
+  }
+  const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
+  try {
+    await ws.shell('cat /d/c.txt')
+    vfs.store.files.set('/d/c.txt', ENC.encode('nothing\n'))
+    const reads = vfs instanceof SearchRAM ? vfs.reads : []
+    reads.length = 0
+    const out = await ws.shell('grep -rl ada /d')
+    return [DEC.decode(out.stdout), [...reads].sort()]
+  } finally {
+    await ws.close()
+  }
+}
+
 // Twin of test_a_cached_file_is_always_read: a search sees the current
 // content and a read serves the cached copy, so a file edited since it was
 // cached is read, not ruled out.
 it('always reads a cached file', async () => {
-  const grepAfterEdit = async (vfs: RAMVFS): Promise<[string, string[]]> => {
-    Object.assign(vfs, { cachesReads: true })
-    for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
-    for (const [key, data] of Object.entries({ ...TREE, '/d/c.txt': 'ada cached\n' })) {
-      vfs.store.files.set(key, ENC.encode(data))
-    }
-    const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
-    try {
-      await ws.shell('cat /d/c.txt')
-      vfs.store.files.set('/d/c.txt', ENC.encode('nothing\n'))
-      const reads = vfs instanceof SearchRAM ? vfs.reads : []
-      reads.length = 0
-      const out = await ws.shell('grep -rl ada /d')
-      return [DEC.decode(out.stdout), [...reads].sort()]
-    } finally {
-      await ws.close()
-    }
-  }
   const [narrowed, reads] = await grepAfterEdit(new SearchRAM({ lines: null }))
   const [scanned] = await grepAfterEdit(new RAMVFS())
   expect([narrowed, scanned]).toEqual([

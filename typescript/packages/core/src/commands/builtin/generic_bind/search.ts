@@ -341,7 +341,7 @@ export async function searchReads<A extends Accessor>(
   }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
     const manager = activeCacheManager()
-    if (manager !== null && (await manager.cachedSize(path)) !== null) return null
+    if (manager !== null && (await manager.isCached(path))) return null
     if (
       found !== null &&
       !named.has(path.virtual) &&

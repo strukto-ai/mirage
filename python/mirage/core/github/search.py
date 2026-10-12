@@ -146,7 +146,7 @@ async def narrow_paths(
                 session=accessor.pool,
             )
         except Exception as exc:
-            logger.warning(
+            logger.debug(
                 "github code search failed (%s); "
                 "falling back to per-file scan",
                 exc,

@@ -58,7 +58,7 @@ export async function filesContaining(
       results = out.items
     } catch (err) {
       if (!(err instanceof BoxApiError)) throw err
-      console.warn(`box search failed (${String(err)}); reading every file`)
+      console.debug(`box search failed (${String(err)}); reading every file`)
       return null
     }
     for (const item of results) {

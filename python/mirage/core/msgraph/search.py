@@ -92,6 +92,6 @@ async def files_containing(
             for item in items:
                 found.extend(files.get(item.get("id", ""), []))
     except (OSError, aiohttp.ClientError, GraphError) as exc:
-        logger.warning("graph search failed (%s); reading every file", exc)
+        logger.debug("graph search failed (%s); reading every file", exc)
         return None
     return found or None

@@ -677,7 +677,7 @@ async def files_containing(
     try:
         return await _search(accessor, text, queries, under, index)
     except (RuntimeError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        logger.warning("slack search failed (%s); reading every file", exc)
+        logger.debug("slack search failed (%s); reading every file", exc)
         return None
 
 

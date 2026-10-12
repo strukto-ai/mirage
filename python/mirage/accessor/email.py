@@ -27,34 +27,38 @@ class EmailAccessor(Accessor):
         # Held from a SELECT to the last command that reads the mailbox
         # it chose, so a concurrent task cannot select another in between.
         self.mailbox_lock = asyncio.Lock()
+        # Held while connecting, so concurrent first uses share one login.
+        self._connecting = asyncio.Lock()
 
     async def get_imap(self) -> IMAPClient:
         """The connected IMAP client, connecting on first use and again
         after the last connection ended (a socket timeout or reset the
         server's side caused included).
         """
-        if self._imap is None or not self._imap.alive:
-            self._imap = None
-            client = await IMAPClient.connect(
-                self.config.imap_host,
-                self.config.imap_port,
-                self.config.use_ssl,
-            )
-            response = await client.login(
-                self.config.username, reveal_secret(self.config.password)
-            )
-            if response.result != "OK":
-                detail = " ".join(
-                    bytes(line).decode(errors="replace")
-                    for line in response.lines
+        async with self._connecting:
+            if self._imap is None or not self._imap.alive:
+                self._imap = None
+                client = await IMAPClient.connect(
+                    self.config.imap_host,
+                    self.config.imap_port,
+                    self.config.use_ssl,
                 )
-                await client.close()
-                raise ConnectionError(
-                    f"IMAP login failed for {self.config.username} on "
-                    f"{self.config.imap_host}: {detail or response.result}"
+                response = await client.login(
+                    self.config.username, reveal_secret(self.config.password)
                 )
-            self._imap = client
-        return self._imap
+                if response.result != "OK":
+                    detail = " ".join(
+                        bytes(line).decode(errors="replace")
+                        for line in response.lines
+                    )
+                    await client.close()
+                    raise ConnectionError(
+                        f"IMAP login failed for {self.config.username} on "
+                        f"{self.config.imap_host}: "
+                        f"{detail or response.result}"
+                    )
+                self._imap = client
+            return self._imap
 
     async def close(self) -> None:
         """Log out and drop the cached IMAP connection.

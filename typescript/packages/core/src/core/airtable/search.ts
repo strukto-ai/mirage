@@ -140,7 +140,7 @@ export async function linesContaining(
   } catch (err) {
     // fetch rejects with a TypeError when the connection fails
     if (!(err instanceof AirtableApiError || err instanceof TypeError)) throw err
-    console.warn(`airtable search failed (${String(err)}); reading the file`)
+    console.debug(`airtable search failed (${String(err)}); reading the file`)
     return null
   }
   if (records.length > cap) return null

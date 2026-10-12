@@ -420,7 +420,7 @@ async def search_reads(
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
         manager = active_cache_manager()
-        if manager is not None and await manager.cached_size(path) is not None:
+        if manager is not None and await manager.is_cached(path):
             return None
         if (
             hits is not None

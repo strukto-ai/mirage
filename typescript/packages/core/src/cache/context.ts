@@ -40,6 +40,7 @@ export interface CacheInvalidator {
   invalidateSubtree(path: string | PathSpec): Promise<void>
   invalidateAncestors(path: PathSpec): Promise<void>
   cachedSize(path: PathSpec): Promise<number | null>
+  isCached(path: PathSpec): Promise<boolean>
   listingTrusted(folder: string): boolean
   probedStat(path: PathSpec): FileStat | null
 }

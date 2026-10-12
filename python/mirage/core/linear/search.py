@@ -98,7 +98,7 @@ async def _named(
                 return None
             named[word] = {str(node.get("id")) for node in nodes}
     except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
-        logger.warning("linear search failed (%s); reading every issue", exc)
+        logger.debug("linear search failed (%s); reading every issue", exc)
         return None
     return asked, named
 
@@ -143,7 +143,7 @@ async def files_containing(
     try:
         return await _found(accessor, text.lower(), under, index, ask_linear)
     except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
-        logger.warning("linear listing failed (%s); reading every file", exc)
+        logger.debug("linear listing failed (%s); reading every file", exc)
         return None
 
 

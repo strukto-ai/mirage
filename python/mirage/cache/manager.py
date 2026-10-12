@@ -723,6 +723,17 @@ class CacheManager:
         cached = await cache.get(key)
         return None if cached is None else len(cached)
 
+    async def is_cached(self, path: PathSpec) -> bool:
+        """Whether a read of ``path`` would be served from the cache,
+        asked of the store without fetching the bytes.
+
+        Args:
+            path (PathSpec): the path to look up.
+        """
+        key = self._cache_key(path)
+        cache = self._readable_cache(key)
+        return cache is not None and await cache.exists(key)
+
     async def invalidate_after_write(self, path: PathSpec) -> None:
         """Invalidate caches after a write to ``path``.
 

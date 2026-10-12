@@ -415,7 +415,7 @@ describe('filesContaining', () => {
     ],
   ])('reads every day when search cannot answer %s', async (line, fake) => {
     const full = await onSlack(line, new FakeSlack(), false)
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
       expect((await onSlack(line, fake())).slice(0, 3)).toEqual(full.slice(0, 3))
     } finally {

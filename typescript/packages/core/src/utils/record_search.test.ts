@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { recordQueries } from './record_search.ts'
+import { KEPT_TEXT_MAX, keptText, mayHold, nonPlainWords, recordQueries } from './record_search.ts'
 
 const KEYS = new Set(['subject', 'body_text', 'flags', 'true', 'seen'])
 
@@ -45,4 +45,28 @@ describe('recordQueries', () => {
   ])('%j (whole word %s) searches %j', (text, wholeWord, queries) => {
     expect(recordQueries(text, KEYS, wholeWord)).toEqual(queries)
   })
+})
+
+// Twins of the non_plain_words, may_hold and kept_text tests in
+// python/tests/utils/test_record_search.py.
+it('splits non-plain words at ASCII whitespace', () => {
+  const text = 'left\ufeffright plain a-b\u00a0c\tx sync-up.'
+  expect(nonPlainWords(text)).toEqual(['left\ufeffright', 'a-b\u00a0c', 'sync-up.'])
+})
+
+it('holds a record when each word is found or kept', () => {
+  const asked = [['visit', 'wombat']]
+  const named = new Map([
+    ['visit', new Set(['r1'])],
+    ['wombat', new Set<string>()],
+  ])
+  expect(mayHold(asked, named, 'r1', 'see wombat.example.com')).toBe(true)
+  expect(mayHold(asked, named, 'r1', 'nothing kept')).toBe(false)
+  expect(mayHold(asked, named, 'r2', 'see wombat.example.com')).toBe(false)
+})
+
+it('keeps lowercased text up to the cap', () => {
+  const enc = new TextEncoder()
+  expect(keptText(enc.encode('{"Name":"Ada"}'))).toEqual({ text: '{"name":"ada"}' })
+  expect(keptText(new Uint8Array(KEPT_TEXT_MAX + 1))).toEqual({})
 })

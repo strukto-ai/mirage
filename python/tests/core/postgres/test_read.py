@@ -20,7 +20,7 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.postgres.read import read
+from mirage.core.postgres.read import read, row_line
 from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
 from mirage.vfs.postgres.config import PostgresConfig
@@ -409,3 +409,13 @@ async def test_whole_read_checks_rendered_utf8_bytes(budget, refuses):
                 await read(accessor, path)
         else:
             assert await read(accessor, path) == '{"x":"é"}\n'.encode()
+
+
+# A row line spells each number as TypeScript's JSON.stringify does: whole
+# below 1e21, an exponent with its sign past it, no exponent down to 1e-6.
+def test_a_row_line_spells_numbers_as_typescript_does():
+    row = {"a": 1e19, "b": 0.00001, "c": 3.4e38, "d": {"n": [1.5e-7, 2.0]}}
+    assert row_line(row) == (
+        '{"a":10000000000000000000,"b":0.00001,"c":3.4e+38,'
+        '"d":{"n":[1.5e-7,2]}}'
+    )

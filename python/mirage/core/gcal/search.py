@@ -165,6 +165,6 @@ async def files_containing(
                     if may_hold(asked, named, entry.id, kept):
                         found.append(child)
     except (OSError, aiohttp.ClientError, ValueError, RuntimeError) as exc:
-        logger.warning("calendar search failed (%s); reading every file", exc)
+        logger.debug("calendar search failed (%s); reading every file", exc)
         return None
     return found or None

@@ -100,7 +100,9 @@ function dateChildren(
     const filename = msgFilename(subject, mid)
     // The listing already fetched the full message, so the exact rendered
     // .gmail.json length and text are free; sizeEstimate is the source
-    // message size and stays in extra.
+    // message size and stays in extra. The kept text leaves the labels out,
+    // the one field that changes after the listing, which a search declines
+    // to rule on instead.
     const rendered = messageJsonBytes(raw)
     children.push([
       filename,
@@ -111,7 +113,13 @@ function dateChildren(
         vfsName: filename,
         size: rendered.byteLength,
         extra: {
-          ...(keepText ? { text: new TextDecoder().decode(rendered).toLowerCase() } : {}),
+          ...(keepText
+            ? {
+                text: new TextDecoder()
+                  .decode(messageJsonBytes({ ...raw, labelIds: [] }))
+                  .toLowerCase(),
+              }
+            : {}),
           ...(raw.sizeEstimate != null ? { size_estimate: raw.sizeEstimate } : {}),
         },
       }),

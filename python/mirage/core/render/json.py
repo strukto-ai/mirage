@@ -16,6 +16,8 @@ import json
 import math
 from typing import Any
 
+import orjson
+
 
 def json_text(value: Any) -> str:
     """Render a value as indented JSON text.
@@ -127,6 +129,22 @@ def value_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return _compact_value_text(value)
+
+
+def ecma_numbers(value: Any) -> Any:
+    """``value`` with each float as the text ``number_text`` spells, for
+    orjson to write numbers as TypeScript's ``JSON.stringify`` does.
+
+    Args:
+        value (Any): a decoded JSON value, a row among them.
+    """
+    if isinstance(value, float):
+        return orjson.Fragment(number_text(value).encode())
+    if isinstance(value, dict):
+        return {key: ecma_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [ecma_numbers(item) for item in value]
+    return value
 
 
 def jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:

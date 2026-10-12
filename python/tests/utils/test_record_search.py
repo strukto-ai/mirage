@@ -14,7 +14,13 @@
 
 import pytest
 
-from mirage.utils.record_search import record_queries
+from mirage.utils.record_search import (
+    KEPT_TEXT_MAX,
+    kept_text,
+    may_hold,
+    non_plain_words,
+    record_queries,
+)
 
 KEYS = frozenset({"subject", "body_text", "flags", "true", "seen"})
 
@@ -50,3 +56,27 @@ def test_a_search_covers_every_record_the_text_may_match(
     # starting with a letter an escape ends with (\n, \b, \u001b) is
     # searched without that letter too, and that letter alone is refused.
     assert record_queries(text, KEYS, whole_word) == queries
+
+
+# A word splits at ASCII whitespace only, the same on both hosts, so a
+# non-ASCII space stays inside a word, which is then not plain.
+def test_non_plain_words_split_at_ascii_whitespace():
+    text = "left\ufeffright plain a-b\u00a0c\tx sync-up."
+    assert non_plain_words(text) == [
+        "left\ufeffright",
+        "a-b\u00a0c",
+        "sync-up.",
+    ]
+
+
+def test_a_record_may_hold_each_word_found_or_kept():
+    asked = [["visit", "wombat"]]
+    named = {"visit": {"r1"}, "wombat": set()}
+    assert may_hold(asked, named, "r1", "see wombat.example.com")
+    assert not may_hold(asked, named, "r1", "nothing kept")
+    assert not may_hold(asked, named, "r2", "see wombat.example.com")
+
+
+def test_kept_text_is_lowercased_up_to_the_cap():
+    assert kept_text(b'{"Name":"Ada"}') == {"text": '{"name":"ada"}'}
+    assert kept_text(b"x" * (KEPT_TEXT_MAX + 1)) == {}

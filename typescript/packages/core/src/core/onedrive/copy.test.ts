@@ -35,6 +35,7 @@ function recorder(): [CacheInvalidator, string[]] {
     invalidateSubtree: note('subtree'),
     invalidateAncestors: note('ancestors'),
     cachedSize: () => Promise.resolve(null),
+    isCached: () => Promise.resolve(false),
     listingTrusted: () => false,
     probedStat: () => null,
   }

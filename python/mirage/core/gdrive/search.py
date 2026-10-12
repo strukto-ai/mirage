@@ -97,6 +97,6 @@ async def files_containing(
                 for file_id in ids:
                     found.extend(files.get(file_id, []))
     except (OSError, aiohttp.ClientError) as exc:
-        logger.warning("drive search failed (%s); reading every file", exc)
+        logger.debug("drive search failed (%s); reading every file", exc)
         return None
     return found or None

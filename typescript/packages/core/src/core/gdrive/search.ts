@@ -87,7 +87,7 @@ export async function filesContaining(
       err instanceof TypeError ||
       err instanceof DOMException
     if (!failed) throw err
-    console.warn(`drive search failed (${String(err)}); reading every file`)
+    console.debug(`drive search failed (${String(err)}); reading every file`)
     return null
   }
   return found.length > 0 ? found : null

@@ -118,7 +118,7 @@ describe('airtable linesContaining', () => {
     ['one', `${TABLE}/views/Nope__viwNope000000000001.jsonl`],
     ['zzz', RECORDS],
   ])('reads the file for %j at %s', async (text, virtual) => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
       const out = await linesContaining(
         makeAccessor(new FakeAirtable()),

@@ -38,7 +38,7 @@ import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import * as _schema from './_schema_json.ts'
-import { read } from './read.ts'
+import { read, rowLine } from './read.ts'
 
 const STUB_DRIVER: PgDriver = {
   query: () => Promise.resolve({ rows: [], rowCount: 0 }),
@@ -286,4 +286,12 @@ describe('whole-read byte budget', () => {
     if (maxReadBytes === 10) await expect(result).rejects.toMatchObject({ code: 'EFBIG' })
     else expect(decode(await result)).toBe('{"x":"é"}\n')
   })
+})
+
+// Twin of test_a_row_line_spells_numbers_as_typescript_does.
+it('spells a row line number as JSON.stringify does', () => {
+  const row = { a: 1e19, b: 0.00001, c: 3.4e38, d: { n: [1.5e-7, 2.0] } }
+  expect(rowLine(row)).toBe(
+    '{"a":10000000000000000000,"b":0.00001,"c":3.4e+38,"d":{"n":[1.5e-7,2]}}',
+  )
 })

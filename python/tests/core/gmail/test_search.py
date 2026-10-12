@@ -49,6 +49,25 @@ async def test_only_the_messages_whose_text_holds_it_are_read(
     assert searches == []
 
 
+# A message's labels change after the listing kept its text, so the kept
+# text leaves them out and a text that may lie in a labels field reads
+# every message.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -rl inbox /gmail",
+        "grep -rlw STARRED /gmail",
+        "grep -rl Label_1 /gmail",
+        "grep -rl abel /gmail",
+        "grep -rlF '\",\"' /gmail",
+    ],
+)
+async def test_a_text_a_label_may_hold_reads_every_message(gmail, line):
+    full = await gmail(line, content_search=False)
+    assert (await gmail(line))[:3] == full[:3]
+
+
 @pytest.mark.asyncio
 async def test_every_message_is_read_for_a_text_that_is_not_ascii(gmail):
     line = "grep -rl caf\u00e9 /gmail"

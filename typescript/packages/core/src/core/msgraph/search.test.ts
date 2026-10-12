@@ -124,7 +124,7 @@ describe('msgraph filesContaining', () => {
       ok({ value: [{ id: '3' }] }),
     ],
   ])('answers null for %s', async (_case, listing, search) => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     graph({ [`${BASE}/root:/Docs:/children`]: listing, search })
     expect(await ask('wombat', 'Docs')).toBeNull()
   })

@@ -586,6 +586,16 @@ export class CacheManager {
     return cached === null ? null : cached.length
   }
 
+  /**
+   * Whether a read of `path` would be served from the cache, asked of the
+   * store without fetching the bytes.
+   */
+  async isCached(path: PathSpec): Promise<boolean> {
+    const key = this.cacheKey(path)
+    const cache = this.readableCache(key)
+    return cache !== null && (await cache.exists(key))
+  }
+
   /** Invalidate caches after a write to `path`; only `virtual` is read. */
   async invalidateAfterWrite(path: string | PathSpec): Promise<void> {
     const key = await this.invalidatePath(path)

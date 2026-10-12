@@ -52,7 +52,7 @@ export async function narrowPaths(
         pathFilter === '' ? undefined : pathFilter,
       )
     } catch (err) {
-      console.warn(`github code search failed (${String(err)}); falling back to per-file scan`)
+      console.debug(`github code search failed (${String(err)}); falling back to per-file scan`)
       return null
     }
     if (answer.truncated) return null

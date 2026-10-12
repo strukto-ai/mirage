@@ -157,7 +157,7 @@ async def lines_containing(
             max_records=cap + 1,
         )
     except (AirtableAPIError, aiohttp.ClientError) as exc:
-        logger.warning("airtable search failed (%s); reading the file", exc)
+        logger.debug("airtable search failed (%s); reading the file", exc)
         return None
     if len(records) > cap:
         return None

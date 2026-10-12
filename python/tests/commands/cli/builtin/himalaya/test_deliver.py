@@ -48,6 +48,7 @@ def config(**overrides) -> EmailConfig:
 def fake_imap(lines: list[bytes], append_result: str = "OK"):
     imap = AsyncMock()
     listing = MagicMock()
+    listing.result = "OK"
     listing.lines = lines
     imap.list.return_value = listing
     appended = MagicMock()

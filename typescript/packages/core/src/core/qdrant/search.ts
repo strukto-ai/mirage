@@ -21,6 +21,7 @@ import type { Row } from '../vector/types.ts'
 import { groupName, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
 import { renderJson, renderText } from './render.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 // The files a listing renders from a point's payload, whose entries keep their
 // text; a blob is read as usual.
@@ -68,7 +69,7 @@ export async function filesContaining(
   const found: PathSpec[] = []
   const pending = [...under]
   for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
-    const parent = current.mountPath.replace(/\/+$/, '')
+    const parent = rstripSlash(current.mountPath)
     for (const listed of await readdir(accessor, current, index)) {
       const child = mountedPath(current, `${parent}/${listed.slice(listed.lastIndexOf('/') + 1)}`)
       const entry = await resolveEntry(readdir, accessor, child, index)

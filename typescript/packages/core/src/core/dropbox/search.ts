@@ -50,7 +50,7 @@ export async function filesContaining(
       results = out.paths
     } catch (err) {
       if (!(err instanceof DropboxApiError)) throw err
-      console.warn(`dropbox search failed (${String(err)}); reading every file`)
+      console.debug(`dropbox search failed (${String(err)}); reading every file`)
       return null
     }
     const scopeLower = scopeApi.toLowerCase()

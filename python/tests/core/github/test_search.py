@@ -171,7 +171,7 @@ async def test_narrow_paths_voids_the_narrowing_on_error(
 ):
     mock_search.side_effect = RuntimeError("boom")
     paths = [PathSpec(vfs_path="src", virtual="/src", directory="/src")]
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("DEBUG"):
         out = await narrow_paths(
             _accessor(config, _SMALL_TREE), "import", paths
         )
