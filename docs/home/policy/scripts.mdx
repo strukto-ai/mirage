@@ -131,7 +131,6 @@ For `cat notes.txt | wc -l` in `/data`, `pre_execute` gets:
     {"command": "wc", "words": [...], "paths": [], ...}
   ],
   "session_id": "agent",
-  "agent_id": "",
   "cwd": "/data",
   "env": {"PWD": "/data", "TEAM": "core", "OLDPWD": "/"},
   "profile": "reviewer",
@@ -144,8 +143,8 @@ it:
 
 | Method | `ctx` holds |
 | --- | --- |
-| `pre_execute` | `line`, `commands`, `agent_id` |
-| `pre_command` | `line`, `command`, `words`, `paths`, `walks`, `agent_id` |
+| `pre_execute` | `line`, `commands` |
+| `pre_command` | `line`, `command`, `words`, `paths`, `walks` |
 | `pre_vfs` | `call` (`name`, `effect`, `target`, `creates`, `subtree`), `path`, `write` |
 | `pre_session` | `verb`, `key`, `value` |
 

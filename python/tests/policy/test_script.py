@@ -194,7 +194,6 @@ def _ctx(
             ),
         ),
         session_id=session_id,
-        agent_id="agent-1",
         tokens=(command, "/repo/sealed/k"),
         program=(command,),
         session=session,
@@ -295,7 +294,7 @@ def test_a_context_reads_as_its_fields_with_the_session_as_data():
         },
     ]
     assert data["session_id"] == "s"
-    assert data["agent_id"] == "agent-1"
+    assert "agent_id" not in data
     assert data["cwd"] == "/data"
     assert data["env"] == {"TEAM": "core", "HOME": "/home/agent"}
     assert data["profile"] == "reviewer"
@@ -309,7 +308,6 @@ def test_a_line_lists_each_command_as_pre_command_reads_it():
         line="cat /repo/sealed/k",
         commands=(_ctx(session=_session()),),
         session_id="s",
-        agent_id="agent-1",
         session=_session(),
     )
     data = script_context(line)
@@ -384,9 +382,7 @@ def _programs(method: str, *printed: bytes) -> ScriptPolicy:
 
 
 def _line() -> RouteContext:
-    return RouteContext(
-        line="python3 job.py", commands=(), session_id="s", agent_id="a"
-    )
+    return RouteContext(line="python3 job.py", commands=(), session_id="s")
 
 
 @pytest.mark.asyncio

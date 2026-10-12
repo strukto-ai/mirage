@@ -388,6 +388,9 @@ export class Decisions {
     ask: Ask,
     signal?: AbortSignal,
     claimant: Claimant | null = null,
+    // The agent the line is attributed to, which a question raised here
+    // names for the host.
+    agentId = '',
   ): Promise<Deny | Pending | Abandoned | null> {
     const rules = ask.rules ?? [askRule(ctx, ask)]
     const argv = [ctx.command, ...ctx.argv]
@@ -410,7 +413,7 @@ export class Decisions {
     }
     for (const [rule, record] of answers) {
       if (record !== null) continue
-      const action = await this.raise(ctx, rule, argv, signal, claimant)
+      const action = await this.raise(ctx, rule, argv, signal, claimant, agentId)
       if (action !== null) return action
     }
     // Every rule is answered and the line may run. The ledger is read again
@@ -774,13 +777,14 @@ export class Decisions {
     // by another, ran on nothing: one nod, two runs. Claimed first, the
     // grant is hidden from the other line, which asks for itself.
     claimant: Claimant | null = null,
+    agentId = '',
   ): Promise<Deny | Pending | Abandoned | null> {
     let record = this.waiting(ctx, rule, argv)
     if (record === null) {
       record = {
         id: await decisionId(ctx.sessionId ?? '', ctx.cwd, argv),
         sessionId: ctx.sessionId ?? '',
-        agentId: ctx.agentId ?? '',
+        agentId,
         command: ctx.command,
         argv: [...ctx.argv],
         cwd: ctx.cwd,

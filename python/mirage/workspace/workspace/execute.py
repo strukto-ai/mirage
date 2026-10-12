@@ -296,14 +296,12 @@ async def recurse(
                     route=ws.router.context(
                         cmd,
                         session,
-                        agent_id or "",
                         await line_judgments(
                             tree,
                             session,
                             ws.registry,
                             ws.namespace,
                             inner if inner is not None else HandOff(),
-                            agent_id or "",
                         ),
                     )
                     if ws.registry.policies.wants("post_execute")
@@ -783,14 +781,13 @@ async def run_prepared_line(
                         ws.registry,
                         ws.namespace,
                         line_handed,
-                        agent or "",
                     )
                 )
             return judgments[0]
 
         async def admission_holds() -> bool:
             return await line_held(
-                await judged(), ws.registry, line_handed, cancel
+                await judged(), ws.registry, line_handed, cancel, agent or ""
             )
 
         held = False
@@ -799,7 +796,6 @@ async def run_prepared_line(
                 command,
                 runtime,
                 effective_session,
-                agent or "",
                 routing_decision,
                 judged,
                 admission_holds,
@@ -890,7 +886,7 @@ async def run_prepared_line(
                     claimant_for(ast, handed),
                     cancel,
                     ws.router.context(
-                        command, effective_session, agent or "", await judged()
+                        command, effective_session, await judged()
                     )
                     if ws.registry.policies.wants("post_execute")
                     else None,
@@ -1023,7 +1019,7 @@ async def run_prepared_line(
                 call_stack=call_stack,
                 execution_scope=execution_scope,
                 route=ws.router.context(
-                    command, effective_session, agent or "", await judged()
+                    command, effective_session, await judged()
                 )
                 if ws.registry.policies.wants("post_execute")
                 else None,

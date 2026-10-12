@@ -18,7 +18,7 @@ import type { RouteContext } from '../types.ts'
 import { PlacementPolicy } from './placement.ts'
 
 function line(text: string): RouteContext {
-  return { line: text, commands: [], sessionId: '', agentId: '' }
+  return { line: text, commands: [], sessionId: '' }
 }
 
 describe('PlacementPolicy', () => {

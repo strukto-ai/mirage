@@ -166,7 +166,6 @@ function ctx(
     cwd: '/repo',
     line: `${command} /repo/sealed/k`,
     sessionId,
-    agentId: 'agent-1',
     tokens: [command, '/repo/sealed/k'],
     program: [command],
     ...extra,
@@ -188,7 +187,7 @@ function sessionCtx(key = 'AWS_KEY'): SessionContext {
 }
 
 function line(): RouteContext {
-  return { line: 'python3 job.py', commands: [], sessionId: 's', agentId: 'a' }
+  return { line: 'python3 job.py', commands: [], sessionId: 's' }
 }
 
 /** A policy whose every program runs on the given fake, in order. */
@@ -275,7 +274,7 @@ describe('scriptContext', () => {
       { text: '/repo/sealed/k', kind: 'operand', option: null, path: '/repo/sealed/k' },
     ])
     expect(data.session_id).toBe('s')
-    expect(data.agent_id).toBe('agent-1')
+    expect(data).not.toHaveProperty('agent_id')
     expect(data.cwd).toBe('/data')
     expect(data.env).toEqual({ TEAM: 'core', HOME: '/home/agent' })
     expect(data.profile).toBe('reviewer')
@@ -289,7 +288,6 @@ describe('scriptContext', () => {
       line: 'cat /repo/sealed/k',
       commands: [ctx('cat', { session: sessionView() })],
       sessionId: 's',
-      agentId: 'agent-1',
       session: sessionView(),
     }
     const data = scriptContext(line)

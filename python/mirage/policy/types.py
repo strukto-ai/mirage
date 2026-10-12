@@ -712,10 +712,6 @@ class CommandContext:
         cwd (str): session working directory.
         session_id (str): the session running the line, set by the
             entry point; empty outside a workspace.
-        agent_id (str): the agent the workspace attributes the line
-            to, carried per execution so a nested line (``eval``,
-            ``$()``, ``xargs``) and a concurrent one keep their own;
-            what an approval request names.
         tokens (tuple[str, ...]): the line as an admission pattern
             reads it, command name first: for an installed CLI the
             verb path replaces the words before it (options before the
@@ -752,7 +748,6 @@ class CommandContext:
     line: str = ""
     words: tuple[CommandWord, ...] = ()
     session_id: str = ""
-    agent_id: str = ""
     tokens: tuple[str, ...] = ()
     program: tuple[str, ...] = ()
     tool: bool = True
@@ -805,7 +800,6 @@ class RouteContext:
             the text alone says what they are, its paths resolved. A
             command whose name only the run expands is left out.
         session_id (str): the session hosting the line.
-        agent_id (str): the agent the line runs as.
         session (SessionView | None): the session, read only: a write
             through it is refused.
         ns (NamespaceView | None): the session's namespace.
@@ -815,7 +809,6 @@ class RouteContext:
     line: str
     commands: tuple[CommandContext, ...]
     session_id: str
-    agent_id: str
     session: SessionView | None = None
     ns: NamespaceView | None = None
     vfs: "Files | None" = None

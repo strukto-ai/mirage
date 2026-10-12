@@ -66,12 +66,10 @@ import { makeAbortError } from '../../utils/abort.ts'
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
-  private readonly agentId: string | null
 
-  constructor(registry: MountRegistry, runtimes: Runtimes, agentId: string | null) {
+  constructor(registry: MountRegistry, runtimes: Runtimes) {
     this.registry = registry
     this.runtimes = runtimes
-    this.agentId = agentId
   }
 
   async decide(
@@ -91,7 +89,7 @@ export class Router {
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (placed === null && !placing && !hasScripts) return null
     if (held !== undefined && (await held())) return placed
-    const ctx = this.context(command, options, session, await judged())
+    const ctx = this.context(command, session, await judged())
     const [said, route] = await policies.preExecute(ctx, placed !== null)
     const action =
       said?.kind === 'ask'
@@ -119,7 +117,7 @@ export class Router {
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     const placing = await policies.wantsFor('preExecute', session.sessionId)
     if (!hasScripts && !placing) return [[], null]
-    const ctx = this.context(command, {}, session, await judged())
+    const ctx = this.context(command, session, await judged())
     const answers = await policies.answers('preExecute', ctx)
     let winner = settled(answers)
     if (winner?.kind === 'ask') {
@@ -208,7 +206,6 @@ export class Router {
    */
   context(
     command: string,
-    options: ExecuteOptions,
     session: SessionState,
     judged: readonly [Walked, Judged[]][],
   ): RouteContext {
@@ -225,7 +222,6 @@ export class Router {
       line: command,
       commands,
       sessionId: session.sessionId,
-      agentId: options.agentId ?? this.agentId ?? '',
       ...views?.(session.sessionId, session),
     }
   }

@@ -492,7 +492,6 @@ async function runPreparedLine(
               effectiveSession,
               env.registry,
               env.namespace,
-              options.agentId ?? env.agentId ?? '',
               handed,
               reparse,
             ))
@@ -510,6 +509,7 @@ async function runPreparedLine(
                   env.registry,
                   handed,
                   mergeSignals(options.signal, context.frame.abortSignal),
+                  options.agentId ?? env.agentId ?? '',
                 ),
             )
           // A line placement refuses ends here, so what admission claimed
@@ -649,14 +649,12 @@ async function runPreparedLine(
                     env.registry.policies.wants('postExecute')
                       ? env.router.context(
                           cmd,
-                          innerOpts,
                           session,
                           await lineJudgments(
                             substitutionTree as unknown as TSNodeLike,
                             session,
                             env.registry,
                             env.namespace,
-                            innerOpts.agentId ?? env.agentId ?? '',
                             innerOpts.handed ?? handed,
                             (source) => substitutionParser.parse(source) as unknown as TSNodeLike,
                           ),
@@ -986,7 +984,7 @@ async function runParsedLine(
         if (filled !== null) return filled
       }
       const route = env.registry.policies.wants('postExecute')
-        ? env.router.context(command, options, effectiveSession, await judged())
+        ? env.router.context(command, effectiveSession, await judged())
         : null
       const result = await abortable(
         runWithRefusalSink(note, () =>
@@ -1099,7 +1097,7 @@ async function runParsedLine(
           false,
           options.callStack ?? null,
           env.registry.policies.wants('postExecute')
-            ? env.router.context(command, options, context.session, await judged())
+            ? env.router.context(command, context.session, await judged())
             : null,
         ).finally(release)
         const result = await joinOrAbort(running, killed)

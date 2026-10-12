@@ -565,7 +565,6 @@ describe('Limit', () => {
       line: 'echo',
       commands: [],
       sessionId: '',
-      agentId: '',
       producer: { command: 'echo', prefixes: [], declared: null },
       exitCode: 0,
       output: new Uint8Array(),
@@ -841,7 +840,6 @@ describe('Ask in the chain', () => {
       line: 'python3 x',
       commands: [],
       sessionId: '',
-      agentId: '',
     }
     // Two policies naming one runtime agree; the first names the line.
     expect(await new Policies([new OnBeta(), new OnBeta()]).preExecute(line)).toEqual([

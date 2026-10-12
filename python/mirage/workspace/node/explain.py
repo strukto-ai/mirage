@@ -316,7 +316,6 @@ async def _judge_words(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str = "",
     redirect_words: tuple[Word, ...] = (),
     stated: bool = True,
     intrinsic: bool = False,
@@ -346,7 +345,6 @@ async def _judge_words(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         redirect_words (tuple[Word, ...]): the statement's redirect
             targets, empty for a command that has none and for the
             inner lines a command runs, which admission reads the same
@@ -403,7 +401,6 @@ async def _judge_words(
         session,
         registry,
         namespace,
-        agent_id,
         stdin=stdin,
         redirects=redirects,
         intrinsic=intrinsic,
@@ -448,7 +445,6 @@ async def _judge_words(
                     session,
                     registry,
                     namespace,
-                    agent_id,
                     line_frame(inner.line, occurrence),
                     stated and not inner.open,
                     whole_line,
@@ -468,7 +464,6 @@ async def _judge_words(
                     session,
                     registry,
                     namespace,
-                    agent_id,
                     stated=stated and not inner.open,
                     whole_line=whole_line,
                     lost=lost,
@@ -814,7 +809,6 @@ async def line_judgments(
     registry: MountRegistry,
     namespace: Namespace | None,
     handed: HandOff,
-    agent_id: str = "",
 ) -> list[tuple[Walked, list[Judged]]]:
     """Every command of a line judged read-only, each with its place on
     the line: the pass placement waits on (:func:`line_held`) and
@@ -828,7 +822,6 @@ async def line_judgments(
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off, whose origin places each
             command on the line.
-        agent_id (str): the agent the line is attributed to.
     """
     judged: list[tuple[Walked, list[Judged]]] = []
     frame = root_frame(ast, handed.origin)
@@ -844,7 +837,6 @@ async def line_judgments(
                     item.session,
                     registry,
                     namespace,
-                    agent_id,
                     item.redirects,
                     stdin=item.stdin,
                     intrinsic=item.intrinsic,
@@ -975,7 +967,7 @@ async def prejudge_line(
     """
     if judged is None:
         judged = await line_judgments(
-            ast, session, registry, namespace, handed, agent_id
+            ast, session, registry, namespace, handed
         )
     if sum(len(explained) for _, explained in judged) < 2:
         return None
@@ -1025,6 +1017,7 @@ async def _verdict_refuses(
     registry: MountRegistry,
     handed: HandOff,
     cancel: asyncio.Event | None,
+    agent_id: str = "",
 ) -> bool:
     """Whether a verdict's answer refuses the command, putting an
     unanswered ask's question to the host.
@@ -1044,6 +1037,7 @@ async def _verdict_refuses(
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
+        agent_id (str): the agent the line is attributed to.
     """
     ctx = judged.ctx
     if ctx is None:
@@ -1062,7 +1056,9 @@ async def _verdict_refuses(
     # hand_off: this pass exists to decide whether a secret is fetched, and
     # the gate behind it still has to admit the line. An answer given here is
     # claimed for that gate, which runs on it -- so the host is asked once.
-    action = await registry.decisions.resolve(ctx, asked, cancel, claimant)
+    action = await registry.decisions.resolve(
+        ctx, asked, cancel, claimant, agent_id
+    )
     if isinstance(action, Abandoned):
         raise MirageAbortError()
     return action is not None
@@ -1150,7 +1146,6 @@ async def _command_refused(
         walked,
         registry,
         namespace,
-        agent_id,
         item.redirects,
         stdin=item.stdin,
         lost=item.lost,
@@ -1161,7 +1156,7 @@ async def _command_refused(
         # only ever over-fetches.
         if not _is_verdict(judged.judgment) or not _asks_for(judged):
             continue
-        if await _verdict_refuses(judged, registry, handed, cancel):
+        if await _verdict_refuses(judged, registry, handed, cancel, agent_id):
             return True
     return False
 
@@ -1242,7 +1237,6 @@ async def _judge_line(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str,
     frame: Frame,
     stated: bool = True,
     whole_line: bool = False,
@@ -1258,7 +1252,6 @@ async def _judge_line(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         frame (Frame): the scope the line is read in.
         stated (bool): whether the line's text reaches here as the gate
             will read it, as ``_judge_words`` takes it.
@@ -1277,7 +1270,6 @@ async def _judge_line(
                 item.session,
                 registry,
                 namespace,
-                agent_id,
                 item.redirects,
                 stated,
                 stdin=item.stdin,
@@ -1295,6 +1287,7 @@ async def line_held(
     registry: MountRegistry,
     handed: HandOff,
     cancel: asyncio.Event | None = None,
+    agent_id: str = "",
 ) -> bool:
     """Whether the line's admission holds it back, which is what
     placement waits on: admission comes first, so a line the rules
@@ -1316,6 +1309,7 @@ async def line_held(
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
+        agent_id (str): the agent the line is attributed to.
     """
     for _, explained in judged:
         for one in explained:
@@ -1328,7 +1322,11 @@ async def line_held(
             if one.ctx is None or asked is None or not one.stated:
                 continue
             action = await registry.decisions.resolve(
-                one.ctx, asked, cancel, Claimant(handed, one.occurrence)
+                one.ctx,
+                asked,
+                cancel,
+                Claimant(handed, one.occurrence),
+                agent_id,
             )
             if isinstance(action, Abandoned):
                 raise MirageAbortError()
@@ -1353,7 +1351,6 @@ async def explain_line(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str = "",
     whole_line: bool = False,
     every: bool = True,
 ) -> list[Judged]:
@@ -1377,7 +1374,6 @@ async def explain_line(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         whole_line (bool): whether a runtime takes the line whole, which
             reads it as typed (``admit_line``); the executor's gate reads
             each command once expanded.
@@ -1390,7 +1386,6 @@ async def explain_line(
         session,
         registry,
         namespace,
-        agent_id,
         root_frame(ast, None),
         whole_line=whole_line,
         every=every,

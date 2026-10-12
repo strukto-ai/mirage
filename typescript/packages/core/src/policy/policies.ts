@@ -358,18 +358,21 @@ export async function postExecuteGate(
  * Returns what refuses it after the fact (a Deny, or the ledger's answer
  * to an Ask), which the caller turns into exit 126 and a refusal record.
  * Nothing the command did is undone. A run killed while the host decides
- * throws the abort. Mirrors the Python `post_command_gate`.
+ * throws the abort. `agentId` is the agent the line is attributed to,
+ * which a question raised here names for the host. Mirrors the Python
+ * `post_command_gate`.
  */
 export async function postCommandGate(
   policies: Policies,
   ctx: CommandResultContext,
   claimant: Claimant | null = null,
   signal?: AbortSignal,
+  agentId = '',
 ): Promise<Deny | Pending | null> {
   if (!policies.wants('postCommand')) return null
   const answer = await policies.postCommand(ctx)
   if (answer?.kind !== 'ask') return answer
-  const said = await policies.decisions.resolve(ctx, answer, signal, claimant)
+  const said = await policies.decisions.resolve(ctx, answer, signal, claimant, agentId)
   if (said?.kind === 'abandoned') throw makeAbortError()
   return said
 }

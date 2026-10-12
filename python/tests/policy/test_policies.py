@@ -364,7 +364,6 @@ async def test_post_execute_gate_merges_user_limits():
             line="echo",
             commands=(),
             session_id="",
-            agent_id="",
             producer=Producer(command="echo"),
         ),
     )
@@ -429,7 +428,6 @@ async def test_pre_execute_routes_agree_and_an_ask_holds_the_line():
         line="python3 x",
         commands=(),
         session_id="",
-        agent_id="",
     )
     # Two policies naming one runtime agree; the first names the line.
     agreed = await Policies([OnBeta(), OnBeta()]).pre_execute(line)

@@ -559,7 +559,7 @@ export class Workspace {
       binding: this.runtimeBinding,
     })
     this.closers.push(() => this.runtimeWorld.close())
-    this.router = new Router(this.registry, this.runtimeWorld, this.agentId)
+    this.router = new Router(this.registry, this.runtimeWorld)
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(
         new PlacementPolicy(options.routePolicy, () => this.runtimeWorld.entries),
@@ -1116,7 +1116,6 @@ export class Workspace {
         session,
         this.registry,
         this.namespace,
-        '',
         reparse,
         wholeLine,
       )
@@ -1125,7 +1124,6 @@ export class Workspace {
         session,
         this.registry,
         this.namespace,
-        '',
         reparse,
         wholeLine,
         false,
@@ -1139,7 +1137,6 @@ export class Workspace {
           session,
           this.registry,
           this.namespace,
-          '',
           { claimed: [], parent: null, origin: null },
           reparse,
         ),

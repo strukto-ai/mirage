@@ -739,6 +739,7 @@ async function runArgv(
         },
         claimant,
         signal,
+        agentId,
       )
       if (action === null) return
       const [err, code] = renderDeny(ctx.command, action)

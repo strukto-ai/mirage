@@ -121,7 +121,6 @@ async function judged(
           session,
           w.registry,
           w.namespace,
-          '',
           (text) => parser.parse(text),
           wholeLine,
         ),

@@ -356,7 +356,6 @@ async def gate(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str = "",
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     intrinsic: bool = False,
@@ -382,7 +381,6 @@ async def gate(
         registry (MountRegistry): registry holding the policies and the
             CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         stdin (ByteSource | None): the line's stdin, which decides
             whether a bare ``rg`` reads the working directory.
         redirects (Sequence[PathSpec]): the statement's expanded
@@ -451,7 +449,6 @@ async def gate(
         cwd=session.cwd,
         line=line,
         session_id=session.session_id,
-        agent_id=agent_id,
         tokens=tokens,
         program=program,
         tool=tool,
@@ -510,7 +507,7 @@ async def admit(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to, for an
+        agent_id (str): the agent the line is attributed to, for a
             ledger record.
         stdin (ByteSource | None): the line's stdin, which decides
             whether a bare ``rg`` reads the working directory.
@@ -544,7 +541,6 @@ async def admit(
         session,
         registry,
         namespace,
-        agent_id,
         stdin,
         redirects,
         intrinsic=intrinsic,
@@ -557,7 +553,9 @@ async def admit(
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.
     action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(ctx, asked, cancel, claimant)
+        await registry.decisions.resolve(
+            ctx, asked, cancel, claimant, agent_id
+        )
         if isinstance(asked, Ask)
         else asked
     )

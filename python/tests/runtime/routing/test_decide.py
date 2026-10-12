@@ -76,9 +76,7 @@ def ctx_for(line: str) -> RouteContext:
                 ),
             )
         )
-    return RouteContext(
-        line=line, commands=tuple(commands), session_id="s", agent_id="a"
-    )
+    return RouteContext(line=line, commands=tuple(commands), session_id="s")
 
 
 @pytest.mark.asyncio

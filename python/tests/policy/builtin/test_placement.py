@@ -25,7 +25,6 @@ def _line(line: str) -> RouteContext:
         line=line,
         commands=(),
         session_id="",
-        agent_id="",
     )
 
 

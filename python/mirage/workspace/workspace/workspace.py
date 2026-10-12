@@ -674,13 +674,11 @@ class Workspace:
         )
         if holds([one.judgment for one in verdicts]):
             return explained_line(line, judged, verdicts, lambda command: "")
-        agent = self._default_agent_id or ""
         answers, placed = await self._router.placement(
             line,
             session,
-            agent,
             lambda: line_judgments(
-                ast, session, self._registry, self._namespace, HandOff(), agent
+                ast, session, self._registry, self._namespace, HandOff()
             ),
         )
         if isinstance(placed, (Deny, Pending)):

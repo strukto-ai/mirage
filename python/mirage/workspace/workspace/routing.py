@@ -78,7 +78,6 @@ class Router:
         command: str,
         runtime: str | None,
         session: SessionState,
-        agent_id: str,
         inherited: RouteDecision[Runtime] | None,
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
         held: Callable[[], Awaitable[bool]] | None = None,
@@ -106,7 +105,6 @@ class Router:
             runtime (str | None): the execute() runtime argument, which
                 wins over the policy.
             session (SessionState): the effective session (cwd, env).
-            agent_id (str): agent the line runs as.
             inherited (RouteDecision | None): the calling line's
                 decision, for nested evals.
             judged (Callable[[], Awaitable[Sequence[tuple[Walked,
@@ -144,7 +142,7 @@ class Router:
             return None
         if held is not None and await held():
             return placed
-        ctx = self.context(command, session, agent_id, await judged())
+        ctx = self.context(command, session, await judged())
         said, route = await policies.pre_execute(
             ctx, placed=placed is not None
         )
@@ -169,7 +167,6 @@ class Router:
         self,
         command: str,
         session: SessionState,
-        agent_id: str,
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
     ) -> tuple[
         tuple[Deny | Ask | Route, ...],
@@ -182,7 +179,6 @@ class Router:
         Args:
             command (str): the raw command line.
             session (SessionState): the effective session.
-            agent_id (str): agent the line runs as.
             judged (Callable[[], Awaitable[Sequence[tuple[Walked,
                 list[Judged]]]]]): the line pass's reading of the line,
                 as ``decide`` takes it.
@@ -195,7 +191,7 @@ class Router:
         placing = await policies.wants_for("pre_execute", session.session_id)
         if not placing and not any(e.script is not None for e in entries):
             return (), None
-        ctx = self.context(command, session, agent_id, await judged())
+        ctx = self.context(command, session, await judged())
         answers = await policies.answers("pre_execute", ctx)
         winner = settled(answers)
         if isinstance(winner, Ask):
@@ -319,7 +315,6 @@ class Router:
         self,
         line: str,
         session: SessionState,
-        agent_id: str,
         judged: Sequence[tuple[Walked, list[Judged]]],
     ) -> RouteContext:
         """What ``pre_execute`` sees of one line, and ``post_execute``
@@ -331,7 +326,6 @@ class Router:
         Args:
             line (str): the raw command line.
             session (SessionState): the effective session.
-            agent_id (str): agent the line runs as.
             judged (Sequence[tuple[Walked, list[Judged]]]): the line pass's
                 reading of the line (``line_judgments``).
         """
@@ -357,7 +351,6 @@ class Router:
             line=line,
             commands=tuple(commands),
             session_id=session.session_id,
-            agent_id=agent_id,
             session=view,
             ns=ns,
             vfs=vfs,

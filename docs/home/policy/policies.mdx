@@ -118,8 +118,8 @@ TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
 
 | Methods | What it is about | `post_` adds |
 | --- | --- | --- |
-| `pre_execute`, `post_execute` | `line`, `agent_id`, and `commands`: every command of the line | `exit_code`, `output`, `results` |
-| `pre_command`, `post_command` | `line`, `agent_id`, and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
+| `pre_execute`, `post_execute` | `line` and `commands`: every command of the line | `exit_code`, `output`, `results` |
+| `pre_command`, `post_command` | `line` and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
 | `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
 | `pre_session`, `post_session` | `verb`, `key`, `value` | `old` |
 

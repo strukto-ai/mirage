@@ -331,7 +331,6 @@ async function judgeWords(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   reparse: (line: string) => TSNodeLike,
   redirectWords: readonly Word[] = [],
   stated = true,
@@ -368,7 +367,6 @@ async function judgeWords(
     session,
     registry,
     namespace,
-    agentId,
     stdin,
     redirects,
     intrinsic,
@@ -410,7 +408,6 @@ async function judgeWords(
           session,
           registry,
           namespace,
-          agentId,
           reparse,
           lineFrame(inner.line, occurrence),
           literal && !inner.open,
@@ -428,7 +425,6 @@ async function judgeWords(
           session,
           registry,
           namespace,
-          agentId,
           reparse,
           [],
           literal && !inner.open,
@@ -691,7 +687,6 @@ export async function lineJudgments(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   handed: HandOff,
   reparse: (line: string) => TSNodeLike,
 ): Promise<[Walked, Judged[]][]> {
@@ -707,7 +702,6 @@ export async function lineJudgments(
         item.session,
         registry,
         namespace,
-        agentId,
         reparse,
         item.redirects,
         true,
@@ -807,8 +801,7 @@ export async function prejudgeLine(
   // already made them, so the policies are asked once.
   made: [Walked, Judged[]][] | null = null,
 ): Promise<Refused | null> {
-  const judged =
-    made ?? (await lineJudgments(root, session, registry, namespace, agentId, handed, reparse))
+  const judged = made ?? (await lineJudgments(root, session, registry, namespace, handed, reparse))
   if (judged.reduce((n, [, explained]) => n + explained.length, 0) < 2) return null
   for (const [item, explained] of judged) {
     const walked = item.session
@@ -869,6 +862,9 @@ async function verdictRefuses(
   // the gate.
   handed: HandOff,
   signal?: AbortSignal,
+  // The agent the line is attributed to, which a question raised here
+  // names for the host.
+  agentId = '',
 ): Promise<boolean> {
   const ctx = judged.ctx
   if (ctx === undefined) return true
@@ -882,7 +878,7 @@ async function verdictRefuses(
   // handOff: this pass exists to decide whether a secret is fetched, and the
   // gate behind it still has to admit the line. An answer given here is
   // claimed for that gate, which runs on it, so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, claimant)
+  const action = await registry.decisions.resolve(ctx, asked, signal, claimant, agentId)
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action !== null
 }
@@ -952,7 +948,6 @@ async function commandRefused(
     walked,
     registry,
     namespace,
-    agentId,
     reparse,
     item.redirects,
     true,
@@ -967,7 +962,7 @@ async function commandRefused(
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.
     if (!isVerdict(judged.judgment) || !asksFor(judged)) continue
-    if (await verdictRefuses(judged, registry, handed, signal)) return true
+    if (await verdictRefuses(judged, registry, handed, signal, agentId)) return true
   }
   return false
 }
@@ -1054,6 +1049,9 @@ export async function lineHeld(
   registry: MountRegistry,
   handed: HandOff,
   signal?: AbortSignal,
+  // The agent the line is attributed to, which a question raised here
+  // names for the host.
+  agentId = '',
 ): Promise<boolean> {
   for (const [, explained] of judged) {
     for (const one of explained) {
@@ -1062,10 +1060,13 @@ export async function lineHeld(
       if (refuses(expl)) return true
       const asked = expl.answers.find((a): a is Ask => a.kind === 'ask')
       if (one.ctx === undefined || asked === undefined || !one.stated) continue
-      const action = await registry.decisions.resolve(one.ctx, asked, signal, {
-        line: handed,
-        occurrence: one.occurrence,
-      })
+      const action = await registry.decisions.resolve(
+        one.ctx,
+        asked,
+        signal,
+        { line: handed, occurrence: one.occurrence },
+        agentId,
+      )
       if (action !== null) {
         if (action.kind === 'abandoned') throw makeAbortError()
         return true
@@ -1108,7 +1109,6 @@ export async function explainLine(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   reparse: (line: string) => TSNodeLike,
   wholeLine = false,
   every = true,
@@ -1118,7 +1118,6 @@ export async function explainLine(
     session,
     registry,
     namespace,
-    agentId,
     reparse,
     rootFrame(root, null),
     true,
@@ -1342,7 +1341,6 @@ async function judgeLine(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   reparse: (line: string) => TSNodeLike,
   frame: Frame,
   stated = true,
@@ -1359,7 +1357,6 @@ async function judgeLine(
         item.session,
         registry,
         namespace,
-        agentId,
         reparse,
         item.redirects,
         stated,

@@ -394,7 +394,6 @@ export async function gate(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId = '',
   stdin: ByteSource | null = null,
   redirects: readonly PathSpec[] = [],
   intrinsic = false,
@@ -425,7 +424,6 @@ export async function gate(
     argv: [...args],
     cwd: session.cwd,
     sessionId: session.sessionId,
-    agentId,
     tokens,
     program,
     tool,
@@ -477,7 +475,6 @@ export async function admit(
     session,
     registry,
     namespace,
-    agentId,
     stdin,
     redirects,
     intrinsic,
@@ -492,7 +489,7 @@ export async function admit(
   // never re-opens a deny.
   const action =
     asked !== null && asked.kind === 'ask'
-      ? await registry.decisions.resolve(ctx, asked, signal, claimant)
+      ? await registry.decisions.resolve(ctx, asked, signal, claimant, agentId)
       : asked
   // The ledger stopped waiting on a host because this run was killed
   // while it was deciding. That is the kill landing late, not a ruling,

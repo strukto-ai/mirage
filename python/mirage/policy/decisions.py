@@ -389,6 +389,7 @@ class Decisions:
         ask: Ask,
         cancel: asyncio.Event | None = None,
         claimant: Claimant | None = None,
+        agent_id: str = "",
     ) -> Deny | Pending | Abandoned | None:
         """The executor's branch for an Ask: settled records answer it,
         else the question is raised now.
@@ -431,6 +432,8 @@ class Decisions:
                 and to nobody else: not to another spelling of the
                 command on the line, and not to another line judged at
                 the same time.
+            agent_id (str): the agent the line is attributed to, which a
+                question raised here names for the host.
 
         Returns:
             None to run the line, a Deny to refuse it, a Pending when
@@ -467,7 +470,9 @@ class Decisions:
         for rule, record in answers:
             if record is not None:
                 continue
-            action = await self._raise(ctx, rule, argv, cancel, claimant)
+            action = await self._raise(
+                ctx, rule, argv, cancel, claimant, agent_id
+            )
             if action is not None:
                 return action
         # Every rule is answered and the line may run. The ledger is read
@@ -862,6 +867,7 @@ class Decisions:
         argv: tuple[str, ...],
         cancel: asyncio.Event | None = None,
         claimant: Claimant | None = None,
+        agent_id: str = "",
     ) -> Deny | Pending | Abandoned | None:
         """Record one rule of a line as a question and put it to the
         host, None when the host said yes.
@@ -897,13 +903,14 @@ class Decisions:
             cancel (asyncio.Event | None): the run's kill channel.
             claimant (Claimant | None): the asking command and its line,
                 None outside a line.
+            agent_id (str): the agent the line is attributed to.
         """
         record = self._waiting(ctx, rule, argv)
         if record is None:
             record = Decision(
                 id=decision_id(ctx.session_id, ctx.cwd, argv),
                 session_id=ctx.session_id,
-                agent_id=ctx.agent_id,
+                agent_id=agent_id,
                 command=ctx.command,
                 argv=tuple(ctx.argv),
                 cwd=ctx.cwd,
