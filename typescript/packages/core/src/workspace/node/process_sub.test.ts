@@ -158,3 +158,59 @@ it('keeps process-substitution operands separate from stdin and releases their p
     await ws.close()
   }
 })
+
+class FailingVFS extends RAMVFS {
+  constructor() {
+    super()
+    this.store.files.set('/bad', new TextEncoder().encode('firstrest'))
+  }
+  override async *readStream(path: PathSpec): AsyncGenerator<Uint8Array> {
+    yield await Promise.resolve(new TextEncoder().encode('first'))
+    throw Object.assign(new Error(path.virtual), { code: 'EACCES', virtualPath: path.virtual })
+  }
+}
+
+it.each([
+  [': < <(sleep 30); echo after', [0, 'after\n', '']],
+  ['true <(sleep 30); echo after', [0, 'after\n', '']],
+  [
+    'head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?; echo after',
+    [0, 'st:141\nafter\n', ''],
+  ],
+  [
+    'f() { head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?; }; f; echo after',
+    [0, 'st:141\nafter\n', ''],
+  ],
+  ["printf '%0200000d' 0 > >(head -c 1 > /dev/null); echo after", [141, '', '']],
+  ['printf data > >(true); echo after:$?', [0, 'after:0\n', '']],
+  ['{ printf a >&3; printf b; } 3>&1 < <(printf x); echo', [0, 'ab\n', '']],
+  [`f() { cat <(local y=child; printf '%s' "$y"); }; f`, [0, 'child', '']],
+  [
+    '(set -C; echo hi > >(cat); st=$?; wait; echo st:$st; echo x > /dev/null; echo null:$?)',
+    [0, 'hi\nst:0\nnull:0\n', ''],
+  ],
+  [
+    'exec 3< <(printf a); echo st:$?',
+    [0, 'st:2\n', 'mirage: unsupported: exec onto a process substitution\n'],
+  ],
+])('keeps the redirect lifecycle: %s', async (command, expected) => {
+  const ws = await workspace()
+  try {
+    const io = await ws.shell(command)
+    expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual(expected)
+    assertReleased(ws)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('fails only the redirect when a file read fails midway', async () => {
+  const ws = await workspace(new FailingVFS())
+  try {
+    const io = await ws.shell('cat < /data/bad; echo after:$?')
+    expect([io.exitCode, io.stdoutText]).toEqual([0, 'after:1\n'])
+    expect(io.stderrText).toContain('Permission denied')
+  } finally {
+    await ws.close()
+  }
+})

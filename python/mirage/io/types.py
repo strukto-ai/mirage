@@ -39,6 +39,30 @@ class DeviceInput(bytes):
     """
 
 
+class PipeStream(AsyncIterator[bytes]):
+    """A streamed read of a live pipe (a process substitution's ``/dev/fd/N``).
+
+    Another task is still writing it, so its reader takes the bytes as
+    they come: the dispatcher opens it without pulling a first chunk that
+    may wait on the very command about to read it, and a redirect binds it
+    as a stream rather than reading it whole first.
+
+    Args:
+        stream (AsyncIterator[bytes]): the pipe's opened read.
+    """
+
+    def __init__(self, stream: AsyncIterator[bytes]) -> None:
+        self._stream = stream
+
+    async def __anext__(self) -> bytes:
+        return await anext(self._stream)
+
+    async def aclose(self) -> None:
+        closer = getattr(self._stream, "aclose", None)
+        if closer is not None:
+            await closer()
+
+
 # The shape every command returns: a live stdout stream (None when
 # buffered into the result) and the command's outcome.
 CommandOutput = tuple["ByteSource | None", "IOResult"]

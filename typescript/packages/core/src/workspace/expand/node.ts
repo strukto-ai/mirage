@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessSubLine, ExecuteFn } from './types.ts'
-import type { EvaluationContext } from '../evaluation.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../view/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { quotedParts } from '../../shell/helpers.ts'
@@ -379,7 +379,10 @@ async function nodeChunks(
   }
 
   if (ntype === NT.PROCESS_SUBSTITUTION && context.frame.processSub !== null) {
-    const parent = context.fork()
+    // The child shell is taken where the word expands, its function's
+    // locals included, so the substitution sees the shell as it stood
+    // then while the command naming it goes on.
+    const parent = childContext(context)
     return [
       piece(
         await context.frame.processSub(tsNode, (text, options) =>

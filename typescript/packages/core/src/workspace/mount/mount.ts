@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DevVFS } from '../../vfs/dev/dev.ts'
+import { RAMAccessor } from '../../accessor/ram.ts'
+import { activePipe } from '../../core/dev/device.ts'
+import { norm } from '../../utils/path.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -378,12 +381,31 @@ export class MountEntry {
     return out
   }
 
+  /**
+   * The VFS as the owner of `access` sees it: the device mount's own view of
+   * that session's descriptors, so a browser call reads its own `/dev/fd`
+   * whatever other session is live; every other VFS as it is.
+   */
+  private viewFor(access?: SessionAccess): BaseVFS {
+    return this.vfs instanceof DevVFS && access !== undefined
+      ? this.vfs.forSession(access.sessionId)
+      : this.vfs
+  }
+
+  /**
+   * Whether a read of a scope keyed below the mount takes bytes another task
+   * is still writing: a live pipe in a store with pipe endpoints, whose first
+   * byte must not be pulled before its reader asks for it. Mirrors Python's
+   * `reads_live`.
+   */
+  readsLive(scope: PathSpec, access?: SessionAccess): boolean {
+    const accessor = this.viewFor(access).accessor
+    return accessor instanceof RAMAccessor && activePipe(accessor, norm(scope.mountPath)) !== null
+  }
+
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
   glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
-    const vfs =
-      this.vfs instanceof DevVFS && access !== undefined
-        ? this.vfs.forSession(access.sessionId)
-        : this.vfs
+    const vfs = this.viewFor(access)
     const io = vfs === this.vfs ? this.io : commandIo(vfs)
     return resolveGlobOf({ ...io, ...(access === undefined ? {} : { access }) })(
       vfs.accessor,
@@ -791,10 +813,7 @@ export class MountEntry {
     const named = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
     const filetype =
       named === null && !this.vfs.supports('read') ? getExtension(scope.virtual) : named
-    const vfs =
-      this.vfs instanceof DevVFS && access !== undefined
-        ? this.vfs.forSession(access.sessionId)
-        : this.vfs
+    const vfs = this.viewFor(access)
     const levels = this.callers(name, filetype, vfs)
     if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
     taken(name, kwargs)
@@ -817,10 +836,7 @@ export class MountEntry {
    * Python's `read_stream`.
    */
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
-    const vfs =
-      this.vfs instanceof DevVFS && access !== undefined
-        ? this.vfs.forSession(access.sessionId)
-        : this.vfs
+    const vfs = this.viewFor(access)
     if (this.retiring) throw ebusy(this.prefix)
     const limit = this.commandLimits.get('read') ?? null
     const revisions = this.revisions.size > 0 ? this.revisions : null

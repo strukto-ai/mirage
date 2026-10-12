@@ -14,13 +14,12 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { PipeClosed } from '../../io/errors.ts'
-
 import { type RedirectGuard, runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { SharedInput, share } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { DeviceInput, IOResult, materialize } from '../../io/types.ts'
+import { DeviceInput, IOResult, PipeStream, materialize } from '../../io/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
@@ -71,12 +70,21 @@ import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.
 import { concat } from '../../utils/bytes.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
+/**
+ * Send FIFO writes immediately; preserve ordinary redirect recording. While a
+ * pipe is in play (`live`), whatever reaches the terminal goes out as it is
+ * written, through a copied descriptor too, so the bytes keep the order the
+ * command wrote them in. A write into an output pipe whose reader has gone
+ * throws `PipeClosed`, which the redirect answers as SIGPIPE. Mirrors
+ * Python's PipeRecorder.
+ */
 class PipeRecorder extends Recorder {
   constructor(
     private readonly dispatch: DispatchFn,
     private readonly streams: Map<Channel, PathSpec>,
     private readonly forward: Map<Channel, Channel>,
     private readonly sink: JobConsole | null,
+    private readonly live = false,
   ) {
     super()
   }
@@ -87,13 +95,18 @@ class PipeRecorder extends Recorder {
       if (this.sink !== null && channelTo !== undefined) await this.sink.emit(channelTo, data)
       else await super.emit(channel, data)
     } else if (data.byteLength > 0) {
-      try {
-        await this.dispatch('append', scope, [data])
-      } catch (error) {
-        if (!(error instanceof PipeClosed)) throw error
-        throw new ExitSignal(141)
-      }
+      await this.dispatch('append', scope, [data])
     }
+  }
+  override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
+    if (this.live && this.sink !== null && stream instanceof Inherited) {
+      if (stream.owner === this.owner) {
+        await this.sink.emit(stream.channel, data)
+        return
+      }
+      if (await deliver(this.sink, stream, data)) return
+    }
+    await super.emitTo(stream, data)
   }
 }
 
@@ -237,6 +250,9 @@ export async function handleRedirect(
   guard?: RedirectGuard,
   name = '',
   args: readonly string[] = [],
+  // Whether bash forks to run the command (a program or a subshell), so a
+  // closed output pipe ends it alone rather than the shell.
+  forked = false,
 ): Promise<Result> {
   const session = context.session
   const badFd = unsupportedDescriptor(redirects)
@@ -309,6 +325,7 @@ export async function handleRedirect(
   const admissionStdin =
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   const readPaths = new Map<number, string>()
+  const piped = new Set<number>()
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
     expanded.push(r)
@@ -377,7 +394,11 @@ export async function handleRedirect(
           inputs.set(r.fd, stdin)
           continue
         }
-        source = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
+        const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
+        // A pipe streams as its producer writes; a file is read whole
+        // here, so a read that fails partway fails the redirect rather
+        // than the command reading it.
+        source = opened instanceof PipeStream ? opened : await materialize(opened)
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
         else {
@@ -385,7 +406,7 @@ export async function handleRedirect(
           return failed(redirectFailure(scope, error))
         }
       }
-      const data = (await isPipe(dispatch, scope)) ? source : await materialize(source)
+      const data = source
       closed.delete(r.fd)
       readPaths.delete(r.fd)
       outputs.set(r.fd, CLOSED)
@@ -404,13 +425,14 @@ export async function handleRedirect(
         outputs.set(r.fd, file)
       } else {
         readPaths.set(r.fd, scope.virtual)
+        if (data instanceof PipeStream) piped.add(r.fd)
         inputs.set(
           r.fd,
           data instanceof Uint8Array && data.byteLength === 0 && (await isDevice(dispatch, scope))
             ? new DeviceInput()
             : r.fd === 0
               ? data
-              : new SharedInput(data ?? new Uint8Array()),
+              : new SharedInput(data),
         )
       }
     } else {
@@ -450,7 +472,8 @@ export async function handleRedirect(
       streams.set(channel, file.scope)
   }
   const forward = new Map<Channel, Channel>()
-  if (streams.size > 0 || [...readPaths.values()].some((path) => path.startsWith('/dev/fd/'))) {
+  const live = streams.size > 0 || piped.size > 0
+  if (live) {
     for (const [fd, channel] of [
       [1, Channel.STDOUT],
       [2, Channel.STDERR],
@@ -460,7 +483,7 @@ export async function handleRedirect(
       else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
     }
   }
-  const recorder = new PipeRecorder(dispatch, streams, forward, sink ?? null)
+  const recorder = new PipeRecorder(dispatch, streams, forward, sink ?? null, live)
   for (const file of files) {
     if (file.source !== null) continue
     for (const [fd, channel] of [
@@ -506,22 +529,31 @@ export async function handleRedirect(
     if (command === null) {
       if (captureInput && given !== UNREADABLE) await pump(recorder, Channel.STDOUT, given)
     } else {
-      const [, execIo, execNode] = await drained(
-        recorder,
-        ...(await ENCLOSING.run(recorder, () =>
-          runWithRedirectPaths(command, targets, () =>
-            executeNode(
-              command,
-              context,
-              given === UNREADABLE ? unreadableStdin() : given,
-              callStack,
-              { sink: recorder },
+      try {
+        const [, execIo, execNode] = await drained(
+          recorder,
+          ...(await ENCLOSING.run(recorder, () =>
+            runWithRedirectPaths(command, targets, () =>
+              executeNode(
+                command,
+                context,
+                given === UNREADABLE ? unreadableStdin() : given,
+                callStack,
+                { sink: recorder },
+              ),
             ),
-          ),
-        )),
-      )
-      io = execIo
-      refused = execNode.refused
+          )),
+        )
+        io = execIo
+        refused = execNode.refused
+      } catch (error) {
+        if (!(error instanceof PipeClosed)) throw error
+        // SIGPIPE: a program or a subshell writing into an output pipe whose
+        // reader has gone ends alone with its status; a builtin or a compound
+        // is the shell's own, and the shell dies with it, as bash's does.
+        if (!forked) throw new ExitSignal(141)
+        io = new IOResult({ exitCode: 141 })
+      }
     }
   } catch (error) {
     if (!isUnwinding(error)) throw error
@@ -802,13 +834,27 @@ export async function redirectStdin(
   return sources.get(FD_STDIN) ?? null
 }
 
-/** Whether a redirect target is a character device (`/dev/null`). */
+/**
+ * Whether an output target is a live pipe, whose writes stream. Only a
+ * descriptor path is asked, so an ordinary target costs no round trip; a
+ * target reached some other way (a link to a pipe) still reaches it through
+ * the device mount's own write, just not streamed. A descriptor no longer
+ * there is no pipe: its open answers for it. Mirrors Python's _is_pipe.
+ */
 async function isPipe(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
   if (!scope.virtual.startsWith('/dev/fd/')) return false
-  const [stat] = await dispatch('stat', scope)
+  let stat: unknown
+  try {
+    ;[stat] = await dispatch('stat', scope)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    logger.debug(`pipe probe found nothing at ${scope.rawPath}: ${String(err)}`)
+    return false
+  }
   return stat instanceof FileStat && stat.type === FileType.FIFO
 }
 
+/** Whether a redirect target is a character device (`/dev/null`). */
 async function isDevice(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
   let stat: unknown
   try {
@@ -841,11 +887,13 @@ async function isDevice(dispatch: DispatchFn, scope: PathSpec): Promise<boolean>
  * parent first (ENOENT), this reads `Is a directory` too. The other is
  * `set -C`, described next.
  *
- * `set -C` refuses a truncating open onto anything that already exists —
- * an empty file counts, since the test is existence and not size — while
- * `>>` is always allowed and `>|` overrides for that one redirect without
- * clearing the option. A directory reached under the option is refused
- * too, in GNU's own wording for that case rather than the noclobber one.
+ * `set -C` refuses a truncating open onto a regular file that already
+ * exists — an empty one counts, since the test is existence and not size —
+ * while `>>` is always allowed and `>|` overrides for that one redirect
+ * without clearing the option. A directory reached under the option is
+ * refused too, in GNU's own wording for that case rather than the noclobber
+ * one; a device or a pipe (`/dev/null`, a process substitution) opens as any
+ * write does, as bash's noclobber open lets it.
  * bash stops at the first target it cannot open, so the scan reports one
  * line and stops.
  *
@@ -884,7 +932,9 @@ async function openRefusal(
         if (!isFsError(err)) throw err
         stat = null
       }
-      exists = stat instanceof FileStat
+      exists =
+        stat instanceof FileStat &&
+        (stat.type === FileType.FILE || stat.type === FileType.DIRECTORY)
       isDir = stat instanceof FileStat && stat.type === FileType.DIRECTORY
     }
     if (noclobber && exists && !r.append && !r.clobber) {

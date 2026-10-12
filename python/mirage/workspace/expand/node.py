@@ -40,7 +40,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
 from mirage.view.types import SessionView
-from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.fields import join_chunks, value_piece
@@ -477,11 +477,14 @@ async def _node_chunks(
         ntype == NT.PROCESS_SUBSTITUTION
         and context.frame.process_sub is not None
     ):
+        # The child shell is taken where the word expands, its function's
+        # locals included, so the substitution sees the shell as it stood
+        # then while the command naming it goes on.
         path = await context.frame.process_sub(
             ts_node,
             partial(
                 child_line,
-                context.fork(),
+                child_context(context),
                 execute_fn,
                 node=ts_node,
                 call_stack=call_stack,

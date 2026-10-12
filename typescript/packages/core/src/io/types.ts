@@ -46,6 +46,21 @@ export class OutputState {
  */
 export class DeviceInput extends Uint8Array {}
 
+/**
+ * A streamed read of a live pipe (a process substitution's `/dev/fd/N`).
+ * Another task is still writing it, so its reader takes the bytes as they
+ * come: the dispatcher opens it without pulling a first chunk that may wait
+ * on the very command about to read it, and a redirect binds it as a stream
+ * rather than reading it whole first. Mirrors Python's PipeStream.
+ */
+export class PipeStream implements AsyncIterable<Uint8Array> {
+  constructor(private readonly stream: AsyncIterable<Uint8Array>) {}
+
+  [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+    return this.stream[Symbol.asyncIterator]()
+  }
+}
+
 export async function materialize(source: ByteSource | null | undefined): Promise<Uint8Array> {
   if (source === null || source === undefined) return new Uint8Array()
   if (source instanceof Uint8Array) return source

@@ -750,6 +750,7 @@ async def _run_redirected(
     pipe_node = next(
         (r.pipeline for r in redirects if r.pipeline is not None), None
     )
+    forked = _forks(command, context)
     expand = partial(
         expand_redirect,
         context=context,
@@ -757,10 +758,23 @@ async def _run_redirected(
         registry=registry,
         call_stack=call_stack,
         view=view,
-        forked=_forks(command, context),
+        forked=forked,
         links=namespace,
     )
     if _is_bare_exec(command):
+        if any(
+            r.target_node is not None
+            and r.target_node.type == NT.PROCESS_SUBSTITUTION
+            for r in redirects
+        ):
+            # A substitution lives as long as the command naming it, so it
+            # cannot back a descriptor the shell keeps after `exec` returns.
+            err = b"mirage: unsupported: exec onto a process substitution\n"
+            return (
+                None,
+                IOResult(exit_code=2, stderr=err),
+                ExecutionNode(command="exec", exit_code=2, stderr=err),
+            )
         return await install_exec_redirects(
             dispatch, session, redirects, stdin, expand=expand
         )
@@ -799,6 +813,7 @@ async def _run_redirected(
                     guard=guard,
                     name=name,
                     args=args,
+                    forked=forked,
                 )
 
             token = set_redirect_paths(
@@ -826,6 +841,7 @@ async def _run_redirected(
                 call_stack,
                 sink=sink if pipe_node is None else None,
                 expand=expand,
+                forked=forked,
             )
         if simple and command is not None and context.frame.diagnostics:
             err = diagnostic_stderr(command, context)

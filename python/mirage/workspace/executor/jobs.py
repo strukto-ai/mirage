@@ -82,7 +82,9 @@ async def pump(
     computes its output eagerly still lands in one chunk, because there
     was nothing to observe before it finished. A pipe is drained before
     the next chunk is pulled, so a reader that closed stops the source
-    before it fetches more.
+    before it fetches more. A write that fails closes the source too, as
+    TypeScript's ``for await`` does, so no half-read stream is left for
+    the collector to finalize.
 
     Args:
         console (JobConsole): where the output goes.
@@ -95,15 +97,17 @@ async def pump(
         if stream:
             await console.emit(channel, stream)
         return
-    async for chunk in stream:
-        if chunk:
-            await console.emit(channel, chunk)
-        if not isinstance(console, PipeConsole):
-            continue
-        await console.drain()
-        if console.closed_reader:
-            await close_quietly(stream)
-            return
+    try:
+        async for chunk in stream:
+            if chunk:
+                await console.emit(channel, chunk)
+            if not isinstance(console, PipeConsole):
+                continue
+            await console.drain()
+            if console.closed_reader:
+                return
+    finally:
+        await close_quietly(stream)
 
 
 async def drained(

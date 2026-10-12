@@ -26,7 +26,7 @@ import {
   walkSpelling,
 } from '../../commands/builtin/utils/paths.ts'
 import { getExtension } from '../../utils/filetype.ts'
-import { IOResult, type OpReport } from '../../io/types.ts'
+import { IOResult, type OpReport, PipeStream } from '../../io/types.ts'
 import {
   eacces,
   eexist,
@@ -358,6 +358,21 @@ async function primed(
     throw err
   }
   const rest = resumed(first.done === true ? [] : [first.value], iterator, report)
+  await rest.next()
+  return rest
+}
+
+/**
+ * Frame a stream the way `primed` does, its first chunk unpulled: for a live
+ * pipe, whose first byte may wait on the very reader about to ask for it, so
+ * pulling it here would hold the command until the producer wrote, or forever
+ * when the producer waits on the command. Mirrors Python's `_opened`.
+ */
+async function opened(
+  stream: AsyncIterable<Uint8Array>,
+  report: OpReport | undefined,
+): Promise<AsyncIterable<Uint8Array>> {
+  const rest = resumed([], stream[Symbol.asyncIterator](), report)
   await rest.next()
   return rest
 }
@@ -1012,8 +1027,9 @@ export class Dispatcher {
 
   /**
    * Open a streamed read, its first chunk pulled before it returns. A cold
-   * read fills the cache as it is pulled. Mirrors Python's
-   * Dispatcher._open_stream.
+   * read fills the cache as it is pulled. A live pipe's read is neither
+   * pulled nor cached: it answers as a `PipeStream`, which its reader takes
+   * as the bytes come. Mirrors Python's Dispatcher._open_stream.
    */
   private async openStream(
     call: Call,
@@ -1021,13 +1037,16 @@ export class Dispatcher {
     scope: PathSpec,
     filler: CacheManager | null,
   ): Promise<AsyncIterable<Uint8Array>> {
-    const [opened, records] = await commandRecords((mine) =>
+    const [source, records] = await commandRecords((mine) =>
       Promise.resolve([mount.readStream(scope, this.access), mine] as const),
     )
+    if (mount.readsLive(scope, this.access)) {
+      return new PipeStream(await opened(source, call.report))
+    }
     const stream =
       filler === null
-        ? opened
-        : filler.fillStream(call.path, opened, records, () => !this.rendersRead(call, mount))
+        ? source
+        : filler.fillStream(call.path, source, records, () => !this.rendersRead(call, mount))
     return await primed(stream, call.report)
   }
 

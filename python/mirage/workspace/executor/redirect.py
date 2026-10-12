@@ -27,7 +27,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import materialize
-from mirage.io.types import ByteSource, DeviceInput
+from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -109,7 +109,21 @@ class _Unreadable(Enum):
 
 
 class PipeRecorder(Recorder):
-    """Send FIFO writes immediately; preserve ordinary redirect recording."""
+    """Send FIFO writes immediately; preserve ordinary redirect recording.
+
+    While a pipe is in play (``live``), whatever reaches the terminal
+    goes out as it is written, through a copied descriptor too, so the
+    bytes keep the order the command wrote them in. A write into an output
+    pipe whose reader has gone raises ``PipeClosed``, which the redirect
+    answers as SIGPIPE.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher the pipe writes go through.
+        streams (dict[Channel, PathSpec]): channels bound to output pipes.
+        forward (dict[Channel, Channel]): terminal channels sent through.
+        sink (JobConsole | None): where the level writes.
+        live (bool): whether any input or output of the level is a pipe.
+    """
 
     def __init__(
         self,
@@ -117,12 +131,14 @@ class PipeRecorder(Recorder):
         streams: dict[Channel, PathSpec],
         forward: dict[Channel, Channel],
         sink: JobConsole | None,
+        live: bool = False,
     ) -> None:
         super().__init__()
         self.dispatch = dispatch
         self.streams = streams
         self.forward = forward
         self.sink = sink
+        self.live = live
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         scope = self.streams.get(channel)
@@ -132,10 +148,20 @@ class PipeRecorder(Recorder):
             else:
                 await super().emit(channel, data)
         elif data:
-            try:
-                await self.dispatch("append", scope, data=data)
-            except PipeClosed as exc:
-                raise ExitSignal(141) from exc
+            await self.dispatch("append", scope, data=data)
+
+    async def emit_to(self, stream: OwnedStream, data: bytes) -> None:
+        if (
+            self.live
+            and self.sink is not None
+            and isinstance(stream, Inherited)
+        ):
+            if stream.owner is self:
+                await self.sink.emit(stream.channel, data)
+                return
+            if await deliver(self.sink, stream, data):
+                return
+        await super().emit_to(stream, data)
 
 
 class JobRoute(JobOutput):
@@ -322,6 +348,7 @@ async def handle_redirect(
     guard: RedirectGuard | None = None,
     name: str = "",
     args: tuple[str, ...] = (),
+    forked: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Apply ordered descriptor bindings for one command and restore them.
 
@@ -352,6 +379,8 @@ async def handle_redirect(
         guard (RedirectGuard | None): admit each resolved target before I/O.
         name (str): command name for the output-only fast path.
         args (tuple[str, ...]): expanded command arguments.
+        forked (bool): whether bash forks to run the command (a program
+            or a subshell), so a closed output pipe ends it alone.
     """
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
@@ -442,6 +471,7 @@ async def handle_redirect(
         else stdin
     )
     read_paths: dict[int, str] = {}
+    piped: set[int] = set()
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
         expanded.append(r)
@@ -516,15 +546,17 @@ async def handle_redirect(
                     inputs[r.fd], outputs[r.fd] = stdin, _CLOSED
                     continue
                 data, _ = await dispatch("read", scope, stream=True)
+                # A pipe streams as its producer writes; a file is read
+                # whole here, so a read that fails partway fails the
+                # redirect rather than the command reading it.
+                if not isinstance(data, PipeStream):
+                    data = await materialize(data) or b""
             except FileNotFoundError as exc:
                 if r.kind != RedirectKind.READWRITE:
                     return await failed(_redirect_failure(scope, exc))
                 data = b""
             except FS_ERRORS as exc:
                 return await failed(_redirect_failure(scope, exc))
-            fifo = await _is_pipe(dispatch, scope)
-            if not fifo:
-                data = await materialize(data) or b""
             closed.discard(r.fd)
             read_paths.pop(r.fd, None)
             outputs[r.fd] = _CLOSED
@@ -536,11 +568,13 @@ async def handle_redirect(
                 except FS_ERRORS as exc:
                     return await failed(_redirect_failure(scope, exc))
                 file = FileDescription(scope, append=True, opened=True)
-                file.source = FileInput(file, data)
+                file.source = FileInput(file, await materialize(data) or b"")
                 files.append(file)
                 inputs[r.fd], outputs[r.fd] = file.source, file
             else:
                 read_paths[r.fd] = scope.virtual
+                if isinstance(data, PipeStream):
+                    piped.add(r.fd)
                 inputs[r.fd] = (
                     DeviceInput()
                     if data == b"" and await _is_device(dispatch, scope)
@@ -589,16 +623,15 @@ async def handle_redirect(
         and await _is_pipe(dispatch, pipe_file.scope)
     }
     forward = {}
-    if streams or any(
-        path.startswith("/dev/fd/") for path in read_paths.values()
-    ):
+    live = bool(streams) or bool(piped)
+    if live:
         for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
             target = outputs[fd]
             if target is _TO_STDOUT:
                 forward[channel] = Channel.STDOUT
             elif target is _TO_STDERR:
                 forward[channel] = Channel.STDERR
-    recorder = PipeRecorder(dispatch, streams, forward, sink)
+    recorder = PipeRecorder(dispatch, streams, forward, sink, live)
     for file in files:
         if file.source is None:
             for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
@@ -650,19 +683,28 @@ async def handle_redirect(
                 await pump(recorder, Channel.STDOUT, inputs[0])
             io = IOResult()
         else:
-            _, io, exec_node = await drained(
-                recorder,
-                *await execute_node(
-                    command,
-                    context,
-                    unreadable_stdin()
-                    if isinstance(inputs[0], _Unreadable)
-                    else inputs[0],
-                    call_stack,
-                    sink=recorder,
-                ),
-            )
-            refused = exec_node.refused
+            try:
+                _, io, exec_node = await drained(
+                    recorder,
+                    *await execute_node(
+                        command,
+                        context,
+                        unreadable_stdin()
+                        if isinstance(inputs[0], _Unreadable)
+                        else inputs[0],
+                        call_stack,
+                        sink=recorder,
+                    ),
+                )
+                refused = exec_node.refused
+            except PipeClosed:
+                # SIGPIPE: a program or a subshell writing into an output
+                # pipe whose reader has gone ends alone with its status;
+                # a builtin or a compound is the shell's own, and the
+                # shell dies with it, as bash's does.
+                if not forked:
+                    raise ExitSignal(141) from None
+                io = IOResult(exit_code=141)
     except UNWINDING as sig:
         unwound, io = sig, IOResult()
         output = await take_stdout(sig)
@@ -1054,9 +1096,24 @@ async def redirect_stdin(
 
 
 async def _is_pipe(dispatch: DispatchFn, scope: PathSpec) -> bool:
+    """Whether an output target is a live pipe, whose writes stream.
+
+    Only a descriptor path is asked, so an ordinary target costs no
+    round trip; a target reached some other way (a link to a pipe) still
+    reaches it through the device mount's own write, just not streamed.
+    A descriptor no longer there is no pipe: its open answers for it.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        scope (PathSpec): the redirect target.
+    """
     if not scope.virtual.startswith("/dev/fd/"):
         return False
-    stat, _ = await dispatch("stat", scope)
+    try:
+        stat, _ = await dispatch("stat", scope)
+    except FS_ERRORS as exc:
+        logger.debug("pipe probe found nothing at %s: %s", scope.raw_path, exc)
+        return False
     return isinstance(stat, FileStat) and stat.type == FileType.FIFO
 
 
@@ -1102,13 +1159,15 @@ async def _open_refusal(
     itself absent: bash reports the parent first (ENOENT), this reads
     `Is a directory` too. The other is `set -C`, described next.
 
-    `set -C` refuses a truncating open onto anything that already exists
-    -- an empty file counts, since the test is existence and not size --
-    while `>>` is always allowed and `>|` overrides for that one
+    `set -C` refuses a truncating open onto a regular file that already
+    exists -- an empty one counts, since the test is existence and not
+    size -- while `>>` is always allowed and `>|` overrides for that one
     redirect without clearing the option. A directory reached under the
     option is refused too, in GNU's own wording for that case rather
-    than the noclobber one. bash stops at the first target it cannot
-    open, so the scan reports one line and stops.
+    than the noclobber one; a device or a pipe (`/dev/null`, a process
+    substitution) opens as any write does, as bash's noclobber open lets
+    it. bash stops at the first target it cannot open, so the scan
+    reports one line and stops.
 
     Targets are stat'd through the op dispatcher rather than a backend,
     so a redirect that lands on another mount is answered by the mount
@@ -1150,7 +1209,10 @@ async def _open_refusal(
                     exc,
                 )
                 stat = None
-            exists = stat is not None
+            exists = stat is not None and stat.type in (
+                FileType.FILE,
+                FileType.DIRECTORY,
+            )
             is_dir = stat is not None and stat.type == FileType.DIRECTORY
         if noclobber and exists and not r.append and not r.clobber:
             detail = (

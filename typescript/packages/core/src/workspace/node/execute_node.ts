@@ -604,6 +604,7 @@ async function runRedirected(
   }
   const pipeNode =
     (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
+  const forked = forks(command, context)
   const expand = (redirect: Redirect) =>
     expandRedirect(
       redirect,
@@ -612,10 +613,22 @@ async function runRedirected(
       registry,
       callStack,
       sessionView(session, registry.policies, context.frame.diagnostics),
-      forks(command, context),
+      forked,
       namespace,
     )
   if (isBareExec(command)) {
+    if (
+      redirects.some((r) => (r.targetNode as TSNodeLike | null)?.type === NT.PROCESS_SUBSTITUTION)
+    ) {
+      // A substitution lives as long as the command naming it, so it cannot
+      // back a descriptor the shell keeps after `exec` returns.
+      const err = encodeText('mirage: unsupported: exec onto a process substitution\n')
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'exec', exitCode: 2, stderr: err }),
+      ]
+    }
     return await installExecRedirects(dispatch, session, redirects, stdin, expand)
   }
   // A heredoc's operator line reads the routed stdout, so then it is
@@ -651,6 +664,7 @@ async function runRedirected(
           guard,
           name,
           args,
+          forked,
         )
       ;[stdout, io, execNode] = await runWithRedirectPaths(
         command,
@@ -677,6 +691,10 @@ async function runRedirected(
         false,
         pipeNode === null ? sink : undefined,
         expand,
+        undefined,
+        '',
+        [],
+        forked,
       )
     }
     if (simple && context.frame.diagnostics.length > 0) {

@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Callable, cast
 
+from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import (
     push_cache_manager,
     push_write_context,
@@ -60,6 +61,7 @@ from mirage.context import (
     set_walk_probe,
     strongest_mode_under,
 )
+from mirage.core.dev.device import active_pipe
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
     expect_offset,
@@ -97,6 +99,7 @@ from mirage.utils.context_scope import ContextScope
 from mirage.utils.filetype import get_extension
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import norm
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared
@@ -1338,6 +1341,20 @@ class MountEntry:
                 reset_revisions(revs_token)
                 reset_active_recorder(recording_token)
                 push_write_context(prev_write)
+
+    def reads_live(self, path: str) -> bool:
+        """Whether a read of ``path`` takes bytes another task is still
+        writing: a live pipe in a store with pipe endpoints, whose first
+        byte must not be pulled before its reader asks for it.
+
+        Args:
+            path (str): virtual path.
+        """
+        accessor = getattr(self.vfs, "accessor", None)
+        if not isinstance(accessor, RAMAccessor):
+            return False
+        key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
+        return active_pipe(accessor, key) is not None
 
     def read_stream(self, path: str) -> AsyncIterator[bytes]:
         """The VFS's streamed read of ``path``, framed for later pulls.

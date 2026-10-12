@@ -59,6 +59,7 @@ from mirage.errors.fs import (
 )
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly
+from mirage.io.types import PipeStream
 from mirage.observe.context import (
     RecordingScope,
     active_lost,
@@ -210,6 +211,24 @@ async def _primed(
         await close_quietly(iterator)
         raise
     resumed = _resumed(head, iterator, report)
+    await resumed.__anext__()
+    return resumed
+
+
+async def _opened(
+    stream: AsyncIterator[bytes], report: OpReport | None
+) -> AsyncIterator[bytes]:
+    """Frame a stream the way ``_primed`` does, its first chunk unpulled.
+
+    For a live pipe, whose first byte may wait on the very reader about
+    to ask for it: pulling it here would hold the command until the
+    producer wrote, or forever when the producer waits on the command.
+
+    Args:
+        stream (AsyncIterator[bytes]): the streamed read.
+        report (OpReport | None): the caller's report.
+    """
+    resumed = _resumed([], stream.__aiter__(), report)
     await resumed.__anext__()
     return resumed
 
@@ -1354,7 +1373,9 @@ class Dispatcher:
     ) -> AsyncIterator[bytes]:
         """Open a streamed read, its first chunk pulled before it returns.
 
-        A cold read fills the cache as it is pulled.
+        A cold read fills the cache as it is pulled. A live pipe's read is
+        neither pulled nor cached: it answers as a ``PipeStream``, which
+        its reader takes as the bytes come.
 
         Args:
             call (_Call): the admitted read.
@@ -1363,6 +1384,8 @@ class Dispatcher:
         """
         with command_records() as records:
             stream = mount.read_stream(call.path.virtual)
+        if mount.reads_live(call.path.virtual):
+            return PipeStream(await _opened(stream, call.report))
         if filler is not None:
             stream = filler.fill_stream(
                 call.path,

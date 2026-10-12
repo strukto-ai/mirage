@@ -82,11 +82,17 @@ export class ProcessSubScope {
       task: Promise.resolve(),
     }
     const output = new SubstitutionConsole(endpoint, this.sink ?? this.capture, abort)
-    child.task = executeLine(getProcessSubBody(node), {
-      sink: output,
-      signal,
-      ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
-    })
+    // The line starts once the command naming it has, as bash's forked child
+    // does and Python's task does: a consumer that reads nothing must not
+    // close its pipe before the command's first write lands.
+    child.task = new Promise<void>((resolve) => setTimeout(resolve, 0))
+      .then(() =>
+        executeLine(getProcessSubBody(node), {
+          sink: output,
+          signal,
+          ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
+        }),
+      )
       .then(async (io) => {
         await output.emit(Channel.STDOUT, await materialize(io.stdout))
         await output.emit(Channel.STDERR, await materialize(io.stderr))
@@ -125,6 +131,9 @@ export class ProcessSubScope {
           try {
             await joinOrAbort(child.task, child.signal)
           } catch (error) {
+            // A join the caller cut short leaves the child to settle on its
+            // own; its late output must not reach a console the caller left.
+            child.abort.abort()
             if (!child.signal.aborted) throw error
           }
           if (child.failure !== undefined) throw child.failure
