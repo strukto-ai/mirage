@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../../expand/types.ts'
 import { getAdmission } from '../../../context/session_context.ts'
 import type { EntryGate } from '../../../policy/types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
@@ -60,7 +59,7 @@ import {
   type FindExpr,
 } from '../../../commands/builtin/find_parse.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
-
+import type { ExecuteFn } from '../../expand/types.ts'
 import { FindParseError } from '../../../commands/errors.ts'
 import { withDispatchRuleGuard } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
@@ -315,8 +314,20 @@ export async function handleCommand(
     parts = [runs, option, ...parts.slice(1)]
   }
 
-  // Every op the command issues from here carries its gate to the dispatcher.
+  // Every op the command issues from here carries its gate to the dispatcher,
+  // and so does every mount run below: one run, a fan-out or a cross-mount.
   dispatch = withDispatchRuleGuard(dispatch, admission)
+  const runCtx: RunOnMountCtx = {
+    admission,
+    ...(signal !== undefined ? { signal } : {}),
+    registry,
+    context,
+    dispatch,
+    ...(namespace !== undefined ? { namespace } : {}),
+    ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
+    ...(routingDecision !== undefined ? { routingDecision } : {}),
+    ...(executeFn !== undefined ? { executeFn } : {}),
+  }
 
   if (cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
@@ -560,17 +571,6 @@ export async function handleCommand(
         groups.map((group) => group.map((p) => p.rawPath)),
       )
     }
-    const runCtx: RunOnMountCtx = {
-      admission,
-      ...(signal !== undefined ? { signal } : {}),
-      registry,
-      context,
-      dispatch,
-      ...(namespace !== undefined ? { namespace } : {}),
-      ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
-      ...(routingDecision !== undefined ? { routingDecision } : {}),
-      ...(executeFn !== undefined ? { executeFn } : {}),
-    }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
     const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission)
@@ -757,23 +757,7 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       (name, ps, ts, fk, opts) =>
-        runOnMount(
-          {
-            registry,
-            context,
-            dispatch,
-            ...(namespace !== undefined ? { namespace } : {}),
-            ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
-            ...(routingDecision !== undefined ? { routingDecision } : {}),
-            ...(executeFn !== undefined ? { executeFn } : {}),
-            ...(signal !== undefined ? { signal } : {}),
-          },
-          name,
-          ps,
-          ts,
-          fk,
-          { ...opts, argv: spelledWords(parts.slice(1)) },
-        ),
+        runOnMount(runCtx, name, ps, ts, fk, { ...opts, argv: spelledWords(parts.slice(1)) }),
     )
     let fanOut = fanOut0
     if (cmdName === 'find') {
@@ -802,17 +786,6 @@ export async function handleCommand(
     return [fanOut, fanIo, fanNode]
   }
 
-  const runCtx: RunOnMountCtx = {
-    admission,
-    ...(signal !== undefined ? { signal } : {}),
-    registry,
-    context,
-    dispatch,
-    ...(namespace !== undefined ? { namespace } : {}),
-    ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
-    ...(routingDecision !== undefined ? { routingDecision } : {}),
-    ...(executeFn !== undefined ? { executeFn } : {}),
-  }
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,
     mount,

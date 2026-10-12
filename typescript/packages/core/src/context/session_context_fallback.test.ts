@@ -1011,3 +1011,57 @@ it('keeps unbound file calls restrictive when a wider browser session shadows th
     await ws.close()
   }
 })
+
+it('walks a nested mount under the command’s own gate while another session’s gate is live', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS(), '/data/sub': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const sealed = ws.createSession('sealed', {
+    profile: parseSessionProfile({
+      commands: { deny: [{ reason: 'sealed', commands: { pause: ['/data/sub/box'] } }] },
+    }),
+  })
+  const free = ws.createSession('free')
+  const [held, release] = gate()
+  const [entered, enter] = gate()
+  ws.registerCli(
+    'pause',
+    new CLI({
+      spec: new CommandSpec({ name: 'pause' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            enter()
+            await held
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  try {
+    await ws.vfs.write('/data/a', 'a')
+    await ws.vfs.mkdir('/data/sub/box')
+    await ws.vfs.write('/data/sub/box/f', 'f')
+    const paused = ws.shell('pause', { sessionId: sealed.sessionId })
+    await entered
+    const found = await ws.shell('find /data', { sessionId: free.sessionId })
+    const grepped = await ws.shell('grep -r f /data', { sessionId: free.sessionId })
+    release()
+    await paused
+    expect([found.stdoutText, found.stderrText, found.exitCode]).toEqual([
+      '/data\n/data/a\n/data/sub\n/data/sub/box\n/data/sub/box/f\n',
+      '',
+      0,
+    ])
+    expect([grepped.stdoutText, grepped.stderrText, grepped.exitCode]).toEqual([
+      '/data/sub/box/f:f\n',
+      '',
+      0,
+    ])
+  } finally {
+    release()
+    await ws.close()
+  }
+})

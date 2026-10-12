@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../../expand/types.ts'
 import type { EntryGate } from '../../../policy/types.ts'
 import { sessionAccess } from '../../../context/session_context.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
@@ -31,7 +30,7 @@ import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
-
+import type { ExecuteFn } from '../../expand/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
@@ -44,7 +43,7 @@ import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 export interface RunOnMountCtx {
-  admission?: EntryGate | null
+  admission: EntryGate | null
   registry: MountRegistry
   context: EvaluationContext
   dispatch: DispatchFn
@@ -264,7 +263,7 @@ export async function runOnMount(
   const access = sessionAccess(session)
   try {
     return await mount.runCommand(cmdName, paths, texts, flags, {
-      ...(ctx.admission === undefined ? {} : { admission: ctx.admission }),
+      admission: ctx.admission,
       access,
       stdin: opts.stdin ?? null,
       cwd: session.cwd,
