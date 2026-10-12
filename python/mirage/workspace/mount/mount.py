@@ -942,7 +942,6 @@ class MountEntry:
         cwd = context.cwd
         return CommandOpts(
             command=cmd_name,
-            admission=context.admission,
             access=context.access,
             stdin=context.stdin,
             flags=flags,
@@ -956,7 +955,6 @@ class MountEntry:
             index=self.index,
             io=dataclasses.replace(
                 dispatched_io(self.io, context.dispatch),
-                admission=context.admission,
                 access=context.access,
             ),
             dispatch=context.dispatch,

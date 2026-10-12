@@ -19,7 +19,7 @@ from mirage.commands.config import ExecContext
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.context.session_context import get_admission, session_access
+from mirage.context.session_context import session_access
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -306,7 +306,6 @@ async def run_on_mount(
             texts,
             flag_kwargs,
             ExecContext(
-                admission=get_admission(),
                 access=session_access(session),
                 limit_override=(
                     session.command_limits.get(cmd_name)

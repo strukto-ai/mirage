@@ -15,22 +15,22 @@
 import { encodeText } from '../../shell/bytes.ts'
 import { getText } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { concat } from '../../utils/bytes.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 
+/** The stderr a statement's expansions left, in the order they spoke: a
+ * text diagnostic in bash's words, prefixed with the builtin the statement
+ * names when bash names one, and bytes (a substitution's own stderr)
+ * verbatim. Mirrors Python's diagnostic_stderr. */
 export function diagnosticStderr(node: TSNodeLike, context: EvaluationContext): Uint8Array {
   const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
   const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
     ? head
     : ''
   const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
-  const parts = context.frame.diagnostics.map((message) =>
-    typeof message === 'string' ? encodeText(prefix + message + '\n') : message,
+  return concat(
+    context.frame.diagnostics.map((message) =>
+      typeof message === 'string' ? encodeText(prefix + message + '\n') : message,
+    ),
   )
-  const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
-  let offset = 0
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-  return result
 }

@@ -24,14 +24,13 @@ export type Stamp = readonly [epoch: number, key: number]
  * granted its turn after it. The writer takes a stamp before it waits and
  * compares it before it installs.
  *
- * The window is open only where the writer actually suspends in between,
- * and that differs by host. Here it always does: `KeyLock.withLock` awaits
- * an already-resolved promise, which is a microtask yield, and the redis
- * store additionally awaits its client. On python it currently never does
- * (`asyncio.Lock.acquire` returns without suspending when the lock is
- * free), so the check is dormant there rather than dead -- it is the
- * contract both hosts share, and the guard that keeps a future await from
- * silently reopening the window.
+ * The window is open only where the writer actually suspends in between:
+ * behind another writer of the key, or in a store that awaits its client
+ * (redis). A free lock admits a writer without suspending on both hosts
+ * (`KeyLock.withLock` runs it at once, as python's `asyncio.Lock.acquire`
+ * returns), so for an uncontended in-memory write the check is dormant
+ * rather than dead -- it is the contract both hosts share, and the guard
+ * that keeps a future await from silently reopening the window.
  *
  * Two counters, because invalidations have different reaches. The
  * store-wide epoch answers `clear`. The per-key counter answers a removal

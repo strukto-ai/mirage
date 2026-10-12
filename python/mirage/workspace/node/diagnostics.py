@@ -19,6 +19,16 @@ from mirage.workspace.evaluation import EvaluationContext
 
 
 def diagnostic_stderr(node: TSNodeLike, context: EvaluationContext) -> bytes:
+    """The stderr a statement's expansions left, in the order they spoke.
+
+    A text diagnostic is worded as bash words it, prefixed with the
+    builtin the statement names when bash names one; bytes (a
+    substitution's own stderr) pass through verbatim.
+
+    Args:
+        node (TSNodeLike): the statement the diagnostics belong to.
+        context (EvaluationContext): the evaluation holding them.
+    """
     if not context.frame.diagnostics:
         return b""
     head = get_text(node).split(None, 1)[0]
