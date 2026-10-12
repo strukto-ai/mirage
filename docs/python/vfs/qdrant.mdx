@@ -154,10 +154,18 @@ All commands delegate to Mirage's shared implementations.
 | `cat`           | print a point's text/JSON, or dump raw blob/image bytes  |
 | `stat`          | directory vs file, blob size, image mime type            |
 | `find`          | walk the tree (e.g. `find /fashion -name '*.txt'`)       |
-| `grep` / `rg`   | lexical search over the text/JSON files                  |
+| `grep` / `rg`   | lexical search over the text/JSON files ([below](#grep-and-rg)) |
 | `search`        | semantic (vector) search -> ranked content paths + score |
 | `head` / `tail` | first/last lines of a file                               |
 | `wc`            | count lines/bytes of a file                              |
+
+## grep and rg
+
+A folder listing scrolls every point's payload anyway, so each `.json` and
+`.txt` entry keeps its rendered text, lowercased, and `grep -r` and `rg` read
+only the files whose text holds the pattern's text in any case, asking Qdrant
+nothing more. A blob, a `.json` or `.txt` over 8 KiB, and every file for a text
+that is not ASCII are read as usual.
 
 ## Access pattern
 

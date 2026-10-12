@@ -27,6 +27,15 @@ import { distinctValues, resolveGroup, rowsMatching, tableExists } from './query
 import { renderJson, renderText } from './render.ts'
 import type { QdrantRow } from './types.ts'
 
+// The largest rendered .json or .txt whose text its entry keeps, lowercased,
+// for grep to check without reading it (`filesContaining`).
+export const KEPT_TEXT_MAX = 8192
+
+function kept(rendered: Uint8Array): Record<string, string> {
+  if (rendered.byteLength > KEPT_TEXT_MAX) return {}
+  return { text: new TextDecoder().decode(rendered).toLowerCase() }
+}
+
 function blobSize(value: unknown): number | null {
   // A payload whose blob column holds something undecodable must not take
   // the whole listing down with it: leave the size unknown and let read()
@@ -41,12 +50,14 @@ function blobSize(value: unknown): number | null {
 
 function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, IndexEntry][] {
   // The scroll already carries every payload, so each file's exact rendered
-  // size is free here; stat serves it from the index instead of refetching
-  // one row per file.
+  // size and text are free here; stat serves the size from the index instead
+  // of refetching one row per file, and grep checks the text instead of
+  // reading it.
   const entries: [string, IndexEntry][] = []
   for (const row of rows) {
     const id = String(row[config.idField])
     const stem = rowStem(row, config)
+    const rendered = renderJson(row, config)
     entries.push([
       `${stem}.json`,
       new IndexEntry({
@@ -54,7 +65,8 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
         name: `${stem}.json`,
         resourceType: 'qdrant/row_json',
         vfsName: `${stem}.json`,
-        size: renderJson(row, config).byteLength,
+        size: rendered.byteLength,
+        extra: kept(rendered),
       }),
     ])
     if (
@@ -62,6 +74,7 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
       fieldValue(row, config.textField) !== null &&
       fieldValue(row, config.textField) !== undefined
     ) {
+      const text = renderText(row, config)
       entries.push([
         `${stem}.txt`,
         new IndexEntry({
@@ -69,7 +82,8 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
           name: `${stem}.txt`,
           resourceType: 'qdrant/row_text',
           vfsName: `${stem}.txt`,
-          size: renderText(row, config).byteLength,
+          size: text.byteLength,
+          extra: kept(text),
         }),
       ])
     }

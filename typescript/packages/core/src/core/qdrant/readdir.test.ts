@@ -24,6 +24,7 @@ import { blobBytes } from '../vector/read.ts'
 import { fieldValue } from './payload.ts'
 import { pointToRow } from './query.ts'
 import { renderJson, renderText } from './render.ts'
+import { filesContaining } from './search.ts'
 import { readdir } from './tree.ts'
 import type { QdrantPoint } from './types.ts'
 
@@ -266,5 +267,72 @@ describe('qdrant capped listings', () => {
     await readdir(acc, spec('/animals/cat/big'), index)
     expect(index.windows.get('/animals')).toBe(true)
     expect(index.windows.get('/animals/cat/big')).toBe(true)
+  })
+})
+
+const ANIMAL_POINTS: QdrantPoint[] = [
+  CAT,
+  {
+    id: 2,
+    payload: { label: 'cat', kind: 'small', name: 'a small grey cat', image_bytes: 'UE5HLTI=' },
+  },
+  {
+    id: 3,
+    payload: { label: 'dog', kind: 'big', name: 'a big brown dog', image_bytes: 'UE5HLTM=' },
+  },
+  {
+    id: 4,
+    payload: { label: 'dog', kind: 'small', name: 'a small white dog', image_bytes: 'UE5HLTQ=' },
+  },
+]
+
+async function containing(
+  points: QdrantPoint[],
+  text: string,
+  path = '/animals',
+): Promise<string[] | null> {
+  const found = await filesContaining(
+    readdir,
+    accessorOf(ANIMALS, points),
+    text,
+    [spec(path)],
+    new RAMIndexCacheStore(),
+  )
+  return found === null ? null : found.map((p) => p.virtual).sort()
+}
+
+// Twin of the files_containing tests in python/tests/core/qdrant/test_search.py:
+// the listing keeps each .json and .txt file's text, so a file is read only
+// when its text holds the word in any case; a blob is always read.
+describe('qdrant filesContaining', () => {
+  it('reads only the files whose text holds it', async () => {
+    const blobs = ['cat/big/1', 'cat/small/2', 'dog/big/3', 'dog/small/4'].map(
+      (stem) => `/animals/${stem}.png`,
+    )
+    expect(await containing(ANIMAL_POINTS, 'Orange')).toEqual(
+      ['/animals/cat/big/1.json', '/animals/cat/big/1.txt', ...blobs].sort(),
+    )
+    expect(await containing(ANIMAL_POINTS, 'kind', '/animals/dog')).toEqual([
+      '/animals/dog/big/3.json',
+      '/animals/dog/big/3.png',
+      '/animals/dog/small/4.json',
+      '/animals/dog/small/4.png',
+    ])
+  })
+
+  it('reads a file too large to keep', async () => {
+    const big: QdrantPoint = {
+      id: 2,
+      payload: { label: 'cat', kind: 'small', name: 'grey '.repeat(2000), image_bytes: 'UE5HLTI=' },
+    }
+    expect(await containing([CAT, big], 'orange', '/animals/cat/small')).toEqual([
+      '/animals/cat/small/2.json',
+      '/animals/cat/small/2.png',
+      '/animals/cat/small/2.txt',
+    ])
+  })
+
+  it('reads every file for a text that is not ASCII', async () => {
+    expect(await containing(ANIMAL_POINTS, 'caf\u00e9')).toBeNull()
   })
 })

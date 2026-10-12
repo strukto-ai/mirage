@@ -29,6 +29,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import type { SearchQuery } from '../types.ts'
 import { readdir, read, stat, SEARCH } from '../../core/qdrant/tree.ts'
+import { filesContaining } from '../../core/qdrant/search.ts'
 
 export interface QdrantVFSOptions {
   config: QdrantConfig
@@ -86,6 +87,15 @@ export class QdrantVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return stat(this.accessor, path, index)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    _opts: { wholeWord: boolean; ignoreCase: boolean },
+    index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    return filesContaining(readdir, this.accessor, text, under, index)
   }
 
   override search(

@@ -37,6 +37,10 @@ from mirage.vfs.qdrant.config import QdrantConfig
 
 logger = logging.getLogger(__name__)
 
+# The largest rendered .json or .txt whose text its entry keeps, lowercased,
+# for grep to check without reading it (``files_containing``).
+KEPT_TEXT_MAX = 8192
+
 
 def _blob_size(value: JsonValue) -> int | None:
     # A payload whose blob column holds something undecodable must not take
@@ -51,16 +55,24 @@ def _blob_size(value: JsonValue) -> int | None:
         return None
 
 
+def _kept(rendered: bytes) -> dict[str, JsonValue]:
+    if len(rendered) > KEPT_TEXT_MAX:
+        return {}
+    return {"text": rendered.decode().lower()}
+
+
 def _row_entries(
     rows: list[QdrantRow], config: QdrantConfig
 ) -> list[tuple[str, IndexEntry]]:
     # The scroll already carries every payload, so each file's exact
-    # rendered size is free here; stat serves it from the index instead of
-    # refetching one row per file.
+    # rendered size and text are free here; stat serves the size from the
+    # index instead of refetching one row per file, and grep checks the
+    # text instead of reading it.
     entries: list[tuple[str, IndexEntry]] = []
     for row in rows:
         rid = str(row[config.id_field])
         stem = row_stem(row, config)
+        rendered = render_json(row, config)
         entries.append(
             (
                 f"{stem}.json",
@@ -69,7 +81,8 @@ def _row_entries(
                     name=f"{stem}.json",
                     resource_type="qdrant/row_json",
                     vfs_name=f"{stem}.json",
-                    size=len(render_json(row, config)),
+                    size=len(rendered),
+                    extra=_kept(rendered),
                 ),
             )
         )
@@ -77,6 +90,7 @@ def _row_entries(
             config.text_field
             and field_value(row, config.text_field) is not None
         ):
+            text = render_text(row, config)
             entries.append(
                 (
                     f"{stem}.txt",
@@ -85,7 +99,8 @@ def _row_entries(
                         name=f"{stem}.txt",
                         resource_type="qdrant/row_text",
                         vfs_name=f"{stem}.txt",
-                        size=len(render_text(row, config)),
+                        size=len(text),
+                        extra=_kept(text),
                     ),
                 )
             )

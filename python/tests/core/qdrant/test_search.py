@@ -1,6 +1,9 @@
 import pytest
 
-from mirage.core.qdrant.tree import TREE
+import mirage.core.qdrant.readdir as readdir_mod
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.qdrant.search import files_containing
+from mirage.core.qdrant.tree import TREE, readdir
 from mirage.core.vector.search import search_rows_output
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -40,3 +43,56 @@ async def test_search_body_is_source_text(accessor):
 async def test_search_emits_document_lineage_path_for_nested_payload(lineage):
     out = await _search(lineage, "refund", "/db")
     assert out.startswith("/db/refund-2026.pdf/004__1.txt:")
+
+
+BLOBS = [
+    "/db/animals/cat/big/1.png",
+    "/db/animals/cat/small/2.png",
+    "/db/animals/dog/big/3.png",
+    "/db/animals/dog/small/4.png",
+]
+
+
+async def _containing(accessor, text: str, path: str = "/db"):
+    spec = PathSpec(
+        vfs_path=mount_key(path, "/db"), virtual=path, directory=path
+    )
+    found = await files_containing(
+        readdir, accessor, text, [spec], RAMIndexCacheStore()
+    )
+    return None if found is None else sorted(p.virtual for p in found)
+
+
+# The listing keeps each .json and .txt file's text, so a file is read only
+# when its text holds the word in any case; a blob is always read.
+@pytest.mark.asyncio
+async def test_only_files_whose_text_holds_it_are_read(accessor):
+    assert await _containing(accessor, "Orange") == sorted(
+        [
+            "/db/animals/cat/big/1.json",
+            "/db/animals/cat/big/1.txt",
+            *BLOBS,
+        ]
+    )
+    assert await _containing(accessor, "kind", "/db/animals/dog") == [
+        "/db/animals/dog/big/3.json",
+        "/db/animals/dog/big/3.png",
+        "/db/animals/dog/small/4.json",
+        "/db/animals/dog/small/4.png",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_file_too_large_to_keep_is_read(accessor, monkeypatch):
+    monkeypatch.setattr(readdir_mod, "KEPT_TEXT_MAX", 10)
+    found = await _containing(accessor, "orange", "/db/animals/cat/small")
+    assert found == [
+        "/db/animals/cat/small/2.json",
+        "/db/animals/cat/small/2.png",
+        "/db/animals/cat/small/2.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_text_that_is_not_ascii_reads_every_file(accessor):
+    assert await _containing(accessor, "caf\u00e9") is None

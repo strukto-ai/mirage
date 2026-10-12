@@ -467,6 +467,19 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "qdrant_grep_checks_the_listing_text",
+      "seq": 640040,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "grep -rli ORANGE /db | sort; grep -rc label /db/dog | sort; rg -l 'small white' /db | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/db/cat/big/1.json\n/db/cat/big/1.txt\n/db/dog/big/3.json:1\n/db/dog/big/3.png:0\n/db/dog/big/3.txt:0\n/db/dog/small/4.json:1\n/db/dog/small/4.png:0\n/db/dog/small/4.txt:0\n/db/dog/small/4.json\n/db/dog/small/4.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }
