@@ -1,0 +1,415 @@
+{
+  "cases": [
+    {
+      "id": "procsub_unread_input_redirect_does_not_block",
+      "seq": 1346039,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": ": < <(sleep 2; echo late); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_unread_input_operand_does_not_block",
+      "seq": 1346040,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "true <(sleep 2; echo late); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_only_the_writer",
+      "seq": 1346041,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "st:141\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_only_the_writer_in_function",
+      "seq": 1346042,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?; }; f; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "st:141\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_through_symlink",
+      "seq": 1346043,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ln -s \"$1\" {mount}/procsub-alias; printf first > {mount}/procsub-alias; rm {mount}/procsub-alias; }; f >(cat); wait; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "first\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_exec_in_subshell",
+      "seq": 1346044,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { (exec >\"$1\"; printf hello); }; f >(cat); wait; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_copied_descriptor_keeps_order_with_input",
+      "seq": 1346045,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ printf a >&3; printf b; } 3>&1 < <(printf x); echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_copied_descriptor_keeps_order_with_output",
+      "seq": 1346046,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ printf a >&3; printf b; } 3>&1 > >(cat); wait; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_input_runs_in_function_scope",
+      "seq": 1346047,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { cat <(local y=child; printf '%s' \"$y\"); }; f",
+      "expect": {
+        "exit": 0,
+        "stdout": "child",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_input_reads_function_local",
+      "seq": 1346048,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "unset y; f() { local y=child; cat <(printf '%s' \"$y\"); }; f; echo \"[${y-unset}]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "child[unset]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_cp_from_input",
+      "seq": 1346049,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cp <(printf hello) {mount}/procsub-copied; cat {mount}/procsub-copied; rm {mount}/procsub-copied",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_cp_into_output",
+      "seq": 1346050,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf hello > {mount}/procsub-src; cp {mount}/procsub-src >(cat); wait; rm {mount}/procsub-src",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_two_readers_share_input_across_chunks",
+      "seq": 1346051,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { head -c 1 \"$1\"; echo; cat \"$1\"; }; f <(printf a; sleep 1; printf rest)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nrest",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_two_readers_share_input_within_chunk",
+      "seq": 1346052,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { head -c 1 \"$1\"; echo; cat \"$1\"; }; f <(printf arest)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"a\\nrest\", because head -c reads only the bytes it needs from a pipe. Mirage's readers take a pipe chunk by chunk, so the first reader takes the rest of the chunk the producer wrote with it."
+    },
+    {
+      "id": "procsub_two_readers_read_line_by_line",
+      "seq": 1346053,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { local a b; read -r a < \"$1\"; read -r b < \"$1\"; echo \"[$a][$b]\"; }; f <(printf '1\\n2\\n')",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1][]\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"[1][2]\\n\", because read takes a pipe a byte at a time. Mirage's line reader takes the chunk the producer wrote, and the rest of it goes with the first read's redirect."
+    },
+    {
+      "id": "procsub_test_operators_keep_bytes",
+      "seq": 1346054,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { [ -s \"$1\" ]; echo s=$?; [ -p \"$1\" ]; echo p=$?; [ -f \"$1\" ]; echo f=$?; [ -e \"$1\" ]; echo e=$?; cat \"$1\"; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "s=1\np=0\nf=1\ne=0\nhello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_fifo_stat_fields",
+      "seq": 1346055,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "stat -L -c '%F %f %a %A %s' <(true) >(cat); wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "fifo 1180 600 prw------- 0\nfifo 1180 600 prw------- 0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_fifo_chmod",
+      "seq": 1346056,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { chmod 640 \"$1\"; stat -L -c '%a %A' \"$1\"; }; f <(true)",
+      "expect": {
+        "exit": 0,
+        "stdout": "640 prw-r-----\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_fifo_ls_long",
+      "seq": 1346057,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "ls -lL <(true) | cut -c1-10",
+      "expect": {
+        "exit": 0,
+        "stdout": "prw-------\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_rm_refused_keeps_stream",
+      "seq": 1346058,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { rm \"$1\" 2>/dev/null; echo rm=$?; cat \"$1\"; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rm=1\nhello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_mv_refused_keeps_stream",
+      "seq": 1346059,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { mv \"$1\" {mount}/procsub-moved 2>/dev/null; echo mv=$?; cat \"$1\"; rm -f {mount}/procsub-moved; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "mv=1\nhello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_reader_keeps_producer_stderr",
+      "seq": 1346060,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 1 <(head -c 100000 /dev/zero; echo after >&2) | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \\0\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 also prints \"after\\n\" on stderr: SIGPIPE ends only the substitution's writer and its next command runs. In Mirage the substitution's line ends when its reader closes early."
+    },
+    {
+      "id": "procsub_noclobber_allows_streams",
+      "seq": 1346061,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(set -C; echo hi > >(cat); st=$?; wait; echo st:$st; echo x > /dev/null; echo null:$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nst:0\nnull:0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_descriptor",
+      "seq": 1346062,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3> >(cat); echo hi >&3; exec 3>&-; wait; echo end)",
+      "expect": {
+        "exit": 0,
+        "stdout": "end\n",
+        "stderr": "mirage: unsupported: exec onto a process substitution\n3: Bad file descriptor\n"
+      },
+      "note": "Mirage refuses exec onto a process substitution, which lives only as long as the command naming it (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
+    },
+    {
+      "id": "procsub_exec_input_descriptor",
+      "seq": 1346063,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(unset x y; exec 3< <(printf 'a\\nb\\n'); read -r x <&3; echo \"$x\"; read -r y <&3; echo \"$y\"; exec 3<&-)",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\n",
+        "stderr": "mirage: unsupported: exec onto a process substitution\n3: Bad file descriptor\n3: Bad file descriptor\n"
+      },
+      "note": "Mirage refuses exec onto a process substitution, which lives only as long as the command naming it (GNU bash 5.2.37 prints \"a\\nb\\n\"); the later reads of the unopened descriptor fail as any read of one does."
+    },
+    {
+      "id": "procsub_pipefail_early_reader",
+      "seq": 1346064,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(set -o pipefail; cat <(head -c 200000 /dev/zero) | head -c 1 | od -An -c; echo \"st=$? ${PIPESTATUS[*]}\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \\0\nst=0 0 0 0\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"  \\\\0\\nst=141 141 0 0\\n\": the substitution's writer dies of SIGPIPE and cat reports it. In Mirage the substitution's line ends quietly when its reader closes early, so pipefail sees no failure."
+    },
+    {
+      "id": "procsub_timeout_unread_input",
+      "seq": 1346065,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "timeout 1 cat < <(sleep 3); echo st=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=124\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
