@@ -379,6 +379,33 @@ describe('LocalRuntime', () => {
     }
   })
 
+  it.each([
+    ['./missing', 127, './missing: No such file or directory\n'],
+    ['./plain', 126, './plain: Permission denied\n'],
+    ['./sub', 126, './sub: Is a directory\n'],
+  ])('answers %s as the shell would', async (name, exitCode, stderr) => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+    await writeFile(join(dir, 'plain'), '#!/bin/sh\necho hi\n')
+    await mkdir(join(dir, 'sub'))
+    const rt = new LocalRuntime({ captures: ['@external'] })
+    try {
+      const result = await rt.runProcess({
+        kind: 'process',
+        argv: [name],
+        cwd: PathSpec.fromStrPath(dir),
+        env: {},
+        stdin: null,
+      })
+      expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+        exitCode,
+        stderr,
+      ])
+    } finally {
+      await rt.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('follows a .. past a symlink in a program path', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
     await mkdir(join(dir, 'opt', 'build'), { recursive: true })

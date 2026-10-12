@@ -90,9 +90,8 @@ def _is_native(runtime: Runtime | None, name: str) -> bool:
     """
     if not isinstance(runtime, (LineExecutorMixin, ProcessExecutorMixin)):
         return False
-    return not (
-        isinstance(runtime, LanguageRuntime) and name in type(runtime).captures
-    )
+    own: tuple[str, ...] = getattr(type(runtime), "commands", ())
+    return not (isinstance(runtime, LanguageRuntime) and name in own)
 
 
 def _layers(

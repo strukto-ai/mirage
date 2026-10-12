@@ -28,4 +28,7 @@ class JsRuntime(LanguageRuntime):
     """
 
     language: ClassVar[Language] = "js"
-    captures = ("node", "js")
+    # The tier's head words: the class-default captures of every
+    # JavaScript engine.
+    commands: ClassVar[tuple[str, ...]] = ("node", "js")
+    captures = commands

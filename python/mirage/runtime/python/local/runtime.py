@@ -39,6 +39,23 @@ from mirage.shell.bytes import encode_text
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
+def _unrunnable(name: str, path: str) -> RunResult | None:
+    """Why a program named by a path cannot run, in the shell's words and
+    exit code; None when it can.
+
+    Args:
+        name (str): the program as typed.
+        path (str): that path joined to the cwd.
+    """
+    if not os.path.exists(path):
+        return _not_run(f"{name}: No such file or directory\n", 127)
+    if os.path.isdir(path):
+        return _not_run(f"{name}: Is a directory\n", 126)
+    if not os.access(path, os.X_OK):
+        return _not_run(f"{name}: Permission denied\n", 126)
+    return None
+
+
 def _not_run(message: str, exit_code: int) -> RunResult:
     """A program that never started: its message and exit code.
 
@@ -129,23 +146,29 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         # The session cwd is a workspace path. Running somewhere else
         # instead would point a relative path at the wrong files.
         cwd = request.cwd.virtual
-        # A name with a directory in it is a path from the cwd, as in the
-        # shell; any other is looked up on PATH.
-        found = shutil.which(
-            os.path.join(cwd, name) if os.path.dirname(name) else name
-        )
-        if found is None:
-            return _not_run(f"{name}: command not found\n", 127)
-        # Absolute: a relative PATH entry names a file here, and the
-        # program starts in the session's cwd. Joined, not normalized,
-        # so the host follows a `..` past a symlink as written.
-        program = (
-            found if os.path.isabs(found) else os.path.join(os.getcwd(), found)
-        )
         if not os.path.isdir(cwd):
             return _not_run(
                 f"{name}: the working directory {cwd} is not on this host\n",
                 126,
+            )
+        if os.path.dirname(name):
+            # A name with a directory in it is a path from the cwd, as in
+            # the shell. Joined, not normalized, so the host follows a
+            # `..` past a symlink as written.
+            program = os.path.join(cwd, name)
+            refusal = _unrunnable(name, program)
+            if refusal is not None:
+                return refusal
+        else:
+            found = shutil.which(name)
+            if found is None:
+                return _not_run(f"{name}: command not found\n", 127)
+            # Absolute: a relative PATH entry names a file here, and the
+            # program starts in the session's cwd.
+            program = (
+                found
+                if os.path.isabs(found)
+                else os.path.join(os.getcwd(), found)
             )
         # A program that cannot start (its script's interpreter missing,
         # say) fails as the shell's would, so `tool || fallback` goes on.

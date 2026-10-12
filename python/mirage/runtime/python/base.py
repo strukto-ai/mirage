@@ -29,7 +29,10 @@ class PythonRuntime(LanguageRuntime):
     """
 
     language: ClassVar[Language] = "python"
-    captures = ("python3", "python")
+    # The tier's head words: the class-default captures of every
+    # python engine.
+    commands: ClassVar[tuple[str, ...]] = ("python3", "python")
+    captures = commands
     # Whether `python3 -m mod` can run at all. True for every engine
     # that is real CPython, since runpy does the work; False for an
     # engine implementing a subset of the language with no import

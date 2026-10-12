@@ -161,8 +161,8 @@ and adds `workspace` when the list leaves it out. On a live workspace,
 `removeRuntime` takes one out, and `runtimes()` lists them:
 
 ```ts
-await ws.removeRuntime('pyodide')
-ws.addRuntime('monty')
+await ws.removeRuntime('monty')
+ws.addRuntime('pyodide')
 ```
 
 `python3` moves to the new runtime at once. A running line finishes before

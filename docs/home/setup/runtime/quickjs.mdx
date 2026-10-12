@@ -93,6 +93,7 @@ list it yourself:
 | `std.getenv` | Yes | Yes | The session's environment. |
 | `scriptArgs`, `std.in.readAsString()` | Yes | Yes | The words after the script, and the piped input. |
 | `std.out.puts`, `std.err.puts`, `console.log`, `print`, `std.exit` | Yes | Yes | |
+| `std.out.printf`, `std.err.printf` | Yes | Yes | C format; return the characters written. Unlike `printf` on an opened FILE. |
 | `std.loadFile`, `std.writeFile`, `std.fdopen`, `std.printf` | Yes | No | |
 | `std.strerror`, `std.setenv`, `std.getenviron`, `std.out.flush` | Yes | No | |
 | `os.open`, `os.read`, `os.write`, `os.seek`, `os.close` | Yes | No | |

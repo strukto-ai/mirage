@@ -255,6 +255,35 @@ async def test_a_program_named_by_a_relative_path_runs_from_the_cwd(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name, exit_code, stderr",
+    [
+        ("./missing", 127, b"./missing: No such file or directory\n"),
+        ("./plain", 126, b"./plain: Permission denied\n"),
+        ("./sub", 126, b"./sub: Is a directory\n"),
+    ],
+)
+async def test_a_program_path_that_cannot_run_answers_as_the_shell(
+    tmp_path, name, exit_code, stderr
+):
+    (tmp_path / "plain").write_text("#!/bin/sh\necho hi\n")
+    (tmp_path / "sub").mkdir()
+    runtime = LocalRuntime(captures=["@external"])
+    try:
+        result = await runtime.run_process(
+            ProcessExecution(
+                argv=(name,),
+                cwd=PathSpec.from_str_path(str(tmp_path)),
+                env={},
+                stdin=None,
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stderr) == (exit_code, stderr)
+
+
+@pytest.mark.asyncio
 async def test_a_program_path_follows_dot_dot_past_a_symlink(tmp_path):
     (tmp_path / "opt" / "build").mkdir(parents=True)
     tool = tmp_path / "opt" / "mirage-tool"

@@ -56,6 +56,11 @@ class _HostPython(PythonRuntime, ProcessExecutorMixin):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
+class _HostTools(_HostPython):
+    name = "host-tools"
+    captures = ("python3", "gcc")
+
+
 def _fixture() -> tuple[SessionState, Workspace]:
     ws = Workspace(mounts={"/ram": (RAMVFS(), MountMode.WRITE)})
     return SessionState(session_id="t"), ws
@@ -297,6 +302,13 @@ def test_a_language_runtime_that_runs_processes_keeps_its_own_names():
     ws = Workspace(
         {"/": RAMVFS()}, runtimes=[_HostPython(captures=["python3", "gcc"])]
     )
+    assert lookup("python3", session, ws._registry) is Consumer.SESSION
+    assert lookup("gcc", session, ws._registry) is Consumer.EXTERNAL
+
+
+def test_a_class_capture_beside_the_language_names_runs_natively():
+    session = SessionState(session_id="t")
+    ws = Workspace({"/": RAMVFS()}, runtimes=[_HostTools()])
     assert lookup("python3", session, ws._registry) is Consumer.SESSION
     assert lookup("gcc", session, ws._registry) is Consumer.EXTERNAL
 

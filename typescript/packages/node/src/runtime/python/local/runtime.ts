@@ -89,6 +89,31 @@ async function isExecutable(program: string): Promise<boolean> {
   }
 }
 
+/**
+ * Why a program named by a path cannot run, in the shell's words and exit
+ * code; null when it can.
+ */
+async function unrunnable(name: string, path: string): Promise<RunResult | null> {
+  const found = await stat(path).catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === undefined) throw err
+    debuglog('mirage')('local: cannot stat %s: %s', path, code)
+    return null
+  })
+  if (found === null) return notRun(`${name}: No such file or directory\n`, 127)
+  if (found.isDirectory()) return notRun(`${name}: Is a directory\n`, 126)
+  const runs = await access(path, constants.X_OK).then(
+    () => true,
+    (err: unknown) => {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      debuglog('mirage')('local: cannot execute %s: %s', path, code)
+      return false
+    },
+  )
+  return runs ? null : notRun(`${name}: Permission denied\n`, 126)
+}
+
 /** A program that never started: its message and exit code. */
 function notRun(message: string, exitCode: number): RunResult {
   return { stdout: new Uint8Array(), stderr: new TextEncoder().encode(message), exitCode }
@@ -151,15 +176,6 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     // The session cwd is a workspace path. Running somewhere else instead
     // would point a relative path at the wrong files.
     const cwd = request.cwd.virtual
-    // A name with a slash is a path from the cwd, as in the shell; any
-    // other is looked up on PATH. Joined, not resolved, so the host
-    // follows a `..` past a symlink as written.
-    const program = !name.includes('/')
-      ? onHostPath(name)
-      : isAbsolute(name)
-        ? name
-        : `${rstripSlash(cwd)}/${name}`
-    if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     const here = await stat(cwd).catch((err: unknown) => {
       const code = (err as NodeJS.ErrnoException).code
       if (code === undefined) throw err
@@ -168,6 +184,18 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     })
     if (here?.isDirectory() !== true) {
       return notRun(`${name}: the working directory ${cwd} is not on this host\n`, 126)
+    }
+    let program: string
+    if (name.includes('/')) {
+      // A name with a slash is a path from the cwd, as in the shell.
+      // Joined, not resolved, so the host follows a `..` past a symlink
+      // as written.
+      program = isAbsolute(name) ? name : `${rstripSlash(cwd)}/${name}`
+      const refusal = await unrunnable(name, program)
+      if (refusal !== null) return refusal
+    } else {
+      program = onHostPath(name)
+      if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     }
     // A program that cannot start (its script's interpreter missing, say)
     // fails as the shell's would, so `tool || fallback` goes on.
