@@ -192,13 +192,13 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     A program runs as any program does on its runtime: never edited,
     in the session's cwd, with the context as JSON (``script_context``)
     in ``CTX_ENV`` and on stdin, and its answer printed on stdout
-    (``script_action``). ``CTX_ENV`` is its only environment variable:
-    the session's variables are in the context, so none the agent sets
-    changes how the program starts, and on wasi it runs with ``-P``
-    (``PROGRAM_FLAGS``), so no file the agent writes stands in for a
-    module it imports. Every failure fails closed: a program
-    that exits non-zero, runs past the timeout, prints something else,
-    or names a runtime that cannot be built refuses the action with a
+    (``script_action``). ``CTX_ENV`` is the only variable it is
+    passed: the session's variables are in the context, so none the
+    agent sets changes how the program starts, and on wasi it runs with
+    ``-P`` (``PROGRAM_FLAGS``), so no file the agent writes stands in
+    for a module it imports. Every failure fails closed: a program that
+    exits non-zero, runs past the timeout, prints something else, or
+    names a runtime that cannot be built refuses the action with a
     reason naming the profile, and is logged.
 
     The runtime is the policy's own, built from the name and settings

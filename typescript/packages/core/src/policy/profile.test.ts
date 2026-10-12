@@ -389,25 +389,26 @@ describe('parseProfileMounts', () => {
   })
 })
 
+function policyRuntime(settings: Record<string, unknown>, code: boolean): unknown {
+  const policy = parseProfilePolicy(
+    {
+      [code ? 'preCommand' : 'pre_command']: [
+        { script: 'p.py', runtime: { name: 'pyodide', config: settings } },
+      ],
+    },
+    'policy',
+    code,
+  )
+  return policy.preCommand?.[0]?.runtime
+}
+
 describe('parseProfilePolicy', () => {
   it("reads a runtime's settings in the document's spelling from a config, and as given from code", () => {
-    const runtime = (settings: Record<string, unknown>, code: boolean): unknown =>
-      Object.values(
-        parseProfilePolicy(
-          {
-            [code ? 'preCommand' : 'pre_command']: [
-              { script: 'p.py', runtime: { name: 'pyodide', config: settings } },
-            ],
-          },
-          'policy',
-          code,
-        ),
-      )[0]?.[0]?.runtime
-    expect(runtime({ auto_load_from_imports: false }, false)).toEqual({
+    expect(policyRuntime({ auto_load_from_imports: false }, false)).toEqual({
       name: 'pyodide',
       config: { autoLoadFromImports: false },
     })
-    expect(runtime({ autoLoadFromImports: false }, true)).toEqual({
+    expect(policyRuntime({ autoLoadFromImports: false }, true)).toEqual({
       name: 'pyodide',
       config: { autoLoadFromImports: false },
     })

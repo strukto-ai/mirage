@@ -87,8 +87,10 @@ it:
 - **Input:** `ctx` as JSON, in the environment variable `MIRAGE_POLICY_CTX`
   and on stdin. On monty, which has no `sys.stdin`, stdin arrives as a
   `stdin` variable, so read the environment variable to run anywhere.
-  `MIRAGE_POLICY_CTX` is reserved: it is the only variable in the
-  program's environment, and the session never sees it.
+  `MIRAGE_POLICY_CTX` is reserved, and the session never sees it. It is
+  the only variable Mirage passes the program: the session's variables
+  stay out of its environment. A runtime may add its own, as wasi adds
+  `PYTHONHOME`, `PYTHONPATH` and `PYTHONDONTWRITEBYTECODE`.
 - **Session:** the program starts in the session's working directory, so
   `os.getcwd()` is the session's. The session's variables are in
   `ctx["env"]`, not in `os.environ`. An `import` never loads a module from
