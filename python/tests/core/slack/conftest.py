@@ -118,7 +118,11 @@ class FakeSlack:
         await asyncio.sleep(0)
         params = params or {}
         if method == "conversations.list":
-            channels = DMS if "im" in params["types"] else CHANNELS
+            types = params["types"].split(",")
+            channels = [
+                *(CHANNELS if "public_channel" in types else []),
+                *(DMS if "im" in types else []),
+            ]
             if config.token.get_secret_value() == SEARCHER:
                 self.searcher_lists += 1
                 channels = [c for c in channels if c["id"] not in self.hidden]

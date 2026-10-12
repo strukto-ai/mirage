@@ -95,6 +95,8 @@ async def test_search_files_calls_correct_endpoint():
                 "D1/2025-11-03",
             ],
         ),
+        ("grep -rlw deploy /slack/dms", ["D1/2025-11-03"]),
+        ("rg -lw deploy /slack/dms/ana__D1", ["D1/2025-11-03"]),
     ],
 )
 async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
@@ -185,7 +187,6 @@ async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
             "grep -rlw deploy /slack/channels",
             FakeSlack(fails=asyncio.TimeoutError()),
         ),
-        ("grep -rlw deploy /slack/dms", FakeSlack()),
     ],
 )
 async def test_every_day_is_read_when_search_cannot_answer(slack, line, fake):
@@ -207,5 +208,18 @@ async def test_a_channel_the_search_user_is_not_in_is_read(slack, line):
     # search names its days; ruling them out would miss its deploy.
     full = await slack(line, content_search=False)
     hidden = FakeSlack(hidden=frozenset({"C2"}))
+    out, code, read, _ = await slack(line, hidden, search_token=SEARCHER)
+    assert (out, code, read) == full[:3]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["grep -rlw deploy /slack", "grep -rlw deploy /slack/dms"]
+)
+async def test_a_dm_the_search_user_is_not_in_is_read(slack, line):
+    # The listing's token holds a DM the search token's user is not in (a
+    # bot's own DM), so no search names its days.
+    full = await slack(line, content_search=False)
+    hidden = FakeSlack(hidden=frozenset({"D1"}))
     out, code, read, _ = await slack(line, hidden, search_token=SEARCHER)
     assert (out, code, read) == full[:3]

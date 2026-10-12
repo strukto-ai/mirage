@@ -225,17 +225,25 @@ class FakeSlack implements SlackTransport {
       call: (endpoint, params = {}) => {
         if (endpoint !== 'conversations.list') return this.call(endpoint, params)
         this.searcherLists += 1
-        return Promise.resolve({ ok: true, channels: CHANNELS.filter((c) => !hidden.has(c.id)) })
+        return Promise.resolve({
+          ok: true,
+          channels: this.conversations(params.types).filter((c) => !hidden.has(c.id)),
+        })
       },
     }
   }
 
+  private conversations(types = ''): { id: string }[] {
+    const listed = types.split(',')
+    return [
+      ...(listed.includes('public_channel') ? CHANNELS : []),
+      ...(listed.includes('im') ? DMS : []),
+    ]
+  }
+
   call(endpoint: string, params: Record<string, string> = {}): Promise<SlackResponse> {
     if (endpoint === 'conversations.list') {
-      return Promise.resolve({
-        ok: true,
-        channels: (params.types ?? '').includes('im') ? DMS : CHANNELS,
-      })
+      return Promise.resolve({ ok: true, channels: this.conversations(params.types) })
     }
     if (endpoint === 'users.list') {
       this.userLists += 1
@@ -353,6 +361,8 @@ describe('filesContaining', () => {
       'grep -rlw deploy /slack',
       ['C1/2025-11-03', 'C1/2025-11-06', 'C2/2025-11-04', 'D1/2025-11-03'],
     ],
+    ['grep -rlw deploy /slack/dms', ['D1/2025-11-03']],
+    ['rg -lw deploy /slack/dms/ana__D1', ['D1/2025-11-03']],
   ])('reads only the days search names for %s', async (line, reads) => {
     // A file hit names every day a message shares it, not its upload.
     const full = await onSlack(line, new FakeSlack(), false)
@@ -403,7 +413,6 @@ describe('filesContaining', () => {
       'grep -rlw deploy /slack/channels',
       () => new FakeSlack(1, new DOMException('timed out', 'TimeoutError')),
     ],
-    ['grep -rlw deploy /slack/dms', () => new FakeSlack()],
   ])('reads every day when search cannot answer %s', async (line, fake) => {
     const full = await onSlack(line, new FakeSlack(), false)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -422,6 +431,18 @@ describe('filesContaining', () => {
     async (line) => {
       const full = await onSlack(line, new FakeSlack(), false)
       const hidden = new FakeSlack(1, null, true, new Set(['C2']))
+      expect((await onSlack(line, hidden)).slice(0, 3)).toEqual(full.slice(0, 3))
+    },
+  )
+
+  // Twin of test_a_dm_the_search_user_is_not_in_is_read: the listing's token
+  // holds a DM the search token's user is not in (a bot's own DM), so no
+  // search names its days.
+  it.each(['grep -rlw deploy /slack', 'grep -rlw deploy /slack/dms'])(
+    'reads a DM the search user is not in: %s',
+    async (line) => {
+      const full = await onSlack(line, new FakeSlack(), false)
+      const hidden = new FakeSlack(1, null, true, new Set(['D1']))
       expect((await onSlack(line, hidden)).slice(0, 3)).toEqual(full.slice(0, 3))
     },
   )

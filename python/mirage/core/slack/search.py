@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 100
 MAX_PAGES = 10
+# The conversations a search token's user may be in: channels and DMs.
+_SEARCHED_TYPES = "public_channel,private_channel,im,mpim"
+# The message containers each directory scope searches across.
+_CONTAINERS = {
+    ROOT: ("channels", "dms"),
+    "channels_root": ("channels",),
+    "dms_root": ("dms",),
+}
 
 # What a channel day's chat.jsonl holds besides the message text, file
 # names and titles and reaction names Slack search covers, spelled as
@@ -609,12 +617,14 @@ async def _hits_of(
 async def _searched_channels(
     accessor: SlackAccessor,
 ) -> frozenset[str] | None:
-    """The channels search covers, or None when it covers every listed one.
+    """The channels and DMs search covers, or None when it covers every
+    listed one.
 
     With ``search_token`` set, search runs as that token's user, who sees
-    every public channel but only the private ones they are in; the
-    listing's token may read a private channel they are not in, whose
-    days no search names. Without it both are the same user.
+    every public channel but only the private ones and DMs they are in;
+    the listing's token may read a private channel or a DM they are not
+    in (a bot's own DMs), whose days no search names. Without it both are
+    the same user.
 
     Args:
         accessor (SlackAccessor): the workspace.
@@ -625,7 +635,9 @@ async def _searched_channels(
     searcher = accessor.config.model_copy(update={"token": search_token})
     return frozenset(
         channel["id"]
-        for channel in await list_channels(searcher, session=accessor.pool)
+        for channel in await list_channels(
+            searcher, types=_SEARCHED_TYPES, session=accessor.pool
+        )
     )
 
 
@@ -635,17 +647,18 @@ async def files_containing(
     under: list[PathSpec],
     index: IndexCacheStore,
 ) -> list[PathSpec] | None:
-    """The channel days under ``under`` Slack search names.
+    """The channel and DM days under ``under`` Slack search names.
 
     Slack matches whole words of message text, of file names and titles
     (``search.files``) and of reaction names (``has::name:``), so each hit
     names the UTC day its message was posted, or each day a file was
-    shared. The root and ``channels`` are searched across the workspace,
-    a channel with ``in:#name`` (``on:`` would read the day in the
-    searcher's time zone); hits map to dirnames through the channel ids
-    the listing holds. A scope with no channel day in it adds nothing,
-    and a day is cheaper to read than to search. None when a channel in
-    scope is one search does not cover (``_searched_channels``), when
+    shared. The root, ``channels``, ``dms`` and a DM are searched across
+    the workspace, a channel with ``in:#name`` (``on:`` would read the
+    day in the searcher's time zone); hits map to dirnames through the
+    channel and DM ids the listing holds. A scope with no day in it adds
+    nothing, and a day is cheaper to read than to search. None when a
+    channel or DM in scope is one search does not cover
+    (``_searched_channels``), when
     ``text`` could match the JSON around those fields
     (``record_queries``), a user's name or the workspace's domain
     (``_search_facts``), on an API or connection error, past ``MAX_PAGES``
@@ -676,10 +689,7 @@ async def _search(
     index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     scopes = [(scope, detect_scope(scope)) for scope in under]
-    if any(
-        match.kind == "day" and match.slots["container"] == "channels"
-        for _, match in scopes
-    ):
+    if any(match.kind == "day" for _, match in scopes):
         return None
     words = text.lower().split()
     facts = await _search_facts(accessor)
@@ -691,34 +701,34 @@ async def _search(
     reaction = words[0] if len(words) == 1 else None
     found: list[PathSpec] = []
     for scope, match in scopes:
-        if match.kind in (ROOT, "channels_root"):
-            listed = await readdir(
-                accessor, mounted_path(scope, "/channels"), index
-            )
-            names = [path.rsplit("/", 1)[-1] for path in listed]
-            dirs = {parse_id_name(name)[1]: name for name in names}
-            if searched is not None and not dirs.keys() <= searched:
-                return None
+        if match.kind in _CONTAINERS:
+            dirs: dict[str, str] = {}
+            for container in _CONTAINERS[match.kind]:
+                listed = await readdir(
+                    accessor, mounted_path(scope, f"/{container}"), index
+                )
+                for path in listed:
+                    name = path.rsplit("/", 1)[-1]
+                    dirs[parse_id_name(name)[1]] = f"{container}/{name}"
             within = ""
-        elif (
-            match.kind == "channel" and match.slots["container"] == "channels"
-        ):
+        elif match.kind == "channel":
+            container = match.slots["container"]
             dirname = scope.mount_path.strip("/").split("/")[1]
-            channel = mounted_path(scope, f"/channels/{dirname}")
+            channel = mounted_path(scope, f"/{container}/{dirname}")
             entry = await resolve_entry(readdir, accessor, channel, index)
-            if entry is None or (
-                searched is not None and entry.id not in searched
-            ):
+            if entry is None:
                 return None
-            dirs = {entry.id: dirname}
-            within = f"in:#{entry.name} "
+            dirs = {entry.id: f"{container}/{dirname}"}
+            within = f"in:#{entry.name} " if container == "channels" else ""
         else:
             continue
+        if searched is not None and not dirs.keys() <= searched:
+            return None
         hits = await _hits_of(accessor, within, queries, reaction)
         if hits is None:
             return None
         found.extend(
-            mounted_path(scope, f"/channels/{dirs[cid]}/{posted}/chat.jsonl")
+            mounted_path(scope, f"/{dirs[cid]}/{posted}/chat.jsonl")
             for cid, posted in hits
             if cid in dirs
         )

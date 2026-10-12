@@ -32,7 +32,9 @@ description: Set up a Slack Bot Token for the Slack VFS.
 
 Slack's `search.messages` API does not accept bot tokens. To use `slack search` or workspace-level search push-down:
 
-1. Add `search:read` under **User Token Scopes**.
+1. Add `search:read` under **User Token Scopes**. For `grep` and `rg`, also add
+   `channels:read`, `groups:read`, `im:read` and `mpim:read`, so Mirage can see
+   which channels and DMs that user's search covers.
 1. Reinstall or reauthorize the app.
 1. Copy the resulting **User OAuth Token** (`xoxp-...`).
 

@@ -143,7 +143,7 @@ instead, and grep exits 2.
 | OneDrive | `search(q=)` | `-w` | `content_search` |
 | SharePoint | `search(q=)` | `-w`, within one document library | `content_search` |
 | Email | IMAP `SEARCH TEXT` | messages (`*/*/*.email.json`) | `content_search` |
-| Slack | `search.messages`, `search.files` | `-w`, channel days (`channels/*/*/chat.jsonl`) | `content_search` |
+| Slack | `search.messages`, `search.files` | `-w`, channel and DM days (`channels/*/*/chat.jsonl`, `dms/*/*/chat.jsonl`) | `content_search` |
 | Gmail | messages search | `-w`, messages (`*/*/*.gmail.json`) | `content_search` |
 | Google Calendar | events `q`, per word | `-w`, events (`*/*/*.gcal.json`), a word with no digit | `content_search` |
 | Linear | `searchIssues` | `-w`, issues (`teams/*/issues/*/issue.json`) | `content_search` |

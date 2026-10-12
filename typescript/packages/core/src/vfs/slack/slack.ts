@@ -33,9 +33,12 @@ import { BaseVFS } from '../base.ts'
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly maxDuEntries: number | null = DU_MAX_ENTRIES
   override readonly readsRanges: boolean = true
-  // Slack search names channel days; DMs, users and file blobs are read as
+  // Slack search names channel and DM days; users and file blobs are read as
   // usual.
-  override readonly searchable: readonly string[] = ['channels/*/*/chat.jsonl']
+  override readonly searchable: readonly string[] = [
+    'channels/*/*/chat.jsonl',
+    'dms/*/*/chat.jsonl',
+  ]
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return slackReaddir(this.accessor, path, index)

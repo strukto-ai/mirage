@@ -103,6 +103,19 @@
         "stdout": "/slack/channels/engineering__C3/2026-01-19/chat.jsonl\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_search_names_dm_days",
+      "seq": 540251,
+      "targets": [
+        "slack"
+      ],
+      "command": "grep -rlw building /slack/dms; rg -lw building /slack/dms/U12__D4",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/dms/U12__D4/2026-01-30/chat.jsonl\n/slack/dms/U12__D4/2026-01-30/chat.jsonl\n",
+        "stderr": ""
+      }
     }
   ]
 }

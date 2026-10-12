@@ -46,9 +46,9 @@ class SlackVFS(BaseVFS):
     write_prompt: str = WRITE_PROMPT
 
     reads_ranges: bool = True
-    # Slack search names channel days; DMs, users and file blobs are read
-    # as usual.
-    searchable = ("channels/*/*/chat.jsonl",)
+    # Slack search names channel and DM days; users and file blobs are
+    # read as usual.
+    searchable = ("channels/*/*/chat.jsonl", "dms/*/*/chat.jsonl")
 
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
