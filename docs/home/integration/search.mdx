@@ -150,6 +150,7 @@ instead, and grep exits 2.
 | Trello | `/1/search`, per word | `-w`, cards (`workspaces/*/boards/*/lists/*/cards/*/card.json`) | `content_search` |
 | PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a table or view whose columns each hold the text as their cast spells it, or never spell it (a number, date or time) | always |
 | MongoDB | `$expr` over keys and strings (`lines_containing`) | `documents.jsonl` of a collection or view | always |
+| Airtable | `filterByFormula` per cell (`lines_containing`) | `records.jsonl` and view files of a table whose cells a formula reads as text, or that hold no word; with a link, AI text or attachment, a text with a space | always |
 | SSH | GNU `grep` on the server | every text, where the server runs commands | always |
 | Chroma | `$contains` over chunks | every text without `-i` | always |
 | LanceDB | `LIKE` over string columns | `.md` cards; a text of letters and spaces that is no column's name, in a table with no list, struct or bytes column | always |

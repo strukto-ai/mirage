@@ -19,7 +19,11 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.airtable.read import read as _read
 from mirage.core.airtable.readdir import readdir as _readdir
+from mirage.core.airtable.search import (
+    lines_containing as _lines_containing,
+)
 from mirage.core.airtable.stat import stat as _stat
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.airtable.prompt import PROMPT, WRITE_PROMPT
@@ -67,6 +71,16 @@ class AirtableVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def lines_containing(
+        self,
+        path: PathSpec,
+        text: str,
+        *,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> ByteSource | None:
+        return await _lines_containing(self.accessor, path, text, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

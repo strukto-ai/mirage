@@ -177,9 +177,35 @@
       ],
       "command": "grep -l 'Dark mode' /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl",
       "expect": {
+        "exit": 0,
+        "stdout": "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "at_grep_reads_a_file_past_the_cap_its_search_declines",
+      "seq": 720114,
+      "targets": [
+        "airtable"
+      ],
+      "command": "grep -l Name /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl",
+      "expect": {
         "exit": 2,
         "stdout": "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl\n",
         "stderr": "grep: /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl: File too large\n"
+      }
+    },
+    {
+      "id": "at_grep_asks_airtable_for_the_matching_records",
+      "seq": 720115,
+      "targets": [
+        "airtable"
+      ],
+      "command": "grep -i cloud /airtable/bases/Ops_Finance__appOpsFinance0002/Q3_Budget__tblQ3Budget000004/records.jsonl; grep -c 'Dark mode' /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl; rg -l 'Dark mode' /roadmap/bases | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"record_id\":\"recBudget00000001\",\"created_time\":\"2026-07-01T08:00:00.000Z\",\"fields\":{\"Item\":\"Cloud hosting\",\"Amount\":12500.5,\"Share\":0.42,\"Approved\":true}}\n0\n/roadmap/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl\n/roadmap/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/views/By_owner_priority__viwFeatByOwner003.jsonl\n/roadmap/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/views/Done__viwFeatDone000002.jsonl\n/roadmap/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/views/Grid_view__viwFeatGrid000001.jsonl\n",
+        "stderr": ""
       }
     }
   ]

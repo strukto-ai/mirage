@@ -103,6 +103,21 @@ grep -c Done .../views/Done_shipped__viwDone0000000001.jsonl
 - **Freshness.** Records are never served from the file cache; the listings of
   bases, tables, and views are cached for the index TTL.
 
+## grep and rg
+
+For one plain text in a `records.jsonl` or a view's file, grep and rg ask
+Airtable for the records that may hold it, with a `filterByFormula` that
+searches the record id and each text, select, email, url and phone cell,
+lowercased, and search those records instead of the whole table, in the order
+a plain read lists them. Number, date and checkbox cells hold no word to
+search. A link, AI text or attachment cell holds no space outside the text a
+formula reads of it, so a table with one is searched for a text with a space
+and read for a single word. The file is read as usual for a table with a
+collaborator, lookup, rollup or formula field, for a text a field name holds,
+or when more than `max_read_records` records match. Since only the matching
+records are fetched, a table too large to read can still be searched when the
+output shows no line numbers or context.
+
 ## Rate Limits
 
 Requests are spaced to `requests_per_second` per base. A `429` that says

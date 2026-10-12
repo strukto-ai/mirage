@@ -27,6 +27,8 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
 import { read as airtableRead } from '../../core/airtable/read.ts'
 import { stat as airtableStat } from '../../core/airtable/stat.ts'
+import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
+import type { ByteSource } from '../../io/types.ts'
 
 export interface AirtableVFSState {
   type: string
@@ -74,6 +76,15 @@ export class AirtableVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return airtableStat(this.accessor, path, index)
+  }
+
+  override linesContaining(
+    path: PathSpec,
+    text: string,
+    _opts: { ignoreCase: boolean },
+    index?: IndexCacheStore,
+  ): Promise<ByteSource | null> {
+    return airtableLinesContaining(this.accessor, path, text, index)
   }
 
   override getState(): AirtableVFSState {
