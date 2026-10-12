@@ -27,12 +27,14 @@ from mirage.types import JsonValue, PathSpec
 TEAM = {"id": "T1", "key": "ENG", "name": "Engineering"}
 
 
-def _issue(issue_id: str, title: str, state: str) -> dict:
+def _issue(
+    issue_id: str, title: str, state: str, description: str = ""
+) -> dict:
     return {
         "id": issue_id,
         "identifier": f"ENG-{issue_id[-1]}",
         "title": title,
-        "description": "",
+        "description": description,
         "team": TEAM,
         "state": {"id": "S", "name": state},
     }
@@ -41,6 +43,7 @@ def _issue(issue_id: str, title: str, state: str) -> dict:
 ISSUES = [
     _issue("I1", "Fix the login page", "Todo"),
     _issue("I2", "Write release notes", "Blocked"),
+    _issue("I3", "Docs", "Todo", "Visit wombat.example.com first"),
 ]
 
 
@@ -51,17 +54,22 @@ def _scope(vfs_path: str = "") -> PathSpec:
 
 async def _ask(
     text: str,
-    named: list[str],
+    named: list[str] | dict[str, list[str]],
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
 ):
     accessor = LinearAccessor(LinearConfig(api_key="k", content_search=True))
-    found = (
-        AsyncMock(
-            return_value={
-                "searchIssues": {"nodes": [{"id": i} for i in named]}
-            }
+
+    def nodes(config, query, variables, **kwargs):
+        ids = (
+            named.get(variables["term"], [])
+            if isinstance(named, dict)
+            else named
         )
+        return {"searchIssues": {"nodes": [{"id": i} for i in ids]}}
+
+    found = (
+        AsyncMock(side_effect=nodes)
         if reply is None
         else AsyncMock(side_effect=[reply])
     )
@@ -99,7 +107,17 @@ async def test_hits_are_what_linear_names_and_what_the_listing_kept():
         "ENG-2__I2",
     ]
     assert all(p.vfs_path.endswith("/issue.json") for p in out)
-    assert asked == ["Blocked", "locked"]
+    assert asked == ["blocked", "locked"]
+
+
+# Linear's search may miss a word inside a link, so the listing keeps it, and
+# each word of a phrase is found in either place.
+@pytest.mark.asyncio
+async def test_a_word_in_a_link_is_kept_by_the_listing():
+    out, asked = await _ask("visit wombat", {"visit": ["I3"]})
+    assert out is not None
+    assert [p.vfs_path.rsplit("/", 2)[-2] for p in out] == ["ENG-3__I3"]
+    assert asked == ["visit", "wombat"]
 
 
 @pytest.mark.asyncio

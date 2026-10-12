@@ -122,7 +122,7 @@
                 {
                   "id": "crd_upgrade",
                   "name": "Upgrade Redis to 7.4",
-                  "desc": "Rolling upgrade of the cache cluster.",
+                  "desc": "Rolling upgrade of the cache cluster, see example.com/Safari/redis.",
                   "idMembers": ["mem_alex"],
                   "labelIds": ["lbl_infra"],
                   "due": null,

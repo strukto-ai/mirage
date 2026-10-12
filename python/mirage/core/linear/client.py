@@ -211,7 +211,7 @@ async def list_team_documents(
         config,
         TEAM_DOCUMENTS_QUERY,
         {"teamId": team_id},
-        ("team", "documents"),
+        ("documents",),
         session=session,
     )
 

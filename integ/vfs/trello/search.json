@@ -9,7 +9,7 @@
       "command": "grep -rlw Safari /board; grep -rlw trello /board | grep -c card.json; grep -rlw nowhere /board; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/comments.jsonl\n6\nrc=1\n",
+        "stdout": "/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/comments.jsonl\n/board/workspaces/Strukto__org_strukto/boards/Ops__brd_ops/lists/Backlog__lst_backlog/cards/Upgrade_Redis_to_7.4__crd_upgrade/card.json\n6\nrc=1\n",
         "stderr": ""
       }
     }

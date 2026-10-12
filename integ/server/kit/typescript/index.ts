@@ -97,3 +97,4 @@ export type {
   SeedReport,
 } from './types.ts'
 export { unrouted, unroutedLine } from './unrouted.ts'
+export { plainWords } from './words.ts'

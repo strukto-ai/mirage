@@ -187,7 +187,7 @@ export async function listTeamDocuments(
   transport: LinearTransport,
   teamId: string,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['team', 'documents'])
+  return paginate(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['documents'])
 }
 
 export async function resolveTeam(

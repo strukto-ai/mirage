@@ -9,7 +9,7 @@
       "command": "grep -rlw GraphQL /issues; grep -rlw nowhere /issues; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json\nrc=1\n",
+        "stdout": "/issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json\n/issues/teams/WEB__Web__team_web/issues/WEB-1__iss_web_1/issue.json\nrc=1\n",
         "stderr": ""
       }
     }

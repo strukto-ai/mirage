@@ -33,7 +33,7 @@ from mirage.core.hierarchy.scope import ROOT
 from mirage.core.time_range import parse_time
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.record_search import record_queries
+from mirage.utils.record_search import may_hold, record_queries
 from mirage.vfs.gcal.event_entry import CALENDAR_FILE
 
 logger = logging.getLogger(__name__)
@@ -162,10 +162,7 @@ async def files_containing(
                     kept = entry.extra.get("unsearched")
                     if not isinstance(kept, str):
                         return None
-                    if any(
-                        all(entry.id in named[w] or w in kept for w in words)
-                        for words in asked
-                    ):
+                    if may_hold(asked, named, entry.id, kept):
                         found.append(child)
     except (OSError, aiohttp.ClientError, ValueError, RuntimeError) as exc:
         logger.warning("calendar search failed (%s); reading every file", exc)

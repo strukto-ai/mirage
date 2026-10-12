@@ -37,6 +37,7 @@ const CARDS: Record<string, unknown>[] = [
     idList: 'l1',
     url: 'https://trello.test/c/c2/2-ship-it',
   },
+  { id: 'c3', name: 'Docs', desc: 'Visit wombat.example.com first', idBoard: 'b1', idList: 'l1' },
 ]
 
 const LIST = 'workspaces/Engineering__ws1/boards/Roadmap__b1/lists/Doing__l1'
@@ -46,7 +47,7 @@ const LIST = 'workspaces/Engineering__ws1/boards/Roadmap__b1/lists/Doing__l1'
 class FakeTransport implements TrelloTransport {
   readonly searched: string[] = []
   constructor(
-    private readonly named: string[],
+    private readonly named: string[] | Record<string, string[]>,
     private readonly reply?: Record<string, unknown> | Error,
   ) {}
   call(_method: string, path: string, params: Record<string, string> = {}): Promise<unknown> {
@@ -54,7 +55,8 @@ class FakeTransport implements TrelloTransport {
       this.searched.push(params.query ?? '')
       if (this.reply instanceof Error) return Promise.reject(this.reply)
       if (this.reply !== undefined) return Promise.resolve(this.reply)
-      return Promise.resolve({ cards: this.named.map((id) => ({ id })) })
+      const ids = Array.isArray(this.named) ? this.named : (this.named[params.query ?? ''] ?? [])
+      return Promise.resolve({ cards: ids.map((id) => ({ id })) })
     }
     if (path === '/members/me/organizations') {
       return Promise.resolve([{ id: 'ws1', displayName: 'Engineering' }])
@@ -74,7 +76,7 @@ function scope(vfsPath = ''): PathSpec {
 
 async function ask(
   text: string,
-  named: string[],
+  named: string[] | Record<string, string[]>,
   under = scope(),
   reply?: Record<string, unknown> | Error,
 ): Promise<[PathSpec[] | null, string[]]> {
@@ -107,6 +109,14 @@ describe('trello filesContaining', () => {
       `${LIST}/cards/Write_notes__c2/card.json`,
     ])
     expect(searched).toEqual(['ship'])
+  })
+
+  // Trello's search may miss a word inside a link, so the listing keeps it,
+  // and each word of a phrase is found in either place.
+  it('keeps a word inside a link in the listing', async () => {
+    const [out, searched] = await ask('visit wombat', { visit: ['c3'] })
+    expect(out?.map((p) => p.vfsPath)).toEqual([`${LIST}/cards/Docs__c3/card.json`])
+    expect(searched).toEqual(['visit', 'wombat'])
   })
 
   it('names a card scope its own card.json', async () => {

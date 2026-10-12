@@ -12,11 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 _HEX_LETTERS = frozenset("abcdef")
 # The letters a JSON escape ends with: ``\b \f \n \r \t``, and the hex
 # digit closing a ``\u00XX`` control character. Each can run into the word
 # after it, so ``\nice`` holds "nice" where the message holds "ice".
 _ESCAPE_LETTERS = frozenset("abcdefnrt")
+# A word a provider's search reads as grep -w does: ASCII letters and
+# digits, with sentence punctuation around them at most.
+_PLAIN_WORD = re.compile(r"[.,;:!?\"'()\[\]]*[A-Za-z0-9]+[.,;:!?\"'()\[\]]*")
 
 
 def record_queries(
@@ -58,3 +63,37 @@ def record_queries(
     if not rest:
         return None
     return [text, rest] if whole_word else [rest]
+
+
+def non_plain_words(text: str) -> list[str]:
+    """The words of ``text`` a provider's search may split otherwise than
+    grep -w: a link, an address, markup, an entity, a hyphenated or
+    non-ASCII word.
+
+    Args:
+        text (str): a field the provider's search reads.
+    """
+    return [word for word in text.split() if not _PLAIN_WORD.fullmatch(word)]
+
+
+def may_hold(
+    asked: list[list[str]],
+    named: dict[str, set[str]],
+    record_id: str,
+    kept: str,
+) -> bool:
+    """Whether a record may hold one of the asked texts: each word of one
+    is named for the record by the provider's search, asked word by word,
+    or held by the text the listing kept.
+
+    Args:
+        asked (list[list[str]]): each searched text's lowercase words.
+        named (dict[str, set[str]]): the record ids each word's search
+            named.
+        record_id (str): the record's id.
+        kept (str): the record's kept text, lowercase.
+    """
+    return any(
+        all(record_id in named[word] or word in kept for word in words)
+        for words in asked
+    )

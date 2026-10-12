@@ -18,7 +18,7 @@ import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { recordQueries } from '../../utils/record_search.ts'
+import { mayHold, recordQueries } from '../../utils/record_search.ts'
 import { CALENDAR_FILE } from '../../vfs/gcal/event_entry.ts'
 import { GoogleApiError } from '../google/client.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
@@ -130,10 +130,7 @@ export async function filesContaining(
           if (entry === null) return null
           const kept = entry.extra.unsearched
           if (typeof kept !== 'string') return null
-          const held = asked.some((words) =>
-            words.every((word) => named.get(word)?.has(entry.id) === true || kept.includes(word)),
-          )
-          if (held) found.push(path)
+          if (mayHold(asked, named, entry.id, kept)) found.push(path)
         }
       }
     }

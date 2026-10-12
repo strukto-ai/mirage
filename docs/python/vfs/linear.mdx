@@ -146,10 +146,12 @@ the creator.
 ## grep and rg
 
 With `content_search=True` (YAML `content_search: true`), `grep -rw` and
-`rg -w` read only the issues Linear's issue search names, and those whose other
-fields (team, project, cycle, state, people, labels, dates, link) hold the
-word, which the listing keeps. Comments, members, projects, cycles and
-documents are always read.
+`rg -w` ask Linear's issue search for each word and read only the issues that
+hold every word, where the search names it or the listing keeps it. The listing
+keeps the issue's other fields (team, project, cycle, state, people, labels,
+dates, link) and each title or description word the search can miss, such as
+one inside a link. Comments, members, projects, cycles and documents are always
+read.
 
 Every issue is read when the word is a key of the issue JSON (`title`,
 `priority`) or a JSON literal, has a digit or only the letters a to f, which an

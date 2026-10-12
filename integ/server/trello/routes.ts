@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Prisma } from '../../generated/trello/index.js'
-import { route, tenantWhere } from '../kit/typescript/index.ts'
+import { plainWords, route, tenantWhere } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { WRITE_STAMP, config } from './config.ts'
 import type { C } from './config.ts'
@@ -167,7 +167,8 @@ async function cardActions(ctx: Ctx<C>): Promise<Reply> {
 }
 
 // Trello's search, cards only: the cards whose name or description holds
-// every word of the query, case folded, up to cards_limit.
+// every word of the query among its plain words, case folded, up to
+// cards_limit.
 async function search(ctx: Ctx<C>): Promise<Reply> {
   const words = (ctx.query.get('query') ?? '')
     .toLowerCase()
@@ -181,7 +182,7 @@ async function search(ctx: Ctx<C>): Promise<Reply> {
   const cards: JsonValue[] = []
   for (const row of rows) {
     if (cards.length >= limit) break
-    const haystack = `${row.name} ${row.desc}`.toLowerCase()
+    const haystack = plainWords(`${row.name} ${row.desc}`).toLowerCase()
     if (words.length > 0 && words.every((word) => haystack.includes(word))) {
       cards.push({ id: row.id })
     }

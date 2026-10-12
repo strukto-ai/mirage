@@ -17,7 +17,8 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { recordQueries } from '../../utils/record_search.ts'
+import { mayHold, recordQueries } from '../../utils/record_search.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { LinearApiError, searchIssues } from './client.ts'
@@ -40,15 +41,13 @@ export const RECORD_KEYS: ReadonlySet<string> = new Set([
   'null',
 ])
 
-// Each issue directory under `scope` by issue id, and the ids whose
-// unsearched text holds `text`; null for a scope inside an issue or a listing
-// that keeps no unsearched text.
+// Each issue directory under `scope` with its kept text, by issue id; null for
+// a scope inside an issue or a listing that keeps no unsearched text.
 async function issueDirs(
   accessor: LinearAccessor,
   scope: PathSpec,
   index: IndexCacheStore | undefined,
-  text: string,
-): Promise<[Map<string, PathSpec>, Set<string>] | null> {
+): Promise<Map<string, [PathSpec, string]> | null> {
   const match = detectScope(scope)
   const base = scope.mountPath.replace(/\/+$/, '')
   let teams: PathSpec[]
@@ -66,8 +65,7 @@ async function issueDirs(
   } else {
     return null
   }
-  const dirs = new Map<string, PathSpec>()
-  const held = new Set<string>()
+  const dirs = new Map<string, [PathSpec, string]>()
   for (const issues of teams) {
     const parent = issues.mountPath.replace(/\/+$/, '')
     for (const listed of await readdir(accessor, issues, index)) {
@@ -75,20 +73,21 @@ async function issueDirs(
       const entry = await resolveEntry(readdir, accessor, child, index)
       const kept = entry?.extra.unsearched
       if (entry === null || typeof kept !== 'string') return null
-      dirs.set(entry.id, child)
-      if (kept.includes(text.toLowerCase())) held.add(entry.id)
+      dirs.set(entry.id, [child, kept])
     }
   }
-  return [dirs, held]
+  return dirs
 }
 
 /**
  * The `issue.json` files under `under` whose issue Linear's search names, or
  * whose other fields hold `text`.
  *
- * Linear searches an issue's title and description, so the rest of its JSON
- * (team, project, cycle, state, people, labels, dates, link) is checked
- * against what the listing kept (`unsearchedText`), and the text goes through
+ * Linear searches an issue's title and description by word, so each word is
+ * asked on its own, and an issue is read when each word is either named there
+ * or held by the text the listing kept (`unsearchedText`): the rest of its
+ * JSON (team, project, cycle, state, people, labels, dates, link), and the
+ * words of those two the search may split otherwise. The text goes through
  * `recordQueries` for its key names and escapes. Null when the text cannot be
  * searched, a scope lies inside an issue, a search answers a full page or
  * fails, or nothing is found, since Linear indexes a write some time after it
@@ -102,20 +101,20 @@ export async function filesContaining(
 ): Promise<PathSpec[] | null> {
   const queries = recordQueries(text, RECORD_KEYS, true)
   if (queries === null) return null
+  const asked = queries.map((query) => query.toLowerCase().split(/\s+/).filter(Boolean))
   const found: PathSpec[] = []
   try {
-    const named = new Set<string>()
-    for (const query of queries) {
-      const nodes = await searchIssues(accessor.transport, query, SEARCH_LIMIT)
+    const named = new Map<string, Set<string>>()
+    for (const word of [...new Set(asked.flat())].sort(compareCodePoints)) {
+      const nodes = await searchIssues(accessor.transport, word, SEARCH_LIMIT)
       if (nodes.length >= SEARCH_LIMIT) return null
-      for (const node of nodes) named.add(String(node.id))
+      named.set(word, new Set(nodes.map((node) => String(node.id))))
     }
     for (const scope of under) {
-      const walked = await issueDirs(accessor, scope, index, text)
-      if (walked === null) return null
-      const [dirs, held] = walked
-      for (const [issueId, path] of dirs) {
-        if (named.has(issueId) || held.has(issueId)) {
+      const dirs = await issueDirs(accessor, scope, index)
+      if (dirs === null) return null
+      for (const [issueId, [path, kept]] of dirs) {
+        if (mayHold(asked, named, issueId, kept)) {
           found.push(mountedPath(path, `${path.mountPath.replace(/\/+$/, '')}/issue.json`))
         }
       }

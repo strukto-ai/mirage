@@ -15,6 +15,7 @@
 import type { Prisma } from '../../generated/linear/index.js'
 import type { Comment, Issue, WorkflowState } from '../../generated/linear/index.js'
 import { idWhere, tenantWhere } from '../kit/typescript/tenant.ts'
+import { plainWords } from '../kit/typescript/words.ts'
 import type { Ctx } from '../kit/typescript/route.ts'
 import type { JsonValue, Reply } from '../kit/typescript/types.ts'
 import { ISSUE_URL_BASE, WRITE_STAMP, config } from './config.ts'
@@ -171,7 +172,7 @@ export const teamDocuments: Op = async (ctx, vars) => {
     orderBy: SEQ_ASC,
   })
   const refs = await loadRefs(ctx.db, ctx.tenant)
-  return dataReply({ team: { documents: connection(rows.map((d) => documentNode(refs, d))) } })
+  return dataReply({ documents: connection(rows.map((d) => documentNode(refs, d))) })
 }
 
 async function issueById(ctx: Ctx<C>, id: string | null): Promise<Issue | null> {
@@ -239,7 +240,8 @@ export const userLookup: Op = async (ctx, vars) => {
 // means 50 rather than an empty page, and a value that is not a number reaches
 // the length comparison exactly as it did there. The scan stops as soon as the
 // page is full, which for a substring match over every issue is the same set
-// as filtering and slicing.
+// as filtering and slicing. The title and description are matched by their
+// plain words only (`plainWords`), as Linear can miss a word inside a link.
 //
 // The row order is the GLOBAL insertion order (Issue.seq, renumbered across
 // teams by afterSeed), not the per-team one: the old fake paged out of one
@@ -254,8 +256,8 @@ export const issueSearch: Op = async (ctx, vars) => {
   const nodes: JsonValue[] = []
   for (const row of rows) {
     const haystack = [
-      pyJoinPart(issueTitle(row)),
-      pyJoinPart(issueDescription(row)),
+      plainWords(pyJoinPart(issueTitle(row))),
+      plainWords(pyJoinPart(issueDescription(row))),
       pyJoinPart(row.identifier),
     ]
       .join(' ')

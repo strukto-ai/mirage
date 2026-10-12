@@ -41,6 +41,13 @@ CARDS = [
         "idList": "l1",
         "url": "https://trello.test/c/c2/2-ship-it",
     },
+    {
+        "id": "c3",
+        "name": "Docs",
+        "desc": "Visit wombat.example.com first",
+        "idBoard": "b1",
+        "idList": "l1",
+    },
 ]
 
 LIST = "workspaces/Engineering__ws1/boards/Roadmap__b1/lists/Doing__l1"
@@ -53,15 +60,24 @@ def _scope(vfs_path: str = "") -> PathSpec:
 
 async def _ask(
     text: str,
-    named: list[str],
+    named: list[str] | dict[str, list[str]],
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
 ):
     accessor = TrelloAccessor(
         TrelloConfig(api_key="k", api_token="t", content_search=True)
     )
+
+    def cards(*args, params, **kwargs):
+        ids = (
+            named.get(params["query"], [])
+            if isinstance(named, dict)
+            else named
+        )
+        return {"cards": [{"id": i} for i in ids]}
+
     found = (
-        AsyncMock(return_value={"cards": [{"id": i} for i in named]})
+        AsyncMock(side_effect=cards)
         if reply is None
         else AsyncMock(side_effect=[reply])
     )
@@ -113,6 +129,16 @@ async def test_hits_are_what_trello_names_and_what_the_listing_kept():
         f"{LIST}/cards/Write_notes__c2/card.json",
     ]
     assert asked == ["ship"]
+
+
+# Trello's search may miss a word inside a link, so the listing keeps it, and
+# each word of a phrase is found in either place.
+@pytest.mark.asyncio
+async def test_a_word_in_a_link_is_kept_by_the_listing():
+    out, asked = await _ask("visit wombat", {"visit": ["c3"]})
+    assert out is not None
+    assert [p.vfs_path for p in out] == [f"{LIST}/cards/Docs__c3/card.json"]
+    assert asked == ["visit", "wombat"]
 
 
 @pytest.mark.asyncio

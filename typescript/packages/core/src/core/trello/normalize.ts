@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { jsonBytes } from '../render/json.ts'
+import { nonPlainWords } from '../../utils/record_search.ts'
 
 type Json = Record<string, unknown>
 
@@ -208,13 +209,19 @@ export function toJsonBytes(value: unknown): Uint8Array {
 export const SEARCHED_FIELDS: ReadonlySet<string> = new Set(['card_name', 'desc'])
 
 /**
- * What a card's `card.json` holds beyond what Trello's search reads,
- * lowercased: every other field as the file renders it. Mirrors Python's
- * `unsearched_text`.
+ * What a card's `card.json` holds beyond the plain words Trello's search
+ * reads, lowercased: every other field as the file renders it, then each word
+ * of the name and description that is not plain (`nonPlainWords`), such as
+ * one inside a link. Mirrors Python's `unsearched_text`.
  */
 export function unsearchedText(card: Json): string {
+  const normalized = normalizeCard(card)
   const rest = Object.fromEntries(
-    Object.entries(normalizeCard(card)).filter(([key]) => !SEARCHED_FIELDS.has(key)),
+    Object.entries(normalized).filter(([key]) => !SEARCHED_FIELDS.has(key)),
   )
-  return new TextDecoder().decode(toJsonBytes(rest)).toLowerCase()
+  const kept = [new TextDecoder().decode(toJsonBytes(rest))]
+  for (const [key, value] of Object.entries(normalized)) {
+    if (SEARCHED_FIELDS.has(key) && typeof value === 'string') kept.push(...nonPlainWords(value))
+  }
+  return kept.join(' ').toLowerCase()
 }

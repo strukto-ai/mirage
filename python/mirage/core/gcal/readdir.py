@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from datetime import date, datetime, timedelta, timezone
 
 from mirage.accessor.gcal import GCalAccessor
@@ -38,6 +37,7 @@ from mirage.errors.fs import enoent
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.glob_walk import glob_prefix, literal_span
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.utils.record_search import non_plain_words
 from mirage.vfs.gcal.event_entry import (
     CALENDAR_FILE,
     PRIMARY_DIR,
@@ -53,9 +53,6 @@ EVENT = "gcal/event"
 FREE_BUSY_ROLE = "freeBusyReader"
 # The text Calendar's search reads that the listing does not keep.
 SEARCHED_FIELDS = ("summary", "description", "location")
-# A word Calendar's search reads as grep -w does: ASCII letters and digits,
-# with sentence punctuation around them at most.
-PLAIN_WORD = re.compile(r"[.,;:!?\"'()\[\]]*[A-Za-z0-9]+[.,;:!?\"'()\[\]]*")
 
 
 def calendar_payload(entry: dict[str, JsonValue], tz: str) -> bytes:
@@ -263,9 +260,7 @@ def unsearched_text(event: dict[str, JsonValue]) -> str:
     for field in SEARCHED_FIELDS:
         value = event.get(field)
         if isinstance(value, str):
-            kept.extend(
-                w for w in value.split() if not PLAIN_WORD.fullmatch(w)
-            )
+            kept.extend(non_plain_words(value))
     return " ".join(kept).lower()
 
 

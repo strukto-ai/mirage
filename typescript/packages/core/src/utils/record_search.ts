@@ -17,6 +17,9 @@ const HEX_LETTERS = /^[a-f]+$/
 // closing a `\u00XX` control character. Each can run into the word after it,
 // so `\nice` holds "nice" where the message holds "ice".
 const ESCAPE_LETTERS = new Set('abcdefnrt')
+// A word a provider's search reads as grep -w does: ASCII letters and digits,
+// with sentence punctuation around them at most.
+const PLAIN_WORD = /^[.,;:!?"'()[\]]*[A-Za-z0-9]+[.,;:!?"'()[\]]*$/
 
 /**
  * The searches whose hits together hold every mounted record `text` may
@@ -52,4 +55,28 @@ export function recordQueries(
   const rest = text.slice(1).trim()
   if (rest === '') return null
   return wholeWord ? [text, rest] : [rest]
+}
+
+/**
+ * The words of `text` a provider's search may split otherwise than grep -w: a
+ * link, an address, markup, an entity, a hyphenated or non-ASCII word.
+ */
+export function nonPlainWords(text: string): string[] {
+  return text.split(/\s+/).filter((word) => word !== '' && !PLAIN_WORD.test(word))
+}
+
+/**
+ * Whether a record may hold one of the asked texts (each searched text's
+ * lowercase words): each word of one is named for the record by the
+ * provider's search, asked word by word, or held by the text the listing kept.
+ */
+export function mayHold(
+  asked: readonly (readonly string[])[],
+  named: ReadonlyMap<string, ReadonlySet<string>>,
+  recordId: string,
+  kept: string,
+): boolean {
+  return asked.some((words) =>
+    words.every((word) => named.get(word)?.has(recordId) === true || kept.includes(word)),
+  )
 }

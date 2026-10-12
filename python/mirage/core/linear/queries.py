@@ -167,30 +167,30 @@ query TeamLabels($teamId: String!, $first: Int!, $after: String) {
 """
 
 TEAM_DOCUMENTS_QUERY = """
-query TeamDocuments($teamId: String!, $first: Int!, $after: String) {
-  team(id: $teamId) {
-    documents(first: $first, after: $after) {
-      nodes {
+query TeamDocuments($teamId: ID!, $first: Int!, $after: String) {
+  documents(
+    filter: {team: {id: {eq: $teamId}}}, first: $first, after: $after
+  ) {
+    nodes {
+      id
+      title
+      content
+      url
+      createdAt
+      updatedAt
+      project {
         id
-        title
-        content
-        url
-        createdAt
-        updatedAt
-        project {
-          id
-          name
-        }
-        creator {
-          id
-          name
-          email
-        }
+        name
       }
-      pageInfo {
-        hasNextPage
-        endCursor
+      creator {
+        id
+        name
+        email
       }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
     }
   }
 }

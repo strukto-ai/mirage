@@ -25,7 +25,7 @@ from mirage.core.trello.readdir import readdir
 from mirage.core.trello.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.record_search import record_queries
+from mirage.utils.record_search import may_hold, record_queries
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +81,15 @@ async def files_containing(
     """The ``card.json`` files under ``under`` whose card Trello's search
     names, or whose other fields hold ``text``.
 
-    Trello searches a card's name and description, so the rest of its
-    JSON (ids, due date, flags, link) is checked against what the listing
-    kept (``unsearched_text``), and the text goes through
-    ``record_queries`` for its key names and escapes. None when the text
-    cannot be searched, a scope lies inside a card, a search answers a
-    full page or fails, or nothing is found, since Trello indexes a write
-    some time after it lands.
+    Trello searches a card's name and description by word, so each word
+    is asked on its own, and a card is read when each word is either
+    named there or held by the text the listing kept
+    (``unsearched_text``): the rest of its JSON (ids, due date, flags,
+    link), and the words of those two the search may split otherwise. The
+    text goes through ``record_queries`` for its key names and escapes.
+    None when the text cannot be searched, a scope lies inside a card, a
+    search answers a full page or fails, or nothing is found, since Trello
+    indexes a write some time after it lands.
 
     Args:
         accessor (TrelloAccessor): the account.
@@ -98,16 +100,17 @@ async def files_containing(
     queries = record_queries(text, RECORD_KEYS, whole_word=True)
     if queries is None:
         return None
+    asked = [query.lower().split() for query in queries]
     found: list[PathSpec] = []
     try:
-        named: set[str] = set()
-        for query in queries:
+        named: dict[str, set[str]] = {}
+        for word in sorted({word for words in asked for word in words}):
             cards = await search_cards(
-                accessor.config, query, SEARCH_LIMIT, session=accessor.pool
+                accessor.config, word, SEARCH_LIMIT, session=accessor.pool
             )
             if len(cards) >= SEARCH_LIMIT:
                 return None
-            named.update(str(card.get("id")) for card in cards)
+            named[word] = {str(card.get("id")) for card in cards}
         for scope in under:
             walked = await _cards(accessor, scope, index)
             if walked is None:
@@ -115,8 +118,7 @@ async def files_containing(
             found.extend(
                 mounted_path(path, f"{path.mount_path.rstrip('/')}/card.json")
                 for path, entry in walked
-                if entry.id in named
-                or text.lower() in entry.extra["unsearched"]
+                if may_hold(asked, named, entry.id, entry.extra["unsearched"])
             )
     except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
         logger.warning("trello search failed (%s); reading every file", exc)

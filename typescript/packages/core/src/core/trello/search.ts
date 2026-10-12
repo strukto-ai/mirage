@@ -18,7 +18,8 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { recordQueries } from '../../utils/record_search.ts'
+import { mayHold, recordQueries } from '../../utils/record_search.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { TrelloApiError, searchCards } from './client.ts'
@@ -82,9 +83,11 @@ async function cards(
  * The `card.json` files under `under` whose card Trello's search names, or
  * whose other fields hold `text`.
  *
- * Trello searches a card's name and description, so the rest of its JSON
- * (ids, due date, flags, link) is checked against what the listing kept
- * (`unsearchedText`), and the text goes through `recordQueries` for its key
+ * Trello searches a card's name and description by word, so each word is
+ * asked on its own, and a card is read when each word is either named there
+ * or held by the text the listing kept (`unsearchedText`): the rest of its
+ * JSON (ids, due date, flags, link), and the words of those two the search
+ * may split otherwise. The text goes through `recordQueries` for its key
  * names and escapes. Null when the text cannot be searched, a scope lies
  * inside a card, a search answers a full page or fails, or nothing is found,
  * since Trello indexes a write some time after it lands. Mirrors Python's
@@ -98,23 +101,21 @@ export async function filesContaining(
 ): Promise<PathSpec[] | null> {
   const queries = recordQueries(text, RECORD_KEYS, true)
   if (queries === null) return null
+  const asked = queries.map((query) => query.toLowerCase().split(/\s+/).filter(Boolean))
   const found: PathSpec[] = []
   try {
-    const named = new Set<string>()
-    for (const query of queries) {
-      const hits = await searchCards(accessor.transport, query, SEARCH_LIMIT)
+    const named = new Map<string, Set<string>>()
+    for (const word of [...new Set(asked.flat())].sort(compareCodePoints)) {
+      const hits = await searchCards(accessor.transport, word, SEARCH_LIMIT)
       if (hits.length >= SEARCH_LIMIT) return null
-      for (const hit of hits) named.add(String(hit.id))
+      named.set(word, new Set(hits.map((hit) => String(hit.id))))
     }
     for (const scope of under) {
       const walked = await cards(accessor, scope, index)
       if (walked === null) return null
       for (const [path, entry] of walked) {
         const kept = entry.extra.unsearched
-        if (
-          named.has(entry.id) ||
-          (typeof kept === 'string' && kept.includes(text.toLowerCase()))
-        ) {
+        if (typeof kept === 'string' && mayHold(asked, named, entry.id, kept)) {
           found.push(mountedPath(path, `${path.mountPath.replace(/\/+$/, '')}/card.json`))
         }
       }

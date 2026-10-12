@@ -25,7 +25,7 @@ from mirage.core.linear.readdir import readdir
 from mirage.core.linear.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.record_search import record_queries
+from mirage.utils.record_search import may_hold, record_queries
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +44,10 @@ async def _issue_dirs(
     accessor: LinearAccessor,
     scope: PathSpec,
     index: IndexCacheStore,
-    text: str,
-) -> tuple[dict[str, PathSpec], set[str]] | None:
-    """Each issue directory under ``scope`` by issue id, and the ids whose
-    unsearched text holds ``text``; None for a scope inside an issue or a
-    listing that keeps no unsearched text.
+) -> dict[str, tuple[PathSpec, str]] | None:
+    """Each issue directory under ``scope`` with its kept text, by issue
+    id; None for a scope inside an issue or a listing that keeps no
+    unsearched text.
     """
     match = detect_scope(scope)
     base = scope.mount_path.rstrip("/")
@@ -66,8 +65,7 @@ async def _issue_dirs(
         teams = []
     else:
         return None
-    dirs: dict[str, PathSpec] = {}
-    held: set[str] = set()
+    dirs: dict[str, tuple[PathSpec, str]] = {}
     for issues in teams:
         parent = issues.mount_path.rstrip("/")
         for listed in await readdir(accessor, issues, index):
@@ -76,10 +74,8 @@ async def _issue_dirs(
             entry = await resolve_entry(readdir, accessor, child, index)
             if entry is None or "unsearched" not in entry.extra:
                 return None
-            dirs[entry.id] = child
-            if text.lower() in entry.extra["unsearched"]:
-                held.add(entry.id)
-    return dirs, held
+            dirs[entry.id] = (child, entry.extra["unsearched"])
+    return dirs
 
 
 async def files_containing(
@@ -91,13 +87,16 @@ async def files_containing(
     """The ``issue.json`` files under ``under`` whose issue Linear's search
     names, or whose other fields hold ``text``.
 
-    Linear searches an issue's title and description, so the rest of its
-    JSON (team, project, cycle, state, people, labels, dates, link) is
-    checked against what the listing kept (``unsearched_text``), and the
-    text goes through ``record_queries`` for its key names and escapes.
-    None when the text cannot be searched, a scope lies inside an issue, a
-    search answers a full page or fails, or nothing is found, since Linear
-    indexes a write some time after it lands.
+    Linear searches an issue's title and description by word, so each
+    word is asked on its own, and an issue is read when each word is
+    either named there or held by the text the listing kept
+    (``unsearched_text``): the rest of its JSON (team, project, cycle,
+    state, people, labels, dates, link), and the words of those two the
+    search may split otherwise. The text goes through ``record_queries``
+    for its key names and escapes. None when the text cannot be searched,
+    a scope lies inside an issue, a search answers a full page or fails,
+    or nothing is found, since Linear indexes a write some time after it
+    lands.
 
     Args:
         accessor (LinearAccessor): the workspace.
@@ -108,25 +107,25 @@ async def files_containing(
     queries = record_queries(text, RECORD_KEYS, whole_word=True)
     if queries is None:
         return None
+    asked = [query.lower().split() for query in queries]
     found: list[PathSpec] = []
     try:
-        named: set[str] = set()
-        for query in queries:
+        named: dict[str, set[str]] = {}
+        for word in sorted({word for words in asked for word in words}):
             nodes = await search_issues(
-                accessor.config, query, SEARCH_LIMIT, session=accessor.pool
+                accessor.config, word, SEARCH_LIMIT, session=accessor.pool
             )
             if len(nodes) >= SEARCH_LIMIT:
                 return None
-            named.update(str(node.get("id")) for node in nodes)
+            named[word] = {str(node.get("id")) for node in nodes}
         for scope in under:
-            walked = await _issue_dirs(accessor, scope, index, text)
-            if walked is None:
+            dirs = await _issue_dirs(accessor, scope, index)
+            if dirs is None:
                 return None
-            dirs, held = walked
             found.extend(
                 mounted_path(path, f"{path.mount_path.rstrip('/')}/issue.json")
-                for issue_id, path in dirs.items()
-                if issue_id in named or issue_id in held
+                for issue_id, (path, kept) in dirs.items()
+                if may_hold(asked, named, issue_id, kept)
             )
     except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
         logger.warning("linear search failed (%s); reading every file", exc)

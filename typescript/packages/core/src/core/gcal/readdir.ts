@@ -27,6 +27,7 @@ import {
 import type { JsonValue, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { nonPlainWords } from '../../utils/record_search.ts'
 import { globPrefix, literalSpan } from '../../utils/glob_walk.ts'
 import {
   SPAN_SEP,
@@ -54,9 +55,6 @@ export const EVENT = 'gcal/event'
 const FREE_BUSY_ROLE = 'freeBusyReader'
 // The text Calendar's search reads that the listing does not keep.
 const SEARCHED_FIELDS: readonly string[] = ['summary', 'description', 'location']
-// A word Calendar's search reads as grep -w does: ASCII letters and digits,
-// with sentence punctuation around them at most.
-const PLAIN_WORD = /^[.,;:!?"'()[\]]*[A-Za-z0-9]+[.,;:!?"'()[\]]*$/
 
 export type CalendarEntryRow = Record<string, JsonValue>
 
@@ -208,7 +206,7 @@ export function unsearchedText(event: CalendarEntryRow): string {
   for (const field of SEARCHED_FIELDS) {
     const value = event[field]
     if (typeof value === 'string') {
-      kept.push(...value.split(/\s+/).filter((word) => word !== '' && !PLAIN_WORD.test(word)))
+      kept.push(...nonPlainWords(value))
     }
   }
   return kept.join(' ').toLowerCase()

@@ -211,7 +211,7 @@
      "id": "iss_web_1",
      "identifier": "WEB-1",
      "title": "Redesign pricing page",
-     "description": "New three-tier layout with annual toggle.",
+     "description": "New three-tier layout with annual toggle, see example.com/GraphQL/pricing.",
      "priority": 3,
      "url": "https://linear.app/strukto/issue/WEB-1",
      "createdAt": "2026-06-08T09:00:00.000Z",

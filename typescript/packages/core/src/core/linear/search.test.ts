@@ -22,12 +22,17 @@ import { SEARCH_LIMIT, filesContaining } from './search.ts'
 
 const TEAM = { id: 'T1', key: 'ENG', name: 'Engineering' }
 
-function issue(id: string, title: string, state: string): Record<string, unknown> {
+function issue(
+  id: string,
+  title: string,
+  state: string,
+  description = '',
+): Record<string, unknown> {
   return {
     id,
     identifier: `ENG-${id.slice(-1)}`,
     title,
-    description: '',
+    description,
     team: TEAM,
     state: { id: 'S', name: state },
   }
@@ -36,6 +41,7 @@ function issue(id: string, title: string, state: string): Record<string, unknown
 const ISSUES = [
   issue('I1', 'Fix the login page', 'Todo'),
   issue('I2', 'Write release notes', 'Blocked'),
+  issue('I3', 'Docs', 'Todo', 'Visit wombat.example.com first'),
 ]
 
 // Answers the team listing, the issue listing and the issue search, recording
@@ -43,7 +49,7 @@ const ISSUES = [
 class FakeTransport implements LinearTransport {
   readonly searched: string[] = []
   constructor(
-    private readonly named: string[],
+    private readonly named: string[] | Record<string, string[]>,
     private readonly reply?: Record<string, unknown> | Error,
   ) {}
   graphql(
@@ -55,7 +61,10 @@ class FakeTransport implements LinearTransport {
       this.searched.push(String(variables.term))
       if (this.reply instanceof Error) return Promise.reject(this.reply)
       if (this.reply !== undefined) return Promise.resolve(this.reply)
-      return Promise.resolve({ searchIssues: { nodes: this.named.map((id) => ({ id })) } })
+      const ids = Array.isArray(this.named)
+        ? this.named
+        : (this.named[String(variables.term)] ?? [])
+      return Promise.resolve({ searchIssues: { nodes: ids.map((id) => ({ id })) } })
     }
     if (query.includes('issues(')) {
       return Promise.resolve({ team: { issues: { nodes: ISSUES, pageInfo: page } } })
@@ -71,7 +80,7 @@ function scope(vfsPath = ''): PathSpec {
 
 async function ask(
   text: string,
-  named: string[],
+  named: string[] | Record<string, string[]>,
   under = scope(),
   reply?: Record<string, unknown> | Error,
 ): Promise<[PathSpec[] | null, string[]]> {
@@ -100,7 +109,15 @@ describe('linear filesContaining', () => {
     const [out, searched] = await ask('Blocked', ['I1'])
     expect(out?.map((p) => p.vfsPath.split('/').at(-2)).sort()).toEqual(['ENG-1__I1', 'ENG-2__I2'])
     expect(out?.every((p) => p.vfsPath.endsWith('/issue.json'))).toBe(true)
-    expect(searched).toEqual(['Blocked', 'locked'])
+    expect(searched).toEqual(['blocked', 'locked'])
+  })
+
+  // Linear's search may miss a word inside a link, so the listing keeps it,
+  // and each word of a phrase is found in either place.
+  it('keeps a word inside a link in the listing', async () => {
+    const [out, searched] = await ask('visit wombat', { visit: ['I3'] })
+    expect(out?.map((p) => p.vfsPath.split('/').at(-2))).toEqual(['ENG-3__I3'])
+    expect(searched).toEqual(['visit', 'wombat'])
   })
 
   it.each<[string, string[], string]>([

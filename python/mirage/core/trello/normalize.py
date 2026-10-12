@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.core.render.json import json_bytes
+from mirage.utils.record_search import non_plain_words
 
 
 def normalize_workspace(workspace: dict[str, Any]) -> dict[str, Any]:
@@ -105,15 +106,23 @@ SEARCHED_FIELDS = ("card_name", "desc")
 
 
 def unsearched_text(card: dict[str, Any]) -> str:
-    """What a card's ``card.json`` holds beyond what Trello's search reads,
-    lowercased: every other field as the file renders it.
+    """What a card's ``card.json`` holds beyond the plain words Trello's
+    search reads, lowercased: every other field as the file renders it,
+    then each word of the name and description that is not plain
+    (``non_plain_words``), such as one inside a link.
 
     Args:
         card (dict[str, Any]): the card as the listing fetched it.
     """
+    normalized = normalize_card(card)
     rest = {
         key: value
-        for key, value in normalize_card(card).items()
+        for key, value in normalized.items()
         if key not in SEARCHED_FIELDS
     }
-    return to_json_bytes(rest).decode().lower()
+    kept = [to_json_bytes(rest).decode()]
+    for field in SEARCHED_FIELDS:
+        value = normalized.get(field)
+        if isinstance(value, str):
+            kept.extend(non_plain_words(value))
+    return " ".join(kept).lower()

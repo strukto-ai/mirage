@@ -213,7 +213,7 @@ class FixtureTransport implements LinearTransport {
     if (op === 'TeamProjects') return Promise.resolve({ team: { projects: connection(PROJECTS) } })
     if (op === 'TeamCycles') return Promise.resolve({ team: { cycles: connection(CYCLES) } })
     if (op === 'TeamDocuments') {
-      return Promise.resolve({ team: { documents: connection(DOCUMENTS) } })
+      return Promise.resolve({ documents: connection(DOCUMENTS) })
     }
     if (op === 'Issue') {
       this.issueFetches += 1
