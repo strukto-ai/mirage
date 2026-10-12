@@ -13,17 +13,18 @@ it. Python SDK, Node and browsers.
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```bash
-    pip install 'mirage-ai[e2b]'
+    pip install 'mirage-ai[e2b,ssh]'
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```bash
-    pnpm add e2b
+    pnpm add e2b ssh2
     ```
   </Tab>
 </Tabs>
 
-Create the sandbox from a template that has what
+The `ssh` extra and `ssh2` serve the workspace into the sandbox with
+`mount_type: ssh`. Create the sandbox from a template that has what
 [connecting the workspace](#connecting-the-workspace) needs. Set `api_key`
 in the config, or `E2B_API_KEY`.
 
@@ -95,8 +96,7 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 
 - The template needs only `sshfs`. No Mirage, keys or open port in the
   sandbox.
-- The host needs `pip install 'mirage-ai[ssh]'` (Python) or `pnpm add ssh2`
-  (Node). `ssh` and `both` do not work in browsers.
+- `ssh` and `both` do not work in browsers.
 - Each file call is a round trip to the workspace, about 150 ms for a small
   file from a laptop; with `both`, keep bulk data on the sandbox's own
   mounts.
