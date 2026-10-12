@@ -109,6 +109,7 @@ import { ensureVarVisible, gateRendering, sessionView } from '../session/state.t
 import { postSessionGate, preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { concat } from '../../utils/bytes.ts'
+import type { ExpandedWords } from './types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -157,6 +158,9 @@ export async function executeCommand(
   // Where a command that runs statements of its own (a function body, a
   // nested shell) writes them as they finish.
   sink?: JobConsole,
+  // Filled with the words the command expanded to, so the caller knows what
+  // the head ran as.
+  expanded?: ExpandedWords,
 ): Promise<Result> {
   const session = context.session
   const name = getCommandName(node)
@@ -392,6 +396,7 @@ export async function executeCommand(
       seedPrefix,
       sink,
       parser,
+      expanded,
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
     return [stdout, io, execNode]
@@ -438,6 +443,7 @@ async function runCommandBody(
   seedPrefix?: (command: string) => Promise<void>,
   sink?: JobConsole,
   parser?: ParseScope,
+  expanded?: ExpandedWords,
 ): Promise<Result> {
   const session = context.session
   const stdin = stdinIn
@@ -465,6 +471,7 @@ async function runCommandBody(
       routingDecision,
     ),
   )
+  if (expanded !== undefined) expanded.words = [argv.name, ...argv.args]
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.

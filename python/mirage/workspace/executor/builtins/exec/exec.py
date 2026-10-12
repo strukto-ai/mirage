@@ -619,7 +619,8 @@ async def divert_statement(
         try:
             refused = await _routed(dispatch, session, channel, data, rest)
         except PipeClosed:
-            if not _writer_forks(statement, session):
+            producer = None if io.producer is None else io.producer.command
+            if not _writer_forks(statement, session, producer):
                 raise ExitSignal(141) from None
             io.exit_code = 141
             break
@@ -641,23 +642,31 @@ async def divert_statement(
     return rest
 
 
-def _writer_forks(statement: TSNodeLike | None, session: SessionState) -> bool:
+def _writer_forks(
+    statement: TSNodeLike | None, session: SessionState, producer: str | None
+) -> bool:
     """Whether what a statement wrote came from a child bash forks for
     it, so a pipe closing under the write ends that writer alone: a
     program or a subshell, redirected or negated too, or a pipeline,
-    whose commands are each a child of their own.
+    whose commands are each a child of their own. A command is judged by
+    the producer its output names, what its head ran as (``$cmd``), when
+    it names one.
 
     Args:
         statement (TSNodeLike | None): the statement that wrote.
         session (SessionState): whose functions a name may call.
+        producer (str | None): the command the output names as its
+            producer, None for none.
     """
     if statement is None:
         return False
     if statement.type == NT.REDIRECTED_STATEMENT:
-        return _writer_forks(get_redirects(statement)[0], session)
+        return _writer_forks(get_redirects(statement)[0], session, producer)
     if statement.type == NT.NEGATED_COMMAND:
-        return _writer_forks(get_negated_command(statement), session)
-    return statement.type == NT.PIPELINE or forks(statement, session)
+        return _writer_forks(get_negated_command(statement), session, producer)
+    if statement.type == NT.PIPELINE:
+        return True
+    return forks(statement, session, None if producer is None else (producer,))
 
 
 async def _routed(

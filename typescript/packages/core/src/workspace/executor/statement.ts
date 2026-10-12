@@ -31,7 +31,7 @@ import {
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
-import { getParts, getText } from '../../shell/helpers.ts'
+import { getParts } from '../../shell/helpers.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
@@ -174,33 +174,48 @@ export function carryStatus(session: SessionState): void {
  * function or another compound command is the shell's own, which expands
  * its redirects itself and discards the line on an error, and ends with a
  * pipe its own write closed. `command -v` is the builtin itself; `command X`
- * is X with functions masked; a name only an expansion spells is taken for
- * a program. Mirrors Python's forks.
+ * is X with functions masked. Once the command has expanded, its words
+ * (`words`, its name first) decide; before then a name only an expansion
+ * spells (`$cmd`) is taken for a program. Mirrors Python's forks.
  */
-export function forks(command: TSNodeLike | null, session: SessionState): boolean {
+export function forks(
+  command: TSNodeLike | null,
+  session: SessionState,
+  words: readonly string[] | null = null,
+): boolean {
   if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
-  let words = getParts(command).filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
+  let rest: (string | null)[] =
+    words !== null
+      ? [...words]
+      : getParts(command)
+          .filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
+          .map(spelled)
   let functions = true
-  while (words[0] !== undefined && getText(words[0]) === 'command') {
-    words = words.slice(1)
+  while (rest[0] === 'command') {
+    rest = rest.slice(1)
     functions = false
-    while (words[0] !== undefined && getText(words[0]).startsWith('-')) {
-      const option = getText(words[0])
-      words = words.slice(1)
+    while (rest[0] !== undefined && (rest[0] ?? '').startsWith('-')) {
+      const option = rest[0] ?? ''
+      rest = rest.slice(1)
       if (option === '--') break
       if (option.includes('v') || option.includes('V')) return false
     }
   }
-  let head = words[0]
-  if (head === undefined) return false
-  if (head.type === NT.COMMAND_NAME && head.namedChildren[0] !== undefined) {
-    head = head.namedChildren[0]
-  }
-  const name = literalText(head)
+  const name = rest[0]
+  if (name === undefined) return false
   return (
     name === null ||
     (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
   )
+}
+
+/** A word's text when it is literal, null when an expansion spells it. */
+function spelled(word: TSNodeLike): string | null {
+  const inner =
+    word.type === NT.COMMAND_NAME && word.namedChildren[0] !== undefined
+      ? word.namedChildren[0]
+      : word
+  return literalText(inner)
 }
 
 /**

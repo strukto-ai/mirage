@@ -17,6 +17,7 @@ import { enotsup, fsError } from '../../errors/fs.ts'
 import { PathSpec, WritePolicy } from '../../types.ts'
 import { mountKey, stripMount, underPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import type { SessionAccess } from '../../view/types.ts'
 import type { MountRegistry } from './registry.ts'
 import { writeConditions } from './write_policy.ts'
 
@@ -80,10 +81,15 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
  * under the path, which the walk would cross; a mount above the owner is
  * never touched. A live pipe (a process substitution) is no file a move can
  * delete either, and copying it first would drain it, so it is refused with
- * EPERM before anything is read, as `rm` refuses it. Mirrors Python's
+ * EPERM before anything is read, as `rm` refuses it. The pipe is looked up
+ * as the moving command's own session sees /dev, since a browser view bound
+ * to no owner sees no pipe while sessions overlap. Mirrors Python's
  * `make_check_unlink`.
  */
-export function makeCheckUnlink(registry: MountRegistry): (path: PathSpec) => void {
+export function makeCheckUnlink(
+  registry: MountRegistry,
+  access?: SessionAccess,
+): (path: PathSpec) => void {
   return (path: PathSpec): void => {
     const owner = registry.tryMountFor(path.virtual)
     const live = owner?.readsLive(
@@ -92,6 +98,7 @@ export function makeCheckUnlink(registry: MountRegistry): (path: PathSpec) => vo
         directory: path.directory,
         vfsPath: mountKey(path.virtual, rstripSlash(owner.prefix)),
       }),
+      access,
     )
     if (live === true) throw fsError(path, 'EPERM')
     for (const entry of registry.allMounts()) {

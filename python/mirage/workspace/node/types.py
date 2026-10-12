@@ -26,3 +26,13 @@ class Substitution:
     allocation: int
     endpoint: DevicePipe
     task: asyncio.Task[None]
+
+
+@dataclass
+class ExpandedWords:
+    """The words a simple command expanded to, its name first, filled in
+    as it dispatches: what its head ran as decides which writer a closed
+    pipe ends (``$cmd`` naming ``printf`` is the shell's own).
+    """
+
+    words: tuple[str, ...] | None = None

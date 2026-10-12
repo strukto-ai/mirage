@@ -110,18 +110,23 @@ describe('snapshotStatus / restoreStatus', () => {
 
 describe('forks', () => {
   it.each([
-    ['head -c 1 f', true],
-    ['(printf x)', true],
-    ['printf x', false],
-    ['g', false],
-    ['command g', true],
-    ['command -v head', false],
-    ['{ head f; }', false],
-    ['x=1', false],
-  ] as const)('%s: %s', async (line, forked) => {
+    ['head -c 1 f', null, true],
+    ['(printf x)', null, true],
+    ['printf x', null, false],
+    ['g', null, false],
+    ['command g', null, true],
+    ['command -v head', null, false],
+    ['{ head f; }', null, false],
+    ['x=1', null, false],
+    ['$cmd x', null, true],
+    ['$cmd x', ['printf', 'x'], false],
+    ['$cmd x', ['head', 'x'], true],
+    ['$c head', ['command', 'head'], true],
+    ['$f', ['g'], false],
+  ] as const)('%s with %j: %s', async (line, words, forked) => {
     const session = new SessionState({ sessionId: 's', functions: { g: 'g() { :; }' } })
     const node = (await getTestParser()).parse(line).children[0]
-    expect(node !== undefined && forks(node, session)).toBe(forked)
+    expect(node !== undefined && forks(node, session, words)).toBe(forked)
   })
 })
 

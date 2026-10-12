@@ -117,21 +117,26 @@ def test_errexit_acts_where_set_e_ends_the_shell(line, status, errexit, acts):
 
 
 @pytest.mark.parametrize(
-    ("line", "forked"),
+    ("line", "words", "forked"),
     [
-        ("head -c 1 f", True),
-        ("(printf x)", True),
-        ("printf x", False),
-        ("g", False),
-        ("command g", True),
-        ("command -v head", False),
-        ("{ head f; }", False),
-        ("x=1", False),
+        ("head -c 1 f", None, True),
+        ("(printf x)", None, True),
+        ("printf x", None, False),
+        ("g", None, False),
+        ("command g", None, True),
+        ("command -v head", None, False),
+        ("{ head f; }", None, False),
+        ("x=1", None, False),
+        ("$cmd x", None, True),
+        ("$cmd x", ("printf", "x"), False),
+        ("$cmd x", ("head", "x"), True),
+        ("$c head", ("command", "head"), True),
+        ("$f", ("g",), False),
     ],
 )
-def test_forks_where_bash_runs_a_child(line, forked):
+def test_forks_where_bash_runs_a_child(line, words, forked):
     session = SessionState(session_id="s", functions={"g": "g() { :; }"})
-    assert forks(parse(line).children[0], session) is forked
+    assert forks(parse(line).children[0], session, words) is forked
 
 
 def test_ignoring_errexit_scopes_the_context():

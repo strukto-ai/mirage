@@ -24,7 +24,7 @@ import { FileType, type FileStat } from '../../types.ts'
 export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
 
 /** The one-letter kind a -printf %y/%Y directive renders. */
-export type PrintfKind = 'f' | 'd' | 'l' | 'c'
+export type PrintfKind = 'f' | 'd' | 'l' | 'c' | 'p'
 export interface FindEntry {
   key: string
   name: string
@@ -562,5 +562,6 @@ export function printfKind(st: FileStat): PrintfKind {
   if (st.type === FileType.DIRECTORY) return 'd'
   if (st.type === FileType.SYMLINK) return 'l'
   if (st.type === FileType.CHAR_DEVICE) return 'c'
+  if (st.type === FileType.FIFO) return 'p'
   return 'f'
 }

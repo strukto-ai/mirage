@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getAdmission } from '../../../context/session_context.ts'
+import { getAdmission, sessionAccess } from '../../../context/session_context.ts'
 import type { EntryGate } from '../../../policy/types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { isBuiltinGrammar, registeredSpec } from '../../../commands/spec/builtins.ts'
@@ -601,7 +601,7 @@ export async function handleCommand(
       session.cwd,
       spelledWords(parts.slice(1)),
       aggregateFor(cmdName, csScopes, registry),
-      makeCheckUnlink(registry),
+      makeCheckUnlink(registry, sessionAccess(session)),
     )
     const csExec = new ExecutionNode({
       command: cmdStr,

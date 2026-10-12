@@ -117,6 +117,7 @@ from mirage.workspace.lookup import (
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.node.admission import Admitted, Refused, admit
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
+from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.state import (
     ensure_var_visible,
     gate_rendering,
@@ -162,11 +163,14 @@ async def execute_command(
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
+    expanded: ExpandedWords | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Dispatch a command node by name.
 
     ``sink`` is where a command that runs statements of its own (a
-    function body, a nested shell) writes them as they finish.
+    function body, a nested shell) writes them as they finish, and
+    ``expanded`` is filled with the words the command expanded to, so
+    its caller knows what the head ran as.
     """
     session = context.session
     name = get_command_name(node)
@@ -414,6 +418,7 @@ async def execute_command(
             agent_id,
             handed,
             sink,
+            expanded,
         )
         if refused:
             io.stderr = refused + (await materialize(io.stderr) or b"")
@@ -461,6 +466,7 @@ async def _dispatch_command_body(
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
+    expanded: ExpandedWords | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # The command's place on the line, as the pass computed it, and
     # the entry point its nested evaluations re-enter through: a word that
@@ -488,6 +494,8 @@ async def _dispatch_command_body(
             routing=routing_decision,
         ),
     )
+    if expanded is not None:
+        expanded.words = (argv.name, *argv.args)
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.

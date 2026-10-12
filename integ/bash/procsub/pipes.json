@@ -212,6 +212,97 @@
       "note": "Divergence: GNU bash 5.2.37 prints \"sub:0\\nafter\" with \"g-after\\nst:0\" on stderr, because only head dies of SIGPIPE. Mirage delivers what an exec redirect sends into a pipe as each of the subshell's statements ends, so the closed reader is met by the function call g, a write of the shell's own, and the subshell ends with 141."
     },
     {
+      "id": "procsub_closed_output_ends_the_shell_for_an_expanded_builtin",
+      "seq": 1346092,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cmd=printf; $cmd %200000s x > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 141,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_the_shell_for_an_expanded_builtin_in_group",
+      "seq": 1346093,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cmd=printf; { $cmd %200000s x; echo st:$? >&2; } > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 141,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_the_shell_for_an_expanded_function",
+      "seq": 1346094,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "g() { printf %200000s x; }; f=g; $f > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 141,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_ends_only_an_expanded_program_in_group",
+      "seq": 1346095,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "c=head; { $c -c 200000 /dev/zero; echo st:$? >&2; } > >(head -c 1 >/dev/null); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": "st:141\n"
+      }
+    },
+    {
+      "id": "procsub_find_fifo_start",
+      "seq": 1346096,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "find -H <(true) -printf '%y %m %M\\n'; find -H <(true) -type p | wc -l; find -H <(true) -type f | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "p 600 prw-------\n1\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_descriptor_in_a_longer_word",
+      "seq": 1346097,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3> >(cat)\"\"; echo hi >&3; exec 3>&-; wait; echo end)",
+      "expect": {
+        "exit": 0,
+        "stdout": "end\n",
+        "stderr": "mirage: unsupported: exec onto a process substitution\n3: Bad file descriptor\n"
+      },
+      "note": "Mirage refuses exec onto a process substitution inside a longer word as it does alone (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
+    },
+    {
       "id": "procsub_output_exec_in_subshell",
       "seq": 1346044,
       "targets": [

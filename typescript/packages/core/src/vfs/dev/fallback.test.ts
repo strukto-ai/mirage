@@ -102,3 +102,53 @@ it('streams separate descriptors while browser sessions overlap', async () => {
     await ws.close()
   }
 })
+
+it('refuses moving a live pipe across mounts while browser sessions overlap', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  ws.createSession('peer')
+  let peerIn!: () => void
+  const entered = new Promise<void>((r) => {
+    peerIn = r
+  })
+  let release!: () => void
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const gate = (fn: () => Promise<void>): CLI =>
+    new CLI({
+      spec: new CommandSpec({ name: 'gate' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            await fn()
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    })
+  ws.registerCli(
+    'await-peer',
+    gate(() => entered),
+  )
+  ws.registerCli(
+    'hold',
+    gate(async () => {
+      peerIn()
+      await held
+    }),
+  )
+  const peer = ws.shell('hold', { sessionId: 'peer' })
+  try {
+    const io = await ws.shell(
+      'f() { await-peer; mv "$1" /data/out 2>/dev/null; echo mv=$?; cat "$1"; }; f <(printf hello)',
+    )
+    expect([io.exitCode, io.stdoutText]).toEqual([0, 'mv=1\nhello'])
+  } finally {
+    release()
+    await peer
+    await ws.close()
+  }
+})

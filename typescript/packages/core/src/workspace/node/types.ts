@@ -25,3 +25,13 @@ export interface Substitution {
   task: Promise<void>
   failure?: Error
 }
+
+/**
+ * The words a simple command expanded to, its name first, filled in as it
+ * dispatches: what its head ran as decides which writer a closed pipe ends
+ * (`$cmd` naming `printf` is the shell's own). Mirrors Python's
+ * ExpandedWords.
+ */
+export interface ExpandedWords {
+  words: readonly string[] | null
+}

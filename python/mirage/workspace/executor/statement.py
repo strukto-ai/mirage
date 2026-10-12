@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -32,7 +32,7 @@ from mirage.shell.descriptors import (
     deliver,
     unreadable_stdin,
 )
-from mirage.shell.helpers import get_parts, get_text
+from mirage.shell.helpers import get_parts
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
@@ -206,46 +206,65 @@ def errexit_acts(node: TSNodeLike, status: int, session: SessionState) -> bool:
     return acts
 
 
-def forks(command: TSNodeLike | None, session: SessionState) -> bool:
+def forks(
+    command: TSNodeLike | None,
+    session: SessionState,
+    words: Sequence[str] | None = None,
+) -> bool:
     """Whether bash forks to run a command, so what fails there fails that
     command alone: its redirects expand in the child, and a pipe closing
     under its writes ends only it. A subshell or a program forks; a
     builtin, a function or another compound command is the shell's own,
     which expands its redirects itself and discards the line on an error,
     and ends with a pipe its own write closed. ``command -v`` is the
-    builtin itself; ``command X`` is X with functions masked; a name only
-    an expansion spells is taken for a program.
+    builtin itself; ``command X`` is X with functions masked. Once the
+    command has expanded, its words decide; before then a name only an
+    expansion spells (``$cmd``) is taken for a program.
 
     Args:
         command (TSNodeLike | None): the command, None for none.
         session (SessionState): whose functions a name may call.
+        words (Sequence[str] | None): what the command's words expanded
+            to, its name first, once they have.
     """
     if command is None or command.type != NT.COMMAND:
         return command is not None and command.type == NT.SUBSHELL
-    words = [
-        part
-        for part in get_parts(command)
-        if part.type != NT.VARIABLE_ASSIGNMENT
-    ]
+    rest: list[str | None] = (
+        list(words)
+        if words is not None
+        else [
+            _spelled(part)
+            for part in get_parts(command)
+            if part.type != NT.VARIABLE_ASSIGNMENT
+        ]
+    )
     functions = True
-    while words and get_text(words[0]) == "command":
-        words, functions = words[1:], False
-        while words and get_text(words[0]).startswith("-"):
-            option = get_text(words.pop(0))
+    while rest and rest[0] == "command":
+        rest, functions = rest[1:], False
+        while rest and (rest[0] or "").startswith("-"):
+            option = rest.pop(0) or ""
             if option == "--":
                 break
             if "v" in option or "V" in option:
                 return False
-    if not words:
+    if not rest:
         return False
-    head = words[0]
-    if head.type == NT.COMMAND_NAME and head.named_children:
-        head = head.named_children[0]
-    name = literal_text(head)
+    name = rest[0]
     return name is None or (
         name not in BASH_BUILTINS
         and not (functions and name in session.functions)
     )
+
+
+def _spelled(word: TSNodeLike) -> str | None:
+    """A word's text when it is literal, None when an expansion spells it.
+
+    Args:
+        word (TSNodeLike): one word of a command.
+    """
+    if word.type == NT.COMMAND_NAME and word.named_children:
+        word = word.named_children[0]
+    return literal_text(word)
 
 
 async def finish_statement(

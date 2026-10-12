@@ -60,6 +60,8 @@ import {
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
+import { walkTree } from '../../shell/parse/names.ts'
+import type { ExpandedWords } from './types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import {
   runWithRedirectPaths,
@@ -603,23 +605,32 @@ async function runRedirected(
   const pipeNode =
     (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
   const forked = forks(command, context.session)
-  const expand = (redirect: Redirect) =>
-    expandRedirect(
-      redirect,
-      context,
-      executeFn,
-      registry,
-      callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-      forked,
-      namespace,
-    )
+  const expandAs =
+    (forkedNow: boolean) =>
+    (redirect: Redirect): Promise<Redirect> =>
+      expandRedirect(
+        redirect,
+        context,
+        executeFn,
+        registry,
+        callStack,
+        sessionView(session, registry.policies, context.frame.diagnostics),
+        forkedNow,
+        namespace,
+      )
+  const expand = expandAs(forked)
   if (isBareExec(command)) {
     if (
-      redirects.some((r) => (r.targetNode as TSNodeLike | null)?.type === NT.PROCESS_SUBSTITUTION)
+      redirects.some((r) => {
+        const target = r.targetNode as TSNodeLike | null
+        return (
+          target !== null && [...walkTree(target)].some((n) => n.type === NT.PROCESS_SUBSTITUTION)
+        )
+      })
     ) {
       // A substitution lives as long as the command naming it, so it cannot
-      // back a descriptor the shell keeps after `exec` returns.
+      // back a descriptor the shell keeps after `exec` returns, spelled alone
+      // or inside a longer word (`>(cat)""`).
       const err = encodeText('mirage: unsupported: exec onto a process substitution\n')
       return [
         null,
@@ -646,8 +657,11 @@ async function runRedirected(
   let execNode: ExecutionNode
   try {
     if (command !== null && command.type === NT.COMMAND) {
-      const underRedirects: RedirectRunner = (run, guard, name, args) =>
-        handleRedirect(
+      const underRedirects: RedirectRunner = (run, guard, name, args) => {
+        // The words have expanded by now, and what the head ran as decides
+        // whether bash forks: `$cmd` naming a builtin is the shell's own.
+        const ranForked = forks(command, context.session, [name, ...args])
+        return handleRedirect(
           (_node, _current, given, _stack, options) =>
             run(given, options?.sink, redirectPathsFor(command)),
           dispatch,
@@ -658,13 +672,14 @@ async function runRedirected(
           callStack,
           false,
           pipeNode === null ? sink : undefined,
-          expand,
+          expandAs(ranForked),
           guard,
           name,
           args,
-          forked,
+          ranForked,
           namespace,
         )
+      }
       ;[stdout, io, execNode] = await runWithRedirectPaths(
         command,
         [],
@@ -1162,6 +1177,7 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.COMMAND) {
+    const expanded: ExpandedWords = { words: null }
     try {
       const ran = await runInCommandScope(() =>
         executeCommand(
@@ -1182,14 +1198,23 @@ async function executeNodeBody(
           agentId,
           deps.handed,
           sink,
+          expanded,
         ),
       )
       return sink === undefined ? ran : await drained(sink, ...ran)
     } catch (err) {
       // SIGPIPE: a program writing into a pipe whose reader has gone dies
       // of it alone, and its caller goes on; a builtin or a function writes
-      // as the shell, which goes down with it.
-      if (!(err instanceof PipeClosed) || !forks(node, session)) throw err
+      // as the shell, which goes down with it. What the head expanded to
+      // decides (`$cmd` naming printf is the shell's), and a command that
+      // never expanded (an alias whose own line already settled it) leaves
+      // it to its caller.
+      if (
+        !(err instanceof PipeClosed) ||
+        expanded.words === null ||
+        !forks(node, session, expanded.words)
+      )
+        throw err
       return [
         null,
         new IOResult({ exitCode: 141 }),

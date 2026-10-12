@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
+import { DIR_MODE, FIFO_MODE, FILE_MODE } from '../../utils/stat_view.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { lsModeString } from './utils/formatting.ts'
 import { groupName, ownerName, type Identity } from './utils/identity.ts'
@@ -39,12 +39,14 @@ const KIND_MODE: Record<PrintfKind, number> = {
   d: DIR_MODE,
   l: 0o120777,
   c: 0o020666,
+  p: FIFO_MODE,
   f: FILE_MODE,
 }
 const KIND_TYPE: Record<PrintfKind, FileType> = {
   d: FileType.DIRECTORY,
   l: FileType.SYMLINK,
   c: FileType.CHAR_DEVICE,
+  p: FileType.FIFO,
   f: FileType.FILE,
 }
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']

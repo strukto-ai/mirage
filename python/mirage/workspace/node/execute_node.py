@@ -71,6 +71,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
@@ -137,6 +138,7 @@ from mirage.workspace.node.test_expr import (
     expand_test_expr,
 )
 from mirage.workspace.node.timing import timing_report
+from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import session_view
@@ -763,12 +765,14 @@ async def _run_redirected(
     )
     if _is_bare_exec(command):
         if any(
-            r.target_node is not None
-            and r.target_node.type == NT.PROCESS_SUBSTITUTION
+            node.type == NT.PROCESS_SUBSTITUTION
             for r in redirects
+            if r.target_node is not None
+            for node in walk_tree(r.target_node)
         ):
             # A substitution lives as long as the command naming it, so it
-            # cannot back a descriptor the shell keeps after `exec` returns.
+            # cannot back a descriptor the shell keeps after `exec` returns,
+            # spelled alone or inside a longer word (`>(cat)""`).
             err = b"mirage: unsupported: exec onto a process substitution\n"
             return (
                 None,
@@ -800,6 +804,10 @@ async def _run_redirected(
                         given, sink, redirect_paths_for(command.id)
                     )
 
+                # The words have expanded by now, and what the head ran
+                # as decides whether bash forks: `$cmd` naming a builtin
+                # is the shell's own.
+                ran_forked = forks(command, context.session, (name, *args))
                 return await handle_redirect(
                     prepared,
                     dispatch,
@@ -809,11 +817,11 @@ async def _run_redirected(
                     stdin,
                     call_stack,
                     sink=sink if pipe_node is None else None,
-                    expand=expand,
+                    expand=partial(expand, forked=ran_forked),
                     guard=guard,
                     name=name,
                     args=args,
-                    forked=forked,
+                    forked=ran_forked,
                     links=namespace,
                 )
 
@@ -1278,6 +1286,7 @@ async def _execute_node(
         )
 
     if kind == NodeKind.COMMAND:
+        expanded = ExpandedWords()
         try:
             async with command_scope():
                 ran = await execute_command(
@@ -1296,13 +1305,19 @@ async def _execute_node(
                     agent_id=agent_id,
                     handed=handed,
                     sink=sink,
+                    expanded=expanded,
                 )
             return ran if sink is None else await drained(sink, *ran)
         except PipeClosed:
             # SIGPIPE: a program writing into a pipe whose reader has
             # gone dies of it alone, and its caller goes on; a builtin
             # or a function writes as the shell, which goes down with it.
-            if not forks(node, session):
+            # What the head expanded to decides (`$cmd` naming printf is
+            # the shell's), and a command that never expanded (an alias
+            # whose own line already settled it) leaves it to its caller.
+            if expanded.words is None or not forks(
+                node, session, expanded.words
+            ):
                 raise
             return (
                 None,

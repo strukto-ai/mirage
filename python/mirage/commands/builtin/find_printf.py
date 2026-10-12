@@ -26,6 +26,7 @@ from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import (
     CHAR_MODE,
     DIR_MODE,
+    FIFO_MODE,
     FILE_MODE,
     LINK_MODE,
     content_size,
@@ -50,6 +51,7 @@ _KIND_MODE = {
     "c": CHAR_MODE,
     "d": DIR_MODE,
     "l": LINK_MODE,
+    "p": FIFO_MODE,
     "f": FILE_MODE,
 }
 

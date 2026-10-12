@@ -457,7 +457,7 @@ export async function divertStatement(
       refused = await routed(dispatch, session, channel, data, rest)
     } catch (err) {
       if (!(err instanceof PipeClosed)) throw err
-      if (!writerForks(statement, session)) throw new ExitSignal(141)
+      if (!writerForks(statement, session, io.producer?.command ?? null)) throw new ExitSignal(141)
       io.exitCode = 141
       break
     }
@@ -483,15 +483,22 @@ export async function divertStatement(
  * Whether what a statement wrote came from a child bash forks for it, so a
  * pipe closing under the write ends that writer alone: a program or a
  * subshell, redirected or negated too, or a pipeline, whose commands are each
- * a child of their own. Mirrors Python's _writer_forks.
+ * a child of their own. A command is judged by the producer its output names
+ * (`producer`), what its head ran as (`$cmd`), when it names one. Mirrors
+ * Python's _writer_forks.
  */
-function writerForks(statement: TSNodeLike | null, session: SessionState): boolean {
+function writerForks(
+  statement: TSNodeLike | null,
+  session: SessionState,
+  producer: string | null,
+): boolean {
   if (statement === null) return false
   if (statement.type === NT.REDIRECTED_STATEMENT)
-    return writerForks(getRedirects(statement)[0], session)
+    return writerForks(getRedirects(statement)[0], session, producer)
   if (statement.type === NT.NEGATED_COMMAND)
-    return writerForks(getNegatedCommand(statement), session)
-  return statement.type === NT.PIPELINE || forks(statement, session)
+    return writerForks(getNegatedCommand(statement), session, producer)
+  if (statement.type === NT.PIPELINE) return true
+  return forks(statement, session, producer === null ? null : [producer])
 }
 
 /** Adjacent chunks of one stream and one kind joined, in order. */
