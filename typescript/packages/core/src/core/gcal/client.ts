@@ -78,6 +78,7 @@ export async function listEvents(
   timeMax: string,
   timeZone?: string,
   scope: TimeRange = new TimeRange(),
+  query?: string,
 ): Promise<Record<string, JsonValue>[]> {
   // The id is one path segment and several real ones are not URL-safe: a
   // holiday calendar is "en.usa#holiday@group.v.calendar.google.com", and an
@@ -94,6 +95,7 @@ export async function listEvents(
   }
   if (Number.isFinite(lo)) base.timeMin = new Date(Math.floor(lo) * 1000).toISOString()
   if (timeZone !== undefined && timeZone !== '') base.timeZone = timeZone
+  if (query !== undefined) base.q = query
   const items: Record<string, JsonValue>[] = []
   let token: string | null = null
   for (let i = 0; i < MAX_PAGES; i += 1) {

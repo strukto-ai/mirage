@@ -14,7 +14,12 @@
 
 import pytest
 
-from mirage.core.gcal.readdir import bucket_zone, calendar_index, readdir
+from mirage.core.gcal.readdir import (
+    bucket_zone,
+    calendar_index,
+    readdir,
+    unsearched_text,
+)
 from tests.fixtures.gcal_api import HK, make_accessor, names, spec
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
@@ -227,3 +232,18 @@ async def test_min_access_role_filters_the_calendar_list(index):
         make_accessor(min_access_role="owner"), spec("/"), index
     )
     assert names(out) == ["primary"]
+
+
+async def test_unsearched_text_keeps_all_but_the_plain_words_the_search_reads():
+    kept = unsearched_text(
+        {
+            "id": "x1",
+            "summary": "Weekly sync-up",
+            "description": "<b>Agenda</b> notes, (draft)",
+            "status": "confirmed",
+        }
+    )
+    assert kept == (
+        '{"id":"x1","summary":"","description":"","status":"confirmed"}'
+        " sync-up <b>agenda</b>"
+    )

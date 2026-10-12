@@ -22,7 +22,7 @@ import { eventSpan } from './day.ts'
 export const HK = 'Asia/Hong_Kong'
 const TODAY = '2026-08-11'
 
-const PRIMARY: Record<string, JsonValue> = {
+export const PRIMARY: Record<string, JsonValue> = {
   id: 'integ@example.com',
   summary: 'Integ User',
   timeZone: HK,
@@ -43,7 +43,12 @@ const SHARED: Record<string, JsonValue> = {
 }
 
 /** An events.list item: a `YYYY-MM-DD` pair is an all-day event. */
-function event(id: string, summary: string, start: string, end: string): Record<string, JsonValue> {
+export function event(
+  id: string,
+  summary: string,
+  start: string,
+  end: string,
+): Record<string, JsonValue> {
   const key = start.length === 10 ? 'date' : 'dateTime'
   return {
     id,
@@ -64,23 +69,50 @@ export const EVENTS: readonly Record<string, JsonValue>[] = [
 ]
 
 /**
+ * Calendar's search at its strictest: each word of `query` is a whole
+ * space-separated word of the summary, description or location, sentence
+ * punctuation aside, so `sync-up` holds no `sync`. Mirrors Python's `_found`.
+ */
+function found(item: Record<string, JsonValue>, query: string): boolean {
+  const words = new Set<string>()
+  for (const field of ['summary', 'description', 'location']) {
+    const value = item[field]
+    if (typeof value !== 'string') continue
+    for (const word of value.split(/\s+/)) {
+      words.add(word.replace(/^[.,;:!?"'()[\]]+|[.,;:!?"'()[\]]+$/g, '').toLowerCase())
+    }
+  }
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .every((word) => words.has(word))
+}
+
+/**
  * The Calendar API the gcal core calls, over `EVENTS`.
  *
  * Test files mock `./client.ts` with `CLIENT`, which delegates here, and
- * reset this one instance per test. It records every events.list window
- * and every deletion, so a test can pin how many requests a listing cost.
+ * reset this one instance per test. It records every events.list window,
+ * every search and every deletion, so a test can pin how many requests a
+ * listing cost. A test may swap the calendars and events it serves.
  */
 class FakeCalendarApi {
+  calendars: readonly Record<string, JsonValue>[] = [PRIMARY, TEAM, SHARED]
+  events: readonly Record<string, JsonValue>[] = EVENTS
   listed: [string, string | null, string][] = []
+  asked: [string, string][] = []
   deleted: [string, string][] = []
 
   reset(): void {
+    this.calendars = [PRIMARY, TEAM, SHARED]
+    this.events = EVENTS
     this.listed = []
+    this.asked = []
     this.deleted = []
   }
 
   listCalendars(minAccessRole?: string): Record<string, JsonValue>[] {
-    const all = [PRIMARY, TEAM, SHARED]
+    const all = [...this.calendars]
     if (minAccessRole === undefined || minAccessRole === '') return all
     return all.filter((c) => c.accessRole === minAccessRole)
   }
@@ -91,12 +123,14 @@ class FakeCalendarApi {
     timeMax: string,
     timeZone: string | undefined,
     scope: TimeRange | undefined,
+    query?: string,
   ): Record<string, JsonValue>[] {
-    this.listed.push([calendarId, timeMin, timeMax])
+    if (query === undefined) this.listed.push([calendarId, timeMin, timeMax])
+    else this.asked.push([calendarId, query])
     const lo = timeMin === null ? -Infinity : Date.parse(timeMin)
     const hi = Date.parse(timeMax)
     const out: Record<string, JsonValue>[] = []
-    for (const item of EVENTS) {
+    for (const item of this.events) {
       const span = eventSpan(item, timeZone ?? HK)
       if (span === null) continue
       // timeMin bounds the END and timeMax the START, both exclusive.
@@ -110,10 +144,10 @@ class FakeCalendarApi {
         for (const [k, v] of Object.entries(item)) {
           if (k !== 'summary' && k !== 'description' && k !== 'location') rest[k] = v
         }
-        out.push(rest)
+        if (query === undefined || found(rest, query)) out.push(rest)
         continue
       }
-      out.push(item)
+      if (query === undefined || found(item, query)) out.push(item)
     }
     return out
   }
@@ -131,7 +165,8 @@ export const CLIENT = {
     timeMax: string,
     timeZone?: string,
     scope?: TimeRange,
-  ) => Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope)),
+    query?: string,
+  ) => Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope, query)),
   deleteEvent: (_tm: unknown, calendarId: string, eventId: string) => {
     API.deleted.push([calendarId, eventId])
     return Promise.resolve()

@@ -26,6 +26,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
+import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.ts'
 import { read as gcalRead } from '../../core/gcal/read.ts'
 import { stat as gcalStat } from '../../core/gcal/stat.ts'
 import { unlink as gcalUnlink } from '../../core/gcal/unlink.ts'
@@ -57,6 +58,8 @@ export class GCalVFS extends BaseVFS {
   override readonly indexTtl: number = 300
   override readonly prompt: string
   override readonly writePrompt: string = WRITE_PROMPT
+  // Calendar's search answers for events; calendar.json is always read.
+  override readonly searchable: readonly string[] = ['*/*/*.gcal.json']
   readonly config: GCalConfig
   override readonly accessor: GCalAccessor
 
@@ -80,6 +83,16 @@ export class GCalVFS extends BaseVFS {
   ): Promise<Uint8Array> {
     const data = await gcalRead(this.accessor, path, index)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override filesContaining(
+    text: string,
+    under: PathSpec[],
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+    index?: IndexCacheStore,
+  ): Promise<PathSpec[] | null> {
+    if (!opts.wholeWord || !this.config.contentSearch) return Promise.resolve(null)
+    return gcalFilesContaining(this.accessor, text, under, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

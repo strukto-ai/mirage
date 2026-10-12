@@ -45,13 +45,18 @@ import { ROOT } from '../hierarchy/scope.ts'
 import { detectScope } from './scope.ts'
 import { listCalendars, listEvents } from './client.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { compactJsonBytes } from '../render/json.ts'
+import { compactJsonBytes, compactJsonText } from '../render/json.ts'
 
 const CALENDAR_DIR = 'gcal/calendar_dir'
 export const CALENDAR_JSON = 'gcal/calendar_json'
 const BUCKET_DIR = 'gcal/bucket_dir'
 export const EVENT = 'gcal/event'
 const FREE_BUSY_ROLE = 'freeBusyReader'
+// The text Calendar's search reads that the listing does not keep.
+const SEARCHED_FIELDS: readonly string[] = ['summary', 'description', 'location']
+// A word Calendar's search reads as grep -w does: ASCII letters and digits,
+// with sentence punctuation around them at most.
+const PLAIN_WORD = /^[.,;:!?"'()[\]]*[A-Za-z0-9]+[.,;:!?"'()[\]]*$/
 
 export type CalendarEntryRow = Record<string, JsonValue>
 
@@ -186,11 +191,36 @@ export function scopedBucket(
 }
 
 /**
+ * What an event's file holds beyond the plain words Calendar's search reads,
+ * lowercased: its JSON with the summary, description and location emptied,
+ * then each of their words that is not plain (a link, an address, markup, an
+ * entity, a hyphenated or non-ASCII word), which the search may split
+ * otherwise than grep -w. Mirrors Python's `unsearched_text`.
+ */
+export function unsearchedText(event: CalendarEntryRow): string {
+  const rest = Object.fromEntries(
+    Object.entries(event).map(([key, value]) => [
+      key,
+      SEARCHED_FIELDS.includes(key) && typeof value === 'string' ? '' : value,
+    ]),
+  )
+  const kept = [compactJsonText(rest)]
+  for (const field of SEARCHED_FIELDS) {
+    const value = event[field]
+    if (typeof value === 'string') {
+      kept.push(...value.split(/\s+/).filter((word) => word !== '' && !PLAIN_WORD.test(word)))
+    }
+  }
+  return kept.join(' ').toLowerCase()
+}
+
+/**
  * Build the index entries for one bucket directory.
  *
  * An event gets one entry for each of the bucket's days it covers, so a
  * multi-day bucket lists what its day directories would, flattened, each
- * name carrying its day when `dated`.
+ * name carrying its day when `dated`. With `unsearched` each entry keeps the
+ * text Calendar's search does not read (`unsearchedText`), for grep.
  */
 function eventEntries(
   events: CalendarEntryRow[],
@@ -198,6 +228,7 @@ function eventEntries(
   tz: string,
   freeBusy: boolean,
   dated: boolean,
+  unsearched = false,
 ): [string, IndexEntry][] {
   const rows: [string, IndexEntry][] = []
   for (const event of events) {
@@ -209,6 +240,7 @@ function eventEntries(
     const title = eventTitle(typeof summary === 'string' ? summary : null, freeBusy)
     const updated = event.updated
     const size = compactJsonBytes(event).length
+    const extra = unsearched ? { unsearched: unsearchedText(event) } : {}
     for (const day of daysCovered(span, tz)) {
       if (!days.includes(day)) continue
       const name = makeEventFilename(eventId, clampedHhmm(span, day, tz), title, dated ? day : null)
@@ -221,6 +253,7 @@ function eventEntries(
           remoteTime: typeof updated === 'string' ? updated : '',
           vfsName: name,
           size,
+          extra,
         }),
       ])
     }
@@ -337,7 +370,7 @@ export async function readdir(
     tz,
     accessor.timeRange,
   )
-  const rows = eventEntries(events, days, tz, freeBusy, size > 1)
+  const rows = eventEntries(events, days, tz, freeBusy, size > 1, accessor.config.contentSearch)
   if (index !== undefined) await index.setDir(virtualKey, rows)
   return rows.map(([name]) => `${prefix}/${key}/${name}`)
 }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from mirage.accessor.gcal import GCalAccessor
@@ -31,7 +32,7 @@ from mirage.core.gcal.day import (
 )
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ROOT
-from mirage.core.render.json import compact_json_bytes
+from mirage.core.render.json import compact_json_bytes, compact_json_text
 from mirage.core.time_range import TimeRange, parse_time
 from mirage.errors.fs import enoent
 from mirage.types import JsonValue, PathSpec
@@ -50,6 +51,11 @@ CALENDAR_JSON = "gcal/calendar_json"
 BUCKET_DIR = "gcal/bucket_dir"
 EVENT = "gcal/event"
 FREE_BUSY_ROLE = "freeBusyReader"
+# The text Calendar's search reads that the listing does not keep.
+SEARCHED_FIELDS = ("summary", "description", "location")
+# A word Calendar's search reads as grep -w does: ASCII letters and digits,
+# with sentence punctuation around them at most.
+PLAIN_WORD = re.compile(r"[.,;:!?\"'()\[\]]*[A-Za-z0-9]+[.,;:!?\"'()\[\]]*")
 
 
 def calendar_payload(entry: dict[str, JsonValue], tz: str) -> bytes:
@@ -239,12 +245,37 @@ def scoped_bucket(
     return days
 
 
+def unsearched_text(event: dict[str, JsonValue]) -> str:
+    """What an event's file holds beyond the plain words Calendar's
+    search reads, lowercased: its JSON with the summary, description and
+    location emptied, then each of their words that is not plain (a link,
+    an address, markup, an entity, a hyphenated or non-ASCII word), which
+    the search may split otherwise than grep -w.
+
+    Args:
+        event (dict[str, JsonValue]): the event as the listing fetched it.
+    """
+    rest = {
+        key: "" if key in SEARCHED_FIELDS and isinstance(value, str) else value
+        for key, value in event.items()
+    }
+    kept = [compact_json_text(rest)]
+    for field in SEARCHED_FIELDS:
+        value = event.get(field)
+        if isinstance(value, str):
+            kept.extend(
+                w for w in value.split() if not PLAIN_WORD.fullmatch(w)
+            )
+    return " ".join(kept).lower()
+
+
 def event_entries(
     events: list[dict[str, JsonValue]],
     days: list[str],
     tz: str,
     free_busy: bool,
     dated: bool,
+    unsearched: bool = False,
 ) -> list[tuple[str, IndexEntry]]:
     """Build the index entries for one bucket directory.
 
@@ -258,6 +289,8 @@ def event_entries(
         free_busy (bool): whether the calendar hides event details.
         dated (bool): whether the names carry their day, as a multi-day
             bucket's do.
+        unsearched (bool): whether each entry keeps the text Calendar's
+            search does not read (``unsearched_text``), for grep.
 
     Returns:
         list[tuple[str, IndexEntry]]: (filename, entry) pairs.
@@ -276,6 +309,7 @@ def event_entries(
         )
         updated = event.get("updated")
         size = len(compact_json_bytes(event))
+        extra = {"unsearched": unsearched_text(event)} if unsearched else {}
         for day in days_covered(span, tz):
             if day not in days:
                 continue
@@ -297,6 +331,7 @@ def event_entries(
                         ),
                         vfs_name=name,
                         size=size,
+                        extra=extra,
                     ),
                 )
             )
@@ -418,6 +453,13 @@ async def readdir(
         tz,
         scope=accessor.time_range,
     )
-    rows = event_entries(events, days, tz, free_busy, dated=size > 1)
+    rows = event_entries(
+        events,
+        days,
+        tz,
+        free_busy,
+        dated=size > 1,
+        unsearched=accessor.config.content_search,
+    )
     await index.set_dir(virtual_key, rows)
     return [f"{prefix}/{key}/{name}" for name, _ in rows]

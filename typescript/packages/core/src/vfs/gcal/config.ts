@@ -41,6 +41,11 @@ export const GCalConfigSchema = GoogleConfigSchema.safeExtend({
   minAccessRole: z.string().optional(),
   // Pin the day the rolling window centres on; test and snapshot use.
   today: z.string().optional(),
+  // Let grep -w and rg -w read only the events Calendar's search names
+  // (`filesContaining`). Off by default: Calendar searches an event's text
+  // by word, and the listing then keeps each event's other fields to check
+  // them itself.
+  contentSearch: z.boolean().default(false),
 }).refine(orderedTimes, timeRangeOrderError)
 
 export type GCalConfig = ConfigOf<typeof GCalConfigSchema>

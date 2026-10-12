@@ -18,7 +18,7 @@ import { API, HK, makeAccessor, names, spec } from './_test_util.ts'
 
 vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
 
-const { readdir, bucketZone, calendarIndex } = await import('./readdir.ts')
+const { readdir, bucketZone, calendarIndex, unsearchedText } = await import('./readdir.ts')
 
 const WEEK = '/primary/2026-08-10--2026-08-16'
 
@@ -174,4 +174,17 @@ describe('gcal readdir', () => {
     const owner = makeAccessor({ min_access_role: 'owner' })
     expect(names(await readdir(owner, spec('/'), index))).toEqual(['primary'])
   })
+})
+
+// Twin of test_unsearched_text_keeps_all_but_the_plain_words_the_search_reads.
+it('keeps all but the plain words the search reads', () => {
+  const kept = unsearchedText({
+    id: 'x1',
+    summary: 'Weekly sync-up',
+    description: '<b>Agenda</b> notes, (draft)',
+    status: 'confirmed',
+  })
+  expect(kept).toBe(
+    '{"id":"x1","summary":"","description":"","status":"confirmed"} sync-up <b>agenda</b>',
+  )
 })

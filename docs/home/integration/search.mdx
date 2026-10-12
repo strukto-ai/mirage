@@ -145,6 +145,7 @@ instead, and grep exits 2.
 | Email | IMAP `SEARCH TEXT` | messages (`*/*/*.email.json`) | `content_search` |
 | Slack | `search.messages`, `search.files` | `-w`, channel days (`channels/*/*/chat.jsonl`) | `content_search` |
 | Gmail | messages search | `-w`, messages (`*/*/*.gmail.json`) | `content_search` |
+| Google Calendar | events `q`, per word | `-w`, events (`*/*/*.gcal.json`), a word with no digit | `content_search` |
 | Linear | `searchIssues` | `-w`, issues (`teams/*/issues/*/issue.json`) | `content_search` |
 | Trello | `/1/search` | `-w`, cards (`workspaces/*/boards/*/lists/*/cards/*/card.json`) | `content_search` |
 | PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a table with text, integer, boolean and uuid columns | always |

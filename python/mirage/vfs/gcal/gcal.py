@@ -20,6 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gcal.day import bucket_name, bucket_start
 from mirage.core.gcal.read import read as _read
 from mirage.core.gcal.readdir import readdir as _readdir
+from mirage.core.gcal.search import files_containing as _files_containing
 from mirage.core.gcal.stat import stat as _stat
 from mirage.core.gcal.unlink import unlink as _unlink
 from mirage.core.google.client import TokenManager
@@ -64,6 +65,7 @@ class GCalVFS(BaseVFS):
     index_ttl: float = 300
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
+    searchable = ("*/*/*.gcal.json",)
 
     def __init__(self, config: GCalConfig) -> None:
         super().__init__()
@@ -93,6 +95,19 @@ class GCalVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def files_containing(
+        self,
+        text: str,
+        under: list[PathSpec],
+        *,
+        whole_word: bool,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> list[PathSpec] | None:
+        if not whole_word or not self.config.content_search:
+            return None
+        return await _files_containing(self.accessor, text, under, index)
 
     async def unlink(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

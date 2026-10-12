@@ -259,6 +259,32 @@
         "stdout": "2026-02-10--2026-03-11\ncalendar.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gc_search_reads_what_calendar_names",
+      "seq": 570020,
+      "targets": [
+        "gcal"
+      ],
+      "command": "grep -rlw Defense /cal/primary | sed 's/[a-z0-9]*__/ID__/'; grep -rlw 'Dissertation Defense' /week/primary | sed 's/[a-z0-9]*__/ID__/'; grep -rcw Offsite /cal/primary/2026-02-12 | sed 's/[a-z0-9]*__/ID__/'; grep -rlw nowhere /cal; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/cal/primary/2026-02-11/ID__0900-1030_PhD_Dissertation_Defense.gcal.json\n/week/primary/2026-02-09--2026-02-15/ID__2026-02-11_0900-1030_PhD_Dissertation_Defense.gcal.json\n/cal/primary/2026-02-12/ID__0000-2400_Conference_Offsite.gcal.json:1\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_search_checks_the_rest_against_the_listing",
+      "seq": 570021,
+      "targets": [
+        "gcal"
+      ],
+      "command": "grep -rlw confirmed /cal/primary/2026-02-11 | sed 's/[a-z0-9]*__/ID__/'; grep -rlw calendar /week/primary | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "/cal/primary/2026-02-11/ID__0000-2400_Conference_Offsite.gcal.json\n/cal/primary/2026-02-11/ID__0000-2400_Public_Holiday.gcal.json\n/cal/primary/2026-02-11/ID__0900-1030_PhD_Dissertation_Defense.gcal.json\n6\n",
+        "stderr": ""
+      }
     }
   ]
 }

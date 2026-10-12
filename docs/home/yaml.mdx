@@ -357,6 +357,13 @@ Monday to Sunday, and each event file name carries its day
 (`<eventId>__2026-08-11_0900-1030_<Title>.gcal.json`). One listing then answers a
 week or a month of events. Other values are refused.
 
+With `content_search: true`, `grep -rw` and `rg -w` read only the events
+Calendar's search names, each word asked on its own, plus the events whose other
+fields hold it: the listing keeps each event's JSON apart from its summary,
+description and location, and their words Calendar may split otherwise than
+grep (a link, an address, markup, a hyphenated word). Off by default, since the
+listing then holds that text.
+
 ```yaml
 mounts:
   /calendar:

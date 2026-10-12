@@ -428,6 +428,19 @@
       }
     },
     {
+      "id": "gcal_content_search_round_trips",
+      "vfs": "gcal",
+      "config": {
+        "access_token": "t",
+        "content_search": true
+      },
+      "expect": {
+        "state": {
+          "content_search": true
+        }
+      }
+    },
+    {
       "id": "disk_folder_versions_default_on",
       "vfs": "disk",
       "config": {

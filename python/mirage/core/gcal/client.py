@@ -92,6 +92,7 @@ async def list_events(
     time_zone: str | None = None,
     *,
     scope: TimeRange = TimeRange(),
+    query: str | None = None,
 ) -> list[dict[str, JsonValue]]:
     """List a calendar's events overlapping a time window.
 
@@ -110,6 +111,9 @@ async def list_events(
         time_max (str): RFC3339 upper bound, offset mandatory.
         time_zone (str | None): zone the response renders times in; Google
             defaults it to the calendar's own.
+        scope (TimeRange): the mount's time range, which clips the window.
+        query (str | None): words Calendar's search must find in an
+            event's summary, description, location or people.
 
     Returns:
         list[dict]: events.list items.
@@ -142,6 +146,8 @@ async def list_events(
         ).isoformat()
     if time_zone:
         params["timeZone"] = time_zone
+    if query is not None:
+        params["q"] = query
     items: list[dict[str, JsonValue]] = []
     token: str | None = None
     for _ in range(MAX_PAGES):

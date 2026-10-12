@@ -98,6 +98,24 @@ EVENTS = [
 ]
 
 
+def _found(item: dict[str, JsonValue], query: str) -> bool:
+    """Calendar's search at its strictest: each word of ``query`` is a
+    whole space-separated word of the summary, description or location,
+    sentence punctuation aside, so ``sync-up`` holds no ``sync``.
+
+    Args:
+        item (dict[str, JsonValue]): the event.
+        query (str): the words asked.
+    """
+    words = {
+        word.strip(".,;:!?\"'()[]").lower()
+        for field in ("summary", "description", "location")
+        if isinstance(value := item.get(field), str)
+        for word in value.split()
+    }
+    return all(word in words for word in query.lower().split())
+
+
 class FakeCalendarApi:
     def __init__(
         self,
@@ -107,6 +125,7 @@ class FakeCalendarApi:
         self.calendars = calendars
         self.events = events
         self.listed: list[tuple[str, str | None, str]] = []
+        self.asked: list[tuple[str, str]] = []
         self.deleted: list[tuple[str, str]] = []
 
     async def list_calendars(
@@ -127,8 +146,12 @@ class FakeCalendarApi:
         time_zone: str | None = None,
         *,
         scope: TimeRange = TimeRange(),
+        query: str | None = None,
     ) -> list[dict[str, JsonValue]]:
-        self.listed.append((calendar_id, time_min, time_max))
+        if query is None:
+            self.listed.append((calendar_id, time_min, time_max))
+        else:
+            self.asked.append((calendar_id, query))
         lo = (
             datetime.fromisoformat(time_min)
             if time_min is not None
@@ -158,6 +181,8 @@ class FakeCalendarApi:
                     for k, v in item.items()
                     if k not in ("summary", "description", "location")
                 }
+            if query is not None and not _found(item, query):
+                continue
             out.append(item)
         return out
 
@@ -174,6 +199,7 @@ def gcal_api(monkeypatch: pytest.MonkeyPatch) -> FakeCalendarApi:
         ("readdir.list_calendars", fake.list_calendars),
         ("readdir.list_events", fake.list_events),
         ("read.list_events", fake.list_events),
+        ("search.list_events", fake.list_events),
         ("unlink.delete_event", fake.delete_event),
     ):
         monkeypatch.setattr(f"mirage.core.gcal.{target}", fn)

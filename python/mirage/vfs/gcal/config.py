@@ -30,3 +30,8 @@ class GCalConfig(GoogleConfig, TimeRangeConfig):
     min_access_role: str | None = None
     # Pin the day the rolling window centres on; test and snapshot use.
     today: str | None = None
+    # Let grep -w and rg -w read only the events Calendar's search names
+    # (`files_containing`). Off by default: Calendar searches an event's
+    # text by word, and the listing then keeps each event's other fields
+    # to check them itself.
+    content_search: bool = False
