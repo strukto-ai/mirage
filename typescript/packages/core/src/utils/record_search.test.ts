@@ -69,4 +69,5 @@ it('keeps lowercased text up to the cap', () => {
   const enc = new TextEncoder()
   expect(keptText(enc.encode('{"Name":"Ada"}'))).toEqual({ text: '{"name":"ada"}' })
   expect(keptText(new Uint8Array(KEPT_TEXT_MAX + 1))).toEqual({})
+  expect(keptText(new Uint8Array([0xef, 0xbb, 0xbf, 0x48, 0x69]))).toEqual({ text: '\ufeffhi' })
 })

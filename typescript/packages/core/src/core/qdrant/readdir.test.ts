@@ -335,4 +335,39 @@ describe('qdrant filesContaining', () => {
   it('reads every file for a text that is not ASCII', async () => {
     expect(await containing(ANIMAL_POINTS, 'caf\u00e9')).toBeNull()
   })
+
+  // A read fetches the point as it is now, so the text is checked against a
+  // listing made for the search, not the one the walk cached.
+  async function listedThen(change: (points: QdrantPoint[]) => void): Promise<string[] | null> {
+    const points = structuredClone(ANIMAL_POINTS)
+    const accessor = accessorOf(ANIMALS, points)
+    const index = new RAMIndexCacheStore()
+    await readdir(accessor, spec('/animals/cat/small'), index)
+    change(points)
+    const found = await filesContaining(
+      readdir,
+      accessor,
+      'striped',
+      [spec('/animals/cat/small')],
+      index,
+    )
+    return found === null ? null : found.map((p) => p.virtual).sort()
+  }
+  const smallCat = [
+    '/animals/cat/small/2.json',
+    '/animals/cat/small/2.png',
+    '/animals/cat/small/2.txt',
+  ]
+
+  it('finds a text changed since the listing', async () => {
+    const found = await listedThen((points) => {
+      const point = points[1]
+      if (point?.payload) point.payload.name = 'a small striped cat'
+    })
+    expect(found).toEqual(smallCat)
+  })
+
+  it('reads a point gone since the listing', async () => {
+    expect(await listedThen((points) => points.splice(1, 1))).toEqual(smallCat)
+  })
 })

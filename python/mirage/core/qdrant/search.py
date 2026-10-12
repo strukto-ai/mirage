@@ -14,6 +14,7 @@
 
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.probe import ReaddirFn, resolve_entry
 from mirage.core.qdrant.naming import group_name, row_stem
 from mirage.core.qdrant.payload import field_value
@@ -60,8 +61,11 @@ async def files_containing(
     The listing's scroll carries every payload, so each ``.json`` and
     ``.txt`` entry keeps its rendered text, lowercased, and a file is read
     only when that text holds ``text``; a blob, or a file too large to
-    keep, is always read. Qdrant is asked nothing more. None for a text
-    that is not ASCII, whose case a lowercased copy may not keep.
+    keep, is always read. A read fetches the point as it is now, so the
+    text is checked against a listing made for this search rather than
+    the walk's, which may be older; a file that listing no longer holds is
+    read. Qdrant is asked nothing more. None for a text that is not
+    ASCII, whose case a lowercased copy may not keep.
 
     Args:
         readdir (ReaddirFn[QdrantAccessor]): the mount's readdir.
@@ -73,6 +77,7 @@ async def files_containing(
     if not text.isascii():
         return None
     needle = text.lower()
+    fresh = RAMIndexCacheStore()
     found: list[PathSpec] = []
     pending = list(under)
     while pending:
@@ -85,13 +90,13 @@ async def files_containing(
             entry = await resolve_entry(readdir, accessor, child, index)
             if entry is None:
                 return None
-            kept = entry.extra.get("text")
             if entry.resource_type.endswith("/group"):
                 pending.append(child)
-            elif (
-                entry.resource_type not in ROW_FILES
-                or not isinstance(kept, str)
-                or needle in kept
-            ):
-                found.append(child)
+                continue
+            if entry.resource_type in ROW_FILES:
+                now = await resolve_entry(readdir, accessor, child, fresh)
+                kept = None if now is None else now.extra.get("text")
+                if isinstance(kept, str) and needle not in kept:
+                    continue
+            found.append(child)
     return found

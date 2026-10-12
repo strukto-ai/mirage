@@ -129,10 +129,10 @@ def _date_children(
         # the source message size and stays in extra. The kept text
         # leaves the labels out, the one field that changes after the
         # listing, which a search declines to rule on instead.
-        unlabeled = message_json_bytes({**raw, "labelIds": []})
-        extra: dict[str, Any] = (
-            {"text": unlabeled.decode().lower()} if keep_text else {}
-        )
+        extra: dict[str, Any] = {}
+        if keep_text:
+            unlabeled = message_json_bytes({**raw, "labelIds": []})
+            extra["text"] = unlabeled.decode().lower()
         if size_estimate is not None:
             extra["size_estimate"] = size_estimate
         children.append(

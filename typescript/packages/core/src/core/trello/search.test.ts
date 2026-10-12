@@ -46,6 +46,7 @@ const LIST = 'workspaces/Engineering__ws1/boards/Roadmap__b1/lists/Doing__l1'
 // searched query.
 class FakeTransport implements TrelloTransport {
   readonly searched: string[] = []
+  listed: Record<string, unknown>[] = CARDS
   constructor(
     private readonly named: string[] | Record<string, string[]>,
     private readonly reply?: Record<string, unknown> | Error,
@@ -64,7 +65,7 @@ class FakeTransport implements TrelloTransport {
     if (path.endsWith('/boards')) return Promise.resolve([{ id: 'b1', name: 'Roadmap' }])
     if (path === '/boards/b1') return Promise.resolve({ id: 'b1', name: 'Roadmap' })
     if (path.endsWith('/lists')) return Promise.resolve([{ id: 'l1', name: 'Doing' }])
-    if (path.endsWith('/cards')) return Promise.resolve(CARDS)
+    if (path.endsWith('/cards')) return Promise.resolve(this.listed)
     return Promise.resolve([])
   }
 }
@@ -117,6 +118,28 @@ describe('trello filesContaining', () => {
     const [out, searched] = await ask('visit wombat', { visit: ['c3'] })
     expect(out?.map((p) => p.vfsPath)).toEqual([`${LIST}/cards/Docs__c3/card.json`])
     expect(searched).toEqual(['visit', 'wombat'])
+  })
+
+  // A read fetches the card as it is now, so the kept text is checked against
+  // listings made for the search, not the ones the walk cached; a card gone
+  // since is read.
+  it('finds a text changed since the listing', async () => {
+    const transport = new FakeTransport({ numbat: ['c1'] })
+    const accessor = new TrelloAccessor(transport, { contentSearch: true })
+    const index = new RAMIndexCacheStore()
+    const search = () => filesContaining(accessor, 'numbat', [scope()], index)
+    await search()
+    transport.listed = CARDS.map((card) =>
+      card.id === 'c2' ? { ...card, desc: 'See numbat.io' } : card,
+    )
+    let out = await search()
+    expect(out?.map((p) => p.vfsPath)).toEqual([
+      `${LIST}/cards/Fix_login__c1/card.json`,
+      `${LIST}/cards/Write_notes__c2/card.json`,
+    ])
+    transport.listed = CARDS.slice(0, 1)
+    out = await search()
+    expect(out).toHaveLength(CARDS.length)
   })
 
   it('names a card scope its own card.json', async () => {

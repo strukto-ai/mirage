@@ -96,3 +96,41 @@ async def test_a_file_too_large_to_keep_is_read(accessor, monkeypatch):
 @pytest.mark.asyncio
 async def test_a_text_that_is_not_ascii_reads_every_file(accessor):
     assert await _containing(accessor, "caf\u00e9") is None
+
+
+async def _listed_then(accessor, change) -> list[str] | None:
+    path = "/db/animals/cat/small"
+    spec = PathSpec(
+        vfs_path=mount_key(path, "/db"), virtual=path, directory=path
+    )
+    index = RAMIndexCacheStore()
+    await readdir(accessor, spec, index)
+    change((await accessor.client()).points)
+    found = await files_containing(readdir, accessor, "striped", [spec], index)
+    return None if found is None else sorted(p.virtual for p in found)
+
+
+# A read fetches the point as it is now, so the text is checked against a
+# listing made for the search, not the one the walk cached.
+@pytest.mark.asyncio
+async def test_a_text_changed_since_the_listing_is_found(accessor):
+    def change(points):
+        points[1].payload["name"] = "a small striped cat"
+
+    assert await _listed_then(accessor, change) == [
+        "/db/animals/cat/small/2.json",
+        "/db/animals/cat/small/2.png",
+        "/db/animals/cat/small/2.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_point_gone_since_the_listing_is_read(accessor):
+    def change(points):
+        del points[1]
+
+    assert await _listed_then(accessor, change) == [
+        "/db/animals/cat/small/2.json",
+        "/db/animals/cat/small/2.png",
+        "/db/animals/cat/small/2.txt",
+    ]

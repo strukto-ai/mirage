@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TrelloAccessor } from '../../accessor/trello.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
@@ -54,23 +54,18 @@ export const WALKED: ReadonlySet<string> = new Set([
   'list',
 ])
 
-// Each card directory under `scope` with its listed entry; null for a scope
-// inside a card or a card whose listing kept no unsearched text.
+// Each card directory under `scope`; null for a scope inside a card.
 async function cards(
   accessor: TrelloAccessor,
   scope: PathSpec,
   index: IndexCacheStore | undefined,
-): Promise<[PathSpec, IndexEntry][] | null> {
+): Promise<PathSpec[] | null> {
   const kind = detectScope(scope).kind
-  if (kind === 'card') {
-    const entry = await resolveEntry(readdir, accessor, scope, index)
-    if (entry === null || typeof entry.extra.unsearched !== 'string') return null
-    return [[scope, entry]]
-  }
+  if (kind === 'card') return [scope]
   if (kind === 'card_json' || kind === 'comments_jsonl') return null
   if (!WALKED.has(kind) && kind !== 'cards') return []
   const base = rstripSlash(scope.mountPath)
-  const found: [PathSpec, IndexEntry][] = []
+  const found: PathSpec[] = []
   for (const listed of await readdir(accessor, scope, index)) {
     const leaf = listed.split('/').at(-1) ?? listed
     const below = await cards(accessor, mountedPath(scope, `${base}/${leaf}`), index)
@@ -88,8 +83,10 @@ async function cards(
  * asked on its own, and a card is read when each word is either named there
  * or held by the text the listing kept (`unsearchedText`): the rest of its
  * JSON (ids, due date, flags, link), and the words of those two the search
- * may split otherwise. The text goes through `recordQueries` for its key
- * names and escapes. Null when the text cannot be searched, a scope lies
+ * may split otherwise. A read fetches the card as it is now, so the kept text
+ * is checked against listings made for this search rather than the walk's,
+ * which may be older; a card those listings no longer hold is read. The text
+ * goes through `recordQueries` for its key names and escapes. Null when the text cannot be searched, a scope lies
  * inside a card, a search answers a full page or fails, or nothing is found,
  * since Trello indexes a write some time after it lands. Mirrors Python's
  * `files_containing`.
@@ -111,14 +108,18 @@ export async function filesContaining(
       if (hits.length >= SEARCH_LIMIT) return null
       named.set(word, new Set(hits.map((hit) => String(hit.id))))
     }
+    const fresh = new RAMIndexCacheStore()
     for (const scope of under) {
       const walked = await cards(accessor, scope, index)
       if (walked === null) return null
-      for (const [path, entry] of walked) {
-        const kept = entry.extra.unsearched
-        if (typeof kept === 'string' && mayHold(asked, named, entry.id, kept)) {
-          found.push(mountedPath(path, `${rstripSlash(path.mountPath)}/card.json`))
+      for (const path of walked) {
+        const entry = await resolveEntry(readdir, accessor, path, fresh)
+        if (entry !== null) {
+          const kept = entry.extra.unsearched
+          if (typeof kept !== 'string') return null
+          if (!mayHold(asked, named, entry.id, kept)) continue
         }
+        found.push(mountedPath(path, `${rstripSlash(path.mountPath)}/card.json`))
       }
     }
   } catch (err) {

@@ -65,6 +65,9 @@ async def _ask(
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
     ask_linear: bool = True,
+    index: RAMIndexCacheStore | None = None,
+    issues: list[dict] = ISSUES,
+    documents: list[dict] = DOCUMENTS,
 ):
     accessor = LinearAccessor(LinearConfig(api_key="k", content_search=True))
 
@@ -84,13 +87,13 @@ async def _ask(
     readdir = "mirage.core.linear.readdir"
     with (
         patch(f"{readdir}.list_teams", AsyncMock(return_value=[TEAM])),
-        patch(f"{readdir}.list_team_issues", AsyncMock(return_value=ISSUES)),
+        patch(f"{readdir}.list_team_issues", AsyncMock(return_value=issues)),
         patch(f"{readdir}.list_team_members", AsyncMock(return_value=[])),
         patch(f"{readdir}.list_team_projects", AsyncMock(return_value=[])),
         patch(f"{readdir}.list_team_cycles", AsyncMock(return_value=[])),
         patch(
             f"{readdir}.list_team_documents",
-            AsyncMock(return_value=DOCUMENTS),
+            AsyncMock(return_value=documents),
         ),
         patch("mirage.core.linear.client.graphql_request", found),
     ):
@@ -98,7 +101,7 @@ async def _ask(
             accessor,
             text,
             under or [_scope()],
-            RAMIndexCacheStore(),
+            index or RAMIndexCacheStore(),
             ask_linear=ask_linear,
         )
     return out, [call.args[2]["term"] for call in found.await_args_list]
@@ -156,6 +159,31 @@ async def test_a_document_is_read_when_its_text_holds_it(ask_linear):
     assert len(_documents(out)) == 1
     out, _ = await _ask("nowhere", [], [_scope(DOCS_DIR)])
     assert out == []
+
+
+# A read fetches the record as it is now, so the kept text is checked
+# against listings made for the search, not the ones the walk cached; an
+# issue gone since is read.
+@pytest.mark.asyncio
+async def test_a_text_changed_since_the_listing_is_found():
+    index = RAMIndexCacheStore()
+    await _ask("numbat", {"numbat": ["I1"]}, index=index)
+    changed = _issue("I2", "Write release notes", "Blocked", "See numbat.io")
+    out, _ = await _ask(
+        "numbat",
+        {"numbat": ["I1"]},
+        index=index,
+        issues=[ISSUES[0], changed, ISSUES[2]],
+        documents=[DOCUMENTS[0], {**DOCUMENTS[1], "content": "Numbat"}],
+    )
+    assert out is not None
+    assert _issues(out) == ["ENG-1__I1", "ENG-2__I2"]
+    assert [name for name in _documents(out) if "D2" in name]
+    out, _ = await _ask(
+        "numbat", {"numbat": ["I1"]}, index=index, issues=ISSUES[:1]
+    )
+    assert out is not None
+    assert _issues(out) == ALL_ISSUES
 
 
 # Without an answer from Linear every issue is read; a scope inside an issue

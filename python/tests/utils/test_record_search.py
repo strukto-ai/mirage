@@ -80,3 +80,4 @@ def test_a_record_may_hold_each_word_found_or_kept():
 def test_kept_text_is_lowercased_up_to_the_cap():
     assert kept_text(b'{"Name":"Ada"}') == {"text": '{"name":"ada"}'}
     assert kept_text(b"x" * (KEPT_TEXT_MAX + 1)) == {}
+    assert kept_text(b"\xef\xbb\xbfHi") == {"text": "\ufeffhi"}

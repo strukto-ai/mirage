@@ -174,8 +174,9 @@ With `content_search=True` (YAML `content_search: true`), `grep -rw` and
 `rg -w` ask Trello search for each word and read only the cards that hold every
 word, where the search names it or the listing keeps it. The listing keeps the
 card's other fields (ids, due date, flags, link) and each name or description
-word the search can miss, such as one inside a link. Comments and the board's
-other files are always read.
+word the search can miss, such as one inside a link; the cards are listed once
+more for this, so a change since the last listing is still found. Comments and
+the board's other files are always read.
 
 Every card is read when the word is a key of the card JSON (`desc`, `due`) or a
 JSON literal, has a digit or only the letters a to f, which an id can hold, and

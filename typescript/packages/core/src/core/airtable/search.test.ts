@@ -132,6 +132,30 @@ describe('airtable linesContaining', () => {
     }
   })
 
+  // A listing that fails to connect leaves the file to a read.
+  it('reads the file when the listing fails to connect', async () => {
+    const fake = new FakeAirtable()
+    fake.formulas[formula('one')] = statusHolds('one')
+    const real = fake.fetch
+    vi.spyOn(fake, 'fetch').mockImplementation((input, init) =>
+      typeof input === 'string' && input.includes('filterByFormula')
+        ? Promise.reject(new TypeError('fetch failed'))
+        : real(input, init),
+    )
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const out = await linesContaining(
+        makeAccessor(fake),
+        spec(RECORDS),
+        'one',
+        new RAMIndexCacheStore(),
+      )
+      expect(out).toBeNull()
+    } finally {
+      debug.mockRestore()
+    }
+  })
+
   it('reads the file when more records match than the cap', async () => {
     const fake = new FakeAirtable()
     fake.formulas[formula('one')] = statusHolds('one')

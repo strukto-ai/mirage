@@ -17,7 +17,8 @@ import logging
 import aiohttp
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import IndexCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.trello.client import search_cards
@@ -47,22 +48,19 @@ WALKED = frozenset(
 
 async def _cards(
     accessor: TrelloAccessor, scope: PathSpec, index: IndexCacheStore
-) -> list[tuple[PathSpec, IndexEntry]] | None:
-    """Each card directory under ``scope`` with its listed entry; None for
-    a scope inside a card or a card whose listing kept no unsearched text.
+) -> list[PathSpec] | None:
+    """Each card directory under ``scope``; None for a scope inside a
+    card.
     """
     kind = detect_scope(scope).kind
     if kind == "card":
-        entry = await resolve_entry(readdir, accessor, scope, index)
-        if entry is None or "unsearched" not in entry.extra:
-            return None
-        return [(scope, entry)]
+        return [scope]
     if kind in ("card_json", "comments_jsonl"):
         return None
     if kind not in WALKED and kind != "cards":
         return []
     base = scope.mount_path.rstrip("/")
-    found: list[tuple[PathSpec, IndexEntry]] = []
+    found: list[PathSpec] = []
     for listed in await readdir(accessor, scope, index):
         child = mounted_path(scope, f"{base}/{listed.rsplit('/', 1)[-1]}")
         below = await _cards(accessor, child, index)
@@ -85,9 +83,12 @@ async def files_containing(
     is asked on its own, and a card is read when each word is either
     named there or held by the text the listing kept
     (``unsearched_text``): the rest of its JSON (ids, due date, flags,
-    link), and the words of those two the search may split otherwise. The
-    text goes through ``record_queries`` for its key names and escapes.
-    None when the text cannot be searched, a scope lies inside a card, a
+    link), and the words of those two the search may split otherwise. A
+    read fetches the card as it is now, so the kept text is checked
+    against listings made for this search rather than the walk's, which
+    may be older; a card those listings no longer hold is read. The text
+    goes through ``record_queries`` for its key names and escapes. None
+    when the text cannot be searched, a scope lies inside a card, a
     search answers a full page or fails, or nothing is found, since Trello
     indexes a write some time after it lands.
 
@@ -111,15 +112,24 @@ async def files_containing(
             if len(cards) >= SEARCH_LIMIT:
                 return None
             named[word] = {str(card.get("id")) for card in cards}
+        fresh = RAMIndexCacheStore()
         for scope in under:
             walked = await _cards(accessor, scope, index)
             if walked is None:
                 return None
-            found.extend(
-                mounted_path(path, f"{path.mount_path.rstrip('/')}/card.json")
-                for path, entry in walked
-                if may_hold(asked, named, entry.id, entry.extra["unsearched"])
-            )
+            for path in walked:
+                entry = await resolve_entry(readdir, accessor, path, fresh)
+                if entry is not None:
+                    kept = entry.extra.get("unsearched")
+                    if not isinstance(kept, str):
+                        return None
+                    if not may_hold(asked, named, entry.id, kept):
+                        continue
+                found.append(
+                    mounted_path(
+                        path, f"{path.mount_path.rstrip('/')}/card.json"
+                    )
+                )
     except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
         logger.debug("trello search failed (%s); reading every file", exc)
         return None

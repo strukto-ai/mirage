@@ -105,3 +105,19 @@ it.each([new TypeError('fetch failed'), new Error(PAGE_LIMIT)])(
     }
   },
 )
+
+// A read fetches the event as it is now, and so does the search: each bucket
+// is listed again rather than served from the walk's listing.
+it('finds a text changed since the listing', async () => {
+  const accessor = makeAccessor({ contentSearch: true })
+  const index = new RAMIndexCacheStore()
+  const search = async (text: string) => {
+    const out = await filesContaining(accessor, text, [spec('/')], index)
+    return out === null
+      ? null
+      : out.map((p) => (p.virtual.split('/').at(-1) ?? '').split('__')[0] ?? '')
+  }
+  expect(await search('tentative')).toBeNull()
+  API.events = EVENTS.map((item) => (item.id === 'aaaa1' ? { ...item, status: 'tentative' } : item))
+  expect(await search('tentative')).toEqual(['aaaa1'])
+})

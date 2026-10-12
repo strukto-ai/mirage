@@ -130,3 +130,22 @@ async def test_a_failed_search_reads_every_file(monkeypatch, error):
 
     monkeypatch.setattr("mirage.core.gcal.search.list_events", refused)
     assert await _ids("lunch") is None
+
+
+# A read fetches the event as it is now, and so does the search: each
+# bucket is listed again rather than served from the walk's listing.
+async def test_a_text_changed_since_the_listing_is_found(monkeypatch):
+    events = list(EVENTS)
+    _api(monkeypatch, events)
+    accessor = make_accessor(content_search=True)
+    index = RAMIndexCacheStore()
+
+    async def ids(text: str) -> list | None:
+        out = await files_containing(accessor, text, [spec("/")], index)
+        if out is None:
+            return None
+        return sorted(p.virtual.rsplit("/", 1)[-1].split("__")[0] for p in out)
+
+    assert await ids("tentative") is None
+    events[0] = _day("aaaa1", "PhD Defense", status="tentative")
+    assert await ids("tentative") == ["aaaa1"]

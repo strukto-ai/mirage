@@ -161,11 +161,11 @@ All commands delegate to Mirage's shared implementations.
 
 ## grep and rg
 
-A folder listing scrolls every point's payload anyway, so each `.json` and
-`.txt` entry keeps its rendered text, lowercased, and `grep -r` and `rg` read
-only the files whose text holds the pattern's text in any case, asking Qdrant
-nothing more. A blob, a `.json` or `.txt` over 8 KiB, and every file for a text
-that is not ASCII are read as usual.
+A folder listing scrolls every point's payload anyway, so `grep -r` and `rg`
+scroll each folder once more, as a listing does, and read only the `.json` and
+`.txt` files whose text holds the pattern's text in any case. A point changed
+since the last listing is still found. A blob, a `.json` or `.txt` over 8 KiB,
+and every file for a text that is not ASCII are read as usual.
 
 ## Access pattern
 

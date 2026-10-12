@@ -63,6 +63,8 @@ async def _ask(
     named: list[str] | dict[str, list[str]],
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
+    index: RAMIndexCacheStore | None = None,
+    listed: list[dict] = CARDS,
 ):
     accessor = TrelloAccessor(
         TrelloConfig(api_key="k", api_token="t", content_search=True)
@@ -101,11 +103,11 @@ async def _ask(
             f"{readdir}.list_board_lists",
             AsyncMock(return_value=[{"id": "l1", "name": "Doing"}]),
         ),
-        patch(f"{readdir}.list_list_cards", AsyncMock(return_value=CARDS)),
+        patch(f"{readdir}.list_list_cards", AsyncMock(return_value=listed)),
         patch("mirage.core.trello.client._get", found),
     ):
         out = await files_containing(
-            accessor, text, under or [_scope()], RAMIndexCacheStore()
+            accessor, text, under or [_scope()], index or RAMIndexCacheStore()
         )
     return out, [
         call.kwargs["params"]["query"] for call in found.await_args_list
@@ -183,3 +185,26 @@ async def test_an_unsure_answer_reads_every_file(text, named):
 async def test_a_garbled_reply_reads_every_file(reply):
     out, _ = await _ask("ship", [], reply=reply)
     assert out is None
+
+
+# A read fetches the card as it is now, so the kept text is checked against
+# listings made for the search, not the ones the walk cached; a card gone
+# since is read.
+@pytest.mark.asyncio
+async def test_a_text_changed_since_the_listing_is_found():
+    index = RAMIndexCacheStore()
+    await _ask("numbat", {"numbat": ["c1"]}, index=index)
+    changed = [CARDS[0], {**CARDS[1], "desc": "See numbat.io"}, CARDS[2]]
+    out, _ = await _ask(
+        "numbat", {"numbat": ["c1"]}, index=index, listed=changed
+    )
+    assert out is not None
+    assert [p.vfs_path for p in out] == [
+        f"{LIST}/cards/Fix_login__c1/card.json",
+        f"{LIST}/cards/Write_notes__c2/card.json",
+    ]
+    out, _ = await _ask(
+        "numbat", {"numbat": ["c1"]}, index=index, listed=CARDS[:1]
+    )
+    assert out is not None
+    assert len(out) == len(CARDS)

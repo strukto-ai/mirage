@@ -146,12 +146,12 @@ instead, and grep exits 2.
 | Slack | `search.messages`, `search.files` | `-w`, channel and DM days (`channels/*/*/chat.jsonl`, `dms/*/*/chat.jsonl`) | `content_search` |
 | Gmail | the listing's message text | messages (`*/*/*.gmail.json`), an ASCII text | `content_search` |
 | Google Calendar | events `q`, per word | `-w`, events (`*/*/*.gcal.json`), a word with no digit | `content_search` |
-| Linear | `searchIssues`, per word; the listing's text | `-w`, issues (`teams/*/issues/*/issue.json`) with `content_search`; members, projects, cycles and documents up to 8 KiB, an ASCII text | `content_search` for issues |
+| Linear | `searchIssues`, per word; a new listing's text | `-w`, issues (`teams/*/issues/*/issue.json`) with `content_search`; members, projects, cycles and documents up to 8 KiB, an ASCII text | `content_search` for issues |
 | Trello | `/1/search`, per word | `-w`, cards (`workspaces/*/boards/*/lists/*/cards/*/card.json`) | `content_search` |
 | PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a table or view whose columns each hold the text as their cast spells it, or never spell it (a number, date or time) | always |
 | MongoDB | `$expr` over keys and strings (`lines_containing`) | `documents.jsonl` of a collection or view | always |
 | Airtable | `filterByFormula` per cell (`lines_containing`) | `records.jsonl` and view files of a table whose cells a formula reads as text, or that hold no word; with a link, AI text or attachment, a text with a space | always |
-| Qdrant | the listing's payload text | `.json` and `.txt` files up to 8 KiB, an ASCII text | always |
+| Qdrant | a new listing's payload text | `.json` and `.txt` files up to 8 KiB, an ASCII text | always |
 | SSH | GNU `grep` on the server | every text, where the server runs commands | always |
 | Chroma | `$contains` over chunks | every text without `-i` | always |
 | LanceDB | `LIKE` over string columns | `.md` cards; a text of letters and spaces that is no column's name, in a table with no list, struct or bytes column | always |

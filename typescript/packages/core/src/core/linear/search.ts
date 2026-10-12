@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinearAccessor } from '../../accessor/linear.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
@@ -127,32 +128,29 @@ async function found(
     issueDirs.push(...dirs[0])
     keptDirs.push(...dirs[1])
   }
-  const issues: [string, PathSpec, string | null][] = []
+  const issues: PathSpec[] = []
   for (const directory of issueDirs) {
     for (const listed of await readdir(accessor, directory, index)) {
-      const path = child(directory, listed.split('/').at(-1) ?? listed)
-      const entry = await resolveEntry(readdir, accessor, path, index)
-      if (entry === null) return null
-      const kept = entry.extra.unsearched
-      issues.push([entry.id, path, typeof kept === 'string' ? kept : null])
+      issues.push(child(directory, listed.split('/').at(-1) ?? listed))
     }
   }
+  const fresh = new RAMIndexCacheStore()
   const answer = askLinear && issues.length > 0 ? await named(accessor, needle) : null
-  const held = issues
-    .filter(
-      ([issueId, , kept]) =>
-        answer !== null && (kept === null || mayHold(answer[0], answer[1], issueId, kept)),
-    )
-    .map(([, path]) => path)
-  const out = (held.length > 0 ? held : issues.map(([, path]) => path)).map((path) =>
-    child(path, 'issue.json'),
-  )
+  const held: PathSpec[] = []
+  if (answer !== null) {
+    for (const path of issues) {
+      const entry = await resolveEntry(readdir, accessor, path, fresh)
+      const kept = entry?.extra.unsearched
+      if (entry === null || typeof kept !== 'string' || mayHold(...answer, entry.id, kept)) {
+        held.push(path)
+      }
+    }
+  }
+  const out = (held.length > 0 ? held : issues).map((path) => child(path, 'issue.json'))
   for (const directory of keptDirs) {
     for (const listed of await readdir(accessor, directory, index)) {
       const path = child(directory, listed.split('/').at(-1) ?? listed)
-      const entry = await resolveEntry(readdir, accessor, path, index)
-      if (entry === null) return null
-      const kept = entry.extra.text
+      const kept = (await resolveEntry(readdir, accessor, path, fresh))?.extra.text
       if (typeof kept !== 'string' || kept.includes(needle)) out.push(path)
     }
   }
@@ -174,9 +172,11 @@ async function found(
  * searched, a search fails or answers a full page, or nothing is found, since
  * Linear indexes a write some time after it lands. A member, project, cycle or
  * document file is read when the text its listing entry kept (`keptText`)
- * holds `text` in any case, or when it was too large to keep. null for a text
- * that is not ASCII or a scope inside an issue. Mirrors Python's
- * `files_containing`.
+ * holds `text` in any case, or when it was too large to keep. A read fetches
+ * the record as it is now, so the kept text is checked against listings made
+ * for this search rather than the walk's, which may be older; a file those
+ * listings no longer hold is read. null for a text that is not ASCII or a
+ * scope inside an issue. Mirrors Python's `files_containing`.
  */
 export async function filesContaining(
   accessor: LinearAccessor,

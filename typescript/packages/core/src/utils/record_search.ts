@@ -94,5 +94,5 @@ export function mayHold(
  */
 export function keptText(rendered: Uint8Array): Record<string, string> {
   if (rendered.byteLength > KEPT_TEXT_MAX) return {}
-  return { text: new TextDecoder().decode(rendered).toLowerCase() }
+  return { text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(rendered).toLowerCase() }
 }

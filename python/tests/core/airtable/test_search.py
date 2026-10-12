@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -136,5 +137,21 @@ async def test_more_matches_than_the_cap_read_the_file(airtable_api):
         _spec(RECORDS),
         "one",
         RAMIndexCacheStore(),
+    )
+    assert out is None
+
+
+# A listing that times out or fails to connect leaves the file to a read.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [TimeoutError(), OSError("reset")])
+async def test_a_failed_listing_reads_the_file(
+    airtable_api, monkeypatch, error
+):
+    monkeypatch.setattr(
+        "mirage.core.airtable.search.list_records",
+        AsyncMock(side_effect=error),
+    )
+    out = await lines_containing(
+        make_accessor(), _spec(RECORDS), "one", RAMIndexCacheStore()
     )
     assert out is None

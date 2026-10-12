@@ -59,6 +59,8 @@ function connection(nodes: unknown[]): Record<string, unknown> {
 // recording each searched term.
 class FakeTransport implements LinearTransport {
   readonly searched: string[] = []
+  issues: Record<string, unknown>[] = ISSUES
+  documents: Record<string, unknown>[] = DOCUMENTS
   constructor(
     private readonly named: string[] | Record<string, string[]>,
     private readonly reply?: Record<string, unknown> | Error,
@@ -77,8 +79,8 @@ class FakeTransport implements LinearTransport {
         : (this.named[String(variables.term)] ?? [])
       return Promise.resolve({ searchIssues: { nodes: ids.map((id) => ({ id })) } })
     }
-    if (op === 'TeamIssues') return Promise.resolve({ team: { issues: connection(ISSUES) } })
-    if (op === 'TeamDocuments') return Promise.resolve({ documents: connection(DOCUMENTS) })
+    if (op === 'TeamIssues') return Promise.resolve({ team: { issues: connection(this.issues) } })
+    if (op === 'TeamDocuments') return Promise.resolve({ documents: connection(this.documents) })
     if (op === 'TeamMembers') return Promise.resolve({ team: { members: connection([]) } })
     if (op === 'TeamProjects') return Promise.resolve({ team: { projects: connection([]) } })
     if (op === 'TeamCycles') return Promise.resolve({ team: { cycles: connection([]) } })
@@ -156,6 +158,29 @@ describe('linear filesContaining', () => {
       expect(none).toEqual([])
     },
   )
+
+  // A read fetches the record as it is now, so the kept text is checked against
+  // listings made for the search, not the ones the walk cached; an issue gone
+  // since is read.
+  it('finds a text changed since the listing', async () => {
+    const transport = new FakeTransport({ numbat: ['I1'] })
+    const accessor = new LinearAccessor(transport, { contentSearch: true })
+    const index = new RAMIndexCacheStore()
+    const search = () => filesContaining(accessor, 'numbat', [scope()], index, true)
+    await search()
+    const changed = issue('I2', 'Write release notes', 'Blocked', 'See numbat.io')
+    transport.issues = ISSUES.map((item) => (item.id === 'I2' ? changed : item))
+    transport.documents = DOCUMENTS.map((doc) =>
+      doc.id === 'D2' ? { ...doc, content: 'Numbat' } : doc,
+    )
+    let out = await search()
+    expect(issues(out)).toEqual(['ENG-1__I1', 'ENG-2__I2'])
+    expect(documents(out).filter((path) => path.includes('D2'))).toHaveLength(1)
+    transport.issues = ISSUES.slice(0, 1)
+    transport.documents = DOCUMENTS
+    out = await search()
+    expect(issues(out)).toEqual(ALL_ISSUES)
+  })
 
   // Without an answer from Linear every issue is read.
   it.each<[string, string[], boolean]>([

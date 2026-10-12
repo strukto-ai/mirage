@@ -18,6 +18,7 @@ import aiohttp
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.linear.client import search_issues
@@ -128,7 +129,10 @@ async def files_containing(
     indexes a write some time after it lands. A member, project, cycle or
     document file is read when the text its listing entry kept
     (``kept_text``) holds ``text`` in any case, or when it was too large
-    to keep. None for a text that is not ASCII or a scope inside an issue.
+    to keep. A read fetches the record as it is now, so the kept text is
+    checked against listings made for this search rather than the walk's,
+    which may be older; a file those listings no longer hold is read. None
+    for a text that is not ASCII or a scope inside an issue.
 
     Args:
         accessor (LinearAccessor): the workspace.
@@ -162,35 +166,30 @@ async def _found(
             return None
         issue_dirs += walked[0]
         kept_dirs += walked[1]
-    issues: list[tuple[str, PathSpec, str | None]] = []
-    for directory in issue_dirs:
-        for listed in await readdir(accessor, directory, index):
-            child = _child(directory, listed.rsplit("/", 1)[-1])
-            entry = await resolve_entry(readdir, accessor, child, index)
-            if entry is None:
-                return None
-            kept = entry.extra.get("unsearched")
-            issues.append(
-                (entry.id, child, kept if isinstance(kept, str) else None)
-            )
+    issues = [
+        _child(directory, listed.rsplit("/", 1)[-1])
+        for directory in issue_dirs
+        for listed in await readdir(accessor, directory, index)
+    ]
+    fresh = RAMIndexCacheStore()
     answer = await _named(accessor, needle) if ask_linear and issues else None
-    held = [
-        path
-        for issue_id, path, kept in issues
-        if answer is not None
-        and (kept is None or may_hold(*answer, issue_id, kept))
-    ]
-    found = [
-        _child(path, "issue.json")
-        for path in (held or [path for _, path, _ in issues])
-    ]
+    held: list[PathSpec] = []
+    if answer is not None:
+        for path in issues:
+            entry = await resolve_entry(readdir, accessor, path, fresh)
+            kept = None if entry is None else entry.extra.get("unsearched")
+            if (
+                entry is None
+                or not isinstance(kept, str)
+                or may_hold(*answer, entry.id, kept)
+            ):
+                held.append(path)
+    found = [_child(path, "issue.json") for path in held or issues]
     for directory in kept_dirs:
         for listed in await readdir(accessor, directory, index):
             child = _child(directory, listed.rsplit("/", 1)[-1])
-            entry = await resolve_entry(readdir, accessor, child, index)
-            if entry is None:
-                return None
-            kept = entry.extra.get("text")
+            entry = await resolve_entry(readdir, accessor, child, fresh)
+            kept = None if entry is None else entry.extra.get("text")
             if not isinstance(kept, str) or needle in kept:
                 found.append(child)
     return found
