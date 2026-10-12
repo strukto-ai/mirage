@@ -12,48 +12,152 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize } from '../../io/types.ts'
-import { ExitSignal } from '../../shell/errors.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { DevicePipe } from '../../core/dev/pipe.ts'
+import { PipeClosed } from '../../io/errors.ts'
+import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
+import { Channel, JobConsole, Terminal } from '../../shell/console/index.ts'
 import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
-import { ProcessSubDirection } from '../../shell/types.ts'
+import { ProcessSubDirection, type TSNodeLike } from '../../shell/types.ts'
+import { joinOrAbort, makeAbortError, mergeSignals } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import type { EvaluationContext } from '../evaluation.ts'
+import type { ProcessSubLine } from '../expand/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { ExecutionNode } from '../types.ts'
+import type { Substitution } from './types.ts'
 
-/** A node-local refusal; carry earlier output until executeNode catches it. */
-export class ProcessSubError extends ExitSignal {
-  constructor() {
-    super(2, encodeText('mirage: unsupported: process substitution >(...)\n'))
+class SubstitutionConsole extends JobConsole {
+  constructor(
+    private readonly endpoint: DevicePipe,
+    private readonly target: JobConsole,
+    private readonly abort: AbortController,
+  ) {
+    super()
+  }
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    if (this.abort.signal.aborted) return
+    if (channel === Channel.STDOUT && this.endpoint.readable) {
+      try {
+        await this.endpoint.pipe.write(data)
+      } catch (error) {
+        if (!(error instanceof PipeClosed)) throw error
+        this.abort.abort()
+        throw makeAbortError(this.abort.signal)
+      }
+    } else await this.target.emit(channel, data)
   }
 }
 
-/**
- * The hook that opens a node's input process substitutions. Each `<(...)`
- * runs as its word expands, in order with the word's other expansions and
- * through the evaluator a `$(...)` there uses, and reads back as a buffered
- * device file rather than a host pipe, held until the node ends; a nested
- * node opens its own, so each lasts as long as the command naming it. An
- * output `>(...)` is refused: the node naming it fails with status 2.
- * Mirrors Python's `_process_input`.
- */
-export function processInput(
-  context: EvaluationContext,
-  registry: MountRegistry,
-  held: (readonly [DevVFS, string, number])[],
-): NonNullable<EvaluationContext['frame']['processSub']> {
-  return async (node, executeLine) => {
-    if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
-    const [dev] = registry.resolve('/dev/null')
-    if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
-    const [path, allocation] = dev.allocateInput()
-    held.push([dev, path, allocation])
-    const inner = getProcessSubBody(node)
-    if (inner !== '') {
-      const io = await executeLine(inner)
-      dev.setInput(path, allocation, await materialize(io.stdout))
-      context.frame.diagnostics.push(await materialize(io.stderr))
+/** Own the virtual descriptors and auxiliary children of one command node. */
+export class ProcessSubScope {
+  private readonly held: Substitution[] = []
+  private readonly capture = new Terminal()
+  private closing: Promise<void> | undefined
+
+  constructor(
+    private readonly context: EvaluationContext,
+    private readonly registry: MountRegistry,
+    private readonly sink?: JobConsole,
+    private readonly signal?: AbortSignal,
+  ) {}
+
+  open = (node: TSNodeLike, executeLine: ProcessSubLine): Promise<string> => {
+    const [root] = this.registry.resolve('/dev/null')
+    if (!(root instanceof DevVFS)) throw new Error('missing device filesystem')
+    const dev = root.forSession(this.context.session.sessionId)
+    const endpoint = new DevicePipe(getProcessSubDirection(node) !== ProcessSubDirection.OUTPUT)
+    const [path, allocation] = dev.allocateInput(endpoint)
+    const abort = new AbortController()
+    const signal =
+      mergeSignals(this.signal ?? this.context.frame.abortSignal ?? undefined, abort.signal) ??
+      abort.signal
+    const child: Substitution = {
+      dev,
+      path,
+      allocation,
+      endpoint,
+      abort,
+      signal,
+      task: Promise.resolve(),
     }
-    return path
+    const output = new SubstitutionConsole(endpoint, this.sink ?? this.capture, abort)
+    child.task = executeLine(getProcessSubBody(node), {
+      sink: output,
+      signal,
+      ...(endpoint.readable ? {} : { stdin: endpoint.pipe.stream() }),
+    })
+      .then(async (io) => {
+        await output.emit(Channel.STDOUT, await materialize(io.stdout))
+        await output.emit(Channel.STDERR, await materialize(io.stderr))
+      })
+      .catch((error: unknown) => {
+        // Closing the command's reader intentionally interrupts its producer.
+        if (signal.aborted && error instanceof Error && error.name === 'AbortError') return
+        if (error instanceof PipeClosed && endpoint.pipe.closedReader) return
+        child.failure = error instanceof Error ? error : new Error(String(error), { cause: error })
+        if (signal.aborted)
+          console.error('process substitution failed after cancellation', child.failure)
+      })
+      .finally(() => {
+        if (endpoint.readable) endpoint.pipe.end(child.failure)
+        else endpoint.pipe.closeReader()
+      })
+    this.held.push(child)
+    return Promise.resolve(path)
+  }
+
+  close(failed = false): Promise<void> {
+    this.closing ??= this.finish(failed)
+    return this.closing
+  }
+
+  private async finish(failed: boolean): Promise<void> {
+    for (const child of this.held) {
+      if (failed || child.endpoint.readable) {
+        child.endpoint.pipe.closeReader()
+        child.abort.abort()
+      } else child.endpoint.pipe.end()
+    }
+    try {
+      await Promise.all(
+        this.held.map(async (child) => {
+          try {
+            await joinOrAbort(child.task, child.signal)
+          } catch (error) {
+            if (!child.signal.aborted) throw error
+          }
+          if (child.failure !== undefined) throw child.failure
+        }),
+      )
+    } finally {
+      for (const child of this.held) child.dev.releaseInput(child.path, child.allocation)
+    }
+  }
+
+  own(stdout: ByteSource | null, io: IOResult, node: ExecutionNode): ByteSource | null {
+    return this.held.length === 0 ? stdout : this.output(stdout, io, node)
+  }
+
+  private async *output(
+    stdout: ByteSource | null,
+    io: IOResult,
+    node: ExecutionNode,
+  ): AsyncGenerator<Uint8Array> {
+    let completed = false
+    try {
+      if (stdout instanceof Uint8Array) {
+        if (stdout.byteLength > 0) yield stdout
+      } else if (stdout !== null) yield* stdout
+      completed = true
+    } finally {
+      await this.close(!completed)
+      const [out, err] = this.capture.take()
+      if (err.byteLength > 0) {
+        io.stderr = concat([await materialize(io.stderr), err])
+        node.stderr = io.stderr
+      }
+      if (completed && out.byteLength > 0) yield out
+    }
   }
 }

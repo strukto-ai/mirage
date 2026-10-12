@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../evaluation.ts'
+import { PipeClosed } from '../../io/errors.ts'
+
 import { type RedirectGuard, runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -68,6 +70,32 @@ import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import { concat } from '../../utils/bytes.ts'
 import { posixPhrase } from '../../errors/posix.ts'
+
+class PipeRecorder extends Recorder {
+  constructor(
+    private readonly dispatch: DispatchFn,
+    private readonly streams: Map<Channel, PathSpec>,
+    private readonly forward: Map<Channel, Channel>,
+    private readonly sink: JobConsole | null,
+  ) {
+    super()
+  }
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    const scope = this.streams.get(channel)
+    if (scope === undefined) {
+      const channelTo = this.forward.get(channel)
+      if (this.sink !== null && channelTo !== undefined) await this.sink.emit(channelTo, data)
+      else await super.emit(channel, data)
+    } else if (data.byteLength > 0) {
+      try {
+        await this.dispatch('append', scope, [data])
+      } catch (error) {
+        if (!(error instanceof PipeClosed)) throw error
+        throw new ExitSignal(141)
+      }
+    }
+  }
+}
 
 /** Host diagnostics stay separate from redirected shell output. */
 const logger = {
@@ -349,7 +377,7 @@ export async function handleRedirect(
           inputs.set(r.fd, stdin)
           continue
         }
-        source = (await dispatch('read', scope))[0] as ByteSource | null
+        source = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
         else {
@@ -357,7 +385,7 @@ export async function handleRedirect(
           return failed(redirectFailure(scope, error))
         }
       }
-      const data = await materialize(source)
+      const data = (await isPipe(dispatch, scope)) ? source : await materialize(source)
       closed.delete(r.fd)
       readPaths.delete(r.fd)
       outputs.set(r.fd, CLOSED)
@@ -370,7 +398,7 @@ export async function handleRedirect(
         }
         const file = new FileDescription(scope, true)
         file.opened = true
-        file.source = new FileInput(file, data)
+        file.source = new FileInput(file, await materialize(data))
         files.push(file)
         inputs.set(r.fd, file.source)
         outputs.set(r.fd, file)
@@ -378,11 +406,11 @@ export async function handleRedirect(
         readPaths.set(r.fd, scope.virtual)
         inputs.set(
           r.fd,
-          data.byteLength === 0 && (await isDevice(dispatch, scope))
+          data instanceof Uint8Array && data.byteLength === 0 && (await isDevice(dispatch, scope))
             ? new DeviceInput()
             : r.fd === 0
               ? data
-              : new SharedInput(data),
+              : new SharedInput(data ?? new Uint8Array()),
         )
       }
     } else {
@@ -399,7 +427,7 @@ export async function handleRedirect(
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
-      const file = new FileDescription(scope, r.append)
+      const file = new FileDescription(scope, r.append || (await isPipe(dispatch, scope)))
       file.opened = true
       if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
       files.push(file)
@@ -412,7 +440,27 @@ export async function handleRedirect(
     }
   }
   redirects = expanded
-  const recorder = new Recorder()
+  const streams = new Map<Channel, PathSpec>()
+  for (const [fd, channel] of [
+    [1, Channel.STDOUT],
+    [2, Channel.STDERR],
+  ] as const) {
+    const file = outputs.get(fd)
+    if (file instanceof FileDescription && (await isPipe(dispatch, file.scope)))
+      streams.set(channel, file.scope)
+  }
+  const forward = new Map<Channel, Channel>()
+  if (streams.size > 0 || [...readPaths.values()].some((path) => path.startsWith('/dev/fd/'))) {
+    for (const [fd, channel] of [
+      [1, Channel.STDOUT],
+      [2, Channel.STDERR],
+    ] as const) {
+      const target = outputs.get(fd)
+      if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
+      else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
+    }
+  }
+  const recorder = new PipeRecorder(dispatch, streams, forward, sink ?? null)
   for (const file of files) {
     if (file.source !== null) continue
     for (const [fd, channel] of [
@@ -755,6 +803,12 @@ export async function redirectStdin(
 }
 
 /** Whether a redirect target is a character device (`/dev/null`). */
+async function isPipe(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
+  if (!scope.virtual.startsWith('/dev/fd/')) return false
+  const [stat] = await dispatch('stat', scope)
+  return stat instanceof FileStat && stat.type === FileType.FIFO
+}
+
 async function isDevice(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
   let stat: unknown
   try {

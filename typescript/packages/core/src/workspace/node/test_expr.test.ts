@@ -46,14 +46,10 @@ it.each([
   ['[[ x == x || -n >(true) ]]; echo $?', '0\n', ''],
   ['[[ x == y && -n <(printf unused >&2) ]]; echo $?', '1\n', ''],
   ['[[ x == y && -n >(true) ]]; echo $?', '1\n', ''],
-  ['[[ x == y || -n <(printf used >&2) ]]; echo $?', '0\n', 'used'],
+  ['[[ x == y || -n >(printf used >&2) ]]; echo $?', '0\n', 'used'],
   ['[[ x == x || ${missing:?unused} ]]; echo $?', '0\n', ''],
   ['x=0; [[ x=5 -eq 5 && $x == 5 ]]; echo "$? $x"', '0 5\n', ''],
-  [
-    '[[ x == x && -n >(true) ]]; echo after=$?',
-    'after=2\n',
-    'mirage: unsupported: process substitution >(...)\n',
-  ],
+  ['[[ x == x && -n >(true) ]]; echo after=$?', 'after=0\n', ''],
 ])('test_double_bracket_expands_only_reached_operands: %s', async (line, out, err) => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
@@ -79,12 +75,8 @@ it.each([
   ],
   ['p=x; case b in b) p=b; echo first;;& "$p") echo second;; esac', 'first\nsecond\n', ''],
   ['case b in @(b|$(printf used >&2))) echo chosen;; esac', 'chosen\n', 'used'],
-  ['case b in <(printf used >&2)|b) echo chosen;; esac', 'chosen\n', 'used'],
-  [
-    'case b in b) echo first;;& >(true)) echo BAD;; esac; echo after=$?',
-    'first\nafter=2\n',
-    'mirage: unsupported: process substitution >(...)\n',
-  ],
+  ['case b in >(printf used >&2)|b) echo chosen;; esac', 'chosen\n', 'used'],
+  ['case b in b) echo first;;& >(true)) echo BAD;; esac; echo after=$?', 'first\nafter=0\n', ''],
   [
     'case b in b) printf body >&2;;& $(printf pattern >&2; printf b)) echo chosen;; esac',
     'chosen\n',

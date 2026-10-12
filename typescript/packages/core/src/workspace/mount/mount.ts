@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DevVFS } from '../../vfs/dev/dev.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -379,8 +380,13 @@ export class MountEntry {
 
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
   glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
-    return resolveGlobOf({ ...this.io, ...(access === undefined ? {} : { access }) })(
-      this.vfs.accessor,
+    const vfs =
+      this.vfs instanceof DevVFS && access !== undefined
+        ? this.vfs.forSession(access.sessionId)
+        : this.vfs
+    const io = vfs === this.vfs ? this.io : commandIo(vfs)
+    return resolveGlobOf({ ...io, ...(access === undefined ? {} : { access }) })(
+      vfs.accessor,
       [path],
       index,
     )
@@ -629,8 +635,7 @@ export class MountEntry {
    * custom one is handed the scope and the op's positional arguments.
    * Mirrors Python's `MountEntry._callers`.
    */
-  callers(name: string, filetype: string | null): OpCall[] {
-    const vfs = this.vfs
+  callers(name: string, filetype: string | null, vfs: BaseVFS = this.vfs): OpCall[] {
     if (name === 'read') {
       const levels: OpCall[] = []
       const renderer = filetype !== null ? vfs.renderers[filetype] : undefined
@@ -786,7 +791,11 @@ export class MountEntry {
     const named = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
     const filetype =
       named === null && !this.vfs.supports('read') ? getExtension(scope.virtual) : named
-    const levels = this.callers(name, filetype)
+    const vfs =
+      this.vfs instanceof DevVFS && access !== undefined
+        ? this.vfs.forSession(access.sessionId)
+        : this.vfs
+    const levels = this.callers(name, filetype, vfs)
     if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
     taken(name, kwargs)
     this.requireWritable(name, scope, [...args, ...Object.values(kwargs)], access)
@@ -807,7 +816,11 @@ export class MountEntry {
    * stream. The mount is held until the stream ends or is closed. Mirrors
    * Python's `read_stream`.
    */
-  readStream(scope: PathSpec): AsyncIterable<Uint8Array> {
+  readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
+    const vfs =
+      this.vfs instanceof DevVFS && access !== undefined
+        ? this.vfs.forSession(access.sessionId)
+        : this.vfs
     if (this.retiring) throw ebusy(this.prefix)
     const limit = this.commandLimits.get('read') ?? null
     const revisions = this.revisions.size > 0 ? this.revisions : null
@@ -827,7 +840,7 @@ export class MountEntry {
     )
     const stream = withMountContext(
       withPullTimeout(
-        this.vfs.readStream(scope, this.index, signal),
+        vfs.readStream(scope, this.index, signal),
         limit?.timeoutSeconds ?? null,
         'read',
       ),
@@ -1045,6 +1058,10 @@ export class MountEntry {
     context: ExecContext,
     probe: WalkProbe | null,
   ): CommandOpts {
+    const io =
+      this.vfs instanceof DevVFS && context.access !== undefined
+        ? commandIo(this.vfs.forSession(context.access.sessionId))
+        : this.io
     return {
       ...(context.admission === undefined ? {} : { admission: context.admission }),
       ...(context.access === undefined ? {} : { access: context.access }),
@@ -1055,7 +1072,7 @@ export class MountEntry {
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
       io: {
-        ...dispatchedIo(this.io, context.dispatch),
+        ...dispatchedIo(io, context.dispatch),
         ...(context.admission === undefined ? {} : { admission: context.admission }),
         ...(context.access === undefined ? {} : { access: context.access }),
         ...(probe === null ? {} : { walkProbe: probe }),
@@ -1176,7 +1193,11 @@ export class MountEntry {
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
         : cmdOpts
-    const running = Promise.resolve(cmd.fn(this.vfs.accessor, paths, texts, runOpts))
+    const vfs =
+      this.vfs instanceof DevVFS && context.access !== undefined
+        ? this.vfs.forSession(context.access.sessionId)
+        : this.vfs
+    const running = Promise.resolve(cmd.fn(vfs.accessor, paths, texts, runOpts))
     try {
       return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
     } catch (err) {

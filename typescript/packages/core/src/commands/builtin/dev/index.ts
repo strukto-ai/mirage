@@ -46,7 +46,13 @@ async function* ranged(
 function endless(io: CommandIO): CommandIO {
   const readRange = io.readRange
   if (readRange === undefined) return io
-  return { ...io, readStream: (accessor, path, index) => ranged(readRange, accessor, path, index) }
+  return {
+    ...io,
+    readStream: (accessor, path, index) =>
+      path.mountPath.startsWith('/fd/')
+        ? io.readStream(accessor, path, index)
+        : ranged(readRange, accessor, path, index),
+  }
 }
 
 // /dev is a RAM mount whose read and stat know the two synthetic character

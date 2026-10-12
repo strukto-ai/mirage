@@ -18,7 +18,7 @@ import { stat as ramStat } from '../ram/stat.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 import { DEVICE_NUMBERS_KEY, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { DEV_RDEV } from './constants.ts'
-import { activeDevice } from './device.ts'
+import { activeDevice, activePipe } from './device.ts'
 
 export function stat(
   accessor: RAMAccessor,
@@ -26,6 +26,11 @@ export function stat(
   _index?: IndexCacheStore,
 ): Promise<FileStat> {
   const key = norm(path.mountPath)
+  const pipe = activePipe(accessor, key)
+  if (pipe !== null)
+    return Promise.resolve(
+      new FileStat({ name: gnuBasename(key), type: FileType.FIFO, size: null }),
+    )
   const device = activeDevice(accessor, key)
   if (device === null) return ramStat(accessor, path)
   const attrs = accessor.store.attrs.get(key) ?? {}

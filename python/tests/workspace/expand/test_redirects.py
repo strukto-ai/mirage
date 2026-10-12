@@ -159,42 +159,51 @@ async def test_procsub_stdin_redirect():
 
 
 @pytest.mark.asyncio
-async def test_procsub_output_redirect_errors_loudly():
-    # `> >(cmd)` would classify the procsub text as a literal filename
-    # and write silently wrong state; it must fail like argv-position
-    # output procsub.
+async def test_procsub_output_redirect_streams():
     ws = await _workspace_at("/data")
-    io = await ws.shell("echo hi > >(cat)")
-    assert io.exit_code == 2
-    assert b"unsupported: process substitution" in (io.stderr or b"")
+    try:
+        io = await ws.shell("echo hi > >(cat)")
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (0, "hi\n", "")
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_procsub_output_word_fails_only_its_node():
+async def test_procsub_output_word_is_a_descriptor():
     ws = await _workspace_at("/data")
-    io = await ws.shell("echo hi >(cat); [[ -n >(true) ]]; echo after=$?")
-    assert (io.exit_code, io.stdout) == (0, b"after=2\n")
-    assert (io.stderr or b"").count(b"unsupported: process substitution") == 2
+    try:
+        io = await ws.shell("echo hi >(cat); [[ -n >(true) ]]; echo after=$?")
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (0, "hi /dev/fd/63\nafter=0\n", "")
+    finally:
+        await ws.close()
 
 
 @pytest.mark.parametrize(
     "command",
     [
-        "echo $(printf warning >&2) >(cat)",
-        "echo <(printf warning >&2) >(cat)",
-        "echo $(printf warning >&2) >(cat) 2>/dev/null",
-        "value=$(printf warning >&2)>(cat)",
-        "for value in $(printf warning >&2) >(cat); do echo BAD; done",
+        "echo $(printf warning >&2) > >(cat)",
+        "echo $(printf warning >&2) > >(cat) 2>/dev/null",
+        "printf warning > >(cat >&2)",
     ],
 )
 @pytest.mark.asyncio
-async def test_procsub_refusal_preserves_earlier_diagnostics(command: str):
+async def test_procsub_keeps_diagnostics(command: str):
     ws = await _workspace_at("/data")
-    io = await ws.shell(command + "; echo after=$?; echo <(true)")
-    assert (io.exit_code, io.stdout) == (0, b"after=2\n/dev/fd/63\n")
-    assert io.stderr == (
-        b"warningmirage: unsupported: process substitution >(...)\n"
-    )
+    try:
+        io = await ws.shell(command + "; echo after=$?")
+        assert io.exit_code == 0
+        assert (await io.stdout_str()).endswith("after=0\n")
+        assert await io.stderr_str() == "warning"
+    finally:
+        await ws.close()
 
 
 # ── quoted redirect targets ────────────────────

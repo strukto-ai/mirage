@@ -65,13 +65,13 @@ async def test_every_operator_reaches_test_as_a_word(line, out, err):
         ("[[ x == x || -n >(true) ]]; echo $?", "0\n", ""),
         ("[[ x == y && -n <(printf unused >&2) ]]; echo $?", "1\n", ""),
         ("[[ x == y && -n >(true) ]]; echo $?", "1\n", ""),
-        ("[[ x == y || -n <(printf used >&2) ]]; echo $?", "0\n", "used"),
+        ("[[ x == y || -n >(printf used >&2) ]]; echo $?", "0\n", "used"),
         ("[[ x == x || ${missing:?unused} ]]; echo $?", "0\n", ""),
         ('x=0; [[ x=5 -eq 5 && $x == 5 ]]; echo "$? $x"', "0 5\n", ""),
         (
             "[[ x == x && -n >(true) ]]; echo after=$?",
-            "after=2\n",
-            "mirage: unsupported: process substitution >(...)\n",
+            "after=0\n",
+            "",
         ),
     ],
 )
@@ -120,14 +120,14 @@ async def test_double_bracket_expands_only_reached_operands(line, out, err):
             "used",
         ),
         (
-            "case b in <(printf used >&2)|b) echo chosen;; esac",
+            "case b in >(printf used >&2)|b) echo chosen;; esac",
             "chosen\n",
             "used",
         ),
         (
             "case b in b) echo first;;& >(true)) echo BAD;; esac; echo after=$?",
-            "first\nafter=2\n",
-            "mirage: unsupported: process substitution >(...)\n",
+            "first\nafter=0\n",
+            "",
         ),
         (
             "case b in b) printf body >&2;;& "

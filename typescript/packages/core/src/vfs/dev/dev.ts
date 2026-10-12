@@ -20,6 +20,9 @@ import type { PathSpec } from '../../types.ts'
 
 import { RAMVFS } from '../ram/ram.ts'
 import type { RAMStore } from '../ram/store.ts'
+import type { DevicePipe } from '../../core/dev/pipe.ts'
+import { activePipe } from '../../core/dev/device.ts'
+import { norm } from '../../utils/path.ts'
 import { type DevFiles, DevStore } from './store.ts'
 
 /**
@@ -40,11 +43,21 @@ export class DevIndex extends RAMIndexCacheStore {
 }
 
 export class DevVFS extends RAMVFS {
-  override readonly store: RAMStore = new DevStore() as unknown as RAMStore
-  override readonly accessor: RAMAccessor = new RAMAccessor(this.store)
+  override readonly store: RAMStore
+  override readonly accessor: RAMAccessor
 
-  allocateInput(): readonly [string, number] {
-    return (this.store.files as DevFiles).allocateInput()
+  constructor(private readonly devices = new DevStore()) {
+    super()
+    this.store = devices as unknown as RAMStore
+    this.accessor = new RAMAccessor(this.store)
+  }
+
+  forSession(owner: string): DevVFS {
+    return new DevVFS(this.devices.forSession(owner))
+  }
+
+  allocateInput(pipe?: DevicePipe): readonly [string, number] {
+    return (this.store.files as DevFiles).allocateInput(pipe)
   }
 
   setInput(path: string, allocation: number, data: Uint8Array): void {
@@ -66,6 +79,11 @@ export class DevVFS extends RAMVFS {
    * endless source (`commands/builtin/dev`).
    */
   override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    const pipe = activePipe(this.accessor, norm(path.mountPath))
+    if (pipe !== null) {
+      yield* pipe.stream(path)
+      return
+    }
     const data = await this.read(path, index)
     if (data.byteLength > 0) yield data
   }

@@ -39,6 +39,7 @@ import nestedSyntax from '../bash/quoted/nested_subshell.json'
 import quotingSyntax from '../bash/syntax/quoting.json'
 import pipelineStatus from '../bash/param/pipestatus.json'
 import traps from '../bash/trap/exit.json'
+import processStreams from '../bash/procsub/stream.json'
 
 export interface Outcome {
   name: string
@@ -87,6 +88,7 @@ async function settle(ready: () => Promise<boolean>): Promise<void> {
 function battery(): [string, Check][] {
   const files = [
     traps,
+    processStreams,
     substitutionScope,
     assignmentRedirect,
     unset,
@@ -112,6 +114,48 @@ function battery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  [
+    'overlapping sessions own their process-substitution descriptors',
+    async (ws) => {
+      ws.createSession('pipe-peer')
+      let release!: () => void
+      let enterBoth!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const both = new Promise<void>((resolve) => {
+        enterBoth = resolve
+      })
+      let entered = 0
+      ws.registerCli(
+        'pipepause',
+        new CLI({
+          spec: new CommandSpec({ name: 'pipepause' }),
+          handlers: {
+            '': new CLIHandler({
+              fn: async () => {
+                if (++entered === 2) enterBoth()
+                await held
+                return [null, new IOResult()]
+              },
+            }),
+          },
+        }),
+      )
+      const left = shell(ws, 'cat <(pipepause; echo left) > >(cat)')
+      const right = shell(ws, 'cat <(pipepause; echo right) > >(cat)', { sessionId: 'pipe-peer' })
+      try {
+        await both
+        release()
+        equal(await left, [0, 'left\n', ''])
+        equal(await right, [0, 'right\n', ''])
+        equal(await shell(ws, 'echo /dev/fd/*'), [0, '/dev/fd/*\n', ''])
+      } finally {
+        release()
+        await Promise.allSettled([left, right])
+      }
+    },
+  ],
   [
     'suspended sessions retain their permissions, umask and glob settings',
     async (ws) => {

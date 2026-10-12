@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from asyncio import Event
 from functools import partial
 
 from mirage.io import IOResult
+from mirage.io.types import ByteSource
 from mirage.shell.backticks import split_backtick_region
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
+from mirage.shell.console import JobConsole
 from mirage.shell.errors import (
     ArithError,
     BadSubstitution,
@@ -123,6 +126,10 @@ async def child_line(
     node: TSNodeLike,
     call_stack: CallStack | None,
     span: tuple[int, int] | None = None,
+    *,
+    stdin: ByteSource | None = None,
+    sink: JobConsole | None = None,
+    cancel: Event | None = None,
 ) -> IOResult:
     """Run a substitution's line in a child shell.
 
@@ -147,12 +154,18 @@ async def child_line(
             node, for a backtick region holding several.
     """
     session = context.session
-    return await execute_fn(
+    execute = (
+        execute_fn if cancel is None else partial(execute_fn, cancel=cancel)
+    )
+    return await execute(
         text,
         session_id=session.session_id,
+        context=context,
         node=node,
         span=span,
         substitution=True,
+        stdin=stdin,
+        sink=sink,
         call_stack=(call_stack or CallStack()).fork(paren=False),
     )
 
@@ -468,7 +481,7 @@ async def _node_chunks(
             ts_node,
             partial(
                 child_line,
-                context,
+                context.fork(),
                 execute_fn,
                 node=ts_node,
                 call_stack=call_stack,

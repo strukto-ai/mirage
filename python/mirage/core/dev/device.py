@@ -13,9 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.dev.mixin import PipeFiles
+from mirage.core.dev.pipe import DevicePipe
 
 
 def active_device(accessor: RAMAccessor, key: str) -> str | None:
     """Return the live synthetic device at key, if the RAM store has one."""
     device_of = getattr(accessor.store.files, "device_of", None)
     return device_of(key) if device_of is not None else None
+
+
+def active_pipe(accessor: RAMAccessor, key: str) -> DevicePipe | None:
+    files = accessor.store.files
+    return files.pipe_of(key) if isinstance(files, PipeFiles) else None

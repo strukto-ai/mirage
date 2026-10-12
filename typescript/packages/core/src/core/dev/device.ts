@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PipeFiles } from './mixin.ts'
+import type { DevicePipe } from './pipe.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 
 interface DeviceFiles {
@@ -21,4 +23,9 @@ interface DeviceFiles {
 export function activeDevice(accessor: RAMAccessor, key: string): string | null {
   const files = accessor.store.files as Map<string, Uint8Array> & Partial<DeviceFiles>
   return typeof files.deviceOf === 'function' ? files.deviceOf(key) : null
+}
+
+export function activePipe(accessor: RAMAccessor, key: string): DevicePipe | null {
+  const files = accessor.store.files
+  return files instanceof PipeFiles ? files.pipeOf(key) : null
 }

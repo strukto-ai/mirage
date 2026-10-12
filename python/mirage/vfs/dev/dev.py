@@ -17,9 +17,12 @@ from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.dev.device import active_pipe
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.dev.read import read as dev_read
 from mirage.core.dev.stat import stat as dev_stat
 from mirage.types import FileStat, PathSpec, VFSName
+from mirage.utils.path import norm
 from mirage.vfs.dev.store import DevStore
 from mirage.vfs.ram.ram import RAMVFS
 
@@ -41,9 +44,9 @@ class DevVFS(RAMVFS):
     # Device metadata is synthetic and needs no content fetch.
     sizes_always_known: bool = True
 
-    def __init__(self) -> None:
+    def __init__(self, store: DevStore | None = None) -> None:
         super().__init__()
-        self._store = DevStore()
+        self._store = store if store is not None else DevStore()
         self.accessor = RAMAccessor(self._store)
 
     async def read(
@@ -63,6 +66,11 @@ class DevVFS(RAMVFS):
     async def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
+        pipe = active_pipe(self.accessor, norm(path.mount_path))
+        if pipe is not None:
+            async for chunk in pipe.stream(path):
+                yield chunk
+            return
         data = await self.read(path, index)
         if data:
             yield data
@@ -77,8 +85,13 @@ class DevVFS(RAMVFS):
             state (dict[str, Any]): the payload ``get_state`` produced.
         """
 
-    def allocate_input(self) -> tuple[str, int]:
-        return self._store.files.allocate_input()
+    def for_session(self, owner: str) -> "DevVFS":
+        return DevVFS(self._store.for_session(owner))
+
+    def allocate_input(
+        self, pipe: DevicePipe | None = None
+    ) -> tuple[str, int]:
+        return self._store.files.allocate_input(pipe)
 
     def set_input(self, path: str, allocation: int, data: bytes) -> None:
         self._store.files.set_input(path, allocation, data)

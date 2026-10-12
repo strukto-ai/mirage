@@ -694,6 +694,7 @@ async function runPreparedLine(
               session.jobWaits = waits
               const caller = innerOpts.jobTable ?? env.jobTable
               innerOpts.jobTable = caller.child(caller)
+              if (opts.sink !== undefined) await capture.attach(opts.sink)
               innerOpts.sink = capture
             }
 

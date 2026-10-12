@@ -105,6 +105,7 @@ _TYPE_LABELS = {
     FileType.SYMLINK: "symbolic link",
     FileType.CHAR_DEVICE: "character special file",
     FileType.FILE: "regular file",
+    FileType.FIFO: "fifo",
 }
 
 _SHELL_SPECIAL = frozenset('!"#$&()*;<=>?[\\^`{|}~')

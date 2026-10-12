@@ -147,7 +147,7 @@
         "ram",
         "disk"
       ],
-      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ '\"'\"'\"'\"'\"'\"'\"'\"'1😀'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]😀]) ]]; echo $?; [[ '\"'\"'\"'\"'\"'\"'\"'\"'😀😀'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]😀]) ]]; echo $?; [[ a == +([[:digit:]😀]) ]]; echo $?'\"'\"''",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ '\"'\"'\"'\"'\"'\"'\"'\"'1\ud83d\ude00'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]\ud83d\ude00]) ]]; echo $?; [[ '\"'\"'\"'\"'\"'\"'\"'\"'\ud83d\ude00\ud83d\ude00'\"'\"'\"'\"'\"'\"'\"'\"' == +([[:digit:]\ud83d\ude00]) ]]; echo $?; [[ a == +([[:digit:]\ud83d\ude00]) ]]; echo $?'\"'\"''",
       "expect": {
         "exit": 0,
         "stdout": "0\n0\n1\n",
@@ -301,10 +301,10 @@
         "ram",
         "disk"
       ],
-      "command": "bash -c 'shopt -s extglob; eval '\"'\"'x=😀; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x#@(?)}\" \"${x%@(?)}\" \"${x##@(?)}\" \"${x%%@(?)}\"; x=😀🦊; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x#@(?)}\" \"${x%@(?)}\" \"${x##+(?)}\" \"${x%%+(?)}\"; x=a😀b; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x##@(a?)}\" \"${x%%@(?b)}\"; x=😀; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x/@([!😀])/X}\" \"${x//?/X}\"; x=𐐨a; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x^^@(𐐨)}\"'\"'\"''",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'x=\ud83d\ude00; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x#@(?)}\" \"${x%@(?)}\" \"${x##@(?)}\" \"${x%%@(?)}\"; x=\ud83d\ude00\ud83e\udd8a; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x#@(?)}\" \"${x%@(?)}\" \"${x##+(?)}\" \"${x%%+(?)}\"; x=a\ud83d\ude00b; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x##@(a?)}\" \"${x%%@(?b)}\"; x=\ud83d\ude00; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x/@([!\ud83d\ude00])/X}\" \"${x//?/X}\"; x=\ud801\udc28a; printf '\"'\"'\"'\"'\"'\"'\"'\"'<%s>\\n'\"'\"'\"'\"'\"'\"'\"'\"' \"${x^^@(\ud801\udc28)}\"'\"'\"''",
       "expect": {
         "exit": 0,
-        "stdout": "<>\n<>\n<>\n<>\n<🦊>\n<😀>\n<>\n<>\n<b>\n<a>\n<😀>\n<X>\n<𐐀a>\n",
+        "stdout": "<>\n<>\n<>\n<>\n<\ud83e\udd8a>\n<\ud83d\ude00>\n<>\n<>\n<b>\n<a>\n<\ud83d\ude00>\n<X>\n<\ud801\udc00a>\n",
         "stderr": ""
       }
     },
@@ -315,7 +315,7 @@
         "ram",
         "disk"
       ],
-      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ x == x || -n <(printf unused >&2) ]]; echo $?; [[ x == x || -n >(true) ]]; echo $?; [[ x == y && -n <(printf unused >&2) ]]; echo $?; [[ x == y && -n >(true) ]]; echo $?; [[ x == y || -n <(printf used >&2) ]]; echo $?; [[ x == x || ${missing:?unused} ]]; echo $?; x=0; [[ x=5 -eq 5 && $x == 5 ]]; echo \"$? $x\"'\"'\"''",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'[[ x == x || -n <(printf unused >&2) ]]; echo $?; [[ x == x || -n >(true) ]]; echo $?; [[ x == y && -n <(printf unused >&2) ]]; echo $?; [[ x == y && -n >(true) ]]; echo $?; [[ x == y || -n >(printf used >&2) ]]; echo $?; [[ x == x || ${missing:?unused} ]]; echo $?; x=0; [[ x=5 -eq 5 && $x == 5 ]]; echo \"$? $x\"; wait'\"'\"''",
       "expect": {
         "exit": 0,
         "stdout": "0\n0\n1\n1\n0\n0\n0 5\n",
@@ -357,7 +357,7 @@
         "ram",
         "disk"
       ],
-      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case b in @(b|$(printf used >&2))) echo chosen;; esac; wait; case b in <(printf used >&2)|b) echo chosen;; esac; wait; case b in b) printf body >&2;;& $(printf pattern >&2; printf b)) echo chosen;; esac'\"'\"''",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'case b in @(b|$(printf used >&2))) echo chosen;; esac; wait; case b in >(printf used >&2)|b) echo chosen;; esac; wait; case b in b) printf body >&2;;& $(printf pattern >&2; printf b)) echo chosen;; esac'\"'\"''",
       "expect": {
         "exit": 0,
         "stdout": "chosen\nchosen\nchosen\n",

@@ -17,7 +17,10 @@ from enum import Enum
 from typing import TypeVar, overload
 
 from mirage.context import get_current_session
+from mirage.core.dev.mixin import PipeFiles
+from mirage.core.dev.pipe import DevicePipe
 from mirage.errors.fs import eacces, enoent
+from mirage.vfs.dev.types import DevFileState, DeviceInput
 from mirage.vfs.ram.store import RAMStore
 
 _DEV_NAMES = frozenset({"null", "zero"})
@@ -28,7 +31,7 @@ class _PopMissing(Enum):
     TOKEN = 0
 
 
-class DevFiles(dict[str, bytes]):
+class DevFiles(dict[str, bytes], PipeFiles):
     """Real backing store plus a synthetic /null, /zero overlay.
 
     The synthetic device names read as empty/zeros and swallow writes until
@@ -37,53 +40,71 @@ class DevFiles(dict[str, bytes]):
     is GNU's rm-then-redirect recreation as a regular file.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self, owner: str | None = None, state: DevFileState | None = None
+    ) -> None:
         super().__init__()
-        self._tombstones: set[str] = set()
-        self._inputs: dict[str, tuple[str, int, bytes]] = {}
-        self._next_allocation = 0
+        self._bound_owner = owner
+        self.state = state if state is not None else DevFileState()
+
+    def for_session(self, owner: str) -> "DevFiles":
+        return DevFiles(owner, self.state)
+
+    def _owner(self) -> str | None:
+        if self._bound_owner is not None:
+            return self._bound_owner
+        session = get_current_session()
+        return session.session_id if session is not None else None
 
     def _visible_inputs(self) -> dict[str, bytes]:
-        session = get_current_session()
-        if session is None:
-            return {}
+        owner = self._owner()
         return {
-            key: data
-            for key, (owner, _, data) in self._inputs.items()
-            if owner == session.session_id
+            key: row.data
+            for key, row in self.state.inputs.items()
+            if row.owner == owner
         }
 
-    def allocate_input(self) -> tuple[str, int]:
-        session = get_current_session()
-        if session is None:
+    def pipe_of(self, key: str) -> DevicePipe | None:
+        row = self.state.inputs.get(key)
+        return (
+            row.pipe
+            if row is not None and row.owner == self._owner()
+            else None
+        )
+
+    def allocate_input(
+        self, pipe: DevicePipe | None = None
+    ) -> tuple[str, int]:
+        owner = self._owner()
+        if owner is None:
             raise eacces("/dev/fd")
         fd = 63
-        while f"/fd/{fd}" in self._inputs:
+        while f"/fd/{fd}" in self.state.inputs:
             fd -= 1
         key = f"/fd/{fd}"
-        allocation = self._next_allocation
-        self._next_allocation += 1
-        self._inputs[key] = (session.session_id, allocation, b"")
+        allocation = self.state.next_allocation
+        self.state.next_allocation += 1
+        self.state.inputs[key] = DeviceInput(owner, allocation, pipe=pipe)
         return f"/dev{key}", allocation
 
     def set_input(self, path: str, allocation: int, data: bytes) -> None:
-        row = self._inputs.get(path[4:])
-        if row is None or row[1] != allocation:
+        row = self.state.inputs.get(path[4:])
+        if row is None or row.allocation != allocation:
             raise enoent(path)
         self[path[4:]] = data
 
     def release_input(self, path: str, allocation: int) -> bool:
-        row = self._inputs.get(path[4:])
-        if row is None or row[1] != allocation:
+        row = self.state.inputs.get(path[4:])
+        if row is None or row.allocation != allocation:
             return False
-        del self._inputs[path[4:]]
+        del self.state.inputs[path[4:]]
         return True
 
     def _synthetic_active(self, name: str) -> bool:
         return (
             name in _DEV_NAMES
-            and name not in self._tombstones
-            and not dict.__contains__(self, "/" + name)
+            and name not in self.state.tombstones
+            and ("/" + name) not in self.state.files
         )
 
     def _synthetic_names(self) -> list[str]:
@@ -104,15 +125,15 @@ class DevFiles(dict[str, bytes]):
             return False
         if key.startswith("/fd/"):
             return key in self._visible_inputs()
-        if dict.__contains__(self, key):
+        if key in self.state.files:
             return True
         return self._synthetic_active(key.strip("/"))
 
     def __getitem__(self, key: str) -> bytes:
         if key.startswith("/fd/"):
             return self._visible_inputs()[key]
-        if dict.__contains__(self, key):
-            return dict.__getitem__(self, key)
+        if key in self.state.files:
+            return self.state.files[key]
         name = key.strip("/")
         if self._synthetic_active(name):
             return b""
@@ -122,29 +143,28 @@ class DevFiles(dict[str, bytes]):
         if key == "/fd" or key.startswith("/fd/"):
             if key not in self._visible_inputs():
                 raise enoent(f"/dev{key}")
-            owner, allocation, _ = self._inputs[key]
-            self._inputs[key] = (owner, allocation, value)
+            self.state.inputs[key].data = value
             return
         name = key.strip("/")
         if self._synthetic_active(name):
             return
-        dict.__setitem__(self, key, value)
-        self._tombstones.discard(name)
+        self.state.files[key] = value
+        self.state.tombstones.discard(name)
 
     def __delitem__(self, key: str) -> None:
         if key.startswith("/fd/"):
             if key not in self._visible_inputs():
                 raise enoent(f"/dev{key}")
-            del self._inputs[key]
+            del self.state.inputs[key]
             return
         name = key.strip("/")
-        if dict.__contains__(self, key):
-            dict.__delitem__(self, key)
+        if key in self.state.files:
+            del self.state.files[key]
             if name in _DEV_NAMES:
-                self._tombstones.add(name)
+                self.state.tombstones.add(name)
             return
         if self._synthetic_active(name):
-            self._tombstones.add(name)
+            self.state.tombstones.add(name)
             return
         raise KeyError(key)
 
@@ -186,7 +206,7 @@ class DevFiles(dict[str, bytes]):
     def keys(self):
         return [
             *self._synthetic_names(),
-            *dict.keys(self),
+            *self.state.files.keys(),
             *self._visible_inputs(),
         ]
 
@@ -195,33 +215,44 @@ class _DevDirs(set[str]):
     """Keep the virtual descriptor directory separate from ordinary writes."""
 
     def __init__(self, files: DevFiles) -> None:
-        super().__init__({"/"})
+        super().__init__()
         self._files = files
+
+    def __len__(self) -> int:
+        return len(self._files.state.dirs) + int("/fd" in self)
 
     def __contains__(self, key) -> bool:
         if key == "/fd":
             return bool(self._files._visible_inputs())
-        return super().__contains__(key)
+        return key in self._files.state.dirs
 
     def __iter__(self):
-        return iter([*super().__iter__(), *(["/fd"] if "/fd" in self else [])])
+        return iter(
+            [*self._files.state.dirs, *(["/fd"] if "/fd" in self else [])]
+        )
 
     def add(self, key: str) -> None:
         if key == "/fd" or key.startswith("/fd/"):
             raise eacces(f"/dev{key}")
-        super().add(key)
+        self._files.state.dirs.add(key)
 
     def discard(self, key) -> None:
         if key == "/fd" or key.startswith("/fd/"):
             raise eacces(f"/dev{key}")
-        super().discard(key)
+        self._files.state.dirs.discard(key)
 
 
 class DevStore(RAMStore):
     files: DevFiles
 
-    def __init__(self) -> None:
-        self.files = DevFiles()
+    def __init__(self, files: DevFiles | None = None) -> None:
+        self.files = files if files is not None else DevFiles()
         self.dirs = _DevDirs(self.files)
         self.modified = {}
         self.attrs = {}
+
+    def for_session(self, owner: str) -> "DevStore":
+        store = DevStore(self.files.for_session(owner))
+        store.modified = self.modified
+        store.attrs = self.attrs
+        return store

@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -28,6 +29,11 @@ async def write(
     store = accessor.store
     timer = start_op()
     p = norm(path)
+    pipe = active_pipe(accessor, p)
+    if pipe is not None:
+        await pipe.write(data, path_spec)
+        record("write", path_spec.virtual, "ram", len(data), timer)
+        return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
     store.files[p] = data

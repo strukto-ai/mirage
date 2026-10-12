@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from mirage.io.types import IOResult
+if TYPE_CHECKING:
+    from mirage.workspace.expand.types import ProcessSubLine
 from mirage.shell.types import TSNodeLike
 
 
@@ -13,13 +17,10 @@ class ExecutionFrame:
     cmdsub_seq: int = 0
     cmdsub_status: int = 0
     process_sub: (
-        Callable[
-            [TSNodeLike, Callable[[str], Awaitable[IOResult]]], Awaitable[str]
-        ]
-        | None
+        Callable[[TSNodeLike, ProcessSubLine], Awaitable[str]] | None
     ) = None
 
-    def fork(self) -> "ExecutionFrame":
+    def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty.
 
         TypeScript's also carries the abort signal; here cancellation is

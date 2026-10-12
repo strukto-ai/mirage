@@ -44,6 +44,7 @@ const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.SYMLINK]: 'symbolic link',
   [FileType.CHAR_DEVICE]: 'character special file',
   [FileType.FILE]: 'regular file',
+  [FileType.FIFO]: 'fifo',
 }
 
 function typeLabel(s: FileStat): string {

@@ -34,7 +34,7 @@ from mirage.context import (
 from mirage.context.session_context import redirect_syntax_for
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
@@ -80,7 +80,6 @@ from mirage.shell.types import (
     TSNodeLike,
 )
 from mirage.types import PathSpec
-from mirage.vfs.dev.dev import DevVFS
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -131,7 +130,7 @@ from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
 from mirage.workspace.node.diagnostics import diagnostic_stderr
 from mirage.workspace.node.occurrence import defined_at
-from mirage.workspace.node.process_sub import ProcessSubError, process_input
+from mirage.workspace.node.process_sub import ProcessSubScope
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (
     expand_double_bracket,
@@ -1079,9 +1078,9 @@ async def execute_node(
     )
     # The node's own `<(...)` files go when it ends, so a command still
     # reading one is read out first.
-    held: list[tuple[DevVFS, str, int]] = []
+    process_subs = ProcessSubScope(context, registry, sink)
     previous = context.frame.process_sub
-    context.frame.process_sub = process_input(context, registry, held)
+    context.frame.process_sub = process_subs.open
     try:
         # What expanding the node printed (a substitution's stderr) goes
         # out with the node's own stderr, unless its caller collects it: a
@@ -1102,21 +1101,12 @@ async def execute_node(
                 raise
             finally:
                 context.frame.diagnostics = outer
-        if held and stdout is not None:
-            stdout = await materialize(stdout)
-        return stdout, io, exec_node
-    except ProcessSubError as exc:
-        # The node fails, as an unsupported command does; the line goes on.
-        err = exc.stderr
-        return (
-            exc.stdout,
-            IOResult(exit_code=2, stderr=err),
-            ExecutionNode(command="process_sub", exit_code=2, stderr=err),
-        )
+        return process_subs.own(stdout, io, exec_node), io, exec_node
+    except BaseException:
+        await process_subs.close(True)
+        raise
     finally:
         context.frame.process_sub = previous
-        for dev, path, allocation in held:
-            dev.release_input(path, allocation)
 
 
 async def _execute_node(

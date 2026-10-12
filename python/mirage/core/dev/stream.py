@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.constants import ZERO_CHUNK_SIZE
-from mirage.core.dev.device import active_device
+from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.stream import read_stream as ram_read_stream
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -32,6 +32,11 @@ async def read_stream(
     forever and stops the moment the reader stops iterating, so nothing
     is materialized. A recreated real file streams normally.
     """
+    pipe = active_pipe(accessor, norm(path.mount_path))
+    if pipe is not None:
+        async for chunk in pipe.stream(path):
+            yield chunk
+        return
     device = active_device(accessor, norm(path.mount_path))
     if device is None:
         async for chunk in ram_read_stream(accessor, path, index):

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { processInput, ProcessSubError } from './process_sub.ts'
+import { ProcessSubScope } from './process_sub.ts'
 import { diagnosticStderr } from './diagnostics.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { type EvaluationContext, childContext } from '../evaluation.ts'
@@ -33,7 +33,7 @@ import type { ProcessSupervisor } from '../../process/supervisor.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
-import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
+import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { literalText } from '../../shell/parse/names.ts'
@@ -95,7 +95,6 @@ import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { DevVFS } from '../../vfs/dev/dev.ts'
 
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
@@ -910,9 +909,9 @@ export async function executeNode(
   await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   // The node's own `<(...)` files go when it ends, so a command still
   // reading one is read out first.
-  const held: (readonly [DevVFS, string, number])[] = []
+  const processSubs = new ProcessSubScope(context, deps.registry, deps.sink, deps.signal)
   const previous = context.frame.processSub
-  context.frame.processSub = processInput(context, deps.registry, held)
+  context.frame.processSub = processSubs.open
   try {
     if (!ownDiagnostics) {
       const [stdout, io, execNode] = await executeNodeBody(
@@ -929,7 +928,7 @@ export async function executeNode(
           deps.signal?.aborted === true ? deps.signal : (context.frame.abortSignal ?? undefined),
         )
       }
-      return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
+      return [processSubs.own(stdout, io, execNode), io, execNode]
     }
     const outer = context.frame.diagnostics
     context.frame.diagnostics = []
@@ -958,7 +957,7 @@ export async function executeNode(
         io.stderr = merged
         execNode.stderr = merged
       }
-      return [held.length > 0 && stdout !== null ? await materialize(stdout) : stdout, io, execNode]
+      return [processSubs.own(stdout, io, execNode), io, execNode]
     } catch (err) {
       if (err instanceof ExitSignal) {
         const extra = diagnosticStderr(node, context)
@@ -972,17 +971,10 @@ export async function executeNode(
       context.frame.diagnostics = outer
     }
   } catch (err) {
-    if (!(err instanceof ProcessSubError)) throw err
-    // The node fails, as an unsupported command does; the line goes on.
-    const stderr = err.stderr
-    return [
-      err.stdout,
-      new IOResult({ exitCode: 2, stderr }),
-      new ExecutionNode({ command: 'process_sub', exitCode: 2, stderr }),
-    ]
+    await processSubs.close(true)
+    throw err
   } finally {
     context.frame.processSub = previous
-    for (const [dev, path, allocation] of held) dev.releaseInput(path, allocation)
   }
 }
 

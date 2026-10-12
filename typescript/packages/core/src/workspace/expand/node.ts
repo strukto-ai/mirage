@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from './types.ts'
+import type { ProcessSubLine, ExecuteFn } from './types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../view/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -104,9 +104,11 @@ export async function childLine(
   node: TSNodeLike,
   callStack: CallStack | null,
   span?: [number, number],
+  options: NonNullable<Parameters<ProcessSubLine>[1]> = {},
 ): Promise<IOResult> {
   const session = context.session
   return executeFn(text, {
+    ...options,
     sessionId: session.sessionId,
     context,
     node,
@@ -377,10 +379,11 @@ async function nodeChunks(
   }
 
   if (ntype === NT.PROCESS_SUBSTITUTION && context.frame.processSub !== null) {
+    const parent = context.fork()
     return [
       piece(
-        await context.frame.processSub(tsNode, (text) =>
-          childLine(context, executeFn, text, tsNode, callStack),
+        await context.frame.processSub(tsNode, (text, options) =>
+          childLine(parent, executeFn, text, tsNode, callStack, undefined, options),
         ),
       ),
     ]

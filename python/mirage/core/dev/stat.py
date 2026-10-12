@@ -15,7 +15,7 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.constants import DEV_RDEV
-from mirage.core.dev.device import active_device
+from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.types import DEVICE_NUMBERS_KEY, FileStat, FileType, PathSpec
 from mirage.utils.path import norm
@@ -34,6 +34,11 @@ async def stat(
     """
     store = accessor.store
     p = norm(path_spec.mount_path)
+    pipe = active_pipe(accessor, p)
+    if pipe is not None:
+        return FileStat(
+            name=p.rsplit("/", 1)[-1], type=FileType.FIFO, size=None
+        )
     device = active_device(accessor, p)
     if device is None:
         return await ram_stat(accessor, path_spec, index)

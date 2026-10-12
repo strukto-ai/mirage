@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 from collections.abc import AsyncIterator
 from dataclasses import replace
 
@@ -57,9 +56,22 @@ async def _ranged(
 
 
 def _endless(io: CommandIO) -> CommandIO:
-    if io.read_range is None:
+    read_range = io.read_range
+    if read_range is None:
         return io
-    return replace(io, read_stream=functools.partial(_ranged, io.read_range))
+
+    async def stream(
+        accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        source = (
+            io.read_stream(accessor, path, index)
+            if path.mount_path.startswith("/fd/")
+            else _ranged(read_range, accessor, path, index)
+        )
+        async for chunk in source:
+            yield chunk
+
+    return replace(io, read_stream=stream)
 
 
 # /dev is a RAM mount whose read and stat know the two synthetic

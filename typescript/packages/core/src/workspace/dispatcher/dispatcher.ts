@@ -1022,7 +1022,7 @@ export class Dispatcher {
     filler: CacheManager | null,
   ): Promise<AsyncIterable<Uint8Array>> {
     const [opened, records] = await commandRecords((mine) =>
-      Promise.resolve([mount.readStream(scope), mine] as const),
+      Promise.resolve([mount.readStream(scope, this.access), mine] as const),
     )
     const stream =
       filler === null

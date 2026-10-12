@@ -14,20 +14,14 @@
 
 from typing import Any, Callable
 
-from mirage.io.types import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
-from mirage.shell.helpers import (
-    get_process_sub_body,
-    get_process_sub_direction,
-)
-from mirage.shell.types import NodeType as NT
-from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
+from mirage.shell.types import Redirect, RedirectKind
 from mirage.view.types import NamespaceLinks, SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.node import child_line, expand_node
+from mirage.workspace.expand.node import expand_node
 from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import visible_env
@@ -110,41 +104,6 @@ async def _expand_target(
         )
     if isinstance(r.target, int):
         return r
-    if (
-        r.target_node is not None
-        and r.target_node.type == NT.PROCESS_SUBSTITUTION
-    ):
-        if (
-            r.kind == RedirectKind.STDIN
-            and get_process_sub_direction(r.target_node)
-            == ProcessSubDirection.INPUT
-        ):
-            # `cmd < <(inner)` — run the inner command and feed its
-            # stdout as stdin, reusing the heredoc delivery path.
-            inner = get_process_sub_body(r.target_node)
-            inner_data = b""
-            if inner:
-                io_ps = await child_line(
-                    context, execute_fn, inner, r.target_node, call_stack
-                )
-                inner_data = await materialize(io_ps.stdout)
-                context.frame.diagnostics.append(
-                    await io_ps.materialize_stderr()
-                )
-            return Redirect(
-                fd=r.fd,
-                target=inner_data,
-                kind=RedirectKind.HEREDOC,
-                expand_vars=False,
-            )
-        # `> >(cmd)` and friends would otherwise classify the
-        # procsub text as a literal filename and write silently
-        # wrong state; fail loudly like the argv-position check.
-        raise ExitSignal(
-            2,
-            stderr=b"mirage: unsupported: process substitution >(...)\n",
-            contained_code=2,
-        )
     target_scope = r.target
     if r.target_node is not None:
         words = await expand_words(

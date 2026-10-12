@@ -25,6 +25,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
+from mirage.io.errors import PipeClosed
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, DeviceInput
 from mirage.runtime.types import DispatchFn
@@ -105,6 +106,36 @@ class _Unreadable(Enum):
     """A descriptor a read cannot use: closed, or open for writing only."""
 
     TOKEN = auto()
+
+
+class PipeRecorder(Recorder):
+    """Send FIFO writes immediately; preserve ordinary redirect recording."""
+
+    def __init__(
+        self,
+        dispatch: DispatchFn,
+        streams: dict[Channel, PathSpec],
+        forward: dict[Channel, Channel],
+        sink: JobConsole | None,
+    ) -> None:
+        super().__init__()
+        self.dispatch = dispatch
+        self.streams = streams
+        self.forward = forward
+        self.sink = sink
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        scope = self.streams.get(channel)
+        if scope is None:
+            if self.sink is not None and channel in self.forward:
+                await self.sink.emit(self.forward[channel], data)
+            else:
+                await super().emit(channel, data)
+        elif data:
+            try:
+                await self.dispatch("append", scope, data=data)
+            except PipeClosed as exc:
+                raise ExitSignal(141) from exc
 
 
 class JobRoute(JobOutput):
@@ -484,14 +515,16 @@ async def handle_redirect(
                     read_paths.pop(r.fd, None)
                     inputs[r.fd], outputs[r.fd] = stdin, _CLOSED
                     continue
-                data, _ = await dispatch("read", scope)
+                data, _ = await dispatch("read", scope, stream=True)
             except FileNotFoundError as exc:
                 if r.kind != RedirectKind.READWRITE:
                     return await failed(_redirect_failure(scope, exc))
                 data = b""
             except FS_ERRORS as exc:
                 return await failed(_redirect_failure(scope, exc))
-            data = await materialize(data) or b""
+            fifo = await _is_pipe(dispatch, scope)
+            if not fifo:
+                data = await materialize(data) or b""
             closed.discard(r.fd)
             read_paths.pop(r.fd, None)
             outputs[r.fd] = _CLOSED
@@ -535,7 +568,11 @@ async def handle_redirect(
                 for fd, path in read_paths.items():
                     if path == scope.virtual:
                         inputs[fd] = emptied
-            file = FileDescription(scope, append=r.append, opened=True)
+            file = FileDescription(
+                scope,
+                append=r.append or await _is_pipe(dispatch, scope),
+                opened=True,
+            )
             if len(expanded) == len(redirects) and _output_only(name, args):
                 complete_output = file
             files.append(file)
@@ -545,7 +582,23 @@ async def handle_redirect(
                 inputs[fd], outputs[fd] = _Unreadable.TOKEN, file
     redirects = expanded
 
-    recorder = Recorder()
+    streams = {
+        channel: pipe_file.scope
+        for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR))
+        if isinstance(pipe_file := outputs[fd], FileDescription)
+        and await _is_pipe(dispatch, pipe_file.scope)
+    }
+    forward = {}
+    if streams or any(
+        path.startswith("/dev/fd/") for path in read_paths.values()
+    ):
+        for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
+            target = outputs[fd]
+            if target is _TO_STDOUT:
+                forward[channel] = Channel.STDOUT
+            elif target is _TO_STDERR:
+                forward[channel] = Channel.STDERR
+    recorder = PipeRecorder(dispatch, streams, forward, sink)
     for file in files:
         if file.source is None:
             for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
@@ -998,6 +1051,13 @@ async def redirect_stdin(
         else:
             sources[r.fd] = DeviceInput()
     return sources.get(FD_STDIN)
+
+
+async def _is_pipe(dispatch: DispatchFn, scope: PathSpec) -> bool:
+    if not scope.virtual.startswith("/dev/fd/"):
+        return False
+    stat, _ = await dispatch("stat", scope)
+    return isinstance(stat, FileStat) and stat.type == FileType.FIFO
 
 
 async def _is_device(dispatch: DispatchFn, scope: PathSpec) -> bool:

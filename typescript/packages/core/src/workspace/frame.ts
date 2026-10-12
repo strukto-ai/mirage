@@ -1,4 +1,4 @@
-import type { IOResult } from '../io/types.ts'
+import type { ProcessSubLine } from './expand/types.ts'
 import type { TSNodeLike } from '../shell/types.ts'
 
 /** Temporary state of one evaluation; never part of a session record. */
@@ -6,9 +6,7 @@ export class ExecutionFrame {
   diagnostics: (string | Uint8Array)[] = []
   cmdsubSeq = 0
   cmdsubStatus = 0
-  processSub:
-    | ((node: TSNodeLike, executeLine: (text: string) => Promise<IOResult>) => Promise<string>)
-    | null = null
+  processSub: ((node: TSNodeLike, executeLine: ProcessSubLine) => Promise<string>) | null = null
   // The cancel channel for work running under this evaluation: killing a
   // background job aborts it, and the mount layer folds it into the signal
   // handed to runtimes. fork() carries it so a job's whole subtree shares

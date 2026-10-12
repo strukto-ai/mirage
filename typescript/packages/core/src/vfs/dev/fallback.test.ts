@@ -3,7 +3,11 @@ import { expect, it, vi } from 'vitest'
 
 vi.mock('../../utils/async_context.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof AsyncContext>()
-  return { ...actual, createAsyncContext: () => new actual.FallbackStorage() }
+  return {
+    ...actual,
+    asyncContextIsolatesTasks: false,
+    createAsyncContext: () => new actual.FallbackStorage(),
+  }
 })
 
 import { runWithSession } from '../../context/session_context.ts'
@@ -45,4 +49,58 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
     await owner
   }
   expect(files.get('/fd/63')).toBeUndefined()
+})
+
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { RAMVFS } from '../ram/ram.ts'
+import { MountMode } from '../../types.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult } from '../../io/types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+
+it('streams separate descriptors while browser sessions overlap', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  ws.createSession('peer')
+  let release!: () => void
+  let ready!: () => void
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const both = new Promise<void>((r) => {
+    ready = r
+  })
+  let entered = 0
+  ws.registerCli(
+    'pause',
+    new CLI({
+      spec: new CommandSpec({ name: 'pause' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            if (++entered === 2) ready()
+            await held
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  const left = ws.shell('cat <(pause; echo left) > >(cat)')
+  const right = ws.shell('cat <(pause; echo right) > >(cat)', { sessionId: 'peer' })
+  try {
+    await both
+    release()
+    const l = await left
+    const r = await right
+    expect([l.exitCode, l.stdoutText, l.stderrText]).toEqual([0, 'left\n', ''])
+    expect([r.exitCode, r.stdoutText, r.stderrText]).toEqual([0, 'right\n', ''])
+  } finally {
+    release()
+    await Promise.allSettled([left, right])
+    await ws.close()
+  }
 })

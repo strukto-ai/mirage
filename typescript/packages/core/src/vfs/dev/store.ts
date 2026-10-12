@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PipeFiles } from '../../core/dev/mixin.ts'
+import type { DevicePipe } from '../../core/dev/pipe.ts'
+import type { DevFileState } from './types.ts'
 import { liveSessions } from '../../context/session_context.ts'
 import { enoent, eacces } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -28,15 +31,31 @@ function strip(key: string): string {
 // deleted (GNU: `rm /dev/null` succeeds and the path is gone). A deleted
 // name is tombstoned; the next write stores real bytes, which is GNU's
 // rm-then-redirect recreation as a regular file.
-export class DevFiles extends Map<string, Uint8Array> {
-  private readonly tombstones = new Set<string>()
-  private readonly inputs = new Map<
-    string,
-    { owner: string; allocation: number; data: Uint8Array }
-  >()
-  private nextAllocation = 0
+export class DevFiles extends PipeFiles {
+  constructor(
+    private readonly boundOwner?: string,
+    readonly state: DevFileState = {
+      files: new Map(),
+      dirs: new Set(['/']),
+      tombstones: new Set(),
+      inputs: new Map(),
+      nextAllocation: 0,
+    },
+  ) {
+    super()
+  }
+
+  forSession(owner: string): DevFiles {
+    return new DevFiles(owner, this.state)
+  }
+
+  pipeOf(key: string): DevicePipe | null {
+    const row = this.state.inputs.get(key)
+    return row?.owner === this.owner() ? (row.pipe ?? null) : null
+  }
 
   private owner(): string | null {
+    if (this.boundOwner !== undefined) return this.boundOwner
     const sessions = liveSessions()
     const owner = sessions[0]?.sessionId
     // The browser fallback cannot distinguish overlapping sessions: fail closed.
@@ -48,37 +67,44 @@ export class DevFiles extends Map<string, Uint8Array> {
   visibleInputs(): Map<string, Uint8Array> {
     const owner = this.owner()
     return new Map(
-      [...this.inputs]
+      [...this.state.inputs]
         .filter(([, row]) => owner !== null && row.owner === owner)
         .map(([key, row]) => [key, row.data]),
     )
   }
 
-  allocateInput(): readonly [string, number] {
+  allocateInput(pipe?: DevicePipe): readonly [string, number] {
     const owner = this.owner()
     if (owner === null) throw eacces('/dev/fd')
     let fd = 63
-    while (this.inputs.has(`/fd/${String(fd)}`)) fd -= 1
+    while (this.state.inputs.has(`/fd/${String(fd)}`)) fd -= 1
     const key = `/fd/${String(fd)}`
-    const allocation = this.nextAllocation++
-    this.inputs.set(key, { owner, allocation, data: new Uint8Array() })
+    const allocation = this.state.nextAllocation++
+    this.state.inputs.set(key, {
+      owner,
+      allocation,
+      data: new Uint8Array(),
+      ...(pipe === undefined ? {} : { pipe }),
+    })
     return [`/dev${key}`, allocation]
   }
 
   setInput(path: string, allocation: number, data: Uint8Array): void {
-    const row = this.inputs.get(path.slice(4))
+    const row = this.state.inputs.get(path.slice(4))
     if (row?.allocation !== allocation) throw enoent(path)
     this.set(path.slice(4), data)
   }
 
   releaseInput(path: string, allocation: number): boolean {
-    const row = this.inputs.get(path.slice(4))
+    const row = this.state.inputs.get(path.slice(4))
     if (row?.allocation !== allocation) return false
-    return this.inputs.delete(path.slice(4))
+    return this.state.inputs.delete(path.slice(4))
   }
 
   private syntheticActive(name: string): boolean {
-    return DEV_NAMES.has(name) && !this.tombstones.has(name) && !super.has('/' + name)
+    return (
+      DEV_NAMES.has(name) && !this.state.tombstones.has(name) && !this.state.files.has('/' + name)
+    )
   }
 
   private syntheticBytes(_name: string): Uint8Array {
@@ -94,12 +120,12 @@ export class DevFiles extends Map<string, Uint8Array> {
 
   override has(key: string): boolean {
     if (key.startsWith('/fd/')) return this.visibleInputs().has(key)
-    return super.has(key) || this.syntheticActive(strip(key))
+    return this.state.files.has(key) || this.syntheticActive(strip(key))
   }
 
   override get(key: string): Uint8Array | undefined {
     if (key.startsWith('/fd/')) return this.visibleInputs().get(key)
-    if (super.has(key)) return super.get(key)
+    if (this.state.files.has(key)) return this.state.files.get(key)
     const name = strip(key)
     if (this.syntheticActive(name)) return this.syntheticBytes(name)
     return undefined
@@ -107,31 +133,31 @@ export class DevFiles extends Map<string, Uint8Array> {
 
   override set(key: string, value: Uint8Array): this {
     if (key === '/fd' || key.startsWith('/fd/')) {
-      const row = this.inputs.get(key)
+      const row = this.state.inputs.get(key)
       if (row === undefined || !this.visibleInputs().has(key)) throw enoent(`/dev${key}`)
-      this.inputs.set(key, { ...row, data: value })
+      this.state.inputs.set(key, { ...row, data: value })
       return this
     }
     const name = strip(key)
     if (this.syntheticActive(name)) return this
-    super.set(key, value)
-    this.tombstones.delete(name)
+    this.state.files.set(key, value)
+    this.state.tombstones.delete(name)
     return this
   }
 
   override delete(key: string): boolean {
     if (key.startsWith('/fd/')) {
       if (!this.visibleInputs().has(key)) return false
-      return this.inputs.delete(key)
+      return this.state.inputs.delete(key)
     }
     const name = strip(key)
-    if (super.has(key)) {
-      super.delete(key)
-      if (DEV_NAMES.has(name)) this.tombstones.add(name)
+    if (this.state.files.has(key)) {
+      this.state.files.delete(key)
+      if (DEV_NAMES.has(name)) this.state.tombstones.add(name)
       return true
     }
     if (this.syntheticActive(name)) {
-      this.tombstones.add(name)
+      this.state.tombstones.add(name)
       return true
     }
     return false
@@ -146,7 +172,7 @@ export class DevFiles extends Map<string, Uint8Array> {
     for (const name of ['null', 'zero']) {
       if (this.syntheticActive(name)) synthetic += 1
     }
-    return synthetic + super.size + this.visibleInputs().size
+    return synthetic + this.state.files.size + this.visibleInputs().size
   }
 
   override *keys(): MapIterator<string> {
@@ -161,7 +187,7 @@ export class DevFiles extends Map<string, Uint8Array> {
     for (const name of ['null', 'zero']) {
       if (this.syntheticActive(name)) yield ['/' + name, this.syntheticBytes(name)]
     }
-    yield* super.entries()
+    yield* this.state.files.entries()
     yield* this.visibleInputs()
   }
 
@@ -182,32 +208,39 @@ export class DevFiles extends Map<string, Uint8Array> {
 class DevDirs extends Set<string> {
   constructor(private readonly files: DevFiles) {
     super()
-    super.add('/')
   }
-
+  override get size(): number {
+    return this.files.state.dirs.size + (this.has('/fd') ? 1 : 0)
+  }
   override has(key: string): boolean {
-    return key === '/fd' ? this.files.visibleInputs().size > 0 : super.has(key)
+    return key === '/fd' ? this.files.visibleInputs().size > 0 : this.files.state.dirs.has(key)
   }
-
   override *[Symbol.iterator](): SetIterator<string> {
-    yield* super[Symbol.iterator]()
+    yield* this.files.state.dirs
     if (this.has('/fd')) yield '/fd'
   }
-
   override add(key: string): this {
     if (key === '/fd' || key.startsWith('/fd/')) throw eacces(`/dev${key}`)
-    return super.add(key)
+    this.files.state.dirs.add(key)
+    return this
   }
-
   override delete(key: string): boolean {
     if (key === '/fd' || key.startsWith('/fd/')) throw eacces(`/dev${key}`)
-    return super.delete(key)
+    return this.files.state.dirs.delete(key)
   }
 }
 
 export class DevStore {
-  readonly files = new DevFiles()
-  readonly dirs = new DevDirs(this.files)
-  readonly modified = new Map<string, string>()
-  readonly attrs = new Map<string, RAMAttrs>()
+  readonly dirs: Set<string>
+  constructor(
+    readonly files = new DevFiles(),
+    readonly modified = new Map<string, string>(),
+    readonly attrs = new Map<string, RAMAttrs>(),
+  ) {
+    this.dirs = new DevDirs(files)
+  }
+
+  forSession(owner: string): DevStore {
+    return new DevStore(this.files.forSession(owner), this.modified, this.attrs)
+  }
 }

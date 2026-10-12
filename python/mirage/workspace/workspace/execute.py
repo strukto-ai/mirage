@@ -249,12 +249,17 @@ async def recurse(
         inner = HandOff(parent=handed)
     else:
         inner = evaluated_from(node, handed, span)
-    session = get_current_session_for(ws.sessions)
+    explicit_context = opts.pop("context", None)
+    session = (
+        opts.get("session")
+        or (explicit_context.session if explicit_context is not None else None)
+        or get_current_session_for(ws.sessions)
+    )
     if session is None:
         session = ws.sessions.get(
             opts.get("session_id") or ws.sessions.default_id
         )
-    context = get_current_evaluation()
+    context = explicit_context or get_current_evaluation()
     if context is None:
         context = EvaluationContext(session)
     elif context.session is not session:
@@ -338,6 +343,8 @@ async def recurse(
         session.job_waits = waits
         caller = opts.get("job_table") or ws.job_table
         opts["job_table"] = caller.child(caller)
+        if opts.get("sink") is not None:
+            await capture.attach(opts["sink"])
         opts["sink"] = capture
     try:
         try:

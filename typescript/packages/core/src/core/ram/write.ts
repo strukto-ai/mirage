@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { activePipe } from '../dev/device.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
@@ -27,6 +28,12 @@ export async function write(
 ): Promise<void> {
   const timer = startOp()
   const p = norm(path.mountPath)
+  const pipe = activePipe(accessor, p)
+  if (pipe !== null) {
+    await pipe.write(data, path)
+    record('write', path.virtual, VFSName.RAM, data.byteLength, timer)
+    return
+  }
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   accessor.store.files.set(p, data)

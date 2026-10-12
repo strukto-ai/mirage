@@ -147,27 +147,13 @@ describe('process substitution stdin redirect', () => {
 })
 
 describe('process substitution output redirect', () => {
-  it('errors loudly on > >(cmd)', async () => {
+  it.each([
+    ['echo hi > >(cat)', 'hi\n'],
+    ['echo hi >(cat); [[ -n >(true) ]]; echo after=$?', 'hi /dev/fd/63\nafter=0\n'],
+  ])('streams or exposes a descriptor: %s', async (command, expected) => {
     const { ws } = await makeIntegrationWS()
     try {
-      const [exit, out, err] = await runResult(ws, 'echo hi > >(cat)')
-      expect(exit).toBe(2)
-      expect(out).toBe('')
-      expect(err).toContain('unsupported: process substitution')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('fails only the node naming one among its words', async () => {
-    const { ws } = await makeIntegrationWS()
-    try {
-      const [exit, out, err] = await runResult(
-        ws,
-        'echo hi >(cat); [[ -n >(true) ]]; echo after=$?',
-      )
-      expect([exit, out]).toEqual([0, 'after=2\n'])
-      expect(err.split('unsupported: process substitution').length - 1).toBe(2)
+      expect(await runResult(ws, command)).toEqual([0, expected, ''])
     } finally {
       await ws.close()
     }
@@ -175,17 +161,16 @@ describe('process substitution output redirect', () => {
 })
 
 it.each([
-  'echo $(printf warning >&2) >(cat)',
-  'echo <(printf warning >&2) >(cat)',
-  'echo $(printf warning >&2) >(cat) 2>/dev/null',
-  'value=$(printf warning >&2)>(cat)',
-  'for value in $(printf warning >&2) >(cat); do echo BAD; done',
-])('preserves diagnostics before a process substitution refusal: %s', async (command) => {
+  'echo $(printf warning >&2) > >(cat)',
+  'echo $(printf warning >&2) > >(cat) 2>/dev/null',
+  'printf warning > >(cat >&2)',
+])('preserves diagnostics with process substitution: %s', async (command) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const [exit, out, err] = await runResult(ws, command + '; echo after=$?; echo <(true)')
-    expect([exit, out]).toEqual([0, 'after=2\n/dev/fd/63\n'])
-    expect(err).toBe('warningmirage: unsupported: process substitution >(...)\n')
+    const [exit, out, err] = await runResult(ws, command + '; echo after=$?')
+    expect(exit).toBe(0)
+    expect(out.endsWith('after=0\n')).toBe(true)
+    expect(err).toBe('warning')
   } finally {
     await ws.close()
   }

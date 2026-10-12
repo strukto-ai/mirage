@@ -18,7 +18,7 @@ import { read as ramRead } from '../ram/read.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
 import { einval } from '../../errors/fs.ts'
-import { activeDevice } from './device.ts'
+import { activeDevice, activePipe } from './device.ts'
 
 const ENDLESS_READ = 'cannot read an endless device without a size'
 
@@ -27,6 +27,8 @@ export function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
+  const pipe = activePipe(accessor, norm(path.mountPath))
+  if (pipe !== null) return pipe.read(path)
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) return ramRead(accessor, path, index)
   if (device === 'null') return Promise.resolve(new Uint8Array(0))
@@ -40,6 +42,8 @@ export function readRange(
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {
+  const pipe = activePipe(accessor, norm(path.mountPath))
+  if (pipe !== null) return pipe.read(path, size)
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) {
     return ramRead(accessor, path, index, { offset, ...(size !== null ? { size } : {}) })

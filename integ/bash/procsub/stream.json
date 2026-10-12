@@ -1,0 +1,169 @@
+{
+  "cases": [
+    {
+      "id": "procsub_output",
+      "seq": 1346028,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf hello > >(tr a-z A-Z); wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_two_streams",
+      "seq": 1346029,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cat <(printf a) <(printf b)",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_early_read",
+      "seq": 1346030,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 1 < <(head -c 200000 /dev/zero)",
+      "expect": {
+        "exit": 0,
+        "stdout": "\u0000",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_large_output",
+      "seq": 1346031,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cat <(head -c 200000 /dev/zero > >(wc -c))",
+      "expect": {
+        "exit": 0,
+        "stdout": "200000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_nested_stream",
+      "seq": 1346032,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "cat <(cat <(echo nested))",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_eof",
+      "seq": 1346033,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf tail > >(cat); wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "tail",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_status",
+      "seq": 1346034,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf data > >(cat > /dev/null; false); echo status:$?; wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_scope",
+      "seq": 1346035,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "x=parent; printf data > >(cat > /dev/null; x=child); wait; echo \"$x\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_fifo_metadata",
+      "seq": 1346036,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "stat -L -c %F <(true); stat -L -c %F >(cat); wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "fifo\nfifo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_chunks",
+      "seq": 1346037,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ echo a; echo b; } > >(cat); wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_output_file",
+      "seq": 1346038,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf saved > >(cat > {mount}/procsub-output); wait; cat {mount}/procsub-output",
+      "expect": {
+        "exit": 0,
+        "stdout": "saved",
+        "stderr": ""
+      }
+    }
+  ]
+}

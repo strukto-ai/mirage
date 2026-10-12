@@ -14,7 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.dev.device import active_device
+from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.read import read as ram_read
 from mirage.errors.fs import einval
 from mirage.types import PathSpec
@@ -35,6 +35,9 @@ async def read(
     refuses a whole read (``size`` is None) with EINVAL: an endless
     device cannot be materialized. A recreated real file reads normally.
     """
+    pipe = active_pipe(accessor, norm(path.mount_path))
+    if pipe is not None:
+        return await pipe.read(path, size)
     device = active_device(accessor, norm(path.mount_path))
     if device is None:
         return await ram_read(accessor, path, index, offset, size)

@@ -18,13 +18,18 @@ import { readStream as ramStream } from '../ram/stream.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
 import { ZERO_CHUNK_SIZE } from './constants.ts'
-import { activeDevice } from './device.ts'
+import { activeDevice, activePipe } from './device.ts'
 
 export async function* readStream(
   accessor: RAMAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
+  const pipe = activePipe(accessor, norm(path.mountPath))
+  if (pipe !== null) {
+    yield* pipe.stream(path)
+    return
+  }
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) {
     yield* ramStream(accessor, path)

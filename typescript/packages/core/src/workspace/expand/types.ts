@@ -86,3 +86,12 @@ export type ExecuteFn = (
     jobTable?: JobTable
   },
 ) => Promise<IOResult>
+
+export type ProcessSubLine = (
+  text: string,
+  options?: {
+    stdin?: ByteSource | null
+    sink?: JobConsole
+    signal?: AbortSignal
+  },
+) => Promise<IOResult>
