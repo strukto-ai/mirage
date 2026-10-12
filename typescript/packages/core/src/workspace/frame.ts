@@ -1,5 +1,15 @@
-import type { ProcessSubLine } from './expand/types.ts'
+import type { ByteSource, IOResult } from '../io/types.ts'
+import type { JobConsole } from '../shell/console/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
+
+export type ProcessSubLine = (
+  text: string,
+  options?: {
+    stdin?: ByteSource | null
+    sink?: JobConsole
+    signal?: AbortSignal
+  },
+) => Promise<IOResult>
 
 /** Temporary state of one evaluation; never part of a session record. */
 export class ExecutionFrame {

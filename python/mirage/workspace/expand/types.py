@@ -85,14 +85,3 @@ class ExecuteFn(Protocol):
         call_stack: CallStack | None = None,
         job_table: JobTable | None = None,
     ) -> IOResult: ...
-
-
-class ProcessSubLine(Protocol):
-    async def __call__(
-        self,
-        text: str,
-        *,
-        stdin: ByteSource | None = None,
-        sink: JobConsole | None = None,
-        cancel: Event | None = None,
-    ) -> IOResult: ...

@@ -26,7 +26,7 @@ from mirage.shell.helpers import (
 from mirage.shell.types import ProcessSubDirection, TSNodeLike
 from mirage.vfs.dev.dev import DevVFS
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.expand.types import ProcessSubLine
+from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
 from mirage.workspace.types import ExecutionNode

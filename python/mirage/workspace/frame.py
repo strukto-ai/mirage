@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from asyncio import Event
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
+
+from mirage.shell.types import TSNodeLike
 
 if TYPE_CHECKING:
-    from mirage.workspace.expand.types import ProcessSubLine
-from mirage.shell.types import TSNodeLike
+    from mirage.io.types import ByteSource, IOResult
+    from mirage.shell.console import JobConsole
+
+
+class ProcessSubLine(Protocol):
+    async def __call__(
+        self,
+        text: str,
+        *,
+        stdin: ByteSource | None = None,
+        sink: JobConsole | None = None,
+        cancel: Event | None = None,
+    ) -> IOResult: ...
 
 
 @dataclass

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessSubLine, ExecuteFn } from './types.ts'
+import type { ExecuteFn } from './types.ts'
+import type { ProcessSubLine } from '../frame.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../view/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
