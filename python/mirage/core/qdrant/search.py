@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
+from qdrant_client.http.exceptions import ApiException
+
 from mirage.accessor.qdrant import QdrantAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -22,6 +26,8 @@ from mirage.core.qdrant.render import render_json, render_text
 from mirage.core.vector.types import Row
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
+
+logger = logging.getLogger(__name__)
 
 # The files a listing renders from a point's payload, whose entries keep
 # their text; a blob is read as usual.
@@ -64,8 +70,8 @@ async def files_containing(
     keep, is always read. A read fetches the point as it is now, so the
     text is checked against a listing made for this search rather than
     the walk's, which may be older; a file that listing no longer holds is
-    read. Qdrant is asked nothing more. None for a text that is not
-    ASCII, whose case a lowercased copy may not keep.
+    read. None for a text that is not ASCII, whose case a lowercased copy
+    may not keep, or a listing that fails.
 
     Args:
         readdir (ReaddirFn[QdrantAccessor]): the mount's readdir.
@@ -76,7 +82,20 @@ async def files_containing(
     """
     if not text.isascii():
         return None
-    needle = text.lower()
+    try:
+        return await _found(readdir, accessor, text.lower(), under, index)
+    except (ApiException, OSError) as exc:
+        logger.debug("qdrant listing failed (%s); reading every file", exc)
+        return None
+
+
+async def _found(
+    readdir: ReaddirFn[QdrantAccessor],
+    accessor: QdrantAccessor,
+    needle: str,
+    under: list[PathSpec],
+    index: IndexCacheStore,
+) -> list[PathSpec] | None:
     fresh = RAMIndexCacheStore()
     found: list[PathSpec] = []
     pending = list(under)

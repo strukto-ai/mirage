@@ -57,8 +57,8 @@ export function hit(accessor: QdrantAccessor, row: Row): [string[], Uint8Array] 
  * holds `text`; a blob, or a file too large to keep, is always read. A read
  * fetches the point as it is now, so the text is checked against a listing
  * made for this search rather than the walk's, which may be older; a file that
- * listing no longer holds is read. Qdrant is asked nothing more. null for a
- * text that is not ASCII, whose case a lowercased copy may not keep. Mirrors
+ * listing no longer holds is read. null for a text that is not ASCII, whose
+ * case a lowercased copy may not keep, or a listing that fails. Mirrors
  * Python's `files_containing`.
  */
 export async function filesContaining(
@@ -69,9 +69,32 @@ export async function filesContaining(
   index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   if (/[\u0080-\uffff]/.test(text)) return null
-  const needle = text.toLowerCase()
+  try {
+    return await found(readdir, accessor, text.toLowerCase(), under, index)
+  } catch (err) {
+    // the client rejects with a QdrantClient error, or the fetcher's error
+    // with a status, when Qdrant refuses or times out, and fetch with a
+    // TypeError when the connection fails
+    const failed =
+      err instanceof TypeError ||
+      (err instanceof Error &&
+        (err.name.startsWith('QdrantClient') ||
+          typeof (err as { status?: unknown }).status === 'number'))
+    if (!failed) throw err
+    console.debug(`qdrant listing failed (${String(err)}); reading every file`)
+    return null
+  }
+}
+
+async function found(
+  readdir: ReaddirFn<QdrantAccessor>,
+  accessor: QdrantAccessor,
+  needle: string,
+  under: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+): Promise<PathSpec[] | null> {
   const fresh = new RAMIndexCacheStore()
-  const found: PathSpec[] = []
+  const out: PathSpec[] = []
   const pending = [...under]
   for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
     const parent = rstripSlash(current.mountPath)
@@ -87,8 +110,8 @@ export async function filesContaining(
         const kept = (await resolveEntry(readdir, accessor, child, fresh))?.extra.text
         if (typeof kept === 'string' && !kept.includes(needle)) continue
       }
-      found.push(child)
+      out.push(child)
     }
   }
-  return found
+  return out
 }

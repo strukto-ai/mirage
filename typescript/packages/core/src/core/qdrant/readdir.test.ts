@@ -286,6 +286,32 @@ const ANIMAL_POINTS: QdrantPoint[] = [
   },
 ]
 
+const SMALL_CAT = [
+  '/animals/cat/small/2.json',
+  '/animals/cat/small/2.png',
+  '/animals/cat/small/2.txt',
+]
+
+// Lists the small cats into an index, applies `change`, then asks with that
+// index as the walk's.
+async function listedThen(
+  change: (points: QdrantPoint[], accessor: QdrantAccessor) => void,
+): Promise<string[] | null> {
+  const points = structuredClone(ANIMAL_POINTS)
+  const accessor = accessorOf(ANIMALS, points)
+  const index = new RAMIndexCacheStore()
+  await readdir(accessor, spec('/animals/cat/small'), index)
+  change(points, accessor)
+  const found = await filesContaining(
+    readdir,
+    accessor,
+    'striped',
+    [spec('/animals/cat/small')],
+    index,
+  )
+  return found === null ? null : found.map((p) => p.virtual).sort()
+}
+
 async function containing(
   points: QdrantPoint[],
   text: string,
@@ -338,36 +364,28 @@ describe('qdrant filesContaining', () => {
 
   // A read fetches the point as it is now, so the text is checked against a
   // listing made for the search, not the one the walk cached.
-  async function listedThen(change: (points: QdrantPoint[]) => void): Promise<string[] | null> {
-    const points = structuredClone(ANIMAL_POINTS)
-    const accessor = accessorOf(ANIMALS, points)
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, spec('/animals/cat/small'), index)
-    change(points)
-    const found = await filesContaining(
-      readdir,
-      accessor,
-      'striped',
-      [spec('/animals/cat/small')],
-      index,
-    )
-    return found === null ? null : found.map((p) => p.virtual).sort()
-  }
-  const smallCat = [
-    '/animals/cat/small/2.json',
-    '/animals/cat/small/2.png',
-    '/animals/cat/small/2.txt',
-  ]
-
   it('finds a text changed since the listing', async () => {
     const found = await listedThen((points) => {
       const point = points[1]
       if (point?.payload) point.payload.name = 'a small striped cat'
     })
-    expect(found).toEqual(smallCat)
+    expect(found).toEqual(SMALL_CAT)
   })
 
   it('reads a point gone since the listing', async () => {
-    expect(await listedThen((points) => points.splice(1, 1))).toEqual(smallCat)
+    expect(await listedThen((points) => points.splice(1, 1))).toEqual(SMALL_CAT)
+  })
+
+  // A listing that fails leaves every file to a read.
+  it('reads every file when a listing fails', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const found = await listedThen((_, accessor) => {
+        vi.spyOn(accessor, 'client').mockRejectedValue(new TypeError('fetch failed'))
+      })
+      expect(found).toBeNull()
+    } finally {
+      debug.mockRestore()
+    }
   })
 })

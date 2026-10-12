@@ -1,4 +1,7 @@
+from unittest.mock import AsyncMock
+
 import pytest
+from qdrant_client.http.exceptions import ResponseHandlingException
 
 import mirage.utils.record_search as record_search_mod
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -105,32 +108,45 @@ async def _listed_then(accessor, change) -> list[str] | None:
     )
     index = RAMIndexCacheStore()
     await readdir(accessor, spec, index)
-    change((await accessor.client()).points)
+    change(await accessor.client())
     found = await files_containing(readdir, accessor, "striped", [spec], index)
     return None if found is None else sorted(p.virtual for p in found)
+
+
+SMALL_CAT = [
+    "/db/animals/cat/small/2.json",
+    "/db/animals/cat/small/2.png",
+    "/db/animals/cat/small/2.txt",
+]
+
+
+def _striped(client) -> None:
+    client.points[1].payload["name"] = "a small striped cat"
+
+
+def _dropped(client) -> None:
+    del client.points[1]
+
+
+def _refused(client) -> None:
+    client.scroll = AsyncMock(
+        side_effect=ResponseHandlingException(OSError("reset"))
+    )
 
 
 # A read fetches the point as it is now, so the text is checked against a
 # listing made for the search, not the one the walk cached.
 @pytest.mark.asyncio
 async def test_a_text_changed_since_the_listing_is_found(accessor):
-    def change(points):
-        points[1].payload["name"] = "a small striped cat"
-
-    assert await _listed_then(accessor, change) == [
-        "/db/animals/cat/small/2.json",
-        "/db/animals/cat/small/2.png",
-        "/db/animals/cat/small/2.txt",
-    ]
+    assert await _listed_then(accessor, _striped) == SMALL_CAT
 
 
 @pytest.mark.asyncio
 async def test_a_point_gone_since_the_listing_is_read(accessor):
-    def change(points):
-        del points[1]
+    assert await _listed_then(accessor, _dropped) == SMALL_CAT
 
-    assert await _listed_then(accessor, change) == [
-        "/db/animals/cat/small/2.json",
-        "/db/animals/cat/small/2.png",
-        "/db/animals/cat/small/2.txt",
-    ]
+
+# A listing that fails leaves every file to a read.
+@pytest.mark.asyncio
+async def test_a_failed_listing_reads_every_file(accessor):
+    assert await _listed_then(accessor, _refused) is None
