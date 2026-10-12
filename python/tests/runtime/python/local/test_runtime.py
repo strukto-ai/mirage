@@ -235,6 +235,26 @@ async def test_a_program_found_through_a_relative_path_entry_runs_elsewhere(
 
 
 @pytest.mark.asyncio
+async def test_a_program_named_by_a_relative_path_runs_from_the_cwd(tmp_path):
+    tool = tmp_path / "mirage-tool"
+    tool.write_text(f"#!{sys.executable}\nprint('tool')\n")
+    tool.chmod(0o755)
+    runtime = LocalRuntime(captures=["@external"])
+    try:
+        result = await runtime.run_process(
+            ProcessExecution(
+                argv=("./mirage-tool",),
+                cwd=PathSpec.from_str_path(str(tmp_path)),
+                env={},
+                stdin=None,
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stdout) == (0, b"tool\n")
+
+
+@pytest.mark.asyncio
 async def test_a_program_that_cannot_start_fails_as_the_shell_would(
     tmp_path, monkeypatch
 ):

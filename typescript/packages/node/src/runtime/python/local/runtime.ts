@@ -147,11 +147,13 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
   async runProcess(request: ProcessExecution): Promise<RunResult> {
     request.signal?.throwIfAborted()
     const name = request.argv[0]
-    const program = onHostPath(name)
-    if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     // The session cwd is a workspace path. Running somewhere else instead
     // would point a relative path at the wrong files.
     const cwd = request.cwd.virtual
+    // A name with a slash is a path from the cwd, as in the shell; any
+    // other is looked up on PATH.
+    const program = name.includes('/') ? resolve(cwd, name) : onHostPath(name)
+    if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     const here = await stat(cwd).catch((err: unknown) => {
       const code = (err as NodeJS.ErrnoException).code
       if (code === undefined) throw err

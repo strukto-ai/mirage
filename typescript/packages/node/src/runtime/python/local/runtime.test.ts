@@ -358,6 +358,27 @@ describe('LocalRuntime', () => {
     },
   )
 
+  it('runs a program named by a relative path from the cwd', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+    const tool = join(dir, 'mirage-tool')
+    await writeFile(tool, '#!/bin/sh\necho tool\n')
+    await chmod(tool, 0o755)
+    const rt = new LocalRuntime({ captures: ['@external'] })
+    try {
+      const result = await rt.runProcess({
+        kind: 'process',
+        argv: ['./mirage-tool'],
+        cwd: PathSpec.fromStrPath(dir),
+        env: {},
+        stdin: null,
+      })
+      expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'tool\n'])
+    } finally {
+      await rt.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('fails a program that cannot start as the shell would', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
     const tool = join(dir, 'mirage-broken')
