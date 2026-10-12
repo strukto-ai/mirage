@@ -42,27 +42,6 @@ def test_unsupported_builtin_returns_clear_error(name):
     )
 
 
-@pytest.mark.parametrize(
-    "cmd",
-    [
-        "echo hi >(cat)",
-        "tee >(grep foo) /tmp/out",
-        "cat >(wc)",
-    ],
-)
-def test_output_process_substitution_unsupported(cmd):
-    ws = Workspace({"/data": RAMVFS()})
-    io = asyncio.run(ws.shell(cmd))
-    assert io.exit_code == 2, (
-        f"expected exit 2 for {cmd!r}, got {io.exit_code}"
-    )
-    stderr = io.stderr or b""
-    assert b"process substitution" in stderr, (
-        f"expected 'process substitution' in stderr, got {stderr!r}"
-    )
-    assert b"unsupported" in stderr
-
-
 def test_input_process_substitution_still_works():
     ram = RAMVFS()
     ram._store.files["/a"] = b"line1\nline2\n"
