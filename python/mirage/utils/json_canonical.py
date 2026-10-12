@@ -15,6 +15,10 @@
 import math
 from typing import Any
 
+# The widest integer a row line can spell: a whole float past it stays a
+# float, which the JSON encoder writes in exponent form.
+_INT64 = 2**63
+
 
 def canonicalize_value(value: Any) -> Any:
     if isinstance(value, dict):
@@ -26,6 +30,7 @@ def canonicalize_value(value: Any) -> Any:
         and not isinstance(value, bool)
         and math.isfinite(value)
         and value.is_integer()
+        and abs(value) < _INT64
     ):
         return int(value)
     return value

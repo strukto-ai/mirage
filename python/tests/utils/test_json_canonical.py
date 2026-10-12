@@ -20,6 +20,13 @@ def test_whole_valued_floats_become_int():
     assert isinstance(canonicalize_value(5.0), int)
 
 
+def test_whole_floats_past_64_bits_stay_floats():
+    # A float4 holding 3.4e38 is whole, but no 64-bit integer spells it.
+    assert isinstance(canonicalize_value(3.4e38), float)
+    assert isinstance(canonicalize_value(-(2.0**63)), float)
+    assert canonicalize_value(2.0**62) == 2**62
+
+
 def test_fractional_floats_are_unchanged():
     assert canonicalize_value(4.5) == 4.5
     assert isinstance(canonicalize_value(4.5), float)

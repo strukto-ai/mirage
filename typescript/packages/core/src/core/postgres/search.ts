@@ -15,43 +15,77 @@
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
-import { fetchBoundedQuery, fetchColumns, qualified, quoteIdent } from './client.ts'
+import { fetchBoundedQuery, qualified, quoteIdent } from './client.ts'
 import { rowLine } from './read.ts'
 import { detectScope } from './scope.ts'
 
-// Column types whose `::text` is the value exactly as a rows.jsonl line spells
-// it, so a LIKE over the cast finds every row whose line holds the text inside
-// that value. Everything else renders differently in the line (a timestamp's
-// separator, a float's digits, a `char(n)`'s padding, json's spacing), and a
-// table holding one is not searchable. Mirrors `_SAME_TEXT_TYPES` in
-// `mirage/core/postgres/search.py`.
-const SAME_TEXT_TYPES: ReadonlySet<string> = new Set([
-  'text',
-  'character varying',
-  'name',
+// Types whose `::text` is the value exactly as a rows.jsonl line spells it,
+// so a LIKE over the cast finds every row whose line holds the text inside
+// that value. Mirrors `_SAME_TEXT_TYPES` in `mirage/core/postgres/search.py`.
+const SAME_TEXT_TYPES: ReadonlySet<string> = new Set(['uuid', 'int2', 'int4', 'int8', 'bool'])
+// The strings among them, which can hold a control character the line spells
+// as an escape (`\n`, `\u0001`), so the text can match the escape's letters in
+// a row whose value never holds them: such rows are candidates too. An enum's
+// label is one as well.
+const STRING_TYPES: ReadonlySet<string> = new Set(['text', 'varchar', 'name'])
+// Array elements whose `::text` is each element as the line spells it.
+const SAME_TEXT_ELEMENTS: ReadonlySet<string> = new Set([
+  ...STRING_TYPES,
   'uuid',
-  'smallint',
-  'integer',
-  'bigint',
-  'boolean',
+  'int2',
+  'int4',
+  'int8',
 ])
-// The ones that can hold a control character, which the line spells as an
-// escape (`\n`, `\u0001`), so the text can match the escape's letters in a
-// row whose value never holds them: such rows are candidates too.
-const STRING_TYPES: ReadonlySet<string> = new Set(['text', 'character varying', 'name'])
+// Every character a value of these types spells in a line on either host (a
+// float's exponent, a numeric's NaN or Infinity, a timestamp's T and Z),
+// folded to lowercase. A text holding any other character is never inside
+// such a value, so the column is left out of the search.
+const NUMBER = '0123456789.+-e'
+const SPELLED_WITH: Readonly<Record<string, string>> = {
+  float4: NUMBER,
+  float8: NUMBER,
+  numeric: `${NUMBER}nainfty`,
+  date: '0123456789-:.tz',
+  timestamp: '0123456789-:.+tz',
+  timestamptz: '0123456789-:.+tz',
+  time: '0123456789:.+-',
+  timetz: '0123456789:.+-',
+}
 // What a line spells around and between values: a text holding one can match
 // where no single value holds it (`:4` after a key).
 const STRUCTURAL: ReadonlySet<string> = new Set(['"', '\\', ':', ',', '{', '}'])
 // How a NULL spells in the line; no LIKE over a NULL ever matches it.
 const NULL = 'null'
 // Relations whose rows a plain read takes in ctid order: a table or a
-// materialized view with no child. A view runs its own query, and a parent
-// appends its children's rows after its own.
+// materialized view with no child. Any other (a view, a parent appending its
+// children's rows) is numbered in the order a plain read returns it.
 const HEAP_KINDS: ReadonlySet<string> = new Set(['r', 'm'])
 const RELATION =
   'SELECT c.relkind::text AS relkind, c.relhassubclass FROM pg_class c ' +
   'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
   'WHERE n.nspname = $1 AND c.relname = $2'
+// Each column's type, a domain's base type in its place, with its category
+// (E an enum, A an array) and an array's element type.
+const COLUMNS =
+  'SELECT a.attname AS name, COALESCE(b.typname, t.typname) AS type, ' +
+  'COALESCE(b.typcategory, t.typcategory)::text AS category, ' +
+  'e.typname AS element FROM pg_attribute a ' +
+  'JOIN pg_class c ON c.oid = a.attrelid ' +
+  'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+  'JOIN pg_type t ON t.oid = a.atttypid ' +
+  'LEFT JOIN pg_type b ON b.oid = t.typbasetype ' +
+  'LEFT JOIN pg_type e ON e.oid = COALESCE(b.typelem, t.typelem) ' +
+  'WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 ' +
+  'AND NOT a.attisdropped ORDER BY a.attnum'
+
+interface Column {
+  name: string
+  type: string
+  category: string
+  element: string | null
+}
+
+type How = 'like' | 'string' | 'skip'
 
 // Escape LIKE/ILIKE wildcards so the text matches as a literal: Postgres LIKE
 // treats % and _ as wildcards and \ as the default escape char, but grep's
@@ -60,39 +94,77 @@ function escapeLike(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
-// Whether a LIKE over the columns finds every line a scan would. A LIKE per
-// column sees only values: a text that can match a key (every row holds every
-// key), the text between values, a NULL's `null` or a value the line spells
-// differently from its cast would be found by the scan and missed by the
-// query. Mirrors `_answerable` in `mirage/core/postgres/search.py`.
-function answerable(
-  columns: readonly [string, string][],
-  text: string,
-  ignoreCase: boolean,
-): boolean {
-  for (const ch of text) {
-    if (STRUCTURAL.has(ch) || (ch.codePointAt(0) ?? 0) < 0x20) return false
+/**
+ * How a LIKE covers one column: `like` over its cast, `string` over its cast
+ * plus its rows holding a control character, `skip` when no value of it can
+ * spell `text`, null when none of these sees every match. A `char(n)` pads its
+ * value and its cast strips the padding, so only a text without a space is
+ * covered. A jsonb value lines up with its cast except for a number the line
+ * may spell another way (a large one in exponent form), so a text that could
+ * lie inside a number, or that holds a bracket next to one, is not. An
+ * array's line brackets where its cast braces. Mirrors `_column_search` in
+ * `mirage/core/postgres/search.py`.
+ */
+function columnSearch(column: Column, text: string): How | null {
+  const folded = [...new Set(text.toLowerCase())]
+  const bracketed = text.includes('[') || text.includes(']')
+  if (STRING_TYPES.has(column.type) || column.category === 'E') return 'string'
+  if (SAME_TEXT_TYPES.has(column.type)) return 'like'
+  if (column.type === 'bpchar') return text.includes(' ') ? null : 'string'
+  if (column.type === 'jsonb') {
+    return bracketed || folded.every((ch) => NUMBER.includes(ch)) ? null : 'like'
   }
-  const folded = ignoreCase ? text.toLowerCase() : text
-  if (NULL.includes(folded)) return false
-  for (const [name, dataType] of columns) {
-    if (!SAME_TEXT_TYPES.has(dataType)) return false
-    if ((ignoreCase ? name.toLowerCase() : name).includes(folded)) return false
+  if (column.category === 'A') {
+    if (column.element === null || !SAME_TEXT_ELEMENTS.has(column.element) || bracketed) {
+      return null
+    }
+    return STRING_TYPES.has(column.element) ? 'string' : 'like'
   }
-  return true
+  const spelled = SPELLED_WITH[column.type]
+  if (spelled !== undefined && !folded.every((ch) => spelled.includes(ch))) return 'skip'
+  return null
 }
 
 /**
- * The lines of a table's rows.jsonl that may hold `text`. A LIKE (ILIKE under
- * -i) over every column picks the rows whose value holds `text`, plus any row
- * with a control character the line spells as an escape; grep matches each
- * line itself. The rows come in ctid order, the order the plain read scans the
- * heap in, whatever plan the filter gets (an index or a parallel scan returns
- * them otherwise), so only a relation in `HEAP_KINDS` with no child is
- * searched. Null for any other file or relation, when the columns or the text
- * keep a LIKE from seeing every match (`answerable`), or past `maxReadRows`
- * rows or `maxReadBytes` bytes, where reading the file refuses it as too
- * large. Mirrors `lines_containing` in `mirage/core/postgres/search.py`.
+ * Each searched column and how, or null when a LIKE over the columns cannot
+ * find every line a scan would. A LIKE per column sees only values: a text
+ * that can match a key (every row holds every key), the text between values,
+ * a NULL's `null` or a value the line spells differently from its cast would
+ * be found by the scan and missed by the query. Mirrors `_searches` in
+ * `mirage/core/postgres/search.py`.
+ */
+function searches(
+  columns: readonly Column[],
+  text: string,
+  ignoreCase: boolean,
+): [string, How][] | null {
+  for (const ch of text) {
+    if (STRUCTURAL.has(ch) || (ch.codePointAt(0) ?? 0) < 0x20) return null
+  }
+  const folded = ignoreCase ? text.toLowerCase() : text
+  if (NULL.includes(folded)) return null
+  const searched: [string, How][] = []
+  for (const column of columns) {
+    if ((ignoreCase ? column.name.toLowerCase() : column.name).includes(folded)) return null
+    const how = columnSearch(column, text)
+    if (how === null) return null
+    if (how !== 'skip') searched.push([column.name, how])
+  }
+  return searched
+}
+
+/**
+ * The lines of a relation's rows.jsonl that may hold `text`. A LIKE (ILIKE
+ * under -i) over every column that can spell `text` picks the rows whose value
+ * holds it, plus any row with a control character the line spells as an
+ * escape; grep matches each line itself. A table's rows come in ctid order,
+ * the order the plain read scans the heap in, whatever plan the filter gets (an
+ * index or a parallel scan returns them otherwise); any other relation's are
+ * numbered as a plain read returns them before the filter. Null for any other
+ * file, when the columns or the text keep a LIKE from seeing every match
+ * (`searches`), or past `maxReadRows` rows or `maxReadBytes` bytes, where
+ * reading the file refuses it as too large. Mirrors `lines_containing` in
+ * `mirage/core/postgres/search.py`.
  */
 export async function linesContaining(
   accessor: PostgresAccessor,
@@ -113,23 +185,33 @@ export async function linesContaining(
   ).rows
   const [only] = relation
   if (relation.length !== 1 || only === undefined) return null
-  if (!HEAP_KINDS.has(only.relkind) || only.relhassubclass) return null
-  const columns = (await fetchColumns(accessor, schema, entity)).map((c): [string, string] => [
-    c.name,
-    c.type,
-  ])
-  if (columns.length === 0 || !answerable(columns, text, ignoreCase)) return null
+  const columns = (await accessor.store.query<Column>(COLUMNS, [schema, entity])).rows
+  if (columns.length === 0) return null
+  const searched = searches(columns, text, ignoreCase)
+  if (searched === null) return null
+  if (searched.length === 0) return new Uint8Array(0)
   const op = ignoreCase ? 'ILIKE' : 'LIKE'
-  const clauses = columns.map(([name]) => `${quoteIdent(name)}::text ${op} $1`)
-  for (const [name, dataType] of columns) {
-    if (STRING_TYPES.has(dataType)) clauses.push(`${quoteIdent(name)} ~ '[[:cntrl:]]'`)
+  const clauses: string[] = []
+  for (const [name, how] of searched) {
+    clauses.push(`${quoteIdent(name)}::text ${op} $1`)
+    if (how === 'string') clauses.push(`${quoteIdent(name)}::text ~ '[[:cntrl:]]'`)
   }
-  const sql = `SELECT * FROM ${qualified(schema, entity)} WHERE ${clauses.join(' OR ')} ORDER BY ctid LIMIT $2`
+  const names = new Set(columns.map((c) => c.name))
+  const source = qualified(schema, entity)
+  const where = clauses.join(' OR ')
+  let marker = '__mirage_row'
+  while (names.has(marker)) marker += '_'
+  const numbered = quoteIdent(marker)
+  const sql =
+    HEAP_KINDS.has(only.relkind) && !only.relhassubclass
+      ? `SELECT * FROM ${source} WHERE ${where} ORDER BY ctid LIMIT $2`
+      : `SELECT * FROM (SELECT row_number() OVER () AS ${numbered}, r.* FROM ${source} r) s ` +
+        `WHERE ${where} ORDER BY ${numbered} LIMIT $2`
   const rows = await fetchBoundedQuery(
     accessor,
     sql,
     [`%${escapeLike(text)}%`, maxReadRows + 1],
-    new Set(columns.map(([name]) => name)),
+    new Set([...names, marker]),
     maxReadBytes,
   )
   if (rows === null || rows.length > maxReadRows) return null
@@ -137,7 +219,9 @@ export async function linesContaining(
   const chunks: Uint8Array[] = []
   let size = 0
   for (const row of rows) {
-    const line = encoder.encode(rowLine(row) + '\n')
+    const line = encoder.encode(
+      rowLine(Object.fromEntries(Object.entries(row).filter(([key]) => key !== marker))) + '\n',
+    )
     size += line.length
     if (size > maxReadBytes) return null
     chunks.push(line)

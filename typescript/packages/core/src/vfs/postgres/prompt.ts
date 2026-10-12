@@ -27,5 +27,6 @@ export const PROMPT = `{prefix}
   dimensions (group by), time_dimensions and facts (aggregate), and
   carries COMMENTs, enum domains and example values.
   Read database.json first to plan joins. Reading rows.jsonl is refused
-  for tables above the configured row/byte threshold; use head, tail, wc,
-  or grep, all of which push predicates down to SQL.`
+  for tables above the configured row/byte threshold; use head, tail or
+  wc, which ask SQL for only what they need, or grep, which fetches only
+  the matching rows when SQL can find every match.`

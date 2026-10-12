@@ -305,7 +305,7 @@
       "targets": [
         "postgres"
       ],
-      "command": "grep -c Dune /pg-limited/public/tables/books/rows.jsonl /pg-limited/public/tables/authors/rows.jsonl",
+      "command": "grep -c 4.5 /pg-limited/public/tables/books/rows.jsonl /pg-limited/public/tables/authors/rows.jsonl",
       "expect": {
         "exit": 2,
         "stdout": "/pg-limited/public/tables/authors/rows.jsonl:0\n",
@@ -318,7 +318,7 @@
       "targets": [
         "postgres"
       ],
-      "command": "grep -F Dune /pg-limited/public/tables/books/rows.jsonl",
+      "command": "grep -F 4.5 /pg-limited/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 2,
         "stdout": "",
@@ -331,7 +331,7 @@
       "targets": [
         "postgres"
       ],
-      "command": "rg -F Dune /pg-limited/public/tables/books/rows.jsonl",
+      "command": "rg -F 4.5 /pg-limited/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 2,
         "stdout": "",
@@ -348,6 +348,45 @@
       "expect": {
         "exit": 0,
         "stdout": "nonempty\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_search_leaves_out_a_float_column",
+      "seq": 611208,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -F ada /pg-limited/public/tables/books/rows.jsonl; rg -c ada /pg-limited/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_search_numbers_a_view",
+      "seq": 611209,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -F ada /pg-limited/public/views/recent_books/rows.jsonl; grep -c 2022 /pg/public/views/recent_books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_search_walks_every_table",
+      "seq": 611210,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -rl ada /pg-limited/public; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/pg-limited/public/tables/authors/rows.jsonl\n/pg-limited/public/tables/books/semantic.json\n/pg-limited/public/tables/books/rows.jsonl\n/pg-limited/public/views/recent_books/rows.jsonl\nrc=0\n",
         "stderr": ""
       }
     },

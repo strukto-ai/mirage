@@ -24,12 +24,18 @@ type Row = Record<string, unknown>
 
 const ROWS = '/public/tables/users/rows.jsonl'
 
-function columns(...pairs: [string, string][]): Row[] {
-  // What `fetchColumns` reads off information_schema.
-  return pairs.map(([name, type]) => ({ column_name: name, data_type: type, is_nullable: 'YES' }))
+function columns(...specs: string[][]): Row[] {
+  // What `COLUMNS` reads off the catalog: name, type, category and an array's
+  // element type.
+  return specs.map(([name, type, category, element]) => ({
+    name,
+    type,
+    category: category ?? 'X',
+    element: element ?? null,
+  }))
 }
 
-const USERS = columns(['id', 'integer'], ['name', 'text'])
+const USERS = columns(['id', 'int4'], ['name', 'text'])
 
 function path(p: string = ROWS): PathSpec {
   return new PathSpec({ virtual: p, directory: p, vfsPath: p.replace(/^\/+/, '') })
@@ -50,10 +56,10 @@ function makeAccessor(
   const driver: PgDriver = {
     query: ((sql: string, params: unknown[] = []) => {
       calls.push([sql, params])
-      if (sql.includes('pg_class')) {
+      if (sql.includes('relhassubclass')) {
         return Promise.resolve({ rows: relation, rowCount: relation.length })
       }
-      if (sql.includes('information_schema.columns')) {
+      if (sql.includes('pg_attribute')) {
         return Promise.resolve({ rows: cols, rowCount: cols.length })
       }
       return Promise.resolve({
@@ -105,8 +111,8 @@ describe('linesContaining', () => {
     expect(sql).not.toContain('ILIKE')
     expect(sql).toContain('"id"::text LIKE $1')
     expect(sql).toContain('"name"::text LIKE $1')
-    expect(sql).toContain(`"name" ~ '[[:cntrl:]]'`)
-    expect(sql).not.toContain('"id" ~')
+    expect(sql).toContain(`"name"::text ~ '[[:cntrl:]]'`)
+    expect(sql).not.toContain('"id"::text ~')
     // One past the ceiling, to tell a full answer from a cut one.
     expect(params).toEqual(['%user\\_id%', 10_001, 10 * 1024 * 1024])
     expect(sql).toContain('LEFT JOIN data ON budget.bytes <= $3')
@@ -123,21 +129,47 @@ describe('linesContaining', () => {
 
   it.each<[Row[], string, string]>([
     [
-      columns(['id', 'integer'], ['rating', 'double precision']),
+      columns(['id', 'int4'], ['rating', 'float8']),
       '4.5',
-      'a double renders differently from its cast',
+      'a double spells digits its cast may spell otherwise',
     ],
     [
-      columns(['id', 'integer'], ['at', 'timestamp with time zone']),
+      columns(['id', 'int4'], ['at', 'timestamptz']),
       '2026',
-      'a timestamp renders differently from its cast',
+      'a timestamp spells digits its cast spells otherwise',
     ],
+    [columns(['id', 'int4'], ['price', 'numeric']), 'nan', 'a numeric spells NaN'],
     [
-      columns(['id', 'integer'], ['code', 'character']),
-      'ab',
+      columns(['id', 'int4'], ['code', 'bpchar']),
+      'a b',
       'char(n) pads, and its cast strips the padding',
     ],
-    [columns(['id', 'integer'], ['doc', 'jsonb']), 'ab', "jsonb's cast spaces its separators"],
+    [
+      columns(['id', 'int4'], ['doc', 'jsonb']),
+      '12',
+      'a jsonb number may spell another way in the line',
+    ],
+    [columns(['id', 'int4'], ['doc', 'jsonb']), '[a', 'a bracket may sit next to a jsonb number'],
+    [
+      columns(['id', 'int4'], ['tags', '_text', 'A', 'text']),
+      '[a',
+      "an array's line brackets where its cast braces",
+    ],
+    [
+      columns(['id', 'int4'], ['flags', '_bool', 'A', 'bool']),
+      'true',
+      "a boolean array's cast spells t and f",
+    ],
+    [
+      columns(['id', 'int4'], ['doc', 'json']),
+      'ab',
+      "a json value's cast keeps escapes the line decodes",
+    ],
+    [
+      columns(['id', 'int4'], ['span', 'interval']),
+      'ab',
+      'an interval spells words on one host and keys on the other',
+    ],
     [USERS, 'am', 'every row holds the key `name`'],
     [USERS, 'ul', 'a NULL spells `null` in the line'],
     [USERS, 'd":1', 'a quote matches between key and value'],
@@ -150,15 +182,87 @@ describe('linesContaining', () => {
     expect(calls).toHaveLength(2)
   })
 
-  // A view runs its own query and a parent appends its children's rows, so
-  // ctid order is not the order reading the file returns.
+  // A char(n) without a space in the text, a jsonb value, an enum's label and
+  // an array of strings or integers hold the text where their cast does; a
+  // string can also hold it as an escape's letters.
+  it.each<[string[], string[]]>([
+    [
+      ['code', 'bpchar'],
+      ['LIKE', '~'],
+    ],
+    [['doc', 'jsonb'], ['LIKE']],
+    [
+      ['status', 'mood', 'E'],
+      ['LIKE', '~'],
+    ],
+    [
+      ['tags', '_text', 'A', 'text'],
+      ['LIKE', '~'],
+    ],
+    [['ids', '_int4', 'A', 'int4'], ['LIKE']],
+    [
+      ['label', 'text'],
+      ['LIKE', '~'],
+    ],
+  ])('searches a column whose cast holds the text: %j', async (column, clauses) => {
+    const { accessor, calls } = makeAccessor(columns(column), [])
+    expect(await lines(accessor, 'ada')).toBe('')
+    const sql = calls[2]?.[0] ?? ''
+    const name = `"${column[0] ?? ''}"::text`
+    expect(['LIKE', '~'].filter((op) => sql.includes(`${name} ${op}`))).toEqual(clauses)
+  })
+
+  // A float, a numeric, a date or a time spells digits and a few marks, never
+  // the letters of `ada`, so only the other columns are asked.
+  it('leaves out a column that cannot spell the text', async () => {
+    const { accessor, calls } = makeAccessor(
+      columns(
+        ['id', 'int4'],
+        ['name', 'text'],
+        ['rating', 'float8'],
+        ['price', 'numeric'],
+        ['at', 'timestamptz'],
+      ),
+      [{ id: 1, name: 'ada', rating: 4.5, price: 1, at: null }],
+    )
+    expect(await lines(accessor, 'ada')).toBe(
+      '{"id":1,"name":"ada","rating":4.5,"price":1,"at":null}\n',
+    )
+    const sql = calls[2]?.[0] ?? ''
+    expect(sql).toContain('"name"::text LIKE')
+    for (const name of ['"rating"', '"price"', '"at"']) expect(sql).not.toContain(name)
+  })
+
+  it('answers nothing when no column can spell the text', async () => {
+    const { accessor, calls } = makeAccessor(columns(['rating', 'float8'], ['at', 'date']), [])
+    expect(await lines(accessor, 'ada')).toBe('')
+    expect(calls).toHaveLength(2)
+  })
+
+  // A view runs its own query and a parent appends its children's rows, so the
+  // rows are numbered in the order a plain read returns them, before the
+  // filter, and the number never reaches the line.
   it.each<[Row[]]>([
     [[{ relkind: 'v', relhassubclass: false }]],
     [[{ relkind: 'p', relhassubclass: true }]],
     [[{ relkind: 'r', relhassubclass: true }]],
-    [[]],
-  ])('declines a relation read in another order: %j', async (relation) => {
-    const { accessor, calls } = makeAccessor(USERS, [], {}, 100, relation)
+  ])('numbers a relation read in another order: %j', async (relation) => {
+    const { accessor, calls } = makeAccessor(
+      USERS,
+      [{ __mirage_row: 3, id: 1, name: 'ada' }],
+      {},
+      100,
+      relation,
+    )
+    expect(await lines(accessor, 'ada')).toBe('{"id":1,"name":"ada"}\n')
+    const sql = calls[2]?.[0] ?? ''
+    expect(sql).toContain('row_number() OVER () AS "__mirage_row", r.*')
+    expect(sql).toContain('ORDER BY "__mirage_row" LIMIT $2')
+    expect(sql).not.toContain('ctid')
+  })
+
+  it('declines a relation it cannot find', async () => {
+    const { accessor, calls } = makeAccessor(USERS, [], {}, 100, [])
     expect(await lines(accessor, 'ada')).toBeNull()
     expect(calls).toHaveLength(1)
   })

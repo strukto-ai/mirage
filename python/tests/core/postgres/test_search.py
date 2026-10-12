@@ -44,11 +44,17 @@ def _path(p: str = ROWS) -> PathSpec:
     return PathSpec(virtual=p, directory=p, vfs_path=p.strip("/"))
 
 
-def _columns(*pairs: tuple[str, str]) -> list[dict[str, str]]:
-    # What `client.fetch_columns` reads off information_schema.
+def _columns(*specs: tuple[str, ...]) -> list[dict[str, str | None]]:
+    # What `_COLUMNS` reads off the catalog: name, type, category and an
+    # array's element type.
     return [
-        {"column_name": name, "data_type": data_type, "is_nullable": "YES"}
-        for name, data_type in pairs
+        {
+            "name": spec[0],
+            "type": spec[1],
+            "category": spec[2] if len(spec) > 2 else "X",
+            "element": spec[3] if len(spec) > 3 else None,
+        }
+        for spec in specs
     ]
 
 
@@ -71,7 +77,7 @@ async def _lines(conn, text: str, ignore_case: bool = False, **config):
     )
 
 
-USERS = _columns(("id", "integer"), ("name", "text"))
+USERS = _columns(("id", "int4"), ("name", "text"))
 
 
 @pytest.mark.asyncio
@@ -105,8 +111,8 @@ async def test_casts_every_column_and_takes_escaped_rows():
     assert "ILIKE" not in sql
     assert '"id"::text LIKE $1' in sql
     assert '"name"::text LIKE $1' in sql
-    assert "\"name\" ~ '[[:cntrl:]]'" in sql
-    assert '"id" ~' not in sql
+    assert "\"name\"::text ~ '[[:cntrl:]]'" in sql
+    assert '"id"::text ~' not in sql
     assert pattern == "%user\\_id%"
     # One past the ceiling, to tell a full answer from a cut one.
     assert limit == 10_001
@@ -128,24 +134,54 @@ async def test_ignore_case_uses_ilike():
     ("columns", "text", "why"),
     [
         (
-            _columns(("id", "integer"), ("rating", "double precision")),
+            _columns(("id", "int4"), ("rating", "float8")),
             "4.5",
-            "a double renders differently from its cast",
+            "a double spells digits its cast may spell otherwise",
         ),
         (
-            _columns(("id", "integer"), ("at", "timestamp with time zone")),
+            _columns(("id", "int4"), ("at", "timestamptz")),
             "2026",
-            "a timestamp renders differently from its cast",
+            "a timestamp spells digits its cast spells otherwise",
         ),
         (
-            _columns(("id", "integer"), ("code", "character")),
-            "ab",
+            _columns(("id", "int4"), ("price", "numeric")),
+            "nan",
+            "a numeric spells NaN",
+        ),
+        (
+            _columns(("id", "int4"), ("code", "bpchar")),
+            "a b",
             "char(n) pads, and its cast strips the padding",
         ),
         (
-            _columns(("id", "integer"), ("doc", "jsonb")),
+            _columns(("id", "int4"), ("doc", "jsonb")),
+            "12",
+            "a jsonb number may spell another way in the line",
+        ),
+        (
+            _columns(("id", "int4"), ("doc", "jsonb")),
+            "[a",
+            "a bracket may sit next to a jsonb number",
+        ),
+        (
+            _columns(("id", "int4"), ("tags", "_text", "A", "text")),
+            "[a",
+            "an array's line brackets where its cast braces",
+        ),
+        (
+            _columns(("id", "int4"), ("flags", "_bool", "A", "bool")),
+            "true",
+            "a boolean array's cast spells t and f",
+        ),
+        (
+            _columns(("id", "int4"), ("doc", "json")),
             "ab",
-            "jsonb's cast spaces its separators",
+            "a json value's cast keeps escapes the line decodes",
+        ),
+        (
+            _columns(("id", "int4"), ("span", "interval")),
+            "ab",
+            "an interval spells words on one host and keys on the other",
         ),
         (USERS, "am", "every row holds the key `name`"),
         (USERS, "ul", "a NULL spells `null` in the line"),
@@ -162,6 +198,59 @@ async def test_declines_when_a_like_cannot_see_every_match(columns, text, why):
     assert len(conn.fetch.await_args_list) == 2
 
 
+@pytest.mark.parametrize(
+    ("column", "clauses"),
+    [
+        (("code", "bpchar"), ["LIKE", "~"]),
+        (("doc", "jsonb"), ["LIKE"]),
+        (("status", "mood", "E"), ["LIKE", "~"]),
+        (("tags", "_text", "A", "text"), ["LIKE", "~"]),
+        (("ids", "_int4", "A", "int4"), ["LIKE"]),
+        (("label", "text"), ["LIKE", "~"]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_searches_a_column_whose_cast_holds_the_text(column, clauses):
+    # A char(n) without a space in the text, a jsonb value, an enum's
+    # label and an array of strings or integers hold the text where their
+    # cast does; a string can also hold it as an escape's letters.
+    conn = _conn(_columns(column), [])
+    assert await _lines(conn, "ada") == b""
+    sql = conn.fetch.await_args_list[2].args[0]
+    name = f'"{column[0]}"::text'
+    assert [op for op in ("LIKE", "~") if f"{name} {op}" in sql] == clauses
+
+
+@pytest.mark.asyncio
+async def test_leaves_out_a_column_that_cannot_spell_the_text():
+    # A float, a numeric, a date or a time spells digits and a few marks,
+    # never the letters of `ada`, so only the other columns are asked.
+    conn = _conn(
+        _columns(
+            ("id", "int4"),
+            ("name", "text"),
+            ("rating", "float8"),
+            ("price", "numeric"),
+            ("at", "timestamptz"),
+        ),
+        [{"id": 1, "name": "ada", "rating": 4.5, "price": 1, "at": None}],
+    )
+    assert await _lines(conn, "ada") == (
+        b'{"id":1,"name":"ada","rating":4.5,"price":1,"at":null}\n'
+    )
+    sql = conn.fetch.await_args_list[2].args[0]
+    assert '"name"::text LIKE' in sql
+    assert '"rating"' not in sql and '"price"' not in sql
+    assert '"at"' not in sql
+
+
+@pytest.mark.asyncio
+async def test_answers_nothing_when_no_column_can_spell_the_text():
+    conn = _conn(_columns(("rating", "float8"), ("at", "date")), [])
+    assert await _lines(conn, "ada") == b""
+    assert len(conn.fetch.await_args_list) == 2
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "relation",
@@ -169,13 +258,25 @@ async def test_declines_when_a_like_cannot_see_every_match(columns, text, why):
         [{"relkind": "v", "relhassubclass": False}],
         [{"relkind": "p", "relhassubclass": True}],
         [{"relkind": "r", "relhassubclass": True}],
-        [],
     ],
 )
-async def test_declines_a_relation_read_in_another_order(relation):
+async def test_numbers_a_relation_read_in_another_order(relation):
     # A view runs its own query and a parent appends its children's rows,
-    # so ctid order is not the order reading the file returns.
-    conn = _conn(USERS, [], relation=relation)
+    # so the rows are numbered in the order a plain read returns them,
+    # before the filter, and the number never reaches the line.
+    conn = _conn(
+        USERS, [{"__mirage_row": 3, "id": 1, "name": "ada"}], relation=relation
+    )
+    assert await _lines(conn, "ada") == b'{"id":1,"name":"ada"}\n'
+    sql = conn.fetch.await_args_list[2].args[0]
+    assert 'row_number() OVER () AS "__mirage_row", r.*' in sql
+    assert 'ORDER BY "__mirage_row" LIMIT $2' in sql
+    assert "ctid" not in sql
+
+
+@pytest.mark.asyncio
+async def test_declines_a_relation_it_cannot_find():
+    conn = _conn(USERS, [], relation=[])
     assert await _lines(conn, "ada") is None
     assert len(conn.fetch.await_args_list) == 1
 
