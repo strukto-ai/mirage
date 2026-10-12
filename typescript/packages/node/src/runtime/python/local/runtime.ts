@@ -17,6 +17,7 @@ import { accessSync, constants, statSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { delimiter, isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
+import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
@@ -33,22 +34,33 @@ const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
  * finds the twin's, as an absolute path: the program's environment carries
  * no host PATH, so the lookup cannot be left to spawn. An empty entry is the
  * current directory, as for the shell. A name with a slash is taken as
- * given, and one the PATH lacks too, so spawn reports it missing.
+ * given, and one the PATH lacks too, so spawn reports it missing. On
+ * Windows a name without one of `PATHEXT`'s suffixes is tried with each.
  */
 function onHostPath(name: string): string {
   if (name.includes('/')) return name
+  const suffixes =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((s) => s !== '')
+      : []
+  const names =
+    suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
+      ? [name]
+      : suffixes.map((s) => name + s)
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    const candidate = resolve(dir, name)
-    try {
-      if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
-      accessSync(candidate, constants.X_OK)
-      return candidate
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === undefined) throw err
-      // Not usable here (not executable, an unreadable entry): the next
-      // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
-      debuglog('mirage')('local: %s is not a usable interpreter: %s', candidate, code)
+    for (const each of names) {
+      const candidate = resolve(dir, each)
+      try {
+        if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
+        accessSync(candidate, constants.X_OK)
+        return candidate
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === undefined) throw err
+        // Not usable here (not executable, an unreadable entry): the next
+        // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
+        debuglog('mirage')('local: %s is not usable: %s', candidate, code)
+      }
     }
   }
   return name
@@ -141,12 +153,16 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     // would point a relative path at the wrong files.
     const cwd = request.cwd.virtual
     const here = await stat(cwd).catch((err: unknown) => {
-      if ((err as NodeJS.ErrnoException).code === undefined) throw err
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      debuglog('mirage')('local: cannot use %s as the working directory: %s', cwd, code)
       return null
     })
     if (here?.isDirectory() !== true) {
       return notRun(`${name}: the working directory ${cwd} is not on this host\n`, 126)
     }
+    // A program that cannot start (its script's interpreter missing, say)
+    // fails as the shell's would, so `tool || fallback` goes on.
     return this.spawnProgram(
       program,
       request.argv.slice(1),
@@ -154,7 +170,11 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
       request.stdin,
       request.signal,
       cwd,
-    )
+    ).catch((err: unknown) => {
+      const { code, syscall } = err as NodeJS.ErrnoException
+      if (code === undefined || syscall?.startsWith('spawn') !== true) throw err
+      return notRun(`${name}: cannot execute: ${fsStrerror(err) ?? code}\n`, 126)
+    })
   }
 
   private spawnProgram(

@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import os
 import shutil
 import sys
 from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
+from mirage.errors.fs import fs_strerror
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
@@ -138,9 +140,21 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
                 f"{name}: the working directory {cwd} is not on this host\n",
                 126,
             )
-        return await self._spawn(
-            program, list(request.argv[1:]), request.env, request.stdin, cwd
-        )
+        # A program that cannot start (its script's interpreter missing,
+        # say) fails as the shell's would, so `tool || fallback` goes on.
+        try:
+            return await self._spawn(
+                program,
+                list(request.argv[1:]),
+                request.env,
+                request.stdin,
+                cwd,
+            )
+        except OSError as exc:
+            reason = fs_strerror(exc) or errno.errorcode.get(
+                exc.errno or 0, str(exc)
+            )
+            return _not_run(f"{name}: cannot execute: {reason}\n", 126)
 
     async def _spawn(
         self,

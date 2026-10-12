@@ -235,6 +235,32 @@ async def test_a_program_found_through_a_relative_path_entry_runs_elsewhere(
 
 
 @pytest.mark.asyncio
+async def test_a_program_that_cannot_start_fails_as_the_shell_would(
+    tmp_path, monkeypatch
+):
+    tool = tmp_path / "mirage-broken"
+    tool.write_text("#!/no/such/interpreter\n")
+    tool.chmod(0o755)
+    runtime = LocalRuntime(captures=["@external"])
+    monkeypatch.setenv("PATH", str(tmp_path))
+    try:
+        result = await runtime.run_process(
+            ProcessExecution(
+                argv=("mirage-broken",),
+                cwd=PathSpec.from_str_path(str(tmp_path)),
+                env={},
+                stdin=None,
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stderr) == (
+        126,
+        b"mirage-broken: cannot execute: No such file or directory\n",
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_bare_home_found_through_an_empty_path_entry_runs(
     tmp_path, monkeypatch
 ):

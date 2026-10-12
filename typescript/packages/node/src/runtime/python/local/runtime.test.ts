@@ -358,6 +358,60 @@ describe('LocalRuntime', () => {
     },
   )
 
+  it('fails a program that cannot start as the shell would', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+    const tool = join(dir, 'mirage-broken')
+    await writeFile(tool, '#!/no/such/interpreter\n')
+    await chmod(tool, 0o755)
+    const rt = new LocalRuntime({ captures: ['@external'] })
+    vi.stubEnv('PATH', dir)
+    try {
+      const result = await rt.runProcess({
+        kind: 'process',
+        argv: ['mirage-broken'],
+        cwd: PathSpec.fromStrPath(dir),
+        env: {},
+        stdin: null,
+      })
+      expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
+        126,
+        'mirage-broken: cannot execute: No such file or directory\n',
+      ])
+    } finally {
+      vi.unstubAllEnvs()
+      await rt.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('finds a program by its PATHEXT suffix on Windows', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+    const tool = join(dir, 'mirage-tool.EXE')
+    await writeFile(tool, '#!/bin/sh\necho tool\n')
+    await chmod(tool, 0o755)
+    const rt = new LocalRuntime({ captures: ['@external'] })
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    if (platform === undefined) throw new Error('process.platform has no descriptor')
+    vi.stubEnv('PATH', dir)
+    vi.stubEnv('PATHEXT', '.COM;.EXE')
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' })
+    try {
+      const result = await rt.runProcess({
+        kind: 'process',
+        argv: ['mirage-tool'],
+        cwd: PathSpec.fromStrPath(dir),
+        env: {},
+        stdin: null,
+      })
+      expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'tool\n'])
+    } finally {
+      Object.defineProperty(process, 'platform', platform)
+      vi.unstubAllEnvs()
+      await rt.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('registers under the local name', () => {
     expect(buildRuntime('local')).toBeInstanceOf(LocalRuntime)
   })
