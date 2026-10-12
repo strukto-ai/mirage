@@ -77,7 +77,10 @@ async def test_grep_m1_short_circuits_after_first_match(accessor, _stat_reads):
             tag = "FOUND" if i == 3 else "skip"
             yield {"_id": ObjectId(), "i": i, "tag": tag}
 
-    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake):
+    with (
+        patch("mirage.core.mongodb.stream.iter_documents", new=_fake),
+        patch("mirage.core.mongodb.search.iter_documents", new=_fake),
+    ):
         source, _ = await generic("grep").fn(
             accessor,
             [_path()],
