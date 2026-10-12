@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../expand/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -37,7 +38,7 @@ import { wordText } from '../../types.ts'
 import { ok, result } from '../executor/builtins/shared.ts'
 import type { Result } from '../executor/builtins/types.ts'
 import { assignmentStatus } from '../executor/statement.ts'
-import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { expandNode } from '../expand/node.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'

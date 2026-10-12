@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -37,6 +37,7 @@ from mirage.utils.hidden import (
     shown_mode,
 )
 from mirage.utils.path import norm, parent
+from mirage.view.types import SessionAccess
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.session.session import SessionState
 
@@ -695,7 +696,17 @@ def effective_path_mode(
         mount_prefix (str): the owning mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    sess = get_current_session()
+    return _path_mode_under(
+        get_current_session(), virtual, mount_prefix, mount_mode
+    )
+
+
+def _path_mode_under(
+    sess: SessionState | None,
+    virtual: str,
+    mount_prefix: str,
+    mount_mode: MountMode,
+) -> MountMode:
     if sess is None:
         return mount_mode
     prefix = norm(mount_prefix)
@@ -810,7 +821,17 @@ def readonly_below(
         mount_prefix (str): the owning mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    sess = get_current_session()
+    return _readonly_below_under(
+        get_current_session(), virtual, mount_prefix, mount_mode
+    )
+
+
+def _readonly_below_under(
+    sess: SessionState | None,
+    virtual: str,
+    mount_prefix: str,
+    mount_mode: MountMode,
+) -> str | None:
     shown = sess.visibility.shown if sess is not None else None
     if shown is None:
         return None
@@ -829,7 +850,7 @@ def readonly_below(
         if not below:
             continue
         if (
-            effective_path_mode(anchor, mount_prefix, mount_mode)
+            _path_mode_under(sess, anchor, mount_prefix, mount_mode)
             == MountMode.READ
         ):
             return anchor
@@ -884,3 +905,48 @@ def require_mount_writable() -> None:
     prefix, mode = gate
     if effective_mount_mode(prefix, mode) == MountMode.READ:
         raise erofs(prefix)
+
+
+def session_access(session: SessionState | None) -> SessionAccess:
+    """Bind access to its owner before an asynchronous operation suspends."""
+
+    def require_writable(
+        paths: Sequence[PathSpec],
+        prefix: str,
+        mode: MountMode,
+        subtree: bool = False,
+    ) -> None:
+        for path in paths:
+            if (
+                _path_mode_under(session, path.virtual, prefix, mode)
+                == MountMode.READ
+            ):
+                raise erofs(path.virtual)
+            blame = (
+                _readonly_below_under(session, path.virtual, prefix, mode)
+                if subtree
+                else None
+            )
+            if blame is not None:
+                raise erofs(blame)
+
+    return SessionAccess(
+        session_id=session.session_id if session is not None else "",
+        visibility=session.visibility if session is not None else None,
+        umask=session.umask if session is not None else DEFAULT_UMASK,
+        dotglob=session.shopts.get("dotglob", False)
+        if session is not None
+        else False,
+        extglob=session.shopts.get("extglob", False)
+        if session is not None
+        else False,
+        path_mode=lambda virtual, prefix, mode: _path_mode_under(
+            session, virtual, prefix, mode
+        ),
+        strongest_mode=lambda prefix, mode: (
+            strongest_under_session(session, prefix, mode)
+            if session is not None
+            else mode
+        ),
+        require_writable=require_writable,
+    )

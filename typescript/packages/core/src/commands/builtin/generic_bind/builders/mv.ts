@@ -33,7 +33,9 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     idx,
     undefined,
     (p: PathSpec) => ops.readdir(accessor, p, idx),
-    refuseReveal,
+    (src, dst) => {
+      refuseReveal(src, dst, ops.access)
+    },
     opts.ns?.links == null || opts.dispatch == null
       ? undefined
       : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd, opts.ns.visibility),

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from './types.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +22,6 @@ import { globPattern, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { expandWords } from './parts.ts'
-import type { ExecuteFn } from './node.ts'
 
 const ENC = new TextEncoder()
 

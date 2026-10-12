@@ -12,7 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from __future__ import annotations
+
+from asyncio import Event
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from mirage.io.types import ByteSource, IOResult
+    from mirage.policy.types import HandOff
+    from mirage.shell.call_stack import CallStack
+    from mirage.shell.console import JobConsole
+    from mirage.shell.job_table import JobTable
+    from mirage.shell.types import TSNodeLike
+    from mirage.workspace.evaluation import EvaluationContext
+    from mirage.workspace.execution import ExecutionScope
+    from mirage.workspace.session.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,3 +62,26 @@ class FieldBreak:
 
 
 Chunk = Piece | FieldBreak
+
+
+class ExecuteFn(Protocol):
+    """The executor's typed entry point for a nested line."""
+
+    async def __call__(
+        self,
+        command: str,
+        *,
+        session_id: str,
+        session: SessionState | None = None,
+        context: EvaluationContext | None = None,
+        execution_scope: ExecutionScope | None = None,
+        stdin: ByteSource | None = None,
+        cancel: Event | None = None,
+        node: TSNodeLike | None = None,
+        span: tuple[int, int] | None = None,
+        handed: HandOff | None = None,
+        substitution: bool = False,
+        sink: JobConsole | None = None,
+        call_stack: CallStack | None = None,
+        job_table: JobTable | None = None,
+    ) -> IOResult: ...

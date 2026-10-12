@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../expand/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { CondNode } from '../executor/builtins/condition/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { ExecuteFn } from '../expand/node.ts'
+
 import { expandChunks, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { splitFields } from '../expand/fields.ts'

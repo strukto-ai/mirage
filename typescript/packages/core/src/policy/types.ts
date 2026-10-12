@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
+import type { SessionAccess } from '../view/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
@@ -633,6 +634,7 @@ export interface RouteContext {
  * python marks the same read with a task-local ContextVar, which a
  * browser has no twin of. */
 export interface VfsContext {
+  access?: SessionAccess
   /** The function called, as `vfsCall` declares it; a rename's or a copy's
    * destination is judged under the same call with `creates` set. */
   call: VfsCall

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EntryGate } from '../policy/types.ts'
 import { compileSpec } from './spec/compile.ts'
 import type { ProcessView } from '../process/view.ts'
 import type { Accessor } from '../accessor/base.ts'
@@ -21,6 +22,7 @@ import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
 import type { DispatchFn, ShellFn } from '../runtime/types.ts'
 import type {
+  SessionAccess,
   ChildMounts,
   NamespaceView,
   ReaddirPath,
@@ -65,6 +67,8 @@ import type { CommandSpec, FlagValue } from './spec/types.ts'
  * output limit, which `runCommand` applies itself instead of forwarding.
  */
 export interface ExecContext {
+  admission?: EntryGate | null
+  access?: SessionAccess
   stdin?: ByteSource | null
   cwd?: string
   dispatch?: DispatchFn
@@ -91,6 +95,8 @@ export interface ExecContext {
  * table through `mountIo`.
  */
 export interface CommandIO<A extends Accessor = Accessor> {
+  admission?: EntryGate | null
+  access?: SessionAccess
   readdir: ReaddirOp<A>
   readBytes: ReadBytesOp<A>
   stat: StatOp<A>
@@ -147,6 +153,8 @@ export interface CommandIO<A extends Accessor = Accessor> {
  * fourth argument. A handler reads the fields it needs and ignores the rest.
  */
 export interface CommandOpts {
+  admission?: EntryGate | null
+  access?: SessionAccess
   /** Piped standard input, if any. */
   stdin: ByteSource | null
   /** The parsed flags. Read them through a spec-bound `FlagView`. */

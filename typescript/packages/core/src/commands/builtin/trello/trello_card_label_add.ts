@@ -39,7 +39,7 @@ async function trelloCardLabelAdd(
   if (labelId === undefined || labelId === '') throw new Error('--label_id is required')
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(opts.mountPrefix ?? '')
+  requireMountWritable(opts.mountPrefix ?? '', opts.access)
   await requireCard(accessor, cardId)
   const card = await cardAddLabel(accessor.transport, cardId, labelId)
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]

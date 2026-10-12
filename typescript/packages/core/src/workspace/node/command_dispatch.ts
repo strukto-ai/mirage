@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../expand/types.ts'
+import type { EntryGate } from '../../policy/types.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
@@ -43,7 +46,7 @@ import { NodeType as NT } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
-import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
@@ -598,7 +601,7 @@ async function runArgv(
   const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
   const boundary = refusedExternal
     ? [...argv.operands]
-    : await expandBoundaryGlobs(argv.operands, registry, namespace)
+    : await expandBoundaryGlobs(argv.operands, registry, namespace, sessionAccess(session))
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -698,6 +701,7 @@ async function runArgv(
         claimant?.line ?? null,
         output,
         parser,
+        admitted,
       )
     // A post hook reads what the command did: its file records, gathered
     // as it runs and as its output drains, and its result node, settled
@@ -827,6 +831,7 @@ async function routeArgv(
   handed: HandOff | null,
   sink?: JobConsole,
   parser?: ParseScope,
+  admission: EntryGate | null = null,
 ): Promise<Result> {
   const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
@@ -924,6 +929,7 @@ async function routeArgv(
       operands,
       lsMode !== null ? lsMode === 'all' : followsLastComponent(name, argv.words),
       !SLASH_KEEPS_LAST.has(name),
+      session.visibility,
     )
     // ls resolves a command-line link only when it leads to a directory, and
     // only a stat can tell where it leads.
@@ -1049,6 +1055,7 @@ async function routeArgv(
     signal,
     sink,
     parser,
+    admission,
   )
 
   const stdout = linkErrors.length > 0 ? await materialize(source) : source

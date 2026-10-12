@@ -265,7 +265,7 @@ describe('session predicates on the fallback storage', () => {
     })
   })
 
-  it('a command view folds the live sessions as the dispatcher does', async () => {
+  it('a command view keeps the named session while another session is live', async () => {
     const hider = new SessionState({
       sessionId: 'hider',
       visibility: { paths: { paths: ['/data/x'] } },
@@ -285,7 +285,7 @@ describe('session predicates on the fallback storage', () => {
       return Promise.resolve()
     })
     await Promise.all([long, short])
-    expect(folded).toBe(false)
+    expect(folded).toBe(true)
     // A session named outside any line keeps its own view.
     const own = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
     expect(pathVisible(own, '/data/x')).toBe(true)
@@ -911,4 +911,65 @@ describe('overlapping shell calls beside xargs', () => {
       await ws.close()
     }
   })
+})
+
+it('keeps each browser session’s permissions, umask and glob settings across suspension', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const loose = ws.createSession('loose')
+  const tight = ws.createSession('tight', {
+    profile: parseSessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/private'] } }),
+  })
+  loose.umask = 0o022
+  loose.shopts.dotglob = true
+  loose.shopts.extglob = true
+  tight.umask = 0o077
+  const [looseHeld, releaseLoose] = gate()
+  const [tightHeld, releaseTight] = gate()
+  const [bothEntered, enterBoth] = gate()
+  let entered = 0
+  ws.registerCli(
+    'pause',
+    new CLI({
+      spec: new CommandSpec({ name: 'pause' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async (inv) => {
+            entered += 1
+            if (entered === 2) enterBoth()
+            await (inv.env.LABEL === 'loose' ? looseHeld : tightHeld)
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  try {
+    for (const name of ['a', 'b', '.hidden', 'private']) await ws.vfs.write(`/data/${name}`, name)
+    const wide = ws.shell(
+      'pause; mkdir /data/new; stat -c %a /data/new; echo /data/*; echo /data/@(a|b)',
+      { sessionId: loose.sessionId, env: { LABEL: 'loose' } },
+    )
+    const narrow = ws.shell('pause; echo /data/*; mkdir /data/denied', {
+      sessionId: tight.sessionId,
+    })
+    await bothEntered
+    releaseLoose()
+    const output = await wide
+    releaseTight()
+    const denied = await narrow
+    expect(output.stderrText).toBe('')
+    expect(output.stdoutText).toBe(
+      '755\n/data/.hidden /data/a /data/b /data/new /data/private\n/data/a /data/b\n',
+    )
+    expect(denied.stdoutText).toBe('/data/a /data/b /data/new\n')
+    expect(denied.exitCode).toBe(1)
+    expect(denied.stderrText).toContain('Read-only file system')
+  } finally {
+    releaseLoose()
+    releaseTight()
+    await ws.close()
+  }
 })

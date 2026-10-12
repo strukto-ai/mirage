@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../view/types.ts'
+import type { SessionState } from '../session/session.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { OpKwargs } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
@@ -144,9 +147,8 @@ function appendsNothing(name: string, args: readonly unknown[]): boolean {
  * paths), so each is keyed by its final segment against the listed
  * directory, the same normalization `mergeReaddir` dedups by.
  */
-function visibleEntries(entries: string[], parent: string): string[] {
+function visibleEntries(entries: string[], parent: string, vis = sessionVisibility()): string[] {
   const base = rstripSlash(parent)
-  const vis = sessionVisibility()
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
     const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
@@ -222,6 +224,7 @@ async function mkdirOnReadOnly(
   mode: MountMode,
   path: PathSpec,
   parents: boolean,
+  access?: SessionAccess,
 ): Promise<void> {
   const base = rstripSlash(prefix)
   const leaf = rstripSlash(path.virtual) || '/'
@@ -245,7 +248,11 @@ async function mkdirOnReadOnly(
       const blame =
         chain
           .slice(index)
-          .find((spec) => effectivePathMode(spec.virtual, prefix, mode) === MountMode.READ) ?? path
+          .find(
+            (spec) =>
+              (access?.pathMode ?? effectivePathMode)(spec.virtual, prefix, mode) ===
+              MountMode.READ,
+          ) ?? path
       throw erofs(blame.virtual, `mount ${prefix} is read-only`)
     }
     if (row.type !== FileType.DIRECTORY) {
@@ -463,9 +470,8 @@ export class Dispatcher {
   // And the approval ledger, which a path rule that asks is put to where
   // no line is running.
   private readonly decisions: Decisions | null
-  private readonly writers = new KeyLock()
-  private readonly stores = new WeakMap<BaseVFS, number>()
-  private storeCount = 0
+  private access: SessionAccess | undefined
+  private state = { writers: new KeyLock(), stores: new WeakMap<BaseVFS, number>(), storeCount: 0 }
   readonly reconciler: Reconciler
 
   constructor(
@@ -485,6 +491,28 @@ export class Dispatcher {
     this.reconciler = new Reconciler(cache, namespace)
   }
 
+  forSession(session: SessionState | null): Dispatcher {
+    const bound = new Dispatcher(
+      this.namespace,
+      this.cache,
+      this.policies,
+      this.drift ?? undefined,
+      this.admitWrite ?? undefined,
+      this.decisions ?? undefined,
+    )
+    bound.access = sessionAccess(session)
+    bound.state = this.state
+    return bound
+  }
+
+  private visibility(): Visibility | null {
+    return this.access === undefined ? sessionVisibility() : this.access.visibility
+  }
+
+  private sessionId(): string {
+    return this.access?.sessionId ?? sessionId()
+  }
+
   /**
    * The namespace's own answer for a path no backend serves.
    *
@@ -494,7 +522,7 @@ export class Dispatcher {
    * namespace knows nothing at `virtual`.
    */
   private namespaceResult(name: string, virtual: string): string[] | FileStat | null {
-    const vis = sessionVisibility()
+    const vis = this.visibility()
     if (name === 'readdir') {
       return namespaceListing(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
@@ -505,6 +533,8 @@ export class Dispatcher {
   }
 
   dispatch: DispatchFn = (name, path, args, kwargs, report) => {
+    if (this.access === undefined)
+      return this.forSession(getCurrentSession()).dispatch(name, path, args, kwargs, report)
     const run = (): ReturnType<DispatchFn> =>
       this.dispatchAdmitted(name, path, args, kwargs, report)
     if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return run()
@@ -552,9 +582,17 @@ export class Dispatcher {
       owner !== null &&
       name === 'mkdir' &&
       explaining() === null &&
-      effectivePathMode(call.path.virtual, owner.prefix, owner.mode) === MountMode.READ
+      (this.access?.pathMode ?? effectivePathMode)(call.path.virtual, owner.prefix, owner.mode) ===
+        MountMode.READ
     const boundary = looksUp
-      ? new Boundary(this.policies, owner.prefix, undefined, sessionId(), this.decisions)
+      ? new Boundary(
+          this.policies,
+          owner.prefix,
+          undefined,
+          this.sessionId(),
+          this.decisions,
+          this.access,
+        )
       : this.boundary(owner)
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
@@ -572,6 +610,7 @@ export class Dispatcher {
           owner.mode,
           call.path,
           call.kwargs?.parents === true,
+          this.access,
         )
         await boundary.complete(mark, call.path, call.write, null)
         return [null, new IOResult()]
@@ -664,7 +703,7 @@ export class Dispatcher {
     report: OpReport | undefined,
     issuer: symbol | undefined,
   ): Promise<Call> {
-    const vis = sessionVisibility()
+    const vis = this.visibility()
     if (!pathVisible(vis, path.virtual)) {
       throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name))
     }
@@ -868,7 +907,7 @@ export class Dispatcher {
     const paths = call.dst === null ? [call.path] : [call.path, call.dst]
     if (paths.some((p) => hiddenUnder(call.vis, p.virtual))) return true
     if (call.ruleGate !== null) return paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
-    return this.policies.wantsFor('preVfs', sessionId(), lineRunning())
+    return this.policies.wantsFor('preVfs', this.sessionId(), lineRunning())
   }
 
   /**
@@ -946,7 +985,7 @@ export class Dispatcher {
     let fallback = isMissingPath(err) ? this.namespaceResult(call.name, call.path.virtual) : null
     if (fallback === null) throw err
     if (call.name === 'readdir' && Array.isArray(fallback)) {
-      fallback = visibleEntries(fallback, call.path.virtual)
+      fallback = visibleEntries(fallback, call.path.virtual, this.visibility())
     }
     await bare.admit(mark, call.path, call.write, {}, call.issuer)
     // A synthetic namespace answer (a directory that exists only because a
@@ -1145,7 +1184,7 @@ export class Dispatcher {
                 const pending = Promise.resolve(
                   name === 'setattr'
                     ? this.applySetattr(mount, vfs, scope, p, opKwargs)
-                    : mount.callKeyed(name, scope, fullArgs, opKwargs),
+                    : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
                 )
                 onCall?.(pending)
                 return runWithTimeout(pending, opTimeout, name)
@@ -1275,6 +1314,7 @@ export class Dispatcher {
           call.path.virtual,
         ),
         call.path.virtual,
+        call.vis,
       )
     }
     if (call.name === 'stat' && result instanceof FileStat) {
@@ -1353,7 +1393,8 @@ export class Dispatcher {
         })
       }
       void keys.reduceRight<() => Promise<void>>(
-        (inner, key) => () => this.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
+        (inner, key) => () =>
+          this.state.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
         held,
       )()
     })
@@ -1426,7 +1467,7 @@ export class Dispatcher {
         // its parents), and the purge taking the directory's hidden nodes
         // must not take it too.
         const arrived = new Set<string>()
-        const vis = sessionVisibility()
+        const vis = this.visibility()
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
           if (pathVisible(vis, link)) arrived.add(link)
         }
@@ -1493,11 +1534,11 @@ export class Dispatcher {
 
   /** A number naming one store object, the same for every mount of it. */
   private storeId(vfs: BaseVFS): number {
-    const known = this.stores.get(vfs)
+    const known = this.state.stores.get(vfs)
     if (known !== undefined) return known
-    this.storeCount += 1
-    this.stores.set(vfs, this.storeCount)
-    return this.storeCount
+    this.state.storeCount += 1
+    this.state.stores.set(vfs, this.state.storeCount)
+    return this.state.storeCount
   }
 
   /**
@@ -1531,8 +1572,9 @@ export class Dispatcher {
       this.policies,
       mount?.prefix ?? '',
       mount?.mode ?? MountMode.WRITE,
-      sessionId(),
+      this.sessionId(),
       this.decisions,
+      this.access,
     )
   }
 
@@ -1564,7 +1606,14 @@ export class Dispatcher {
     const mount = this.namespace.mountFor(spec.virtual)
     const mark = declared(vfs.constructor, name) ?? CALLS.get(name) ?? null
     const write = mark !== null && WRITE_EFFECTS.includes(mark.effect)
-    const boundary = new Boundary(this.policies, mountPrefix, mode, sessionId(), this.decisions)
+    const boundary = new Boundary(
+      this.policies,
+      mountPrefix,
+      mode,
+      this.sessionId(),
+      this.decisions,
+      this.access,
+    )
     if (mark !== null && write) {
       // The same pre-vfs admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -1586,10 +1635,16 @@ export class Dispatcher {
         const answer = await runWithMountContext(
           () =>
             mount.runWithWriteRevisions(() =>
-              mount.callKeyed(name, spec, [], {
-                ...this.indexKwargs(mount),
-                ...kwargs,
-              }),
+              mount.callKeyed(
+                name,
+                spec,
+                [],
+                {
+                  ...this.indexKwargs(mount),
+                  ...kwargs,
+                },
+                this.access,
+              ),
             ),
           mount.mountId,
         )
@@ -1698,7 +1753,7 @@ export class Dispatcher {
     ruleGate: EntryGate | null,
     issuer?: symbol,
   ): Promise<void> {
-    const vis = sessionVisibility()
+    const vis = this.visibility()
     if (!hiddenUnder(vis, path.virtual)) throw refusal
     let entries: unknown
     try {
@@ -1773,7 +1828,7 @@ export class Dispatcher {
     let walked = followOrLoop(this.namespace, path, false, spelled)
     if (spelled !== path.virtual) walked = posixNormpath(walked)
     if (walked === path.virtual) return path
-    const vis = sessionVisibility()
+    const vis = this.visibility()
     if (!pathVisible(vis, walked)) throw hiddenRefusal(vis, walked, create)
     return PathSpec.fromStrPath(walked)
   }
@@ -1924,7 +1979,7 @@ export class Dispatcher {
   ): Promise<[boolean, readonly string[] | null]> {
     if (this.namespace.isLink(path.virtual)) return [true, null]
     const prefixes = this.namespace.mountPrefixes()
-    if (namespaceStat(sessionVisibility(), prefixes, this.namespace, path.virtual) !== null) {
+    if (namespaceStat(this.visibility(), prefixes, this.namespace, path.virtual) !== null) {
       return [true, null]
     }
     const mount = this.namespace.tryMountFor(path.virtual)
@@ -2014,7 +2069,7 @@ export class Dispatcher {
   private async entryType(virtual: string, issuer?: symbol): Promise<FileType | null> {
     if (virtual === '/') return FileType.DIRECTORY
     const prefixes = this.namespace.mountPrefixes()
-    if (namespaceStat(sessionVisibility(), prefixes, this.namespace, virtual) !== null) {
+    if (namespaceStat(this.visibility(), prefixes, this.namespace, virtual) !== null) {
       return FileType.DIRECTORY
     }
     const mount = this.namespace.tryMountFor(virtual)
@@ -2257,7 +2312,7 @@ export class Dispatcher {
       await this.xattrTarget(mount, p)
       return this.overlaySetattr(p, kwargs)
     }
-    const raw = await mount.callKeyed('setattr', scope, [], kwargs)
+    const raw = await mount.callKeyed('setattr', scope, [], kwargs, this.access)
     const residual = raw as Record<string, number | string>
     const applied = SETATTR_KEYS.filter(
       (key) => kwargs[key] !== undefined && kwargs[key] !== null && !(key in residual),

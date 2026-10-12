@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../../view/types.ts'
 import {
   Effect,
   Target,
@@ -499,6 +500,7 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
     ops.globChildren,
     ops.stat,
     ops.globTargetStat,
+    ops.access,
   )
 }
 
@@ -809,15 +811,15 @@ export interface GenericCommand<A extends Accessor = Accessor> {
  * only when the directory it lands in is visible. Raised at the op
  * boundary so each command renders the refusal through its own
  * missing-file wording, indistinguishable from a real miss. */
-export function refuseHidden(path: PathSpec, create: boolean): void {
-  const vis = sessionVisibility()
+export function refuseHidden(path: PathSpec, create: boolean, access?: SessionAccess): void {
+  const vis = access === undefined ? sessionVisibility() : access.visibility
   if (pathVisible(vis, path.virtual)) return
   throw hiddenRefusal(vis, path.virtual, create)
 }
 
-function visibleChildren(entries: string[], parent: PathSpec): string[] {
+function visibleChildren(entries: string[], parent: PathSpec, access?: SessionAccess): string[] {
   const base = rstripSlash(parent.virtual)
-  const vis = sessionVisibility()
+  const vis = access === undefined ? sessionVisibility() : access.visibility
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
     return pathVisible(vis, `${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
@@ -825,8 +827,12 @@ function visibleChildren(entries: string[], parent: PathSpec): string[] {
 }
 
 /** Whether the bound session's hides make this relocation a reveal. */
-function moveWouldReveal(src: PathSpec, dst: PathSpec): boolean {
-  return moveReveals(sessionVisibility(), src.virtual, dst.virtual)
+function moveWouldReveal(src: PathSpec, dst: PathSpec, access?: SessionAccess): boolean {
+  return moveReveals(
+    access === undefined ? sessionVisibility() : access.visibility,
+    src.virtual,
+    dst.virtual,
+  )
 }
 
 /** Refuse a relocation that would surface a hidden path.
@@ -838,8 +844,8 @@ function moveWouldReveal(src: PathSpec, dst: PathSpec): boolean {
  * Only a directory has anything below it to re-anchor, so callers
  * check this for a source they know is a directory and skip it for a
  * file. */
-export function refuseReveal(src: PathSpec, dst: PathSpec): void {
-  if (moveWouldReveal(src, dst)) throw eacces(src.virtual)
+export function refuseReveal(src: PathSpec, dst: PathSpec, access?: SessionAccess): void {
+  if (moveWouldReveal(src, dst, access)) throw eacces(src.virtual)
 }
 
 /**
@@ -857,14 +863,20 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
   const guarded: CommandIO<A> = {
     ...ops,
     readdir: async (accessor, path, index) => {
-      refuseHidden(path, false)
-      return visibleChildren(await ops.readdir(accessor, path, index), path)
+      refuseHidden(path, false, ops.access)
+      return visibleChildren(await ops.readdir(accessor, path, index), path, ops.access)
     },
   }
   const ex = ops.exists
   if (ex !== undefined) {
     guarded.exists = async (accessor, path) => {
-      if (!pathVisible(sessionVisibility(), path.virtual)) return false
+      if (
+        !pathVisible(
+          ops.access === undefined ? sessionVisibility() : ops.access.visibility,
+          path.virtual,
+        )
+      )
+        return false
       return ex(accessor, path)
     }
   }
@@ -1070,17 +1082,19 @@ function checkCommandPaths(
   slot: GuardedSlot,
   checkHidden = true,
   checkMode = true,
+  access?: SessionAccess,
+  admission = getAdmission(),
 ): void {
-  const access = mutationOf(slot)
-  const admission = getAdmission()
+  const mutation = mutationOf(slot)
   for (const [position, path] of paths.entries()) {
-    if (checkHidden) refuseHidden(path, position > 0 || access?.create === true)
+    if (checkHidden) refuseHidden(path, position > 0 || mutation?.create === true, access)
     if (slot !== 'stat' && slot !== 'exists') admission?.check(path.virtual)
   }
-  if (access !== undefined && checkMode) {
-    for (const path of access.firstSource ? paths.slice(1) : paths) {
+  if (mutation !== undefined && checkMode) {
+    for (const path of mutation.firstSource ? paths.slice(1) : paths) {
       const gate = mountGateFor(path.virtual)
-      if (gate !== null) requirePathsWritable([path], ...gate, access.subtree)
+      if (gate !== null)
+        (access?.requireWritable ?? requirePathsWritable)([path], ...gate, mutation.subtree)
     }
   }
 }
@@ -1089,9 +1103,11 @@ function commandCall<T extends (...args: never[]) => unknown>(
   fn: T,
   slot: GuardedSlot,
   checkMode = true,
+  access?: SessionAccess,
+  admission = getAdmission(),
 ): T {
   return ((...args: never[]) => {
-    checkCommandPaths(pathsOf(args), slot, true, checkMode)
+    checkCommandPaths(pathsOf(args), slot, true, checkMode, access, admission)
     return fn(...args)
   }) as T
 }
@@ -1112,14 +1128,17 @@ export function withCommandGuards<A extends Accessor>(
   prefix?: string,
 ): CommandIO<A> {
   const probe = prefix === undefined ? null : walkProbeFor(prefix)
-  const scope = opPolicyScope(prefix ?? null)
+  const scope = opPolicyScope(prefix ?? null, ops.access)
   const prepared = namespaceOps({ ...ops, readdir: policyCall(scope, ops.readdir, 'readdir') })
   const guarded = { ...prepared }
   for (const slot of ['readBytes', 'readRange', 'stat', 'exists', 'readdir'] as const) {
     const fn = prepared[slot]
     if (fn === undefined) continue
     // Hides and the path rule on a content read are the dispatcher's.
-    const call = slot === 'readBytes' || slot === 'readRange' ? fn : commandCall(fn, slot)
+    const call =
+      slot === 'readBytes' || slot === 'readRange'
+        ? fn
+        : commandCall(fn, slot, true, ops.access, ops.admission)
     Object.assign(guarded, {
       [slot]: walkedCall(probe, call as (...args: unknown[]) => Promise<unknown>),
     })
@@ -1132,7 +1151,10 @@ export function withCommandGuards<A extends Accessor>(
   if (guarded.exists !== undefined) {
     const exists = guarded.exists
     guarded.exists = (accessor, path) =>
-      pathVisible(sessionVisibility(), path.virtual)
+      pathVisible(
+        ops.access === undefined ? sessionVisibility() : ops.access.visibility,
+        path.virtual,
+      )
         ? exists(accessor, path)
         : Promise.resolve(false)
   }
@@ -1146,9 +1168,8 @@ export function withCommandGuards<A extends Accessor>(
  * which command issued an op. A metadata op passes unmarked, as
  * `withCommandGuards` lets `stat` pass.
  */
-export function withDispatchRuleGuard(dispatch: DispatchFn): DispatchFn {
+export function withDispatchRuleGuard(dispatch: DispatchFn, gate = getAdmission()): DispatchFn {
   return async (op, path, args, options, report) => {
-    const gate = getAdmission()
     if (gate === null || METADATA_OPS.has(op)) return dispatch(op, path, args, options, report)
     return dispatch(op, path, args, { ...options, ruleGate: gate }, report)
   }
@@ -1162,16 +1183,22 @@ interface OpPolicyScope {
    * time (a registration-time wrap has no one mount). */
   prefix: string | null
   sessionId: string
+  access?: SessionAccess
 }
 
 /**
  * The scope to consult for this op call: null is the fast path (no
  * dispatched command bound policies, or none of them override preVfs).
  */
-function opPolicyScope(prefix: string | null): OpPolicyScope | null {
+function opPolicyScope(prefix: string | null, access?: SessionAccess): OpPolicyScope | null {
   const policies = getOpPolicies()
   if (!policies?.wants('preVfs')) return null
-  return { policies, prefix, sessionId: getCurrentSession()?.sessionId ?? '' }
+  return {
+    policies,
+    prefix,
+    sessionId: access?.sessionId ?? getCurrentSession()?.sessionId ?? '',
+    ...(access === undefined ? {} : { access }),
+  }
 }
 
 /**
@@ -1215,6 +1242,7 @@ async function policyAdmit(
   }
   await preVfsGate(scope.policies, call, path, write, prefix, scope.sessionId, undefined, {
     checkHidden: false,
+    ...(scope.access === undefined ? {} : { access: scope.access }),
   })
 }
 

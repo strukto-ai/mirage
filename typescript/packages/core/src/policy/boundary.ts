@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../view/types.ts'
 import { limitResult } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from './decisions.ts'
 import type { Policies } from './policies.ts'
@@ -31,6 +32,7 @@ export class Boundary {
     readonly mode?: MountMode | undefined,
     readonly sessionId = '',
     readonly decisions: Decisions | null = null,
+    readonly access?: SessionAccess,
   ) {}
 
   async admit(
@@ -43,6 +45,7 @@ export class Boundary {
     await preVfsGate(this.policies, call, path, write, this.prefix, this.sessionId, issuer, {
       ...(this.mode === undefined ? {} : { mode: this.mode }),
       decisions: this.decisions,
+      ...(this.access === undefined ? {} : { access: this.access }),
       ...access,
     })
   }
@@ -53,6 +56,7 @@ export class Boundary {
       await postVfsGate(this.policies, call, path, write, this.prefix, result, this.sessionId, {
         ...(this.mode === undefined ? {} : { mode: this.mode }),
         decisions: this.decisions,
+        ...(this.access === undefined ? {} : { access: this.access }),
       }),
     )
   }

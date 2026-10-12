@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../expand/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
@@ -42,7 +43,7 @@ import {
   statementStdin,
 } from '../executor/statement.ts'
 import { errTrapArmed, runErrTrap, runExitTrap } from '../executor/traps.ts'
-import type { ExecuteFn } from '../expand/node.ts'
+
 import { Recorder, type StreamOwner } from '../../shell/descriptors.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'

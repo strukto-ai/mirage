@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../view/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { ByteSource, IOResult } from '../io/types.ts'
@@ -865,11 +866,53 @@ export function requirePathsWritable(
  * storage select the right gate; the isolating runtimes answer from
  * the binding alone.
  */
-export function requireMountWritable(mountPrefix: string): void {
+export function requireMountWritable(mountPrefix: string, access?: SessionAccess): void {
   const gate = mountGateFor(mountPrefix)
   if (gate === null) return
   const [prefix, mode] = gate
-  if (effectiveMountMode(prefix, mode) === MountMode.READ) {
+  if (
+    (access === undefined
+      ? effectiveMountMode(prefix, mode)
+      : access.pathMode(prefix, prefix, mode)) === MountMode.READ
+  ) {
     throw erofs(prefix, `mount ${prefix} is read-only`)
+  }
+}
+
+/** Bind access to its owner before an asynchronous operation can suspend. */
+export function sessionAccess(session: SessionState | null): SessionAccess {
+  return {
+    sessionId: session?.sessionId ?? '',
+    get visibility() {
+      return session?.visibility ?? null
+    },
+    get umask() {
+      return session?.umask ?? DEFAULT_UMASK
+    },
+    get dotglob() {
+      return session?.shopts.dotglob === true
+    },
+    get extglob() {
+      return session?.shopts.extglob === true
+    },
+    pathMode: (virtual, prefix, mode) =>
+      session === null ? mode : pathModeUnder(session, virtual, prefix, mode),
+    strongestMode: (prefix, mode) =>
+      session === null ? mode : strongestUnderSession(session, prefix, mode),
+    requireWritable: (paths, prefix, mode, subtree = false) => {
+      for (const path of paths) {
+        if (
+          (session === null ? mode : pathModeUnder(session, path.virtual, prefix, mode)) ===
+          MountMode.READ
+        ) {
+          throw erofs(path, `mount ${prefix} is read-only`)
+        }
+        const blame =
+          subtree && session !== null
+            ? readonlyBelowUnder(session, path.virtual, prefix, mode)
+            : null
+        if (blame !== null) throw erofs(blame, `mount ${prefix} is read-only`)
+      }
+    },
   }
 }

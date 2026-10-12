@@ -121,7 +121,7 @@ import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine, explainedLine, holds, lineJudgments } from '../node/explain.ts'
 import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
-import { abortable, hasAborted, makeAbortError } from '../../utils/abort.ts'
+import { abortable } from '../../utils/abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { sourceFor } from '../../secrets/registry.ts'
@@ -1842,30 +1842,15 @@ export class Workspace {
     // default id there, and a key taken before that names a session no
     // later line would wait on.
     await abortable(this.ensureSessionsLoaded(), signal)
-    let started = false
     const key = sessionId ?? this.sessionManager.defaultId
-    const gate = this.lineLock.withLock(key, async () => {
-      // A line queued behind a running one wakes after close may have
-      // started, or after its caller was released; it runs nothing,
-      // like a line that arrived after.
-      if (this.isShuttingDown()) throw new Error('Workspace is closed')
-      if (hasAborted(signal)) throw makeAbortError(signal)
-      started = true
-      return run()
-    })
-    if (signal === undefined) return gate
-    // The wait is the caller's to abandon; the run is not. Once the line
-    // has started, its own abort handling joins the tree under the grace
-    // and restores `$?`, and releasing the caller here would skip that.
-    return new Promise<T>((resolve, reject) => {
-      const onAbort = (): void => {
-        if (!started) reject(makeAbortError(signal))
-      }
-      signal.addEventListener('abort', onAbort, { once: true })
-      gate.then(resolve, reject).finally(() => {
-        signal.removeEventListener('abort', onAbort)
-      })
-    })
+    return this.lineLock.withLock(
+      key,
+      async () => {
+        if (this.isShuttingDown()) throw new Error('Workspace is closed')
+        return run()
+      },
+      signal,
+    )
   }
 
   /**

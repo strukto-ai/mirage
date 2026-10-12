@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from './types.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
@@ -19,7 +20,7 @@ import { getCaseItems } from '../../shell/helpers.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
-import type { ExecuteFn } from './node.ts'
+
 import { escapeGlob } from '../../utils/glob_walk.ts'
 import { expandPattern } from './pattern.ts'
 import type { TSNodeLike } from '../../shell/types.ts'

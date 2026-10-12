@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from './types.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
@@ -34,7 +36,7 @@ import {
 
 import { classifyParts } from './classify/index.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
-import { type ExecuteFn } from './node.ts'
+
 import { expandWords } from './parts.ts'
 import { type CommandSpec, type ValueType } from '../../commands/spec/types.ts'
 import { specForCommand, specWordBases, specWordKinds } from './spec_hints.ts'
@@ -184,11 +186,20 @@ export async function expandArgv(
     const own = wordKinds !== null ? wordKinds.slice(consumed - 1) : tail.map(() => null)
     wordKinds = [
       ...new Array<ValueType | null>(consumed - 1).fill('str'),
-      ...tail.map((word, i): ValueType | null => (hasGlob(word) ? 'path' : (own[i] ?? null))),
+      ...tail.map((word, i): ValueType | null =>
+        hasGlob(word, sessionAccess(session)) ? 'path' : (own[i] ?? null),
+      ),
     ]
   }
 
-  const classified = classifyParts(lineWords, registry, session.cwd, wordKinds, wordBases)
+  const classified = classifyParts(
+    lineWords,
+    registry,
+    session.cwd,
+    wordKinds,
+    wordBases,
+    sessionAccess(session),
+  )
   // A glob word is resolved by whoever consumes it, exactly once:
   // WordPolicy.SHELL words get matches here; mount commands keep
   // patterns for backend pushdown; unknown names fail without

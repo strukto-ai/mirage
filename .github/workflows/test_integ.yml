@@ -2379,10 +2379,30 @@ jobs:
         working-directory: integ
         run: pnpm run wandb:conformance
 
+  integ-shell-coverage:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integ-battery-setup
+        with:
+          start-services: "false"
+          typescript-build-artifact: integ-typescript-dist
+      - name: Enforce integration-only shell coverage floors
+        run: ./python/.venv/bin/python integ/shell_coverage.py
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integ-shell-coverage
+          path: .cache/integ-shell-coverage
+
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-watch, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb]
+    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-watch, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

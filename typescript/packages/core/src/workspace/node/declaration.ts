@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../expand/types.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { IOResult } from '../../io/types.ts'
@@ -44,7 +45,7 @@ import {
 } from '../executor/builtins/declare/declare.ts'
 import { traceArray, traceCommand } from '../../shell/xtrace.ts'
 import { concat } from '../../utils/bytes.ts'
-import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 

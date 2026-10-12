@@ -135,3 +135,22 @@ async def test_key_lock_keeps_nothing_once_released():
     async with lock.with_lock("/b"):
         pass
     assert lock._locks == {} and lock._users == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_leaves_while_holder_is_blocked():
+    lock = KeyLock()
+    entered: list[str] = []
+    async with lock.with_lock("session"):
+        waiting = asyncio.create_task(
+            _section(lock, "session", "cancelled", entered)
+        )
+        await asyncio.sleep(0)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        assert entered == []
+        assert lock._users["session"] == 1
+    await _section(lock, "session", "next", entered)
+    assert entered == ["next_start", "next_end"]
+    assert lock._locks == {} and lock._users == {}

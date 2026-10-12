@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../view/types.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -341,14 +342,18 @@ export class MountEntry {
    * the key is the placement's to know, and keeps the VFS retained while
    * the walk reads metadata.
    */
-  async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
+  async expandGlob(
+    paths: readonly PathSpec[],
+    prefix: string,
+    access?: SessionAccess,
+  ): Promise<PathSpec[]> {
     if (!this.vfs.supports('readdir')) return [...paths]
     return this.use(async () => {
       const manager = this.cacheManager
-      if (manager === null) return this.runGlob(paths, prefix, this.indexStore)
+      if (manager === null) return this.runGlob(paths, prefix, this.indexStore, access)
       return manager.withMutation(async () => {
         await this.ensureReady()
-        return this.runGlob(paths, prefix, manager.scopeIndexLocked(this.indexStore))
+        return this.runGlob(paths, prefix, manager.scopeIndexLocked(this.indexStore), access)
       })
     })
   }
@@ -357,6 +362,7 @@ export class MountEntry {
     paths: readonly PathSpec[],
     prefix: string,
     index: IndexCacheStore,
+    access?: SessionAccess,
   ): Promise<PathSpec[]> {
     const out: PathSpec[] = []
     for (const p of paths) {
@@ -370,14 +376,18 @@ export class MountEntry {
             rawPath: p.rawPath,
           })
         : p
-      out.push(...(await this.glob(spec, index)))
+      out.push(...(await this.glob(spec, index, access)))
     }
     return out
   }
 
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
-  glob(path: PathSpec, index?: IndexCacheStore): Promise<PathSpec[]> {
-    return resolveGlobOf(this.io)(this.vfs.accessor, [path], index)
+  glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
+    return resolveGlobOf({ ...this.io, ...(access === undefined ? {} : { access }) })(
+      this.vfs.accessor,
+      [path],
+      index,
+    )
   }
 
   /** Metadata access bound to this mount's ownership. */
@@ -543,11 +553,16 @@ export class MountEntry {
    * anywhere below its paths, and a copy only reads its source. Mirrors
    * Python's `require_writable`.
    */
-  requireWritable(name: string, path: PathSpec, values: readonly unknown[]): void {
+  requireWritable(
+    name: string,
+    path: PathSpec,
+    values: readonly unknown[],
+    access?: SessionAccess,
+  ): void {
     const mark = declared(this.vfs.constructor, name)
     if (mark === null || !WRITE_EFFECTS.includes(mark.effect)) return
     const others = values.filter((value): value is PathSpec => value instanceof PathSpec)
-    requirePathsWritable(
+    ;(access?.requireWritable ?? requirePathsWritable)(
       mark.effect === Effect.COPY ? others : [path, ...others],
       this.prefix,
       this.mode,
@@ -768,6 +783,7 @@ export class MountEntry {
     scope: PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    access?: SessionAccess,
   ): Promise<unknown> {
     const named = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
     const filetype =
@@ -775,7 +791,7 @@ export class MountEntry {
     const levels = this.callers(name, filetype)
     if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
     taken(name, kwargs)
-    this.requireWritable(name, scope, [...args, ...Object.values(kwargs)])
+    this.requireWritable(name, scope, [...args, ...Object.values(kwargs)], access)
     for (const call of levels) {
       const result = await call(scope, args, kwargs)
       if (result !== null && result !== undefined) return result
@@ -911,7 +927,7 @@ export class MountEntry {
       const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context)
       return this.inCommandScope(context, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
-          const refusal = this.readOnlyRefusal(cmdName, cmd, flags)
+          const refusal = this.readOnlyRefusal(cmdName, cmd, flags, context.access)
           if (refusal !== null) return [null, refusal]
           const result = await this.runHandler(cmdName, cmd, keyedPaths, texts, cmdOpts, context)
           if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
@@ -1030,13 +1046,19 @@ export class MountEntry {
     context: ExecContext,
   ): CommandOpts {
     return {
+      ...(context.admission === undefined ? {} : { admission: context.admission }),
+      ...(context.access === undefined ? {} : { access: context.access }),
       stdin: context.stdin ?? null,
       flags,
       mountPrefix: rstripSlash(this.prefix),
       command: cmdName,
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
-      io: dispatchedIo(this.io, context.dispatch),
+      io: {
+        ...dispatchedIo(this.io, context.dispatch),
+        ...(context.admission === undefined ? {} : { admission: context.admission }),
+        ...(context.access === undefined ? {} : { access: context.access }),
+      },
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),
@@ -1095,13 +1117,14 @@ export class MountEntry {
     cmdName: string,
     cmd: Command,
     flags: Record<string, FlagValue>,
+    access?: SessionAccess,
   ): IOResult | null {
     const infoOnly = flags.help === true || (flags.version === true && hasInjectedVersion(cmd.spec))
     if (
       cmd.write &&
       !cmd.pathGuarded &&
       !infoOnly &&
-      strongestModeUnder(this.prefix, this.mode) === MountMode.READ
+      (access?.strongestMode ?? strongestModeUnder)(this.prefix, this.mode) === MountMode.READ
     ) {
       return new IOResult({
         exitCode: 1,
@@ -1213,6 +1236,7 @@ export class MountEntry {
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    access?: SessionAccess,
   ): Promise<unknown> {
     return this.use(async (): Promise<unknown> => {
       const mountPrefix = rstripSlash(this.prefix)
@@ -1234,7 +1258,7 @@ export class MountEntry {
         () =>
           this.runWithWriteRevisions(async () => {
             const result = await runWithTimeout(
-              this.callKeyed(name, scope, args, effectiveKwargs),
+              this.callKeyed(name, scope, args, effectiveKwargs, access),
               opTimeout,
               name,
             )

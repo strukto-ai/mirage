@@ -56,6 +56,7 @@ function parseJobs(raw: string): number {
 
 function parseArgs(): {
   targets: string[]
+  excluded: string[]
   emit: string | undefined
   facet: string | undefined
   strict: boolean
@@ -63,6 +64,7 @@ function parseArgs(): {
   targetJobs: number
 } {
   const targets: string[] = []
+  const excluded: string[] = []
   let emit: string | undefined
   let facet: string | undefined
   let strict = false
@@ -77,7 +79,11 @@ function parseArgs(): {
     else if (argv[i] === '--facet' && i + 1 < argv.length) facet = argv[++i]
     else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
     else if (argv[i] === '--strict') strict = true
-    else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
+    else if (argv[i] === '--exclude-case') {
+      const id = argv[++i]
+      if (id === undefined || id.startsWith('--')) throw new Error('--exclude-case requires an ID')
+      excluded.push(id)
+    } else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
     else if (argv[i] === '--target-jobs' || argv[i].startsWith('--target-jobs=')) {
       // Both spellings, and a missing value refused rather than ignored,
       // because argparse takes `--target-jobs=4` and refuses the empty form
@@ -92,7 +98,7 @@ function parseArgs(): {
       )
     }
   }
-  return { targets, emit, facet, strict, allowSkip, targetJobs }
+  return { targets, excluded, emit, facet, strict, allowSkip, targetJobs }
 }
 
 /**
@@ -328,9 +334,12 @@ async function main(): Promise<void> {
   const root = integRoot()
   const manifest = loadTargets(root)
   const services = loadServices(root)
-  const cases = loadCases(root)
+  const allCases = loadCases(root)
 
-  const { targets, emit: emitPath, facet, strict, allowSkip, targetJobs } = parseArgs()
+  const { targets, excluded, emit: emitPath, facet, strict, allowSkip, targetJobs } = parseArgs()
+  const known = new Set(allCases.map((c) => c.id))
+  for (const id of excluded) if (!known.has(id)) throw new Error(`unknown excluded case: ${id}`)
+  const cases = allCases.filter((c) => !excluded.includes(c.id))
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]

@@ -12,33 +12,58 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export class KeyLock {
-  private readonly tails = new Map<string, Promise<void>>()
+import { hasAborted, makeAbortError } from '../utils/abort.ts'
 
-  async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.tails.get(key) ?? Promise.resolve()
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const tail = prev.then(() => gate)
-    this.tails.set(key, tail)
+interface Waiter {
+  enter: () => void
+}
+
+export class KeyLock {
+  private readonly queues = new Map<string, Set<Waiter>>()
+
+  async withLock<T>(key: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (hasAborted(signal)) throw makeAbortError(signal)
+    let queue = this.queues.get(key)
+    if (queue === undefined) {
+      queue = new Set<Waiter>()
+      this.queues.set(key, queue)
+    } else {
+      const waiting = queue
+      await new Promise<void>((resolve, reject) => {
+        const waiter: Waiter = {
+          enter: () => {
+            signal?.removeEventListener('abort', onAbort)
+            resolve()
+          },
+        }
+        const onAbort = (): void => {
+          waiting.delete(waiter)
+          reject(makeAbortError(signal))
+        }
+        waiting.add(waiter)
+        signal?.addEventListener('abort', onAbort, { once: true })
+      })
+    }
     try {
-      await prev
+      // Admission may have transferred immediately before cancellation.
+      if (hasAborted(signal)) throw makeAbortError(signal)
       return await fn()
     } finally {
-      release()
-      if (this.tails.get(key) === tail) {
-        this.tails.delete(key)
+      const next = queue.values().next().value
+      if (next !== undefined) {
+        queue.delete(next)
+        next.enter()
+      } else if (this.queues.get(key) === queue) {
+        this.queues.delete(key)
       }
     }
   }
 
   discard(key: string): void {
-    this.tails.delete(key)
+    this.queues.delete(key)
   }
 
   clear(): void {
-    this.tails.clear()
+    this.queues.clear()
   }
 }

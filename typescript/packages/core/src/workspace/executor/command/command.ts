@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../../expand/types.ts'
+import { getAdmission } from '../../../context/session_context.ts'
+import type { EntryGate } from '../../../policy/types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { isBuiltinGrammar, registeredSpec } from '../../../commands/spec/builtins.ts'
 import { STANDARD_AFTER_SCAN } from '../../../commands/spec/constants.ts'
@@ -57,7 +60,7 @@ import {
   type FindExpr,
 } from '../../../commands/builtin/find_parse.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
-import type { ExecuteFn } from '../../expand/node.ts'
+
 import { FindParseError } from '../../../commands/errors.ts'
 import { withDispatchRuleGuard } from '../../../commands/builtin/generic_bind/adapter.ts'
 import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
@@ -194,6 +197,7 @@ export async function handleCommand(
   // Where a function body writes its statements as they finish.
   sink?: JobConsole,
   parser?: ParseScope,
+  admission: EntryGate | null = getAdmission(),
 ): Promise<Result> {
   const session = context.session
   if (parts.length === 0) {
@@ -288,7 +292,7 @@ export async function handleCommand(
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path) => pathStat(dispatch, path, null),
-          ns: namespaceViewOf(registry, namespace ?? null, dispatch, session),
+          ns: namespaceViewOf(registry, namespace ?? null, dispatch, session, admission),
           sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
@@ -312,7 +316,7 @@ export async function handleCommand(
   }
 
   // Every op the command issues from here carries its gate to the dispatcher.
-  dispatch = withDispatchRuleGuard(dispatch)
+  dispatch = withDispatchRuleGuard(dispatch, admission)
 
   if (cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
@@ -557,6 +561,7 @@ export async function handleCommand(
       )
     }
     const runCtx: RunOnMountCtx = {
+      admission,
       ...(signal !== undefined ? { signal } : {}),
       registry,
       context,
@@ -568,7 +573,7 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
-    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
+    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission)
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
@@ -734,7 +739,7 @@ export async function handleCommand(
       ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
-  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch, session)
+  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission)
   const singleStat: StatPath = (path) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
@@ -798,6 +803,7 @@ export async function handleCommand(
   }
 
   const runCtx: RunOnMountCtx = {
+    admission,
     ...(signal !== undefined ? { signal } : {}),
     registry,
     context,

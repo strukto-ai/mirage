@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { processInput, ProcessSubError } from './process_sub.ts'
+import { diagnosticStderr } from './diagnostics.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import { type EvaluationContext, childContext } from '../evaluation.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 
@@ -55,18 +58,10 @@ import {
   getParts,
   getUnsetArgs,
   getWhileParts,
-  getProcessSubBody,
-  getProcessSubDirection,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
-import {
-  NodeType as NT,
-  type PipelineStages,
-  ProcessSubDirection,
-  Redirect,
-  RedirectKind,
-} from '../../shell/types.ts'
+import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import {
   runWithRedirectPaths,
@@ -75,7 +70,7 @@ import {
   type RedirectRunner,
 } from '../../context/session_context.ts'
 import { expandRedirect } from '../expand/redirects.ts'
-import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
+import { expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
@@ -100,7 +95,7 @@ import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { DevVFS } from '../../vfs/dev/dev.ts'
+import type { DevVFS } from '../../vfs/dev/dev.ts'
 
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
@@ -989,61 +984,6 @@ export async function executeNode(
     context.frame.processSub = previous
     for (const [dev, path, allocation] of held) dev.releaseInput(path, allocation)
   }
-}
-
-/** A node-local refusal; carry earlier output until executeNode catches it. */
-class ProcessSubError extends ExitSignal {
-  constructor() {
-    super(2, encodeText('mirage: unsupported: process substitution >(...)\n'))
-  }
-}
-
-/**
- * The hook that opens a node's input process substitutions. Each `<(...)`
- * runs as its word expands, in order with the word's other expansions and
- * through the evaluator a `$(...)` there uses, and reads back as a buffered
- * device file rather than a host pipe, held until the node ends; a nested
- * node opens its own, so each lasts as long as the command naming it. An
- * output `>(...)` is refused: the node naming it fails with status 2.
- * Mirrors Python's `_process_input`.
- */
-function processInput(
-  context: EvaluationContext,
-  registry: MountRegistry,
-  held: (readonly [DevVFS, string, number])[],
-): NonNullable<EvaluationContext['frame']['processSub']> {
-  return async (node, executeLine) => {
-    if (getProcessSubDirection(node) === ProcessSubDirection.OUTPUT) throw new ProcessSubError()
-    const [dev] = registry.resolve('/dev/null')
-    if (!(dev instanceof DevVFS)) throw new Error('missing device filesystem')
-    const [path, allocation] = dev.allocateInput()
-    held.push([dev, path, allocation])
-    const inner = getProcessSubBody(node)
-    if (inner !== '') {
-      const io = await executeLine(inner)
-      dev.setInput(path, allocation, await materialize(io.stdout))
-      context.frame.diagnostics.push(await materialize(io.stderr))
-    }
-    return path
-  }
-}
-
-function diagnosticStderr(node: TSNodeLike, context: EvaluationContext): Uint8Array {
-  const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
-  const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
-    ? head
-    : ''
-  const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
-  const parts = context.frame.diagnostics.map((message) =>
-    typeof message === 'string' ? encodeText(prefix + message + '\n') : message,
-  )
-  const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
-  let offset = 0
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-  return result
 }
 
 /**

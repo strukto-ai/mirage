@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../../view/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { hasGlob, unmarkGlobs } from '../../../utils/glob_walk.ts'
@@ -32,11 +33,12 @@ export function relativeSpec(
   word: string,
   registry: MountRegistry,
   cwd: string,
+  access?: SessionAccess,
 ): string | PathSpec {
   const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
   if (registry.tryMountFor(unmarkGlobs(path)) === null) return word
   const lastSlash = path.lastIndexOf('/')
-  if (hasGlob(word)) {
+  if (hasGlob(word, access)) {
     return new PathSpec({
       vfsPath: stripSlash(path),
       virtual: path,

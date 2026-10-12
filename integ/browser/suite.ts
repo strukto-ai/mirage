@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
@@ -111,6 +112,77 @@ function battery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  [
+    'suspended sessions retain their permissions, umask and glob settings',
+    async (ws) => {
+      const loose = ws.createSession('loose')
+      const tight = ws.createSession('tight', {
+        profile: parseSessionProfile({
+          mounts: { '/data': 'r' },
+          paths: { hide: ['/data/private'] },
+        }),
+      })
+      loose.umask = 0o022
+      loose.shopts.dotglob = true
+      loose.shopts.extglob = true
+      tight.umask = 0o077
+      let releaseLoose!: () => void
+      let releaseTight!: () => void
+      let enterBoth!: () => void
+      const looseHeld = new Promise<void>((resolve) => {
+        releaseLoose = resolve
+      })
+      const tightHeld = new Promise<void>((resolve) => {
+        releaseTight = resolve
+      })
+      const bothEntered = new Promise<void>((resolve) => {
+        enterBoth = resolve
+      })
+      let entered = 0
+      ws.registerCli(
+        'pause',
+        new CLI({
+          spec: new CommandSpec({ name: 'pause' }),
+          handlers: {
+            '': new CLIHandler({
+              fn: async (inv) => {
+                if (++entered === 2) enterBoth()
+                await (inv.env.LABEL === 'loose' ? looseHeld : tightHeld)
+                return [null, new IOResult()]
+              },
+            }),
+          },
+        }),
+      )
+      try {
+        for (const name of ['a', 'b', '.hidden', 'private'])
+          await ws.vfs.write(`/data/${name}`, name)
+        const wide = shell(
+          ws,
+          'pause; mkdir /data/new; stat -c %a /data/new; echo /data/*; echo /data/@(a|b)',
+          { sessionId: loose.sessionId, env: { LABEL: 'loose' } },
+        )
+        const narrow = shell(ws, 'pause; echo /data/*; mkdir /data/denied', {
+          sessionId: tight.sessionId,
+        })
+        await bothEntered
+        releaseLoose()
+        const output = await wide
+        releaseTight()
+        const denied = await narrow
+        equal(output, [
+          0,
+          '755\n/data/.hidden /data/a /data/b /data/new /data/private\n/data/a /data/b\n',
+          '',
+        ])
+        equal(denied.slice(0, 2), [1, '/data/a /data/b /data/new\n'])
+        equal(denied[2].includes('Read-only file system'), true)
+      } finally {
+        releaseLoose()
+        releaseTight()
+      }
+    },
+  ],
   [
     'bundled computation workers execute searches, jq, sort and diff',
     async (ws) => {

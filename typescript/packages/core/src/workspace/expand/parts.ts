@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from './types.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -25,7 +27,7 @@ import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES } from './constants.ts'
 import { splitFields } from './fields.ts'
-import { expandChunks, type ExecuteFn } from './node.ts'
+import { expandChunks } from './node.ts'
 import type { Chunk } from './types.ts'
 import { ifsValue } from './variable.ts'
 import { unescapeUnquoted } from '../../shell/escapes.ts'
@@ -123,5 +125,5 @@ export async function expandAndClassify(
   // '/data/*.txt'` iterates once over the name as typed, like bash,
   // while `for f in '/data/*'?.txt` still globs on the `?`.
   const expanded = await expandWords(words, context, executeFn, callStack, view)
-  return expanded.map((w) => classifyWord(w, registry, cwd))
+  return expanded.map((w) => classifyWord(w, registry, cwd, sessionAccess(context.session)))
 }

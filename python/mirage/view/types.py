@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import FileStat, PathSpec, Visibility
+from mirage.types import FileStat, MountMode, PathSpec, Visibility
 
 StatOverlay = Callable[[str, FileStat], FileStat]
 # Stat one virtual path through the workspace rather than one backend, so
@@ -355,3 +355,19 @@ class NamespaceView:
 SessionBind = Callable[
     [str | None, Callable[[], Awaitable[Any]]], Awaitable[Any]
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class SessionAccess:
+    """The calling session's read-only access and shell settings."""
+
+    session_id: str
+    visibility: Visibility | None
+    umask: int
+    dotglob: bool
+    extglob: bool
+    path_mode: Callable[[str, str, MountMode], MountMode]
+    strongest_mode: Callable[[str, MountMode], MountMode]
+    require_writable: Callable[
+        [Sequence[PathSpec], str, MountMode, bool], None
+    ]

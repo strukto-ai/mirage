@@ -31,20 +31,24 @@ from mirage.utils.fnmatch import (
 )
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
-from mirage.view.types import ChildMounts, LinkTargetStat
+from mirage.view.types import ChildMounts, LinkTargetStat, SessionAccess
 
 logger = logging.getLogger(__name__)
 
 GLOB_CHARS = ("*", "?", "[")
 
 
-def _meta_index(pattern: str) -> int:
+def _meta_index(pattern: str, access: SessionAccess | None = None) -> int:
     first = -1
     for ch in GLOB_CHARS:
         idx = pattern.find(ch)
         if idx != -1 and (first == -1 or idx < first):
             first = idx
-    opener = EXTGLOB_RE.search(pattern) if extglob_active() else None
+    opener = (
+        EXTGLOB_RE.search(pattern)
+        if (access.extglob if access is not None else extglob_active())
+        else None
+    )
     if opener is not None and (first == -1 or opener.start() < first):
         first = opener.start()
     return first
@@ -77,7 +81,10 @@ def has_glob_prefix(pattern: str) -> bool:
     return bool(glob_prefix(pattern))
 
 
-def glob_prefix(pattern: str | None) -> str:
+def glob_prefix(
+    pattern: str | None,
+    access: SessionAccess | None = None,
+) -> str:
     """The literal text a glob starts with, before its first metacharacter.
 
     A quoted glob character travels under a private mark and stands for
@@ -93,7 +100,7 @@ def glob_prefix(pattern: str | None) -> str:
     """
     if not pattern:
         return ""
-    meta_index = _meta_index(pattern)
+    meta_index = _meta_index(pattern, access)
     if meta_index == -1:
         return ""
     return unmark_globs(pattern[:meta_index])
@@ -213,14 +220,18 @@ _PATTERN_TABLE = str.maketrans(
 DEFAULT_MAX_GLOB_MATCHES = 10000
 
 
-def has_glob(segment: str) -> bool:
+def has_glob(
+    segment: str,
+    access: SessionAccess | None = None,
+) -> bool:
     """Whether a path segment contains shell glob characters.
 
     Args:
         segment (str): one path component.
     """
     return any(ch in segment for ch in GLOB_CHARS) or (
-        extglob_active() and EXTGLOB_RE.search(segment) is not None
+        (access.extglob if access is not None else extglob_active())
+        and EXTGLOB_RE.search(segment) is not None
     )
 
 
@@ -365,16 +376,28 @@ def is_word_shaped(p: PathSpec) -> bool:
     return p.virtual.rstrip("/") != p.directory.rstrip("/")
 
 
-def glob_parts(pattern: str) -> list[str]:
+def glob_parts(
+    pattern: str,
+    access: SessionAccess | None = None,
+) -> list[str]:
     """Path components under the active shell's pattern grammar.
 
     Args:
         pattern (str): pathname with quote marks still intact.
     """
-    return pattern_parts(pattern) if extglob_active() else pattern.split("/")
+    return (
+        pattern_parts(pattern)
+        if (access.extglob if access is not None else extglob_active())
+        else pattern.split("/")
+    )
 
 
-def spell_match(raw: str, virtual: str, walked: int) -> str:
+def spell_match(
+    raw: str,
+    virtual: str,
+    walked: int,
+    access: SessionAccess | None = None,
+) -> str:
     """Spell a match the way bash expansion would.
 
     Bash rewrites only the glob segments of the typed word; everything
@@ -389,12 +412,16 @@ def spell_match(raw: str, virtual: str, walked: int) -> str:
         virtual (str): one match's absolute virtual path.
         walked (int): segment count from the first glob segment on.
     """
-    head = glob_parts(raw.rstrip("/"))[:-walked]
+    head = glob_parts(raw.rstrip("/"), access)[:-walked]
     tail = virtual.rstrip("/").split("/")[-walked:]
     return "/".join([*(unmark_globs(part) for part in head), *tail])
 
 
-def glob_name_matches(name: str, pattern: str) -> bool:
+def glob_name_matches(
+    name: str,
+    pattern: str,
+    access: SessionAccess | None = None,
+) -> bool:
     """Whether one directory entry answers a pathname-expansion segment.
 
     `fnmatch` plus bash's leading-dot rule: a name that starts with `.`
@@ -409,7 +436,12 @@ def glob_name_matches(name: str, pattern: str) -> bool:
         pattern (str): the segment, marks already resolved.
     """
     return fnmatch(
-        name, pattern, extglob=extglob_active(), period=not dotglob_active()
+        name,
+        pattern,
+        extglob=(access.extglob if access is not None else extglob_active()),
+        period=not (
+            access.dotglob if access is not None else dotglob_active()
+        ),
     )
 
 
@@ -419,6 +451,7 @@ async def expand_pattern(
     path: PathSpec,
     index: IndexCacheStore,
     children: ChildMounts | None = None,
+    access: SessionAccess | None = None,
 ) -> list[PathSpec]:
     """Expand a glob PathSpec segment-by-segment via readdir.
 
@@ -443,14 +476,14 @@ async def expand_pattern(
             is the union ``merge_readdir`` applies to a listing.
     """
     prefix = path.virtual[: len(path.virtual.rstrip("/")) - len(path.vfs_path)]
-    segments = glob_parts(path.vfs_path) if path.vfs_path else []
+    segments = glob_parts(path.vfs_path, access) if path.vfs_path else []
     # Two spec shapes reach resolvers: a full pattern path (classify), where
     # the pattern is already the last segment, and a directory-shaped spec
     # (PathSpec.dir), where the pattern applies to the directory's entries.
     if path.pattern and (not segments or segments[-1] != path.pattern):
         segments = [*segments, path.pattern]
     first = next(
-        (i for i, seg in enumerate(segments) if has_glob(seg)),
+        (i for i, seg in enumerate(segments) if has_glob(seg, access)),
         len(segments) - 1,
     )
     # The head above the first glob segment is a real directory, so a
@@ -473,7 +506,7 @@ async def expand_pattern(
                 virtual=parent,
                 directory=parent,
                 vfs_path=rekey(path.virtual, path.vfs_path, parent),
-                pattern=seg if has_glob(seg) else None,
+                pattern=seg if has_glob(seg, access) else None,
             )
             try:
                 entries = await readdir(accessor, spec, index)
@@ -484,7 +517,9 @@ async def expand_pattern(
             # gdrive, dropbox); the marker is not part of the name.
             for e in entries:
                 entry = e.rstrip("/")
-                if glob_name_matches(entry.rsplit("/", 1)[-1], pattern):
+                if glob_name_matches(
+                    entry.rsplit("/", 1)[-1], pattern, access
+                ):
                     next_level.append(entry)
             if children is not None:
                 # A nested mount root or a link is a real child of this
@@ -493,7 +528,7 @@ async def expand_pattern(
                 next_level.extend(
                     f"{base_dir}/{name}"
                     for name in children(f"{base_dir}/")
-                    if glob_name_matches(name, pattern)
+                    if glob_name_matches(name, pattern, access)
                 )
         # bash sorts a pathname expansion, and the two sources are
         # enumerated separately, so the union is ordered here.
@@ -512,7 +547,9 @@ async def expand_pattern(
     walked = len(segments) - first
     raw = path.raw_path
     return [
-        dataclasses.replace(m, raw_path=spell_match(raw, m.virtual, walked))
+        dataclasses.replace(
+            m, raw_path=spell_match(raw, m.virtual, walked, access)
+        )
         for m in matches
     ]
 
@@ -542,6 +579,7 @@ def make_resolve_glob(
     children: ChildMounts | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
+    access: SessionAccess | None = None,
 ) -> ResolveGlobFn:
     """Build a resolve_glob generic over a backend's readdir.
 
@@ -573,6 +611,7 @@ def make_resolve_glob(
             children,
             stat,
             target_stat,
+            access,
         )
 
     return resolve_glob
@@ -632,6 +671,7 @@ async def resolve_glob_with(
     children: ChildMounts | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
+    access: SessionAccess | None = None,
 ) -> list[PathSpec]:
     """Shared resolve_glob loop over a backend's readdir.
 
@@ -666,7 +706,7 @@ async def resolve_glob_with(
             it a trailing slash keeps every owed name.
     """
     result: list[PathSpec] = []
-    vis = session_visibility()
+    vis = access.visibility if access is not None else session_visibility()
     for p in paths:
         if p.resolved:
             result.append(p)
@@ -692,7 +732,7 @@ async def resolve_glob_with(
             matched = [
                 m
                 for m in await expand_pattern(
-                    readdir, accessor, word, index, children
+                    readdir, accessor, word, index, children, access
                 )
                 if path_visible(vis, m.virtual)
             ]

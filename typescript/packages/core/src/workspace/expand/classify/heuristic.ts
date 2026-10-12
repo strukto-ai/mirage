@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../../view/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { extglobActive } from '../../../context/session_context.ts'
 import { patternShape } from '../../../utils/fnmatch.ts'
@@ -33,12 +34,14 @@ export function classifyWord(
   word: string,
   registry: MountRegistry,
   cwd: string,
+  access?: SessionAccess,
 ): string | PathSpec {
   // Whether the word globs is read off the marks, but whether it looks
   // like a path at all is a question about the name itself, so the shape
   // tests below read the literal spelling.
-  const wordHasGlob = hasGlob(word)
-  const shape = wordHasGlob && extglobActive() ? patternShape(word) : unmarkGlobs(word)
+  const wordHasGlob = hasGlob(word, access)
+  const shape =
+    wordHasGlob && (access?.extglob ?? extglobActive()) ? patternShape(word) : unmarkGlobs(word)
 
   if (word.startsWith('/')) {
     // A quoted character names the mount literally (`'/team+'/*`).
@@ -94,11 +97,11 @@ export function classifyWord(
   // shell syntax beside the glob (`x=*`) is an argument, not a path.
   if (wordHasGlob && (word.includes('/') || !shape.startsWith('.'))) {
     if (NON_PATH_CHAR.test(shape)) return word
-    return relativeSpec(word, registry, cwd)
+    return relativeSpec(word, registry, cwd, access)
   }
 
   if (!wordHasGlob && word.includes('/') && RELATIVE_PATH.test(shape)) {
-    return relativeSpec(word, registry, cwd)
+    return relativeSpec(word, registry, cwd, access)
   }
 
   return word

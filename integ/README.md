@@ -380,6 +380,30 @@ suite checks that a cancelled tree keeps its programs until a blocked leaf
 settles. The browser host checks also cover cancellation and workspace
 shutdown.
 
+## Integration-only shell coverage
+
+After building core/node, run `python integ/shell_coverage.py` with the Python
+project environment. It runs the shared RAM battery separately under coverage.py
+and c8, never imports unit-test coverage, counts unexecuted source files, and
+fails on a failed battery, an empty report, or either missed floor.
+`integ/shell_coverage.json` defines the common shell/executor source scope and
+independent statement/branch floors. Its documented case exclusion omits the
+300,000-iteration stress test from measurement only; the regular battery still
+runs it. Both runners reject an unknown excluded ID. `--measure` prints current coverage without
+enforcing floors; CI always enforces them. Reports live in
+`.cache/integ-shell-coverage/` and are uploaded by `integ-shell-coverage`, which
+is required by `integ-gate` and uses the existing core/TypeScript path filters.
+
+The real Chrome suite additionally suspends two sessions with opposite mount
+permissions, hidden paths, umasks and glob options. Its explicit session access
+is also exercised by the fallback-context unit tests. Python retains native
+ContextVar isolation and carries the same access shape into command options.
+
+`INT`, `TERM` and `DEBUG` traps are outside this consolidation: delivering host
+signals and defining per-command debug ordering require their own shell
+semantics and conformance cases. The existing `EXIT`, `ERR` and `RETURN` traps
+remain in the shared battery.
+
 ## Running locally
 
 The `unix/cp` and `unix/mv` cases use GNU coreutils 9.7 as their transfer

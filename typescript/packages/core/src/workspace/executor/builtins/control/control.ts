@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
@@ -23,7 +24,6 @@ import { builtinError, isCountWord, numericOperands, statusOf } from '../shared.
 import type { BuiltinCall, Result } from '../types.ts'
 import { BreakSignal, ContinueSignal } from '../../control.ts'
 import { runExitTrap } from '../../traps.ts'
-import type { ExecuteFn } from '../../../expand/node.ts'
 
 /** `true`: succeed and print nothing. */
 export function handleTrue(): Result {

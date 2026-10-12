@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from './types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -21,7 +22,7 @@ import { escapeGlob } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 
 import { homeDir } from '../session/shell_dirs.ts'
-import { expandNode, type ExecuteFn } from './node.ts'
+import { expandNode } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
 /** An unquoted word as a pattern: globs live, backslash escapes. */

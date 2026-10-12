@@ -407,6 +407,7 @@ async def main() -> None:
     parser.add_argument("--facet", dest="facet")
     parser.add_argument("--emit", dest="emit")
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--exclude-case", action="append", default=[])
     # A facet can be split across CI jobs (core's databases and vector
     # stores run in integ-database/integ-data), so a job names the
     # services it knowingly does not provision. Anything skipping outside
@@ -427,6 +428,11 @@ async def main() -> None:
     manifest = harness.load_targets(root)
     services = harness.load_services(root)
     cases = harness.load_cases(root)
+    excluded = set(args.exclude_case)
+    unknown = excluded - {case["id"] for case in cases}
+    if unknown:
+        parser.error(f"unknown excluded cases: {sorted(unknown)}")
+    cases = [case for case in cases if case["id"] not in excluded]
 
     # Targets are grouped into facets so CI can run one backend family per job;
     # a target with no facet belongs to "core", which the shared battery runs.

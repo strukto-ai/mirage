@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../view/types.ts'
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { ChildMounts } from '../view/types.ts'
@@ -73,14 +74,14 @@ export function hasGlobPrefix(pattern: string): boolean {
  * character literally, so the marks are restored here: `'*'ab*` asks for
  * names starting with a real star.
  */
-export function globPrefix(pattern: string | null | undefined): string {
+export function globPrefix(pattern: string | null | undefined, access?: SessionAccess): string {
   if (!pattern) return ''
   let metaIndex = -1
   for (const ch of GLOB_CHARS) {
     const idx = pattern.indexOf(ch)
     if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
   }
-  const opener = extglobActive() ? pattern.search(EXTGLOB_RE) : -1
+  const opener = (access?.extglob ?? extglobActive()) ? pattern.search(EXTGLOB_RE) : -1
   if (opener !== -1 && (metaIndex === -1 || opener < metaIndex)) metaIndex = opener
   if (metaIndex === -1) return ''
   return unmarkGlobs(pattern.slice(0, metaIndex))
@@ -184,9 +185,10 @@ const GLOB_MARK_RE = /[\uFDD0-\uFDD8]/g
 
 export const DEFAULT_MAX_GLOB_MATCHES = 10000
 
-export function hasGlob(segment: string): boolean {
+export function hasGlob(segment: string, access?: SessionAccess): boolean {
   return (
-    GLOB_CHARS.some((ch) => segment.includes(ch)) || (extglobActive() && EXTGLOB_RE.test(segment))
+    GLOB_CHARS.some((ch) => segment.includes(ch)) ||
+    ((access?.extglob ?? extglobActive()) && EXTGLOB_RE.test(segment))
   )
 }
 
@@ -305,8 +307,8 @@ export function isWordShaped(p: PathSpec): boolean {
 }
 
 /** Path components under the active shell's pattern grammar. */
-export function globParts(pattern: string): string[] {
-  return extglobActive() ? patternParts(pattern) : pattern.split('/')
+export function globParts(pattern: string, access?: SessionAccess): string[] {
+  return (access?.extglob ?? extglobActive()) ? patternParts(pattern) : pattern.split('/')
 }
 
 // Spell a match the way bash expansion would. Bash rewrites only the glob
@@ -315,8 +317,13 @@ export function globParts(pattern: string): string[] {
 // tail has the same segment count in the typed word and in the match's
 // virtual path, so the spelling is the typed head plus the match's last
 // `walked` segments.
-export function spellMatch(raw: string, virtual: string, walked: number): string {
-  const head = globParts(rstripSlash(raw)).slice(0, -walked)
+export function spellMatch(
+  raw: string,
+  virtual: string,
+  walked: number,
+  access?: SessionAccess,
+): string {
+  const head = globParts(rstripSlash(raw), access).slice(0, -walked)
   const tail = rstripSlash(virtual).split('/').slice(-walked)
   return [...head.map(unmarkGlobs), ...tail].join('/')
 }
@@ -389,9 +396,10 @@ export async function resolveGlobWith<A, I>(
   children?: ChildMounts,
   stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
   targetStat?: TargetStat,
+  access?: SessionAccess,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
-  const vis = sessionVisibility()
+  const vis = access === undefined ? sessionVisibility() : access.visibility
   for (const p of paths) {
     if (p.resolved) {
       result.push(p)
@@ -421,8 +429,8 @@ export async function resolveGlobWith<A, I>(
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
-      let matched = (await expandPattern(readdir, accessor, word, index, children)).filter((m) =>
-        pathVisible(vis, m.virtual),
+      let matched = (await expandPattern(readdir, accessor, word, index, children, access)).filter(
+        (m) => pathVisible(vis, m.virtual),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []
@@ -477,8 +485,13 @@ export async function resolveGlobWith<A, I>(
  * Pathname expansion's rule alone; `find -name` and `case` match through
  * `fnmatch` directly.
  */
-export function globNameMatches(name: string, pattern: string): boolean {
-  return fnmatch(name, pattern, extglobActive(), !dotglobActive())
+export function globNameMatches(name: string, pattern: string, access?: SessionAccess): boolean {
+  return fnmatch(
+    name,
+    pattern,
+    access?.extglob ?? extglobActive(),
+    !(access?.dotglob ?? dotglobActive()),
+  )
 }
 
 /**
@@ -497,16 +510,17 @@ export async function expandPattern<A, I>(
   path: PathSpec,
   index?: I,
   children?: ChildMounts,
+  access?: SessionAccess,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
-  const segments = path.vfsPath === '' ? [] : globParts(path.vfsPath)
+  const segments = path.vfsPath === '' ? [] : globParts(path.vfsPath, access)
   // Two spec shapes reach resolvers: a full pattern path (classify), where
   // the pattern is already the last segment, and a directory-shaped spec
   // (PathSpec.dir), where the pattern applies to the directory's entries.
   if (path.pattern !== null && path.pattern !== '' && segments.at(-1) !== path.pattern) {
     segments.push(path.pattern)
   }
-  let first = segments.findIndex((seg) => hasGlob(seg))
+  let first = segments.findIndex((seg) => hasGlob(seg, access))
   if (first < 0) first = segments.length - 1
   // The head above the first glob segment is a real directory, so a glob
   // character quoted inside it is part of the name to list.
@@ -526,7 +540,7 @@ export async function expandPattern<A, I>(
         virtual: parent,
         directory: parent,
         vfsPath: rekey(path.virtual, path.vfsPath, parent),
-        pattern: hasGlob(seg) ? seg : null,
+        pattern: hasGlob(seg, access) ? seg : null,
       })
       let entries: string[]
       try {
@@ -539,14 +553,14 @@ export async function expandPattern<A, I>(
       // dropbox); the marker is not part of the name.
       for (const e of entries) {
         const entry = rstripSlash(e)
-        if (globNameMatches(entry.split('/').pop() ?? '', matcher)) nextLevel.push(entry)
+        if (globNameMatches(entry.split('/').pop() ?? '', matcher, access)) nextLevel.push(entry)
       }
       if (children !== undefined) {
         // A nested mount root or a link is a real child of this parent
         // whether or not the backend could list it.
         const baseDir = rstripSlash(parent)
         for (const name of children(`${baseDir}/`)) {
-          if (globNameMatches(name, matcher)) nextLevel.push(`${baseDir}/${name}`)
+          if (globNameMatches(name, matcher, access)) nextLevel.push(`${baseDir}/${name}`)
         }
       }
     }
@@ -570,7 +584,7 @@ export async function expandPattern<A, I>(
         vfsPath: m.vfsPath,
         pattern: m.pattern,
         resolved: m.resolved,
-        rawPath: spellMatch(raw, m.virtual, walked),
+        rawPath: spellMatch(raw, m.virtual, walked, access),
       }),
   )
 }
@@ -581,7 +595,18 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
   children?: ChildMounts,
   stat?: StatOp<A>,
   targetStat?: TargetStat,
+  access?: SessionAccess,
 ): ResolveGlobOp<A> {
   return async (accessor, paths, index) =>
-    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children, stat, targetStat)
+    resolveGlobWith(
+      readdir,
+      accessor,
+      paths,
+      index,
+      maxGlobMatches,
+      children,
+      stat,
+      targetStat,
+      access,
+    )
 }

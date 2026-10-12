@@ -15,7 +15,7 @@
 import { destKind } from '../../../../commands/builtin/generic/cp.ts'
 import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.ts'
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
-import type { FileStat } from '../../../../types.ts'
+import type { Visibility, FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
@@ -73,8 +73,8 @@ export function followPaths(
   items: (string | PathSpec)[],
   followLast = true,
   slashFollows = true,
+  vis: Visibility | null = sessionVisibility(),
 ): (string | PathSpec)[] {
-  const vis = sessionVisibility()
   const out: (string | PathSpec)[] = []
   for (const item of items) {
     // A path the line's session cannot see stays as typed, so the op that

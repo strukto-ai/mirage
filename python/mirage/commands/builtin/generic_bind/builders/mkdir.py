@@ -77,7 +77,9 @@ async def mkdir(
         # parents made by `-p` keep that default (GNU gives them
         # `u+wx` on top of the mask, which the one backend op cannot
         # tell apart from the named directory).
-        umask = session_umask()
+        umask = (
+            opts.access.umask if opts.access is not None else session_umask()
+        )
         if umask != DEFAULT_UMASK:
             mode = 0o777 & ~umask
     mkdir_fn = require_op(ops, Operation.MKDIR)

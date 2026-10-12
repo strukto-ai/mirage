@@ -14,11 +14,11 @@
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
@@ -41,7 +41,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
@@ -61,8 +61,6 @@ from mirage.shell.helpers import (
     get_negated_command,
     get_parts,
     get_pipeline_stages,
-    get_process_sub_body,
-    get_process_sub_direction,
     get_redirects,
     get_text,
     get_unset_args,
@@ -73,10 +71,10 @@ from mirage.shell.helpers import (
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
 from mirage.shell.parse.names import literal_text
+from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
     PipelineStages,
-    ProcessSubDirection,
     Redirect,
     RedirectKind,
     TSNodeLike,
@@ -124,13 +122,16 @@ from mirage.workspace.expand import (
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.pattern import expand_pattern
+from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.lookup.constants import BASH_BUILTINS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
+from mirage.workspace.node.diagnostics import diagnostic_stderr
 from mirage.workspace.node.occurrence import defined_at
+from mirage.workspace.node.process_sub import ProcessSubError, process_input
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (
     expand_double_bracket,
@@ -147,7 +148,7 @@ async def _eval_cfor_expr(
     exprs: list[Any],
     default: int,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None = None,
 ) -> int:
@@ -188,7 +189,7 @@ async def _eval_cfor_expr(
 async def _slot_text(
     exprs: list[Any],
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> str:
@@ -250,18 +251,18 @@ STREAMING_KINDS = frozenset(
 async def _recurse_reassociated(
     recurse: Callable[..., Any],
     dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
-    redirects: list[Any],
+    redirects: list[Redirect],
     processes: ProcessSupervisor | None,
-    right: Any,
-    node: Any,
+    right: TSNodeLike,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Recurse wrapper for a re-associated trailing redirect.
 
     Runs the list's right operand under the hoisted redirects, bound by
@@ -311,18 +312,18 @@ async def _recurse_reassociated(
 async def _recurse_lifted(
     recurse: Callable[..., Any],
     dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
     stages: PipelineStages,
     processes: ProcessSupervisor | None,
-    right: Any,
-    node: Any,
+    right: TSNodeLike,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Recurse wrapper for a list the parse pulled into a pipeline's first
     stage: the list's right operand, where the pipeline starts, runs the
     pipeline; every other node recurses normally.
@@ -362,19 +363,19 @@ async def _recurse_lifted(
 async def _recurse_stage(
     recurse: Callable[..., Any],
     dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
     stages: PipelineStages,
     targets: list[Any],
     processes: ProcessSupervisor | None,
-    node: Any,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     *,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Recurse wrapper for one pipeline stage.
 
     A stage the parse hoisted redirects off runs under them, with the
@@ -442,16 +443,16 @@ async def _recurse_stage(
 async def _run_pipeline(
     recurse: Callable[..., Any],
     dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
     stages: PipelineStages,
     context: EvaluationContext,
-    stdin: Any,
+    stdin: ByteSource | None,
     call_stack: CallStack | None,
     processes: ProcessSupervisor | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a pipeline as bash reads it (``get_pipeline_stages``).
 
     A list the parse pulled into the first stage runs as the list it
@@ -542,17 +543,17 @@ async def _run_pipeline(
 async def _recurse_pipe_stderr(
     recurse: Callable[..., Any],
     dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
     targets: list[Any],
-    node: Any,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     *,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     view = session_view(
         session, registry.policies, diagnostics=context.frame.diagnostics
@@ -581,12 +582,12 @@ async def _recurse_pipe_stderr(
 
 
 async def _negated(
-    stdout: Any,
+    stdout: ByteSource | None,
     io: IOResult,
     exec_node: ExecutionNode,
     context: EvaluationContext,
     inner: Any,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """What ``!`` makes of the statement it wraps once that has run.
 
     Args:
@@ -619,19 +620,19 @@ async def _negated(
 async def _run_redirected(
     recurse: Callable[..., Any],
     dispatch: DispatchFn,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
     view: SessionView | None,
-    command: Any,
+    command: TSNodeLike | None,
     redirects: list[Redirect],
     processes: ProcessSupervisor | None,
     context: EvaluationContext,
-    stdin: Any,
+    stdin: ByteSource | None,
     call_stack: CallStack | None,
     *,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a redirected statement: the command under its redirects, then
     the pipeline a heredoc's operator line fed it into.
 
@@ -827,13 +828,13 @@ async def _run_redirected(
                 sink=sink if pipe_node is None else None,
                 expand=expand,
             )
-        if simple and context.frame.diagnostics:
-            err = _diagnostic_stderr(command, context)
+        if simple and command is not None and context.frame.diagnostics:
+            err = diagnostic_stderr(command, context)
             io.stderr = err + await io.materialize_stderr()
             exec_node.stderr = err + (exec_node.stderr or b"")
     except ExitSignal as exc:
-        if simple:
-            exc.stderr = _diagnostic_stderr(command, context) + exc.stderr
+        if simple and command is not None:
+            exc.stderr = diagnostic_stderr(command, context) + exc.stderr
         raise
     finally:
         context.frame.diagnostics = outer
@@ -849,13 +850,13 @@ async def _run_redirected(
 async def _run_continuation(
     recurse: Callable[..., Any],
     run_left: Callable[..., Any],
-    left: Any,
-    steps: tuple[tuple[str, Any], ...],
+    left: TSNodeLike,
+    steps: tuple[tuple[str, TSNodeLike], ...],
     context: EvaluationContext,
-    stdin: Any,
+    stdin: ByteSource | None,
     call_stack: CallStack | None,
-    execute_fn: Callable[..., Any] | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+    execute_fn: ExecuteFn | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Fold the ``&&``/``||`` steps a heredoc's operator line carried
     around the statement, left to right.
 
@@ -873,7 +874,7 @@ async def _run_continuation(
             ``(session, stdin, call_stack)``.
         left (Any): the redirected_statement node, standing for the
             left side in ``handle_connection``.
-        steps (tuple[tuple[str, Any], ...]): the ``(operator, right)``
+        steps (tuple[tuple[str, TSNodeLike], ...]): the ``(operator, right)``
             steps, in order.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -906,14 +907,14 @@ async def _run_continuation(
 async def _recurse_continuation(
     recurse: Callable[..., Any],
     run_left: Callable[..., Any],
-    left: Any,
-    steps: tuple[tuple[str, Any], ...],
-    execute_fn: Callable[..., Any] | None,
-    node: Any,
+    left: TSNodeLike,
+    steps: tuple[tuple[str, TSNodeLike], ...],
+    execute_fn: ExecuteFn | None,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Recurse wrapper for a heredoc continuation: the statement's own
     node runs the steps before the current one, anything else recurses.
 
@@ -921,7 +922,7 @@ async def _recurse_continuation(
         recurse (Callable): the plain execute_node recursion.
         run_left (Callable): runs the redirected statement itself.
         left (Any): the redirected_statement node.
-        steps (tuple[tuple[str, Any], ...]): the steps before the
+        steps (tuple[tuple[str, TSNodeLike], ...]): the steps before the
             current one.
         execute_fn (Callable[..., Any] | None): runs the ERR action.
         node (Any): the node ``handle_connection`` asks for.
@@ -943,7 +944,7 @@ async def _recurse_continuation(
     return await recurse(node, context, stdin, call_stack)
 
 
-def _is_bare_exec(command: Any) -> bool:
+def _is_bare_exec(command: TSNodeLike | None) -> bool:
     """Whether a redirected statement's command is a bare `exec`, which
     installs its redirects on the shell for every later statement;
     `exec cmd` is a command.
@@ -962,7 +963,7 @@ def _is_bare_exec(command: Any) -> bool:
     )
 
 
-def _forks(command: Any, context: EvaluationContext) -> bool:
+def _forks(command: TSNodeLike | None, context: EvaluationContext) -> bool:
     """Whether bash forks to run a redirected command, so its redirects
     expand in the child and an error there fails that command alone: a
     subshell or a program. A builtin, a function or another compound
@@ -1009,11 +1010,11 @@ async def execute_node(
     registry: MountRegistry,
     namespace: Namespace,
     job_table: JobTable,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     agent_id: str,
-    node: Any,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision[Runtime] | None = None,
@@ -1022,7 +1023,7 @@ async def execute_node(
     execution_scope: ExecutionScope | None = None,
     ends_shell: bool = False,
     own_diagnostics: bool = True,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     execution_scope = execution_scope or ExecutionScope()
     # The node is the whole of a child shell (a background job), which
@@ -1080,7 +1081,7 @@ async def execute_node(
     # reading one is read out first.
     held: list[tuple[DevVFS, str, int]] = []
     previous = context.frame.process_sub
-    context.frame.process_sub = _process_input(context, registry, held)
+    context.frame.process_sub = process_input(context, registry, held)
     try:
         # What expanding the node printed (a substitution's stderr) goes
         # out with the node's own stderr, unless its caller collects it: a
@@ -1093,18 +1094,18 @@ async def execute_node(
             try:
                 stdout, io, exec_node = await run()
                 if context.frame.diagnostics:
-                    err = _diagnostic_stderr(node, context)
+                    err = diagnostic_stderr(node, context)
                     io.stderr = err + await io.materialize_stderr()
                     exec_node.stderr = err + (exec_node.stderr or b"")
             except ExitSignal as exc:
-                exc.stderr = _diagnostic_stderr(node, context) + exc.stderr
+                exc.stderr = diagnostic_stderr(node, context) + exc.stderr
                 raise
             finally:
                 context.frame.diagnostics = outer
         if held and stdout is not None:
             stdout = await materialize(stdout)
         return stdout, io, exec_node
-    except _ProcessSubError as exc:
+    except ProcessSubError as exc:
         # The node fails, as an unsupported command does; the line goes on.
         err = exc.stderr
         return (
@@ -1118,86 +1119,16 @@ async def execute_node(
             dev.release_input(path, allocation)
 
 
-class _ProcessSubError(ExitSignal):
-    """A node-local refusal; carry earlier output until execute_node catches it."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            2, stderr=b"mirage: unsupported: process substitution >(...)\n"
-        )
-
-
-def _process_input(
-    context: EvaluationContext,
-    registry: MountRegistry,
-    held: list[tuple[DevVFS, str, int]],
-) -> Callable[
-    [TSNodeLike, Callable[[str], Awaitable[IOResult]]], Awaitable[str]
-]:
-    """The hook that opens a node's input process substitutions.
-
-    Each ``<(...)`` runs as its word expands, in order with the word's
-    other expansions and through the evaluator a ``$(...)`` there uses,
-    and reads back as a buffered device file rather than a host pipe,
-    held until the node ends; a nested node opens its own, so each lasts
-    as long as the command naming it. An output ``>(...)`` is refused:
-    the node naming it fails with status 2.
-
-    Args:
-        context (EvaluationContext): the evaluation the node runs in.
-        registry (MountRegistry): mount registry holding ``/dev``.
-        held (list[tuple[DevVFS, str, int]]): the node's open files.
-    """
-
-    async def open_input(
-        node: TSNodeLike,
-        execute_line: Callable[[str], Awaitable[IOResult]],
-    ) -> str:
-        if get_process_sub_direction(node) == ProcessSubDirection.OUTPUT:
-            raise _ProcessSubError
-        dev, _, _ = registry.resolve("/dev/null")
-        assert isinstance(dev, DevVFS)
-        path, allocation = dev.allocate_input()
-        held.append((dev, path, allocation))
-        inner = get_process_sub_body(node)
-        if inner:
-            io = await execute_line(inner)
-            dev.set_input(path, allocation, await materialize(io.stdout))
-            context.frame.diagnostics.append(await materialize(io.stderr))
-        return path
-
-    return open_input
-
-
-def _diagnostic_stderr(node: Any, context: EvaluationContext) -> bytes:
-    if not context.frame.diagnostics:
-        return b""
-    head = get_text(node).split(None, 1)[0]
-    builtin = (
-        head
-        if head
-        in {"export", "declare", "local", "readonly", "read", "printf", "let"}
-        else ""
-    )
-    prefix = f"bash: {builtin}: " if builtin else "bash: "
-    return b"".join(
-        message
-        if isinstance(message, bytes)
-        else encode_text(prefix + message + "\n")
-        for message in context.frame.diagnostics
-    )
-
-
 async def _execute_node(
     dispatch: DispatchFn,
     registry: MountRegistry,
     namespace: Namespace,
     job_table: JobTable,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     agent_id: str,
-    node: Any,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin: Any = None,
+    stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision[Runtime] | None = None,
@@ -1205,7 +1136,7 @@ async def _execute_node(
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
     own_diagnostics: bool = True,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Walk tree-sitter AST and dispatch each node.
 
     ``set -n`` stops every node at any depth, as GNU answers ``if true;
@@ -1318,7 +1249,7 @@ async def _execute_node(
         elapsed = time.monotonic() - started
         report = b"".join(
             timing_report(elapsed, portable, session.env.get("TIMEFORMAT"))
-            for portable in reversed(node.timing)
+            for portable in reversed(cast(PrefixNode, node).timing)
         )
         io.stderr = (await io.materialize_stderr()) + report
         return stdout, io, exec_node
@@ -1555,7 +1486,7 @@ async def _execute_node(
     )
 
     if kind == NodeKind.COMPOUND:
-        return await run_body(node.named_children)
+        return await run_body(list(node.named_children))
 
     if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)
@@ -1704,11 +1635,11 @@ async def _execute_node(
     if kind == NodeKind.VAR_ASSIGNS:
         sub_seq = context.frame.cmdsub_seq
         merged_io = IOResult()
-        for child in node.named_children:
-            if child.type != NT.VARIABLE_ASSIGNMENT:
+        for assignment in node.named_children:
+            if assignment.type != NT.VARIABLE_ASSIGNMENT:
                 continue
             _, io, _ = await recurse(
-                child, context, stdin, cs, own_diagnostics=False
+                assignment, context, stdin, cs, own_diagnostics=False
             )
             merged_io = await merged_io.merge(io)
         # The statement's status follows the last command substitution

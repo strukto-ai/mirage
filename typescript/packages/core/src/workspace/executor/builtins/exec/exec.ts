@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../../../expand/types.ts'
 import { SharedInput, share } from '../../../../io/async_line_iterator.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
@@ -50,7 +51,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import type { ExecuteFn } from '../../../expand/node.ts'
+
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { programHead } from '../../find_action_dispatch.ts'
 import { clearTraps } from '../../traps.ts'

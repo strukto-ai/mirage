@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../../expand/types.ts'
+import type { EntryGate } from '../../../policy/types.ts'
+import { sessionAccess } from '../../../context/session_context.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -28,7 +31,7 @@ import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
-import type { ExecuteFn } from '../../expand/node.ts'
+
 import { UsageError } from '../../../commands/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
@@ -41,6 +44,7 @@ import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 export interface RunOnMountCtx {
+  admission?: EntryGate | null
   registry: MountRegistry
   context: EvaluationContext
   dispatch: DispatchFn
@@ -233,7 +237,7 @@ export async function runOnMount(
   // namespace owes a directory. A command that does not read `ns` off
   // its context ignores it, so there is no list of aware commands to
   // keep in step.
-  const ns = namespaceViewOf(registry, namespace ?? null, dispatch, session)
+  const ns = namespaceViewOf(registry, namespace ?? null, dispatch, session, ctx.admission)
   const statOverlay = ns.statOverlay ?? null
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
@@ -259,6 +263,8 @@ export async function runOnMount(
   if (signal?.aborted === true) throw makeAbortError(signal)
   try {
     return await mount.runCommand(cmdName, paths, texts, flags, {
+      ...(ctx.admission === undefined ? {} : { admission: ctx.admission }),
+      access: sessionAccess(session),
       stdin: opts.stdin ?? null,
       cwd: session.cwd,
       dispatch,
@@ -266,8 +272,8 @@ export async function runOnMount(
       env: envSnapshot(session),
       sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
       ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-      execAllowed: registry.isExecAllowed(),
-      execPathAllowed: registry.execAllowedAt,
+      execAllowed: registry.isExecAllowed(sessionAccess(session)),
+      execPathAllowed: (virtual) => registry.execAllowedAt(virtual, sessionAccess(session)),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ns,
       statPath,

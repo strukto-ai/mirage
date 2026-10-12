@@ -942,6 +942,8 @@ class MountEntry:
         cwd = context.cwd
         return CommandOpts(
             command=cmd_name,
+            admission=context.admission,
+            access=context.access,
             stdin=context.stdin,
             flags=flags,
             cwd=PathSpec(
@@ -952,7 +954,11 @@ class MountEntry:
             ),
             mount_prefix=mount_prefix,
             index=self.index,
-            io=dispatched_io(self.io, context.dispatch),
+            io=dataclasses.replace(
+                dispatched_io(self.io, context.dispatch),
+                admission=context.admission,
+                access=context.access,
+            ),
             dispatch=context.dispatch,
             session_id=context.session_id,
             env=context.env,

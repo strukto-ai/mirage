@@ -14,7 +14,7 @@
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { FileStat, PathSpec, Visibility } from '../types.ts'
+import type { FileStat, MountMode, PathSpec, Visibility } from '../types.ts'
 
 /**
  * The keywords an op carries through the dispatcher: the mount's index, the
@@ -251,3 +251,20 @@ export interface NamespaceView {
  * shell line does without holding the session manager itself.
  */
 export type SessionBind = <T>(sessionId: string | null, run: () => Promise<T>) => Promise<T>
+
+/** The calling session's read-only access and shell settings. */
+export interface SessionAccess {
+  readonly sessionId: string
+  readonly visibility: Visibility | null
+  readonly umask: number
+  readonly dotglob: boolean
+  readonly extglob: boolean
+  pathMode(virtual: string, prefix: string, mode: MountMode): MountMode
+  strongestMode(prefix: string, mode: MountMode): MountMode
+  requireWritable(
+    paths: readonly PathSpec[],
+    prefix: string,
+    mode: MountMode,
+    subtree?: boolean,
+  ): void
+}

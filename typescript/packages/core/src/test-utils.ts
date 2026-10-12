@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Dispatcher } from './workspace/dispatcher/dispatcher.ts'
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
 import type { OpKwargs } from './view/types.ts'
@@ -239,12 +240,18 @@ export function dispatched(
   before?: (name: string, path: PathSpec) => Promise<void>,
 ): [string, string][] {
   const seen: [string, string][] = []
-  const dispatcher = (ws as unknown as { dispatcher: { dispatchAdmitted: DispatchFn } }).dispatcher
-  const real = dispatcher.dispatchAdmitted
-  dispatcher.dispatchAdmitted = async (name, path, args, kwargs, report) => {
-    seen.push([name, path.virtual])
-    if (before !== undefined) await before(name, path)
-    return real(name, path, args, kwargs, report)
+  const dispatcher = (ws as unknown as { dispatcher: Dispatcher }).dispatcher
+  const bind = dispatcher.forSession.bind(dispatcher)
+  dispatcher.forSession = (session) => {
+    const bound = bind(session)
+    const target = bound as unknown as { dispatchAdmitted: DispatchFn }
+    const real = target.dispatchAdmitted
+    target.dispatchAdmitted = async (name, path, args, kwargs, report) => {
+      seen.push([name, path.virtual])
+      if (before !== undefined) await before(name, path)
+      return real(name, path, args, kwargs, report)
+    }
+    return bound
   }
   return seen
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../../view/types.ts'
 import { type ValueType } from '../../../commands/spec/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
@@ -31,6 +32,7 @@ export function classifyParts(
   cwd: string,
   wordKinds: readonly (ValueType | null)[] | null = null,
   wordBases: readonly (string | null)[] | null = null,
+  access?: SessionAccess,
 ): (string | PathSpec)[] {
   if (parts.length === 0) return []
   const result: (string | PathSpec)[] = [parts[0] ?? '']
@@ -43,9 +45,9 @@ export function classifyParts(
     if (kind !== null && kind !== 'path') {
       result.push(w)
     } else if (kind === 'path') {
-      result.push(classifyBarePath(w, registry, here))
+      result.push(classifyBarePath(w, registry, here, access))
     } else {
-      result.push(classifyWord(w, registry, here))
+      result.push(classifyWord(w, registry, here, access))
     }
   }
   return result

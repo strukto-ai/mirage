@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from functools import partial
-from typing import Any
 
 from mirage.io import IOResult
 from mirage.shell.backticks import split_backtick_region
@@ -43,7 +41,7 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.fields import join_chunks, value_piece
-from mirage.workspace.expand.types import Chunk, Piece
+from mirage.workspace.expand.types import Chunk, ExecuteFn, Piece
 from mirage.workspace.expand.variable import (
     expand_braces,
     is_at_splat,
@@ -75,7 +73,7 @@ def _folded_whitespace(node: TSNodeLike) -> str:
 async def _expand_backtick_region(
     raw: str,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     node: TSNodeLike,
     offset: int,
     call_stack: CallStack | None,
@@ -120,9 +118,9 @@ async def _expand_backtick_region(
 
 async def child_line(
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     text: str,
-    node: Any,
+    node: TSNodeLike,
     call_stack: CallStack | None,
     span: tuple[int, int] | None = None,
 ) -> IOResult:
@@ -172,7 +170,7 @@ def _find_first(node: TSNodeLike, ntype: str) -> TSNodeLike | None:
 async def expand_arith(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None = None,
 ) -> str:
@@ -201,7 +199,7 @@ def _arith_inside(ts_node: TSNodeLike) -> str:
 async def _arith_text(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> str:
@@ -248,7 +246,7 @@ async def _arith_text(
 async def _arith_subscript(
     sub_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> str:
@@ -321,7 +319,7 @@ async def _arith_value(
 async def expand_node(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
 ) -> str:
@@ -345,7 +343,7 @@ async def expand_node(
 async def expand_node_marked(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
 ) -> str:
@@ -374,7 +372,7 @@ async def expand_node_marked(
 async def expand_chunks(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
     quoted: bool = False,
@@ -406,7 +404,7 @@ async def expand_chunks(
 async def _node_chunks(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
     quoted: bool,
@@ -535,7 +533,7 @@ async def _expand_child(
     quoted: bool,
     *,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> list[Chunk]:
@@ -557,7 +555,7 @@ async def _expand_child(
 async def _string_chunks(
     node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> list[Chunk]:
@@ -612,7 +610,7 @@ async def _string_chunks(
 async def _substitution(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> str:
@@ -690,7 +688,7 @@ async def _substitution(
 async def _literal_node(
     ts_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn: Callable[..., Any],
+    execute_fn: ExecuteFn,
     call_stack: CallStack | None,
     view: SessionView | None,
 ) -> str:

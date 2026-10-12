@@ -1,0 +1,27 @@
+{
+  "target": "ram",
+  "sources": [
+    "shell",
+    "workspace/node",
+    "workspace/expand",
+    "workspace/executor",
+    "workspace/session",
+    "workspace/abort",
+    "workspace/workspace/execute",
+    "workspace/workspace/lifecycle",
+    "runtime/python/local"
+  ],
+  "minimum": {
+    "python": {
+      "statements": 75,
+      "branches": 66
+    },
+    "typescript": {
+      "statements": 88,
+      "branches": 83
+    }
+  },
+  "exclude_cases": {
+    "ctl_for_long_word_list_leaves_last_value": "300,000-iteration stress test remains in the normal battery; smaller loop cases exercise the same coverage branches."
+  }
+}

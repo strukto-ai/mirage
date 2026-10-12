@@ -245,7 +245,7 @@ export async function preVfsGate(
   prefix: string,
   sessionId = '',
   issuer?: symbol,
-  access: Pick<VfsContext, 'mode'> & {
+  access: Pick<VfsContext, 'mode' | 'access'> & {
     checkHidden?: boolean
     decisions?: Decisions | null
     final?: boolean
@@ -318,7 +318,7 @@ export async function postVfsGate(
   prefix: string,
   result: unknown,
   sessionId = '',
-  access: Pick<VfsContext, 'mode'> & {
+  access: Pick<VfsContext, 'mode' | 'access'> & {
     decisions?: Decisions | null
   } = {},
 ): Promise<Limit | null> {

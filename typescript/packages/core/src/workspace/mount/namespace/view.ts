@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EntryGate } from '../../../policy/types.ts'
 import type { FileStat, Visibility } from '../../../types.ts'
 import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../view/types.ts'
 import { namespaceNames } from '../../../view/namespace_view.ts'
-import { getAdmission, liveSessions, sessionVisibility } from '../../../context/session_context.ts'
+import { getAdmission } from '../../../context/session_context.ts'
 import { hiddenUnder, pathVisible } from '../../../utils/hidden.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -142,20 +143,15 @@ export function namespaceViewOf(
   namespace: Namespace | null,
   dispatch: DispatchFn,
   session: SessionState | null,
+  gate: EntryGate | null = getAdmission(),
 ): NamespaceView {
   const statOverlay =
     namespace !== null
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
-  // A session running a line sees what the dispatcher folds for it: on the
-  // fallback storage every live session's hides hold, so a command never
-  // lists a name its own reads would answer as absent.
-  const vis =
-    session !== null && liveSessions().includes(session)
-      ? sessionVisibility()
-      : (session?.visibility ?? null)
+  // Capture the named session, including on runtimes without async-local storage.
+  const vis = session?.visibility ?? null
   const links = linkViewFor(namespace, dispatch, vis)
-  const gate = getAdmission()
   return {
     ...(links !== null ? { links } : {}),
     mounts: mountView(registry, vis),

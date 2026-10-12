@@ -89,3 +89,68 @@ describe('KeyLock', () => {
     expect(await lock.withLock('/a', () => Promise.resolve('again'))).toBe('again')
   })
 })
+
+it('removes cancelled waiters before the holder finishes and preserves FIFO admission', async () => {
+  const lock = new KeyLock()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const first = lock.withLock('session', () => held)
+  const abort = new AbortController()
+  let entered = false
+  const cancelled = lock.withLock(
+    'session',
+    () => {
+      entered = true
+      return Promise.resolve()
+    },
+    abort.signal,
+  )
+  const rejected = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+  abort.abort()
+  await rejected
+  const queues = (lock as unknown as { queues: Map<string, Set<unknown>> }).queues
+  expect(queues.get('session')?.size).toBe(0)
+  const order: number[] = []
+  const second = lock.withLock('session', () => {
+    order.push(2)
+    return Promise.resolve()
+  })
+  const third = lock.withLock('session', () => {
+    order.push(3)
+    return Promise.resolve()
+  })
+  expect(order).toEqual([])
+  release()
+  await Promise.all([first, second, third])
+  expect(entered).toBe(false)
+  expect(order).toEqual([2, 3])
+  expect(queues.size).toBe(0)
+})
+
+it('cancels during handoff without stranding the next waiter', async () => {
+  const lock = new KeyLock()
+  const abort = new AbortController()
+  let release!: () => void
+  const first = lock.withLock(
+    'session',
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve
+      }),
+  )
+  const next = lock.withLock(
+    'session',
+    () => Promise.reject(new Error('must not run')),
+    abort.signal,
+  )
+  const rejected = expect(next).rejects.toMatchObject({ name: 'AbortError' })
+  const last = lock.withLock('session', () => Promise.resolve('last'))
+  release()
+  await Promise.resolve()
+  abort.abort()
+  await first
+  await rejected
+  expect(await last).toBe('last')
+})

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../view/types.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
 import { sessionVisibility } from '../../context/session_context.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
@@ -47,6 +49,7 @@ const GLOBSTAR_MAX_DEPTH = 32
 // inside the backend glob (`globNameMatches`), so it does not travel
 // here.
 export interface GlobOptions {
+  access?: SessionAccess
   nullglob: boolean
   failglob: boolean
   globstar: boolean
@@ -61,6 +64,7 @@ export function globNeedsShell(opts: GlobOptions): boolean {
 
 export function globOptions(session: SessionState): GlobOptions {
   return {
+    access: sessionAccess(session),
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
@@ -81,11 +85,17 @@ function namespaceChildren(
   links: NamespaceLinks | null,
   directory: string,
   pattern: string,
+  access?: SessionAccess,
 ): string[] {
   const base = rstripSlash(directory)
   const matcher = globPattern(pattern)
-  return namespaceNames(sessionVisibility(), registry.mountPrefixes(), links, directory)
-    .filter((name) => globNameMatches(name, matcher))
+  return namespaceNames(
+    access === undefined ? sessionVisibility() : access.visibility,
+    registry.mountPrefixes(),
+    links,
+    directory,
+  )
+    .filter((name) => globNameMatches(name, matcher, access))
     .map((name) => `${base}/${name}`)
 }
 
@@ -129,6 +139,7 @@ function toSpecs(
   registry: MountRegistry,
   mount: MountEntry,
   walked: number,
+  access?: SessionAccess,
 ): PathSpec[] {
   return virtuals.map((v) => {
     const prefix = rstripSlash(mountOf(registry, v, mount).prefix)
@@ -137,7 +148,7 @@ function toSpecs(
       virtual: base.virtual,
       directory: base.directory,
       vfsPath: base.vfsPath,
-      rawPath: spellMatch(item.rawPath, v, walked),
+      rawPath: spellMatch(item.rawPath, v, walked, access),
     })
   })
 }
@@ -191,6 +202,7 @@ async function levelMatches(
   links: NamespaceLinks | null,
   dirVirtual: string,
   seg: string,
+  access?: SessionAccess,
 ): Promise<string[]> {
   const real = listingDir(links, dirVirtual)
   const owner = mountOf(registry, real, mount)
@@ -207,7 +219,7 @@ async function levelMatches(
       resolved: false,
     })
     try {
-      const matches = await owner.expandGlob([spec], prefix)
+      const matches = await owner.expandGlob([spec], prefix, access)
       // A descent step yields children, so a match that is the parent
       // itself is not one. A backend asked to list a path that is really
       // a file answers with that file, which walked back out as a
@@ -224,7 +236,7 @@ async function levelMatches(
       if ((err as { code?: string }).code === undefined) throw err
     }
   }
-  out.push(...namespaceChildren(registry, links, real, seg))
+  out.push(...namespaceChildren(registry, links, real, seg, access))
   return real === dirVirtual ? out : respell(out, dirVirtual)
 }
 
@@ -265,16 +277,17 @@ async function descend(
   parent: string,
   spelled: string,
   depth: number,
+  access?: SessionAccess,
 ): Promise<[string, string][]> {
   if (depth >= GLOBSTAR_MAX_DEPTH) return []
   const out: [string, string][] = []
-  const children = [...new Set(await levelMatches(registry, mount, links, `${parent}/`, '*'))].sort(
-    compareCodePoints,
-  )
+  const children = [
+    ...new Set(await levelMatches(registry, mount, links, `${parent}/`, '*', access)),
+  ].sort(compareCodePoints)
   for (const child of children) {
     const childSpelled = joinSpelling(spelled, child.split('/').pop() ?? '')
     out.push([child, childSpelled])
-    out.push(...(await descend(registry, mount, links, child, childSpelled, depth + 1)))
+    out.push(...(await descend(registry, mount, links, child, childSpelled, depth + 1, access)))
   }
   return out
 }
@@ -299,10 +312,11 @@ async function walk(
   registry: MountRegistry,
   links: NamespaceLinks | null,
   globstar: boolean,
+  access?: SessionAccess,
 ): Promise<PathSpec[]> {
-  const typed = globParts(stripSlash(item.dotted ?? item.virtual))
-  const first = typed.findIndex((seg) => hasGlobChars(seg) || seg === '.' || seg === '..')
-  const raw = globParts(rstripSlash(item.rawPath)).map(unmarkGlobs)
+  const typed = globParts(stripSlash(item.dotted ?? item.virtual), access)
+  const first = typed.findIndex((seg) => hasGlobChars(seg, access) || seg === '.' || seg === '..')
+  const raw = globParts(rstripSlash(item.rawPath), access).map(unmarkGlobs)
   let spelledHead = raw.slice(0, raw.length - (typed.length - first)).join('/')
   if (item.rawPath.startsWith('/') && spelledHead === '') spelledHead = '/'
   // The head above the first glob or dot segment is a real directory, so a
@@ -319,7 +333,7 @@ async function walk(
         }
       } else if (globstar && seg === '**') {
         gathered.push([dir, spelled, true])
-        for (const [v, sp] of await descend(registry, mount, links, dir, spelled, 0)) {
+        for (const [v, sp] of await descend(registry, mount, links, dir, spelled, 0, access)) {
           gathered.push([v, sp, false])
         }
       } else {
@@ -329,6 +343,7 @@ async function walk(
           links,
           `${rstripSlash(dir)}/`,
           seg,
+          access,
         )) {
           gathered.push([child, joinSpelling(spelled, child.split('/').pop() ?? ''), false])
         }
@@ -408,8 +423,8 @@ function withTrailingSlash(spec: PathSpec): PathSpec {
   })
 }
 
-function hasGlobstarSegment(item: PathSpec): boolean {
-  return globParts(item.virtual).includes('**')
+function hasGlobstarSegment(item: PathSpec, access?: SessionAccess): boolean {
+  return globParts(item.virtual, access).includes('**')
 }
 
 export async function resolveGlobs(
@@ -428,6 +443,7 @@ export async function resolveGlobs(
     globstar: false,
     extglob: false,
   }
+  const access = opts.access
   const result: (string | PathSpec)[] = []
   for (const item of classified) {
     if (item instanceof PathSpec && item.pattern !== null) {
@@ -442,7 +458,7 @@ export async function resolveGlobs(
       // A VFS with no glob of its own can still hold a nested mount
       // root or a link under the globbed directory; with nothing for the
       // namespace to add it keeps the untouched pass-through it had.
-      const midPath = item.dotted !== null || hasGlobChars(item.directory)
+      const midPath = item.dotted !== null || hasGlobChars(item.directory, access)
       // The parent directory is a real directory to list, so a glob
       // character quoted inside it is part of its name.
       const directory = unmarkGlobs(item.directory)
@@ -450,7 +466,7 @@ export async function resolveGlobs(
       // has nothing to list and levelMatches has to follow it first.
       const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
-        midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
+        midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern, access)
       if (!linked && !mount.answers('glob') && extra.length === 0) {
         result.push(item)
         continue
@@ -485,16 +501,17 @@ export async function resolveGlobs(
       await mount.ensureReady()
       try {
         let resolved: PathSpec[]
-        if (midPath || (opts.globstar && hasGlobstarSegment(withPrefix))) {
-          resolved = await walk(withPrefix, mount, registry, links, opts.globstar)
+        if (midPath || (opts.globstar && hasGlobstarSegment(withPrefix, access))) {
+          resolved = await walk(withPrefix, mount, registry, links, opts.globstar, access)
         } else if (linked) {
-          const found = await levelMatches(registry, mount, links, directory, item.pattern)
+          const found = await levelMatches(registry, mount, links, directory, item.pattern, access)
           resolved = toSpecs(
             [...new Set(found)].sort(compareCodePoints),
             withPrefix,
             registry,
             mount,
             1,
+            access,
           )
         } else {
           // Asked with the word, a backend that matched nothing answers
@@ -503,7 +520,7 @@ export async function resolveGlobs(
           // to `xa.txt` lost its first match to that ambiguity. The
           // directory-shaped spec has no literal to reinstate, so an
           // empty list means no match and every spec returned is one.
-          const own = await mount.expandGlob([withPrefix.dir], prefix)
+          const own = await mount.expandGlob([withPrefix.dir], prefix, access)
           resolved = mergeNamespace(own, extra, directory, registry, mount)
         }
         if (dirsOnly) {
@@ -560,10 +577,10 @@ export async function resolveGlobs(
 }
 
 // The fixed directory above a word's first glob segment.
-function globHead(spec: PathSpec): string {
+function globHead(spec: PathSpec, access?: SessionAccess): string {
   const fixed: string[] = []
-  for (const seg of globParts(spec.virtual)) {
-    if (hasGlobChars(seg)) break
+  for (const seg of globParts(spec.virtual, access)) {
+    if (hasGlobChars(seg, access)) break
     fixed.push(seg)
   }
   return fixed.join('/') + '/'
@@ -586,18 +603,27 @@ export async function expandBoundaryGlobs(
   parts: readonly (string | PathSpec)[],
   registry: MountRegistry,
   links: NamespaceLinks | null,
+  access?: SessionAccess,
 ): Promise<(string | PathSpec)[]> {
   const prefixes = registry.mountPrefixes()
-  const vis = sessionVisibility()
+  const vis = access === undefined ? sessionVisibility() : access.visibility
   const spans = (p: string | PathSpec): boolean =>
     p instanceof PathSpec &&
     p.pattern !== null &&
-    childMountNames(vis, prefixes, globHead(p)).length > 0
+    childMountNames(vis, prefixes, globHead(p, access)).length > 0
   if (!parts.some(spans)) return [...parts]
   const out: (string | PathSpec)[] = []
   for (const item of parts) {
     if (spans(item)) {
-      out.push(...(await resolveGlobs([item], registry, false, links)))
+      out.push(
+        ...(await resolveGlobs([item], registry, false, links, {
+          nullglob: false,
+          failglob: false,
+          globstar: false,
+          extglob: access?.extglob ?? false,
+          ...(access === undefined ? {} : { access }),
+        })),
+      )
     } else {
       out.push(item)
     }

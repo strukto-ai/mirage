@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecuteFn } from '../expand/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -66,7 +67,7 @@ import {
   snapshotStatus,
   type StatusSnapshot,
 } from '../executor/statement.ts'
-import type { ExecuteFn } from '../expand/node.ts'
+
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { withHandOff } from '../node/execute_node.ts'
@@ -570,7 +571,7 @@ async function runPreparedLine(
           }
           const routingDecision: RouteDecision<Runtime> | null = placed
 
-          const dispatch: DispatchFn = env.dispatcher.dispatch
+          const dispatch: DispatchFn = env.dispatcher.forSession(effectiveSession).dispatch
 
           const executeFn: ExecuteFn = async (cmd, opts) => {
             // The executor's internal evals ($(), eval, source, xargs) are

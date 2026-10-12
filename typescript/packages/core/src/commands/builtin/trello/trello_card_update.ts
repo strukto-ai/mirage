@@ -69,7 +69,7 @@ async function trelloCardUpdate(
   const due = fl.asStr('due') ?? null
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(opts.mountPrefix ?? '')
+  requireMountWritable(opts.mountPrefix ?? '', opts.access)
   await requireCard(accessor, cardId)
   const card = await cardUpdate(accessor.transport, {
     cardId,

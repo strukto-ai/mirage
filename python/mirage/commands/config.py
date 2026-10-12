@@ -28,6 +28,7 @@ from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
+from mirage.policy.types import EntryGate
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
@@ -64,6 +65,7 @@ from mirage.view.types import (
     LinkTargetStat,
     NamespaceView,
     ReaddirPath,
+    SessionAccess,
     SessionView,
     StatPath,
 )
@@ -87,6 +89,8 @@ class ExecContext:
     """
 
     limit_override: Limit | None = None
+    admission: EntryGate | None = None
+    access: SessionAccess | None = None
     stdin: ByteSource | None = None
     cwd: str = "/"
     dispatch: DispatchFn | None = None
@@ -130,6 +134,8 @@ class CommandIO:
     stat: StatOp
     read_stream: ReadStreamOp
     is_mounted: IsMountedOp
+    admission: EntryGate | None = None
+    access: SessionAccess | None = None
     read_range: ReadRangeOp | None = None
     exists: ExistsOp | None = None
     find: FindOp | None = None
@@ -166,6 +172,7 @@ class CommandIO:
             self.glob_children,
             self.stat,
             self.glob_target_stat,
+            self.access,
         )
 
 
@@ -217,6 +224,8 @@ class CommandOpts:
             runs split per operand or per mount.
     """
 
+    admission: EntryGate | None = None
+    access: SessionAccess | None = None
     stdin: ByteSource | None = None
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     cwd: PathSpec = ROOT_CWD

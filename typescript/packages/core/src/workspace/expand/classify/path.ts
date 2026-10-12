@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionAccess } from '../../../view/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { classifyWord } from './heuristic.ts'
@@ -21,8 +22,9 @@ export function classifyBarePath(
   word: string,
   registry: MountRegistry,
   cwd: string,
+  access?: SessionAccess,
 ): string | PathSpec {
-  const classified = classifyWord(word, registry, cwd)
+  const classified = classifyWord(word, registry, cwd, access)
   if (typeof classified !== 'string') return classified
-  return relativeSpec(word, registry, cwd)
+  return relativeSpec(word, registry, cwd, access)
 }

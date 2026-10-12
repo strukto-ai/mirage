@@ -66,7 +66,7 @@ from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.parse.source import source_offsets
 from mirage.shell.parse.syntax import find_syntax_issue
-from mirage.shell.types import AliasExpansion
+from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
@@ -104,6 +104,7 @@ from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
+from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.lookup import (
     SLASH_KEEPS_LAST,
     UNSUPPORTED_BUILTINS,
@@ -130,7 +131,7 @@ from mirage.workspace.types import ExecutionNode
 T = TypeVar("T")
 
 
-async def _own_words(node: Any, pending: Awaitable[T]) -> T:
+async def _own_words(node: TSNodeLike, pending: Awaitable[T]) -> T:
     """Await an expansion of the command's own words; an ``ExitSignal``
     it raises names the command, whose redirects bash had not applied.
 
@@ -150,7 +151,7 @@ async def execute_command(
     dispatch,
     registry,
     namespace,
-    execute_fn,
+    execute_fn: ExecuteFn,
     node,
     context: EvaluationContext,
     stdin,
@@ -161,7 +162,7 @@ async def execute_command(
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Dispatch a command node by name.
 
     ``sink`` is where a command that runs statements of its own (a
@@ -446,7 +447,7 @@ async def _dispatch_command_body(
     dispatch,
     registry,
     namespace,
-    execute_fn,
+    execute_fn: ExecuteFn,
     node,
     parts,
     name,
@@ -460,7 +461,7 @@ async def _dispatch_command_body(
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # The command's place on the line, as the pass computed it, and
     # the entry point its nested evaluations re-enter through: a word that
     # runs a line (eval, source, xargs) is bound to this node, and a
@@ -570,7 +571,7 @@ async def _run_argv(
     dispatch,
     registry,
     namespace,
-    execute_fn,
+    execute_fn: ExecuteFn,
     argv: Argv,
     context: EvaluationContext,
     stdin,
@@ -585,7 +586,7 @@ async def _run_argv(
     seed_prefix: Callable[[str], Awaitable[None]] | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
     ``row`` is the row the shell began reading the command on within its
@@ -841,7 +842,7 @@ async def _route_argv(
     dispatch,
     registry,
     namespace,
-    execute_fn,
+    execute_fn: ExecuteFn,
     argv: Argv,
     context: EvaluationContext,
     stdin,
@@ -853,7 +854,7 @@ async def _route_argv(
     agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one admitted command to its builtin or mount handler.
 
     The half of ``_run_argv`` past the gate, split out so the gate's
