@@ -151,8 +151,13 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     // would point a relative path at the wrong files.
     const cwd = request.cwd.virtual
     // A name with a slash is a path from the cwd, as in the shell; any
-    // other is looked up on PATH.
-    const program = name.includes('/') ? resolve(cwd, name) : onHostPath(name)
+    // other is looked up on PATH. Joined, not resolved, so the host
+    // follows a `..` past a symlink as written.
+    const program = !name.includes('/')
+      ? onHostPath(name)
+      : isAbsolute(name)
+        ? name
+        : `${cwd.replace(/\/+$/, '')}/${name}`
     if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     const here = await stat(cwd).catch((err: unknown) => {
       const code = (err as NodeJS.ErrnoException).code

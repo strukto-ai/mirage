@@ -137,8 +137,11 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         if found is None:
             return _not_run(f"{name}: command not found\n", 127)
         # Absolute: a relative PATH entry names a file here, and the
-        # program starts in the session's cwd.
-        program = os.path.abspath(found)
+        # program starts in the session's cwd. Joined, not normalized,
+        # so the host follows a `..` past a symlink as written.
+        program = (
+            found if os.path.isabs(found) else os.path.join(os.getcwd(), found)
+        )
         if not os.path.isdir(cwd):
             return _not_run(
                 f"{name}: the working directory {cwd} is not on this host\n",

@@ -255,6 +255,30 @@ async def test_a_program_named_by_a_relative_path_runs_from_the_cwd(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_program_path_follows_dot_dot_past_a_symlink(tmp_path):
+    (tmp_path / "opt" / "build").mkdir(parents=True)
+    tool = tmp_path / "opt" / "mirage-tool"
+    tool.write_text(f"#!{sys.executable}\nprint('opt')\n")
+    tool.chmod(0o755)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "link").symlink_to(tmp_path / "opt" / "build")
+    runtime = LocalRuntime(captures=["@external"])
+    try:
+        result = await runtime.run_process(
+            ProcessExecution(
+                argv=("link/../mirage-tool",),
+                cwd=PathSpec.from_str_path(str(work)),
+                env={},
+                stdin=None,
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stdout) == (0, b"opt\n")
+
+
+@pytest.mark.asyncio
 async def test_a_program_that_cannot_start_fails_as_the_shell_would(
     tmp_path, monkeypatch
 ):

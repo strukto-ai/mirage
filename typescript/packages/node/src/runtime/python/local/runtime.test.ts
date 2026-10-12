@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -373,6 +373,30 @@ describe('LocalRuntime', () => {
         stdin: null,
       })
       expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'tool\n'])
+    } finally {
+      await rt.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('follows a .. past a symlink in a program path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
+    await mkdir(join(dir, 'opt', 'build'), { recursive: true })
+    const tool = join(dir, 'opt', 'mirage-tool')
+    await writeFile(tool, '#!/bin/sh\necho opt\n')
+    await chmod(tool, 0o755)
+    await mkdir(join(dir, 'work'))
+    await symlink(join(dir, 'opt', 'build'), join(dir, 'work', 'link'))
+    const rt = new LocalRuntime({ captures: ['@external'] })
+    try {
+      const result = await rt.runProcess({
+        kind: 'process',
+        argv: ['link/../mirage-tool'],
+        cwd: PathSpec.fromStrPath(join(dir, 'work')),
+        env: {},
+        stdin: null,
+      })
+      expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'opt\n'])
     } finally {
       await rt.close()
       await rm(dir, { recursive: true, force: true })
