@@ -29,7 +29,6 @@ from mirage.core.gmail.messages import (
     get_message_raw,
     list_messages,
     message_json_bytes,
-    unsearched_text,
 )
 from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
@@ -105,6 +104,7 @@ def _attachment_entries(
 
 def _date_children(
     raws: list[dict[str, Any]],
+    keep_text: bool,
 ) -> tuple[
     list[tuple[str, IndexEntry]], dict[str, list[tuple[str, IndexEntry]]]
 ]:
@@ -112,6 +112,8 @@ def _date_children(
 
     Args:
         raws (list[dict]): the date's full message payloads.
+        keep_text (bool): whether each message's entry keeps its
+            rendered text, lowercased, for grep (``content_search``).
     """
     children: list[tuple[str, IndexEntry]] = []
     seeds: dict[str, list[tuple[str, IndexEntry]]] = {}
@@ -121,11 +123,13 @@ def _date_children(
         subject = _extract_header(headers, "Subject") or "No Subject"
         filename = _msg_filename(subject, mid)
         size_estimate = raw.get("sizeEstimate")
+        rendered = message_json_bytes(raw)
         # The listing already fetched the full message, so the exact
-        # rendered .gmail.json length is free; sizeEstimate is the
-        # source message size and stays in extra, beside the text a
-        # search has to look at itself.
-        extra: dict[str, Any] = {"unsearched": unsearched_text(raw)}
+        # rendered .gmail.json length and text are free; sizeEstimate is
+        # the source message size and stays in extra.
+        extra: dict[str, Any] = (
+            {"text": rendered.decode().lower()} if keep_text else {}
+        )
         if size_estimate is not None:
             extra["size_estimate"] = size_estimate
         children.append(
@@ -136,7 +140,7 @@ def _date_children(
                     name=subject,
                     resource_type="gmail/message",
                     vfs_name=filename,
-                    size=len(message_json_bytes(raw)),
+                    size=len(rendered),
                     extra=extra,
                 ),
             )
@@ -222,7 +226,9 @@ async def _list_label(
                 ),
             )
         )
-        children, att_seeds = _date_children(groups[date_str])
+        children, att_seeds = _date_children(
+            groups[date_str], accessor.config.content_search
+        )
         seeds[date_str] = children
         for att_dir, att_entries in att_seeds.items():
             seeds[f"{date_str}/{att_dir}"] = att_entries
@@ -247,7 +253,9 @@ async def _list_day(
         max_results=MAX_MESSAGES,
     )
     groups = await _group_by_date(accessor, msg_ids)
-    children, att_seeds = _date_children(groups.get(match.slots["day"], []))
+    children, att_seeds = _date_children(
+        groups.get(match.slots["day"], []), accessor.config.content_search
+    )
     return DirListing(entries=children, seeds=att_seeds, window=True)
 
 

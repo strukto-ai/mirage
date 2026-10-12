@@ -50,7 +50,7 @@ class WindowSpy extends RAMIndexCacheStore {
   }
 }
 
-const ACCESSOR = new GmailAccessor({ tokenManager: {} as TokenManager })
+const ACCESSOR = new GmailAccessor({ tokenManager: {} as TokenManager, config: {} })
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/gmail') })

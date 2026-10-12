@@ -22,9 +22,9 @@ import {
 } from '../secrets.ts'
 
 const GmailConfigSchema = GoogleConfigSchema.extend({
-  // Let grep -w and rg -w read only the messages Gmail search names
-  // (`filesContaining`). Off by default: Gmail indexes a message some time
-  // after it arrives.
+  // Keep each listed message's text so grep and rg read only the messages
+  // that hold the text (`filesContaining`). Off by default: the listing then
+  // holds every listed message's body.
   contentSearch: z.boolean().optional(),
 })
 

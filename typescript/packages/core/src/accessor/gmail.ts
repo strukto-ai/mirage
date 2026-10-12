@@ -12,6 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { TokenManager } from '../core/google/client.ts'
 import { GoogleApiAccessor } from './google_api.ts'
+import type { GmailConfig } from '../vfs/gmail/config.ts'
 
-export class GmailAccessor extends GoogleApiAccessor {}
+export class GmailAccessor extends GoogleApiAccessor {
+  readonly config: GmailConfig
+
+  constructor(opts: { tokenManager: TokenManager; config: GmailConfig }) {
+    super(opts)
+    this.config = opts.config
+  }
+}

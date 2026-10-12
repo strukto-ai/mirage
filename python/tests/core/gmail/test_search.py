@@ -12,84 +12,45 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
-import aiohttp
 import pytest
 
-from tests.core.gmail.conftest import RATE_LIMITED, FakeGmail
+from tests.core.gmail.conftest import FakeGmail
 
 
+# The listing keeps each message's rendered text, so a message is read when
+# its text holds the word anywhere: e5 holds rtf only in its attachment's
+# MIME type, g7 travel only in a snippet cut inside traveler, i9 mountain
+# only in its Date header and j10 wombat only inside a link, which Gmail's
+# search may not split out. Gmail's search is never asked.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line, reads",
     [
         ("grep -rlw deploy /gmail", ["b2", "b2", "c3"]),
+        ("grep -rl deploy /gmail", ["b2", "b2", "c3"]),
         ("grep -rlw Ana /gmail/INBOX", ["a1"]),
         ("grep -rlw plan /gmail/INBOX", ["a1"]),
         ("grep -rlw deploy /gmail/INBOX/2026-01-06", ["b2"]),
         ("rg -lw friday /gmail/Work", ["b2"]),
-    ],
-)
-async def test_a_word_reads_only_the_messages_search_names(gmail, line, reads):
-    full = await gmail(line, content_search=False)
-    out, code, read, _ = await gmail(line)
-    assert (out, code) == full[:2]
-    assert read == reads
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line, reads",
-    [
-        # e5 holds rtf only in its attachment's MIME type, g7 holds travel
-        # only in a snippet cut inside traveler and i9 holds mountain only
-        # in its Date header; Gmail searches none of them, so the listing's
-        # copy of them is checked.
         ("grep -rlw rtf /gmail/INBOX", ["e5", "f6"]),
         ("grep -rlw travel /gmail/INBOX", ["a1", "g7"]),
         ("grep -rlw mountain /gmail/INBOX", ["h8", "i9"]),
+        ("grep -rlw wombat /gmail", ["j10"]),
+        ("grep -rlw nothing /gmail", []),
     ],
 )
-async def test_text_gmail_does_not_search_is_checked_in_the_listing(
+async def test_only_the_messages_whose_text_holds_it_are_read(
     gmail, line, reads
 ):
     full = await gmail(line, content_search=False)
-    out, code, read, _ = await gmail(line)
+    out, code, read, searches = await gmail(line)
     assert (out, code) == full[:2]
     assert read == reads
+    assert searches == []
 
 
 @pytest.mark.asyncio
-async def test_a_label_day_is_searched_within_its_bounds(gmail):
-    *_, searches = await gmail("grep -rlw deploy /gmail/INBOX/2026-01-06")
-    assert searches == [
-        "deploy after:1767657599 before:1767744000",
-        "eploy after:1767657599 before:1767744000",
-        "filename:deploy after:1767657599 before:1767744000",
-        "filename:eploy after:1767657599 before:1767744000",
-    ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line, fake",
-    [
-        ("grep -rlw inbox /gmail", FakeGmail()),
-        ("grep -rlw Jan /gmail", FakeGmail()),
-        ("grep -rlw nothing /gmail", FakeGmail()),
-        ("grep -rlw deploy /gmail", FakeGmail(fails=RATE_LIMITED)),
-        (
-            "grep -rlw deploy /gmail",
-            FakeGmail(fails=aiohttp.ClientConnectionError("reset")),
-        ),
-        ("grep -rlw deploy /gmail", FakeGmail(fails=asyncio.TimeoutError())),
-        ("grep -rlw deploy /gmail", FakeGmail(more=True)),
-    ],
-)
-async def test_every_message_is_read_when_search_cannot_answer(
-    gmail, line, fake
-):
+async def test_every_message_is_read_for_a_text_that_is_not_ascii(gmail):
+    line = "grep -rl caf\u00e9 /gmail"
     full = await gmail(line, content_search=False)
-    out, code, read, _ = await gmail(line, fake)
-    assert (out, code, read) == full[:3]
+    assert (await gmail(line, FakeGmail()))[:3] == full[:3]

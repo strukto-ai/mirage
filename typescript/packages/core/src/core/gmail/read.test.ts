@@ -45,7 +45,7 @@ const STUB_TOKEN_MANAGER = {
 } as TokenManager
 
 function makeAccessor(): GmailAccessor {
-  return new GmailAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+  return new GmailAccessor({ tokenManager: STUB_TOKEN_MANAGER, config: {} })
 }
 
 describe('gmail read auto-bootstrap', () => {

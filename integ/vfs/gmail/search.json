@@ -66,7 +66,7 @@
       }
     },
     {
-      "id": "gmail_search_reads_every_message_for_a_key_name",
+      "id": "gmail_search_finds_a_key_name",
       "seq": 540248,
       "targets": [
         "gmail"
@@ -79,7 +79,7 @@
       }
     },
     {
-      "id": "gmail_search_without_a_hit_reads_every_message",
+      "id": "gmail_search_without_a_hit_reads_nothing",
       "seq": 540249,
       "targets": [
         "gmail"
@@ -101,6 +101,19 @@
       "expect": {
         "exit": 0,
         "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gmail_search_checks_the_listing_text_without_w",
+      "seq": 540253,
+      "targets": [
+        "gmail"
+      ],
+      "command": "grep -rl udget /mail | sort; rg -l 'orker-3' /mail | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-05/Standup_notes__msg0002.gmail.json\n/mail/SENT/2026-02-01/Re_Q2_Budget_Review__msg0007.gmail.json\n/mail/UNREAD/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\n/mail/INBOX/2026-01-07/Server_alert_worker-3__msg0003.gmail.json\n/mail/UNREAD/2026-01-07/Server_alert_worker-3__msg0003.gmail.json\n",
         "stderr": ""
       }
     }

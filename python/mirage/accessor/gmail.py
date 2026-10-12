@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.vfs.gmail.config import GmailConfig
 
 
 class GmailAccessor(GoogleApiAccessor):
-    pass
+    config: GmailConfig

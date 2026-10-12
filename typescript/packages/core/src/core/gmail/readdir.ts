@@ -26,7 +26,6 @@ import {
   getMessageRaw,
   listMessages,
   messageJsonBytes,
-  unsearchedText,
 } from './messages.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
@@ -80,8 +79,15 @@ function attachmentEntries(raw: GmailMessageRaw): [string, IndexEntry][] {
   )
 }
 
-/** One date directory's children, plus its attachment-dir seeds. */
-function dateChildren(raws: readonly GmailMessageRaw[]): {
+/**
+ * One date directory's children, plus its attachment-dir seeds. With
+ * `keepText` each message's entry keeps its rendered text, lowercased, for
+ * grep (`contentSearch`).
+ */
+function dateChildren(
+  raws: readonly GmailMessageRaw[],
+  keepText: boolean,
+): {
   children: [string, IndexEntry][]
   seeds: Record<string, [string, IndexEntry][]>
 } {
@@ -93,8 +99,9 @@ function dateChildren(raws: readonly GmailMessageRaw[]): {
     const subject = extractHeader(headers, 'Subject') || 'No Subject'
     const filename = msgFilename(subject, mid)
     // The listing already fetched the full message, so the exact rendered
-    // .gmail.json length is free; sizeEstimate is the source message size
-    // and stays in extra, beside the text a search has to look at itself.
+    // .gmail.json length and text are free; sizeEstimate is the source
+    // message size and stays in extra.
+    const rendered = messageJsonBytes(raw)
     children.push([
       filename,
       new IndexEntry({
@@ -102,9 +109,9 @@ function dateChildren(raws: readonly GmailMessageRaw[]): {
         name: subject,
         resourceType: 'gmail/message',
         vfsName: filename,
-        size: messageJsonBytes(raw).byteLength,
+        size: rendered.byteLength,
         extra: {
-          unsearched: unsearchedText(raw),
+          ...(keepText ? { text: new TextDecoder().decode(rendered).toLowerCase() } : {}),
           ...(raw.sizeEstimate != null ? { size_estimate: raw.sizeEstimate } : {}),
         },
       }),
@@ -191,7 +198,10 @@ async function listLabel(
         extra: { label_id: own.id },
       }),
     ])
-    const { children, seeds: attSeeds } = dateChildren(groups.get(dateStr) ?? [])
+    const { children, seeds: attSeeds } = dateChildren(
+      groups.get(dateStr) ?? [],
+      accessor.config.contentSearch === true,
+    )
     seeds[dateStr] = children
     for (const [attDir, attEntries] of Object.entries(attSeeds)) {
       seeds[`${dateStr}/${attDir}`] = attEntries
@@ -218,7 +228,10 @@ async function listDay(
     maxResults: MAX_MESSAGES,
   })
   const groups = await groupByDate(accessor, msgIds)
-  const { children, seeds } = dateChildren(groups.get(day) ?? [])
+  const { children, seeds } = dateChildren(
+    groups.get(day) ?? [],
+    accessor.config.contentSearch === true,
+  )
   const listing: DirListing = { entries: children, seeds, window: true }
   return listing
 }

@@ -17,14 +17,10 @@ import re
 from datetime import datetime
 from typing import Any
 
-import aiohttp
 import pytest
-from multidict import CIMultiDict, CIMultiDictProxy
-from yarl import URL
 
 import mirage.core.gmail.read as read_mod
 import mirage.core.gmail.readdir as readdir_mod
-import mirage.core.gmail.search as search_mod
 from mirage.types import MountMode
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.gmail import GmailVFS
@@ -151,6 +147,14 @@ MESSAGES = [
         "quiet",
         date="Thu, 8 Jan 2026 09:00:00 -0700 (Mountain Standard Time)",
     ),
+    _message(
+        "j10",
+        ["INBOX"],
+        "2026-01-08",
+        "Jo <jo@example.com>",
+        "Links",
+        "notes at example.com/wombat/guide",
+    ),
 ]
 
 
@@ -164,30 +168,15 @@ def _header(message: dict[str, Any], name: str) -> str:
     return next((h["value"] for h in headers if h["name"] == name), "")
 
 
-RATE_LIMITED = aiohttp.ClientResponseError(
-    aiohttp.RequestInfo(
-        URL("https://gmail.test"), "GET", CIMultiDictProxy(CIMultiDict())
-    ),
-    (),
-    status=429,
-)
-
-
 class FakeGmail:
-    """The Gmail API a label walk and its search reach.
+    """The Gmail API a label walk reaches, recording each search.
 
     A bare word matches whole words of the From, To, Cc and Subject
     headers and the body in any case, ``filename:`` an attachment name,
-    and ``after:``/``before:`` take epoch seconds, as Gmail does. A
-    search raises ``fails`` when set, and with ``more`` names a next page
-    however few stubs it returns.
+    and ``after:``/``before:`` take epoch seconds, as Gmail does.
     """
 
-    def __init__(
-        self, fails: Exception | None = None, more: bool = False
-    ) -> None:
-        self.fails = fails
-        self.more = more
+    def __init__(self) -> None:
         self.searches: list[str] = []
 
     async def list_labels(self, token_manager):
@@ -198,8 +187,6 @@ class FakeGmail:
     ):
         if query is not None and not query.startswith("after:"):
             self.searches.append(query)
-            if self.fails is not None:
-                raise self.fails
         found = [
             {"id": m["id"], "threadId": m["threadId"]}
             for m in MESSAGES
@@ -207,14 +194,6 @@ class FakeGmail:
             and self._matches(m, query or "")
         ]
         return found[:max_results]
-
-    async def list_message_page(
-        self, token_manager, label_id=None, query=None, max_results=50
-    ):
-        found = await self.list_messages(
-            token_manager, label_id, query, max_results
-        )
-        return found, "next" if self.more else None
 
     def _matches(self, message: dict[str, Any], query: str) -> bool:
         seconds = int(message["internalDate"]) // 1000
@@ -265,9 +244,6 @@ def gmail(monkeypatch):
         monkeypatch.setattr(readdir_mod, "list_messages", fake.list_messages)
         monkeypatch.setattr(
             readdir_mod, "get_message_raw", fake.get_message_raw
-        )
-        monkeypatch.setattr(
-            search_mod, "list_message_page", fake.list_message_page
         )
         monkeypatch.setattr(read_mod, "get_attachment", fake.get_attachment)
         reads: list[str] = []

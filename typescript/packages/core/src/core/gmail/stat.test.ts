@@ -26,7 +26,7 @@ const STUB_TM = {} as TokenManager
 const PREFIX = '/gmail'
 
 function makeAccessor(): GmailAccessor {
-  return new GmailAccessor({ tokenManager: STUB_TM })
+  return new GmailAccessor({ tokenManager: STUB_TM, config: {} })
 }
 
 function spec(virtual: string): PathSpec {

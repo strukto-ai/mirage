@@ -55,7 +55,7 @@ async function find(
 const STUB_TM = {} as TokenManager
 
 function makeAccessor(): GmailAccessor {
-  return new GmailAccessor({ tokenManager: STUB_TM })
+  return new GmailAccessor({ tokenManager: STUB_TM, config: {} })
 }
 
 function enoent(p: string): Error {

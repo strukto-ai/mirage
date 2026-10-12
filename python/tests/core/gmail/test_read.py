@@ -22,11 +22,14 @@ from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.gmail.read import read
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gmail.config import GmailConfig
 
 
 @pytest.fixture
 def accessor():
-    return GmailAccessor(config=None, token_manager=None)
+    return GmailAccessor(
+        config=GmailConfig(access_token="t"), token_manager=None
+    )
 
 
 @pytest.fixture

@@ -42,7 +42,7 @@ class GmailVFS(BaseVFS):
     index_ttl: float = 86_400
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
-    # Gmail search names messages; an attachment is read as usual.
+    # The listing keeps each message's text; an attachment is read as usual.
     searchable = ("*/*/*.gmail.json",)
 
     def __init__(self, config: GmailConfig) -> None:
@@ -80,7 +80,7 @@ class GmailVFS(BaseVFS):
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        if not whole_word or not self.config.content_search:
+        if not self.config.content_search:
             return None
         return await _files_containing(self.accessor, text, under, index)
 

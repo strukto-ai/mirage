@@ -143,6 +143,14 @@ const MESSAGES = [
     null,
     'Thu, 8 Jan 2026 09:00:00 -0700 (Mountain Standard Time)',
   ),
+  message(
+    'j10',
+    ['INBOX'],
+    '2026-01-08',
+    'Jo <jo@example.com>',
+    'Links',
+    'notes at example.com/wombat/guide',
+  ),
 ]
 
 function holds(text: string, word: string): boolean {
@@ -155,19 +163,13 @@ function header(m: Message, name: string): string {
 }
 
 /**
- * The Gmail API a label walk and its search reach. A bare word matches whole
- * words of the From, To, Cc and Subject headers and the body in any case,
- * `filename:` an attachment name, and `after:`/`before:` take epoch seconds,
- * as Gmail does. A search answers 429 when `fails` is 'status' and rejects
- * with it when it is an error, and with `more` names a next page however few
- * stubs it returns. Mirrors Python's `FakeGmail`.
+ * The Gmail API a label walk reaches, recording each search. A bare word
+ * matches whole words of the From, To, Cc and Subject headers and the body in
+ * any case, `filename:` an attachment name, and `after:`/`before:` take epoch
+ * seconds, as Gmail does. Mirrors Python's `FakeGmail`.
  */
 class FakeGmail {
   readonly searches: string[] = []
-  constructor(
-    private readonly fails: 'status' | Error | null = null,
-    private readonly more = false,
-  ) {}
 
   readonly fetch = (input: string | URL | Request): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : String(input))
@@ -180,10 +182,10 @@ class FakeGmail {
     return this.json(MESSAGES.find((m) => m.id === id) ?? {})
   }
 
-  private json(body: unknown, status = 200): Promise<Response> {
+  private json(body: unknown): Promise<Response> {
     return Promise.resolve(
       new Response(JSON.stringify(body), {
-        status,
+        status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     )
@@ -191,18 +193,12 @@ class FakeGmail {
 
   private list(params: URLSearchParams): Promise<Response> {
     const query = params.get('q') ?? ''
-    if (query !== '' && !query.startsWith('after:')) {
-      this.searches.push(query)
-      if (this.fails === 'status') return this.json({ error: { message: 'rate limited' } }, 429)
-      if (this.fails !== null) return Promise.reject(this.fails)
-    }
+    if (query !== '' && !query.startsWith('after:')) this.searches.push(query)
     const label = params.get('labelIds')
     const found = MESSAGES.filter(
       (m) => (label === null || m.labelIds.includes(label)) && this.matches(m, query),
     ).map((m) => ({ id: m.id, threadId: m.threadId }))
-    const messages = found.slice(0, Number(params.get('maxResults') ?? 100))
-    const searched = query !== '' && !query.startsWith('after:')
-    return this.json(this.more && searched ? { messages, nextPageToken: 'next' } : { messages })
+    return this.json({ messages: found.slice(0, Number(params.get('maxResults') ?? 100)) })
   }
 
   private matches(m: Message, query: string): boolean {
@@ -260,59 +256,35 @@ afterEach(() => {
 })
 
 describe('filesContaining', () => {
+  // Twin of test_only_the_messages_whose_text_holds_it_are_read: the listing
+  // keeps each message's rendered text, so a message is read when its text
+  // holds the word anywhere: e5 holds rtf only in its attachment's MIME type,
+  // g7 travel only in a snippet cut inside traveler, i9 mountain only in its
+  // Date header and j10 wombat only inside a link, which Gmail's search may
+  // not split out. Gmail's search is never asked.
   it.each([
     ['grep -rlw deploy /gmail', ['b2', 'b2', 'c3']],
+    ['grep -rl deploy /gmail', ['b2', 'b2', 'c3']],
     ['grep -rlw Ana /gmail/INBOX', ['a1']],
     ['grep -rlw plan /gmail/INBOX', ['a1']],
     ['grep -rlw deploy /gmail/INBOX/2026-01-06', ['b2']],
     ['rg -lw friday /gmail/Work', ['b2']],
-  ])('reads only the messages search names for %s', async (line, reads) => {
-    const full = await onGmail(line, new FakeGmail(), false)
-    const [out, code, read] = await onGmail(line)
-    expect([out, code]).toEqual(full.slice(0, 2))
-    expect(read).toEqual(reads)
-  })
-
-  // Twin of test_text_gmail_does_not_search_is_checked_in_the_listing: e5
-  // holds rtf only in its attachment's MIME type, g7 holds travel only in a
-  // snippet cut inside traveler and i9 holds mountain only in its Date header;
-  // Gmail searches none of them, so the listing's copy of them is checked.
-  it.each([
     ['grep -rlw rtf /gmail/INBOX', ['e5', 'f6']],
     ['grep -rlw travel /gmail/INBOX', ['a1', 'g7']],
     ['grep -rlw mountain /gmail/INBOX', ['h8', 'i9']],
-  ])('checks what Gmail does not search in the listing for %s', async (line, reads) => {
+    ['grep -rlw wombat /gmail', ['j10']],
+    ['grep -rlw nothing /gmail', []],
+  ])('reads only the messages whose text holds it for %s', async (line, reads) => {
     const full = await onGmail(line, new FakeGmail(), false)
-    const [out, code, read] = await onGmail(line)
+    const [out, code, read, searches] = await onGmail(line)
     expect([out, code]).toEqual(full.slice(0, 2))
     expect(read).toEqual(reads)
+    expect(searches).toEqual([])
   })
 
-  it('searches a label day within its bounds', async () => {
-    const [, , , searches] = await onGmail('grep -rlw deploy /gmail/INBOX/2026-01-06')
-    expect(searches).toEqual([
-      'deploy after:1767657599 before:1767744000',
-      'eploy after:1767657599 before:1767744000',
-      'filename:deploy after:1767657599 before:1767744000',
-      'filename:eploy after:1767657599 before:1767744000',
-    ])
-  })
-
-  it.each([
-    ['grep -rlw inbox /gmail', () => new FakeGmail()],
-    ['grep -rlw Jan /gmail', () => new FakeGmail()],
-    ['grep -rlw nothing /gmail', () => new FakeGmail()],
-    ['grep -rlw deploy /gmail', () => new FakeGmail('status')],
-    ['grep -rlw deploy /gmail', () => new FakeGmail(new TypeError('fetch failed'))],
-    ['grep -rlw deploy /gmail', () => new FakeGmail(new DOMException('timed out', 'TimeoutError'))],
-    ['grep -rlw deploy /gmail', () => new FakeGmail(null, true)],
-  ])('reads every message when search cannot answer %s', async (line, fake) => {
+  it('reads every message for a text that is not ASCII', async () => {
+    const line = 'grep -rl caf\u00e9 /gmail'
     const full = await onGmail(line, new FakeGmail(), false)
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    try {
-      expect((await onGmail(line, fake())).slice(0, 3)).toEqual(full.slice(0, 3))
-    } finally {
-      warn.mockRestore()
-    }
+    expect((await onGmail(line)).slice(0, 3)).toEqual(full.slice(0, 3))
   })
 })

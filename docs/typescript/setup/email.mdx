@@ -47,8 +47,8 @@ await ws.shell('ls /mail/INBOX/')
 ## grep and rg
 
 With `contentSearch: true` (YAML `content_search: true`), `grep -r` and `rg` read only the
-messages IMAP `SEARCH TEXT` names in each folder or day they walk, and print
-what reading every message would. IMAP matches the headers and body in any
+messages IMAP `SEARCH TEXT` names in each folder or day they walk (from the
+mount root, in every folder), and print what reading every message would. IMAP matches the headers and body in any
 case; each hit's file is named from a header-only fetch. Attachments are always
 read.
 
