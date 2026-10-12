@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../expand/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -47,7 +46,7 @@ import {
 } from '../../commands/builtin/find_parse.ts'
 import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
 import type { ExecAction, FindAction, PrintfAction } from '../../commands/builtin/types.ts'
-
+import type { ExecuteFn } from '../expand/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { concat } from '../../utils/bytes.ts'

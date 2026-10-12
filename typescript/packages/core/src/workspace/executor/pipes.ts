@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../expand/types.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
 import { runWithEvaluation } from '../../context/session_context.ts'
 
@@ -53,7 +52,7 @@ import { handleBackground, pump } from './jobs.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { endShell, errTrapArmed, inheritTraps, runErrTrap, runExitTrap } from './traps.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
-
+import type { ExecuteFn } from '../expand/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 

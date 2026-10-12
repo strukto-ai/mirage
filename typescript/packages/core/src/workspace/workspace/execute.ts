@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../expand/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -67,7 +66,7 @@ import {
   snapshotStatus,
   type StatusSnapshot,
 } from '../executor/statement.ts'
-
+import type { ExecuteFn } from '../expand/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { withHandOff } from '../node/execute_node.ts'

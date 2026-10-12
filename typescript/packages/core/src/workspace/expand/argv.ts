@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from './types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
@@ -35,7 +34,7 @@ import {
 
 import { classifyParts } from './classify/index.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
-
+import type { ExecuteFn } from './types.ts'
 import { expandWords } from './parts.ts'
 import { type CommandSpec, type ValueType } from '../../commands/spec/types.ts'
 import { specForCommand, specWordBases, specWordKinds } from './spec_hints.ts'

@@ -389,8 +389,8 @@ fails on a failed battery, an empty report, or either missed floor.
 `integ/shell_coverage.json` defines the common shell/executor source scope and
 independent statement/branch floors. Its documented case exclusion omits the
 300,000-iteration stress test from measurement only; the regular battery still
-runs it. Both runners reject an unknown excluded ID. `--measure` prints current coverage without
-enforcing floors; CI always enforces them. Reports live in
+runs it. Both runners reject an unknown excluded ID. `--measure` prints current
+coverage without enforcing floors; CI always enforces them. Reports live in
 `.cache/integ-shell-coverage/` and are uploaded by `integ-shell-coverage`, which
 is required by `integ-gate` and uses the existing core/TypeScript path filters.
 
@@ -405,17 +405,18 @@ in Python and 36 statement entries / 11 branches in TypeScript. Equal shell
 outputs therefore do not imply equal coverage percentages. The shared goldens
 establish behavior parity; these independent floors catch coverage regressions.
 
-The PR 1 Linux CI RAM measurement was Python 85.04% statements / 75.80% branches
-and TypeScript 89.24% / 84.26%. The floors leave roughly one to two percentage
-points of headroom in each host. Tighten a host's floors when its measured coverage
-increases, without copying the other coverage engine's percentage.
+When the floors were set (October 2026), the Linux CI RAM measurement was
+Python 85.04% statements / 75.80% branches and TypeScript 89.24% / 84.26%. The
+floors leave roughly one to two percentage points of headroom in each host.
+Tighten a host's floors when its measured coverage increases, without copying
+the other coverage engine's percentage.
 
 The real Chrome suite additionally suspends two sessions with opposite mount
 permissions, hidden paths, umasks and glob options. Its explicit session access
 is also exercised by the fallback-context unit tests. Python retains native
 ContextVar isolation and carries the same access shape into command options.
 
-`INT`, `TERM` and `DEBUG` traps are outside this consolidation: delivering host
+`INT`, `TERM` and `DEBUG` traps are not measured here: delivering host
 signals and defining per-command debug ordering require their own shell
 semantics and conformance cases. The existing `EXIT`, `ERR` and `RETURN` traps
 remain in the shared battery.

@@ -925,8 +925,12 @@ def require_mount_writable() -> None:
 
 
 def session_access(session: SessionState | None) -> SessionAccess:
-    """Bind access to its owner before an asynchronous operation suspends."""
+    """Bind access to its owner before an asynchronous operation suspends.
 
+    Args:
+        session (SessionState | None): the owner; None answers as an
+            unrestricted session with bash's default mask.
+    """
     return SessionAccess(
         session_id=session.session_id if session is not None else "",
         visibility=session.visibility if session is not None else None,
