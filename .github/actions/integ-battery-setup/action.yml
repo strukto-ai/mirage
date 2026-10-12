@@ -117,13 +117,18 @@ runs:
     # The trade: a crash in any one fake now takes the whole process down,
     # where eleven processes lost only one. server/launcher has its own
     # selftest for that reason.
+    #
+    # Each fake keeps its SQLite files under the OS tmpdir in rollback-journal
+    # mode, so every write commit fsyncs twice; one box run commits about
+    # 18,000 times. The process dies with the job, so tmpfs loses nothing,
+    # the same trade the nextcloud service makes for its data dir.
     - name: Start the kit fakes
       if: ${{ inputs.start-services == 'true' }}
       working-directory: integ
       shell: bash
       run: |
         : > /tmp/fakes.log
-        nohup ./node_modules/.bin/tsx server/launcher/main.ts \
+        TMPDIR=/dev/shm nohup ./node_modules/.bin/tsx server/launcher/main.ts \
           --config ci/fakes.json > /tmp/fakes.log 2>&1 &
         # `grep -c` PRINTS the count and still exits 1 when it is zero, so a
         # `|| echo 0` fallback appends a second line and the test sees "0\n0".

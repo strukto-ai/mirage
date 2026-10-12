@@ -1573,6 +1573,22 @@ def selftest_shard() -> None:
                 all(parts),
                 f"{[len(part) for part in parts]}",
             )
+        shared = shard.launched(manifest, host)
+        check(
+            f"shard ({host}): the launcher serves box and sharepoint, not s3",
+            {"box", "sharepoint"} <= shared and not {"ram", "s3"} & shared,
+            f"{sorted(shared)}",
+        )
+        fake_load = [
+            sum(weight for ids, weight in part if shared & set(ids))
+            for part in shard.split(items, 3, shared)
+        ]
+        heaviest = max(w for ids, w in items if shared & set(ids))
+        check(
+            f"shard ({host}): launcher load spreads within one target",
+            max(fake_load) - min(fake_load) <= heaviest,
+            f"{fake_load} vs {heaviest}",
+        )
         check(
             f"shard ({host}): no skipped service and no foreign host",
             all(

@@ -37,6 +37,7 @@ from pathlib import Path
 
 INTEG = Path(__file__).resolve().parents[2]
 SECONDS = INTEG / "ci" / "shard_seconds.json"
+FAKES = INTEG / "ci" / "fakes.json"
 SKIP_DIRS = {"node_modules", "generated", "truth", "fixtures"}
 
 
@@ -156,22 +157,59 @@ def idle_facets(
     return sorted(set(facets) - seen)
 
 
+def launched(manifest: dict, host: str) -> set[str]:
+    """The targets whose service the job's one fake launcher answers.
+
+    Args:
+        manifest (dict): targets.json.
+        host (str): `python` or `typescript`, the runner's language.
+    """
+    fakes = json.loads(FAKES.read_text())
+    tokens = {
+        spec.get("token", f"{name.upper().replace('-', '_')}_URL")
+        for name, spec in fakes.items()
+        if not name.startswith("_")
+    }
+    services = manifest.get("services", {})
+    return {
+        target["id"]
+        for target in manifest["targets"]
+        if tokens & set(services.get(target.get("service"), {}).get(host, []))
+    }
+
+
 def split(
-    items: list[tuple[list[str], int]], shards: int
+    items: list[tuple[list[str], int]],
+    shards: int,
+    shared: set[str] | None = None,
 ) -> list[list[tuple[list[str], int]]]:
     """Largest first onto the lightest shard, so shards weigh the same.
+
+    Items on the job's shared fake process go first, each onto the shard
+    whose fake carries the least, and the rest fill in by weight: equal
+    weights alone once put five of the heaviest fake targets on one shard,
+    whose single fake process then slowed all five.
 
     Args:
         items (list[tuple[list[str], int]]): work items and weights.
         shards (int): how many shard jobs there are.
+        shared (set[str] | None): target ids the job's fake launcher serves.
     """
+    shared = shared or set()
     out: list[list[tuple[list[str], int]]] = [[] for _ in range(shards)]
     load = [0] * shards
-    for item in sorted(items, key=lambda it: (-it[1], it[0])):
-        lightest = load.index(min(load))
-        out[lightest].append(item)
-        load[lightest] += item[1]
-    return out
+    fake = [0] * shards
+    for item in sorted(
+        items, key=lambda it: (not shared & set(it[0]), -it[1], it[0])
+    ):
+        if shared & set(item[0]):
+            pick = min(range(shards), key=lambda s: (fake[s], load[s]))
+            fake[pick] += item[1]
+        else:
+            pick = load.index(min(load))
+        out[pick].append(item)
+        load[pick] += item[1]
+    return [sorted(part, key=lambda it: (-it[1], it[0])) for part in out]
 
 
 def run_item(
@@ -238,7 +276,7 @@ def main() -> None:
             f"--facet puts no {args.host} target in the split: "
             f"{', '.join(idle)}"
         )
-    mine = split(items, args.shards)[args.shard]
+    mine = split(items, args.shards, launched(manifest, args.host))[args.shard]
     if not mine:
         print(
             f"shard {args.shard} of {args.shards} got no targets",
