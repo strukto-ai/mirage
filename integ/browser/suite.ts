@@ -159,7 +159,7 @@ const CHECKS: [string, Check][] = [
           await ws.vfs.write(`/data/${name}`, name)
         const wide = shell(
           ws,
-          'pause; mkdir /data/new; stat -c %a /data/new; echo /data/*; echo /data/@(a|b)',
+          'pause; mkdir /data/new; stat -c %a /data/new; echo /data/*; echo /data/@(a|b); p="/data/@(a|b)"; echo hi > $p',
           { sessionId: loose.sessionId, env: { LABEL: 'loose' } },
         )
         const narrow = shell(ws, 'pause; echo /data/*; mkdir /data/denied', {
@@ -170,11 +170,11 @@ const CHECKS: [string, Check][] = [
         const output = await wide
         releaseTight()
         const denied = await narrow
-        equal(output, [
-          0,
+        equal(output.slice(0, 2), [
+          1,
           '755\n/data/.hidden /data/a /data/b /data/new /data/private\n/data/a /data/b\n',
-          '',
         ])
+        equal(output[2].includes('ambiguous redirect'), true)
         equal(denied.slice(0, 2), [1, '/data/a /data/b /data/new\n'])
         equal(denied[2].includes('Read-only file system'), true)
       } finally {

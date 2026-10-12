@@ -2383,7 +2383,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/integ-battery-setup

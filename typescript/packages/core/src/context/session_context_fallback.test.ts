@@ -949,7 +949,7 @@ it('keeps each browser session’s permissions, umask and glob settings across s
   try {
     for (const name of ['a', 'b', '.hidden', 'private']) await ws.vfs.write(`/data/${name}`, name)
     const wide = ws.shell(
-      'pause; mkdir /data/new; stat -c %a /data/new; echo /data/*; echo /data/@(a|b)',
+      'pause; mkdir /data/new; stat -c %a /data/new; echo /data/*; echo /data/@(a|b); p="/data/@(a|b)"; echo hi > $p',
       { sessionId: loose.sessionId, env: { LABEL: 'loose' } },
     )
     const narrow = ws.shell('pause; echo /data/*; mkdir /data/denied', {
@@ -960,7 +960,8 @@ it('keeps each browser session’s permissions, umask and glob settings across s
     const output = await wide
     releaseTight()
     const denied = await narrow
-    expect(output.stderrText).toBe('')
+    expect(output.exitCode).toBe(1)
+    expect(output.stderrText).toContain('ambiguous redirect')
     expect(output.stdoutText).toBe(
       '755\n/data/.hidden /data/a /data/b /data/new /data/private\n/data/a /data/b\n',
     )
@@ -970,6 +971,43 @@ it('keeps each browser session’s permissions, umask and glob settings across s
   } finally {
     releaseLoose()
     releaseTight()
+    await ws.close()
+  }
+})
+
+it('keeps unbound file calls restrictive when a wider browser session shadows their owner', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const narrow = ws.createSession('narrow', {
+    profile: parseSessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/secret'] } }),
+  })
+  const wide = ws.createSession('wide')
+  const [resume, releaseNarrow] = gate()
+  const [held, releaseWide] = gate()
+  try {
+    await ws.vfs.write('/data/secret', 'secret')
+    const first = runWithSession(
+      narrow,
+      async () => {
+        await resume
+        await expect(ws.vfs.read('/data/secret')).rejects.toMatchObject({ code: 'ENOENT' })
+        await expect(ws.vfs.write('/data/new', 'denied')).rejects.toMatchObject({ code: 'EROFS' })
+      },
+      { owner: ws.sessionManager },
+    )
+    const second = runWithSession(wide, () => held, { owner: ws.sessionManager })
+    try {
+      releaseNarrow()
+      await first
+    } finally {
+      releaseWide()
+      await second
+    }
+  } finally {
+    releaseNarrow()
+    releaseWide()
     await ws.close()
   }
 })

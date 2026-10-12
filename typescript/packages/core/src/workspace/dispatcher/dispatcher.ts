@@ -533,8 +533,9 @@ export class Dispatcher {
   }
 
   dispatch: DispatchFn = (name, path, args, kwargs, report) => {
-    if (this.access === undefined)
-      return this.forSession(getCurrentSession()).dispatch(name, path, args, kwargs, report)
+    // Only forSession knows the owner. An unbound browser call must keep
+    // the conservative live-session checks rather than borrow the newest
+    // binding, which can belong to a wider concurrent session.
     const run = (): ReturnType<DispatchFn> =>
       this.dispatchAdmitted(name, path, args, kwargs, report)
     if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return run()

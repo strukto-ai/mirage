@@ -382,7 +382,7 @@ describe('withDispatchRuleGuard', () => {
       resolved: true,
     })
 
-  it('marks an op with the bound gate for the dispatcher to judge', async () => {
+  it('marks an op with its explicit gate despite another ambient gate', async () => {
     const seen: [string, unknown][] = []
     const inner: DispatchFn = (op, _path, _args, kwargs) => {
       seen.push([op, kwargs?.ruleGate])
@@ -401,10 +401,11 @@ describe('withDispatchRuleGuard', () => {
       },
       refuses: () => false,
     }
-    await runWithAdmission(gate, async () => {
-      await dispatch('read', spec('/data/f'), [spec('/data/g')])
+    const bound = withDispatchRuleGuard(inner, gate)
+    await runWithAdmission({ ...gate, scopes: () => false }, async () => {
+      await bound('read', spec('/data/f'), [spec('/data/g')])
       // A metadata op is never judged: deny is present and refused.
-      await dispatch('stat', spec('/data/f'))
+      await bound('stat', spec('/data/f'))
     })
     expect(seen).toEqual([
       ['read', undefined],

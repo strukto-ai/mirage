@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ExecuteFn } from './types.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { childLine } from './node.ts'
 import type { NamespaceLinks, SessionView } from '../../view/types.ts'
@@ -124,7 +125,7 @@ async function expandTarget(
   if (targetNode !== null) {
     const words = await expandWords([targetNode], context, executeFn, callStack, view)
     const targets = await resolveGlobs(
-      words.map((word) => classifyBarePath(word, registry, session.cwd)),
+      words.map((word) => classifyBarePath(word, registry, session.cwd, sessionAccess(session))),
       registry,
       session.shellOptions.noglob ?? false,
       links,
