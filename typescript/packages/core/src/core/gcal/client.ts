@@ -19,6 +19,8 @@ import { calendarBase, googleDelete, googleGet, type TokenManager } from '../goo
 
 const MAX_PAGES = 50
 
+export const PAGE_LIMIT = 'gcal: listing exceeded 50 pages; narrow the date range'
+
 function rows(data: unknown): Record<string, JsonValue>[] {
   if (typeof data !== 'object' || data === null) return []
   const items = (data as Record<string, unknown>).items
@@ -56,7 +58,7 @@ export async function listCalendars(
     token = nextToken(data)
     if (token === null) break
   }
-  if (token !== null) throw new Error('gcal: listing exceeded 50 pages; narrow the date range')
+  if (token !== null) throw new Error(PAGE_LIMIT)
   return items
 }
 
@@ -105,7 +107,7 @@ export async function listEvents(
     token = nextToken(data)
     if (token === null) break
   }
-  if (token !== null) throw new Error('gcal: listing exceeded 50 pages; narrow the date range')
+  if (token !== null) throw new Error(PAGE_LIMIT)
   return scope.bounded
     ? items.filter((event) => {
         const span = eventSpan(event, timeZone ?? 'UTC')

@@ -17,6 +17,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
+from mirage.cache.context import active_cache_manager
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import (
     directories_action,
@@ -323,9 +324,11 @@ async def search_reads(
     the output shows nothing else, or tells whether it is worth reading.
     An operand named on the line is never ruled out by a search asked
     about directories, nor is a path pinned to a revision, since a
-    search sees the current content. Neither is asked when a hide, a path rule or a
-    pre_vfs policy judges a path, since a search sees the raw tree. When
-    neither can stand in for a walk, ``before_full_scan`` may refuse it.
+    search sees the current content, nor a file the read cache holds,
+    which a read serves as it was cached. Neither is asked when a hide, a
+    path rule or a pre_vfs policy judges a path, since a search sees the
+    raw tree. When neither can stand in for a walk, ``before_full_scan``
+    may refuse it.
 
     Args:
         io (CommandIO): the backend table.
@@ -416,6 +419,9 @@ async def search_reads(
                 raise
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
+        manager = active_cache_manager()
+        if manager is not None and await manager.cached_size(path) is not None:
+            return None
         if (
             hits is not None
             and path.virtual not in named

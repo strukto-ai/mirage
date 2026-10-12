@@ -24,7 +24,7 @@ import { GoogleApiError } from '../google/client.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { parseTime } from '../time_range.ts'
-import { listEvents } from './client.ts'
+import { PAGE_LIMIT, listEvents } from './client.ts'
 import { dayBounds } from './day.ts'
 import { bucketZone, calendarIndex, normalize, readdir, scopedBucket } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -70,8 +70,9 @@ async function buckets(
  * by the text the listing kept (`unsearchedText`): the event's other fields,
  * and the words of those three the search may split otherwise. The text goes
  * through `recordQueries` for its escapes. Null when the text cannot be
- * searched, a scope lies inside a bucket, a search fails, or nothing is
- * found. Mirrors Python's `files_containing`.
+ * searched, a scope lies inside a bucket, a search fails or runs past
+ * `MAX_PAGES` pages, or nothing is found. Mirrors Python's
+ * `files_containing`.
  */
 export async function filesContaining(
   accessor: GCalAccessor,
@@ -145,7 +146,8 @@ export async function filesContaining(
       err instanceof GoogleApiError ||
       err instanceof TypeError ||
       err instanceof DOMException ||
-      err instanceof SyntaxError
+      err instanceof SyntaxError ||
+      (err instanceof Error && err.message === PAGE_LIMIT)
     if (!failed) throw err
     console.warn(`calendar search failed (${String(err)}); reading every file`)
     return null

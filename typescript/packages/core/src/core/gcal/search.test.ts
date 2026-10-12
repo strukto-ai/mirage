@@ -20,6 +20,7 @@ import { API, CLIENT, PRIMARY, event, makeAccessor, spec } from './_test_util.ts
 vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
 
 const { filesContaining } = await import('./search.ts')
+const { PAGE_LIMIT } = await import('./client.ts')
 
 const DAY = '2026-08-11'
 
@@ -87,17 +88,20 @@ it('reads every file when the listing kept no text', async () => {
   expect(out).toBeNull()
 })
 
-it('reads every file when a search fails', async () => {
-  const listEvents = vi
-    .spyOn(CLIENT, 'listEvents')
-    .mockImplementation((_tm, calendarId, timeMin, timeMax, timeZone, scope, query) =>
-      query === undefined
-        ? Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope))
-        : Promise.reject(new TypeError('fetch failed')),
-    )
-  try {
-    expect(await ids('lunch')).toBeNull()
-  } finally {
-    listEvents.mockRestore()
-  }
-})
+it.each([new TypeError('fetch failed'), new Error(PAGE_LIMIT)])(
+  'reads every file when a search fails with %s',
+  async (error) => {
+    const listEvents = vi
+      .spyOn(CLIENT, 'listEvents')
+      .mockImplementation((_tm, calendarId, timeMin, timeMax, timeZone, scope, query) =>
+        query === undefined
+          ? Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope))
+          : Promise.reject(error),
+      )
+    try {
+      expect(await ids('lunch')).toBeNull()
+    } finally {
+      listEvents.mockRestore()
+    }
+  },
+)

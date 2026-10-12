@@ -89,7 +89,8 @@ async def files_containing(
     the event's other fields, and the words of those three the search may
     split otherwise. The text goes through ``record_queries`` for its
     escapes. None when the text cannot be searched, a scope lies inside a
-    bucket, a search fails, or nothing is found.
+    bucket, a search fails or runs past ``MAX_PAGES`` pages, or nothing is
+    found.
 
     Args:
         accessor (GCalAccessor): the mount's accessor.
@@ -166,7 +167,7 @@ async def files_containing(
                         for words in asked
                     ):
                         found.append(child)
-    except (OSError, aiohttp.ClientError, ValueError) as exc:
+    except (OSError, aiohttp.ClientError, ValueError, RuntimeError) as exc:
         logger.warning("calendar search failed (%s); reading every file", exc)
         return None
     return found or None

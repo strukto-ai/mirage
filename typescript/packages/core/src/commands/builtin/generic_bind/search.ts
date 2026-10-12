@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
+import { activeCacheManager } from '../../../cache/context.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
@@ -255,7 +256,8 @@ async function fullScan<A extends Accessor>(
  * lines in its place when the output shows nothing else, or tells whether it
  * is worth reading. An operand
  * named on the line is never ruled out by a search asked about directories,
- * nor is a path pinned to a revision, since a search sees the current content.
+ * nor is a path pinned to a revision, since a search sees the current content,
+ * nor a file the read cache holds, which a read serves as it was cached.
  * Neither is asked when a hide, a path rule or a preVfs policy judges a path,
  * since a search sees the raw tree.
  * When neither can stand in for a walk, `beforeFullScan` may refuse it.
@@ -338,6 +340,8 @@ export async function searchReads<A extends Accessor>(
     return scan
   }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
+    const manager = activeCacheManager()
+    if (manager !== null && (await manager.cachedSize(path)) !== null) return null
     if (
       found !== null &&
       !named.has(path.virtual) &&

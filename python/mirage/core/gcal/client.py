@@ -40,6 +40,8 @@ __all__ = [
 
 MAX_PAGES = 50
 
+PAGE_LIMIT = "gcal: listing exceeded 50 pages; narrow the date range"
+
 
 async def list_calendars(
     token_manager: TokenManager, min_access_role: str | None = None
@@ -78,9 +80,7 @@ async def list_calendars(
             break
         token = nxt
     else:
-        raise RuntimeError(
-            "gcal: listing exceeded 50 pages; narrow the date range"
-        )
+        raise RuntimeError(PAGE_LIMIT)
     return items
 
 
@@ -165,9 +165,7 @@ async def list_events(
             break
         token = nxt
     else:
-        raise RuntimeError(
-            "gcal: listing exceeded 50 pages; narrow the date range"
-        )
+        raise RuntimeError(PAGE_LIMIT)
     if scope.bounded:
         items = [
             event

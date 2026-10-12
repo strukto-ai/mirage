@@ -156,6 +156,7 @@ class FakeCalendarApi {
 export const API = new FakeCalendarApi()
 
 export const CLIENT = {
+  PAGE_LIMIT: 'gcal: listing exceeded 50 pages; narrow the date range',
   listCalendars: (_tm: unknown, minAccessRole?: string) =>
     Promise.resolve(API.listCalendars(minAccessRole)),
   listEvents: (

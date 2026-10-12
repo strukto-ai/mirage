@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.gcal.client import PAGE_LIMIT
 from mirage.core.gcal.search import files_containing
 from tests.fixtures.gcal_api import (
     PRIMARY,
@@ -116,12 +117,15 @@ async def test_a_listing_without_kept_text_reads_every_file(monkeypatch):
     assert out is None
 
 
-async def test_a_failed_search_reads_every_file(monkeypatch):
+@pytest.mark.parametrize(
+    "error", [OSError("connection reset"), RuntimeError(PAGE_LIMIT)]
+)
+async def test_a_failed_search_reads_every_file(monkeypatch, error):
     fake = _api(monkeypatch, EVENTS)
 
     async def refused(*args, query=None, **kwargs):
         if query is not None:
-            raise OSError("connection reset")
+            raise error
         return await fake.list_events(*args, **kwargs)
 
     monkeypatch.setattr("mirage.core.gcal.search.list_events", refused)
