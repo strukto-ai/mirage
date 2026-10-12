@@ -14,16 +14,30 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_unlink
+from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import lookup_error
-from mirage.errors.fs import eisdir
+from mirage.errors.fs import eisdir, fs_error
+from mirage.errors.types import FsCondition
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
 async def unlink(accessor: RAMAccessor, path_spec: PathSpec) -> None:
+    """Remove one key.
+
+    A live descriptor is the shell's to release when its command ends,
+    so unlinking one is EPERM and it stays readable (GNU: ``rm
+    /dev/fd/63`` is "Operation not permitted").
+
+    Args:
+        accessor (RAMAccessor): the RAM accessor.
+        path_spec (PathSpec): the key to remove.
+    """
     path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
+    if active_pipe(accessor, p) is not None:
+        raise fs_error(path_spec, FsCondition.EPERM)
     if p in store.dirs:
         raise eisdir(path_spec)
     if p not in store.files:

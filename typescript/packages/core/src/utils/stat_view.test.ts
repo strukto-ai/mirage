@@ -20,12 +20,15 @@ import {
   contentSize,
   DIR_MODE,
   DIR_SIZE,
+  FIFO_MODE,
   FILE_MODE,
   isDir,
+  isFifo,
   isLink,
   LINK_MODE,
   mtimeMs,
   posixMode,
+  sizeUnknown,
 } from './stat_view.ts'
 
 const NAIVE = '2026-01-02T03:04:05'
@@ -147,5 +150,25 @@ describe('isLink', () => {
     expect(
       isLink(new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })),
     ).toBe(false)
+  })
+})
+
+describe('FIFO', () => {
+  it('fifo mode is prw for its owner', () => {
+    expect(FIFO_MODE).toBe(0o010600)
+    const fifo = new FileStat({ name: '63', type: FileType.FIFO })
+    expect(isFifo(fifo)).toBe(true)
+    expect(posixMode(fifo)).toBe(FIFO_MODE)
+    expect(posixMode(fifo.with({ mode: 0o640 }))).toBe(0o010640)
+  })
+
+  it('size unknown spares a directory and a fifo', () => {
+    expect(
+      sizeUnknown(new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })),
+    ).toBe(true)
+    expect(sizeUnknown(new FileStat({ name: 'd', type: FileType.DIRECTORY }))).toBe(false)
+    const fifo = new FileStat({ name: '63', type: FileType.FIFO })
+    expect(sizeUnknown(fifo)).toBe(false)
+    expect(contentSize(fifo)).toBe(0)
   })
 })

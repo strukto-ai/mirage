@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from stat import S_IFCHR, S_IFDIR, S_IFLNK, S_IFREG
+from stat import S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG
 
 from mirage.types import DEVICE_NUMBERS_KEY, FileStat, FileType
 from mirage.utils.dates import iso_timestamp
@@ -23,6 +23,9 @@ from mirage.utils.dates import iso_timestamp
 CHAR_MODE = S_IFCHR | 0o666
 DIR_MODE = S_IFDIR | 0o755
 FILE_MODE = S_IFREG | 0o644
+# A pipe is created rw------- (GNU: `stat -L -c %A <(true)` prints
+# prw-------), which is what a FIFO with no recorded mode reports.
+FIFO_MODE = S_IFIFO | 0o600
 # A link is always lrwxrwxrwx: the bits on a symlink are not consulted
 # by any POSIX system, so this is the one mode every translator reports
 # for one (FUSE's link_stat, find's -type l row, a guest's lstat).
@@ -106,7 +109,8 @@ def posix_mode(st: FileStat) -> int:
     from the namespace overlay when a chmod put one there, which is what
     makes a metadata write visible to a guest and to a mount alike. A
     backend that reports no mode keeps the default rw-r--r-- / rwxr-xr-x
-    pair; there are no permissions to read on an object store.
+    pair (rw------- for a FIFO); there are no permissions to read on an
+    object store.
 
     A link is the exception in both halves: its type bits are S_IFLNK
     and its permission bits are always 0777, because no POSIX system
@@ -121,6 +125,8 @@ def posix_mode(st: FileStat) -> int:
         return LINK_MODE
     if is_char_device(st):
         base = CHAR_MODE
+    elif is_fifo(st):
+        base = FIFO_MODE
     else:
         base = DIR_MODE if is_dir(st) else FILE_MODE
     if st.mode is None:
@@ -151,6 +157,15 @@ def is_char_device(st: FileStat) -> bool:
     return st.type == FileType.CHAR_DEVICE
 
 
+def is_fifo(st: FileStat) -> bool:
+    """Whether a FileStat describes a FIFO.
+
+    Args:
+        st (FileStat): the stat to inspect.
+    """
+    return st.type == FileType.FIFO
+
+
 def device_rdev(st: FileStat) -> int:
     """Encode a character device's logical major:minor for guest stat."""
     values = st.extra.get(DEVICE_NUMBERS_KEY)
@@ -175,3 +190,17 @@ def content_size(st: FileStat) -> int:
     if is_dir(st):
         return DIR_SIZE
     return st.size or 0
+
+
+def size_unknown(st: FileStat) -> bool:
+    """Whether a listing has no size to show for one FileStat.
+
+    A directory always shows ``DIR_SIZE``, and a FIFO 0: it stores no
+    bytes, so its size stays None, and 0 is what GNU's ``stat`` and
+    ``ls -l`` print for one. Any other entry shows its rendered length,
+    unknown when the backend reports none.
+
+    Args:
+        st (FileStat): the stat to inspect.
+    """
+    return st.size is None and not is_dir(st) and not is_fifo(st)

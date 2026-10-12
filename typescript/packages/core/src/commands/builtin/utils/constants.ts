@@ -52,15 +52,6 @@ export const TYPE_CHARS: Partial<Record<FileType, string>> = {
   [FileType.SOCKET]: 's',
 }
 
-// A symlink has no permission bits of its own on Linux: the mode is
-// always 0777 and access is decided by the target, so GNU always
-// renders lrwxrwxrwx.
-export const DEFAULT_MODES: Partial<Record<FileType, number>> = {
-  [FileType.DIRECTORY]: 0o755,
-  [FileType.SYMLINK]: 0o777,
-  [FileType.CHAR_DEVICE]: 0o666,
-}
-
 // GNU ls's window of "recent" times: half a Gregorian year of 365.2425
 // days, in seconds (ls.c). findutils draws its own line (listfile.c):
 // old past 180 days, future past an hour.

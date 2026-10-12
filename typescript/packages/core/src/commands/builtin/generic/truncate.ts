@@ -2,6 +2,8 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { eisdir, enoent, enotdir, isEnotdir, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
+import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { isDir } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
@@ -114,7 +116,8 @@ export async function truncateGeneric(
   const errors: string[] = []
   for (const path of paths) {
     try {
-      await truncateOne(path, flags, stat, truncate)
+      const refused = await truncateOne(path, flags, stat, truncate)
+      if (refused !== null) errors.push(refused)
     } catch (e) {
       if (!isFsError(e)) throw e
       errors.push(fsErrorLine('truncate', path, e))
@@ -138,13 +141,15 @@ export async function truncateGeneric(
 // EISDIR, settled here so a backend with no truncate op answers in GNU's
 // words too: `missing/` and `reg/` are both `Is a directory` and nothing is
 // made, while under -c `reg/` goes to the truncate op, whose lookup is
-// ENOTDIR. Mirrors Python's _truncate_one.
+// ENOTDIR. A length that cannot take (a pipe has none) is the ftruncate
+// step's EINVAL, which GNU words with the size it asked for, and that line
+// is returned. Mirrors Python's _truncate_one.
 async function truncateOne(
   path: PathSpec,
   flags: TruncateFlags,
   stat: (path: PathSpec) => Promise<FileStat>,
   truncate: (path: PathSpec, length: number, noCreate: boolean) => Promise<void>,
-): Promise<void> {
+): Promise<string | null> {
   let current = 0
   let directory = false
   try {
@@ -157,10 +162,18 @@ async function truncateOne(
     if (isEnotdir(err) && (flags.noCreate || !path.rawPath.endsWith('/'))) throw err
     const why = await absentDestError(stat, path)
     if (why === 'ENOTDIR') throw enotdir(path)
-    if (flags.noCreate) return
+    if (flags.noCreate) return null
     if (why !== null) throw enoent(path)
     current = 0
   }
   if (directory || (path.rawPath.endsWith('/') && !flags.noCreate)) throw eisdir(path)
-  await truncate(path, parseSize(flags.size, current), flags.noCreate)
+  const size = parseSize(flags.size, current)
+  try {
+    await truncate(path, size, flags.noCreate)
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'EINVAL') throw err
+    const label = shellQuoteAlways(path.rawPath === '' ? path.virtual : path.rawPath)
+    return `truncate: failed to truncate ${label} at ${String(size)} bytes: ${posixPhrase('EINVAL')}\n`
+  }
+  return null
 }

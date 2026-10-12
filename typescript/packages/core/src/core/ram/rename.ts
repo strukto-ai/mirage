@@ -17,6 +17,8 @@ import type { PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { fsError } from '../../errors/fs.ts'
+import { activePipe } from '../dev/device.ts'
 import { checkDestParents, lookupError } from './dest.ts'
 import { invalidateAfterMove } from '../../cache/context.ts'
 
@@ -64,9 +66,17 @@ function moveSubtree(accessor: RAMAccessor, s: string, d: string): void {
   }
 }
 
+/**
+ * Move one key, a directory with its subtree. A live descriptor at either
+ * end is the shell's to release, so moving one or over one is EPERM (GNU:
+ * `mv /dev/fd/63 /dev/fd/62` is "Operation not permitted"). Mirrors
+ * Python's rename.
+ */
 export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
+  if (activePipe(accessor, s) !== null) throw fsError(src, 'EPERM')
+  if (activePipe(accessor, d) !== null) throw fsError(dst, 'EPERM')
   const now = nowIso()
   checkDestParents(accessor, dst, d)
   // rename(2) onto its own name succeeds and changes nothing; moving the

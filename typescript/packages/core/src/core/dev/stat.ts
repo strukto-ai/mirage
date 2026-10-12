@@ -17,23 +17,41 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { stat as ramStat } from '../ram/stat.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 import { DEVICE_NUMBERS_KEY, FileStat, FileType, type PathSpec } from '../../types.ts'
+import { FIFO_MODE } from '../../utils/stat_view.ts'
 import { DEV_RDEV } from './constants.ts'
 import { activeDevice, activePipe } from './device.ts'
 
+/**
+ * Stat a /dev path: a FIFO for a live descriptor, a char device for an
+ * active synthetic name, otherwise the ordinary RAM stat (a recreated real
+ * file, or a dir). Neither has rendered content, so the size is null; a
+ * device's identity is the [major, minor] under DEVICE_NUMBERS_KEY. Both
+ * carry the mode, owner and times a chmod, chown or touch stored, and a
+ * FIFO that has none is rw------- as a pipe is created. Mirrors Python's
+ * dev stat.
+ */
 export function stat(
   accessor: RAMAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,
 ): Promise<FileStat> {
   const key = norm(path.mountPath)
-  const pipe = activePipe(accessor, key)
-  if (pipe !== null)
+  const attrs = accessor.store.attrs.get(key) ?? {}
+  if (activePipe(accessor, key) !== null)
     return Promise.resolve(
-      new FileStat({ name: gnuBasename(key), type: FileType.FIFO, size: null }),
+      new FileStat({
+        name: gnuBasename(key),
+        size: null,
+        modified: accessor.store.modified.get(key) ?? null,
+        type: FileType.FIFO,
+        mode: attrs.mode ?? FIFO_MODE & 0o7777,
+        uid: attrs.uid ?? null,
+        gid: attrs.gid ?? null,
+        atime: attrs.atime ?? null,
+      }),
     )
   const device = activeDevice(accessor, key)
   if (device === null) return ramStat(accessor, path)
-  const attrs = accessor.store.attrs.get(key) ?? {}
   const numbers = DEV_RDEV[device]
   if (numbers === undefined) return ramStat(accessor, path)
   return Promise.resolve(

@@ -358,9 +358,10 @@ it('preserves a reused descriptor when an earlier substitution finishes', async 
       },
     }),
   )
-  const owner = ws.shell('consume() { echo "$1"; rm "$1"; hold-old; }; consume <(echo old)', {
-    sessionId: 'owner',
-  })
+  const owner = ws.shell(
+    'consume() { echo "$1"; rm "$1" 2>/dev/null || echo kept; hold-old; }; consume <(echo old)',
+    { sessionId: 'owner' },
+  )
   let peer: typeof owner | undefined
   try {
     await oldReady
@@ -371,11 +372,11 @@ it('preserves a reused descriptor when an earlier substitution finishes', async 
     oldReleaseResolve()
     const oldResult = await owner
     expect(oldResult.exitCode).toBe(0)
-    expect(oldResult.stdoutText).toBe('/dev/fd/63\n')
+    expect(oldResult.stdoutText).toBe('/dev/fd/63\nkept\n')
     newReleaseResolve()
     const newResult = await peer
     expect(newResult.exitCode).toBe(0)
-    expect(newResult.stdoutText).toBe('/dev/fd/63\nnew\n')
+    expect(newResult.stdoutText).toBe('/dev/fd/62\nnew\n')
     expect((await ws.shell('ls /dev/fd', { sessionId: 'peer' })).exitCode).not.toBe(0)
   } finally {
     oldReleaseResolve()

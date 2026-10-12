@@ -12,9 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import errno
+
 import pytest
 
+from mirage.core.dev.pipe import DevicePipe
+from mirage.types import MountMode
 from mirage.vfs.dev.store import DevFiles, DevStore
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
+
+
+def _with_pipe() -> tuple[DevFiles, str]:
+    files = DevFiles("owner")
+    path, _ = files.allocate_input(DevicePipe(True))
+    return files, path[4:]
 
 
 def test_contains_dev_names_with_or_without_slash():
@@ -107,3 +120,88 @@ def test_dev_store_starts_with_synthetic_files_and_root():
     assert list(store.files.keys()) == ["/null", "/zero"]
     assert "/" in store.dirs
     assert store.modified == {}
+
+
+def test_pipe_row_has_no_byte_buffer():
+    files, key = _with_pipe()
+    for access in (
+        lambda: files[key],
+        lambda: files.get(key),
+        lambda: files.__setitem__(key, b"lost"),
+    ):
+        with pytest.raises(OSError) as caught:
+            access()
+        assert caught.value.errno == errno.EINVAL
+    assert files.state.inputs[key].data == b""
+
+
+def test_pipe_row_is_listed_and_counted_empty():
+    files, key = _with_pipe()
+    assert key in files
+    assert list(files) == ["/null", "/zero", key]
+    assert len(files) == 3
+    assert files.items()[-1] == (key, b"")
+    assert files.values()[-1] == b""
+
+
+def test_removing_a_pipe_row_is_eperm_and_keeps_it():
+    files, key = _with_pipe()
+    for remove in (lambda: files.__delitem__(key), lambda: files.pop(key)):
+        with pytest.raises(PermissionError) as caught:
+            remove()
+        assert caught.value.errno == errno.EPERM
+    assert files.pipe_of(key) is not None
+
+
+def test_descriptor_row_without_a_pipe_keeps_its_bytes():
+    files = DevFiles("owner")
+    path, allocation = files.allocate_input()
+    files.set_input(path, allocation, b"data")
+    assert files[path[4:]] == b"data"
+    del files[path[4:]]
+    assert path[4:] not in files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        (
+            "f() { ls -l /dev/fd | awk 'NR > 1 { print $1, $5, $NF }'; }; "
+            "f <(true)",
+            "prw------- 0 63\n",
+        ),
+        (
+            "f() { ls -lL \"$1\" | awk '{ print $1, $5 }'; }; f <(true)",
+            "prw------- 0\n",
+        ),
+        (
+            "f() { find /dev -type p > /dev/null; echo find=$?; }; f <(true)",
+            "find=0\n",
+        ),
+        (
+            "f() { find /dev -type p; find /dev -size -1; }; f <(true)",
+            "/dev/fd/63\n/dev/fd/63\n",
+        ),
+        ("f() { du -a /dev/fd; }; f <(true)", "0\t/dev/fd/63\n0\t/dev/fd\n"),
+        (
+            'f() { rm "$1"; mv "$1" /dev/x; echo "st=$?"; }; f <(true) 2>&1',
+            (
+                "rm: cannot remove '/dev/fd/63': Operation not permitted\n"
+                "mv: cannot move '/dev/fd/63' to '/dev/x': "
+                "Operation not permitted\nst=1\n"
+            ),
+        ),
+    ],
+)
+async def test_listing_an_open_substitution(command, expected):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await asyncio.wait_for(ws.shell(command), 5)
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (0, expected, "")
+    finally:
+        await ws.close()

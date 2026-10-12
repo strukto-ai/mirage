@@ -19,8 +19,15 @@ import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
+import { activePipe } from '../dev/device.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
+/**
+ * Write bytes at an offset of one key. A live pipe has no offset: its bytes
+ * go into the pipe, in the order they are written, which is how an open
+ * descriptor delivers to a FIFO (`exec >"$1"` and a link to a substitution
+ * write through here). Mirrors Python's pwrite.
+ */
 export async function pwrite(
   accessor: RAMAccessor,
   path: PathSpec,
@@ -29,6 +36,12 @@ export async function pwrite(
 ): Promise<void> {
   const timer = startOp()
   const p = norm(path.mountPath)
+  const pipe = activePipe(accessor, p)
+  if (pipe !== null) {
+    await pipe.write(data, path)
+    record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)
+    return
+  }
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   const existing = accessor.store.files.get(p) ?? new Uint8Array()

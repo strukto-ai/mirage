@@ -62,12 +62,15 @@ def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
 async def path_kind(
     ctx: CondContext, val: str | PathSpec
 ) -> tuple[str | None, FileStat | None]:
-    """Resolve an operand to 'dir' / 'file' / None plus its stat.
+    """Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / None plus
+    its stat.
 
     Symlinks are followed first (test -e/-f/-d act on the target), then
     ``resolve_path_stat`` answers what is there. That probe is shared with
     ``find`` and ``tree``'s start point, so ``test -d`` and a traversal
-    cannot disagree about whether a path exists.
+    cannot disagree about whether a path exists. A FIFO is not a regular
+    file: ``-f`` is false for one, and ``-s`` too without reading it, a
+    FIFO storing nothing (GNU: ``[ -s <(printf x) ]`` is false).
 
     Args:
         ctx (CondContext): evaluation context.
@@ -97,6 +100,8 @@ async def path_kind(
         return "dir", stat
     if stat.type == FileType.CHAR_DEVICE:
         return "char", stat
+    if stat.type == FileType.FIFO:
+        return "fifo", stat
     return "file", stat
 
 
@@ -137,6 +142,8 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             return kind == "dir"
         if op == "-c":
             return kind == "char"
+        if op == "-p":
+            return kind == "fifo"
         if op == "-s":
             if kind == "dir":
                 return True
@@ -161,7 +168,7 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
         if op == "-x":
             if kind == "dir":
                 return True
-            if kind != "file" or stat is None:
+            if kind not in ("file", "fifo") or stat is None:
                 return False
             return stat.mode is not None and bool(stat.mode & 0o111)
     if op in UNSUPPORTED_UNARY:

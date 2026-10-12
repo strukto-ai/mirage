@@ -15,12 +15,19 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
-import { eisdir } from '../../errors/fs.ts'
+import { eisdir, fsError } from '../../errors/fs.ts'
 import { norm } from '../../utils/path.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
+import { activePipe } from '../dev/device.ts'
 
+/**
+ * Remove one key. A live descriptor is the shell's to release when its
+ * command ends, so unlinking one is EPERM and it stays readable (GNU:
+ * `rm /dev/fd/63` is "Operation not permitted"). Mirrors Python's unlink.
+ */
 export async function unlink(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
+  if (activePipe(accessor, p) !== null) throw fsError(path, 'EPERM')
   if (accessor.store.dirs.has(p)) throw eisdir(path)
   if (!accessor.store.files.has(p)) throw lookupError(accessor, path, p)
   accessor.store.files.delete(p)

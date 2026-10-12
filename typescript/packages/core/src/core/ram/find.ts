@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
+import { activePipe } from '../dev/device.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -59,20 +60,21 @@ export function find(
   const files = accessor.store.files as Map<string, Uint8Array> & {
     deviceOf?: (key: string) => string | null
   }
-  const kindOf = (key: string): 'f' | 'c' => (files.deviceOf?.(key) != null ? 'c' : 'f')
-  const emptyOf = (key: string, kind: 'f' | 'd' | 'c'): boolean => {
+  const kindOf = (key: string): 'f' | 'c' | 'p' =>
+    files.deviceOf?.(key) != null ? 'c' : activePipe(accessor, key) !== null ? 'p' : 'f'
+  const emptyOf = (key: string, kind: 'f' | 'd' | 'c' | 'p'): boolean => {
     if (kind === 'f') return (accessor.store.files.get(key)?.byteLength ?? 0) === 0
     if (kind === 'd') return !nonempty.has(key)
     return false
   }
-  const candidates: [string, 'f' | 'd' | 'c'][] = []
+  const candidates: [string, 'f' | 'd' | 'c' | 'p'][] = []
   if (options.type !== 'd') {
     for (const key of accessor.store.files.keys()) candidates.push([key, kindOf(key)])
   }
   if (options.type !== 'f') {
     for (const key of accessor.store.dirs) candidates.push([key, 'd'])
   }
-  let rootKind: 'f' | 'd' | 'c' | null = null
+  let rootKind: 'f' | 'd' | 'c' | 'p' | null = null
   let rootIsEmpty: boolean | null = null
   let rootSize: number | null = null
   for (const [key, kind] of candidates) {
@@ -95,7 +97,7 @@ export function find(
     }
     if (!keep({ key, name: basename, kind, depth, isEmpty }, tree, options.minDepth)) continue
     if (options.minSize != null || options.maxSize != null) {
-      let size = DIR_SIZE
+      let size = kind === 'p' ? 0 : DIR_SIZE
       if (kind === 'f') {
         const data = accessor.store.files.get(key)
         if (data === undefined) continue

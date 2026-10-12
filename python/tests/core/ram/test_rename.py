@@ -12,18 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import errno
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import push_cache_manager
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.rename import rename
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.dev.store import DevFiles, DevStore
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from mirage.workspace import Workspace
 from tests.core.object_store.conftest import FakeManager
 
 
 def spec(path: str) -> PathSpec:
     return PathSpec(vfs_path=path.lstrip("/"), virtual=path, directory=path)
+
+
+def dev_spec(key: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=key.lstrip("/"),
+        virtual="/dev" + key,
+        directory="/dev" + key[: key.rindex("/") + 1],
+    )
 
 
 @pytest.fixture
@@ -167,3 +182,41 @@ async def test_rename_dir_evicts_both_subtrees(accessor):
     manager = await _managed(rename(accessor, spec("/dir"), spec("/d/moved")))
     assert manager.subtrees == ["/d/moved", "/dir"]
     assert manager.unlinks == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pipe_end", ["source", "destination"])
+async def test_rename_at_a_live_descriptor_is_eperm(pipe_end):
+    store = DevStore(DevFiles("owner"))
+    endpoint = DevicePipe(True)
+    path, _ = store.files.allocate_input(endpoint)
+    store.files["/plain"] = b"x"
+    src, dst = (
+        (path[4:], "/moved") if pipe_end == "source" else ("/plain", path[4:])
+    )
+    with pytest.raises(PermissionError) as caught:
+        await rename(RAMAccessor(store), dev_spec(src), dev_spec(dst))
+    assert caught.value.errno == errno.EPERM
+    assert store.files.pipe_of(path[4:]) is endpoint
+    assert store.files["/plain"] == b"x"
+    assert "/moved" not in store.files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        (
+            'f() { mv "$1" /dev/x; echo "st=$?"; cat "$1"; }; f <(echo still)',
+            "st=1\nstill\n",
+        ),
+        ('f() { mv "$1" "$2"; echo "st=$?"; }; f <(true) <(true)', "st=1\n"),
+    ],
+)
+async def test_mv_of_a_substitution_leaves_it_readable(command, expected):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await asyncio.wait_for(ws.shell(command), 5)
+        assert (io.exit_code, await io.stdout_str()) == (0, expected)
+    finally:
+        await ws.close()

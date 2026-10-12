@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from mirage.errors.fs import ebadf
@@ -20,13 +21,25 @@ from mirage.types import PathSpec
 
 
 class DevicePipe:
-    """One directional virtual descriptor with bounded producer backpressure."""
+    """One directional virtual descriptor with bounded producer backpressure.
+
+    The read end belongs to the scope that opened the descriptor, which
+    closes it with ``pipe.close_reader()`` when its command ends; no
+    reader closes it, so a function can read one substitution twice.
+    Readers take turns, one chunk each, so concurrent readers split the
+    stream between them and a ranged read leaves the rest of its chunk
+    to the next reader. A chunk is pulled in a task of its own: a reader
+    cancelled while it waits leaves that chunk to the next reader rather
+    than ending the stream for every reader.
+    """
 
     def __init__(self, readable: bool) -> None:
         self.readable = readable
         self.pipe = BytePipe()
         self._source: AsyncIterator[bytes] | None = None
+        self._pull: asyncio.Task[bytes] | None = None
         self._pending = b""
+        self._turn = asyncio.Lock()
 
     async def write(self, data: bytes, path: PathSpec) -> None:
         if self.readable:
@@ -36,37 +49,53 @@ class DevicePipe:
     async def read(self, path: PathSpec, size: int | None = None) -> bytes:
         if not self.readable:
             raise ebadf(path)
-        if self._source is None:
-            self._source = self.pipe.stream()
         chunks: list[bytes] = []
         remaining = size
         while remaining is None or remaining > 0:
-            if not self._pending:
-                try:
-                    self._pending = await anext(self._source)
-                except StopAsyncIteration:
-                    break
-            count = (
-                len(self._pending)
-                if remaining is None
-                else min(remaining, len(self._pending))
-            )
-            chunks.append(self._pending[:count])
-            self._pending = self._pending[count:]
+            chunk = await self._take(remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
             if remaining is not None:
-                remaining -= count
+                remaining -= len(chunk)
         return b"".join(chunks)
 
     async def stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         if not self.readable:
             raise ebadf(path)
+        while chunk := await self._take(None):
+            yield chunk
+
+    async def _take(self, size: int | None) -> bytes:
+        """One reader's turn: the next bytes of the stream, b"" at its end.
+
+        Args:
+            size (int | None): the most bytes to take; None takes what is
+                left of the current chunk.
+        """
+        async with self._turn:
+            if not self._pending:
+                pull = self._pull or asyncio.create_task(self._next())
+                self._pull = pull
+                try:
+                    await asyncio.shield(pull)
+                finally:
+                    if pull.done() and (pull.cancelled() or pull.exception()):
+                        self._pull = None
+                self._pull = None
+                self._pending = pull.result()
+            count = (
+                len(self._pending)
+                if size is None
+                else min(size, len(self._pending))
+            )
+            taken, self._pending = (
+                self._pending[:count],
+                self._pending[count:],
+            )
+            return taken
+
+    async def _next(self) -> bytes:
         if self._source is None:
             self._source = self.pipe.stream()
-        try:
-            if self._pending:
-                pending, self._pending = self._pending, b""
-                yield pending
-            async for chunk in self._source:
-                yield chunk
-        finally:
-            self.pipe.release()
+        return await anext(self._source, b"")

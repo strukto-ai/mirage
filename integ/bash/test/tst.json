@@ -809,11 +809,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[ -p /data/a.txt ]; echo $?",
+      "command": "[ -S /data/a.txt ]; echo $?",
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: -p: unsupported operator\n"
+        "stderr": "bash: [: -S: unsupported operator\n"
       }
     },
     {

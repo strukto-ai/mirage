@@ -95,6 +95,7 @@ OPERAND_CONDITIONS: frozenset[FsCondition] = frozenset(
         FsCondition.EEXIST,
         FsCondition.EROFS,
         FsCondition.EACCES,
+        FsCondition.EPERM,
         FsCondition.ENOTEMPTY,
         FsCondition.ENOTSUP,
         FsCondition.EXDEV,

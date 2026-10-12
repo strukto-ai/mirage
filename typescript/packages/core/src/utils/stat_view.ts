@@ -25,6 +25,9 @@ const S_IFLNK = 0o120000
 export const CHAR_MODE = S_IFCHR | 0o666
 export const DIR_MODE = S_IFDIR | 0o755
 export const FILE_MODE = S_IFREG | 0o644
+// S_IFIFO, created rw------- as a pipe is (GNU: `stat -L -c %A <(true)`
+// prints prw-------), which is what a FIFO with no recorded mode reports.
+export const FIFO_MODE = 0o010000 | 0o600
 // A link is always lrwxrwxrwx: the bits on a symlink are not consulted
 // by any POSIX system, so this is the one mode every translator reports
 // for one (the FUSE attr fold, find's -type l row, a guest's lstat).
@@ -98,6 +101,11 @@ export function isCharDevice(st: FileStat): boolean {
   return st.type === FileType.CHAR_DEVICE
 }
 
+/** Whether a FileStat describes a FIFO. */
+export function isFifo(st: FileStat): boolean {
+  return st.type === FileType.FIFO
+}
+
 /** Encode a character device's logical major:minor for guest stat. */
 export function deviceRdev(st: FileStat): number {
   const values = st.extra.device_numbers
@@ -117,8 +125,9 @@ export function deviceRdev(st: FileStat): number {
  * The type bits come from the entry's kind and the permission bits from
  * the namespace overlay when a chmod put one there, which is what makes
  * a metadata write visible to a guest and to a mount alike. A backend
- * that reports no mode keeps the default rw-r--r-- / rwxr-xr-x pair;
- * there are no permissions to read on an object store.
+ * that reports no mode keeps the default rw-r--r-- / rwxr-xr-x pair
+ * (rw------- for a FIFO); there are no permissions to read on an object
+ * store.
  *
  * A link is the exception in both halves: its type bits are S_IFLNK and
  * its permission bits are always 0777, because no POSIX system consults
@@ -128,7 +137,13 @@ export function deviceRdev(st: FileStat): number {
  */
 export function posixMode(st: FileStat): number {
   if (isLink(st)) return LINK_MODE
-  const base = isCharDevice(st) ? CHAR_MODE : isDir(st) ? DIR_MODE : FILE_MODE
+  const base = isCharDevice(st)
+    ? CHAR_MODE
+    : isFifo(st)
+      ? FIFO_MODE
+      : isDir(st)
+        ? DIR_MODE
+        : FILE_MODE
   if (st.mode === null) return base
   return (base & ~0o7777) | (st.mode & 0o7777)
 }
@@ -143,4 +158,16 @@ export function posixMode(st: FileStat): number {
 export function contentSize(st: FileStat): number {
   if (isDir(st)) return DIR_SIZE
   return st.size ?? 0
+}
+
+/**
+ * Whether a listing has no size to show for one FileStat.
+ *
+ * A directory always shows `DIR_SIZE`, and a FIFO 0: it stores no bytes,
+ * so its size stays null, and 0 is what GNU's `stat` and `ls -l` print
+ * for one. Any other entry shows its rendered length, unknown when the
+ * backend reports none. Mirrors python's size_unknown.
+ */
+export function sizeUnknown(st: FileStat): boolean {
+  return st.size === null && !isDir(st) && !isFifo(st)
 }

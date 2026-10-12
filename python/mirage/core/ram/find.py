@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.dev.device import active_pipe
 from mirage.core.generic.find_eval import (
     FindEntry,
     PredNode,
@@ -77,6 +78,8 @@ async def find(
     def kind_of(key: str) -> str:
         if device_of is not None and device_of(key) is not None:
             return "c"
+        if active_pipe(accessor, key) is not None:
+            return "p"
         return "f"
 
     def empty_of(key: str, kind: str) -> bool:
@@ -133,7 +136,13 @@ async def find(
             continue
 
         if min_size is not None or max_size is not None:
-            size = len(store.files[key]) if kind == "f" else DIR_SIZE
+            size = (
+                len(store.files[key])
+                if kind == "f"
+                else 0
+                if kind == "p"
+                else DIR_SIZE
+            )
             if min_size is not None and size < min_size:
                 continue
             if max_size is not None and size > max_size:

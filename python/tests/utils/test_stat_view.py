@@ -15,7 +15,7 @@
 import os
 import time
 from datetime import datetime, timezone
-from stat import S_IFDIR, S_IFREG
+from stat import S_IFDIR, S_IFIFO, S_IFREG
 
 import pytest
 
@@ -23,13 +23,16 @@ from mirage.types import ContentType, FileStat, FileType
 from mirage.utils.stat_view import (
     DIR_MODE,
     DIR_SIZE,
+    FIFO_MODE,
     FILE_MODE,
     LINK_MODE,
     content_size,
     is_dir,
+    is_fifo,
     is_link,
     mtime_ns,
     posix_mode,
+    size_unknown,
 )
 
 NAIVE = "2026-01-02T03:04:05"
@@ -181,3 +184,23 @@ def test_is_link_reads_the_kind():
 
 def test_link_mode_is_lrwxrwxrwx():
     assert LINK_MODE == 0o120777
+
+
+def test_fifo_mode_is_prw_for_its_owner():
+    assert FIFO_MODE == (S_IFIFO | 0o600)
+    fifo = FileStat(name="63", type=FileType.FIFO)
+    assert is_fifo(fifo)
+    assert posix_mode(fifo) == FIFO_MODE
+    assert posix_mode(fifo.model_copy(update={"mode": 0o640})) == (
+        S_IFIFO | 0o640
+    )
+
+
+def test_size_unknown_spares_a_directory_and_a_fifo():
+    assert size_unknown(
+        FileStat(name="f", type=FileType.FILE, content=ContentType.TEXT)
+    )
+    assert not size_unknown(FileStat(name="d", type=FileType.DIRECTORY))
+    fifo = FileStat(name="63", type=FileType.FIFO)
+    assert not size_unknown(fifo)
+    assert content_size(fifo) == 0

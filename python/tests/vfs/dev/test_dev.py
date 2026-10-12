@@ -112,7 +112,8 @@ async def test_process_substitution_cleanup_preserves_reused_descriptor():
     )
     owner = asyncio.create_task(
         ws.shell(
-            'consume() { echo "$1"; rm "$1"; hold-old; }; consume <(echo old)',
+            'consume() { echo "$1"; rm "$1" 2>/dev/null || echo kept; '
+            "hold-old; }; consume <(echo old)",
             session_id="owner",
         )
     )
@@ -130,11 +131,11 @@ async def test_process_substitution_cleanup_preserves_reused_descriptor():
         old_release.set()
         old_result = await owner
         assert old_result.exit_code == 0
-        assert old_result.stdout == b"/dev/fd/63\n"
+        assert old_result.stdout == b"/dev/fd/63\nkept\n"
         new_release.set()
         new_result = await peer
         assert new_result.exit_code == 0
-        assert new_result.stdout == b"/dev/fd/63\nnew\n"
+        assert new_result.stdout == b"/dev/fd/62\nnew\n"
         assert (await ws.shell("ls /dev/fd", session_id="peer")).exit_code != 0
     finally:
         old_release.set()

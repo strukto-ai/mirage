@@ -128,6 +128,7 @@ describe('stat -c directive formatting', () => {
       [fs({ type: FileType.DIRECTORY, size: null }), `  Size: ${String(DIR_SIZE)} `],
       [fs({ type: FileType.DIRECTORY, size: 123456 }), `  Size: ${String(DIR_SIZE)} `],
       [fs({ size: null }), '  Size: - '],
+      [fs({ type: FileType.FIFO, size: null }), '  Size: 0 '],
     ]
     for (const [s, want] of cases) {
       const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], plain, () =>
@@ -140,13 +141,21 @@ describe('stat -c directive formatting', () => {
   })
 
   // No mode is GNU's 0644 file default, as ls -l falls back to; a special bit
-  // keeps the high octal digit and renders as s/S/t/T. Mirrors test_stat.py.
+  // keeps the high octal digit and renders as s/S/t/T. A FIFO carries its own
+  // type bits, rw------- by default (GNU: `stat -L -c '%a %A %f' <(true)`).
+  // Mirrors test_stat.py.
   it.each([
     [fs({ mode: null }), '644 -rw-r--r-- 81a4'],
     [fs({ mode: 0o4644 }), '4644 -rwSr--r-- 89a4'],
     [fs({ type: FileType.DIRECTORY, size: null, mode: null }), '755 drwxr-xr-x 41ed'],
+    [fs({ type: FileType.FIFO, size: null, mode: null }), '600 prw------- 1180'],
+    [fs({ type: FileType.FIFO, size: null, mode: 0o4755 }), '4755 prwsr-xr-x 19ed'],
   ])('renders the mode directives of %j', async (stat, want) => {
     expect(await render('%a %A %f', stat)).toBe(want)
+  })
+
+  it('a fifo size is zero', async () => {
+    expect(await render('%s', fs({ type: FileType.FIFO, size: null }))).toBe('0')
   })
 
   it('parses printf flags/width/precision, not as the directive', async () => {

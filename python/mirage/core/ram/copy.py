@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import check_dest_parents, lookup_error
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -23,13 +24,38 @@ from mirage.utils.path import norm
 async def copy(
     accessor: RAMAccessor, src_spec: PathSpec, dst_spec: PathSpec
 ) -> None:
+    """Copy one key onto another.
+
+    A live pipe at either end is used as one: a pipe source is read
+    through its reader and a pipe destination written into, so no bytes
+    land in a row no reader sees (GNU: ``cp <(printf x) f`` and ``cp f
+    >(cat)`` both deliver).
+
+    Args:
+        accessor (RAMAccessor): the RAM accessor.
+        src_spec (PathSpec): the key to copy.
+        dst_spec (PathSpec): the key to write.
+    """
     src = src_spec.mount_path
     dst = dst_spec.mount_path
     store = accessor.store
     s, d = norm(src), norm(dst)
     check_dest_parents(store, dst_spec, d)
-    if s not in store.files:
+    source = active_pipe(accessor, s)
+    target = active_pipe(accessor, d)
+    if source is not None and target is not None:
+        async for chunk in source.stream(src_spec):
+            await target.write(chunk, dst_spec)
+        return
+    if source is not None:
+        data = await source.read(src_spec)
+    elif s in store.files:
+        data = store.files[s]
+    else:
         raise lookup_error(store, src_spec, s)
-    store.files[d] = store.files[s]
+    if target is not None:
+        await target.write(data, dst_spec)
+        return
+    store.files[d] = data
     store.modified[d] = now_iso()
     await invalidate_after_write(dst_spec)

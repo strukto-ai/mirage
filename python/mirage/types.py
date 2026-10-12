@@ -129,11 +129,11 @@ class FileType(str, Enum):
     rendering hint for a FILE.
 
     The full POSIX set is enumerated so the model is comprehensive.
-    DIRECTORY, FILE, SYMLINK and CHAR_DEVICE (the /dev mount) are
-    produced today; BLOCK_DEVICE, FIFO and SOCKET are declared but not
-    yet emitted, and the render/derivation tables (find letter, st_mode
-    bits, ls char) grow a row for one the moment a backend starts
-    producing it.
+    DIRECTORY, FILE, SYMLINK, CHAR_DEVICE (the /dev mount) and FIFO (a
+    process substitution's /dev/fd/N) are produced today; BLOCK_DEVICE
+    and SOCKET are declared but not yet emitted, and the render/derivation
+    tables (find letter, st_mode bits, ls char) grow a row for one the
+    moment a backend starts producing it.
     """
 
     DIRECTORY = "directory"

@@ -38,15 +38,17 @@ function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
 }
 
 /**
- * Resolve an operand to 'dir' / 'file' / null plus its stat. Symlinks are
- * followed first, then resolvePathStat answers what is there. That probe is
- * shared with find and tree's start point, so `test -d` and a traversal
- * cannot disagree about whether a path exists.
+ * Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / null plus its
+ * stat. Symlinks are followed first, then resolvePathStat answers what is
+ * there. That probe is shared with find and tree's start point, so `test -d`
+ * and a traversal cannot disagree about whether a path exists. A FIFO is not
+ * a regular file: `-f` is false for one, and `-s` too without reading it, a
+ * FIFO storing nothing (GNU: `[ -s <(printf x) ]` is false).
  */
 async function pathKind(
   ctx: CondContext,
   val: string | PathSpec,
-): Promise<['dir' | 'file' | 'char' | null, FileStat | null]> {
+): Promise<['dir' | 'file' | 'char' | 'fifo' | null, FileStat | null]> {
   // A path whose `.` and `..` do not resolve names nothing, which is what
   // every file test reads as false.
   const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
@@ -69,6 +71,7 @@ async function pathKind(
   if (stat === null) return [null, null]
   if (stat.type === FileType.DIRECTORY) return ['dir', stat]
   if (stat.type === FileType.CHAR_DEVICE) return ['char', stat]
+  if (stat.type === FileType.FIFO) return ['fifo', stat]
   return ['file', stat]
 }
 
@@ -102,6 +105,7 @@ export async function applyUnary(
     if (op === '-f') return kind === 'file'
     if (op === '-d') return kind === 'dir'
     if (op === '-c') return kind === 'char'
+    if (op === '-p') return kind === 'fifo'
     if (op === '-s') {
       if (kind === 'dir') return true
       if (kind !== 'file' || stat === null) return false
@@ -127,7 +131,7 @@ export async function applyUnary(
     }
     if (op === '-x') {
       if (kind === 'dir') return true
-      if (kind !== 'file' || stat === null) return false
+      if ((kind !== 'file' && kind !== 'fifo') || stat === null) return false
       return stat.mode !== null && (stat.mode & 0o111) !== 0
     }
   }

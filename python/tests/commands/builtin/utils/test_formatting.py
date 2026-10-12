@@ -142,6 +142,14 @@ def test_size_and_time_are_independently_unknown(size, modified, expected):
     assert formatting.format_ls_long([row])[0].endswith(expected + " file")
 
 
+def test_a_fifo_row_is_prw_with_size_zero():
+    row = FileStat(name="63", type=FileType.FIFO)
+    assert formatting.ls_mode_string(row) == "prw-------"
+    line = formatting.format_ls_long([row])[0]
+    assert line.startswith("prw------- ")
+    assert line.endswith(" 0 - 63")
+
+
 def test_full_iso_time_keeps_the_stamp_digits_in_the_zone():
     stamp = "2026-03-04T05:06:07.123456789Z"
     assert formatting.full_iso_time(stamp) == (

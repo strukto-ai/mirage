@@ -15,8 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
-import { PathSpec } from '../../types.ts'
+import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { MountMode, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { DevicePipe } from '../dev/pipe.ts'
 import { rename } from './rename.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
 import { FakeManager } from '../object_store/fakes.ts'
@@ -26,6 +31,15 @@ function mkPath(virtual: string): PathSpec {
     virtual,
     directory: virtual,
     vfsPath: stripSlash(virtual),
+    resolved: true,
+  })
+}
+
+function devPath(key: string): PathSpec {
+  return new PathSpec({
+    virtual: `/dev${key}`,
+    directory: `/dev${key.slice(0, key.lastIndexOf('/') + 1)}`,
+    vfsPath: key.slice(1),
     resolved: true,
   })
 }
@@ -150,5 +164,41 @@ describe('core/ram rename', () => {
     await runWithCacheManager(manager, () => rename(acc, mkPath('/dir'), mkPath('/d/moved')))
     expect(manager.subtrees).toEqual(['/dir', '/d/moved'])
     expect(manager.unlinks).toEqual([])
+  })
+})
+
+describe('core/ram rename at a live descriptor', () => {
+  it.each(['source', 'destination'])(
+    'rename at a live descriptor is EPERM (%s)',
+    async (pipeEnd) => {
+      const store = new DevStore(new DevFiles('owner'))
+      const endpoint = new DevicePipe(true)
+      const [path] = store.files.allocateInput(endpoint)
+      store.files.set('/plain', new Uint8Array([120]))
+      const [src, dst] =
+        pipeEnd === 'source' ? [path.slice(4), '/moved'] : ['/plain', path.slice(4)]
+      await expect(
+        rename(new RAMAccessor(store as unknown as RAMStore), devPath(src), devPath(dst)),
+      ).rejects.toMatchObject({ code: 'EPERM' })
+      expect(store.files.pipeOf(path.slice(4))).toBe(endpoint)
+      expect(store.files.get('/plain')).toEqual(new Uint8Array([120]))
+      expect(store.files.has('/moved')).toBe(false)
+    },
+  )
+
+  it.each([
+    ['f() { mv "$1" /dev/x; echo "st=$?"; cat "$1"; }; f <(echo still)', 'st=1\nstill\n'],
+    ['f() { mv "$1" "$2"; echo "st=$?"; }; f <(true) <(true)', 'st=1\n'],
+  ])('mv of a substitution leaves it readable: %s', async (command, expected) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const io = await ws.shell(command)
+      expect([io.exitCode, io.stdoutText]).toEqual([0, expected])
+    } finally {
+      await ws.close()
+    }
   })
 })

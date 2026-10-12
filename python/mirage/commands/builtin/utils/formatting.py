@@ -36,7 +36,7 @@ from mirage.types import (
     LsTimeKind,
 )
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.stat_view import content_size, is_dir
+from mirage.utils.stat_view import content_size, posix_mode, size_unknown
 
 logger = logging.getLogger(__name__)
 
@@ -268,11 +268,7 @@ def _perm_triplet(bits: int, special: str | None = None) -> str:
 
 def ls_mode_string(s: FileStat) -> str:
     type_char = constants.TYPE_CHARS.get(s.type, "-")
-    mode = (
-        s.mode
-        if s.mode is not None
-        else constants.DEFAULT_MODES.get(s.type, 0o644)
-    )
+    mode = s.mode if s.mode is not None else posix_mode(s) & 0o7777
     perms = (
         _perm_triplet(mode >> 6, "s" if mode & 0o4000 else None)
         + _perm_triplet(mode >> 3, "s" if mode & 0o2000 else None)
@@ -443,7 +439,7 @@ def _ls_size_and_time(
     API-backend directory) shows ``-`` for the time rather than
     inventing the epoch, and so does a time kind no backend reports;
     its size is ``-`` too unless it is a directory, whose size is
-    always ``DIR_SIZE``.
+    always ``DIR_SIZE``, or a FIFO, whose size is 0.
 
     Args:
         s (FileStat): the row's stat.
@@ -466,7 +462,7 @@ def _ls_size_and_time(
         return f"{dev[0]}, {dev[1]}", when
     size = (
         UNKNOWN_NAME
-        if not is_dir(s) and s.size is None
+        if size_unknown(s)
         else scaled_size(content_size(s), columns.block_size, human)
     )
     if not known_time or when_iso is None:

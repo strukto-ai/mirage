@@ -17,11 +17,21 @@ import { ebadf } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 
-/** One directional virtual descriptor, with bounded producer backpressure. */
+/**
+ * One directional virtual descriptor, with bounded producer backpressure.
+ *
+ * The read end belongs to the scope that opened the descriptor, which
+ * closes it with `pipe.closeReader()` when its command ends; no reader
+ * closes it, so a function can read one substitution twice. Readers take
+ * turns, one chunk each, so concurrent readers split the stream between
+ * them and a ranged read leaves the rest of its chunk to the next reader.
+ * Mirrors Python's DevicePipe.
+ */
 export class DevicePipe {
   readonly pipe = new BytePipe()
   private source: AsyncIterator<Uint8Array> | undefined
   private pending: Uint8Array = new Uint8Array()
+  private turn: Promise<unknown> = Promise.resolve()
 
   constructor(readonly readable: boolean) {}
 
@@ -32,40 +42,46 @@ export class DevicePipe {
 
   async read(path: PathSpec, size: number | null = null): Promise<Uint8Array> {
     if (!this.readable) throw ebadf(path)
-    this.source ??= this.pipe.stream()[Symbol.asyncIterator]()
     const chunks: Uint8Array[] = []
     let remaining = size
     while (remaining === null || remaining > 0) {
-      if (this.pending.byteLength === 0) {
-        const next = await this.source.next()
-        if (next.done === true) break
-        this.pending = next.value
-      }
-      const count =
-        remaining === null ? this.pending.byteLength : Math.min(remaining, this.pending.byteLength)
-      chunks.push(this.pending.subarray(0, count))
-      this.pending = this.pending.subarray(count)
-      if (remaining !== null) remaining -= count
+      const chunk = await this.take(remaining)
+      if (chunk.byteLength === 0) break
+      chunks.push(chunk)
+      if (remaining !== null) remaining -= chunk.byteLength
     }
     return concat(chunks)
   }
 
   async *stream(path: PathSpec): AsyncGenerator<Uint8Array> {
     if (!this.readable) throw ebadf(path)
-    this.source ??= this.pipe.stream()[Symbol.asyncIterator]()
-    try {
-      if (this.pending.byteLength > 0) {
-        const pending = this.pending
-        this.pending = new Uint8Array()
-        yield pending
-      }
-      for (;;) {
-        const next = await this.source.next()
-        if (next.done === true) return
-        yield next.value
-      }
-    } finally {
-      this.pipe.release()
+    for (;;) {
+      const chunk = await this.take(null)
+      if (chunk.byteLength === 0) return
+      yield chunk
     }
+  }
+
+  /** One reader's turn: the next bytes of the stream, at most `size`, empty at its end. */
+  private take(size: number | null): Promise<Uint8Array> {
+    const taken = this.turn.then(() => this.next(size))
+    this.turn = taken.then(
+      () => undefined,
+      () => undefined,
+    )
+    return taken
+  }
+
+  private async next(size: number | null): Promise<Uint8Array> {
+    if (this.pending.byteLength === 0) {
+      this.source ??= this.pipe.stream()[Symbol.asyncIterator]()
+      const step = await this.source.next()
+      if (step.done === true) return new Uint8Array()
+      this.pending = step.value
+    }
+    const count = size === null ? this.pending.byteLength : Math.min(size, this.pending.byteLength)
+    const taken = this.pending.subarray(0, count)
+    this.pending = this.pending.subarray(count)
+    return taken
   }
 }

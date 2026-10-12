@@ -116,9 +116,20 @@ describe('test/[ arity, combinators, errors', () => {
   })
 
   it('unsupported operator fails loudly', async () => {
-    const [rc, , stderr] = await runResult(ws, '[ -p /data/plain.txt ]')
+    const [rc, , stderr] = await runResult(ws, '[ -S /data/plain.txt ]')
     expect(rc).toBe(2)
-    expect(stderr).toContain('[: -p: unsupported operator')
+    expect(stderr).toContain('[: -S: unsupported operator')
+  })
+
+  it.each([
+    [
+      'f() { [ -p "$1" ]; echo p=$?; [ -f "$1" ]; echo f=$?; [ -e "$1" ]; echo e=$?; [ -s "$1" ]; echo s=$?; cat "$1"; }; f <(printf hello)',
+      'p=0\nf=1\ne=0\ns=1\nhello',
+    ],
+    ['f() { [[ -p $1 ]]; echo $?; [ -p /data/plain.txt ]; echo $?; }; f <(true)', '0\n1\n'],
+    ['f() { [ -x "$1" ]; echo $?; chmod 700 "$1"; [ -x "$1" ]; echo $?; }; f <(true)', '1\n0\n'],
+  ])('file tests on a fifo: %s', async (command, expected) => {
+    expect(await runResult(ws, command)).toEqual([0, expected, ''])
   })
 })
 

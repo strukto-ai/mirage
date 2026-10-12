@@ -26,14 +26,11 @@ export function entries(
   const prefix = rstripSlash(p) + '/'
   const entries: [string, number][] = []
   let total = 0
-  const sortedKeys = [...accessor.store.files.keys()].sort(compareCodePoints)
-  for (const key of sortedKeys) {
+  const rows = [...accessor.store.files].sort(([a], [b]) => compareCodePoints(a, b))
+  for (const [key, data] of rows) {
     if (key === p || key.startsWith(prefix)) {
-      const data = accessor.store.files.get(key)
-      if (data === undefined) continue
-      const size = data.byteLength
-      entries.push([key, size])
-      total += size
+      entries.push([key, data.byteLength])
+      total += data.byteLength
     }
   }
   return Promise.resolve([entries, total])

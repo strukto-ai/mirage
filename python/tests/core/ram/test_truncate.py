@@ -12,13 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import errno
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.truncate import truncate
 from mirage.observe.context import RecordingScope
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.dev.store import DevFiles, DevStore
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from mirage.workspace import Workspace
+
+FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
 
 
 @pytest.mark.asyncio
@@ -63,3 +72,34 @@ async def test_truncate_records_its_own_op():
     assert [r.op for r in scope.records] == ["truncate"]
     assert scope.records[0].bytes == 0
     assert scope.records[0].source == "ram"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("readable", [True, False])
+async def test_truncate_of_a_pipe_is_einval(readable):
+    store = DevStore(DevFiles("owner"))
+    endpoint = DevicePipe(readable)
+    store.files.allocate_input(endpoint)
+    with pytest.raises(OSError) as caught:
+        await truncate(RAMAccessor(store), FD, 0)
+    assert caught.value.errno == errno.EINVAL
+    assert store.files.pipe_of("/fd/63") is endpoint
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        ('truncate -s 0 >(cat); echo "st=$?"', "st=1\n"),
+        ('f() { : > "$1"; echo "st=$?"; }; f >(cat)', "st=0\n"),
+    ],
+)
+async def test_truncating_a_substitution_fails_but_opening_it_does_not(
+    command, expected
+):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await asyncio.wait_for(ws.shell(command), 5)
+        assert (io.exit_code, await io.stdout_str()) == (0, expected)
+    finally:
+        await ws.close()

@@ -15,7 +15,8 @@
 import functools
 from typing import Callable
 
-from mirage.errors.fs import enotsup
+from mirage.errors.fs import enotsup, fs_error
+from mirage.errors.types import FsCondition
 from mirage.types import CheckFn, PathSpec, WritePolicy
 from mirage.utils.key_prefix import strip_mount, under_path
 from mirage.vfs.base import BaseVFS
@@ -90,6 +91,9 @@ def check_unlink(registry: MountRegistry, path: PathSpec) -> None:
     after the copy landed, so the move is refused before it starts. The
     mount owning the source counts, and so does any mount nested under it,
     which the walk would cross; a mount above the owner is never touched.
+    A live pipe (a process substitution) is no file a move can delete
+    either, and copying it first would drain it, so it is refused with
+    EPERM before anything is read, as ``rm`` refuses it.
 
     Args:
         registry (MountRegistry): Mount set the operand is addressed in.
@@ -97,8 +101,11 @@ def check_unlink(registry: MountRegistry, path: PathSpec) -> None:
 
     Raises:
         OperationNotSupportedError: a mount cannot condition a delete.
+        PermissionError: the source is a live pipe.
     """
     owner = registry.try_mount_for(path.virtual)
+    if owner is not None and owner.reads_live(path.virtual):
+        raise fs_error(path, FsCondition.EPERM)
     for entry in registry.mounts():
         if (
             entry.write is WritePolicy.CONDITIONAL

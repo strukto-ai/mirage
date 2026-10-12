@@ -23,9 +23,8 @@ import { gnuStrftime } from './strftime.ts'
 import { UINTMAX } from '../constants.ts'
 import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
-import { contentSize, isDir } from '../../../utils/stat_view.ts'
+import { contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
 import {
-  DEFAULT_MODES,
   EPOCH_LS_TIME,
   FIND_FUTURE_SECONDS,
   FIND_LS_ESCAPES,
@@ -244,7 +243,7 @@ function permTriplet(bits: number, special?: string): string {
 
 export function lsModeString(s: FileStat): string {
   const typeChar = TYPE_CHARS[s.type] ?? '-'
-  const mode = s.mode ?? DEFAULT_MODES[s.type] ?? 0o644
+  const mode = s.mode ?? posixMode(s) & 0o7777
   return (
     typeChar +
     permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +
@@ -370,8 +369,8 @@ export function lsName(s: FileStat): string {
 // major and minor numbers where GNU puts them. An entry with neither a
 // size nor a time (a synthetic API-backend directory) shows `-` for the
 // time rather than inventing the epoch; its size is `-` too unless it is
-// a directory, whose size is always DIR_SIZE. Mirrors the python
-// formatter.
+// a directory, whose size is always DIR_SIZE, or a FIFO, whose size is 0.
+// Mirrors the python formatter.
 function lsSizeAndTime(
   s: FileStat,
   human: boolean,
@@ -393,10 +392,7 @@ function lsSizeAndTime(
       whenIso === null ? UNKNOWN_NAME : renderTime(),
     ]
   }
-  const size =
-    !isDir(s) && s.size === null
-      ? UNKNOWN_NAME
-      : scaledSize(contentSize(s), columns.blockSize, human)
+  const size = sizeUnknown(s) ? UNKNOWN_NAME : scaledSize(contentSize(s), columns.blockSize, human)
   return [size, whenIso === null ? UNKNOWN_NAME : renderTime()]
 }
 

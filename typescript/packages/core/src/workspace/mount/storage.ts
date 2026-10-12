@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BaseVFS } from '../../vfs/base.ts'
-import { enotsup } from '../../errors/fs.ts'
-import { type PathSpec, WritePolicy } from '../../types.ts'
-import { stripMount, underPath } from '../../utils/key_prefix.ts'
+import { enotsup, fsError } from '../../errors/fs.ts'
+import { PathSpec, WritePolicy } from '../../types.ts'
+import { mountKey, stripMount, underPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 import { writeConditions } from './write_policy.ts'
@@ -78,11 +78,22 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
  * whose backend ignores delete conditions the delete would be refused after
  * the copy landed. The owning mount counts, and so does any mount nested
  * under the path, which the walk would cross; a mount above the owner is
- * never touched. Mirrors Python's `make_check_unlink`.
+ * never touched. A live pipe (a process substitution) is no file a move can
+ * delete either, and copying it first would drain it, so it is refused with
+ * EPERM before anything is read, as `rm` refuses it. Mirrors Python's
+ * `make_check_unlink`.
  */
 export function makeCheckUnlink(registry: MountRegistry): (path: PathSpec) => void {
   return (path: PathSpec): void => {
     const owner = registry.tryMountFor(path.virtual)
+    const live = owner?.readsLive(
+      new PathSpec({
+        virtual: path.virtual,
+        directory: path.directory,
+        vfsPath: mountKey(path.virtual, rstripSlash(owner.prefix)),
+      }),
+    )
+    if (live === true) throw fsError(path, 'EPERM')
     for (const entry of registry.allMounts()) {
       if (
         entry.write === WritePolicy.CONDITIONAL &&

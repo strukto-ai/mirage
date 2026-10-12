@@ -16,17 +16,33 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
+import { activePipe } from '../dev/device.ts'
 import { checkDestParents, lookupError } from './dest.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 
+/**
+ * Copy one key onto another. A live pipe at either end is used as one: a
+ * pipe source is read through its reader and a pipe destination written
+ * into, so no bytes land in a row no reader sees (GNU: `cp <(printf x) f`
+ * and `cp f >(cat)` both deliver). Mirrors Python's copy.
+ */
 export async function copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
   checkDestParents(accessor, dst, d)
-  const data = accessor.store.files.get(s)
+  const source = activePipe(accessor, s)
+  const target = activePipe(accessor, d)
+  if (source !== null && target !== null) {
+    for await (const chunk of source.stream(src)) await target.write(chunk, dst)
+    return
+  }
+  const data = source !== null ? await source.read(src) : accessor.store.files.get(s)
   if (data === undefined) throw lookupError(accessor, src, s)
+  if (target !== null) {
+    await target.write(data, dst)
+    return
+  }
   accessor.store.files.set(d, data)
   accessor.store.modified.set(d, nowIso())
   await invalidateAfterWrite(dst)
-  return Promise.resolve()
 }

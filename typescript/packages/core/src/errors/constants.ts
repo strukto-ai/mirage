@@ -56,6 +56,7 @@ export const OPERAND_CONDITIONS: ReadonlySet<FsCondition> = new Set<FsCondition>
   'EEXIST',
   'EROFS',
   'EACCES',
+  'EPERM',
   'ENOTEMPTY',
   'ENOTSUP',
   'EXDEV',

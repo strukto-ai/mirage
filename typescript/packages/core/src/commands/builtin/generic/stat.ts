@@ -31,7 +31,7 @@ import { isoTimestamp, isoToEpoch } from '../../../utils/dates.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
-import { contentSize, deviceRdev, isDir } from '../../../utils/stat_view.ts'
+import { contentSize, deviceRdev, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
@@ -52,19 +52,7 @@ function typeLabel(s: FileStat): string {
 }
 
 function effectiveMode(s: FileStat): number {
-  if (s.mode !== null) return s.mode & 0o7777
-  if (s.type === FileType.DIRECTORY) return 0o755
-  // A symlink carries no permission bits of its own; GNU reports 0777.
-  if (s.type === FileType.SYMLINK) return 0o777
-  if (s.type === FileType.CHAR_DEVICE) return 0o666
-  return 0o644
-}
-
-function typeBits(s: FileStat): number {
-  if (s.type === FileType.DIRECTORY) return 0o040000
-  if (s.type === FileType.SYMLINK) return 0o120000
-  if (s.type === FileType.CHAR_DEVICE) return 0o020000
-  return 0o100000
+  return posixMode(s) & 0o7777
 }
 
 function epoch(iso: string | null): string {
@@ -226,11 +214,11 @@ function directiveValue(
 ): string {
   if (spec === '%') return '%'
   if (spec === 'n') return name
-  if (spec === 's') return !isDir(s) && s.size === null ? '-' : String(contentSize(s))
+  if (spec === 's') return sizeUnknown(s) ? '-' : String(contentSize(s))
   if (spec === 'F') return typeLabel(s)
   if (spec === 'a') return effectiveMode(s).toString(8)
   if (spec === 'A') return lsModeString(s)
-  if (spec === 'f') return (typeBits(s) | effectiveMode(s)).toString(16)
+  if (spec === 'f') return posixMode(s).toString(16)
   if (spec === 'u' || spec === 'U') return ownerName(s.uid, identity)
   if (spec === 'g' || spec === 'G') return groupName(s.gid, identity)
   if (spec === 'x') return statTime(s.atime ?? s.modified)

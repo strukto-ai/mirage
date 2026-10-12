@@ -12,14 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.pwrite import pwrite
-from mirage.types import PathSpec
+from mirage.io.types import materialize
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.dev.store import DevFiles, DevStore
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from mirage.workspace import Workspace
 
 PATH = PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/")
+FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
 
 
 @pytest.mark.asyncio
@@ -46,3 +54,39 @@ async def test_pwrite_refuses_a_missing_parent():
     )
     with pytest.raises(FileNotFoundError):
         await pwrite(accessor, nested, b"x", 0)
+
+
+@pytest.mark.asyncio
+async def test_pwrite_to_a_pipe_delivers_in_write_order():
+    store = DevStore(DevFiles("owner"))
+    target = DevicePipe(False)
+    path, _ = store.files.allocate_input(target)
+    assert path == FD.virtual
+    consumed = asyncio.create_task(materialize(target.pipe.stream()))
+    await pwrite(RAMAccessor(store), FD, b"first ", 0)
+    await pwrite(RAMAccessor(store), FD, b"second", 0)
+    target.pipe.end()
+    assert await asyncio.wait_for(consumed, 3) == b"first second"
+    assert "/fd/63" not in store.modified
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        'f() { (exec >"$1"; printf hello); }; f >(cat); wait',
+        'f() { ln -s "$1" /data/out; printf hello > /data/out; }; '
+        "f >(cat); wait",
+    ],
+)
+async def test_descriptor_writes_reach_the_substitution(command):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await asyncio.wait_for(ws.shell(command), 5)
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (0, "hello", "")
+    finally:
+        await ws.close()

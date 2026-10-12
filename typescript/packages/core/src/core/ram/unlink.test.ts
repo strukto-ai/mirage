@@ -1,0 +1,53 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { describe, expect, it } from 'vitest'
+import { RAMAccessor } from '../../accessor/ram.ts'
+import type { RAMStore } from '../../vfs/ram/store.ts'
+import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { DevicePipe } from '../dev/pipe.ts'
+import { unlink } from './unlink.ts'
+
+const FD = new PathSpec({ virtual: '/dev/fd/63', directory: '/dev/fd/', vfsPath: 'fd/63' })
+
+describe('unlink', () => {
+  it('unlink of a live descriptor is EPERM and keeps it', async () => {
+    const store = new DevStore(new DevFiles('owner'))
+    const endpoint = new DevicePipe(true)
+    store.files.allocateInput(endpoint)
+    await expect(unlink(new RAMAccessor(store as unknown as RAMStore), FD)).rejects.toMatchObject({
+      code: 'EPERM',
+      virtualPath: '/dev/fd/63',
+    })
+    expect(store.files.pipeOf('/fd/63')).toBe(endpoint)
+  })
+
+  it('rm of a substitution leaves it readable', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const io = await ws.shell('f() { rm "$1"; echo "st=$?"; cat "$1"; }; f <(echo still)')
+      expect([io.exitCode, io.stdoutText]).toEqual([0, 'st=1\nstill\n'])
+      expect(io.stderrText).toContain('/dev/fd/63')
+    } finally {
+      await ws.close()
+    }
+  })
+})

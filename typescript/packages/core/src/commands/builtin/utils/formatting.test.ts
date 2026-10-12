@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType } from '../../../types.ts'
-import { fullIsoTime, parseBlockSize, formatLsLong, styledTime } from './formatting.ts'
+import {
+  fullIsoTime,
+  parseBlockSize,
+  formatLsLong,
+  lsModeString,
+  styledTime,
+} from './formatting.ts'
 import { resolveTz } from '../../../utils/timezone.ts'
 
 describe('parseBlockSize', () => {
@@ -40,6 +46,14 @@ it.each([
 ] as const)('keeps unknown size and time independent', (size, modified, expected) => {
   const row = new FileStat({ name: 'file', type: FileType.FILE, size, modified })
   expect(formatLsLong([row])[0]).toMatch(new RegExp(`${expected} file$`))
+})
+
+it('a fifo row is prw with size zero', () => {
+  const row = new FileStat({ name: '63', type: FileType.FIFO })
+  expect(lsModeString(row)).toBe('prw-------')
+  const line = formatLsLong([row])[0] ?? ''
+  expect(line.startsWith('prw------- ')).toBe(true)
+  expect(line.endsWith(' 0 - 63')).toBe(true)
 })
 
 it('renders full-iso with the stamp digits in the zone', () => {

@@ -42,8 +42,8 @@ from mirage.utils.quote import shell_quote_always
 from mirage.utils.stat_view import (
     content_size,
     device_rdev,
-    is_dir,
     posix_mode,
+    size_unknown,
 )
 from mirage.view.types import LinkView, MountView, StatPath
 
@@ -150,16 +150,6 @@ def _type_label(s: FileStat) -> str:
 
 def _effective_mode(s: FileStat) -> int:
     return posix_mode(s) & 0o7777
-
-
-def _type_bits(s: FileStat) -> int:
-    if s.type == FileType.DIRECTORY:
-        return 0o040000
-    if s.type == FileType.SYMLINK:
-        return 0o120000
-    if s.type == FileType.CHAR_DEVICE:
-        return 0o020000
-    return 0o100000
 
 
 def _epoch(iso: str | None) -> str:
@@ -283,9 +273,7 @@ def _directive_value(
     if spec == "n":
         return name
     if spec == "s":
-        return (
-            "-" if not is_dir(s) and s.size is None else str(content_size(s))
-        )
+        return "-" if size_unknown(s) else str(content_size(s))
     if spec == "F":
         return _type_label(s)
     if spec == "a":
@@ -293,7 +281,7 @@ def _directive_value(
     if spec == "A":
         return ls_mode_string(s)
     if spec == "f":
-        return format(_type_bits(s) | _effective_mode(s), "x")
+        return format(posix_mode(s), "x")
     if spec in ("u", "U"):
         return owner_name(s.uid, identity)
     if spec in ("g", "G"):

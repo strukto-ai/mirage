@@ -18,8 +18,15 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
+import { einval } from '../../errors/fs.ts'
+import { activePipe } from '../dev/device.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
+/**
+ * Set one key's length, padding with NULs or cutting it short. A live pipe
+ * has no length to set: EINVAL, as ftruncate(2) answers for one (GNU:
+ * `truncate -s 0 >(cat)` is "Invalid argument"). Mirrors Python's truncate.
+ */
 export async function truncate(
   accessor: RAMAccessor,
   path: PathSpec,
@@ -28,6 +35,7 @@ export async function truncate(
 ): Promise<void> {
   const timer = startOp()
   const p = norm(path.mountPath)
+  if (activePipe(accessor, p) !== null) throw einval(path)
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   if (noCreate && !accessor.store.files.has(p)) return

@@ -30,7 +30,7 @@ export interface FindEntry {
   name: string
   // 'l' is a namespace symlink: GNU find without -L reports the link
   // itself and never walks through it, so it is never 'f' or 'd'.
-  kind: 'f' | 'd' | 'l' | 'c'
+  kind: 'f' | 'd' | 'l' | 'c' | 'p'
   depth: number
   isEmpty?: boolean | null
   mtime?: number | null

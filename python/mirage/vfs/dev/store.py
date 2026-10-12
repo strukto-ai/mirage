@@ -19,7 +19,8 @@ from typing import TypeVar, overload
 from mirage.context import get_current_session
 from mirage.core.dev.mixin import PipeFiles
 from mirage.core.dev.pipe import DevicePipe
-from mirage.errors.fs import eacces, enoent
+from mirage.errors.fs import eacces, einval, enoent, fs_error
+from mirage.errors.types import FsCondition
 from mirage.vfs.dev.types import DevFileState, DeviceInput
 from mirage.vfs.ram.store import RAMStore
 
@@ -38,6 +39,13 @@ class DevFiles(dict[str, bytes], PipeFiles):
     they are deleted (GNU: ``rm /dev/null`` succeeds and the path is gone).
     A deleted name is tombstoned; the next write stores real bytes, which
     is GNU's rm-then-redirect recreation as a regular file.
+
+    A descriptor that holds a pipe has no byte buffer: reading or writing
+    its row as bytes is EINVAL, so an op that forgets its pipe branch
+    fails instead of using bytes no reader sees, and removing the row is
+    EPERM (GNU: ``rm /dev/fd/63``) because only the scope that opened it
+    releases it. Membership and listing still see the row, and the bulk
+    ``items``/``values`` views count it as empty, a FIFO storing nothing.
     """
 
     def __init__(
@@ -71,6 +79,17 @@ class DevFiles(dict[str, bytes], PipeFiles):
             if row is not None and row.owner == self._owner()
             else None
         )
+
+    def _refuse_bytes(self, key: str) -> None:
+        if self.pipe_of(key) is not None:
+            raise einval(f"/dev{key}")
+
+    def _refuse_removal(self, key: str) -> None:
+        if self.pipe_of(key) is not None:
+            raise fs_error(f"/dev{key}", FsCondition.EPERM)
+
+    def _listed_bytes(self, key: str) -> bytes:
+        return b"" if self.pipe_of(key) is not None else self[key]
 
     def allocate_input(
         self, pipe: DevicePipe | None = None
@@ -131,6 +150,7 @@ class DevFiles(dict[str, bytes], PipeFiles):
 
     def __getitem__(self, key: str) -> bytes:
         if key.startswith("/fd/"):
+            self._refuse_bytes(key)
             return self._visible_inputs()[key]
         if key in self.state.files:
             return self.state.files[key]
@@ -143,6 +163,7 @@ class DevFiles(dict[str, bytes], PipeFiles):
         if key == "/fd" or key.startswith("/fd/"):
             if key not in self._visible_inputs():
                 raise enoent(f"/dev{key}")
+            self._refuse_bytes(key)
             self.state.inputs[key].data = value
             return
         name = key.strip("/")
@@ -155,6 +176,7 @@ class DevFiles(dict[str, bytes], PipeFiles):
         if key.startswith("/fd/"):
             if key not in self._visible_inputs():
                 raise enoent(f"/dev{key}")
+            self._refuse_removal(key)
             del self.state.inputs[key]
             return
         name = key.strip("/")
@@ -184,6 +206,7 @@ class DevFiles(dict[str, bytes], PipeFiles):
             if default is _PopMissing.TOKEN:
                 raise KeyError(key)
             return default
+        self._refuse_removal(key)
         value = self[key]
         del self[key]
         return value
@@ -198,10 +221,10 @@ class DevFiles(dict[str, bytes], PipeFiles):
         return self[key] if key in self else default
 
     def items(self):
-        return [(key, self[key]) for key in self.keys()]
+        return [(key, self._listed_bytes(key)) for key in self.keys()]
 
     def values(self):
-        return [self[key] for key in self.keys()]
+        return [self._listed_bytes(key) for key in self.keys()]
 
     def keys(self):
         return [

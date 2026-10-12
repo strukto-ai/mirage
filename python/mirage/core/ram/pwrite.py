@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
+from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -25,10 +26,27 @@ from mirage.utils.ranges import splice_window
 async def pwrite(
     accessor: RAMAccessor, path_spec: PathSpec, data: bytes, offset: int
 ) -> None:
+    """Write bytes at an offset of one key.
+
+    A live pipe has no offset: its bytes go into the pipe, in the order
+    they are written, which is how an open descriptor delivers to a FIFO
+    (``exec >"$1"`` and a link to a substitution write through here).
+
+    Args:
+        accessor (RAMAccessor): the RAM accessor.
+        path_spec (PathSpec): the key to write.
+        data (bytes): the bytes to write.
+        offset (int): where in the file the bytes go.
+    """
     path = path_spec.mount_path
     store = accessor.store
     timer = start_op()
     p = norm(path)
+    pipe = active_pipe(accessor, p)
+    if pipe is not None:
+        await pipe.write(data, path_spec)
+        record("pwrite", path_spec.virtual, "ram", len(data), timer)
+        return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
     store.files[p] = splice_window(store.files.get(p, b""), offset, data)

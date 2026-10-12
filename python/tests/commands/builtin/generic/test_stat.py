@@ -91,6 +91,7 @@ async def test_default_record_sizes_a_directory_as_percent_s_does():
         (_fs(type=FileType.DIRECTORY, size=None), f"  Size: {DIR_SIZE} "),
         (_fs(type=FileType.DIRECTORY, size=123456), f"  Size: {DIR_SIZE} "),
         (_fs(size=None), "  Size: - "),
+        (_fs(type=FileType.FIFO, size=None), "  Size: 0 "),
     ]
     for fs, want in cases:
         out, io = await stat(
@@ -113,10 +114,22 @@ async def test_default_record_sizes_a_directory_as_percent_s_does():
             _fs(type=FileType.DIRECTORY, size=None, mode=None),
             "755 drwxr-xr-x 41ed",
         ),
+        # A FIFO carries its own type bits, rw------- by default (GNU:
+        # `stat -L -c '%a %A %f' <(true)`).
+        (_fs(type=FileType.FIFO, size=None, mode=None), "600 prw------- 1180"),
+        (
+            _fs(type=FileType.FIFO, size=None, mode=0o4755),
+            "4755 prwsr-xr-x 19ed",
+        ),
     ],
 )
 async def test_mode_directives(fs, want):
     assert await _render("%a %A %f", fs) == want
+
+
+@pytest.mark.asyncio
+async def test_a_fifo_size_is_zero():
+    assert await _render("%s", _fs(type=FileType.FIFO, size=None)) == "0"
 
 
 @pytest.mark.asyncio

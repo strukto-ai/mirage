@@ -31,23 +31,25 @@ const STRING_UNARY = new Set(['-n', '-z'])
 // `-v NAME` asks whether the variable (or the `NAME[sub]` element) is
 // set; it reads session state, not a path.
 const VAR_UNARY = new Set(['-v'])
-export const FILE_UNARY = new Set(['-e', '-f', '-d', '-c', '-s', '-r', '-w', '-x', '-L', '-h'])
-// Real GNU operators mirage cannot answer truthfully: the VFS has no
-// FIFO/socket/device node types, no uid/gid ownership or setuid bits,
-// and no controlling terminal. Failing loudly beats the silent-false
-// this module used to produce.
-export const UNSUPPORTED_UNARY = new Set([
+export const FILE_UNARY = new Set([
+  '-e',
+  '-f',
+  '-d',
+  '-c',
   '-p',
-  '-S',
-  '-b',
-  '-g',
-  '-k',
-  '-u',
-  '-O',
-  '-G',
-  '-N',
-  '-t',
+  '-s',
+  '-r',
+  '-w',
+  '-x',
+  '-L',
+  '-h',
 ])
+// Real GNU operators mirage cannot answer truthfully: the VFS has no
+// socket or block-device node types, no uid/gid ownership or setuid
+// bits, and no controlling terminal. (Character devices and FIFOs ARE
+// modelled, so -c and -p are supported above.) Failing loudly beats the
+// silent-false this module used to produce.
+export const UNSUPPORTED_UNARY = new Set(['-S', '-b', '-g', '-k', '-u', '-O', '-G', '-N', '-t'])
 export const BINARY_OPS = new Set([...STRING_BINARY, ...NUMERIC_BINARY, ...FILE_PAIR_BINARY])
 export const UNARY_OPS = new Set([
   ...STRING_UNARY,

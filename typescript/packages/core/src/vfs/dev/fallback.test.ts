@@ -1,5 +1,15 @@
 import type * as AsyncContext from '../../utils/async_context.ts'
 import { expect, it, vi } from 'vitest'
+import { runWithSession } from '../../context/session_context.ts'
+import { SessionState } from '../../workspace/session/session.ts'
+import { DevFiles } from './store.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { RAMVFS } from '../ram/ram.ts'
+import { MountMode } from '../../types.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult } from '../../io/types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 
 vi.mock('../../utils/async_context.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof AsyncContext>()
@@ -9,10 +19,6 @@ vi.mock('../../utils/async_context.ts', async (importOriginal) => {
     createAsyncContext: () => new actual.FallbackStorage(),
   }
 })
-
-import { runWithSession } from '../../context/session_context.ts'
-import { SessionState } from '../../workspace/session/session.ts'
-import { DevFiles } from './store.ts'
 
 it('refuses descriptor access when fallback contexts overlap', async () => {
   const files = new DevFiles()
@@ -50,14 +56,6 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
   }
   expect(files.get('/fd/63')).toBeUndefined()
 })
-
-import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { RAMVFS } from '../ram/ram.ts'
-import { MountMode } from '../../types.ts'
-import { CLI, CLIHandler } from '../../commands/cli/types.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
-import { IOResult } from '../../io/types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 
 it('streams separate descriptors while browser sessions overlap', async () => {
   const ws = new Workspace(

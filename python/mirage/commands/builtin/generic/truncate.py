@@ -1,3 +1,4 @@
+import errno
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -11,11 +12,13 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
+from mirage.utils.quote import shell_quote_always
 from mirage.utils.stat_view import is_dir
 
 # GNU truncate's letter set differs from split's and od's: lowercase
@@ -150,9 +153,12 @@ async def truncate_generic(
     errors: list[str] = []
     for path in paths:
         try:
-            await _truncate_one(path, flags, stat, truncate_fn)
+            refused = await _truncate_one(path, flags, stat, truncate_fn)
         except FS_ERRORS as exc:
             errors.append(fs_error_line("truncate", path, exc))
+        else:
+            if refused is not None:
+                errors.append(refused)
     err = encode_text("".join(errors))
     return None, IOResult(exit_code=1 if err else 0, stderr=err or None)
 
@@ -162,8 +168,9 @@ async def _truncate_one(
     flags: TruncateFlags,
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     truncate_fn: Callable[[PathSpec, int, bool], Awaitable[None]],
-) -> None:
-    """One operand, in the order GNU's open settles it.
+) -> str | None:
+    """One operand, in the order GNU's open settles it, and the line GNU
+    prints when the open went through but the length did not take.
 
     GNU opens the name before it looks at anything, with O_CREAT unless
     ``-c``: an absent file is made (``-c`` leaves it, silently), but only
@@ -176,7 +183,9 @@ async def _truncate_one(
     settled here so a backend with no truncate op answers in GNU's words
     too: ``missing/`` and ``reg/`` are both ``Is a directory`` and nothing
     is made, while under ``-c`` ``reg/`` goes to the truncate op, whose
-    lookup is ENOTDIR.
+    lookup is ENOTDIR. A length that cannot take (a pipe has none) is
+    the ftruncate step's EINVAL, which GNU words with the size it asked
+    for: ``failed to truncate 'x' at 0 bytes: Invalid argument``.
 
     Args:
         path (PathSpec): the operand.
@@ -198,13 +207,24 @@ async def _truncate_one(
         if why is FsCondition.ENOTDIR:
             raise enotdir(path) from exc
         if flags.no_create:
-            return
+            return None
         if why is not None:
             raise enoent(path) from exc
         current = 0
     if directory or (path.raw_path.endswith("/") and not flags.no_create):
         raise eisdir(path)
-    await truncate_fn(path, parse_size(flags.size, current), flags.no_create)
+    size = parse_size(flags.size, current)
+    try:
+        await truncate_fn(path, size, flags.no_create)
+    except OSError as exc:
+        if exc.errno != errno.EINVAL:
+            raise
+        label = shell_quote_always(path.raw_path or path.virtual)
+        return (
+            f"truncate: failed to truncate {label} at {size} bytes: "
+            f"{posix_phrase(FsCondition.EINVAL)}\n"
+        )
+    return None
 
 
 __all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate_generic"]

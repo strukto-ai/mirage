@@ -14,12 +14,19 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
+import { materialize } from '../../io/types.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
-import { PathSpec } from '../../types.ts'
+import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { DevicePipe } from '../dev/pipe.ts'
 import { pwrite } from './pwrite.ts'
 
 const ENC = new TextEncoder()
 const PATH = new PathSpec({ virtual: '/f.txt', directory: '/', vfsPath: 'f.txt' })
+const FD = new PathSpec({ virtual: '/dev/fd/63', directory: '/dev/fd/', vfsPath: 'fd/63' })
 
 describe('pwrite', () => {
   it('keeps the bytes outside the window', async () => {
@@ -42,5 +49,37 @@ describe('pwrite', () => {
     await expect(pwrite(accessor, nested, ENC.encode('x'), 0)).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+})
+
+describe('pwrite to a pipe', () => {
+  it('pwrite to a pipe delivers in write order', async () => {
+    const store = new DevStore(new DevFiles('owner'))
+    const accessor = new RAMAccessor(store as unknown as RAMStore)
+    const target = new DevicePipe(false)
+    const [path] = store.files.allocateInput(target)
+    expect(path).toBe(FD.virtual)
+    const consumed = materialize(target.pipe.stream())
+    await pwrite(accessor, FD, ENC.encode('first '), 0)
+    await pwrite(accessor, FD, ENC.encode('second'), 0)
+    target.pipe.end()
+    expect(new TextDecoder().decode(await consumed)).toBe('first second')
+    expect(store.modified.has('/fd/63')).toBe(false)
+  })
+
+  it.each([
+    ['f() { (exec >"$1"; printf hello); }; f >(cat); wait'],
+    ['f() { ln -s "$1" /data/out; printf hello > /data/out; }; f >(cat); wait'],
+  ])('descriptor writes reach the substitution: %s', async (command) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const io = await ws.shell(command)
+      expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, 'hello', ''])
+    } finally {
+      await ws.close()
+    }
   })
 })
