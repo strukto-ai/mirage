@@ -236,8 +236,23 @@
             "group": "Runtimes",
             "pages": [
               "home/setup/runtime/overview",
-              "home/setup/runtime/python",
-              "home/setup/runtime/javascript",
+              {
+                "group": "Python",
+                "icon": "python",
+                "pages": [
+                  "home/setup/runtime/monty",
+                  "home/setup/runtime/wasi",
+                  "home/setup/runtime/pyodide"
+                ]
+              },
+              {
+                "group": "JavaScript",
+                "icon": "js",
+                "pages": [
+                  "home/setup/runtime/quickjs"
+                ]
+              },
+              "home/setup/runtime/local",
               {
                 "group": "Sandbox",
                 "icon": "server",
@@ -252,10 +267,16 @@
                   "home/setup/runtime/sandbox/ssh"
                 ]
               },
-              "home/setup/fuse",
-              "home/setup/macos",
-              "home/setup/linux",
-              "home/setup/windows"
+              {
+                "group": "FUSE",
+                "icon": "folder-open",
+                "pages": [
+                  "home/setup/fuse",
+                  "home/setup/macos",
+                  "home/setup/linux",
+                  "home/setup/windows"
+                ]
+              }
             ]
           }
         ]
@@ -447,22 +468,7 @@
           {
             "group": "Runtimes",
             "pages": [
-              "python/runtime/python",
-              "python/runtime/javascript",
-              {
-                "group": "Sandbox",
-                "icon": "server",
-                "pages": [
-                  "python/runtime/sandbox",
-                  "python/runtime/sandbox/sandlock",
-                  "python/runtime/sandbox/docker",
-                  "python/runtime/sandbox/apple_container",
-                  "python/runtime/sandbox/smolvm",
-                  "python/runtime/sandbox/daytona",
-                  "python/runtime/sandbox/e2b",
-                  "python/runtime/sandbox/ssh"
-                ]
-              }
+              "python/runtime/python"
             ]
           }
         ]
@@ -657,22 +663,7 @@
           {
             "group": "Runtimes",
             "pages": [
-              "typescript/runtime/python",
-              "typescript/runtime/javascript",
-              {
-                "group": "Sandbox",
-                "icon": "server",
-                "pages": [
-                  "typescript/runtime/sandbox",
-                  "typescript/runtime/sandbox/sandlock",
-                  "typescript/runtime/sandbox/docker",
-                  "typescript/runtime/sandbox/apple_container",
-                  "typescript/runtime/sandbox/smolvm",
-                  "typescript/runtime/sandbox/daytona",
-                  "typescript/runtime/sandbox/e2b",
-                  "typescript/runtime/sandbox/ssh"
-                ]
-              }
+              "typescript/runtime/python"
             ]
           }
         ]
@@ -680,6 +671,14 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/home/setup/runtime/python",
+      "destination": "/home/setup/runtime/overview"
+    },
+    {
+      "source": "/home/setup/runtime/javascript",
+      "destination": "/home/setup/runtime/quickjs"
+    },
     {
       "source": "/home/auth",
       "destination": "/home/access/http"
@@ -699,6 +698,78 @@
     {
       "source": "/typescript/server-and-cli",
       "destination": "/typescript/access/server"
+    },
+    {
+      "source": "/python/runtime/javascript",
+      "destination": "/home/setup/runtime/quickjs"
+    },
+    {
+      "source": "/python/runtime/sandbox",
+      "destination": "/home/setup/runtime/sandbox"
+    },
+    {
+      "source": "/python/runtime/sandbox/apple_container",
+      "destination": "/home/setup/runtime/sandbox/apple_container"
+    },
+    {
+      "source": "/python/runtime/sandbox/daytona",
+      "destination": "/home/setup/runtime/sandbox/daytona"
+    },
+    {
+      "source": "/python/runtime/sandbox/docker",
+      "destination": "/home/setup/runtime/sandbox/docker"
+    },
+    {
+      "source": "/python/runtime/sandbox/e2b",
+      "destination": "/home/setup/runtime/sandbox/e2b"
+    },
+    {
+      "source": "/python/runtime/sandbox/sandlock",
+      "destination": "/home/setup/runtime/sandbox/sandlock"
+    },
+    {
+      "source": "/python/runtime/sandbox/smolvm",
+      "destination": "/home/setup/runtime/sandbox/smolvm"
+    },
+    {
+      "source": "/python/runtime/sandbox/ssh",
+      "destination": "/home/setup/runtime/sandbox/ssh"
+    },
+    {
+      "source": "/typescript/runtime/javascript",
+      "destination": "/home/setup/runtime/quickjs"
+    },
+    {
+      "source": "/typescript/runtime/sandbox",
+      "destination": "/home/setup/runtime/sandbox"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/apple_container",
+      "destination": "/home/setup/runtime/sandbox/apple_container"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/daytona",
+      "destination": "/home/setup/runtime/sandbox/daytona"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/docker",
+      "destination": "/home/setup/runtime/sandbox/docker"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/e2b",
+      "destination": "/home/setup/runtime/sandbox/e2b"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/sandlock",
+      "destination": "/home/setup/runtime/sandbox/sandlock"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/smolvm",
+      "destination": "/home/setup/runtime/sandbox/smolvm"
+    },
+    {
+      "source": "/typescript/runtime/sandbox/ssh",
+      "destination": "/home/setup/runtime/sandbox/ssh"
     }
   ],
   "navbar": {

@@ -16,13 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { makeWorkspace } from '../../../workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
+const PYODIDE = { runtimes: ['pyodide', 'workspace'] }
 const stdout = (r: { stdout: Uint8Array }): string => DEC.decode(r.stdout)
 const stderr = (r: { stderr: Uint8Array | null }): string =>
   r.stderr === null ? '' : DEC.decode(r.stderr)
 
 describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   it('prints the value of the last expression (single-mode behavior)', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r = await ws.executePythonRepl('1 + 2')
     expect(r.status).toBe('complete')
     expect(r.exitCode).toBe(0)
@@ -31,7 +32,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('persists state across calls in the same session', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r1 = await ws.executePythonRepl('x = 41')
     expect(r1.status).toBe('complete')
     const r2 = await ws.executePythonRepl('x + 1')
@@ -41,7 +42,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('isolates state between distinct sessions', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.executePythonRepl('x = 1', { sessionId: 'a' })
     const r = await ws.executePythonRepl('x', { sessionId: 'b' })
     expect(r.exitCode).toBe(1)
@@ -50,7 +51,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('reports incomplete for unclosed blocks', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r = await ws.executePythonRepl('def f(x):')
     expect(r.status).toBe('incomplete')
     expect(r.exitCode).toBe(0)
@@ -60,7 +61,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('runs a multi-line def submitted as one buffer, then calls it', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r1 = await ws.executePythonRepl('def f(x):\n    return x * 2\n')
     expect(r1.status).toBe('complete')
     const r2 = await ws.executePythonRepl('f(21)')
@@ -70,7 +71,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('reports SyntaxError as complete with stderr (not as incomplete)', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r = await ws.executePythonRepl('def (x): bad')
     expect(r.status).toBe('complete')
     expect(r.exitCode).toBe(1)
@@ -79,7 +80,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('exit() returns status=exit with exitCode 0', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r = await ws.executePythonRepl('exit()')
     expect(r.status).toBe('exit')
     expect(r.exitCode).toBe(0)
@@ -87,7 +88,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('exit(2) returns status=exit with exitCode 2', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r = await ws.executePythonRepl('exit(2)')
     expect(r.status).toBe('exit')
     expect(r.exitCode).toBe(2)
@@ -95,7 +96,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('uncaught exception shows traceback, exitCode 1, status complete', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const r = await ws.executePythonRepl('1 / 0')
     expect(r.status).toBe('complete')
     expect(r.exitCode).toBe(1)
@@ -104,7 +105,7 @@ describe('Workspace.executePythonRepl', { timeout: 60_000 }, () => {
   })
 
   it('imports persist across calls within a session', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.executePythonRepl('import json')
     const r = await ws.executePythonRepl('json.dumps({"a": 1})')
     expect(r.status).toBe('complete')

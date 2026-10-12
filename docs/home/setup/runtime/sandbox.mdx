@@ -1,13 +1,66 @@
 ---
 title: Overview
 icon: server
-description: Set up an external sandbox runtime for either Mirage SDK.
+description: Run captured programs in a container, VM, cloud sandbox or remote machine you already have.
 ---
 
-You create the container, VM or cloud sandbox; Mirage only connects to it.
-Programs there need the workspace mounts at the same paths: `docker` and
-`e2b` serve them with `mount_type: ssh`, and otherwise a Mirage inside the
-sandbox serves them. Then choose a provider below.
+A sandbox runtime runs captured programs somewhere you already have: a
+container, a microVM, a cloud sandbox or a machine over SSH. You create and
+stop it; Mirage only runs programs in it. Each runtime's `captures` defaults
+to [`@external`](/home/setup/runtime/overview#captures), every program
+Mirage does not have itself.
 
-Full architecture: [Python](/python/runtime/sandbox) ·
-[TypeScript](/typescript/runtime/sandbox)
+A program there opens workspace files at the same paths, so the sandbox
+must see the mounts. `docker` and `e2b` pick how with `mount_type`: `ssh`
+serves them from the workspace, `fuse` from a Mirage inside the sandbox, and
+`both` mixes the two. The others use a Mirage inside.
+
+| Runtime | Runs programs in | Workspace files through |
+| --- | --- | --- |
+| [Docker](/home/setup/runtime/sandbox/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
+| [E2B](/home/setup/runtime/sandbox/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
+| [Daytona](/home/setup/runtime/sandbox/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
+| [smolvm](/home/setup/runtime/sandbox/smolvm) | A microVM with its own kernel | FUSE, from a Mirage inside |
+| [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | FUSE, from a Mirage inside |
+| [SSH](/home/setup/runtime/sandbox/ssh) | Any machine running `sshd` | The ssh VFS at the same paths, or FUSE from a Mirage there |
+| [Sandlock](/home/setup/runtime/sandbox/sandlock) | This Linux host, confined | A [FUSE folder](/home/setup/fuse) you grant |
+
+## The sandbox image
+
+A sandbox that serves the mounts with its own Mirage needs `fuse3` and
+Mirage. The repository's Dockerfile builds that image from the current
+checkout, with every mountable backend:
+
+```bash
+docker build -f docker/sandbox/Dockerfile --target fuse -t mirage-python-fuse .
+```
+
+Narrow it to the backends you use with `MIRAGE_EXTRAS`:
+
+```bash
+docker build -f docker/sandbox/Dockerfile --target fuse \
+  --build-arg MIRAGE_EXTRAS=s3,postgres -t mirage-fuse-lean .
+```
+
+The same image serves every provider: run it under Docker, Apple's
+`container` or smolvm, or use it as a Daytona image or an E2B template base.
+Add the programs your captures need, such as Node.js for `node`. The Mirage
+inside is the Python build, whichever SDK the host uses.
+
+## Timeouts
+
+`command_limits` apply to a sandboxed program as to any command: past
+`timeout_seconds` it exits 124, and `max_bytes` and `max_lines` cap its
+output.
+
+<Warning>
+  A timeout stops Mirage waiting; it does not always stop the program.
+  Sandlock kills it. E2B tries to kill the command, but its child processes
+  may survive. The other providers leave it running, and a Daytona sandbox has no timeout of its
+  own, so it keeps running and billing. Use the provider's own limits.
+</Warning>
+
+## Route policy
+
+A sandbox runs programs but does not evaluate expressions, so it cannot run
+a [route policy](/home/policy/route-policy) script.

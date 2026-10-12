@@ -19,14 +19,12 @@ import {
   buildRuntime,
   checkRuntimeOptions,
   DEFAULT_ENTRIES,
-  DEFAULT_PYTHON,
   knownRuntimes,
   registerRuntime,
   runtimeBindingsFor,
 } from './table.ts'
 import { WorkspaceRuntime } from './workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
-import { PythonRuntime } from './python/base.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 
@@ -52,12 +50,9 @@ describe('runtime table', () => {
     expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('workspace')
   })
 
-  it('the default python engine is pyodide and leads the default world', () => {
-    // The one entry Python disagrees on, so it is named rather than
-    // left to a slot: Python registers monty.
-    expect(DEFAULT_PYTHON).toBe('pyodide')
-    expect(DEFAULT_ENTRIES[0]).toBe(DEFAULT_PYTHON)
-    expect(buildRuntime(DEFAULT_PYTHON)).toBeInstanceOf(PythonRuntime)
+  it('the default world is monty, quickjs and workspace', () => {
+    expect(DEFAULT_ENTRIES).toEqual(['monty', 'quickjs', 'workspace'])
+    expect(buildRuntime('monty')).toBeInstanceOf(MontyRuntime)
   })
 
   it.each<[string, new (...args: never[]) => Runtime]>([

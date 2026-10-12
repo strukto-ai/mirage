@@ -20,6 +20,7 @@ import { IOResult } from '../../io/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '../../runtime/mixin.ts'
+import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -46,6 +47,17 @@ class Sandbox extends Runtime implements ProcessExecutor {
   readonly name = 'sandbox'
   constructor() {
     super({}, ['gcc', EXTERNAL_COMMANDS])
+  }
+  runProcess(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
+class HostPython extends PythonRuntime implements ProcessExecutor {
+  readonly [PROCESS_EXECUTOR] = true as const
+  readonly name = 'host-python'
+  run(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
   }
   runProcess(): Promise<RunResult> {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
@@ -367,6 +379,16 @@ describe('program', () => {
     expect(programs(session, ws.registry)).not.toContain('history')
   })
 
+  it('keeps its own names on a language runtime that runs processes', () => {
+    const session = new SessionState({ sessionId: 't' })
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { runtimes: [new HostPython({ captures: ['python3', 'gcc'] })] },
+    )
+    expect(lookup('python3', session, ws.registry)).toBe(Consumer.SESSION)
+    expect(lookup('gcc', session, ws.registry)).toBe(Consumer.EXTERNAL)
+  })
+
   it('is no file for a name only the fallback takes', () => {
     const session = new SessionState({ sessionId: 't' })
     const ws = new Workspace({ '/': new RAMVFS() }, { runtimes: [new Sandbox()] })
@@ -388,7 +410,7 @@ describe('programNote', () => {
       'prog is a CLI registered with this workspace. Help: prog --help',
     )
     expect(programNote('python3', session, ws.registry)).toBe(
-      "python3 runs on the workspace's pyodide runtime.",
+      "python3 runs on the workspace's monty runtime.",
     )
     // A builtin's --help varies, so its line names none.
     for (const name of ['echo', 'ln', 'xargs']) {

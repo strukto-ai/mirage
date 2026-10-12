@@ -9,6 +9,6 @@ line back.
 | `external.json` | captured external commands: argv, pipeline stages, path policy, globs in text slots, interpreter scripts, builtins kept |
 | `fallback.json` | a captured program in a pipeline; an external fallback keeps mirage's commands and is no program to `which` or `type`   |
 | `line.json`     | whole-line capture (`*`), literal words, interpreter scripts                                                            |
-| `defaults.json` | the default Python runtime per host: monty on python, pyodide on typescript                                             |
+| `defaults.json` | the default Python runtime: monty on both hosts                                                                         |
 | `registry.json` | a registered runtime named like a builtin, listed as known; a builtin name cannot be shadowed                           |
 | `syntax.json`   | a syntax error exits 2, keeps its whole message, and is reported before policy                                          |

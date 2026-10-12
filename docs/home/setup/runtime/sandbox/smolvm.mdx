@@ -1,33 +1,113 @@
 ---
 title: smolvm
 icon: /images/smolvm-logo.svg
-description: Connect either Mirage SDK to an existing smolvm microVM.
+description: Run captured programs in a smolvm microVM with its own kernel.
 ---
 
-Create and start the machine. Details: [Python](/python/runtime/sandbox/smolvm) ·
-[TypeScript](/typescript/runtime/sandbox/smolvm).
+`smolvm` runs captured programs in a running [smolvm](https://smolmachines.com)
+microVM, by name. Each machine has its own guest kernel, on macOS, Linux and
+Windows. You create and start the machine; Mirage only runs programs in it.
+Python SDK and Node.
+
+## Installation
+
+Install the `smolvm` CLI. Create and start a machine from an image that
+has what [connecting the workspace](#connecting-the-workspace) needs:
 
 ```bash
 smolvm machine create --net --name mirage-box --image my-mirage-image
 smolvm machine start --name mirage-box
 ```
 
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `python3` to run it in the
+machine too.
+
 <Tabs>
-  <Tab title="Python SDK" icon="/images/python-logo.svg">
+  <Tab title="Python" icon="/images/python-logo.svg">
     ```python
+    from mirage import RAMVFS, MountMode, Workspace
     from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 
-    runtime = SmolvmRuntime(captures=["python3"], config={"machine": "mirage-box"})
+    runtime = SmolvmRuntime(captures=["python3", "@external"], config={"machine": "mirage-box"})
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
-  <Tab title="TypeScript SDK" icon="/images/typescript-logo.svg">
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { SmolvmRuntime } from '@struktoai/mirage-node'
+    import { MountMode, RAMVFS, SmolvmRuntime, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new SmolvmRuntime({
-      captures: ['python3'],
+      captures: ['python3', '@external'],
       config: { machine: 'mirage-box' },
     })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: smolvm
+        captures: ["python3", "@external"]
+        config:
+          machine: mirage-box
+    mounts:
+      /data:
+        vfs: ram
     ```
   </Tab>
 </Tabs>
+
+## Connecting the workspace
+
+A program in the machine opens workspace files at the same paths as in
+Mirage, so the machine must see the mounts there. Mirage does not serve them
+into a smolvm machine: use [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image),
+which carries Mirage and `fuse3`. Write the same mounts at the same paths
+into `sandbox.yaml`, put it in the machine (in its image, or a directory
+passed with `--volume`), and start Mirage with it:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+smolvm machine exec --name mirage-box -- mirage workspace create /tmp/sandbox.yaml
+```
+
+- This workspace's mount modes and permissions do not reach those files;
+  `sandbox.yaml` decides.
+- Keep the machine's paths in step with the host's mounts yourself.
+
+## What is wired
+
+| | In the machine |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | What the Mirage inside serves; see [above](#connecting-the-workspace) |
+| Host files | Only directories passed with `--volume` at boot |
+| Disk and network | The machine's own |
+
+## Notes
+
+- The `smolvm` CLI is the transport, so there is no package to install.
+- The first captured line checks the machine and accepts only `running`.
+  Start a `stopped` or `created` machine; `unreachable` means its guest agent
+  is not answering; a `frozen` machine is a fork base, so use a clone.
+- Lines sent to one machine share its files and processes. Give each tenant
+  its own machine.
+- A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the program in the machine.

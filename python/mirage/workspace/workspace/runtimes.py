@@ -65,11 +65,10 @@ class Runtimes:
         the workspace dispatch attached. The workspace runtime is required:
         when the list omits it, an unconditional one is appended, so
         there is always an executor for unclaimed commands. An explicit
-        list fails loud per entry. The default set (DEFAULT_ENTRIES,
-        whose python engine is DEFAULT_PYTHON) builds gracefully: a
-        missing extra skips the entry so its commands report the
-        install hint per invocation, never a silent escalation to
-        another runtime.
+        list fails loud per entry. The default set (DEFAULT_ENTRIES)
+        builds gracefully: a missing extra skips the entry so its
+        commands report the install hint per invocation, never a silent
+        escalation to another runtime.
 
         Args:
             runtimes (list[Runtime | str] | None): user entries, or

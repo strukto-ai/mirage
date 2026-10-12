@@ -651,7 +651,8 @@
   },
   "runtime/python/local/runtime": {
    "typescript_only": {
-    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup."
+    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup.",
+    "isExecutable": "Checks that the program found on PATH is an executable file; Python's shutil.which already checks that."
    }
   },
   "commands/builtin/general/interpreter": {

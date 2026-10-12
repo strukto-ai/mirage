@@ -20,23 +20,47 @@ from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.local.config import LocalConfig
-from mirage.runtime.types import RunArgs, RunResult, RuntimeReach, ScriptSource
+from mirage.runtime.types import (
+    ProcessExecution,
+    RunArgs,
+    RunResult,
+    RuntimeReach,
+    ScriptSource,
+)
+from mirage.shell.bytes import encode_text
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
-class LocalRuntime(PythonRuntime):
-    """Run Python code on a host interpreter as a subprocess.
+def _not_run(message: str, exit_code: int) -> RunResult:
+    """A program that never started: its message and exit code.
 
-    Each run spawns `<interpreter> -c <code>`; the code sees the host
-    filesystem, not the workspace mounts. Its environment is the
-    session's and the config `env`, nothing of mirage's own, as a
-    sandlock child gets. Cancelling the run kills the subprocess, so a
-    limit timeout reclaims it.
+    Args:
+        message (str): what the program would have said on stderr.
+        exit_code (int): 127 when it was not found, 126 when it could
+            not run.
+    """
+    return RunResult(
+        stdout=b"", stderr=encode_text(message), exit_code=exit_code
+    )
+
+
+class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
+    """Run Python code, and any other captured program, on the host.
+
+    Each python3 run spawns `<interpreter> -c <code>`. Any other name
+    the captures send here (a named program, or EXTERNAL_COMMANDS) runs
+    as its argv, found on the host PATH, with no shell, in the session
+    cwd. Either way the program sees the host filesystem, not the
+    workspace mounts. Its environment is the session's and the config
+    `env`, nothing of mirage's own, as a sandlock child gets.
+    Cancelling the run kills the subprocess, so a limit timeout
+    reclaims it.
 
     The interpreter defaults to the one running mirage; point the
     config `home` (the yaml entry's ``config`` block ends up here) or
@@ -83,24 +107,50 @@ class LocalRuntime(PythonRuntime):
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
-        return await self._run(["--version"], {})
+        return await self._spawn(self._python, ["--version"], {})
 
     async def run(self, args: RunArgs) -> RunResult:
         # Honoring the init switches is just handing them back to the
         # real interpreter, which is why this tier gets them exactly
         # right (sys.flags included) where an in-process engine cannot.
-        return await self._run(
+        return await self._spawn(
+            self._python,
             [*init_argv(args.flags), "-c", prepare_source(args), *args.args],
             args.env,
             args.stdin,
         )
 
-    async def _run(
-        self, argv: list[str], env: dict[str, str], stdin: bytes | None = None
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        if not request.argv:
+            raise ValueError("process argv must not be empty")
+        name = request.argv[0]
+        program = shutil.which(name)
+        if program is None:
+            return _not_run(f"{name}: command not found\n", 127)
+        # The session cwd is a workspace path. Running somewhere else
+        # instead would point a relative path at the wrong files.
+        cwd = request.cwd.virtual
+        if not os.path.isdir(cwd):
+            return _not_run(
+                f"{name}: the working directory {cwd} is not on this host\n",
+                126,
+            )
+        return await self._spawn(
+            program, list(request.argv[1:]), request.env, request.stdin, cwd
+        )
+
+    async def _spawn(
+        self,
+        program: str,
+        argv: list[str],
+        env: dict[str, str],
+        stdin: bytes | None = None,
+        cwd: str | None = None,
     ) -> RunResult:
         proc = await asyncio.create_subprocess_exec(
-            self._python,
+            program,
             *argv,
+            cwd=cwd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

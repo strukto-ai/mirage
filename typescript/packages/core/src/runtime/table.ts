@@ -36,35 +36,24 @@ const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = 
 )
 
 /**
- * The python engine a default world registers, named rather than left
- * to a slot in DEFAULT_ENTRIES because it is the one entry the two
- * implementations disagree on: TypeScript registers pyodide, Python
- * registers monty (`DEFAULT_PYTHON` in `mirage/runtime/table.py`). Both
- * are sandboxed; neither reaches the host. Pinned by integ/runtime/routing/defaults.json, which reads the split
- * back out of a default world on each host.
- *
- * A name, not a class: `name` is an instance field, so `PyodideRuntime.name`
- * is the JS function name, not the registry key.
- */
-export const DEFAULT_PYTHON = 'pyodide'
-
-/**
  * The default world when no runtimes list is given: one python engine,
- * one js engine, and the builtin command engine. `local`/`wasi` are
- * Python-only.
+ * one js engine, and the builtin command engine, the same three as
+ * Python's (pinned by integ/runtime/routing/defaults.json). Names, not
+ * classes: `name` is an instance field, so `MontyRuntime.name` is the JS
+ * function name, not the registry key.
  */
-export const DEFAULT_ENTRIES: readonly string[] = [DEFAULT_PYTHON, 'quickjs', 'workspace']
+export const DEFAULT_ENTRIES: readonly string[] = ['monty', 'quickjs', 'workspace']
 
 /** Python-only runtime names a cross-language config may carry. */
 const PYTHON_ONLY_HINTS: Record<string, string> = {
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript " +
-    "supports 'pyodide' (WASM CPython, default), 'monty' (sandboxed), " +
+    "supports 'monty' (sandboxed, default), 'pyodide' (WASM CPython), " +
     "and 'quickjs' (sandboxed JavaScript)",
   local:
     "runtime 'local' (the host python3) lives in @struktoai/mirage-node; " +
     'import that package to register it. Browser worlds support ' +
-    "'pyodide' (WASM CPython, default), 'monty' (sandboxed), and " +
+    "'monty' (sandboxed, default), 'pyodide' (WASM CPython), and " +
     "'quickjs' (sandboxed JavaScript)",
   sandlock:
     "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +

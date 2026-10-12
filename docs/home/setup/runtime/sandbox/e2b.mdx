@@ -1,41 +1,154 @@
 ---
 title: E2B
 icon: /images/e2b-logo.svg
-description: Connect either Mirage SDK to an existing E2B sandbox.
+description: Run captured programs in an E2B cloud sandbox you created.
 ---
 
-Create the sandbox from a template, then connect by ID. The runtime runs in
-Python, Node and browsers. With `mount_type: ssh` (not in browsers) the
-sandbox needs only `sshfs`. Details: [Python](/python/runtime/sandbox/e2b) ·
-[TypeScript](/typescript/runtime/sandbox/e2b).
+`e2b` runs captured programs in a running [E2B](https://e2b.dev) sandbox,
+by ID. You create the sandbox from a template; Mirage only runs programs in
+it. Python SDK, Node and browsers.
+
+## Installation
 
 <Tabs>
-  <Tab title="Python SDK" icon="/images/python-logo.svg">
+  <Tab title="Python" icon="/images/python-logo.svg">
     ```bash
     pip install 'mirage-ai[e2b]'
     ```
-
-    ```python
-    from mirage.runtime.sandbox.e2b import E2BRuntime
-
-    runtime = E2BRuntime(captures=["python3"], config={"sandbox_id": "sandbox-id"})
-    ```
   </Tab>
-  <Tab title="TypeScript SDK" icon="/images/typescript-logo.svg">
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```bash
     pnpm add e2b
     ```
-
-    ```typescript
-    import { E2BRuntime } from '@struktoai/mirage-node'
-
-    const runtime = new E2BRuntime({
-      captures: ['python3'],
-      config: { sandboxId: 'sandbox-id' },
-    })
-    ```
-
-    For browsers, import from
-    `@struktoai/mirage-core/runtime/sandbox/e2b/runtime` and supply `apiKey`.
   </Tab>
 </Tabs>
+
+Create the sandbox from a template that has what
+[connecting the workspace](#connecting-the-workspace) needs. Set `api_key`
+in the config, or `E2B_API_KEY`.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `python3` to run it in the
+sandbox too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.sandbox.e2b import E2BRuntime
+
+    runtime = E2BRuntime(
+        captures=["python3", "@external"],
+        config={"sandbox_id": "sandbox-id", "mount_type": "ssh"},
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { E2BRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const runtime = new E2BRuntime({
+      captures: ['python3', '@external'],
+      config: { sandboxId: 'sandbox-id', mountType: 'ssh' },
+    })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+
+    In a browser, import `E2BRuntime` from
+    `@struktoai/mirage-core/runtime/sandbox/e2b/runtime`, pass `apiKey`, and
+    use `mountType: 'fuse'` or leave it unset.
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: e2b
+        captures: ["python3", "@external"]
+        config:
+          sandbox_id: ${E2B_SANDBOX_ID}
+          mount_type: ssh
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A program in the sandbox opens workspace files at the same paths as in
+Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
+
+| `mount_type` | How the files get there | Rules that apply |
+| --- | --- | --- |
+| `ssh` | Mirage serves every mount over E2B's command channel; the sandbox mounts each with `sshfs` | This workspace's mount modes, hides, permissions and policies |
+| `fuse` | A Mirage inside the sandbox mounts your backends with FUSE | That Mirage's own config |
+| `both` | The sandbox's own FUSE mounts where it has them, `ssh` for the rest | Each side's own |
+| unset | Nothing; you put the files there yourself | The sandbox's |
+
+### ssh
+
+- The template needs only `sshfs`. No Mirage, keys or open port in the
+  sandbox.
+- The host needs `pip install 'mirage-ai[ssh]'` (Python) or `pnpm add ssh2`
+  (Node). `ssh` and `both` do not work in browsers.
+- Each file call is a round trip to the workspace, about 150 ms for a small
+  file from a laptop; with `both`, keep bulk data on the sandbox's own
+  mounts.
+- The sandbox shows one session's view, the first that runs a line there.
+  Give each agent its own sandbox.
+- The root mount and `/dev` are not served.
+
+### fuse
+
+Base the template on [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image),
+which carries Mirage and `fuse3`. Write the same mounts at the same paths
+into `sandbox.yaml`, and start Mirage with it in the sandbox:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+mirage workspace create /tmp/sandbox.yaml
+```
+
+- This workspace's rules do not reach those files, so a line is refused
+  while the session's permissions hide or narrow anything under them.
+- Keep the sandbox's paths in step with the host's mounts yourself.
+  `sandbox.yaml` can differ where it should, such as narrower credentials.
+
+## What is wired
+
+| | In the sandbox |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | By `mount_type`, above |
+| Disk and network | The sandbox's own |
+
+## Notes
+
+- The runtime connects on the first captured line and keeps the client until
+  the workspace closes, which leaves the sandbox running.
+- Commands run concurrently, each with its own input and output. Without
+  piped input, stdin starts closed.
+- On the default template, install `sshfs` with
+  `sudo apt-get install -y sshfs`.
+- Templates, sizing, networking and lifecycle stay E2B settings. E2B applies
+  its own command timeout, 60 seconds by default, to every command.
+- A Mirage [timeout](/home/setup/runtime/sandbox#timeouts) tries to kill the command; its child
+  processes may survive.

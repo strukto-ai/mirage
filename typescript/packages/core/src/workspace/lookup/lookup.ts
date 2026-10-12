@@ -71,6 +71,19 @@ function runtimeFor(name: string, registry: MountRegistry): Runtime | undefined 
 }
 
 /**
+ * Whether the runtime runs the name as a native program. A language runtime
+ * that also runs processes (local) still interprets its own language's
+ * names (python3), so those stay the session's builtin; any other name it
+ * captures runs natively.
+ */
+function isNative(runtime: Runtime | null | undefined, name: string): boolean {
+  if (runtime == null || !(isLineExecutor(runtime) || isProcessExecutor(runtime))) return false
+  if (!(runtime instanceof LanguageRuntime)) return true
+  const own = (runtime.constructor as { readonly commands?: readonly string[] }).commands ?? []
+  return !own.includes(name)
+}
+
+/**
  * Yield every layer holding the name, most-preferred first.
  *
  * The one place precedence is written down: `lookup` reads the first
@@ -92,7 +105,7 @@ function* layers(
     routing !== undefined && Object.hasOwn(routing.bindings, name)
       ? routing.bindings[name]
       : declared
-  const native = bound != null && (isLineExecutor(bound) || isProcessExecutor(bound))
+  const native = isNative(bound, name)
   const refused = runtimeRefused(name, session, registry, routing)
   if (SHELL_NAMES.has(name)) {
     found = true

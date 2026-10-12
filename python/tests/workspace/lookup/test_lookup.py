@@ -20,7 +20,8 @@ from mirage.policy.types import AdmissionRules
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.types import ProcessExecution, RunArgs, RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -40,6 +41,16 @@ from mirage.workspace.session import SessionState
 class _Sandbox(Runtime, ProcessExecutorMixin):
     name = "sandbox"
     captures = ("gcc", EXTERNAL_COMMANDS)
+
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class _HostPython(PythonRuntime, ProcessExecutorMixin):
+    name = "host-python"
+
+    async def run(self, args: RunArgs) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
@@ -279,6 +290,15 @@ def test_program_has_no_file_for_a_shell_word_a_mount_also_registers():
     ]
     assert program("history", session, ws._registry) is None
     assert "history" not in programs(session, ws._registry)
+
+
+def test_a_language_runtime_that_runs_processes_keeps_its_own_names():
+    session = SessionState(session_id="t")
+    ws = Workspace(
+        {"/": RAMVFS()}, runtimes=[_HostPython(captures=["python3", "gcc"])]
+    )
+    assert lookup("python3", session, ws._registry) is Consumer.SESSION
+    assert lookup("gcc", session, ws._registry) is Consumer.EXTERNAL
 
 
 def test_program_is_no_file_for_a_name_only_the_fallback_takes():

@@ -1,11 +1,112 @@
 ---
 title: Sandlock
 icon: /images/sandlock-logo.svg
-description: Set up the Sandlock process runtime on Linux.
+description: Run captured programs on this Linux host, confined by Landlock and seccomp.
 ---
 
-Sandlock confines native processes on Linux with Landlock and seccomp, in
-the Python SDK and `@struktoai/mirage-node`. Install the `sandlock` CLI on
-`PATH`; Mirage needs no extra package. Details:
-[Python](/python/runtime/sandbox/sandlock) ·
-[TypeScript](/typescript/runtime/sandbox/sandlock).
+`sandlock` runs captured programs on this host through
+[Sandlock](https://github.com/multikernel/sandlock), which confines each
+process with Landlock and seccomp: it reads only the paths you grant and
+writes only the ones you allow. Linux only, in the Python SDK and Node.
+
+## Installation
+
+Install the `sandlock` CLI on `PATH`. The full ruleset needs Linux 6.12 or
+later.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `python3` to run the host's
+`python3` under Sandlock too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.sandbox.sandlock import SandlockRuntime
+
+    runtime = SandlockRuntime(
+        captures=["python3", "@external"],
+        config={"fs_readable": ["/opt/tools"], "fs_writable": ["/tmp/work"]},
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, SandlockRuntime, Workspace } from '@struktoai/mirage-node'
+
+    const runtime = new SandlockRuntime({
+      captures: ['python3', '@external'],
+      config: { fsReadable: ['/opt/tools'], fsWritable: ['/tmp/work'] },
+    })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: sandlock
+        captures: ["python3", "@external"]
+        config:
+          fs_readable: [/opt/tools]
+          fs_writable: [/tmp/work]
+          max_memory: 512M
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A Sandlock program opens host paths, not the workspace's. To give it workspace
+files, expose a mount as a [FUSE folder](/home/setup/fuse) and grant it in
+`fs_writable`, or `fs_readable` for read only:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+runtimes:
+  - name: sandlock
+    captures: ["python3", "@external"]
+    config:
+      fs_writable: [/data]
+```
+
+- Put the folder at the mount's own path when you can, so a path typed in
+  the shell names the same file in the program.
+- Calls into the folder follow mount modes and policies. A folder added in
+  code with a session, `add_fuse_mount(prefix, mountpoint, session_id)` or
+  `addFuseMount(prefix, mountpoint, sessionId)`, also follows that
+  session's permissions.
+
+## What is wired
+
+| | On this host |
+| --- | --- |
+| Command | The captured program and its words, as argv |
+| Piped input | stdin |
+| Environment | The session's, over the config `env`; none of the host's |
+| Working directory | The shell's |
+| Files it can read | `/usr`, `/lib`, `/lib64`, `/bin`, `/etc`, `/proc`, `/dev`, and `fs_readable` |
+| Files it can write | `fs_writable` only |
+| Memory | Capped at `max_memory`, when set |
+| Workspace files | Only through a FUSE folder you grant; see [above](#connecting-the-workspace) |
+
+## Notes
+
+- An interpreter installed outside the system paths needs an `fs_readable`
+  grant.
+- Host credentials are not passed to the program.
+- The runtime does not create the FUSE folder or bind it to a session.

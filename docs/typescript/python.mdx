@@ -1,10 +1,10 @@
 ---
 title: Python
 icon: python
-description: Run python3 code inside Mirage via Pyodide. Supports -c, script files, and stdin-piped code, in Node and the browser.
+description: Run python3 code inside Mirage on Pyodide, full CPython in WebAssembly. Supports -c, script files, and stdin-piped code, in Node and the browser.
 ---
 
-Mirage TypeScript implements `python3` as a shell builtin, backed by [Pyodide](https://pyodide.org/) (CPython compiled to WebAssembly). Behavior matches Python Mirage's reference, with a few WASM-runtime divergences noted below. The same code path runs in Node and in the browser.
+Mirage TypeScript implements `python3` as a shell builtin. It runs on [Monty](/home/setup/runtime/monty) by default; this page covers [Pyodide](https://pyodide.org/) (CPython compiled to WebAssembly), for programs that need the full language and stdlib. Behavior matches Python Mirage's reference, with a few WASM-runtime divergences noted below. The same code path runs in Node and in the browser.
 
 ## What works
 
@@ -57,6 +57,12 @@ pnpm add @struktoai/mirage-browser pyodide
 </CodeGroup>
 
 `npm install` and `yarn add` work too.
+
+List it in the workspace's runtimes, in place of the default `monty`:
+
+```ts
+const ws = new Workspace(mounts, { runtimes: ['pyodide', 'quickjs', 'workspace'] })
+```
 
 If `pyodide` isn't installed, `python3` returns `exit=127` with a helpful stderr message, and the workspace keeps running.
 
@@ -176,7 +182,7 @@ const png = await ws.vfs.read('/ram/icon.png')
 // PNG bytes, ws.vfs sees what Python wrote
 ```
 
-See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
+See [Pyodide workspace file access](/typescript/runtime/python#files)
 for worker requirements, caching, write behavior, and mount limitations.
 
 ## What you cannot do

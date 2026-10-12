@@ -24,7 +24,8 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import ProcessExecution, RunArgs
+from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
@@ -160,6 +161,49 @@ async def test_the_program_gets_none_of_the_host_environment(monkeypatch):
 
 def test_local_name():
     assert LocalRuntime().name == "local"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "argv, cwd, exit_code, stdout, stderr",
+    [
+        (("cksum",), "/", 0, b"2352138605 2\n", None),
+        (
+            ("no-such-program-xyz",),
+            "/",
+            127,
+            b"",
+            b"no-such-program-xyz: command not found\n",
+        ),
+        (
+            ("cksum",),
+            "/no/such/dir",
+            126,
+            b"",
+            b"cksum: the working directory /no/such/dir is not on this host\n",
+        ),
+    ],
+)
+async def test_a_captured_program_runs_on_the_host(
+    argv, cwd, exit_code, stdout, stderr
+):
+    runtime = LocalRuntime(captures=["python3", "@external"])
+    try:
+        result = await runtime.run_process(
+            ProcessExecution(
+                argv=argv,
+                cwd=PathSpec.from_str_path(cwd),
+                env={},
+                stdin=b"hi",
+            )
+        )
+    finally:
+        await runtime.close()
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        exit_code,
+        stdout,
+        stderr,
+    )
 
 
 @pytest.mark.asyncio

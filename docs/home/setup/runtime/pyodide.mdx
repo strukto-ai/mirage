@@ -1,0 +1,123 @@
+---
+title: Pyodide
+icon: python
+description: Full CPython in WebAssembly, with packages such as numpy, for python3 in the TypeScript SDK.
+---
+
+[Pyodide](https://pyodide.org) is full CPython compiled to WebAssembly, run
+in a worker, with packages such as numpy loaded on import. It has no host
+files or network: the files it opens are the workspace's, under the same
+mount modes and permissions as shell commands. Each command starts a fresh
+interpreter. TypeScript SDK only, in Node and in browsers.
+
+## Installation
+
+```bash
+pnpm add pyodide
+```
+
+In a browser, the page must be cross-origin isolated for the worker; see
+[worker and browser setup](/typescript/runtime/python#worker-and-browser-setup).
+
+## Usage
+
+<Tabs>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - pyodide
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Packages
+
+[Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html),
+such as numpy, load when a program imports them. The first import downloads
+the package from the Pyodide CDN; Node keeps it beside the installed
+`pyodide` package for later runs.
+
+| Config key | What it does |
+| --- | --- |
+| `packages` | Load these when each interpreter starts, before the program runs. |
+| `auto_load_from_imports` | Load what a program imports. Default `true`; `false` loads only `packages`. |
+| `deny_packages` | Never load these; importing one raises `ModuleNotFoundError`. |
+| `sys_path` | Mount paths to put first on `sys.path`: directories, globs, or pure-Python `.whl` files. |
+| `package_base_url` | Where packages download from; point it at your own copy to work offline. |
+
+<Tabs>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
+
+    const runtime = new PyodideRuntime({
+      config: {
+        packages: ['numpy'],
+        denyPackages: ['requests'],
+        sysPath: ['/data/vendor', '/data/wheels/*.whl'],
+      },
+    })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: pyodide
+        config:
+          packages: [numpy]
+          deny_packages: [requests]
+          sys_path: [/data/vendor, /data/wheels/*.whl]
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+A package from PyPI cannot be installed at run time: `micropip.install`
+fails. Put its pure-Python wheel on a mount and list it in `sys_path`.
+
+## What is wired
+
+Anything built on these calls, such as `os.path`, `pathlib`, `glob`,
+`shutil` and `json.load`, works too.
+
+| Python | Supported | Notes |
+| --- | --- | --- |
+| `open()` in every mode, `os.open` | Yes | The file is read when it is opened. |
+| `f.read()`, `os.read`, `os.pread` | Yes | |
+| `f.write()`, `os.write`, `os.pwrite` | Yes | Written at close, or at the next call that reaches a mount. |
+| `f.truncate()`, `os.truncate` | Yes | |
+| `os.stat`, `os.lstat`, `os.fstat`, `Path.stat` | Yes | |
+| `os.listdir`, `os.scandir`, `os.walk`, `glob.glob`, `Path.glob` | Yes | |
+| `os.mkdir`, `os.makedirs`, `os.rmdir`, `shutil.rmtree` | Yes | |
+| `os.remove`, `os.unlink`, `Path.unlink` | Yes | |
+| `os.rename`, `os.replace`, `shutil.move` | Yes | `EXDEV` across mounts, where `shutil.move` copies instead. |
+| `os.symlink`, `os.readlink` | Yes | |
+| `os.utime`, `os.chmod`, `Path.touch` | Yes | |
+| `os.getxattr`, `os.setxattr`, `os.listxattr`, `os.removexattr` | Yes | The same attributes as `getfattr` in the shell. |
+| `subprocess.run`, `subprocess.Popen`, `shutil.which` | Yes | Runs a Mirage command, after pending writes land. |
+| `os.getcwd`, `os.chdir` | Yes | The shell's working directory; a change lasts for the run. |
+| `os.environ`, `sys.argv`, `sys.stdin` | Yes | The session's environment, the words after the script, and the piped input. |
+| `os.fsync` | No | Does nothing. |
+| `os.link` | No | Does not exist. |
+| `mmap` | No | Fails. |
+| `socket` | No | Cannot connect (`ENETUNREACH`). |
+
+Files written outside the mounts stay in memory and are lost when the run
+ends.

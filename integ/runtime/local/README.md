@@ -2,7 +2,8 @@
 
 What only the host's own interpreter has.
 
-| File          | Pins                                                                                                                                                                                                             |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoke.json` | a host script is named after its workspace path; init switches reach it; `-m` runs a module or names the missing one; `argv[0]` and `__file__` as CPython has them; `command` and `unset -f` restore the handoff |
-| `policy.json` | a stdin operand obeys path policy                                                                                                                                                                                |
+| File            | Pins                                                                                                                                                                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoke.json`   | a host script is named after its workspace path; init switches reach it; `-m` runs a module or names the missing one; `argv[0]` and `__file__` as CPython has them; `command` and `unset -f` restore the handoff |
+| `policy.json`   | a stdin operand obeys path policy                                                                                                                                                                                |
+| `programs.json` | a captured host program runs with stdin, a missing one or a cwd not on the host says why; without the capture only python3 goes to the host                                                                      |

@@ -1,16 +1,19 @@
 ---
 title: Apple Container
 icon: apple
-iconType: brands
-description: Connect either Mirage SDK to an existing container under Apple's container tool.
+description: Run captured programs in containers under Apple's container tool on macOS.
 ---
 
-Start the container yourself. Apple's `container` needs Apple silicon and
-macOS 26 or later; live FUSE mounts need `SYS_ADMIN`. Details:
-[Python](/python/runtime/sandbox/apple_container) ·
-[TypeScript](/typescript/runtime/sandbox/apple_container).
+`apple_container` runs captured programs in a running container under
+Apple's `container` tool. It can map each session to its own container, so
+every agent gets one. You start the containers; Mirage only runs programs
+in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
 
-Run these commands from the Mirage repository root:
+## Installation
+
+Install and start Apple's `container`. From the Mirage repository root,
+build [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image), which
+carries Mirage and `fuse3`, and start a container from it:
 
 ```bash
 brew install container
@@ -21,26 +24,110 @@ container run -d --cap-add SYS_ADMIN \
   --name my-sandbox mirage-python-fuse sleep infinity
 ```
 
-`mirage-python-fuse` is [the sandbox image](/python/runtime/sandbox#the-sandbox-image):
-Python, Mirage and FUSE. Then copy your workspace config into the container
-and mount your backends, as the guides above describe.
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `python3` to run it in the
+container too. Use `containers`, a
+map from session ID to container, for one container per agent.
 
 <Tabs>
-  <Tab title="Python SDK" icon="/images/python-logo.svg">
+  <Tab title="Python" icon="/images/python-logo.svg">
     ```python
+    from mirage import RAMVFS, MountMode, Workspace
     from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
 
-    runtime = AppleContainerRuntime(captures=["python3"], config={"container": "my-sandbox"})
+    runtime = AppleContainerRuntime(
+        captures=["python3", "@external"],
+        config={"container": "my-sandbox"},
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
-  <Tab title="TypeScript SDK" icon="/images/typescript-logo.svg">
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { AppleContainerRuntime } from '@struktoai/mirage-node'
+    import { AppleContainerRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new AppleContainerRuntime({
-      captures: ['python3'],
+      captures: ['python3', '@external'],
       config: { container: 'my-sandbox' },
     })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: apple_container
+        captures: ["python3", "@external"]
+        config:
+          container: my-sandbox
+          containers:
+            agent-1: agent-1-box
+    mounts:
+      /data:
+        vfs: ram
     ```
   </Tab>
 </Tabs>
+
+## Connecting the workspace
+
+A program in the container opens workspace files at the same paths as in
+Mirage, so the container must see the mounts there. Mirage does not serve them
+into an Apple container: write the same mounts at the same paths into
+`sandbox.yaml`, and start Mirage with it in the container:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+container cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml
+container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
+```
+
+- This workspace's mount modes and permissions do not reach those files;
+  `sandbox.yaml` decides.
+- Keep the container's paths in step with the host's mounts yourself.
+
+## What is wired
+
+| | In the container |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | What the Mirage inside serves; see [above](#connecting-the-workspace) |
+| Disk and network | The container's own |
+
+## Notes
+
+- The `container` CLI is the transport, so there is no package to install.
+  `container` is the name the container was started with, and the first
+  captured line checks that it is running.
+- Each command runs under a short `sh` prelude, so the image needs a POSIX
+  `sh`. The session's environment wins over the image's, and a working
+  directory the container does not have fails (`can't cd to /data`) instead
+  of being created empty.
+- Host directories reach the container only through `--volume`. A service on
+  your Mac is not at `127.0.0.1` inside; Apple's
+  [host integration guide](https://github.com/apple/container/blob/main/docs/host-integration.md)
+  sets up `host.container.internal`.
+- `containers` maps session IDs to containers, one per agent; a session not
+  listed runs in `container`, and fails if there is none. Each container is
+  its own VM, so agents share no files, processes, CPU or memory. Give each
+  one that agent's rules: the `default` profile in its `sandbox.yaml`.
+- A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the program: `container` 1.4.1 does
+  not deliver signals into the guest
+  ([apple/container#1941](https://github.com/apple/container/issues/1941)).

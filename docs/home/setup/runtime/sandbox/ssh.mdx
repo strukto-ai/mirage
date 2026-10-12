@@ -1,49 +1,146 @@
 ---
 title: SSH
 icon: /images/ssh-logo.svg
-description: Connect either Mirage SDK to a machine over SSH.
+description: Run captured programs on any machine you can reach over SSH.
 ---
 
-The machine only needs `sshd`. Details: [Python](/python/runtime/sandbox/ssh) ·
-[TypeScript](/typescript/runtime/sandbox/ssh).
+`ssh` runs captured programs on a machine running `sshd`. Anything you can
+already `ssh` into works, with nothing to install on it. You run the
+machine; Mirage only runs programs on it. Python SDK and Node.
+
+## Installation
 
 <Tabs>
-  <Tab title="Python SDK" icon="/images/python-logo.svg">
+  <Tab title="Python" icon="/images/python-logo.svg">
     ```bash
     pip install 'mirage-ai[ssh]'
     ```
-
-    ```python
-    from mirage.runtime.sandbox.ssh import SSHRuntime
-
-    runtime = SSHRuntime(
-        captures=["python3"],
-        config={
-            "host": "mybox",
-            "username": "deploy",
-            "identity_file": "~/.ssh/id_ed25519",
-        },
-    )
-    ```
-
   </Tab>
-  <Tab title="TypeScript SDK" icon="/images/typescript-logo.svg">
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```bash
     pnpm add ssh2
     ```
-
-    ```typescript
-    import { SSHRuntime } from '@struktoai/mirage-node'
-
-    const runtime = new SSHRuntime({
-      captures: ['python3'],
-      config: {
-        host: 'mybox',
-        username: 'deploy',
-        identityFile: '~/.ssh/id_ed25519',
-      },
-    })
-    ```
-
   </Tab>
 </Tabs>
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `python3` to run it on the
+machine too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.sandbox.ssh import SSHRuntime
+
+    runtime = SSHRuntime(
+        captures=["python3", "@external"],
+        config={"host": "mybox", "username": "deploy", "identity_file": "~/.ssh/id_ed25519"},
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, SSHRuntime, Workspace } from '@struktoai/mirage-node'
+
+    const runtime = new SSHRuntime({
+      captures: ['python3', '@external'],
+      config: { host: 'mybox', username: 'deploy', identityFile: '~/.ssh/id_ed25519' },
+    })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: ssh
+        captures: ["python3", "@external"]
+        config:
+          host: mybox
+          username: deploy
+          identity_file: ~/.ssh/id_ed25519
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A program on the machine opens workspace files at the same paths as in
+Mirage, so the machine must see the mounts there. Two ways:
+
+**Files already on the machine.** Mount the machine's directory with the
+[ssh VFS](/python/vfs/ssh) at a prefix equal to its path there. The same
+path then names the same file on both sides, with nothing to install:
+
+```yaml
+mounts:
+  /home/user/proj:
+    vfs: ssh
+    config:
+      host: mybox
+      root: /home/user/proj
+runtimes:
+  - name: ssh
+    captures: ["python3", "@external"]
+    config:
+      host: mybox
+```
+
+**Any other mount** (S3, Slack and so on). Install Mirage and `fuse3` on the
+machine. Write the same mounts at the same paths into `sandbox.yaml`, and
+start Mirage with it there:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+ssh mybox mirage workspace create sandbox.yaml
+```
+
+Nothing checks that the paths match; a mismatch shows only when a program
+misses a file. For a friendlier name, put or link the directory at that path
+on the machine: Mirage never rewrites paths. A program on the machine opens its files directly, outside
+this workspace's mount modes and permissions.
+
+## What is wired
+
+| | On the machine |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | The machine's own paths; see [above](#connecting-the-workspace) |
+| Disk and network | The machine's own |
+
+## Notes
+
+- `host` is also the address unless `hostname` overrides it; `port`,
+  `username`, `identity_file` and `timeout` are optional. Authentication is
+  a key or an agent, never a password.
+- The runtime opens one SSH connection, and each line is one exec channel on
+  it, with its own stdin, stderr and exit code. The working directory and
+  environment travel in the command, so the machine's login shell must be
+  POSIX.
+- A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the remote program.
+
+<Warning>
+  Host keys are not verified, so treat the network path to the machine as
+  trusted.
+</Warning>

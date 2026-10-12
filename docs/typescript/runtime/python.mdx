@@ -1,67 +1,68 @@
 ---
-title: Python
-description: Choose the interpreter that runs python3 in the workspace, pyodide (default), the sandboxed monty runtime, or the host interpreter in Node.
+title: Runtimes
+sidebarTitle: TypeScript SDK
+description: What only the TypeScript SDK has for runtimes, Pyodide details, browsers, managing runtimes in code, and child processes.
 icon: python
 ---
 
-A **runtime** is the interpreter behind `python3`. Pick one per workspace:
+Setup and behavior of every runtime are on the
+[Runtimes](/home/setup/runtime/overview) pages. This page covers what is
+specific to the TypeScript SDK.
 
-| Runtime | Engine | Sees | Install |
-| --- | --- | --- | --- |
-| `pyodide` (default) | CPython in WebAssembly ([Pyodide](https://pyodide.org)), in a worker | Workspace mounts | `pnpm add pyodide` |
-| `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a Python subset in Rust | Workspace mounts | `pnpm add @pydantic/monty` |
-| `local` (Node) | The host `python3`, as a subprocess | The host filesystem, not the mounts | Nothing |
+## Differences from the Python SDK
 
-For a confined native process in Node, use
-[Sandlock](/typescript/runtime/sandbox/sandlock).
-
-```ts
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
-await ws.shell('echo hello > /data/a.txt')
-const io = await ws.shell(`python3 -c "print(open('/data/a.txt').read())"`)
-```
+- **Monty:** each run executes in a crash-isolated worker. `os.chdir()`
+  raises `RuntimeError`; use `cd` in the shell or `RunArgs.cwd`. `os.stat()`
+  has only the named fields (`st.st_size`).
+- **QuickJS:** a `std` and `os` shim with the calls the
+  [QuickJS](/home/setup/runtime/quickjs) table lists. A write shows to other
+  commands once the file is closed. A timeout only stops waiting, so give
+  untrusted code a finite workload; the engine has its own memory and stack
+  caps.
+- **Local:** in `@struktoai/mirage-node` only. With neither `home` nor
+  `MIRAGE_LOCAL_HOME`, `python3` is the one on `PATH`.
+- **Sandboxes:** in `@struktoai/mirage-node`; `e2b` also runs in browsers.
+  `mountType` `ssh` and `both` need Node and the `ssh2` package. The `ssh`
+  runtime authenticates through `SSH_AUTH_SOCK` when there is no
+  `identityFile`, and `username` defaults to the local user.
+- **Config objects** are camelCase in code (`sandboxId`, `mountType`); YAML
+  spells the same keys in snake_case.
+- **Pyodide** is in the TypeScript SDK only; WASI is in the Python SDK only.
 
 ## Pyodide
 
-Pyodide is full CPython: the real stdlib, `sys.argv`, stdin, and scientific
-packages loaded on import. Each command and one-shot evaluation starts a
-fresh interpreter, so imports do not carry over; files on the mounts do. A
-console session keeps its own interpreter.
-
 ### Scripts and flags
 
+- Each command and one-shot evaluation starts a fresh interpreter, so imports
+  do not carry over; files on the mounts do. A console session keeps its own
+  interpreter.
 - A script runs as in CPython: `__file__` is absolute, tracebacks quote its
   lines, and `sys.path[0]` is its directory. `-P` leaves that entry off, and
-  for `-c` and stdin omits the cwd entry. `sysPath` entries stay either way.
+  for `-c` and stdin omits the working directory entry. `sys_path` entries
+  stay either way.
 - `-P`, `-O`/`-OO` and `-B` show in a read-only `sys.flags`. `-O` and `-OO`
-  compile imported modules from source. Flags and import paths reset when
-  the command ends, errors included.
+  compile imported modules from source. Flags and import paths reset when the
+  command ends, errors included.
 - An installed Python CLI gets bare `argv` (its name at index 0) and `stdin`
   (bytes, or `None`), as on Monty; Pyodide also keeps `sys.argv` and
   `sys.stdin`.
 
-### Workspace file access
+### Files
 
-- `open()`, `os.listdir`, `pathlib` and native packages such as PIL and NumPy
-  reach the same mounts as the shell, with the namespace's symlinks and
-  metadata.
-- A file is fetched on first access and cached for the run; external edits
-  during the run are not seen.
+- Native packages such as PIL and NumPy reach the same mounts as `open()`.
+- A file is fetched on first access and cached for the run; edits made
+  elsewhere during the run are not seen.
 - A create, delete, rename, mkdir, chmod or truncate reaches the mount when
-  the call is made, and writes when the file is closed, so a refusal fails
-  that call with the mount's errno. Writes still open at the end flush then;
-  a failure there exits nonzero with a message. Concurrent writes are not
+  the call is made, and a write when the file is closed, so a refusal fails
+  that call with the mount's errno. Writes still open at the end land then; a
+  failure there exits nonzero with a message. Concurrent writes are not
   conflict-checked.
-- `os.getxattr` and its siblings reach the attributes `getfattr` sees; a path
-  no mount serves answers `ENOTSUP`.
-- A run starts in the session's cwd (`RunArgs.cwd` overrides one run). A
-  console keeps its own `os.chdir()`, even through an exception; if its
-  directory disappears, the next feed fails, resets the cwd to `/` and keeps
-  the variables.
+- A path no mount serves answers `ENOTSUP` to `os.getxattr`.
+- A console keeps its own `os.chdir()`, even through an exception; if its
+  directory disappears, the next input fails, resets the working directory to
+  `/` and keeps the variables.
 - Mount files under a prefix such as `/data`: a mount at `/` cannot replace
-  Pyodide's own filesystem, which holds its stdlib.
+  Pyodide's own filesystem, which holds its standard library.
 
 ### Worker and browser setup
 
@@ -76,219 +77,113 @@ export default defineConfig({
 })
 ```
 
-Without a worker, `python3` in a workspace exits 127 and says why. JSPI is
-not needed.
+Without a worker, `python3` exits 127 and says why. JSPI is not needed.
 
-### Concurrency
+### Concurrency and timeouts
 
-`maxConcurrency` (default 1) bounds active top-level commands, one-shot
-evaluations and feeds to distinct consoles; extra calls wait. Feeds to one
-console, and calls in one shell session, stay ordered; give independent work
-its own session with `ws.createSession(id)` and `{ sessionId: id }`. Nested
-subprocesses bypass the limit. A host without isolated async context runs
-one at a time. See
-[Python command concurrency](/typescript/python#2-concurrency-is-bounded-and-defaults-to-one).
+- `max_concurrency` (default 1) bounds active top-level commands, one-shot
+  evaluations and inputs to distinct consoles; extra calls wait. Calls in one
+  shell session stay ordered; give independent work its own session with
+  `ws.createSession(id)` and `{ sessionId: id }`. Nested subprocesses bypass
+  the limit.
+- A timeout raises `KeyboardInterrupt` in the program, even in a busy loop.
+  That needs `SharedArrayBuffer`; without it a busy loop blocks the event loop
+  until it ends.
 
 ### Sockets
 
-Guest sockets never reach the network: `connect` and `sendto` raise
-`OSError` `ENETUNREACH`, and `listen`, a UDP `bind` and `socket.socketpair()`
-raise `ENETDOWN`, so `urllib.request.urlopen` fails fast (Pyodide 0.29.0
-reports HTTPS as `unknown url type: https`). Compare against
-`errno.ENETUNREACH`, not a number: the values are Emscripten's.
-`socket.socket()`, a TCP `bind` and name lookups (placeholder addresses)
-still answer. An `initModule` that calls `useNodeSockFS()` installs real
-sockets and makes the runtime's reach `process`.
+`connect` and `sendto` raise `ENETUNREACH`, and `listen`, a UDP `bind` and
+`socket.socketpair()` raise `ENETDOWN`, so `urllib.request.urlopen` fails
+fast. Compare against `errno.ENETUNREACH`, not a number: the values are
+Emscripten's. `socket.socket()`, a TCP `bind` and name lookups still answer.
+An `init_module` that calls `useNodeSockFS()` installs real sockets.
 
-### Config
+### Child processes
+
+`subprocess` runs Mirage commands:
+
+```python
+import subprocess
+
+result = subprocess.run(["printf", "%s", "hello"], capture_output=True, text=True, check=True)
+print(result.stdout)
+```
+
+- Supported: `run`, `call`, `check_call`, `check_output`, `Popen` with live
+  pipes, `poll`, `wait`, `communicate`, termination, timeout retries, text
+  mode, `stderr=STDOUT`, and `shell=True` through the workspace's `sh`.
+- `sys.executable` is `/usr/bin/python3`, and `shutil.which` sees the
+  profile's programs. Functions and shell builtins are not programs.
+- The environment is inherited unless `env` replaces it. Writes land before
+  each process call, and file caches reset after it.
+- A timed-out `wait` or `communicate` leaves the child running; `run` kills
+  it. Children still running when the program ends are cancelled.
+- Not supported: native descriptors, PTYs, process groups, user switching,
+  `preexec_fn`, `asyncio.create_subprocess_exec` and signal handlers. An
+  unsupported option fails with an error.
+
+### Configuration
+
+The package keys are on the [Pyodide](/home/setup/runtime/pyodide#packages)
+page. The others:
 
 | Key (YAML) | Meaning |
 | --- | --- |
-| `home` | Where the distribution loads from. Default: the installed package in Node, the pinned CDN in browsers; falls back to `MIRAGE_PYODIDE_HOME`. |
+| `home` | Where the distribution loads from. Default: the installed package in Node, the pinned CDN in browsers, then `MIRAGE_PYODIDE_HOME`. |
 | `max_concurrency` | Active top-level calls, default 1. |
-| `packages` | Packages loaded when each interpreter starts. |
-| `auto_load_from_imports` | Load packages a program imports, default true. |
-| `deny_packages` | Packages the import scan never fetches. |
-| `package_base_url` | Where wheels come from; set it for offline `packages`. |
 | `lockFileURL` | A custom `pyodide-lock.json` (this one key is camelCase in YAML too). |
-| `sys_path` | Mount paths (globs and `.whl` files allowed) prepended to `sys.path`. |
 | `bootstrap_code` | Python run when each interpreter starts. |
 | `init_module` | A trusted host module whose default export receives Pyodide before `bootstrap_code`, and may return a cleanup. |
 
 `init_module` runs per command or evaluation and once per console, inside
 the worker. It has host privileges, so keep it in deployment config:
-`POST /v1/workspaces` rejects it, and setting it makes the runtime's reach
-`process`. Only an in-process shutdown calls its cleanup.
+`POST /v1/workspaces` rejects it, and setting it gives the runtime host
+access. Only an in-process shutdown calls its cleanup.
 
-## Monty
+## E2B in browsers
 
-Monty runs each execution in a crash-isolated worker, with no host
-filesystem, environment or network. `pathlib` and `os.environ` go through
-the workspace. Without `@pydantic/monty`, `python3` exits 127 with an
-install hint.
+Import the runtime from core, which also registers `e2b` for YAML, and pass
+`apiKey`:
 
 ```ts
-const ws = new Workspace({ '/data': new RAMVFS() }, {
-  mode: MountMode.EXEC,
-  runtimes: ['monty', 'workspace'],
-})
+import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 ```
 
-### Working directory and arguments
+Keep account keys out of shared frontend bundles; have your backend
+authenticate the app. `mountType` `ssh` and `both` need Node, so a browser
+uses `fuse` or none.
 
-- A run starts in the shell's cwd. Relative paths resolve against it and pass
-  the same mount and policy checks as `cat`.
-- The script is a file operand like `cat`'s: a rule protecting `/data/job.py`
-  refuses `python3 job.py` from `/data`.
-- The words after the script are its argv as typed, with globs expanded as
-  bash expands them. A word naming another mount is only a string.
-- `os.getcwd()` and `Path.cwd()` report the virtual cwd. `os.chdir()` raises
-  `RuntimeError` on this host; `cd` in the shell or `RunArgs.cwd` instead.
-- A console session takes the cwd on its first feed and keeps it, even if
-  the shell changes directory.
+## Managing runtimes in code
 
-### Differences from CPython
-
-Monty 1.0.0 implements a subset of Python, and Mirage never falls back to
-another interpreter. `integ/runtime/monty/surface.json` records the gaps.
-
-| Missing | Use instead |
-| --- | --- |
-| `dir()` | `hasattr(value, "name")` |
-| `json.load()`, `json.dump()` | `json.loads(f.read())`, `f.write(json.dumps(value))` |
-| `sys.argv` | The `argv` global |
-| `sys.stdin` | The `pyodide` runtime |
-| `st[6]`, `len(st)` on `os.stat()` | The named fields (`st.st_size`) |
-| `os.chdir()` | `cd` in the shell, or `RunArgs.cwd` |
-| `os.getxattr` and its siblings | `getfattr`, `setfattr` in the shell |
-| `subprocess` | Nothing: the import fails |
-
-- **Stdlib:** `asyncio`, `base64`, `binascii`, `collections`, `copy`,
-  `dataclasses`, `datetime`, `functools`, `itertools`, `json`, `math`, `os`,
-  `pathlib`, `random`, `re`, `sys`, `time`, `typing`, `unicodedata`, each
-  partial. No third-party imports.
-- **Syntax:** no class inheritance, metaclasses, `classmethod`,
-  `staticmethod`, `property` or `yield`. Plain classes, function decorators,
-  `with`, f-strings and comprehensions work.
-- **Introspection:** no `dir`, `vars`, `globals`, `help`, `callable`,
-  `issubclass`, `super`, `compile` or `__dict__`.
-- `__file__` is the script's name under the starting directory.
-- `os.environ` is the session's env only.
-- `os.urandom()` returns at most 1 MiB per call; more raises `MemoryError`.
-
-## Local
-
-In `@struktoai/mirage-node`, `local` runs the host `python3` from `PATH` as a
-subprocess, for code that needs third-party packages or host files. It sees
-the host filesystem, not the workspace mounts.
-
-```yaml
-runtimes:
-  - name: local
-    config:
-      home: /path/to/venv/bin/python # default: python3 on PATH
-  - workspace
-```
-
-- `home` also reads `MIRAGE_LOCAL_HOME`.
-- The program's env is the session's plus the config `env`; nothing of the
-  host process's own env is passed.
-
-## Selecting in YAML
-
-`runtimes` is the workspace's ordered list of runtimes: the first one that
-captures a command runs it, and `workspace` is the in-process catch-all. An
-entry is a name, or a mapping with `name`, `captures`, `config` and
-`script`. The name is a runtime Mirage ships, one registered with
-`registerRuntime`, or a `./file.mjs:Class` reference to a `Runtime` subclass.
-YAML keys are snake_case in both languages; the TypeScript config objects
-spell them in camelCase.
-
-```yaml
-runtimes:
-  - name: pyodide
-    config:
-      home: https://assets.example.com/pyodide/
-      max_concurrency: 2
-  - workspace
-mounts:
-  /data:
-    vfs: ram
-    command_limits:
-      python3:
-        timeout_seconds: 30
-```
-
-```ts
-import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
-
-const ws = new Workspace(mounts, {
-  runtimes: [
-    new PyodideRuntime({
-      config: { home: 'https://assets.example.com/pyodide/', maxConcurrency: 2 },
-    }),
-    'workspace',
-  ],
-})
-```
-
-A runtime rejects config keys it does not know; `monty` takes none. `wasi`
-is Python-only and fails with a hint.
-
-## Live workspaces
-
+`new Workspace(mounts, { runtimes: [...] })` takes names and runtime objects,
+and adds `workspace` when the list leaves it out. On a live workspace,
 `addRuntime` appends an entry (the first capturer still wins),
 `removeRuntime` takes one out, and `runtimes()` lists them:
 
 ```ts
-await ws.removeRuntime('pyodide') // python3 rebinds at once
-ws.addRuntime(new MontyRuntime())
+await ws.removeRuntime('pyodide')
+ws.addRuntime('monty')
 ```
 
-A running line finishes before its removed runtime closes. A removed
-instance cannot be added again, and `workspace` cannot be removed.
+`python3` moves to the new runtime at once. A running line finishes before
+its removed runtime closes, a removed instance cannot be added again, and
+`workspace` cannot be removed. `registerRuntime(name, cls)` makes your own
+runtime class available by name in YAML. The `@external` capture is also
+exported as `EXTERNAL_COMMANDS`.
 
-## Resource limits
+A sandbox subclass that overrides `loadSdk()` imports the SDK type from the
+provider's `sdk` module:
 
-`command_limits` apply to `python3` as to any command: past
-`timeout_seconds` it exits 124 with `python3: timed out after Ns`, and
-`max_bytes` and `max_lines` cap its output. The deadline also stops the run:
-
-- `monty` SIGKILLs its worker.
-- `pyodide` raises `KeyboardInterrupt` in the guest from a watchdog, even in
-  a busy loop. That needs `SharedArrayBuffer`; without it a busy loop blocks
-  the event loop until it ends.
-- `local` SIGKILLs the subprocess.
+```ts
+import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
+import type { DaytonaSdk } from '@struktoai/mirage-node/runtime/sandbox/daytona/sdk'
+import type { Ssh2Sdk } from '@struktoai/mirage-node/runtime/sandbox/ssh/sdk'
+```
 
 ## Child processes
 
-In the Pyodide worker, `subprocess` runs workspace commands:
-
-```python
-import subprocess
-
-result = subprocess.run(["printf", "%s", "hello"],
-                        capture_output=True, text=True, check=True)
-print(result.stdout)
-```
-
-- Mirage supplies `subprocess.Popen`; `run`, `call`, `check_call` and
-  `check_output` use it.
-- Supported: live pipes, `poll`, `wait`, `communicate`, termination, timeout
-  retries, text mode, `stderr=STDOUT`, and `shell=True` through the
-  workspace's `sh`.
-- `sys.executable` is `/usr/bin/python3`, and `shutil.which` reads the
-  profile's program view. Functions and shell builtins are not executables.
-- The env is inherited unless `env` replaces it. Writes flush before each
-  process call, and file caches reset after it.
-- A timed-out `wait` or `communicate` leaves the child running; `run` kills
-  it. Children still running when the program ends are cancelled.
-- Not supplied: native descriptors, PTYs, process groups, user switching,
-  `preexec_fn`, `asyncio.create_subprocess_exec`, and guest signal handlers.
-  Unsupported options fail explicitly.
-
-A host application starts a program through the same admitted entry point.
-See [managed execution](/home/architecture#managed-execution).
+A host application starts a program through the same admitted entry point
+as the shell. See [managed execution](/home/architecture#managed-execution).
 
 ```ts
 const child = ws.spawn({ argv: ['cat'] })

@@ -19,6 +19,7 @@ import type { OpRecord } from '../../observe/record.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
 import { type CacheFacts, MountMode, type Refusal } from '../../types.ts'
+import type { RuntimeEntry } from '../../runtime/base.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { describeRefusal } from '../../policy/index.ts'
 
@@ -83,7 +84,9 @@ function putDir(res: RAMVFS, path: string): void {
   res.store.dirs.add(path)
 }
 
-export async function makeWorkspace(extra: { agentId?: string } = {}): Promise<TestWorkspace> {
+export async function makeWorkspace(
+  extra: { agentId?: string; runtimes?: RuntimeEntry[] } = {},
+): Promise<TestWorkspace> {
   const parser = await getTestParser()
   const s3 = new RAMVFS()
   const disk = new RAMVFS()

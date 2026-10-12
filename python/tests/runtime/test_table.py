@@ -21,7 +21,6 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.table import (
     BUILTIN_RUNTIMES,
     DEFAULT_ENTRIES,
-    DEFAULT_PYTHON,
     NAMED,
     bind_commands,
     build_runtime,
@@ -47,15 +46,9 @@ def test_default_entries_never_include_local():
     assert DEFAULT_ENTRIES[-1] == "workspace"
 
 
-def test_default_python_is_monty_and_leads_the_default_world():
-    # The one entry TypeScript disagrees on, so it is named rather than
-    # left to a slot: TypeScript registers pyodide.
-    assert DEFAULT_PYTHON == "monty"
-    assert DEFAULT_ENTRIES[0] == DEFAULT_PYTHON
-
-
-def test_default_python_is_a_registered_python_engine():
-    assert issubclass(NAMED[DEFAULT_PYTHON], PythonRuntime)
+def test_default_world_is_monty_quickjs_and_workspace():
+    assert DEFAULT_ENTRIES == ("monty", "quickjs", "workspace")
+    assert issubclass(NAMED[DEFAULT_ENTRIES[0]], PythonRuntime)
 
 
 @pytest.mark.parametrize(

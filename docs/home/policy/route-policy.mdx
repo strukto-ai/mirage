@@ -93,8 +93,8 @@ runtime.
 ## What runs the scripts
 
 A script runs on an **evaluator runtime** from the `runtimes` list: a
-`.py` script on the first Python evaluator (monty, or pyodide in
-TypeScript), a `.js` one on the first JavaScript evaluator (quickjs).
+`.py` script on the first Python evaluator (monty by default, or
+pyodide), a `.js` one on the first JavaScript evaluator (quickjs).
 With no evaluator the first decision fails. A script that runs past 10
 seconds fails the line.
 

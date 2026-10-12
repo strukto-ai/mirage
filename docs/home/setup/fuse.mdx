@@ -15,9 +15,9 @@ uses [@zkochan/fuse-native](https://www.npmjs.com/package/@zkochan/fuse-native)
 
 | OS | Python | TypeScript (Node) | Notes |
 | --- | --- | --- | --- |
-| Linux | ✅ supported, CI-gated | ✅ supported, CI-gated | `fuse3`; multiple mounts per process |
+| Linux | ✅ supported | ✅ supported | `fuse3`; multiple mounts per process |
 | macOS | ✅ supported | ✅ supported | macFUSE kernel extension; **one mount per process** |
-| Windows | 🧪 experimental | ❌ not supported | Python via [WinFsp](/home/setup/windows); advisory CI job passes |
+| Windows | 🧪 experimental | ❌ not supported | Python via [WinFsp](/home/setup/windows) |
 | Browser | ❌ | ❌ | no kernel; use the virtual executor instead |
 
 Per-OS install guides: [macOS](/home/setup/macos), [Linux](/home/setup/linux),
@@ -27,18 +27,13 @@ Per-OS install guides: [macOS](/home/setup/macos), [Linux](/home/setup/linux),
 
 ## What the labels mean
 
-- **Supported, CI-gated (Linux).** The FUSE integration battery (both SDKs,
-  real kernel mounts, including size-unknown API files) runs on every change
-  and gates merges.
-- **Supported (macOS).** Same code paths, verified on real macFUSE kext
-  mounts; hosted CI runners cannot approve kernel extensions, so macOS
-  coverage is local rather than gated. Remember the one-mount-per-process
-  limit.
-- **Experimental (Windows, Python only).** The full battery passes over
-  WinFsp in an advisory CI job (not merge-gating). Windows conventions
-  (unmount at process exit, mount-level ownership, stat-opens-a-handle) are
-  documented on the [Windows page](/home/setup/windows). Write-heavy flows
-  and symlinks are not yet exercised there.
+- **Supported (Linux and macOS).** Both SDKs mount through the kernel,
+  including API files whose size is unknown. macOS allows one mount per
+  process.
+- **Experimental (Windows, Python only).** Mounts work over WinFsp, with the
+  Windows conventions (unmount at process exit, mount-level ownership,
+  stat-opens-a-handle) on the [Windows page](/home/setup/windows).
+  Write-heavy use and symlinks are not yet proven there.
 - **Not supported (Windows, TypeScript).** `@zkochan/fuse-native` only
   targets macOS and Linux; its legacy Windows path builds against the
   unmaintained Dokany-based `fuse-shared-library-win32` rather than WinFsp.

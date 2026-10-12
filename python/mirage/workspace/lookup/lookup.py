@@ -77,6 +77,24 @@ def runtime_refused(
     )
 
 
+def _is_native(runtime: Runtime | None, name: str) -> bool:
+    """Whether the runtime runs the name as a native program.
+
+    A language runtime that also runs processes (local) still
+    interprets its own language's names (python3), so those stay the
+    session's builtin; any other name it captures runs natively.
+
+    Args:
+        runtime (Runtime | None): the runtime bound to the name.
+        name (str): expanded command name.
+    """
+    if not isinstance(runtime, (LineExecutorMixin, ProcessExecutorMixin)):
+        return False
+    return not (
+        isinstance(runtime, LanguageRuntime) and name in type(runtime).captures
+    )
+
+
 def _layers(
     name: str,
     session: SessionState,
@@ -106,7 +124,7 @@ def _layers(
         if name in bindings
         else registry.runtime_bindings.get(name)
     )
-    native = isinstance(bound, (LineExecutorMixin, ProcessExecutorMixin))
+    native = _is_native(bound, name)
     refused = runtime_refused(name, session, registry, routing)
     if name in SHELL_NAMES:
         found = True

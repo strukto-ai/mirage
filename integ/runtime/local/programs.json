@@ -1,0 +1,80 @@
+{
+  "cases": [
+    {
+      "id": "local_runs_a_captured_host_program",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "captures": [
+              "python3",
+              "@external"
+            ]
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "job.py": "import sys\nprint('job', sys.argv[1:])\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf hi | cksum",
+          "expect": {
+            "exit": 0,
+            "stdout": "2352138605 2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 /ram/job.py a b",
+          "expect": {
+            "exit": 0,
+            "stdout": "job ['a', 'b']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "no-such-program-xyz",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "no-such-program-xyz: command not found\n"
+          }
+        },
+        {
+          "command": "cd /ram && cksum",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "cksum: the working directory /ram is not on this host\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "local_runs_only_python_unless_captured",
+      "world": {
+        "runtimes": [
+          "local",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "printf hi | cksum",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "cksum: command not found\n"
+          }
+        }
+      ]
+    }
+  ]
+}

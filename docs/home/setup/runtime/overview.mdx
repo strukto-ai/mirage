@@ -15,17 +15,16 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 | Runtime | Runs | Where | SDK |
 | --- | --- | --- | --- |
 | `workspace` | Mirage's own commands | in-process | both |
-| [`monty`](/home/setup/runtime/python) | `python3`, a Python subset | in-process | Python (default), TypeScript |
-| [`wasi`](/home/setup/runtime/python) | `python3`, full CPython on wasmtime | in-process | Python |
-| [`pyodide`](/home/setup/runtime/python) | `python3`, full CPython in WebAssembly | in-process | TypeScript (default) |
-| [`quickjs`](/home/setup/runtime/javascript) | `node` and `js` | in-process | both (default) |
-| [`local`](/home/setup/runtime/python) | the host's `python3` | host | Python, Node |
-| [`sandlock`](/home/setup/runtime/sandbox/sandlock) | native programs, confined | host (Linux) | Python, Node |
-| [Sandboxes](/home/setup/runtime/sandbox) | native programs | another machine | Python, Node |
+| [`monty`](/home/setup/runtime/monty) | `python3`, a Python subset | in-process | both (default) |
+| [`wasi`](/home/setup/runtime/wasi) | `python3`, full CPython on wasmtime | in-process | Python |
+| [`pyodide`](/home/setup/runtime/pyodide) | `python3`, full CPython in WebAssembly | in-process | TypeScript |
+| [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js` | in-process | both (default) |
+| [`local`](/home/setup/runtime/local) | the host's `python3`, and any host program you capture | host | Python, Node |
+| [Sandboxes](/home/setup/runtime/sandbox) | native programs | a container, VM, cloud sandbox or SSH machine, or this Linux host with Sandlock | Python, Node |
 
 ## Routing
 
-`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in Python and `[pyodide, quickjs, workspace]` in TypeScript.
+`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs.
 
 ```yaml
 runtimes:
@@ -37,16 +36,78 @@ runtimes:
   - workspace
 ```
 
-- Python engines capture `python3` and `python`; `quickjs` captures `node` and `js`.
-- Sandboxes and Sandlock capture `@external`: any program name Mirage does not know.
-- A [route policy](/home/route-policy) can pick the runtime per line.
+An entry is a name, or a mapping with `name`, `captures`, `config` and
+`script`. The name is a runtime Mirage ships, one you registered in code, or
+a `./file.py:Class` (Python) or `./file.mjs:Class` (TypeScript) reference to
+your own runtime. Config keys are snake_case in YAML for both SDKs, and a
+runtime rejects a key it does not know.
+
+A [route policy](/home/policy/route-policy) can pick the runtime per line instead.
+
+## Captures
+
+`captures` lists the programs a runtime takes:
+
+| Entry | Takes |
+| --- | --- |
+| A name, such as `python3` or `ffmpeg` | That program |
+| `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `uname` or a vendor CLI |
+| `*` | The whole line, Mirage's own commands included (sandboxes only) |
+
+| Runtime | Default `captures` |
+| --- | --- |
+| `monty`, `wasi`, `pyodide`, `local` | `python3`, `python` |
+| `quickjs` | `node`, `js` |
+| Sandboxes | `@external` |
+
+- Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
+  in Mirage. `cd`, `export` and `echo` stay even when named.
+- `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
+  those itself and gives them to the Python or JavaScript runtime in the list.
+  Name them to send them somewhere else.
+- A program no runtime takes exits 127, `command not found`.
+- A name only `@external` takes has no file, so `which`, `command -v` and
+  `type` report it missing; running it still works.
+- Globs expand against the workspace first (`python3 job.py *.csv` runs
+  `python3 job.py a.csv b.csv`), and permission rules judge that argv.
+
+```yaml
+runtimes:
+  - name: docker
+    captures: ["python3", "@external"]
+    config:
+      container: my-sandbox
+```
+
+Here `python3 job.py | grep error` runs `python3` in the container and
+`grep` in Mirage, and `ffmpeg -i a.mp4 b.webm` runs in the container.
 
 ## Files
 
 | Where | Reaches the workspace through | Outside the workspace |
 | --- | --- | --- |
-| In-process | the VFS bridge: every file call is a workspace call | nothing: no host files, no network |
-| Host | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network |
-| Sandbox | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`), or a Mirage inside the sandbox | that machine's disk and network |
+| In-process | directly: every file it opens is the workspace's | nothing: no host files, no network |
+| `local`, Sandlock | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under Sandlock, only the paths you grant |
+| Other sandboxes | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`), or a Mirage inside the sandbox | that sandbox's disk and network |
 
-Mount modes, profiles and policies hold for every call that reaches the workspace. Only in-process runtimes have no other way out, so agent code cannot get around them only when every runtime in the list is in-process.
+Mount modes, profiles and policies apply to every file call that reaches the workspace. A host or sandbox runtime also has its own files and network, which they do not cover; only an all in-process list keeps agent code inside them.
+
+## Resource limits
+
+`command_limits` apply to a runtime's programs as to any command: past
+`timeout_seconds` a program exits 124 (`python3: timed out after Ns`), and
+`max_bytes` and `max_lines` cap its output.
+
+```yaml
+mounts:
+  /data:
+    vfs: ram
+    command_limits:
+      python3:
+        timeout_seconds: 30
+```
+
+The deadline also stops the run in Monty, WASI, Pyodide, `local`, Sandlock
+and the Python SDK's QuickJS. The TypeScript SDK's QuickJS and the other
+sandboxes only stop waiting, so give untrusted code a finite workload; see
+[sandbox timeouts](/home/setup/runtime/sandbox#timeouts).

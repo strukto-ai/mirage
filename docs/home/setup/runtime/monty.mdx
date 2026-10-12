@@ -1,0 +1,119 @@
+---
+title: Monty
+icon: /images/pydantic-logo.svg
+description: A fast Python subset, written in Rust, and the default python3 in both Mirage SDKs.
+---
+
+[Pydantic Monty](https://github.com/pydantic/monty) runs a subset of Python,
+written in Rust, inside the Mirage process. A run starts in microseconds. It
+has no host files, environment or network: the files it opens are the
+workspace's, under the same mount modes and permissions as shell commands.
+It is the default `python3` in both SDKs, in Node and in browsers.
+
+## Installation
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[monty]'
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```bash
+    pnpm add @pydantic/monty
+    ```
+  </Tab>
+</Tabs>
+
+## Usage
+
+Monty is in the default runtimes, so `python3` works with no setup. To list
+it yourself:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"])
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['monty'] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - monty
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## What is wired
+
+Monty implements part of Python; see [Python subset](#python-subset). For
+files, processes and the environment:
+
+| Python | Supported | Notes |
+| --- | --- | --- |
+| `open()` with `r`, `w`, `a`, plus `b` | Yes | |
+| `open()` with `x` or `+` | No | |
+| `f.read()`, `f.readline()`, `f.readlines()`, `f.seek()`, `f.tell()` | Yes | The whole file is read at once. |
+| `f.write()` | Yes | Each call is written at once. |
+| `for line in f`, `f.truncate()`, `f.fileno()` | No | |
+| `Path.open`, `read_text`, `read_bytes`, `write_text`, `write_bytes` | Yes | |
+| `os.stat`, `Path.stat`, `exists`, `is_file`, `is_dir`, `is_symlink` | Yes | In TypeScript, use the named fields (`st.st_size`), not `st[6]`. |
+| `os.lstat`, `os.fstat` | No | |
+| `os.listdir`, `Path.iterdir` | Yes | |
+| `os.scandir`, `os.walk`, `Path.glob`, `Path.rglob` | No | |
+| `os.mkdir`, `os.makedirs`, `Path.mkdir` | Yes | |
+| `os.rmdir`, `Path.rmdir`, `os.remove`, `os.unlink`, `Path.unlink` | Yes | |
+| `os.rename`, `os.replace`, `Path.rename` | Yes | Raises `OSError` across mounts. |
+| `os.getcwd`, `Path.cwd`, `Path.resolve` | Yes | The shell's working directory. |
+| `os.chdir` | Python SDK | Lasts for the run. Raises `RuntimeError` in TypeScript. |
+| `os.environ`, `os.getenv` | Yes | The session's environment, never the host's. |
+| `argv`, `stdin` globals | Yes | The words after the script, and the piped input. |
+| `sys.argv`, `sys.stdin` | No | Use `argv` and `stdin`. |
+| `os.urandom` | Yes | Up to 1 MiB per call. |
+| `os.path` | No | |
+| `os.open` and file descriptors, `os.truncate` | No | |
+| `os.symlink`, `os.readlink`, `os.link` | No | |
+| `os.utime`, `os.chmod`, `Path.touch`, `os.getxattr` | No | |
+| `json.load`, `json.dump` | No | Use `json.loads(f.read())` and `f.write(json.dumps(value))`. |
+| `glob`, `shutil`, `subprocess`, `socket` | No | Importing one fails. |
+
+## Notes
+
+- A run starts in the shell's working directory. The script and every
+  relative path pass the same mount and permission checks as `cat`: a rule
+  protecting `/data/job.py` refuses `python3 job.py` from `/data`.
+- The words after the script are its `argv` as typed, with globs expanded as
+  bash expands them. A word naming another mount is only a string.
+- A console session takes the working directory on its first input and keeps
+  its own after that.
+- `__file__` is the script's name under the starting directory.
+
+## Python subset
+
+Monty 1.0.0 implements a subset of Python, and Mirage never falls back to
+another interpreter.
+
+- **Stdlib:** `asyncio`, `base64`, `binascii`, `collections`, `copy`,
+  `dataclasses`, `datetime`, `functools`, `itertools`, `json`, `math`, `os`,
+  `pathlib`, `random`, `re`, `sys`, `time`, `typing`, `unicodedata`, each
+  partial. No third-party imports.
+- **Syntax:** no class inheritance, metaclasses, `classmethod`,
+  `staticmethod`, `property` or `yield`. Plain classes, function decorators,
+  `with`, f-strings and comprehensions work.
+- **Introspection:** no `dir` (use `hasattr`), `vars`, `globals`, `help`,
+  `callable`, `issubclass`, `super`, `compile` or `__dict__`.

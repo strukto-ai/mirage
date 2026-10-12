@@ -1,0 +1,112 @@
+---
+title: Local
+icon: laptop
+description: Run the host's python3, and any other host program you capture, as a subprocess.
+---
+
+`local` runs programs on the host as subprocesses: the host's `python3`, and
+any other program you add to its `captures`, such as `ffmpeg`, `gcc` or a
+vendor CLI. A program sees the host's files and network, not the workspace
+mounts; to reach the mounts, give it a [FUSE folder](/home/setup/fuse).
+Nothing confines it; on Linux, [Sandlock](/home/setup/runtime/sandbox/sandlock)
+does. Python SDK and Node only, and never in the default runtimes.
+
+## Installation
+
+Nothing to install. `home` names the `python3` to run. Without it, Mirage
+uses `MIRAGE_LOCAL_HOME`, then the interpreter running Mirage (Python) or
+`python3` on `PATH` (Node).
+
+## Usage
+
+`captures` defaults to `python3` and `python`. Add program names, or
+[`@external`](/home/setup/runtime/overview#captures) for every program
+Mirage does not have itself. Mirage's own commands, pipes and redirects stay
+in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.python import LocalRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[LocalRuntime(captures=["python3", "@external"])],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { LocalRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime({ captures: ['python3', '@external'] })] },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: local
+        captures: ["python3", "@external"]
+        config:
+          home: /path/to/venv/bin/python
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A local program opens host paths, not the workspace's. To give it workspace
+files, expose a mount as a [FUSE folder](/home/setup/fuse):
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+runtimes:
+  - name: local
+    captures: ["python3", "@external"]
+```
+
+- Put the folder at the mount's own path when you can, so a path typed in
+  the shell names the same file in the program.
+- Calls into the folder follow mount modes and policies. A folder added in
+  code with a session, `add_fuse_mount(prefix, mountpoint, session_id)` or
+  `addFuseMount(prefix, mountpoint, sessionId)`, also follows that
+  session's permissions.
+
+## What is wired
+
+`python3` is the same Mirage command on every Python runtime: Mirage reads
+the script from the workspace and checks it like any file, and `local` runs
+it on the host's interpreter. Every other program is a plain host program.
+
+| | `python3` | Other programs |
+| --- | --- | --- |
+| Program | The host's `python3`, given the script from the workspace | The name, found on the host's `PATH`; exit 127 if it is not there |
+| Arguments | `sys.argv` | Its argv, with no shell |
+| Piped input | stdin | stdin |
+| Environment | The session's, plus the config `env`; none of the host's | The same |
+| Working directory | Mirage's own | The shell's; exit 126 if it does not exist on the host |
+| Files | The host's, and FUSE folders | The host's, and FUSE folders |
+| Network | The host's | The host's |
+
+## Notes
+
+- For `python3`, `__file__` and tracebacks name the script's workspace path,
+  but `sys.path[0]` stays the host's working directory.
+- A timeout kills the subprocess.

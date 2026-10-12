@@ -90,23 +90,15 @@ def known_runtimes() -> list[str]:
     return sorted({*NAMED, *SANDBOX_MODULES})
 
 
-# The python engine a default world registers, named rather than left
-# to a slot in DEFAULT_ENTRIES because it is the one entry the two
-# implementations disagree on: Python registers monty, TypeScript
-# registers pyodide (`DEFAULT_PYTHON` in runtime/table.ts). Both are
-# sandboxed; neither reaches the host.
-# Pinned by integ/runtime/routing/defaults.json, which reads the split back
-# out of a default world on each host.
-DEFAULT_PYTHON: str = MontyRuntime.name
-
 # The default world when no runtimes list is given: one python engine,
-# one js engine, and the builtin command engine. Defaults build
+# one js engine, and the builtin command engine, the same three as
+# TypeScript's (pinned by integ/runtime/routing/defaults.json). Defaults build
 # gracefully (a missing extra leaves the command reporting its install
 # hint per invocation); an explicitly listed name still fails loud.
 # `local` is deliberately absent: a sandboxed default must never
 # silently escalate to host execution.
 DEFAULT_ENTRIES: tuple[str, ...] = (
-    DEFAULT_PYTHON,
+    MontyRuntime.name,
     QuickJsRuntime.name,
     WorkspaceRuntime.name,
 )

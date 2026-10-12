@@ -205,7 +205,7 @@ repositories. No repository operation opens a host path behind the VFS.
   warns and leaves it in place.
 - Diff hunk bodies and diffstat counts can differ from native Git because
   the line-diff algorithm differs from xdiff. Headers, ordering and supported
-  formatting are pinned by the shared corpus. Pretty formats `email`, `mboxrd` and `reference` are refused.
+  formatting match Git. Pretty formats `email`, `mboxrd` and `reference` are refused.
 - History searches use ASCII case folding. `--since` and `--until` accept
   ISO-8601 or epoch seconds; relative date phrases are refused.
 - `tag -l`/`-d` conflict wording uses a fixed option order. Tag deletion uses a

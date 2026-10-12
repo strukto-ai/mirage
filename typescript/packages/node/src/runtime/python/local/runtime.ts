@@ -17,11 +17,12 @@ import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunArgs, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { ProcessExecution, RunArgs, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
@@ -52,20 +53,47 @@ function onHostPath(name: string): string {
   return name
 }
 
+/** Whether a resolved program is an executable file. */
+function isExecutable(program: string): boolean {
+  if (!program.includes('/')) return false
+  try {
+    if (statSync(program, { throwIfNoEntry: false })?.isFile() !== true) return false
+    accessSync(program, constants.X_OK)
+    return true
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === undefined) throw err
+    debuglog('mirage')(
+      'local: %s is not executable: %s',
+      program,
+      (err as NodeJS.ErrnoException).code,
+    )
+    return false
+  }
+}
+
+/** A program that never started: its message and exit code. */
+function notRun(message: string, exitCode: number): RunResult {
+  return { stdout: new Uint8Array(), stderr: new TextEncoder().encode(message), exitCode }
+}
+
 /**
- * Run Python code on a host interpreter as a subprocess.
+ * Run Python code, and any other captured program, on the host.
  *
- * Each run spawns `<interpreter> -c <code>`; the code sees the host
- * filesystem, not the workspace mounts. Its environment is the session's
- * and the config `env`, nothing of mirage's own, as a sandlock child
- * gets. Mirrors the python LocalRuntime: the interpreter defaults to
+ * Each python3 run spawns `<interpreter> -c <code>`. Any other name the
+ * captures send here (a named program, or EXTERNAL_COMMANDS) runs as its
+ * argv, found on the host PATH, with no shell, in the session cwd. Either
+ * way the program sees the host filesystem, not the workspace mounts. Its
+ * environment is the session's and the config `env`, nothing of mirage's
+ * own, as a sandlock child gets. Mirrors the python LocalRuntime: the
+ * interpreter defaults to
  * `python3` on PATH (node has no embedded python, unlike the python
  * package which defaults to its own interpreter); point the config `home`
  * or the MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
  * project venv whose packages the code needs.
  */
-export class LocalRuntime extends PythonRuntime {
+export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
   readonly name = 'local'
+  readonly [PROCESS_EXECUTOR] = true as const
   // Spawns the host interpreter: a real process with the user's own
   // filesystem and network, entry points the workspace gate never sees. This
   // is the base default; declared here so the claim is explicit at the
@@ -83,14 +111,15 @@ export class LocalRuntime extends PythonRuntime {
 
   override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
     // Session loader variables can execute code before --version is read.
-    return this.runProcess(['--version'], {}, null, signal)
+    return this.spawnProgram(this.python, ['--version'], {}, null, signal)
   }
 
   run(args: RunArgs): Promise<RunResult> {
     // Honoring the init switches is just handing them back to the real
     // interpreter, which is why this tier gets them exactly right
     // (sys.flags included) where an in-process engine cannot.
-    return this.runProcess(
+    return this.spawnProgram(
+      this.python,
       [...initArgv((args.flags ?? {}) as InitFlags), '-c', prepareSource(args), ...args.args],
       args.env,
       args.stdin,
@@ -98,17 +127,43 @@ export class LocalRuntime extends PythonRuntime {
     )
   }
 
-  private runProcess(
+  runProcess(request: ProcessExecution): Promise<RunResult> {
+    request.signal?.throwIfAborted()
+    const name = request.argv[0]
+    const program = onHostPath(name)
+    if (!isExecutable(program)) return Promise.resolve(notRun(`${name}: command not found\n`, 127))
+    // The session cwd is a workspace path. Running somewhere else instead
+    // would point a relative path at the wrong files.
+    const cwd = request.cwd.virtual
+    if (statSync(cwd, { throwIfNoEntry: false })?.isDirectory() !== true) {
+      return Promise.resolve(
+        notRun(`${name}: the working directory ${cwd} is not on this host\n`, 126),
+      )
+    }
+    return this.spawnProgram(
+      program,
+      request.argv.slice(1),
+      request.env,
+      request.stdin,
+      request.signal,
+      cwd,
+    )
+  }
+
+  private spawnProgram(
+    program: string,
     argv: string[],
     env: Record<string, string>,
     stdin: Uint8Array | null,
     signal?: AbortSignal,
+    cwd?: string,
   ): Promise<RunResult> {
     return new Promise((resolve, reject) => {
       // The signal aborts when the command's limit timeout trips:
       // spawn then SIGKILLs the child (matching the python runtime's
       // proc.kill() on cancellation) and 'close' settles the promise.
-      const child = spawn(this.python, argv, {
+      const child = spawn(program, argv, {
+        ...(cwd !== undefined ? { cwd } : {}),
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...(this.config as LocalConfig).env, ...env },
         ...(signal !== undefined ? { signal, killSignal: 'SIGKILL' } : {}),
@@ -122,7 +177,7 @@ export class LocalRuntime extends PythonRuntime {
         if (error.name === 'AbortError') return
         this.children.delete(child)
         reject(
-          error.code === 'ENOENT'
+          error.code === 'ENOENT' && program === this.python
             ? new Error(
                 `local python interpreter not found: '${this.python}' (set the ` +
                   `runtime entry's config home or ${LOCAL_HOME_ENV})`,

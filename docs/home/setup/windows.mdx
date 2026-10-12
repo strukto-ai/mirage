@@ -8,9 +8,8 @@ description: Set up WinFsp on Windows for MIRAGE FUSE mounts (Python, experiment
 
 Windows has no native FUSE. MIRAGE's Python FUSE mounts run on
 [WinFsp](https://winfsp.dev/), a maintained Windows file system driver with a
-FUSE-compatible layer. Support is **experimental**: the FUSE integration
-battery passes in CI on `windows-latest`, but Windows is not yet a fully
-supported platform. The TypeScript SDK has no Windows FUSE support at all
+FUSE-compatible layer. Support is **experimental**: Windows is not yet a
+fully supported platform. The TypeScript SDK has no Windows FUSE support at all
 (its binding only targets macOS and Linux).
 
 ### Install WinFsp

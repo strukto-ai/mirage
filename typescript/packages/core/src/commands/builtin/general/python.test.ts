@@ -25,6 +25,8 @@ import {
 } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
+const PYODIDE = { runtimes: ['pyodide', 'workspace'] }
+
 const GUARDED = parseSessionProfile({
   commands: { deny: [{ reason: 'protected', commands: { python3: ['/secret.py'] } }] },
 })
@@ -77,7 +79,7 @@ describe('python3: a rule on the script', () => {
 
 describe('python3: the program argv and its own file', { timeout: 60000 }, () => {
   async function seeded(): Promise<Awaited<ReturnType<typeof makeWorkspace>>> {
-    const made = await makeWorkspace()
+    const made = await makeWorkspace(PYODIDE)
     await made.ws.shell('mkdir -p /disk/app /disk/data')
     await made.ws.shell("printf 'import sys\\nprint(sys.argv[1:])\\n' > /disk/app/argv.py")
     await made.ws.shell("printf 'print(__file__)\\n' > /disk/app/file.py")
@@ -149,7 +151,7 @@ describe('python3: the program argv and its own file', { timeout: 60000 }, () =>
 
 describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, () => {
   it('reports the Pyodide guest version through every version spelling', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     try {
       const guest = await ws.shell("python3 -c 'import sys; print(sys.version.split()[0])'")
       expect(guest.exitCode).toBe(0)
@@ -166,7 +168,7 @@ describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, 
   }, 60_000)
 
   it('passes a program its own --version argument', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     try {
       await ws.shell("echo 'import sys; print(sys.argv[-1])' > /ram/version.py")
       const io = await ws.shell('python3 /ram/version.py --version')
@@ -178,7 +180,7 @@ describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, 
   }, 60_000)
 
   it('test_python3_no_args (L1417): bare python3 → exit 1 "no input"', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('no input')
@@ -186,7 +188,7 @@ describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, 
   })
 
   it('bare-filename script not found → exit 1, "No such file" on stderr', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3 missing.py')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('No such file')
@@ -199,14 +201,14 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   // isolation invariants documented in §14 of the design doc.
 
   it('SystemExit() (no arg) → exit 0', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3 -c "import sys; sys.exit()"')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
 
   it('SystemExit("msg") → exit 1 + msg on stderr', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3 -c "import sys; sys.exit(\\"boom\\")"')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('boom')
@@ -214,7 +216,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   })
 
   it('cross-call env isolation: mutations die with the call', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.shell("python3 -c \"import os; os.environ['LEAKED'] = 'yes'\"")
     const io = await ws.shell("python3 -c \"import os; print(os.environ.get('LEAKED', 'absent'))\"")
     expect(stdoutStr(io).trim()).toBe('absent')
@@ -222,7 +224,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   })
 
   it('cross-call namespace isolation: top-level vars do not leak', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.shell('python3 -c "leaked_var = 42"')
     const io = await ws.shell('python3 -c "print(\'leaked_var\' in dir())"')
     expect(stdoutStr(io).trim()).toBe('False')
@@ -230,7 +232,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   })
 
   it('sys.modules entries do not leak between commands in one workspace', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.shell(
       "python3 -c \"import sys, types; sys.modules['mirage_test_module'] = types.ModuleType('mirage_test_module')\"",
     )
@@ -242,8 +244,8 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   })
 
   it('cross-workspace isolation: different workspaces have different envs', async () => {
-    const a = await makeWorkspace()
-    const b = await makeWorkspace()
+    const a = await makeWorkspace(PYODIDE)
+    const b = await makeWorkspace(PYODIDE)
     await a.ws.shell('export NAME=alpha')
     await b.ws.shell('export NAME=beta')
     const [ra, rb] = await Promise.all([
@@ -257,7 +259,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   }, 30000)
 
   it('concurrent calls — each sees its own os.environ mutations atomically', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     // Each python3 call sets and reads os.environ['VAR'] internally — no
     // session-level export. The JS queue + Python try/finally guarantees
     // that call N's snapshot/set/read/restore is atomic w.r.t. call N+1.
@@ -286,7 +288,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
     // bash's own rule: a function of the same name takes the line. It has
     // no CPython option table, so the `--` the interpreter's handoff would
     // need must not be inserted into its arguments.
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.shell('python3() { echo "$@"; }')
     const io = await ws.shell('python3 -c payload -u x')
     expect(io.exitCode).toBe(0)
@@ -297,7 +299,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   it('command bypasses the function and restores the handoff', async () => {
     // `command` masks the function for its inner run, so the interpreter
     // is what runs and -u belongs to the program again.
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.shell('python3() { echo "$@"; }')
     const io = await ws.shell('command python3 -c "import sys; print(sys.argv)" -u x')
     expect(io.exitCode).toBe(0)
@@ -308,7 +310,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   it('an invalid -W filter is reported and the program still runs', async () => {
     // CPython names a bad filter at startup and runs the program anyway;
     // aborting would kill a line every other runtime completes.
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3 -W nonsense -c "print(42)"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('42\n')
@@ -319,7 +321,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   it('a known -X name is reported as unhonored', async () => {
     // -X dev's real effect is read out of sys.flags, which is read-only,
     // so populating sys._xoptions is all this engine can do for it.
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3 -X dev -c "print(7)"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('7\n')
@@ -329,7 +331,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
 
   it('an arbitrary -X name lands in sys._xoptions in silence', async () => {
     // On CPython it does nothing but land in the dict either.
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     const io = await ws.shell('python3 -X nosuchopt -c "import sys; print(sys._xoptions)"')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe("{'nosuchopt': True}\n")
@@ -338,7 +340,7 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
   }, 60_000)
 
   it('unsetting the function restores the handoff', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = await makeWorkspace(PYODIDE)
     await ws.shell('python3() { echo "$@"; }')
     await ws.shell('unset -f python3')
     const io = await ws.shell('python3 -c "import sys; print(sys.argv)" -u x')

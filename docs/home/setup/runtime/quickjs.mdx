@@ -1,0 +1,119 @@
+---
+title: QuickJS
+icon: js
+description: A small ES2023 engine in WebAssembly for node and js, in both Mirage SDKs.
+---
+
+[QuickJS](https://github.com/quickjs-ng/quickjs) runs `node` and `js`: a
+bare ES2023 engine in WebAssembly, inside the Mirage process, for small
+scripts and pipe transforms. It is not Node: there is no `require`, npm,
+`fs` or `fetch`. The files it opens are the workspace's, under the same
+mount modes and permissions as shell commands. It is in the default runtimes
+of both SDKs.
+
+## Installation
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[quickjs]'
+    ```
+
+    Download `qjs-wasi.wasm` from a
+    [quickjs-ng release](https://github.com/quickjs-ng/quickjs/releases).
+    Point `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```bash
+    pnpm add quickjs-emscripten
+    ```
+
+    The package bundles its WebAssembly.
+  </Tab>
+</Tabs>
+
+## Usage
+
+QuickJS is in the default runtimes, so `node` works once it is installed. To
+list it yourself:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.js import QuickJsRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[QuickJsRuntime(config={"home": "/path/to/quickjs"})],
+    )
+    await ws.shell("node -e 'console.log(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['quickjs'] })
+    await ws.shell("node -e 'console.log(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: quickjs
+        config:
+          home: /path/to/quickjs
+    mounts:
+      /data:
+        vfs: ram
+    ```
+
+    `home` is for the Python SDK; TypeScript ignores it.
+  </Tab>
+</Tabs>
+
+## What is wired
+
+`std` and `os` are globals, as in `qjs --std`.
+
+| JavaScript | Python SDK | TypeScript SDK | Notes |
+| --- | --- | --- | --- |
+| `std.open(path, mode, errorObj)`, modes `r`, `w`, `a`, `+`, `x`, `b` | Yes | Yes | `null` on failure, with `errorObj.errno`. |
+| FILE `readAsString`, `read`, `getline`, `seek`, `tell`, `eof` | Yes | Yes | |
+| FILE `puts`, `write` | Yes | Yes | Written at `close`, or when the run ends. |
+| FILE `flush` | Yes | Does nothing | |
+| FILE `printf`, `tello` | Yes | No | |
+| `os.readdir`, `os.stat` | Yes | Yes | Return `[value, errno]`. In Python, `mode` has only the file type bits. |
+| `os.mkdir`, `os.remove`, `os.utimes` | Yes | Yes | `os.remove` also removes an empty directory. |
+| `os.rename` | Yes | Yes | `-75` (`EXDEV`) across mounts. |
+| `os.getcwd`, `os.chdir` | Yes | Yes | The shell's working directory; a change lasts for the run. |
+| `std.getenv` | Yes | Yes | The session's environment. |
+| `scriptArgs`, `std.in.readAsString()` | Yes | Yes | The words after the script, and the piped input. |
+| `std.out.puts`, `std.err.puts`, `console.log`, `print`, `std.exit` | Yes | Yes | |
+| `std.loadFile`, `std.writeFile`, `std.fdopen`, `std.printf` | Yes | No | |
+| `std.strerror`, `std.setenv`, `std.getenviron`, `std.out.flush` | Yes | No | |
+| `os.open`, `os.read`, `os.write`, `os.seek`, `os.close` | Yes | No | |
+| `os.sleep`, `os.setTimeout` | Yes | No | |
+| `os.lstat`, `os.symlink`, `os.readlink`, `os.realpath` | No | No | |
+| `os.exec`, `std.popen`, `std.tmpfile` | No | No | |
+| `console.error`, `setTimeout`, `fetch`, `require`, `process` | No | No | |
+
+In TypeScript, any `std` or `os` function not listed as supported throws
+`TypeError`.
+
+## Notes
+
+- `-e <code>` runs the argument, a file runs a mounted script, and with
+  neither, piped input is the program. A `.mjs` file runs as an ES module;
+  `.js` and `-e` run as classic scripts, and `-m` forces module mode.
+- `console.log` and `print` add a newline; `std.out.puts` and `std.err.puts`
+  write raw.
+- QuickJS cannot reach host files or the network, but only `command_limits`
+  bound its CPU and memory. Run untrusted or heavy code in a
+  [sandbox](/home/setup/runtime/sandbox).
+- QuickJS can evaluate expressions, so it can run a
+  [route policy](/home/policy/route-policy): `route_policy: ./policy.js` runs per
+  line with `ctx` as a global, and the last expression names the runtime.

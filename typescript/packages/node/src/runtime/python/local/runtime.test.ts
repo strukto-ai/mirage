@@ -325,6 +325,39 @@ describe('LocalRuntime', () => {
     expect(result.exitCode).not.toBe(0)
   })
 
+  it.each([
+    [['cksum'], '/', 0, '2352138605 2\n', ''],
+    [['no-such-program-xyz'], '/', 127, '', 'no-such-program-xyz: command not found\n'],
+    [
+      ['cksum'],
+      '/no/such/dir',
+      126,
+      '',
+      'cksum: the working directory /no/such/dir is not on this host\n',
+    ],
+  ] as const)(
+    'runs a captured program on the host: %j in %s',
+    async (argv, cwd, exitCode, stdout, stderr) => {
+      const rt = new LocalRuntime({ captures: ['python3', '@external'] })
+      try {
+        const result = await rt.runProcess({
+          kind: 'process',
+          argv: argv as unknown as [string, ...string[]],
+          cwd: PathSpec.fromStrPath(cwd),
+          env: {},
+          stdin: new TextEncoder().encode('hi'),
+        })
+        expect([
+          result.exitCode,
+          DEC.decode(result.stdout),
+          DEC.decode(result.stderr ?? new Uint8Array()),
+        ]).toEqual([exitCode, stdout, stderr])
+      } finally {
+        await rt.close()
+      }
+    },
+  )
+
   it('registers under the local name', () => {
     expect(buildRuntime('local')).toBeInstanceOf(LocalRuntime)
   })

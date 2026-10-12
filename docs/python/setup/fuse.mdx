@@ -128,7 +128,7 @@ break every API-backed mount, and an option whose safe value is always the
 default is a trap. `MountBackend.FSKIT` is macOS-only and raises elsewhere.
 
 The metadata write surface works: create, mkdir, rename, unlink and
-in-place overwrites, pinned by `integ/fuse/truth_fskit.json`. This depends
+in-place overwrites. This depends
 on `mirage/fuse/darwin.py`, which declares macFUSE's Darwin-only callbacks
 (`setattr_x`, `renamex`) that the FSKit shim uses to finalize new items and
 route renames; stock mfusepy leaves those slots NULL, which fails every
@@ -140,8 +140,7 @@ create with ENOSYS after the file already landed.
   NUL bytes; appends are hit-or-miss. The writer sees no error, and the
   kernel page cache serves the written data back, so the corruption only
   shows in the backing store. Mirage warns at mount time on writable fskit
-  mounts (`check_writes`); use `MountBackend.FUSE` for writes. Pinned in
-  `integ/fuse/truth_fskit.json` so a shim fix flips the test.
+  mounts (`check_writes`); use `MountBackend.FUSE` for writes.
 </Warning>
 
 <Warning>
