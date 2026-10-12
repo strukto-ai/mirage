@@ -61,6 +61,10 @@ class FakeManager {
   cachedSize(_path: PathSpec): Promise<number | null> {
     return Promise.resolve(null)
   }
+
+  isCached(_path: PathSpec): Promise<boolean> {
+    return Promise.resolve(false)
+  }
 }
 
 let root: string

@@ -55,6 +55,10 @@ class RecordingInvalidator implements CacheInvalidator {
   cachedSize(): Promise<number | null> {
     return Promise.resolve(null)
   }
+
+  isCached(): Promise<boolean> {
+    return Promise.resolve(false)
+  }
 }
 
 function refusingCreate(initial: Record<string, string>): FakeNextcloudOperator {
