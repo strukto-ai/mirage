@@ -509,11 +509,18 @@ def test_close_leaves_a_blocked_loops_child_to_that_loop():
         daemon=True,
     )
     worker.start()
-    assert blocked.wait(10)
     try:
+        assert blocked.wait(10)
         asyncio.run(asyncio.wait_for(runtime.close(), timeout=5))
     finally:
         release.set()
         worker.join(10)
+        if worker.is_alive():
+            # The loop never blocked or never finished: kill what it ran
+            # and stop it, so a failed run leaves no loop behind.
+            for child in list(runtime._children):
+                child.kill()
+            owner.call_soon_threadsafe(owner.stop)
+            worker.join(10)
         owner.close()
     assert results[0].exit_code != 0
