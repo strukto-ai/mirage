@@ -21,6 +21,7 @@ import { MountMode, type PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import type { Dispatcher } from '../dispatcher/dispatcher.ts'
 
 const DEC = new TextDecoder()
 
@@ -154,20 +155,34 @@ describe('job output reaches the session terminal as it is written', () => {
   })
 })
 
+/** Intercept every session-bound dispatcher used by this workspace. */
+function beforeDispatch(
+  ws: Workspace,
+  before: (op: string, path: PathSpec) => Promise<void>,
+): void {
+  const dispatcher = (ws as unknown as { dispatcher: Dispatcher }).dispatcher
+  const bind = dispatcher.forSession.bind(dispatcher)
+  dispatcher.forSession = (session) => {
+    const bound = bind(session)
+    const inner = bound.dispatch.bind(bound)
+    bound.dispatch = async (op, path, ...rest) => {
+      await before(op, path)
+      return inner(op, path, ...rest)
+    }
+    return bound
+  }
+}
+
 /** Make each file's first write take 0.2 s, as a remote mount's can. */
 function slowFirstWrites(ws: Workspace): void {
-  type Dispatch = (op: string, path: PathSpec, ...rest: unknown[]) => Promise<unknown>
-  const dispatcher = (ws as unknown as { dispatcher: { dispatch: Dispatch } }).dispatcher
-  const inner = dispatcher.dispatch.bind(dispatcher)
   const seen = new Set<string>()
-  dispatcher.dispatch = async (op, path, ...rest) => {
+  beforeDispatch(ws, async (op, path) => {
     const key = `${op} ${path.virtual}`
     if (['write', 'append', 'pwrite'].includes(op) && !seen.has(key)) {
       seen.add(key)
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
-    return inner(op, path, ...rest)
-  }
+  })
 }
 
 async function slowly(line: string): Promise<string> {
@@ -192,32 +207,24 @@ class Stalled extends JobConsole {
 
 /** Make the second write to `/m/out` wait for `held`, recording every write to it. */
 function holdSecondWrite(ws: Workspace, held: Promise<void>): string[] {
-  type Dispatch = (op: string, path: PathSpec, ...rest: unknown[]) => Promise<unknown>
-  const dispatcher = (ws as unknown as { dispatcher: { dispatch: Dispatch } }).dispatcher
-  const inner = dispatcher.dispatch.bind(dispatcher)
   const writes: string[] = []
-  dispatcher.dispatch = async (op, path, ...rest) => {
+  beforeDispatch(ws, async (op, path) => {
     if (['write', 'append', 'pwrite'].includes(op) && path.virtual === '/m/out') {
       writes.push(op)
       if (writes.length === 2) await held
     }
-    return inner(op, path, ...rest)
-  }
+  })
   return writes
 }
 
 /** Make every write fail after 0.2 s, as a remote mount's can. */
 function failingSlowWrites(ws: Workspace): void {
-  type Dispatch = (op: string, path: PathSpec, ...rest: unknown[]) => Promise<unknown>
-  const dispatcher = (ws as unknown as { dispatcher: { dispatch: Dispatch } }).dispatcher
-  const inner = dispatcher.dispatch.bind(dispatcher)
-  dispatcher.dispatch = async (op, path, ...rest) => {
+  beforeDispatch(ws, async (op, path) => {
     if (['write', 'append', 'pwrite'].includes(op)) {
       await new Promise((resolve) => setTimeout(resolve, 200))
       throw eacces(path)
     }
-    return inner(op, path, ...rest)
-  }
+  })
 }
 
 describe('a job writing through its redirect', () => {
