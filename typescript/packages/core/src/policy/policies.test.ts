@@ -1142,6 +1142,33 @@ describe('postCommand and postSession', () => {
     }
   })
 
+  class AskAfterVault implements Policy {
+    postCommand(ctx: CommandResultContext): Action | null {
+      const vault = ctx.records.some(
+        (r) => typeof r.path === 'string' && r.path.startsWith('/data/vault/'),
+      )
+      return vault ? { kind: 'ask', reason: 'vault reads need a nod' } : null
+    }
+  }
+
+  it('a postCommand question names the agent of its call', async () => {
+    // Asked after the command ran, once its output drained, through a pipe
+    // or not, the question still names the agent of the call.
+    const ws = executableWorkspace()
+    try {
+      await ws.shell('mkdir -p /data/vault && echo a > /data/vault/a')
+      await ws.shell('echo b > /data/vault/b')
+      ws.policies.add(new AskAfterVault())
+      await ws.shell('cat /data/vault/a', { agentId: 'zoe' })
+      await ws.shell('cat /data/vault/b | head -1', { agentId: 'yan' })
+      expect(
+        Object.fromEntries(ws.decisions.pending().map((r) => [r.argv.join(' '), r.agentId])),
+      ).toEqual({ '/data/vault/a': 'zoe', '/data/vault/b': 'yan' })
+    } finally {
+      await ws.close()
+    }
+  })
+
   class GuardVars implements Policy {
     readonly seen: SessionResultContext[] = []
 

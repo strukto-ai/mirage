@@ -1643,6 +1643,32 @@ async def test_post_command_reads_the_files_its_command_read():
         await ws.close()
 
 
+class AskAfterVault(Policy):
+    async def post_command(self, ctx: CommandResultContext) -> Action | None:
+        if any(r["path"].startswith("/data/vault/") for r in ctx.records):
+            return Ask("vault reads need a nod")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_post_command_question_names_the_agent_of_its_call():
+    # Asked after the command ran, once its output drained, through a
+    # pipe or not, the question still names the agent of the call.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/vault && echo a > /data/vault/a")
+        await ws.shell("echo b > /data/vault/b")
+        ws.policies.add(AskAfterVault())
+        await ws.shell("cat /data/vault/a", agent_id="zoe")
+        await ws.shell("cat /data/vault/b | head -1", agent_id="yan")
+        assert {r.argv: r.agent_id for r in ws.decisions.pending()} == {
+            ("/data/vault/a",): "zoe",
+            ("/data/vault/b",): "yan",
+        }
+    finally:
+        await ws.close()
+
+
 class GuardVars(Policy):
     def __init__(self) -> None:
         self.seen: list[SessionResultContext] = []
