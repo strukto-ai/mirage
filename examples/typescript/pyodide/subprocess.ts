@@ -15,7 +15,7 @@ const LOG =
 
 async function main(): Promise<void> {
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC })
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
   ws.addMount('/ro', ram, MountMode.READ)
   await ws.vfs.write('/data/app.log', LOG)
   await ws.vfs.write(

@@ -16,7 +16,7 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.EXEC })
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
 
   console.log('python3 reads a script file from ANY mount — demo: /ram/\n')
   console.log('Script path is dispatched through the workspace mount registry,')

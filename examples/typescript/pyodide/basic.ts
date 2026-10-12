@@ -32,7 +32,7 @@ async function runLabeled(ws: Workspace, label: string, cmd: string): Promise<vo
 
 async function main(): Promise<void> {
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC })
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
 
   console.log('python3 in @mirage-ai — Pyodide-backed, three invocation modes')
   console.log('(each command starts a fresh Pyodide interpreter)\n')

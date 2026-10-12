@@ -61,7 +61,7 @@ async function py(ws: Workspace, label: string, code: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({}, { mode: MountMode.EXEC })
+  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
   // The demo scripts live under /ram, so the mount carries x.
   ws.addMount('/ram', new RAMVFS(), MountMode.EXEC)
 
