@@ -34,7 +34,6 @@ from mirage.policy.constants import (
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     VALIDITY,
-    Action,
     Answer,
     Ask,
     CommandContext,
@@ -181,9 +180,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     it: where that policy evaluates the document's declarative rules,
     this one runs the profile's programs. A profile names, per method,
     a list of programs and the runtime each runs on; they are asked in
-    order, the first deny wins, then the first ask, and every route
-    must agree. A method with no program is silence and costs nothing.
-    It reads the session's programs through the narrow
+    order, up to the first deny, and their answers reach the chain as
+    one tuple, each read as if its own policy had said it: an Ask from
+    one program and a Route from another both stand, and two routes
+    that disagree refuse the line. A method with no program is silence
+    and costs nothing. It reads the session's programs through the narrow
     ``SessionScriptsQuery`` by the session id the entry point put in the
     context.
 
@@ -236,18 +237,26 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self._engines: dict[tuple[str, str], LanguageRuntime] = {}
         self._lock = asyncio.Lock()
 
-    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+    async def pre_execute(
+        self, ctx: RouteContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("pre_execute", ctx)
 
-    async def pre_command(self, ctx: CommandContext) -> Action | None:
+    async def pre_command(
+        self, ctx: CommandContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("pre_command", ctx)
 
-    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+    async def pre_vfs(
+        self, ctx: VfsContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
         if _POLICY_READ.get():
             return None
         return await self._judge("pre_vfs", ctx)
 
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
+    async def pre_session(
+        self, ctx: SessionContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("pre_session", ctx)
 
     async def wants_for(self, hook: str, session_id: str) -> bool:
@@ -270,8 +279,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self,
         method: str,
         ctx: CommandContext | RouteContext | VfsContext | SessionContext,
-    ) -> Action | None:
-        """Every program the session's profile names at one method.
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        """Every program the session's profile names at one method, each
+        answer in order, up to the first deny.
 
         Args:
             method (str): the method the entry point fired.
@@ -284,23 +294,14 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         payload = json.dumps(script_context(ctx))
         cwd = await self._cwd(ctx)
         env = dict(ctx.session.snapshot()) if ctx.session is not None else {}
-        asked: Ask | None = None
-        routed: Route | None = None
+        answers: list[Deny | Ask | Route] = []
         for entry in programs:
             answer = await self._run(entry, method, payload, cwd, env)
+            if answer is not None:
+                answers.append(answer)
             if isinstance(answer, Deny):
-                return answer
-            if isinstance(answer, Ask) and asked is None:
-                asked = answer
-            if isinstance(answer, Route):
-                if routed is not None and routed.runtime != answer.runtime:
-                    return self._failed(
-                        entry,
-                        f"places the line on {routed.runtime!r} and "
-                        f"{answer.runtime!r}",
-                    )
-                routed = routed or answer
-        return asked or routed
+                break
+        return tuple(answers) or None
 
     async def _cwd(
         self, ctx: CommandContext | RouteContext | VfsContext | SessionContext

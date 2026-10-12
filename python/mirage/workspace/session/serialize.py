@@ -113,6 +113,18 @@ def script_from_dict(data: Mapping[str, Any]) -> ProfileScript:
     )
 
 
+def scripts_to_dict(scripts: ProfileScripts) -> dict[str, Any]:
+    """A session's policy programs as the record stores them.
+
+    Args:
+        scripts (ProfileScripts): each method's programs.
+    """
+    return {
+        method: [script_to_dict(entry) for entry in entries]
+        for method, entries in scripts.items()
+    }
+
+
 def scripts_from_dict(
     data: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> ProfileScripts:

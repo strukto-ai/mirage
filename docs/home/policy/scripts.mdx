@@ -48,9 +48,11 @@ if any("marker" in contents(path) for path in ctx["paths"]):
 
 Each entry names its program and its runtime: a name, or `{name, config}`
 when the runtime needs settings, as in a `runtimes` entry. A method's
-programs are asked in order: the first deny wins, then the first ask, and
-every route must agree. A method with no program is never asked and costs
-nothing.
+programs are asked in order, up to the first deny, and each answer counts
+as if a policy of its own gave it
+([when answers disagree](/home/policy/policies#when-answers-disagree)):
+an ask from one program and a route from another both hold. A method with
+no program is never asked and costs nothing.
 
 In code, a profile takes the same block, with a `ScriptSource` for each
 program:

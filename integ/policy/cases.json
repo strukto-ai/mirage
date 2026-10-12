@@ -306,6 +306,17 @@
    ]
   },
   {
+   "id": "a_profile_policys_ask_and_route_both_hold",
+   "settings": {"mode": "exec", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "local", "workspace"]},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "print('{\"kind\": \"ask\", \"reason\": \"line needs a nod\"}')\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "print('{\"kind\": \"route\", \"runtime\": \"local\"}')\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "python3: Permission denied\n", "refusal": "line needs a nod"}}},
+    {"op": "asks", "session": "agent", "expect": {"value": [{"command": "", "paths": [], "reason": "line needs a nod"}]}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "python3 -c \"import sys; print(sys.platform != 'monty')\"", "expect": {"value": {"exit_code": 0, "stdout": "True\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
    "id": "a_profile_policy_answers_at_each_pre_method",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [

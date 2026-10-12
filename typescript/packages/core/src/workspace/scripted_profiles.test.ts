@@ -297,6 +297,15 @@ describe('profile policies', () => {
         },
       }),
     ).rejects.toThrow(/postVfs/)
+    await expect(
+      build({
+        release: {
+          policy: {
+            constructor: [{ script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' }],
+          },
+        },
+      }),
+    ).rejects.toThrow(/names constructor/)
   })
 
   it('an inline document may not add a policy', async () => {

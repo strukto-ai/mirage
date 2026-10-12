@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Outcome } from './types.ts'
+import { Outcome, type ScriptMethod } from './types.ts'
 
 /**
  * A whole-command refusal exits as bash does for a command it found but
@@ -92,7 +92,7 @@ export const METHODS = {
   preCommand: 'pre_command',
   preVfs: 'pre_vfs',
   preSession: 'pre_session',
-} as const
+} as const satisfies Record<ScriptMethod, string>
 
 /** The runtimes a policy program runs on: monty, and Python on wasm. */
 export const PROGRAM_RUNTIMES: ReadonlySet<string> = new Set(['monty', 'pyodide'])

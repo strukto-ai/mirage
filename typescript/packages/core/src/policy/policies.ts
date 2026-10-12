@@ -563,17 +563,18 @@ export class Policies {
 
   /**
    * The one loop every stage runs: each policy's answer, named and checked
-   * against what the hook may carry. The entry point stops at the first Deny,
-   * since nothing after it can change the outcome; `every` goes on, so
-   * `explain` shows the answers a Deny would hide. A policy that throws
-   * answers with a Deny naming it (fail closed), except the built-in
-   * placement, which throws to the caller. A kind the hook cannot carry
-   * (VALIDITY) throws PolicyError: a programming error, not a refusal, and
-   * as loud in a dry run as at the entry point. A later Ask's rules are
-   * appended to the first Ask's, so the first Ask carries every question
-   * the stage raised and the host grants each. Each hook runs as a policy
-   * deciding, with its views filled unless the profile's rules alone are
-   * asked. Mirrors the Python `_said`.
+   * against what the hook may carry; a policy answering an array has each
+   * read in turn, as if its own policy had said it. The entry point stops
+   * at the first Deny, since nothing after it can change the outcome;
+   * `every` goes on, so `explain` shows the answers a Deny would hide. A
+   * policy that throws answers with a Deny naming it (fail closed), except
+   * the built-in placement, which throws to the caller. A kind the hook
+   * cannot carry (VALIDITY) throws PolicyError: a programming error, not a
+   * refusal, and as loud in a dry run as at the entry point. A later Ask's
+   * rules are appended to the first Ask's, so the first Ask carries every
+   * question the stage raised and the host grants each. Each hook runs as a
+   * policy deciding, with its views filled unless the profile's rules alone
+   * are asked. Mirrors the Python `_said`.
    */
   private async said(
     hook: Hook,
@@ -601,7 +602,7 @@ export class Policies {
           : null
       if (handles !== null) seen = { ...seen, ...handles }
       const asked = seen
-      let action
+      let answered
       try {
         const ask = async (): Promise<Awaited<ReturnType<typeof fn>>> =>
           fn.call(
@@ -614,7 +615,7 @@ export class Policies {
           )
         // Without task isolation the binding would reach other tasks' ops,
         // so there a hook runs as it did before: it may write.
-        action = await (asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask())
+        answered = await (asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask())
       } catch (err) {
         if (policy === this.placement) throw err
         // The agent reads which policy broke, never what it threw: the
@@ -625,35 +626,39 @@ export class Policies {
         if (!every) return [said, []]
         continue
       }
-      if (action === null) continue
-      const kind: unknown = typeof action === 'object' ? action.kind : undefined
-      if (typeof kind !== 'string' || !VALIDITY[hook].has(kind)) {
-        throw new PolicyError(
-          `${hook} of ${name} returned ${JSON.stringify(action)}; ` +
-            `legal kinds here: ${[...VALIDITY[hook]].join(', ')}`,
-        )
-      }
-      if (action instanceof Limit) {
-        limits.push(action)
-        continue
-      }
-      if (action.kind === 'hide') continue
-      said.push(
-        action.policy === undefined || action.policy === '' ? { ...action, policy: name } : action,
-      )
-      const first = said.findIndex((a) => a.kind === 'ask')
-      const held = said[first]
-      if (action.kind === 'ask' && held?.kind === 'ask' && first < said.length - 1) {
-        const rules = [
-          ...(held.rules ?? [askRule(seen, held)]),
-          ...(action.rules ?? [askRule(seen, action)]),
-        ]
-        said[first] = {
-          ...held,
-          rules: rules.filter((rule, i) => rules.findIndex((r) => sameRule(r, rule)) === i),
+      for (const action of Array.isArray(answered) ? answered : [answered]) {
+        if (action === null) continue
+        const kind: unknown = typeof action === 'object' ? action.kind : undefined
+        if (typeof kind !== 'string' || !VALIDITY[hook].has(kind)) {
+          throw new PolicyError(
+            `${hook} of ${name} returned ${JSON.stringify(action)}; ` +
+              `legal kinds here: ${[...VALIDITY[hook]].join(', ')}`,
+          )
         }
+        if (action instanceof Limit) {
+          limits.push(action)
+          continue
+        }
+        if (action.kind === 'hide') continue
+        said.push(
+          action.policy === undefined || action.policy === ''
+            ? { ...action, policy: name }
+            : action,
+        )
+        const first = said.findIndex((a) => a.kind === 'ask')
+        const held = said[first]
+        if (action.kind === 'ask' && held?.kind === 'ask' && first < said.length - 1) {
+          const rules = [
+            ...(held.rules ?? [askRule(seen, held)]),
+            ...(action.rules ?? [askRule(seen, action)]),
+          ]
+          said[first] = {
+            ...held,
+            rules: rules.filter((rule, i) => rules.findIndex((r) => sameRule(r, rule)) === i),
+          }
+        }
+        if (action.kind === 'deny' && !every) return [said, []]
       }
-      if (action.kind === 'deny' && !every) return [said, []]
     }
     return [said, limits]
   }

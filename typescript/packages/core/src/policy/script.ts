@@ -34,7 +34,6 @@ import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
 import {
   Answer,
   VALIDITY,
-  type Action,
   type Ask,
   type CommandContext,
   type Deny,
@@ -150,8 +149,9 @@ export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | A
   }
   const { kind, reason, runtime } = answer.data
   if (!VALIDITY[method].has(kind)) throw new Error(`script cannot answer ${kind} at ${name}`)
-  if (kind === 'deny') return { kind, reason: reason ?? DEFAULT_DENY_REASON }
-  if (kind === 'ask') return { kind, reason: reason ?? DEFAULT_ASK_REASON }
+  const said = reason ?? ''
+  if (kind === 'deny') return { kind, reason: said === '' ? DEFAULT_DENY_REASON : said }
+  if (kind === 'ask') return { kind, reason: said === '' ? DEFAULT_ASK_REASON : said }
   return { kind, runtime: runtime ?? '' }
 }
 
@@ -180,9 +180,11 @@ export interface ScriptWiring {
  * The scripted twin of `PermissionsPolicy`, registered right after it:
  * where that policy evaluates the document's declarative rules, this one
  * runs the profile's programs. A profile names, per method, a list of
- * programs and the runtime each runs on; they are asked in order, the
- * first deny wins, then the first ask, and every route must agree. A
- * method with no program is silence and costs nothing. It reads the
+ * programs and the runtime each runs on; they are asked in order, up to
+ * the first deny, and their answers reach the chain as one array, each
+ * read as if its own policy had said it: an Ask from one program and a
+ * Route from another both stand, and two routes that disagree refuse the
+ * line. A method with no program is silence and costs nothing. It reads the
  * session's programs through the narrow `SessionScriptsQuery` by the
  * session id the entry point put in the context.
  *
@@ -222,26 +224,28 @@ export class ScriptPolicy implements Policy, SessionScoped {
     this.wiring = wiring
   }
 
-  async preExecute(ctx: RouteContext): Promise<Action | null> {
+  async preExecute(ctx: RouteContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('preExecute', ctx)
   }
 
-  async preCommand(ctx: CommandContext): Promise<Action | null> {
+  async preCommand(ctx: CommandContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('preCommand', ctx)
   }
 
-  async preVfs(ctx: VfsContext): Promise<Action | null> {
+  async preVfs(ctx: VfsContext): Promise<(Deny | Ask | Route)[] | null> {
     if (ctx.issuer === this.issuer) return null
     return this.judge('preVfs', ctx)
   }
 
-  async preSession(ctx: SessionContext): Promise<Action | null> {
+  async preSession(ctx: SessionContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('preSession', ctx)
   }
 
   /** Whether this session's profile names a program at `hook`. */
   wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
-    const programs = hook in METHODS ? this.sessions.scriptsOf(sessionId)[hook as ScriptMethod] : []
+    const programs = Object.hasOwn(METHODS, hook)
+      ? this.sessions.scriptsOf(sessionId)[hook as ScriptMethod]
+      : []
     return Promise.resolve((programs?.length ?? 0) > 0)
   }
 
@@ -252,31 +256,26 @@ export class ScriptPolicy implements Policy, SessionScoped {
     for (const engine of engines) await engine.close()
   }
 
-  /** Every program the session's profile names at one method. */
+  /**
+   * Every program the session's profile names at one method, each answer
+   * in order, up to the first deny.
+   */
   private async judge(
     method: ScriptMethod,
     ctx: CommandContext | RouteContext | VfsContext | SessionContext,
-  ): Promise<Action | null> {
+  ): Promise<(Deny | Ask | Route)[] | null> {
     const programs = this.sessions.scriptsOf(ctx.sessionId ?? '')[method] ?? []
     if (programs.length === 0) return null
     const payload = JSON.stringify(scriptContext(ctx))
     const cwd = await this.cwd(ctx)
     const env = { ...(ctx.session?.snapshot() ?? {}) }
-    let asked: Ask | null = null
-    let routed: Route | null = null
+    const answers: (Deny | Ask | Route)[] = []
     for (const entry of programs) {
       const answer = await this.run(entry, method, payload, cwd, env)
-      if (answer === null) continue
-      if (answer.kind === 'deny') return answer
-      if (answer.kind === 'ask') asked ??= answer
-      if (answer.kind === 'route') {
-        if (routed !== null && routed.runtime !== answer.runtime) {
-          return failed(entry, `places the line on '${routed.runtime}' and '${answer.runtime}'`)
-        }
-        routed ??= answer
-      }
+      if (answer !== null) answers.push(answer)
+      if (answer?.kind === 'deny') break
     }
-    return asked ?? routed
+    return answers.length > 0 ? answers : null
   }
 
   /**
@@ -304,19 +303,30 @@ export class ScriptPolicy implements Policy, SessionScoped {
     try {
       result = await this.serialized(async () => {
         const engine = this.engine(entry)
-        return runWithTimeout(
-          engine.execute({
-            kind: 'code',
-            language: entry.script.language,
-            code: entry.script.source,
-            args: [],
-            cwd: PathSpec.fromStrPath(cwd),
-            env: { ...env, [CTX_ENV]: payload },
-            stdin: ENCODER.encode(payload),
-          }),
-          SCRIPT_EVAL_TIMEOUT.seconds,
-          `profile '${entry.profile}' policy`,
-        )
+        // The runtime stops itself at the deadline; the signal stops it
+        // when the wait gives up first, before the next run takes the
+        // runtime.
+        const cancel = new AbortController()
+        try {
+          return await runWithTimeout(
+            engine.execute({
+              kind: 'code',
+              language: entry.script.language,
+              code: entry.script.source,
+              args: [],
+              cwd: PathSpec.fromStrPath(cwd),
+              env: { ...env, [CTX_ENV]: payload },
+              stdin: ENCODER.encode(payload),
+              signal: cancel.signal,
+              timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
+            }),
+            SCRIPT_EVAL_TIMEOUT.seconds,
+            `profile '${entry.profile}' policy`,
+          )
+        } catch (err) {
+          cancel.abort()
+          throw err
+        }
       })
     } catch (err) {
       if (err instanceof CommandTimeoutError) {

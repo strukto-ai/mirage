@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
+from typing import Any
 
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import (
@@ -504,17 +505,17 @@ def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
                     f"({program.script!r}); only the config loader loads "
                     f"one, pass ScriptSource in code"
                 )
-            runtime = program.runtime
+            named: dict[str, Any] = (
+                {"name": program.runtime}
+                if isinstance(program.runtime, str)
+                else program.runtime
+            )
             entries.append(
                 ProfileScript(
                     profile=name,
                     script=program.script,
-                    runtime=runtime
-                    if isinstance(runtime, str)
-                    else runtime["name"],
-                    config={}
-                    if isinstance(runtime, str)
-                    else dict(runtime.get("config") or {}),
+                    runtime=named["name"],
+                    config=dict(named.get("config") or {}),
                 )
             )
         if entries:

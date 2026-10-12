@@ -28,9 +28,11 @@ import type {
  * One concern's answers to the workspace lifecycle.
  *
  * Implementations define only the hooks they care about; a hook
- * returns an Action to state an opinion or null to stay silent
- * (directly or as a promise; the seam awaits either), and a hook that
- * throws fails closed (the command is refused, naming the policy).
+ * returns an Action to state an opinion, an array of them to state
+ * several (each read as if its own policy had said it, as a profile's
+ * programs answer), or null to stay silent (directly or as a promise;
+ * the seam awaits either), and a hook that throws fails closed (the
+ * command is refused, naming the policy).
  * Undefined hooks are detected at the seam and never called.
  *
  * The hooks come in pairs, one per surface: the line (`preExecute` /
@@ -57,7 +59,7 @@ export interface Policy {
    * approves. The workspace's `routePolicy` answers here as a built-in,
    * ahead of the policies registered in code.
    */
-  preExecute?(ctx: RouteContext): Action | null | Promise<Action | null>
+  preExecute?(ctx: RouteContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Admit, hold or refuse one command or CLI, once, as it runs. A Deny
    * refuses it (`<command>: Permission denied`, exit 126, or the
@@ -65,14 +67,16 @@ export interface Policy {
    * the host approves. Its own file I/O meets the hides, the mount mode
    * and the profile's path rules, never `preVfs`.
    */
-  preCommand?(ctx: CommandContext): Action | null | Promise<Action | null>
+  preCommand?(ctx: CommandContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Judge one command or CLI once it ran and its output drained. A Deny,
    * or an Ask the host has not approved, sets its exit code to 126 and
    * records the refusal, so `&&` and `pipefail` stop there; output
    * already sent stays sent.
    */
-  postCommand?(ctx: CommandResultContext): Action | null | Promise<Action | null>
+  postCommand?(
+    ctx: CommandResultContext,
+  ): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Admit, hold or refuse one `ws.vfs` / `session.vfs` call. Fires at the
    * dispatcher before any backend or cache I/O, for the host's and the
@@ -80,24 +84,26 @@ export interface Policy {
    * which `preCommand` judged. A Deny is EACCES; an Ask holds the call
    * until the host approves.
    */
-  preVfs?(ctx: VfsContext): Action | null | Promise<Action | null>
+  preVfs?(ctx: VfsContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Judge one completed `ws.vfs` / `session.vfs` call. A Deny, or an Ask
    * the host has not approved, drops the result with EACCES (the call
    * itself is not undone); a Limit caps a byte-producing one.
    */
-  postVfs?(ctx: VfsResultContext): Action | null | Promise<Action | null>
+  postVfs?(ctx: VfsResultContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Admit, hold or refuse one session write (set, unset, mark) on the
    * session plane, before it lands. Not path-scoped on purpose: the
    * context carries a key, never a pseudo-path.
    */
-  preSession?(ctx: SessionContext): Action | null | Promise<Action | null>
+  preSession?(ctx: SessionContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Judge one session write once it landed. A Deny, or an Ask the host
    * has not approved, puts the old value back and refuses the write.
    */
-  postSession?(ctx: SessionResultContext): Action | null | Promise<Action | null>
+  postSession?(
+    ctx: SessionResultContext,
+  ): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Judge one finished line's output: what `preExecute` saw, plus the exit
    * code, the output and each command's result. A Deny, or an Ask the host
@@ -105,5 +111,7 @@ export interface Policy {
    * Limit merges with every other opining policy's (tightest per field)
    * and caps it at the workspace boundary.
    */
-  postExecute?(ctx: ExecuteResultContext): Action | null | Promise<Action | null>
+  postExecute?(
+    ctx: ExecuteResultContext,
+  ): Action | Action[] | null | Promise<Action | Action[] | null>
 }

@@ -29,10 +29,11 @@ class Policy:
     """One concern's answers to the workspace lifecycle.
 
     Subclasses override only the hooks they care about; a hook returns
-    an Action to state an opinion or None to stay silent, and a hook
-    that raises fails closed (the command or op is refused, naming the
-    policy). Hooks left un-overridden are detected at the seam and
-    never called.
+    an Action to state an opinion, a tuple of them to state several
+    (each read as if its own policy had said it, as a profile's
+    programs answer), or None to stay silent, and a hook that raises
+    fails closed (the command or op is refused, naming the policy).
+    Hooks left un-overridden are detected at the seam and never called.
 
     The hooks come in pairs, one per surface: the line
     (``pre_execute`` / ``post_execute``), each command or CLI
@@ -50,7 +51,9 @@ class Policy:
     refused.
     """
 
-    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+    async def pre_execute(
+        self, ctx: RouteContext
+    ) -> Action | tuple[Action, ...] | None:
         """Place, hold or refuse one typed line before any of it runs.
 
         Fires once per line, after the profile's rules clear it (a line
@@ -66,7 +69,9 @@ class Policy:
         """
         return None
 
-    async def pre_command(self, ctx: CommandContext) -> Action | None:
+    async def pre_command(
+        self, ctx: CommandContext
+    ) -> Action | tuple[Action, ...] | None:
         """Admit, hold or refuse one command or CLI, once, as it runs.
 
         A Deny refuses it (``<command>: Permission denied``, exit 126, or
@@ -79,7 +84,9 @@ class Policy:
         """
         return None
 
-    async def post_command(self, ctx: CommandResultContext) -> Action | None:
+    async def post_command(
+        self, ctx: CommandResultContext
+    ) -> Action | tuple[Action, ...] | None:
         """Judge one command or CLI once it ran and its output drained.
 
         A Deny, or an Ask the host has not approved, sets its exit code
@@ -92,7 +99,9 @@ class Policy:
         """
         return None
 
-    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+    async def pre_vfs(
+        self, ctx: VfsContext
+    ) -> Action | tuple[Action, ...] | None:
         """Admit, hold or refuse one ``ws.vfs`` / ``session.vfs`` call.
 
         Fires at the dispatcher before any backend or cache I/O, for the
@@ -105,7 +114,9 @@ class Policy:
         """
         return None
 
-    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+    async def post_vfs(
+        self, ctx: VfsResultContext
+    ) -> Action | tuple[Action, ...] | None:
         """Judge one completed ``ws.vfs`` / ``session.vfs`` call.
 
         A Deny, or an Ask the host has not approved, drops the result
@@ -117,7 +128,9 @@ class Policy:
         """
         return None
 
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
+    async def pre_session(
+        self, ctx: SessionContext
+    ) -> Action | tuple[Action, ...] | None:
         """Admit, hold or refuse one session write (set, unset, mark).
 
         Fires on the session plane, so an ``export`` from the shell, a
@@ -130,7 +143,9 @@ class Policy:
         """
         return None
 
-    async def post_session(self, ctx: SessionResultContext) -> Action | None:
+    async def post_session(
+        self, ctx: SessionResultContext
+    ) -> Action | tuple[Action, ...] | None:
         """Judge one session write once it landed.
 
         A Deny, or an Ask the host has not approved, puts the old value
@@ -142,7 +157,9 @@ class Policy:
         """
         return None
 
-    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+    async def post_execute(
+        self, ctx: ExecuteResultContext
+    ) -> Action | tuple[Action, ...] | None:
         """Judge one finished line's output.
 
         A Deny, or an Ask the host has not approved, drops the output

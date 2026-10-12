@@ -24,6 +24,7 @@ import type {
 import { METHODS } from '../../policy/constants.ts'
 import type { Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
+import { snakeToCamel } from '../../utils/normalize.ts'
 import type { RuntimeLanguage } from '../../runtime/types.ts'
 
 /** A compiled command tier as the session record stores it (the Python spelling). */
@@ -103,16 +104,20 @@ export function scriptFromJSON(data: ScriptJSON): ProfileScript {
   }
 }
 
+/** A session's policy programs as the record stores them, keyed by the document's method names. */
+export function scriptsToJSON(scripts: ProfileScripts): Record<string, ScriptJSON[]> {
+  return Object.fromEntries(
+    Object.entries(scripts).map(([method, entries]) => [
+      METHODS[method as ScriptMethod],
+      entries.map(scriptToJSON),
+    ]),
+  )
+}
+
 /** A session's policy programs read back from a record, keyed by the document's method names. */
 export function scriptsFromJSON(data: Record<string, ScriptJSON[]>): ProfileScripts {
-  const methods: Record<string, ScriptMethod> = Object.fromEntries(
-    Object.entries(METHODS).map(([method, key]) => [key, method as ScriptMethod]),
-  )
   return Object.fromEntries(
-    Object.entries(data).map(([key, entries]) => [
-      methods[key] ?? key,
-      entries.map(scriptFromJSON),
-    ]),
+    Object.entries(data).map(([key, entries]) => [snakeToCamel(key), entries.map(scriptFromJSON)]),
   )
 }
 

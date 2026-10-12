@@ -22,6 +22,7 @@ import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
+import { snakeToCamel } from '../utils/normalize.ts'
 import { norm } from '../utils/path.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
@@ -563,9 +564,7 @@ export function parseProfileMounts(
  * (`preCommand`).
  */
 export function parseProfilePolicy(raw: unknown, where: string, code = false): ProfilePolicy {
-  const spelling: Record<string, ScriptMethod> = Object.fromEntries(
-    Object.entries(METHODS).map(([method, key]) => [code ? method : key, method as ScriptMethod]),
-  )
+  const keys: readonly string[] = code ? Object.keys(METHODS) : Object.values(METHODS)
   if (typeof raw === 'string' || raw instanceof ScriptSource) {
     throw new Error(`${where} must be a mapping of method to programs`)
   }
@@ -576,19 +575,19 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
         `{pre_command: [{script: <file>, runtime: <runtime>}]}`,
     )
   }
-  const unknown = Object.keys(obj).filter((key) => !(key in spelling))
+  const unknown = Object.keys(obj).filter((key) => !keys.includes(key))
   if (unknown.length > 0) {
     throw new Error(
       `${where} names ${unknown.sort(compareCodePoints).join(', ')}; a program answers at ` +
-        Object.keys(spelling).join(', '),
+        keys.join(', '),
     )
   }
   const out: Partial<Record<ScriptMethod, readonly ProfilePolicySpec[]>> = {}
-  for (const [key, method] of Object.entries(spelling)) {
+  for (const key of keys) {
     const programs = obj[key]
     if (programs === undefined) continue
     if (!Array.isArray(programs)) throw new Error(`${where}.${key} must be a list of programs`)
-    out[method] = programs.map((raw, i): ProfilePolicySpec => {
+    out[snakeToCamel(key) as ScriptMethod] = programs.map((raw, i): ProfilePolicySpec => {
       const at = `${where}.${key}[${String(i)}]`
       const program = asObject(raw, at)
       rejectUnknownKeys(program, PROGRAM_FIELDS, at)

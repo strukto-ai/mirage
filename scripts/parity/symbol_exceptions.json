@@ -1,5 +1,5 @@
 {
-  "baseline": 3856,
+  "baseline": 3858,
  "modules": {
   "concurrency/worker": {
    "python_only": {

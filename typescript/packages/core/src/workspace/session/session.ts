@@ -36,21 +36,14 @@ import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
-import type {
-  AdmissionRules,
-  Decision,
-  HideReason,
-  ProfileScripts,
-  ScriptMethod,
-} from '../../policy/types.ts'
-import { METHODS } from '../../policy/constants.ts'
+import type { AdmissionRules, Decision, HideReason, ProfileScripts } from '../../policy/types.ts'
 import {
   commandsFromJSON,
   commandsToJSON,
   decisionFromJSON,
   decisionToJSON,
   scriptsFromJSON,
-  scriptToJSON,
+  scriptsToJSON,
   type CommandsJSON,
   type DecisionJSON,
   type ScriptJSON,
@@ -927,14 +920,7 @@ export class SessionState {
       }
     }
     if (this.commands !== null) data.commands = commandsToJSON(this.commands)
-    if (Object.keys(this.scripts).length > 0) {
-      data.scripts = Object.fromEntries(
-        Object.entries(this.scripts).map(([method, entries]) => [
-          METHODS[method as ScriptMethod],
-          entries.map(scriptToJSON),
-        ]),
-      )
-    }
+    if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToJSON(this.scripts)
     if (Object.keys(this.commandLimits).length > 0)
       data.command_limits = commandLimitsToJSON(this.commandLimits)
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))

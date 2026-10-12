@@ -753,11 +753,12 @@ class Policies:
         rules_only: bool = False,
     ) -> tuple[list[Deny | Ask | Route], list[Limit]]:
         """The one loop every stage runs: each policy's answer, named and
-        checked against what the hook may carry. A later Ask's rules are
-        appended to the first Ask's, so the first Ask carries every
-        question the stage raised and the host grants each. Each hook
-        runs as a policy deciding, with its views filled unless the
-        profile's rules alone are asked.
+        checked against what the hook may carry; a policy answering a
+        tuple has each read in turn, as if its own policy had said it.
+        A later Ask's rules are appended to the first Ask's, so the first
+        Ask carries every question the stage raised and the host grants
+        each. Each hook runs as a policy deciding, with its views filled
+        unless the profile's rules alone are asked.
 
         The entry point stops at the first Deny, since nothing after it can
         change the outcome; ``every`` goes on, so ``explain`` shows the
@@ -796,9 +797,9 @@ class Policies:
                 ctx = replace(ctx, session=session, ns=ns, vfs=vfs)
             token = set_explaining(DryRun.DECIDING)
             try:
-                action = getattr(policy, hook)(ctx)
-                if inspect.isawaitable(action):
-                    action = await action
+                answered = getattr(policy, hook)(ctx)
+                if inspect.isawaitable(answered):
+                    answered = await answered
             except Exception as exc:
                 if policy is self._placement:
                     raise
@@ -812,36 +813,39 @@ class Policies:
                 continue
             finally:
                 reset_explaining(token)
-            if action is None:
-                continue
-            if not isinstance(action, (Deny, Ask, Route, Limit)) or (
-                action.kind not in legal
+            for action in (
+                answered if isinstance(answered, tuple) else (answered,)
             ):
-                raise PolicyError(
-                    f"{hook} of {name} returned {action!r}; "
-                    f"legal kinds here: {sorted(legal)}"
+                if action is None:
+                    continue
+                if not isinstance(action, (Deny, Ask, Route, Limit)) or (
+                    action.kind not in legal
+                ):
+                    raise PolicyError(
+                        f"{hook} of {name} returned {action!r}; "
+                        f"legal kinds here: {sorted(legal)}"
+                    )
+                if isinstance(action, Limit):
+                    limits.append(action)
+                    continue
+                said.append(
+                    action if action.policy else replace(action, policy=name)
                 )
-            if isinstance(action, Limit):
-                limits.append(action)
-                continue
-            said.append(
-                action if action.policy else replace(action, policy=name)
-            )
-            first = next((a for a in said if isinstance(a, Ask)), None)
-            if (
-                isinstance(action, Ask)
-                and first is not None
-                and first is not said[-1]
-            ):
-                rules = (
-                    *(first.rules or (ask_rule(ctx, first),)),
-                    *(action.rules or (ask_rule(ctx, action),)),
-                )
-                said[said.index(first)] = replace(
-                    first, rules=tuple(dict.fromkeys(rules))
-                )
-            if isinstance(action, Deny) and not every:
-                return said, []
+                first = next((a for a in said if isinstance(a, Ask)), None)
+                if (
+                    isinstance(action, Ask)
+                    and first is not None
+                    and first is not said[-1]
+                ):
+                    rules = (
+                        *(first.rules or (ask_rule(ctx, first),)),
+                        *(action.rules or (ask_rule(ctx, action),)),
+                    )
+                    said[said.index(first)] = replace(
+                        first, rules=tuple(dict.fromkeys(rules))
+                    )
+                if isinstance(action, Deny) and not every:
+                    return said, []
         return said, limits
 
     async def _fire(

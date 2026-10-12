@@ -9,6 +9,7 @@ from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
 )
+from mirage.policy.policies import Policies
 from mirage.policy.script import (
     _POLICY_READ,
     ScriptPolicy,
@@ -37,6 +38,7 @@ from mirage.runtime.types import (
     RunResult,
     ScriptSource,
 )
+from mirage.shell.variable import ShellValue, VarAttr
 from mirage.types import PathSpec
 from mirage.view.types import MountView, NamespaceView, SessionView
 from mirage.workspace.dispatcher.constants import CALLS
@@ -138,8 +140,12 @@ def _path(virtual: str) -> PathSpec:
     return PathSpec.from_str_path(virtual)
 
 
-async def _refused(*args: object, **kwargs: object) -> None:
-    raise PermissionError("read only")
+async def _refused(
+    name: str,
+    *args: ShellValue | VarAttr | bool | None,
+    **kwargs: bool | frozenset[int | str] | str | None,
+) -> None:
+    raise PermissionError(f"{name}: read only")
 
 
 def _session(cwd: str = "/data") -> SessionView:
@@ -241,12 +247,12 @@ def test_a_deny_or_an_ask_is_read_with_its_reason():
 
 
 def test_a_reason_left_out_is_the_documents_default():
-    assert script_action(_answer(kind="deny"), "pre_command") == Deny(
-        DEFAULT_DENY_REASON
-    )
-    assert script_action(_answer(kind="ask"), "pre_command") == Ask(
-        DEFAULT_ASK_REASON
-    )
+    for printed in (_answer(kind="deny"), _answer(kind="deny", reason="")):
+        assert script_action(printed, "pre_command") == Deny(
+            DEFAULT_DENY_REASON
+        )
+    for printed in (_answer(kind="ask"), _answer(kind="ask", reason="")):
+        assert script_action(printed, "pre_command") == Ask(DEFAULT_ASK_REASON)
 
 
 def test_a_route_places_the_line_at_pre_execute_only():
@@ -342,7 +348,7 @@ async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
     engine = FakeProgram(_answer(kind="deny", reason="sealed"))
     policy = _policy("pre_command", engine)
     ctx = _ctx(session=_session(cwd="/"), ns=_ns())
-    assert await policy.pre_command(ctx) == Deny("sealed")
+    assert await policy.pre_command(ctx) == (Deny("sealed"),)
     [request] = engine.requests
     assert request.code == "SOURCE"
     assert request.language == "python"
@@ -353,60 +359,94 @@ async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
     assert request.env["TEAM"] == "core"
 
 
-@pytest.mark.asyncio
-async def test_the_first_deny_wins_over_an_ask_before_it():
-    asks = FakeProgram(_answer(kind="ask", reason="nod"))
-    denies = FakeProgram(_answer(kind="deny", reason="no"))
-    entries = (_entry("monty"), _entry("wasi"))
-    policy = ScriptPolicy(Programs({"pre_command": entries}))
-    policy._engines[("monty", "{}")] = asks
-    policy._engines[("wasi", "{}")] = denies
-    assert await policy.pre_command(_ctx()) == Deny("no")
-
-
-@pytest.mark.asyncio
-async def test_an_ask_holds_when_nothing_denies():
-    silent = FakeProgram(b"")
-    asks = FakeProgram(_answer(kind="ask", reason="nod"))
-    policy = ScriptPolicy(
-        Programs({"pre_vfs": (_entry("monty"), _entry("wasi"))})
+def _programs(method: str, *printed: bytes) -> ScriptPolicy:
+    """A policy whose programs at ``method`` print ``printed`` in order,
+    each on its own runtime."""
+    entries = tuple(
+        _entry("monty", config={"n": str(i)}) for i in range(len(printed))
     )
-    policy._engines[("monty", "{}")] = silent
-    policy._engines[("wasi", "{}")] = asks
-    assert await policy.pre_vfs(_ops_ctx()) == Ask("nod")
+    policy = ScriptPolicy(Programs({method: entries}))
+    for i, out in enumerate(printed):
+        policy._engines[("monty", json.dumps({"n": str(i)}))] = FakeProgram(
+            out
+        )
+    return policy
+
+
+def _line() -> RouteContext:
+    return RouteContext(
+        line="python3 job.py", commands=(), session_id="s", agent_id="a"
+    )
+
+
+@pytest.mark.asyncio
+async def test_each_answer_is_returned_in_order_up_to_the_first_deny():
+    policy = _programs(
+        "pre_command",
+        b"",
+        _answer(kind="ask", reason="nod"),
+        _answer(kind="deny", reason="no"),
+        _answer(kind="ask", reason="late"),
+    )
+    assert await policy.pre_command(_ctx()) == (Ask("nod"), Deny("no"))
+    assert [len(e.requests) for e in policy._engines.values()] == [1, 1, 1, 0]
+
+
+@pytest.mark.asyncio
+async def test_the_chain_reads_each_answer_as_its_own_policys():
+    denies = _programs(
+        "pre_command",
+        _answer(kind="ask", reason="nod"),
+        _answer(kind="deny", reason="no"),
+    )
+    action = await Policies([denies]).pre_command(_ctx())
+    assert isinstance(action, Deny) and action.reason == "no"
+    asks = _programs("pre_vfs", b"", _answer(kind="ask", reason="nod"))
+    action = await Policies([asks]).pre_vfs(_ops_ctx())
+    assert isinstance(action, Ask) and action.reason == "nod"
+
+
+@pytest.mark.asyncio
+async def test_an_ask_and_a_route_both_stand():
+    policy = _programs(
+        "pre_execute",
+        _answer(kind="ask", reason="nod"),
+        _answer(kind="route", runtime="docker"),
+    )
+    said, route = await Policies([policy]).pre_execute(_line())
+    assert isinstance(said, Ask) and said.reason == "nod"
+    assert route is not None and route.runtime == "docker"
 
 
 @pytest.mark.asyncio
 async def test_routes_must_agree():
-    line = RouteContext(
-        line="python3 job.py", commands=(), session_id="s", agent_id="a"
+    agree = _programs(
+        "pre_execute",
+        _answer(kind="route", runtime="docker"),
+        _answer(kind="route", runtime="docker"),
     )
-    entries = (_entry("monty"), _entry("wasi"))
-    agree = ScriptPolicy(Programs({"pre_execute": entries}))
-    agree._engines[("monty", "{}")] = FakeProgram(
-        _answer(kind="route", runtime="docker")
+    said, route = await Policies([agree]).pre_execute(_line())
+    assert said is None
+    assert route is not None and route.runtime == "docker"
+    differ = _programs(
+        "pre_execute",
+        _answer(kind="route", runtime="docker"),
+        _answer(kind="route", runtime="monty"),
     )
-    agree._engines[("wasi", "{}")] = FakeProgram(
-        _answer(kind="route", runtime="docker")
-    )
-    assert await agree.pre_execute(line) == Route("docker")
-    differ = ScriptPolicy(Programs({"pre_execute": entries}))
-    differ._engines[("monty", "{}")] = FakeProgram(
-        _answer(kind="route", runtime="docker")
-    )
-    differ._engines[("wasi", "{}")] = FakeProgram(
-        _answer(kind="route", runtime="monty")
-    )
-    assert await differ.pre_execute(line) == Deny(
-        "profile 'release' policy places the line on 'docker' and 'monty'"
+    said, route = await Policies([differ]).pre_execute(_line())
+    assert route is None
+    assert isinstance(said, Deny)
+    assert said.reason == (
+        "policies place the line on different runtimes: "
+        "ScriptPolicy on docker, ScriptPolicy on monty"
     )
 
 
 @pytest.mark.asyncio
 async def test_a_program_that_exits_non_zero_fails_closed():
     policy = _policy("pre_command", FakeProgram(b"", 3, b"Traceback"))
-    assert await policy.pre_command(_ctx()) == Deny(
-        "profile 'release' policy exited 3"
+    assert await policy.pre_command(_ctx()) == (
+        Deny("profile 'release' policy exited 3"),
     )
 
 
@@ -416,15 +456,15 @@ async def test_a_program_that_timed_out_fails_closed(monkeypatch):
         "mirage.policy.script.SCRIPT_EVAL_TIMEOUT_SECONDS", 0.01
     )
     policy = _policy("pre_command", FakeProgram(delay=1.0))
-    assert await policy.pre_command(_ctx()) == Deny(
-        "profile 'release' policy timed out after 0.01s"
+    assert await policy.pre_command(_ctx()) == (
+        Deny("profile 'release' policy timed out after 0.01s"),
     )
 
 
 @pytest.mark.asyncio
 async def test_a_wrong_answer_fails_closed():
     policy = _policy("pre_command", FakeProgram(b'{"deny": "x"}'))
-    action = await policy.pre_command(_ctx())
+    [action] = await policy.pre_command(_ctx()) or ()
     assert isinstance(action, Deny)
     assert action.reason.startswith(
         "profile 'release' policy must print a JSON answer at pre_command"
@@ -434,9 +474,11 @@ async def test_a_wrong_answer_fails_closed():
 @pytest.mark.asyncio
 async def test_a_runtime_policies_do_not_run_on_fails_closed():
     policy = ScriptPolicy(Programs({"pre_command": (_entry("quickjs"),)}))
-    assert await policy.pre_command(_ctx()) == Deny(
-        "profile 'release' policy names runtime 'quickjs'; a policy program "
-        "runs on monty or wasi"
+    assert await policy.pre_command(_ctx()) == (
+        Deny(
+            "profile 'release' policy names runtime 'quickjs'; a policy "
+            "program runs on monty or wasi"
+        ),
     )
 
 
@@ -448,17 +490,18 @@ def _no_engine(script, runtime, config):
 async def test_a_runtime_it_cannot_build_fails_closed(monkeypatch):
     monkeypatch.setattr("mirage.policy.script.script_engine", _no_engine)
     policy = ScriptPolicy(Programs({"pre_command": (_entry("wasi"),)}))
-    assert await policy.pre_command(_ctx()) == Deny(
-        "profile 'release' policy names runtime 'wasi': nope"
+    assert await policy.pre_command(_ctx()) == (
+        Deny("profile 'release' policy names runtime 'wasi': nope"),
     )
+
+
+def _fresh_engine(script, runtime, config):
+    return FakeProgram()
 
 
 @pytest.mark.asyncio
 async def test_a_runtime_is_built_once_per_name_and_settings(monkeypatch):
-    def build(script, runtime, config):
-        return FakeProgram()
-
-    monkeypatch.setattr("mirage.policy.script.script_engine", build)
+    monkeypatch.setattr("mirage.policy.script.script_engine", _fresh_engine)
     entries = (
         _entry("wasi", config={"home": "/a"}),
         _entry("wasi", config={"home": "/a"}),
@@ -515,12 +558,13 @@ async def test_a_bare_policy_attaches_nothing(monkeypatch):
     assert engine.attached is None
 
 
-def test_dispatch_and_resolver_travel_together():
-    async def dispatch(op, path, **kwargs):
-        return None, None
+async def _no_dispatch(op, path, **kwargs):
+    return None, None
 
+
+def test_dispatch_and_resolver_travel_together():
     with pytest.raises(ValueError, match="travel together"):
-        ScriptPolicy(Programs({}), dispatch=dispatch)
+        ScriptPolicy(Programs({}), dispatch=_no_dispatch)
     with pytest.raises(ValueError, match="travel together"):
         ScriptPolicy(Programs({}), resolver=PrefixResolver(lambda: []))
 
@@ -535,8 +579,8 @@ async def test_the_policys_own_read_is_not_judged_by_its_vfs_program():
     finally:
         _POLICY_READ.reset(token)
     assert engine.requests == []
-    assert await policy.pre_vfs(_ops_ctx("read", write=False)) == Deny(
-        "frozen"
+    assert await policy.pre_vfs(_ops_ctx("read", write=False)) == (
+        Deny("frozen"),
     )
 
 

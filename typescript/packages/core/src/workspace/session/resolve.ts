@@ -390,15 +390,16 @@ export function compileScripts(effective: SessionProfile, name: string): Profile
             `only the config loader loads one, pass ScriptSource in code`,
         )
       }
-      const runtime = program.runtime
-      return typeof runtime === 'string'
-        ? { profile: name, script: program.script, runtime, config: {} }
-        : {
-            profile: name,
-            script: program.script,
-            runtime: runtime.name,
-            config: { ...(runtime.config ?? {}) },
-          }
+      const runtime =
+        typeof program.runtime === 'string'
+          ? { name: program.runtime, config: {} }
+          : program.runtime
+      return {
+        profile: name,
+        script: program.script,
+        runtime: runtime.name,
+        config: { ...runtime.config },
+      }
     })
     if (entries.length > 0) compiled[method as ScriptMethod] = entries
   }

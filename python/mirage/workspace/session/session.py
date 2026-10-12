@@ -70,8 +70,8 @@ from mirage.workspace.session.serialize import (
     commands_to_dict,
     decision_from_dict,
     decision_to_dict,
-    script_to_dict,
     scripts_from_dict,
+    scripts_to_dict,
 )
 from mirage.workspace.types import StatusWriter
 
@@ -596,10 +596,7 @@ class SessionState:
         if self.commands is not None:
             data["commands"] = commands_to_dict(self.commands)
         if self.scripts:
-            data["scripts"] = {
-                method: [script_to_dict(entry) for entry in entries]
-                for method, entries in self.scripts.items()
-            }
+            data["scripts"] = scripts_to_dict(self.scripts)
         if self.command_limits:
             data["command_limits"] = {
                 name: limit.model_dump()

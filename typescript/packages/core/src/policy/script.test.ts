@@ -187,6 +187,10 @@ function sessionCtx(key = 'AWS_KEY'): SessionContext {
   return { verb: 'set', key, value: 'v', sessionId: 's' }
 }
 
+function line(): RouteContext {
+  return { line: 'python3 job.py', commands: [], sessionId: 's', agentId: 'a' }
+}
+
 /** A policy whose every program runs on the given fake, in order. */
 function policyWith(method: keyof ProfileScripts, ...engines: FakeProgram[]): ScriptPolicy {
   const queue = [...engines]
@@ -225,15 +229,19 @@ describe('scriptAction', () => {
     })
   })
 
-  it("gives a reason left out the document's default", () => {
-    expect(scriptAction(bytes(answer({ kind: 'deny' })), 'preCommand')).toEqual({
-      kind: 'deny',
-      reason: DEFAULT_DENY_REASON,
-    })
-    expect(scriptAction(bytes(answer({ kind: 'ask' })), 'preCommand')).toEqual({
-      kind: 'ask',
-      reason: DEFAULT_ASK_REASON,
-    })
+  it("gives a reason left out or empty the document's default", () => {
+    for (const printed of [answer({ kind: 'deny' }), answer({ kind: 'deny', reason: '' })]) {
+      expect(scriptAction(bytes(printed), 'preCommand')).toEqual({
+        kind: 'deny',
+        reason: DEFAULT_DENY_REASON,
+      })
+    }
+    for (const printed of [answer({ kind: 'ask' }), answer({ kind: 'ask', reason: '' })]) {
+      expect(scriptAction(bytes(printed), 'preCommand')).toEqual({
+        kind: 'ask',
+        reason: DEFAULT_ASK_REASON,
+      })
+    }
   })
 
   it('places a line at preExecute only', () => {
@@ -317,7 +325,7 @@ describe('ScriptPolicy', () => {
     const engine = new FakeProgram(answer({ kind: 'deny', reason: 'sealed' }))
     const policy = policyWith('preCommand', engine)
     const judged = ctx('cat', { session: sessionView('/'), ns: ns() })
-    expect(await policy.preCommand(judged)).toEqual({ kind: 'deny', reason: 'sealed' })
+    expect(await policy.preCommand(judged)).toEqual([{ kind: 'deny', reason: 'sealed' }])
     const [request] = engine.requests
     if (request === undefined) throw new Error('the program never ran')
     expect(request.code).toBe('SOURCE 0')
@@ -329,86 +337,127 @@ describe('ScriptPolicy', () => {
     expect(request.env.TEAM).toBe('core')
   })
 
-  it('lets the first deny win over an ask before it', async () => {
+  it('returns each answer in order, up to the first deny', async () => {
+    const late = new FakeProgram(answer({ kind: 'ask', reason: 'late' }))
     const policy = policyWith(
+      'preCommand',
+      new FakeProgram(''),
+      new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
+      new FakeProgram(answer({ kind: 'deny', reason: 'no' })),
+      late,
+    )
+    expect(await policy.preCommand(ctx())).toEqual([
+      { kind: 'ask', reason: 'nod' },
+      { kind: 'deny', reason: 'no' },
+    ])
+    expect(late.requests).toEqual([])
+  })
+
+  it("has the chain read each answer as its own policy's", async () => {
+    const denies = policyWith(
       'preCommand',
       new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
       new FakeProgram(answer({ kind: 'deny', reason: 'no' })),
     )
-    expect(await policy.preCommand(ctx())).toEqual({ kind: 'deny', reason: 'no' })
-  })
-
-  it('holds an ask when nothing denies', async () => {
-    const policy = policyWith(
+    expect(await new Policies([denies]).preCommand(ctx())).toMatchObject({
+      kind: 'deny',
+      reason: 'no',
+    })
+    const asks = policyWith(
       'preVfs',
       new FakeProgram(''),
       new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
     )
-    expect(await policy.preVfs(opsCtx())).toEqual({ kind: 'ask', reason: 'nod' })
+    expect(await new Policies([asks]).preVfs(opsCtx())).toMatchObject({
+      kind: 'ask',
+      reason: 'nod',
+    })
+  })
+
+  it('keeps an ask and a route both', async () => {
+    const policy = policyWith(
+      'preExecute',
+      new FakeProgram(answer({ kind: 'ask', reason: 'nod' })),
+      new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
+    )
+    const [said, route] = await new Policies([policy]).preExecute(line())
+    expect(said).toMatchObject({ kind: 'ask', reason: 'nod' })
+    expect(route).toMatchObject({ kind: 'route', runtime: 'docker' })
   })
 
   it('needs every route to agree', async () => {
-    const line: RouteContext = {
-      line: 'python3 job.py',
-      commands: [],
-      sessionId: 's',
-      agentId: 'a',
-    }
     const agree = policyWith(
       'preExecute',
       new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
       new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
     )
-    expect(await agree.preExecute(line)).toEqual({ kind: 'route', runtime: 'docker' })
+    const [none, route] = await new Policies([agree]).preExecute(line())
+    expect(none).toBeNull()
+    expect(route).toMatchObject({ kind: 'route', runtime: 'docker' })
     const differ = policyWith(
       'preExecute',
       new FakeProgram(answer({ kind: 'route', runtime: 'docker' })),
       new FakeProgram(answer({ kind: 'route', runtime: 'monty' })),
     )
-    expect(await differ.preExecute(line)).toEqual({
+    const [refused, unplaced] = await new Policies([differ]).preExecute(line())
+    expect(unplaced).toBeNull()
+    expect(refused).toMatchObject({
       kind: 'deny',
-      reason: "profile 'release' policy places the line on 'docker' and 'monty'",
+      reason:
+        'policies place the line on different runtimes: ScriptPolicy on docker, ScriptPolicy on monty',
     })
   })
 
   it('fails closed on a program that exits non-zero', async () => {
     const policy = policyWith('preCommand', new FakeProgram('', 3))
-    expect(await policy.preCommand(ctx())).toEqual({
-      kind: 'deny',
-      reason: "profile 'release' policy exited 3",
-    })
+    expect(await policy.preCommand(ctx())).toEqual([
+      { kind: 'deny', reason: "profile 'release' policy exited 3" },
+    ])
   })
 
-  it('fails closed on a program that timed out', async () => {
+  it('fails closed on a program that timed out, and stops it', async () => {
     const seconds = SCRIPT_EVAL_TIMEOUT.seconds
     SCRIPT_EVAL_TIMEOUT.seconds = 0.01
     try {
-      const policy = policyWith('preCommand', new FakeProgram('', 0, 1000))
-      expect(await policy.preCommand(ctx())).toEqual({
-        kind: 'deny',
-        reason: "profile 'release' policy timed out after 0.01s",
-      })
+      const engine = new FakeProgram('', 0, 1000)
+      const policy = policyWith('preCommand', engine)
+      expect(await policy.preCommand(ctx())).toEqual([
+        { kind: 'deny', reason: "profile 'release' policy timed out after 0.01s" },
+      ])
+      const [request] = engine.requests
+      expect(request?.timeoutSeconds).toBe(0.01)
+      expect(request?.signal?.aborted).toBe(true)
     } finally {
       SCRIPT_EVAL_TIMEOUT.seconds = seconds
     }
   })
 
+  it('leaves a run that finished in time alone', async () => {
+    const engine = new FakeProgram()
+    await policyWith('preCommand', engine).preCommand(ctx())
+    const [request] = engine.requests
+    expect(request?.timeoutSeconds).toBe(SCRIPT_EVAL_TIMEOUT.seconds)
+    expect(request?.signal?.aborted).toBe(false)
+  })
+
   it('fails closed on a wrong answer', async () => {
     const policy = policyWith('preCommand', new FakeProgram('{"deny": "x"}'))
-    const action = await policy.preCommand(ctx())
+    const [action] = (await policy.preCommand(ctx())) ?? []
     expect(action?.kind).toBe('deny')
-    expect(action !== null && 'reason' in action ? action.reason : '').toMatch(
+    expect(action !== undefined && 'reason' in action ? action.reason : '').toMatch(
       /^profile 'release' policy must print a JSON answer at pre_command/,
     )
   })
 
   it('fails closed on a runtime policies do not run on', async () => {
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('quickjs')] })))
-    expect(await policy.preCommand(ctx())).toEqual({
-      kind: 'deny',
-      reason:
-        "profile 'release' policy names runtime 'quickjs'; a policy program runs on monty or pyodide",
-    })
+    expect(await policy.preCommand(ctx())).toEqual([
+      {
+        kind: 'deny',
+        reason:
+          "profile 'release' policy names runtime 'quickjs'; a policy program runs on monty or pyodide",
+      },
+    ])
   })
 
   it('fails closed on a runtime it cannot build', async () => {
@@ -416,10 +465,9 @@ describe('ScriptPolicy', () => {
       throw new Error(`script names runtime '${runtime}': nope`)
     }
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] })))
-    expect(await policy.preCommand(ctx())).toEqual({
-      kind: 'deny',
-      reason: "profile 'release' policy names runtime 'pyodide': nope",
-    })
+    expect(await policy.preCommand(ctx())).toEqual([
+      { kind: 'deny', reason: "profile 'release' policy names runtime 'pyodide': nope" },
+    ])
   })
 
   it('builds a runtime once per name and settings, and closes it', async () => {
@@ -478,10 +526,9 @@ describe('ScriptPolicy', () => {
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
     )
-    expect(await policy.preVfs(opsCtx('read', '/repo/a', false))).toEqual({
-      kind: 'deny',
-      reason: 'frozen',
-    })
+    expect(await policy.preVfs(opsCtx('read', '/repo/a', false))).toEqual([
+      { kind: 'deny', reason: 'frozen' },
+    ])
     const [token] = stamped
     if (token === undefined) throw new Error('the bridge was never built')
     expect(await policy.preVfs({ ...opsCtx('read', '/repo/a', false), issuer: token })).toBeNull()
@@ -574,10 +621,9 @@ describe('a policy program on monty', () => {
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
     )
-    expect(await policy.preCommand(ctx('cat'))).toEqual({
-      kind: 'ask',
-      reason: 'sign-off on payload',
-    })
+    expect(await policy.preCommand(ctx('cat'))).toEqual([
+      { kind: 'ask', reason: 'sign-off on payload' },
+    ])
   }, 60_000)
 
   it('reads no file when unwired, so nothing is judged on content it never saw', async () => {
