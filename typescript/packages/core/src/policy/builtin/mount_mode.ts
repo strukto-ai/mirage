@@ -24,12 +24,7 @@ export class MountModePolicy implements Policy {
   preVfs(ctx: VfsContext): Deny | null {
     if (!ctx.write || ctx.mode === undefined) return null
     try {
-      ;(ctx.access?.requireWritable ?? requirePathsWritable)(
-        [ctx.path],
-        ctx.prefix || '/',
-        ctx.mode,
-        ctx.call.subtree,
-      )
+      requirePathsWritable([ctx.path], ctx.prefix || '/', ctx.mode, ctx.call.subtree, ctx.access)
     } catch (error) {
       if (!(error instanceof Error)) throw error
       return { kind: 'deny', reason: posixPhrase('EROFS'), error }

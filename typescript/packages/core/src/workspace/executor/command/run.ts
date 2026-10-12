@@ -261,10 +261,11 @@ export async function runOnMount(
   // mount handler: eager write handlers do not read the signal, and a
   // cancelled `rm` must not run.
   if (signal?.aborted === true) throw makeAbortError(signal)
+  const access = sessionAccess(session)
   try {
     return await mount.runCommand(cmdName, paths, texts, flags, {
       ...(ctx.admission === undefined ? {} : { admission: ctx.admission }),
-      access: sessionAccess(session),
+      access,
       stdin: opts.stdin ?? null,
       cwd: session.cwd,
       dispatch,
@@ -272,8 +273,8 @@ export async function runOnMount(
       env: envSnapshot(session),
       sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
       ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-      execAllowed: registry.isExecAllowed(sessionAccess(session)),
-      execPathAllowed: (virtual) => registry.execAllowedAt(virtual, sessionAccess(session)),
+      execAllowed: registry.isExecAllowed(access),
+      execPathAllowed: (virtual) => registry.execAllowedAt(virtual, access),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ns,
       statPath,

@@ -12,11 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionAccess } from '../../view/types.ts'
-import { sessionAccess } from '../../context/session_context.ts'
 import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
-import { sessionVisibility } from '../../context/session_context.ts'
-import type { NamespaceLinks } from '../../view/types.ts'
+import { sessionAccess, sessionVisibility } from '../../context/session_context.ts'
+import type { NamespaceLinks, SessionAccess } from '../../view/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -89,12 +87,7 @@ function namespaceChildren(
 ): string[] {
   const base = rstripSlash(directory)
   const matcher = globPattern(pattern)
-  return namespaceNames(
-    access === undefined ? sessionVisibility() : access.visibility,
-    registry.mountPrefixes(),
-    links,
-    directory,
-  )
+  return namespaceNames(sessionVisibility(access), registry.mountPrefixes(), links, directory)
     .filter((name) => globNameMatches(name, matcher, access))
     .map((name) => `${base}/${name}`)
 }
@@ -606,7 +599,7 @@ export async function expandBoundaryGlobs(
   access?: SessionAccess,
 ): Promise<(string | PathSpec)[]> {
   const prefixes = registry.mountPrefixes()
-  const vis = access === undefined ? sessionVisibility() : access.visibility
+  const vis = sessionVisibility(access)
   const spans = (p: string | PathSpec): boolean =>
     p instanceof PathSpec &&
     p.pattern !== null &&
@@ -620,7 +613,7 @@ export async function expandBoundaryGlobs(
           nullglob: false,
           failglob: false,
           globstar: false,
-          extglob: access?.extglob ?? false,
+          extglob: access?.shopts.extglob === true,
           ...(access === undefined ? {} : { access }),
         })),
       )

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionAccess } from '../../view/types.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -42,7 +41,7 @@ import type {
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import type { LinkView, OpKwargs } from '../../view/types.ts'
+import type { LinkView, OpKwargs, SessionAccess } from '../../view/types.ts'
 import {
   commandIo,
   resolveGlobOf,
@@ -562,11 +561,12 @@ export class MountEntry {
     const mark = declared(this.vfs.constructor, name)
     if (mark === null || !WRITE_EFFECTS.includes(mark.effect)) return
     const others = values.filter((value): value is PathSpec => value instanceof PathSpec)
-    ;(access?.requireWritable ?? requirePathsWritable)(
+    requirePathsWritable(
       mark.effect === Effect.COPY ? others : [path, ...others],
       this.prefix,
       this.mode,
       mark.subtree,
+      access,
     )
   }
 
@@ -1124,7 +1124,7 @@ export class MountEntry {
       cmd.write &&
       !cmd.pathGuarded &&
       !infoOnly &&
-      (access?.strongestMode ?? strongestModeUnder)(this.prefix, this.mode) === MountMode.READ
+      strongestModeUnder(this.prefix, this.mode, access) === MountMode.READ
     ) {
       return new IOResult({
         exitCode: 1,

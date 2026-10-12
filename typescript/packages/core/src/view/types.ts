@@ -257,14 +257,6 @@ export interface SessionAccess {
   readonly sessionId: string
   readonly visibility: Visibility | null
   readonly umask: number
-  readonly dotglob: boolean
-  readonly extglob: boolean
-  pathMode(virtual: string, prefix: string, mode: MountMode): MountMode
-  strongestMode(prefix: string, mode: MountMode): MountMode
-  requireWritable(
-    paths: readonly PathSpec[],
-    prefix: string,
-    mode: MountMode,
-    subtree?: boolean,
-  ): void
+  readonly shopts: Readonly<Record<string, boolean>>
+  readonly mountModes: ReadonlyMap<string, MountMode> | null
 }

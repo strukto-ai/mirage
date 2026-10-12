@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionAccess } from '../../view/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { sessionAccess } from '../../context/session_context.ts'
-import type { OpKwargs } from '../../view/types.ts'
+import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -125,6 +123,7 @@ import {
   hiddenRefusal,
   lineRunning,
   sessionVisibility,
+  sessionAccess,
 } from '../../context/session_context.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
@@ -249,9 +248,7 @@ async function mkdirOnReadOnly(
         chain
           .slice(index)
           .find(
-            (spec) =>
-              (access?.pathMode ?? effectivePathMode)(spec.virtual, prefix, mode) ===
-              MountMode.READ,
+            (spec) => effectivePathMode(spec.virtual, prefix, mode, access) === MountMode.READ,
           ) ?? path
       throw erofs(blame.virtual, `mount ${prefix} is read-only`)
     }
@@ -505,10 +502,6 @@ export class Dispatcher {
     return bound
   }
 
-  private visibility(): Visibility | null {
-    return this.access === undefined ? sessionVisibility() : this.access.visibility
-  }
-
   private sessionId(): string {
     return this.access?.sessionId ?? sessionId()
   }
@@ -522,7 +515,7 @@ export class Dispatcher {
    * namespace knows nothing at `virtual`.
    */
   private namespaceResult(name: string, virtual: string): string[] | FileStat | null {
-    const vis = this.visibility()
+    const vis = sessionVisibility(this.access)
     if (name === 'readdir') {
       return namespaceListing(vis, this.namespace.mountPrefixes(), this.namespace, virtual)
     }
@@ -583,8 +576,7 @@ export class Dispatcher {
       owner !== null &&
       name === 'mkdir' &&
       explaining() === null &&
-      (this.access?.pathMode ?? effectivePathMode)(call.path.virtual, owner.prefix, owner.mode) ===
-        MountMode.READ
+      effectivePathMode(call.path.virtual, owner.prefix, owner.mode, this.access) === MountMode.READ
     const boundary = looksUp
       ? new Boundary(
           this.policies,
@@ -704,7 +696,7 @@ export class Dispatcher {
     report: OpReport | undefined,
     issuer: symbol | undefined,
   ): Promise<Call> {
-    const vis = this.visibility()
+    const vis = sessionVisibility(this.access)
     if (!pathVisible(vis, path.virtual)) {
       throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name))
     }
@@ -986,7 +978,7 @@ export class Dispatcher {
     let fallback = isMissingPath(err) ? this.namespaceResult(call.name, call.path.virtual) : null
     if (fallback === null) throw err
     if (call.name === 'readdir' && Array.isArray(fallback)) {
-      fallback = visibleEntries(fallback, call.path.virtual, this.visibility())
+      fallback = visibleEntries(fallback, call.path.virtual, sessionVisibility(this.access))
     }
     await bare.admit(mark, call.path, call.write, {}, call.issuer)
     // A synthetic namespace answer (a directory that exists only because a
@@ -1468,7 +1460,7 @@ export class Dispatcher {
         // its parents), and the purge taking the directory's hidden nodes
         // must not take it too.
         const arrived = new Set<string>()
-        const vis = this.visibility()
+        const vis = sessionVisibility(this.access)
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
           if (pathVisible(vis, link)) arrived.add(link)
         }
@@ -1754,7 +1746,7 @@ export class Dispatcher {
     ruleGate: EntryGate | null,
     issuer?: symbol,
   ): Promise<void> {
-    const vis = this.visibility()
+    const vis = sessionVisibility(this.access)
     if (!hiddenUnder(vis, path.virtual)) throw refusal
     let entries: unknown
     try {
@@ -1829,7 +1821,7 @@ export class Dispatcher {
     let walked = followOrLoop(this.namespace, path, false, spelled)
     if (spelled !== path.virtual) walked = posixNormpath(walked)
     if (walked === path.virtual) return path
-    const vis = this.visibility()
+    const vis = sessionVisibility(this.access)
     if (!pathVisible(vis, walked)) throw hiddenRefusal(vis, walked, create)
     return PathSpec.fromStrPath(walked)
   }
@@ -1980,7 +1972,9 @@ export class Dispatcher {
   ): Promise<[boolean, readonly string[] | null]> {
     if (this.namespace.isLink(path.virtual)) return [true, null]
     const prefixes = this.namespace.mountPrefixes()
-    if (namespaceStat(this.visibility(), prefixes, this.namespace, path.virtual) !== null) {
+    if (
+      namespaceStat(sessionVisibility(this.access), prefixes, this.namespace, path.virtual) !== null
+    ) {
       return [true, null]
     }
     const mount = this.namespace.tryMountFor(path.virtual)
@@ -2070,7 +2064,7 @@ export class Dispatcher {
   private async entryType(virtual: string, issuer?: symbol): Promise<FileType | null> {
     if (virtual === '/') return FileType.DIRECTORY
     const prefixes = this.namespace.mountPrefixes()
-    if (namespaceStat(this.visibility(), prefixes, this.namespace, virtual) !== null) {
+    if (namespaceStat(sessionVisibility(this.access), prefixes, this.namespace, virtual) !== null) {
       return FileType.DIRECTORY
     }
     const mount = this.namespace.tryMountFor(virtual)

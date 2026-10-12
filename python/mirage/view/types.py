@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -364,10 +364,5 @@ class SessionAccess:
     session_id: str
     visibility: Visibility | None
     umask: int
-    dotglob: bool
-    extglob: bool
-    path_mode: Callable[[str, str, MountMode], MountMode]
-    strongest_mode: Callable[[str, MountMode], MountMode]
-    require_writable: Callable[
-        [Sequence[PathSpec], str, MountMode, bool], None
-    ]
+    shopts: Mapping[str, bool]
+    mount_modes: Mapping[str, MountMode] | None

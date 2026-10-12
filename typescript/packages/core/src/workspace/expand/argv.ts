@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ExecuteFn } from './types.ts'
-import { sessionAccess } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
@@ -173,6 +172,7 @@ export async function expandArgv(
       }
     }
   }
+  const globOpts = globOptions(session)
   if (program) {
     // bash globs every unquoted word before the program reads any of
     // them, whatever slot it fills and whatever it looks like:
@@ -187,7 +187,7 @@ export async function expandArgv(
     wordKinds = [
       ...new Array<ValueType | null>(consumed - 1).fill('str'),
       ...tail.map((word, i): ValueType | null =>
-        hasGlob(word, sessionAccess(session)) ? 'path' : (own[i] ?? null),
+        hasGlob(word, globOpts.access) ? 'path' : (own[i] ?? null),
       ),
     ]
   }
@@ -198,7 +198,7 @@ export async function expandArgv(
     session.cwd,
     wordKinds,
     wordBases,
-    sessionAccess(session),
+    globOpts.access,
   )
   // A glob word is resolved by whoever consumes it, exactly once:
   // WordPolicy.SHELL words get matches here; mount commands keep
@@ -209,7 +209,6 @@ export async function expandArgv(
   // only later matches under the rule's path would pass a gate its
   // matches fail. And so does a pattern that walks a `.` or `..`, which no
   // backend key holds.
-  const globOpts = globOptions(session)
   let words =
     !refused &&
     (policy === WordPolicy.SHELL ||

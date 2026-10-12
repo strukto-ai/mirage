@@ -40,8 +40,7 @@ export function classifyWord(
   // like a path at all is a question about the name itself, so the shape
   // tests below read the literal spelling.
   const wordHasGlob = hasGlob(word, access)
-  const shape =
-    wordHasGlob && (access?.extglob ?? extglobActive()) ? patternShape(word) : unmarkGlobs(word)
+  const shape = wordHasGlob && extglobActive(access) ? patternShape(word) : unmarkGlobs(word)
 
   if (word.startsWith('/')) {
     // A quoted character names the mount literally (`'/team+'/*`).

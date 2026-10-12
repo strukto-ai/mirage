@@ -25,7 +25,7 @@ import type { Hide, VfsContext } from '../types.ts'
 export class HiddenPathsPolicy {
   /** Hide the op's path when the bound session cannot see it. */
   preVfs(ctx: VfsContext): Promise<Hide | null> {
-    const vis = ctx.access === undefined ? sessionVisibility() : ctx.access.visibility
+    const vis = sessionVisibility(ctx.access)
     if (pathVisible(vis, ctx.path.virtual)) return Promise.resolve(null)
     return Promise.resolve({
       kind: 'hide',

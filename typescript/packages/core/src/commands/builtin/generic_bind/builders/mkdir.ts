@@ -222,7 +222,7 @@ const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     // mask away from bash's default costs a setattr, since 755 is what
     // every backend already renders for a fresh directory; parents
     // made by `-p` keep that default.
-    const umask = opts.access?.umask ?? sessionUmask()
+    const umask = sessionUmask(opts.access)
     if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
   }
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)

@@ -44,11 +44,7 @@ def _meta_index(pattern: str, access: SessionAccess | None = None) -> int:
         idx = pattern.find(ch)
         if idx != -1 and (first == -1 or idx < first):
             first = idx
-    opener = (
-        EXTGLOB_RE.search(pattern)
-        if (access.extglob if access is not None else extglob_active())
-        else None
-    )
+    opener = EXTGLOB_RE.search(pattern) if extglob_active(access) else None
     if opener is not None and (first == -1 or opener.start() < first):
         first = opener.start()
     return first
@@ -230,8 +226,7 @@ def has_glob(
         segment (str): one path component.
     """
     return any(ch in segment for ch in GLOB_CHARS) or (
-        (access.extglob if access is not None else extglob_active())
-        and EXTGLOB_RE.search(segment) is not None
+        extglob_active(access) and EXTGLOB_RE.search(segment) is not None
     )
 
 
@@ -387,7 +382,7 @@ def glob_parts(
     """
     return (
         pattern_parts(pattern)
-        if (access.extglob if access is not None else extglob_active())
+        if extglob_active(access)
         else pattern.split("/")
     )
 
@@ -438,10 +433,8 @@ def glob_name_matches(
     return fnmatch(
         name,
         pattern,
-        extglob=(access.extglob if access is not None else extglob_active()),
-        period=not (
-            access.dotglob if access is not None else dotglob_active()
-        ),
+        extglob=extglob_active(access),
+        period=not dotglob_active(access),
     )
 
 
@@ -706,7 +699,7 @@ async def resolve_glob_with(
             it a trailing slash keeps every owed name.
     """
     result: list[PathSpec] = []
-    vis = access.visibility if access is not None else session_visibility()
+    vis = session_visibility(access)
     for p in paths:
         if p.resolved:
             result.append(p)

@@ -170,7 +170,7 @@ export function getCurrentSessionUnlessForeign(owner: SessionOwner): SessionStat
  * profile cannot see. Folded to the weakest across every live session,
  * which on an isolating runtime is the bound one alone.
  */
-function sessionModeOf(sess: SessionState, mountPrefix: string): MountMode {
+function sessionModeOf(sess: SessionAccess, mountPrefix: string): MountMode {
   if (sess.mountModes == null) return MountMode.EXEC
   return sess.mountModes.get(norm(mountPrefix)) ?? MountMode.EXEC
 }
@@ -185,15 +185,11 @@ function sessionMode(mountPrefix: string): MountMode {
 
 export const DEFAULT_UMASK = 0o022
 
-/**
- * The file-creation mask of the session bound to this context, read by
- * the creators that run inside a command handler (`mkdir`, which cannot
- * be handed the session) the way `dotglobActive` reads the shell
- * options. bash's default when no session is bound; ORed across live
- * sessions otherwise, since a mask can only clear more bits, failing
- * toward the tighter mode.
- */
-export function sessionUmask(): number {
+/** The owner's creation mask, or the ambient mask when no owner is supplied.
+ * Unbound browser calls OR every live session's mask so an overlapping
+ * wider session cannot relax permissions. No live session means bash's default. */
+export function sessionUmask(access?: SessionAccess): number {
+  if (access !== undefined) return access.umask
   const live = liveSessions()
   if (live.length === 0) return DEFAULT_UMASK
   let mask = 0
@@ -201,48 +197,27 @@ export function sessionUmask(): number {
   return mask
 }
 
-/**
- * Whether the bound session's `shopt -s dotglob` is on. Read inside
- * pathname expansion, which runs in every backend's resolveGlob and so
- * cannot be handed the session: a name starting with `.` is matched
- * only by a pattern that also starts with `.`, unless dotglob relaxes
- * it. False when no session is bound (bash's default), and unanimous
- * across live sessions otherwise: dotfiles entering a match set is the
- * surprising direction, so one session's opt-in must not widen a
- * concurrent one's expansion.
- */
-export function dotglobActive(): boolean {
+/** Whether the owner's pathname expansion includes leading dots.
+ * Unbound browser calls require every live session to opt in; no live
+ * session means bash's default, off. */
+export function dotglobActive(access?: SessionAccess): boolean {
+  if (access !== undefined) return access.shopts.dotglob === true
   const live = liveSessions()
   return live.length > 0 && live.every((sess) => sess.shopts.dotglob === true)
 }
 
-/**
- * Whether the bound session's `shopt -s extglob` is on. Read where
- * `dotglobActive` is, for the same reason: pathname expansion runs in every
- * backend's resolveGlob, and whether `@(a|b)` is a group or text decides
- * both how a word splits into segments and how a name matches one. False
- * when no session is bound, which is bash's default. Unlike dotglob it is
- * the evaluating session's alone: it is grammar, which a nested shell turns
- * on for itself while its parent's stays off.
- */
-export function extglobActive(): boolean {
+/** Whether the owner's patterns use extglob grammar. Without an explicit
+ * owner, read the evaluating session; no session means bash's default, off. */
+export function extglobActive(access?: SessionAccess): boolean {
+  if (access !== undefined) return access.shopts.extglob === true
   return getCurrentSession()?.shopts.extglob === true
 }
 
-/**
- * The bound session's visibility, null when no session is bound.
- *
- * For the op boundary, which runs under the session it serves and
- * answers a hidden path as absent. A command reads the visibility off
- * its namespace view (`opts.ns.visibility`) instead, so nothing past
- * the boundary consults the session about what exists. On the fallback
- * storage several sessions can be live at once, and the answer merges
- * toward hiding: every live session's hides, re-opened only by a show
- * every hiding session states (by path: the mode gates read each
- * session's own shows), so no live session sees more than it would
- * alone.
- */
-export function sessionVisibility(): Visibility | null {
+/** The owner's visibility, or the ambient view when no owner is supplied.
+ * Unbound browser calls combine live sessions' hides and keep only shows
+ * they all grant. An explicit unrestricted owner stays unrestricted. */
+export function sessionVisibility(access?: SessionAccess): Visibility | null {
+  if (access !== undefined) return access.visibility
   const live = liveSessions().map((sess) => sess.visibility)
   const first = live[0]
   if (first === undefined) return null
@@ -686,7 +661,7 @@ export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): M
  * isolating runtime is the bound one alone.
  */
 function pathModeUnder(
-  sess: SessionState,
+  sess: SessionAccess,
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
@@ -695,7 +670,7 @@ function pathModeUnder(
   const cap = sess.mountModes?.get(prefix) ?? null
   let bestDepth = cap != null ? anchorDepth(prefix) : null
   let bestMode: MountMode | null = cap
-  const deepest = shownMode(sess.visibility.shown, virtual)
+  const deepest = shownMode(sess.visibility?.shown, virtual)
   if (deepest != null) {
     const [depth, mode] = deepest
     if (bestDepth === null || depth > bestDepth) {
@@ -713,7 +688,9 @@ export function effectivePathMode(
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
+  access?: SessionAccess,
 ): MountMode {
+  if (access !== undefined) return pathModeUnder(access, virtual, mountPrefix, mountMode)
   let mode = mountMode
   for (const sess of liveSessions()) {
     mode = weakerMode(mode, pathModeUnder(sess, virtual, mountPrefix, mountMode))
@@ -742,12 +719,12 @@ function reachesUnder(head: string, prefix: string): boolean {
  * configured mode. Mirrors the Python `strongest_under_session`.
  */
 export function strongestUnderSession(
-  sess: SessionState,
+  sess: SessionAccess,
   mountPrefix: string,
   mountMode: MountMode,
 ): MountMode {
   let best = weakerMode(mountMode, sessionModeOf(sess, mountPrefix))
-  const shown = sess.visibility.shown
+  const shown = sess.visibility?.shown
   if (shown == null) return best
   const prefix = norm(mountPrefix)
   for (const entry of shown.entries) {
@@ -770,7 +747,12 @@ export function strongestUnderSession(
  * refuses per path), and the interpreters' any-`x` rule counts a show
  * grant the way it counts a whole mount.
  */
-export function strongestModeUnder(mountPrefix: string, mountMode: MountMode): MountMode {
+export function strongestModeUnder(
+  mountPrefix: string,
+  mountMode: MountMode,
+  access?: SessionAccess,
+): MountMode {
+  if (access !== undefined) return strongestUnderSession(access, mountPrefix, mountMode)
   let best = mountMode
   for (const sess of liveSessions()) {
     best = weakerMode(best, strongestUnderSession(sess, mountPrefix, mountMode))
@@ -794,12 +776,12 @@ export function strongestModeUnder(mountPrefix: string, mountMode: MountMode): M
  * blame any live session raises answers.
  */
 function readonlyBelowUnder(
-  sess: SessionState,
+  sess: SessionAccess,
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
 ): string | null {
-  const shown = sess.visibility.shown
+  const shown = sess.visibility?.shown
   if (shown == null) return null
   const v = '/' + stripSlash(virtual)
   for (const entry of shown.entries) {
@@ -824,7 +806,9 @@ export function readonlyBelow(
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
+  access?: SessionAccess,
 ): string | null {
+  if (access !== undefined) return readonlyBelowUnder(access, virtual, mountPrefix, mountMode)
   for (const sess of liveSessions()) {
     const blame = readonlyBelowUnder(sess, virtual, mountPrefix, mountMode)
     if (blame !== null) return blame
@@ -838,15 +822,16 @@ export function requirePathsWritable(
   mountPrefix: string,
   mountMode: MountMode,
   subtree = false,
+  access?: SessionAccess,
 ): void {
   for (const path of paths) {
-    if (effectivePathMode(path.virtual, mountPrefix, mountMode) === MountMode.READ) {
+    if (effectivePathMode(path.virtual, mountPrefix, mountMode, access) === MountMode.READ) {
       throw erofs(path, `mount ${mountPrefix} is read-only`)
     }
   }
   if (subtree) {
     for (const path of paths) {
-      const blame = readonlyBelow(path.virtual, mountPrefix, mountMode)
+      const blame = readonlyBelow(path.virtual, mountPrefix, mountMode, access)
       if (blame !== null) throw erofs(blame, `mount ${mountPrefix} is read-only`)
     }
   }
@@ -873,7 +858,7 @@ export function requireMountWritable(mountPrefix: string, access?: SessionAccess
   if (
     (access === undefined
       ? effectiveMountMode(prefix, mode)
-      : access.pathMode(prefix, prefix, mode)) === MountMode.READ
+      : effectivePathMode(prefix, prefix, mode, access)) === MountMode.READ
   ) {
     throw erofs(prefix, `mount ${prefix} is read-only`)
   }
@@ -881,38 +866,13 @@ export function requireMountWritable(mountPrefix: string, access?: SessionAccess
 
 /** Bind access to its owner before an asynchronous operation can suspend. */
 export function sessionAccess(session: SessionState | null): SessionAccess {
-  return {
-    sessionId: session?.sessionId ?? '',
-    get visibility() {
-      return session?.visibility ?? null
-    },
-    get umask() {
-      return session?.umask ?? DEFAULT_UMASK
-    },
-    get dotglob() {
-      return session?.shopts.dotglob === true
-    },
-    get extglob() {
-      return session?.shopts.extglob === true
-    },
-    pathMode: (virtual, prefix, mode) =>
-      session === null ? mode : pathModeUnder(session, virtual, prefix, mode),
-    strongestMode: (prefix, mode) =>
-      session === null ? mode : strongestUnderSession(session, prefix, mode),
-    requireWritable: (paths, prefix, mode, subtree = false) => {
-      for (const path of paths) {
-        if (
-          (session === null ? mode : pathModeUnder(session, path.virtual, prefix, mode)) ===
-          MountMode.READ
-        ) {
-          throw erofs(path, `mount ${prefix} is read-only`)
-        }
-        const blame =
-          subtree && session !== null
-            ? readonlyBelowUnder(session, path.virtual, prefix, mode)
-            : null
-        if (blame !== null) throw erofs(blame, `mount ${prefix} is read-only`)
-      }
-    },
-  }
+  return (
+    session ?? {
+      sessionId: '',
+      visibility: null,
+      umask: DEFAULT_UMASK,
+      shopts: {},
+      mountModes: null,
+    }
+  )
 }

@@ -523,8 +523,7 @@ export class MountRegistry {
       if (m.prefix === DEV_PREFIX) continue
       // strongestModeUnder, not effectiveMode: a session whose only x
       // grant is a show entry still counts as having one.
-      if ((access?.strongestMode ?? strongestModeUnder)(m.prefix, m.mode) === MountMode.EXEC)
-        return true
+      if (strongestModeUnder(m.prefix, m.mode, access) === MountMode.EXEC) return true
     }
     return false
   }
@@ -540,7 +539,7 @@ export class MountRegistry {
   execAllowedAt = (virtual: string, access?: SessionAccess): boolean => {
     const m = this.tryMountFor(virtual)
     if (m === null) return false
-    return (access?.pathMode ?? effectivePathMode)(virtual, m.prefix, m.mode) === MountMode.EXEC
+    return effectivePathMode(virtual, m.prefix, m.mode, access) === MountMode.EXEC
   }
 
   mountForCommand(cmdName: string): MountEntry | null {

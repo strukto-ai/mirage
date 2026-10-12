@@ -213,65 +213,52 @@ def _session_mode(mount_prefix: str) -> MountMode:
 DEFAULT_UMASK = 0o022
 
 
-def session_umask() -> int:
-    """The file-creation mask of the session bound to this context.
-
-    Read by the creators that run inside a command handler (`mkdir`,
-    which cannot be handed the session) the way `dotglob_active` reads
-    the shell options: bash's default when no session is bound,
-    which is also what mirage's own 644/755 defaults for a new entry
-    already assume.
+def session_umask(access: SessionAccess | None = None) -> int:
+    """The owner's creation mask, or the current session's; bash's default if absent.
 
     Args:
-        None
+        access (SessionAccess | None): explicit owner, else the current context.
     """
+    if access is not None:
+        return access.umask
     sess = get_current_session()
     return DEFAULT_UMASK if sess is None else sess.umask
 
 
-def dotglob_active() -> bool:
-    """Whether the bound session's `shopt -s dotglob` is on.
-
-    Read inside pathname expansion, which runs in every backend's
-    `resolve_glob` and so cannot be handed the session: bash's rule is
-    that a name starting with `.` is matched only by a pattern that
-    starts with `.`, and `dotglob` is the one thing that relaxes it.
-    False when no session is bound, which is bash's default.
+def dotglob_active(access: SessionAccess | None = None) -> bool:
+    """Whether the owner's pathname expansion includes leading dots; off if absent.
 
     Args:
-        None
+        access (SessionAccess | None): explicit owner, else the current context.
     """
+    if access is not None:
+        return access.shopts.get("dotglob", False)
     sess = get_current_session()
     return sess is not None and bool(sess.shopts.get("dotglob"))
 
 
-def extglob_active() -> bool:
-    """Whether the bound session's `shopt -s extglob` is on.
-
-    Read where `dotglob_active` is, for the same reason: pathname
-    expansion runs in every backend's `resolve_glob`, and whether
-    `@(a|b)` is a group or text decides both how a word splits into
-    segments and how a name matches one. False when no session is bound,
-    which is bash's default.
+def extglob_active(access: SessionAccess | None = None) -> bool:
+    """Whether the owner's patterns use extglob grammar; off if absent.
 
     Args:
-        None
+        access (SessionAccess | None): explicit owner, else the current context.
     """
+    if access is not None:
+        return access.shopts.get("extglob", False)
     sess = get_current_session()
     return sess is not None and bool(sess.shopts.get("extglob"))
 
 
-def session_visibility() -> Visibility | None:
-    """The bound session's visibility, None when no session is bound.
-
-    For the op boundary, which runs under the session it serves and
-    answers a hidden path as absent. A command reads the visibility off
-    its namespace view (``opts.ns.visibility``) instead, so nothing past
-    the boundary consults the session about what exists.
+def session_visibility(
+    access: SessionAccess | None = None,
+) -> Visibility | None:
+    """The owner's visibility, or the current session's; None if unrestricted.
 
     Args:
-        None
+        access (SessionAccess | None): explicit owner, else the current context.
     """
+    if access is not None:
+        return access.visibility
     sess = get_current_session()
     return sess.visibility if sess is not None else None
 
@@ -677,7 +664,10 @@ def effective_mount_mode(
 
 
 def effective_path_mode(
-    virtual: str, mount_prefix: str, mount_mode: MountMode
+    virtual: str,
+    mount_prefix: str,
+    mount_mode: MountMode,
+    access: SessionAccess | None = None,
 ) -> MountMode:
     """The mode in force at one path: the whole VFS axis on the one
     anchor-depth rule.
@@ -695,14 +685,18 @@ def effective_path_mode(
         virtual (str): absolute virtual path the op touches.
         mount_prefix (str): the owning mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
+        access (SessionAccess | None): explicit owner, else the current context.
     """
     return _path_mode_under(
-        get_current_session(), virtual, mount_prefix, mount_mode
+        access if access is not None else get_current_session(),
+        virtual,
+        mount_prefix,
+        mount_mode,
     )
 
 
 def _path_mode_under(
-    sess: SessionState | None,
+    sess: SessionState | SessionAccess | None,
     virtual: str,
     mount_prefix: str,
     mount_mode: MountMode,
@@ -715,7 +709,9 @@ def _path_mode_under(
     )
     best_depth = anchor_depth(prefix) if cap is not None else None
     best_mode = cap
-    deepest = shown_mode(sess.visibility.shown, virtual)
+    deepest = shown_mode(
+        sess.visibility.shown if sess.visibility is not None else None, virtual
+    )
     if deepest is not None:
         depth, mode = deepest
         if best_depth is None or depth > best_depth:
@@ -746,14 +742,16 @@ def _reaches_under(head: str, prefix: str) -> bool:
 
 
 def strongest_under_session(
-    sess: SessionState, mount_prefix: str, mount_mode: MountMode
+    sess: SessionState | SessionAccess,
+    mount_prefix: str,
+    mount_mode: MountMode,
 ) -> MountMode:
     """The strongest mode one session reaches anywhere under a mount:
     its mount-wide mode, or a deeper show grant, still capped by the
     mount's configured mode.
 
     Args:
-        sess (SessionState): the session.
+        sess (SessionState | SessionAccess): the session.
         mount_prefix (str): the mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
@@ -763,7 +761,7 @@ def strongest_under_session(
         else MountMode.EXEC
     )
     best = weaker_mode(mount_mode, cap)
-    shown = sess.visibility.shown
+    shown = sess.visibility.shown if sess.visibility is not None else None
     if shown is None:
         return best
     prefix = norm(mount_prefix)
@@ -778,7 +776,9 @@ def strongest_under_session(
 
 
 def strongest_mode_under(
-    mount_prefix: str, mount_mode: MountMode
+    mount_prefix: str,
+    mount_mode: MountMode,
+    access: SessionAccess | None = None,
 ) -> MountMode:
     """The strongest mode the current session reaches anywhere under a
     mount (:func:`strongest_under_session`), the mount's own mode when no
@@ -793,6 +793,8 @@ def strongest_mode_under(
         mount_prefix (str): the mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
+    if access is not None:
+        return strongest_under_session(access, mount_prefix, mount_mode)
     sess = get_current_session()
     if sess is None:
         return mount_mode
@@ -800,7 +802,10 @@ def strongest_mode_under(
 
 
 def readonly_below(
-    virtual: str, mount_prefix: str, mount_mode: MountMode
+    virtual: str,
+    mount_prefix: str,
+    mount_mode: MountMode,
+    access: SessionAccess | None = None,
 ) -> str | None:
     """The path to blame when a subtree mutation reaches into a
     read-only region below its operand, None when nothing below is
@@ -820,19 +825,27 @@ def readonly_below(
         virtual (str): absolute virtual path the mutation covers.
         mount_prefix (str): the owning mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
+        access (SessionAccess | None): explicit owner, else the current context.
     """
     return _readonly_below_under(
-        get_current_session(), virtual, mount_prefix, mount_mode
+        access if access is not None else get_current_session(),
+        virtual,
+        mount_prefix,
+        mount_mode,
     )
 
 
 def _readonly_below_under(
-    sess: SessionState | None,
+    sess: SessionState | SessionAccess | None,
     virtual: str,
     mount_prefix: str,
     mount_mode: MountMode,
 ) -> str | None:
-    shown = sess.visibility.shown if sess is not None else None
+    shown = (
+        sess.visibility.shown
+        if sess is not None and sess.visibility is not None
+        else None
+    )
     if shown is None:
         return None
     v = "/" + virtual.strip("/")
@@ -858,29 +871,33 @@ def _readonly_below_under(
 
 
 def require_paths_writable(
-    paths: list[PathSpec],
+    paths: Sequence[PathSpec],
     mount_prefix: str,
     mount_mode: MountMode,
     *,
     subtree: bool = False,
+    access: SessionAccess | None = None,
 ) -> None:
     """Apply the same mode ceiling to command, dispatcher and namespace writes.
 
     Args:
-        paths (list[PathSpec]): written endpoints, excluding copy sources.
+        paths (Sequence[PathSpec]): written endpoints, excluding copy sources.
         mount_prefix (str): the governing mount prefix.
         mount_mode (MountMode): the configured authorization ceiling.
         subtree (bool): whether each endpoint's descendants are mutated.
+        access (SessionAccess | None): explicit owner, else the current context.
     """
     for path in paths:
         if (
-            effective_path_mode(path.virtual, mount_prefix, mount_mode)
+            effective_path_mode(path.virtual, mount_prefix, mount_mode, access)
             == MountMode.READ
         ):
             raise erofs(path.virtual)
     if subtree:
         for path in paths:
-            blame = readonly_below(path.virtual, mount_prefix, mount_mode)
+            blame = readonly_below(
+                path.virtual, mount_prefix, mount_mode, access
+            )
             if blame is not None:
                 raise erofs(blame)
 
@@ -910,43 +927,10 @@ def require_mount_writable() -> None:
 def session_access(session: SessionState | None) -> SessionAccess:
     """Bind access to its owner before an asynchronous operation suspends."""
 
-    def require_writable(
-        paths: Sequence[PathSpec],
-        prefix: str,
-        mode: MountMode,
-        subtree: bool = False,
-    ) -> None:
-        for path in paths:
-            if (
-                _path_mode_under(session, path.virtual, prefix, mode)
-                == MountMode.READ
-            ):
-                raise erofs(path.virtual)
-            blame = (
-                _readonly_below_under(session, path.virtual, prefix, mode)
-                if subtree
-                else None
-            )
-            if blame is not None:
-                raise erofs(blame)
-
     return SessionAccess(
         session_id=session.session_id if session is not None else "",
         visibility=session.visibility if session is not None else None,
         umask=session.umask if session is not None else DEFAULT_UMASK,
-        dotglob=session.shopts.get("dotglob", False)
-        if session is not None
-        else False,
-        extglob=session.shopts.get("extglob", False)
-        if session is not None
-        else False,
-        path_mode=lambda virtual, prefix, mode: _path_mode_under(
-            session, virtual, prefix, mode
-        ),
-        strongest_mode=lambda prefix, mode: (
-            strongest_under_session(session, prefix, mode)
-            if session is not None
-            else mode
-        ),
-        require_writable=require_writable,
+        shopts=session.shopts if session is not None else {},
+        mount_modes=session.mount_modes if session is not None else None,
     )

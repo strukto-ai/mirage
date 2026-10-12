@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionAccess } from '../../../view/types.ts'
 import {
   Effect,
   Target,
@@ -46,7 +45,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import type { StatOverlay } from '../../../view/types.ts'
+import type { SessionAccess, StatOverlay } from '../../../view/types.ts'
 
 import {
   FileType,
@@ -812,14 +811,14 @@ export interface GenericCommand<A extends Accessor = Accessor> {
  * boundary so each command renders the refusal through its own
  * missing-file wording, indistinguishable from a real miss. */
 export function refuseHidden(path: PathSpec, create: boolean, access?: SessionAccess): void {
-  const vis = access === undefined ? sessionVisibility() : access.visibility
+  const vis = sessionVisibility(access)
   if (pathVisible(vis, path.virtual)) return
   throw hiddenRefusal(vis, path.virtual, create)
 }
 
 function visibleChildren(entries: string[], parent: PathSpec, access?: SessionAccess): string[] {
   const base = rstripSlash(parent.virtual)
-  const vis = access === undefined ? sessionVisibility() : access.visibility
+  const vis = sessionVisibility(access)
   return entries.filter((e) => {
     const trimmed = rstripSlash(e)
     return pathVisible(vis, `${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
@@ -828,11 +827,7 @@ function visibleChildren(entries: string[], parent: PathSpec, access?: SessionAc
 
 /** Whether the bound session's hides make this relocation a reveal. */
 function moveWouldReveal(src: PathSpec, dst: PathSpec, access?: SessionAccess): boolean {
-  return moveReveals(
-    access === undefined ? sessionVisibility() : access.visibility,
-    src.virtual,
-    dst.virtual,
-  )
+  return moveReveals(sessionVisibility(access), src.virtual, dst.virtual)
 }
 
 /** Refuse a relocation that would surface a hidden path.
@@ -870,13 +865,7 @@ function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): Command
   const ex = ops.exists
   if (ex !== undefined) {
     guarded.exists = async (accessor, path) => {
-      if (
-        !pathVisible(
-          ops.access === undefined ? sessionVisibility() : ops.access.visibility,
-          path.virtual,
-        )
-      )
-        return false
+      if (!pathVisible(sessionVisibility(ops.access), path.virtual)) return false
       return ex(accessor, path)
     }
   }
@@ -1093,8 +1082,7 @@ function checkCommandPaths(
   if (mutation !== undefined && checkMode) {
     for (const path of mutation.firstSource ? paths.slice(1) : paths) {
       const gate = mountGateFor(path.virtual)
-      if (gate !== null)
-        (access?.requireWritable ?? requirePathsWritable)([path], ...gate, mutation.subtree)
+      if (gate !== null) requirePathsWritable([path], ...gate, mutation.subtree, access)
     }
   }
 }
@@ -1151,10 +1139,7 @@ export function withCommandGuards<A extends Accessor>(
   if (guarded.exists !== undefined) {
     const exists = guarded.exists
     guarded.exists = (accessor, path) =>
-      pathVisible(
-        ops.access === undefined ? sessionVisibility() : ops.access.visibility,
-        path.virtual,
-      )
+      pathVisible(sessionVisibility(ops.access), path.virtual)
         ? exists(accessor, path)
         : Promise.resolve(false)
   }
