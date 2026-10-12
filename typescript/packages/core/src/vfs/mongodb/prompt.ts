@@ -23,6 +23,6 @@ export const PROMPT = `{prefix}
       documents.jsonl
   Read database.json first to discover entities. Use schema.json before
   reading large document streams; head, tail, wc, grep, rg, and jq understand
-  documents.jsonl, with directory-scope grep/rg pushed down to MongoDB.
+  documents.jsonl; grep and rg fetch only the documents that may match.
   Unknown stat sizes display as -; wc -c measures bytes and wc -l counts
   documents on demand. These counts may scan the collection.`

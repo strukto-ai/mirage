@@ -16,7 +16,9 @@ import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { read as mongodbRead, streamAny as mongodbStream } from '../../core/mongodb/read.ts'
 import { readdir as mongodbReaddir } from '../../core/mongodb/readdir.ts'
+import { linesContaining as mongodbLinesContaining } from '../../core/mongodb/search.ts'
 import { stat as mongodbStat } from '../../core/mongodb/stat.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
@@ -46,5 +48,9 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
 
   override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
     return mongodbStream(this.accessor, path, index)
+  }
+
+  override linesContaining(path: PathSpec, text: string): Promise<ByteSource | null> {
+    return mongodbLinesContaining(this.accessor, path, text)
   }
 }

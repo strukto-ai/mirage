@@ -219,6 +219,19 @@
           }
         }
       }
+    },
+    {
+      "id": "mongodb_search_matches_keys_values_and_views",
+      "seq": 620079,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "grep -ric RATING /mongodb/mirage_integ/collections | sort; rg -iw HISTORY /mongodb/mirage_integ/; rg -c ben /mongodb/mirage_integ/views",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ/collections/authors/documents.jsonl:0\n/mongodb/mirage_integ/collections/authors/schema.json:0\n/mongodb/mirage_integ/collections/books/documents.jsonl:5\n/mongodb/mirage_integ/collections/books/schema.json:1\n/mongodb/mirage_integ/collections/system.views/documents.jsonl:0\n/mongodb/mirage_integ/collections/system.views/schema.json:0\n/mongodb/mirage_integ/collections/books/documents.jsonl:{\"_id\": 4, \"title\": \"delta\", \"author\": \"ada\", \"year\": 2023, \"tags\": [\"history\"], \"rating\": 4}\n/mongodb/mirage_integ/views/recent_books/documents.jsonl:{\"_id\": 4, \"title\": \"delta\", \"author\": \"ada\", \"year\": 2023, \"tags\": [\"history\"], \"rating\": 4}\n/mongodb/mirage_integ/views/recent_books/documents.jsonl:1\n",
+        "stderr": ""
+      }
     }
   ]
 }

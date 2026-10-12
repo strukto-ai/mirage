@@ -161,7 +161,7 @@ memory ahead of the consumer.
 | `tail -n K`                  | Server-side sort + limit; a K past `max_doc_limit` stops there, notes it on stderr, exits 1 |
 | `tail -f`                    | Opens a change stream; yields each new insert as a JSONL line     |
 | `grep` (file level)          | Streams from `documents.jsonl`; supports `-m` for short-circuit   |
-| `grep -r` (collection/db level) | Every file under the directory, each read as `cat` renders it; no result cap |
+| `grep -r` (collection/db level) | Every file under the directory; MongoDB sends only the documents that may match |
 | `jq`                         | Inherits the streaming `cat` source                               |
 | `wc`                         | Uses `countDocuments()` server-side; zero download                |
 | `stat`                       | Existence and type only; no counts or index queries   |
@@ -170,11 +170,17 @@ memory ahead of the consumer.
 
 ### grep and rg
 
-grep and rg read each file as `cat` renders it, streaming `documents.jsonl`
-so `-m` stops the cursor early; `grep -r` and `rg` walk a directory. A
-MongoDB query cannot say which documents' rendered lines hold a text (keys,
-nested values and the JSON around them), so no server-side search stands in
-for the read.
+For one plain text in a collection's or view's `documents.jsonl`, grep and
+rg ask MongoDB for the documents that may hold it, in the `_id` order a plain
+read takes, and search their lines instead of the whole collection. The
+filter matches the text in any case against every key and string of a
+document, eight levels deep; a document nested deeper, or holding a value it
+cannot look into (binary, a regex, code), is always sent. MongoDB still scans
+the collection, but only those documents are sent. The file is read as usual
+when the text holds anything but ASCII letters and spaces, or could match an
+Extended JSON key (`$oid`, `$date`, `$numberLong`), a JSON literal (`true`,
+`null`) or an id (a word of hex letters only, such as `ada`). `schema.json`
+and `database.json` are always read, and `-m` stops the cursor early.
 
 ```bash
 grep "Godfather" "/mongodb/sample_mflix/collections/movies/documents.jsonl"
@@ -272,8 +278,8 @@ async def main():
     )
     print(await r.stdout_str())
 
-    # Search across a database (uses MongoDB query engine)
-    r = await ws.shell('grep "Godfather" "/mongodb/sample_mflix/"')
+    # Search across a database
+    r = await ws.shell('grep -r "Godfather" "/mongodb/sample_mflix/"')
     print(await r.stdout_str())
 
     # Count documents (server-side, no download)
@@ -330,8 +336,8 @@ wc -l "/mongodb/sample_mflix/collections/comments/documents.jsonl"
 # Most recent documents (sorted by _id desc)
 tail -n 10 "/mongodb/sample_mflix/collections/comments/documents.jsonl"
 
-# Server-side query at collection scope avoids streaming the whole jsonl
-grep "love" "/mongodb/sample_mflix/collections/comments/"
+# MongoDB sends only the comments that may hold the word
+grep -r "love" "/mongodb/sample_mflix/collections/comments/"
 
 # Drop heavy fields via elide_fields, then take the slice you want
 head -n 20 "/mongodb/sample_mflix/collections/movies/documents.jsonl"

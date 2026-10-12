@@ -20,7 +20,11 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb.read import read as _read
 from mirage.core.mongodb.read import stream_any as _read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
+from mirage.core.mongodb.search import (
+    lines_containing as _lines_containing,
+)
 from mirage.core.mongodb.stat import stat as _stat
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -66,6 +70,16 @@ class MongoDBVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
         return _read_stream(self.accessor, path, index)
+
+    async def lines_containing(
+        self,
+        path: PathSpec,
+        text: str,
+        *,
+        ignore_case: bool,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> ByteSource | None:
+        return await _lines_containing(self.accessor, path, text)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
