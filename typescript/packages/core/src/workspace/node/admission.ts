@@ -39,7 +39,7 @@ import { commandNodes } from '../../runtime/routing/index.ts'
 import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
-import { PathSpec, type Refusal } from '../../types.ts'
+import { PathSpec, type Refusal, type Visibility } from '../../types.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -206,7 +206,10 @@ export class Admitted implements EntryGate {
  * follows links, the targets they resolve to. `cat /data/link` reads
  * `/data/secret`, so a rule protecting the target has to see it, and a
  * command-scoped rule never runs at the dispatcher where the resolved path
- * would otherwise be checked. The follow policy is the command's own
+ * would otherwise be checked. The links are followed as the command's own
+ * session sees them (`vis`), as the router follows them: on the browser
+ * fallback the ambient view folds every live session's hides, and a peer
+ * hiding the link must not keep its target from the rule. The follow policy is the command's own
  * (`followsLastComponent`: rm, mv, ln, stat, tar ... act on the link
  * itself, `-L` turns following back on), the same one the router
  * applies to the operands before the handler runs, so a rule sees
@@ -228,6 +231,7 @@ export function policyScopes(
   operands: readonly (string | PathSpec)[],
   namespace: Namespace | null,
   cwd: string,
+  vis: Visibility | null,
   implied: PathSpec | null = null,
   redirects: readonly PathSpec[] = [],
 ): PathSpec[] {
@@ -248,6 +252,7 @@ export function policyScopes(
       [...operands],
       followsLastComponent(name, [name, ...args]),
       !SLASH_KEEPS_LAST.has(name),
+      vis,
     )
     const seen = new Set(scopes.map((p) => p.virtual))
     for (const item of followed) {
@@ -263,7 +268,7 @@ export function policyScopes(
   if (redirects.length > 0) {
     const targets: (string | PathSpec)[] = [...redirects]
     if (namespace !== null && namespace.nodes.size > 0) {
-      const followed = followPaths(namespace, [...redirects], true)
+      const followed = followPaths(namespace, [...redirects], true, true, vis)
       targets.push(...followed.filter((p) => p instanceof PathSpec))
     }
     const seen = new Set(scopes.map((p) => p.virtual))
@@ -413,7 +418,16 @@ export async function gate(
     command: name,
     paths: seen(
       session,
-      policyScopes(name, args, operands, namespace, session.cwd, implied, redirects),
+      policyScopes(
+        name,
+        args,
+        operands,
+        namespace,
+        session.cwd,
+        session.visibility,
+        implied,
+        redirects,
+      ),
       unread,
     ),
     words: seenWords(

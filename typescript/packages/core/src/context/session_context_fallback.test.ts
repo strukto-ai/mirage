@@ -1372,3 +1372,52 @@ it('expands an ambient glob under every live session’s hides', async () => {
     await ws.close()
   }
 })
+
+it('checks a link target under the caller’s own view while a peer hides the link', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const peer = ws.createSession('peer', {
+    profile: parseSessionProfile({ paths: { hide: ['/data/link'] } }),
+  })
+  const [held, release] = gate()
+  const [entered, enter] = gate()
+  ws.registerCli(
+    'pause',
+    new CLI({
+      spec: new CommandSpec({ name: 'pause' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            enter()
+            await held
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  const sealed: Policy = {
+    preCommand: (ctx) =>
+      Promise.resolve(
+        ctx.paths.some((p) => p.virtual === '/data/secret')
+          ? { kind: 'deny', reason: 'sealed' }
+          : null,
+      ),
+  }
+  try {
+    await ws.vfs.write('/data/secret', 'top secret')
+    await ws.shell('ln -s /data/secret /data/link')
+    ws.policies.add(sealed)
+    const paused = ws.shell('pause', { sessionId: peer.sessionId })
+    await entered
+    const io = await ws.shell('cat /data/link')
+    release()
+    await paused
+    expect([io.exitCode === 0, io.stdoutText]).toEqual([false, ''])
+  } finally {
+    release()
+    await ws.close()
+  }
+})

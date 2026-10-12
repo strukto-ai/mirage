@@ -86,7 +86,7 @@ async function ws(profile: SessionProfile | null = DOC): Promise<Workspace> {
 
 function virtuals(w: Workspace, name: string, ...args: string[]): string[] {
   const words = classifyParts([name, ...args], w.registry, '/')
-  return policyScopes(name, args, words.slice(1), w.namespace, '/').map((p) => p.virtual)
+  return policyScopes(name, args, words.slice(1), w.namespace, '/', null).map((p) => p.virtual)
 }
 
 describe('admission', () => {
@@ -103,7 +103,7 @@ describe('admission', () => {
     expect(virtuals(w, 'cat', '/data/secret')).toEqual(['/data/secret'])
     const words = classifyParts(['cat', '/data/link'], w.registry, '/')
     expect(
-      policyScopes('cat', ['/data/link'], words.slice(1), null, '/').map((p) => p.virtual),
+      policyScopes('cat', ['/data/link'], words.slice(1), null, '/', null).map((p) => p.virtual),
     ).toEqual(['/data/link'])
   })
 
