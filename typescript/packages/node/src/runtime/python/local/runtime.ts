@@ -24,6 +24,7 @@ import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { ProcessExecution, RunArgs, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
 
@@ -157,7 +158,7 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
       ? onHostPath(name)
       : isAbsolute(name)
         ? name
-        : `${cwd.replace(/\/+$/, '')}/${name}`
+        : `${rstripSlash(cwd)}/${name}`
     if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     const here = await stat(cwd).catch((err: unknown) => {
       const code = (err as NodeJS.ErrnoException).code
