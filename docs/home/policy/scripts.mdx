@@ -86,11 +86,13 @@ it:
 
 - **Input:** `ctx` as JSON, in the environment variable `MIRAGE_POLICY_CTX`
   and on stdin. On monty, which has no `sys.stdin`, stdin arrives as a
-  `stdin` variable, so read the environment variable to run anywhere. The
-  variable exists only in that run; the session never sees it.
-- **Session:** the program starts in the session's working directory, with
-  the session's variables, so `os.getcwd()` and `os.environ` are the
-  session's.
+  `stdin` variable, so read the environment variable to run anywhere.
+  `MIRAGE_POLICY_CTX` is reserved: it is the only variable in the
+  program's environment, and the session never sees it.
+- **Session:** the program starts in the session's working directory, so
+  `os.getcwd()` is the session's. The session's variables are in
+  `ctx["env"]`, not in `os.environ`. An `import` never loads a module from
+  the session's directory.
 - **Answer:** printed on stdout. Nothing, or `null`, is no opinion.
 
 | Prints | Effect |

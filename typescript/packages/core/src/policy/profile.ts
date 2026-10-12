@@ -22,7 +22,7 @@ import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
-import { snakeToCamel } from '../utils/normalize.ts'
+import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
 import { norm } from '../utils/path.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
@@ -559,9 +559,9 @@ export function parseProfileMounts(
 /**
  * Validate a profile's `policy` block: per method, a list of programs,
  * each naming its program and the runtime that runs it, both required.
- * A config file spells the methods as the document does
- * (`pre_command`); code, with `code` set, as the interface does
- * (`preCommand`).
+ * A config file spells the methods and a runtime's settings as the
+ * document does (`pre_command`, `auto_load_from_imports`); code, with
+ * `code` set, as the interface does (`preCommand`, `autoLoadFromImports`).
  */
 export function parseProfilePolicy(raw: unknown, where: string, code = false): ProfilePolicy {
   const keys: readonly string[] = code ? Object.keys(METHODS) : Object.values(METHODS)
@@ -616,12 +616,11 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
             JSON.stringify(runtime),
         )
       }
+      if (settings === undefined) return { script, runtime: { name: named.name } }
+      const config = settings as Record<string, unknown>
       return {
         script,
-        runtime:
-          settings === undefined
-            ? { name: named.name }
-            : { name: named.name, config: settings as Record<string, unknown> },
+        runtime: { name: named.name, config: code ? config : normalizeFields(config) },
       }
     })
   }

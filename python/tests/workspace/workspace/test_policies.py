@@ -1789,6 +1789,41 @@ async def test_post_execute_sees_the_line_its_output_and_each_result():
         await ws.close()
 
 
+class SeeRoute(Policy):
+    def __init__(self) -> None:
+        self.seen: list[list[tuple[str, str, str | None]]] = []
+
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        self.seen.append(
+            [
+                (
+                    c.command,
+                    c.cwd,
+                    c.session.cwd() if c.session is not None else None,
+                )
+                for c in ctx.commands
+            ]
+        )
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_shows_a_nested_command_in_the_session_it_runs_in():
+    # eval's line runs after its own cd: the command in it stands in
+    # /data, while eval itself stands where the line was typed.
+    spy = SeeRoute()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell("eval 'cd /data; cat x'")
+        assert spy.seen[-1] == [
+            ("eval", "/", "/"),
+            ("cd", "/", "/"),
+            ("cat", "/data", "/data"),
+        ]
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_route_policy_reads_the_session_as_data():
     seen: list[dict] = []

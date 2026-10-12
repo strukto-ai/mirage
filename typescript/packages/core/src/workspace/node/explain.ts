@@ -192,6 +192,12 @@ export interface Judged {
    * command's question to the ledger without asking the chain again.
    */
   readonly ctx?: CommandContext
+  /**
+   * The session the command was judged in, set beside `ctx`: for a command
+   * a line runs in turn (`eval`), the one its own walk reached, so a `cd`
+   * before it in that line is where it stands.
+   */
+  readonly session?: SessionState
 }
 
 /**
@@ -380,6 +386,7 @@ async function judgeWords(
       intrinsic,
       unread,
       ctx,
+      session,
     },
   ]
   for (const inner of innerLines(name, words.slice(1))) {

@@ -334,7 +334,17 @@ describe('ScriptPolicy', () => {
     const payload = request.env[CTX_ENV] ?? ''
     expect(JSON.parse(payload)).toEqual(scriptContext(judged))
     expect(new TextDecoder().decode(request.stdin ?? new Uint8Array())).toBe(payload)
-    expect(request.env.TEAM).toBe('core')
+    expect(request.env).toEqual({ [CTX_ENV]: payload })
+    expect((JSON.parse(payload) as { env: Record<string, string> }).env.TEAM).toBe('core')
+    expect(request.flags).toEqual({})
+  })
+
+  it("keeps the session's directory off a pyodide program's path", async () => {
+    const engine = new FakeProgram('')
+    built.factory = () => engine
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] })))
+    await policy.preCommand(ctx('cat', { session: sessionView('/data') }))
+    expect(engine.requests[0]?.flags).toEqual({ P: true })
   })
 
   it('returns each answer in order, up to the first deny', async () => {

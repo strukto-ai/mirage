@@ -29,6 +29,7 @@ from mirage.policy.constants import (
     CTX_ENV,
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
+    PROGRAM_FLAGS,
     PROGRAM_RUNTIMES,
 )
 from mirage.policy.mixin import SessionScopedMixin
@@ -189,9 +190,13 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     context.
 
     A program runs as any program does on its runtime: never edited,
-    with the context as JSON (``script_context``) in ``CTX_ENV`` and on
-    stdin, the session's cwd and environment, and its answer printed on
-    stdout (``script_action``). Every failure fails closed: a program
+    in the session's cwd, with the context as JSON (``script_context``)
+    in ``CTX_ENV`` and on stdin, and its answer printed on stdout
+    (``script_action``). ``CTX_ENV`` is its only environment variable:
+    the session's variables are in the context, so none the agent sets
+    changes how the program starts, and on wasi it runs with ``-P``
+    (``PROGRAM_FLAGS``), so no file the agent writes stands in for a
+    module it imports. Every failure fails closed: a program
     that exits non-zero, runs past the timeout, prints something else,
     or names a runtime that cannot be built refuses the action with a
     reason naming the profile, and is logged.
@@ -293,10 +298,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             return None
         payload = json.dumps(script_context(ctx))
         cwd = await self._cwd(ctx)
-        env = dict(ctx.session.snapshot()) if ctx.session is not None else {}
         answers: list[Deny | Ask | Route] = []
         for entry in programs:
-            answer = await self._run(entry, method, payload, cwd, env)
+            answer = await self._run(entry, method, payload, cwd)
             if answer is not None:
                 answers.append(answer)
             if isinstance(answer, Deny):
@@ -329,7 +333,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         method: str,
         payload: str,
         cwd: str,
-        env: dict[str, str],
     ) -> Deny | Ask | Route | None:
         """One program at one method, failing closed.
 
@@ -338,7 +341,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             method (str): the method it answers at.
             payload (str): the context as JSON.
             cwd (str): the directory it starts in.
-            env (dict[str, str]): the session's environment.
         """
         try:
             async with self._lock:
@@ -350,8 +352,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                             code=entry.script.source,
                             args=[],
                             cwd=PathSpec.from_str_path(cwd),
-                            env={**env, CTX_ENV: payload},
+                            env={CTX_ENV: payload},
                             stdin=payload.encode(),
+                            flags=dict(PROGRAM_FLAGS.get(entry.runtime, {})),
                         )
                     ),
                     timeout=SCRIPT_EVAL_TIMEOUT_SECONDS,

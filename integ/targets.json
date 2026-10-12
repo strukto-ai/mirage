@@ -3410,7 +3410,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        print(json.dumps({'kind': 'deny', 'reason': 'written by ' + ctx['profile']}))\n        break\n"
+                  "source": "import json\nimport os\nimport shlex\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        reason = 'written by ' + ctx['profile'] + ' for ' + shlex.join(ctx['argv'])\n        print(json.dumps({'kind': 'deny', 'reason': reason}))\n        break\n"
                 },
                 "runtime": "wasi"
               }
@@ -3483,7 +3483,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        print(json.dumps({'kind': 'deny', 'reason': 'written by ' + ctx['profile']}))\n        break\n"
+                  "source": "import json\nimport os\nimport shlex\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        reason = 'written by ' + ctx['profile'] + ' for ' + shlex.join(ctx['argv'])\n        print(json.dumps({'kind': 'deny', 'reason': reason}))\n        break\n"
                 },
                 "runtime": "pyodide"
               }

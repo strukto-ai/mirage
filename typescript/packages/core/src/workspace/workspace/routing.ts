@@ -215,9 +215,10 @@ export class Router {
     const views = this.registry.policies.views
     const commands: CommandContext[] = []
     for (const [item, explained] of judged) {
-      const handles = views?.(item.session.sessionId, item.session) ?? null
       for (const one of explained) {
-        if (one.ctx !== undefined) commands.push({ ...one.ctx, ...handles })
+        if (one.ctx === undefined) continue
+        const walked = one.session ?? item.session
+        commands.push({ ...one.ctx, ...views?.(walked.sessionId, walked) })
       }
     }
     return {

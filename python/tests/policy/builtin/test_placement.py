@@ -29,12 +29,13 @@ def _line(line: str) -> RouteContext:
     )
 
 
+def _heavy_on_beta(ctx: RouteContext) -> str | None:
+    return "beta" if "heavy" in ctx.line else None
+
+
 @pytest.mark.asyncio
 async def test_a_runtime_name_places_the_line_and_none_says_nothing():
-    def route(ctx: RouteContext):
-        return "beta" if "heavy" in ctx.line else None
-
-    policy = PlacementPolicy(route, list)
+    policy = PlacementPolicy(_heavy_on_beta, list)
     assert await policy.pre_execute(_line("python3 heavy")) == Route("beta")
     assert await policy.pre_execute(_line("echo hi")) is None
 

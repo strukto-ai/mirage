@@ -261,6 +261,10 @@ class Judged:
         ctx (CommandContext | None): the context the chain was shown,
             None for a command refused before it, so ``explain`` can
             gather every policy's answer without the gate paying for it.
+        session (SessionState | None): the session the command was
+            judged in, set beside ``ctx``: for a command a line runs in
+            turn (``eval``), the one its own walk reached, so a ``cd``
+            before it in that line is where it stands.
     """
 
     judgment: Judgment
@@ -269,6 +273,7 @@ class Judged:
     intrinsic: bool = False
     unread: frozenset[str] = frozenset()
     ctx: CommandContext | None = None
+    session: SessionState | None = None
 
 
 def _unread_paths(
@@ -419,6 +424,7 @@ async def _judge_words(
             intrinsic,
             unread,
             ctx,
+            session,
         )
     ]
     for inner in inner_lines(name, words[1:]):

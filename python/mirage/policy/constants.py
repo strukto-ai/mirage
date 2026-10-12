@@ -71,6 +71,12 @@ METHODS = ("pre_execute", "pre_command", "pre_vfs", "pre_session")
 # The runtimes a policy program runs on: monty, and Python on wasm.
 PROGRAM_RUNTIMES = frozenset({"monty", "wasi"})
 
+# The interpreter switches a program runs with, per runtime: ``-P``
+# keeps the session's directory off ``sys.path``, so no file there
+# stands in for a module the program imports. Monty has no
+# ``sys.path``.
+PROGRAM_FLAGS: dict[str, dict[str, bool]] = {"wasi": {"P": True}}
+
 # The environment variable a policy program reads its context from, as
 # JSON; the same text arrives on stdin.
 CTX_ENV = "MIRAGE_POLICY_CTX"

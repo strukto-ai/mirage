@@ -356,7 +356,17 @@ async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
     payload = request.env[CTX_ENV]
     assert json.loads(payload) == script_context(ctx)
     assert request.stdin == payload.encode()
-    assert request.env["TEAM"] == "core"
+    assert request.env == {CTX_ENV: payload}
+    assert json.loads(payload)["env"]["TEAM"] == "core"
+    assert request.flags == {}
+
+
+@pytest.mark.asyncio
+async def test_a_program_on_wasi_keeps_the_sessions_directory_off_its_path():
+    engine = FakeProgram()
+    policy = _policy("pre_command", engine, entries=(_entry("wasi"),))
+    await policy.pre_command(_ctx(session=_session(cwd="/data")))
+    assert engine.requests[0].flags == {"P": True}
 
 
 def _programs(method: str, *printed: bytes) -> ScriptPolicy:

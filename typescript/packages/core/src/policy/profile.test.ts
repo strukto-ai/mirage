@@ -16,7 +16,12 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { MountMode } from '../types.ts'
-import { parseProfileMount, parseProfileMounts, parseSessionProfile } from './profile.ts'
+import {
+  parseProfileMount,
+  parseProfileMounts,
+  parseProfilePolicy,
+  parseSessionProfile,
+} from './profile.ts'
 
 const mountSection = (raw: unknown): unknown => parseProfileMount(raw, '/repo', 'mounts[/repo]')
 
@@ -381,5 +386,30 @@ describe('parseProfileMounts', () => {
       new Map([['/a', { mode: MountMode.WRITE }]]),
     )
     expect(parseProfileMounts(null)).toBeNull()
+  })
+})
+
+describe('parseProfilePolicy', () => {
+  it("reads a runtime's settings in the document's spelling from a config, and as given from code", () => {
+    const runtime = (settings: Record<string, unknown>, code: boolean): unknown =>
+      Object.values(
+        parseProfilePolicy(
+          {
+            [code ? 'preCommand' : 'pre_command']: [
+              { script: 'p.py', runtime: { name: 'pyodide', config: settings } },
+            ],
+          },
+          'policy',
+          code,
+        ),
+      )[0]?.[0]?.runtime
+    expect(runtime({ auto_load_from_imports: false }, false)).toEqual({
+      name: 'pyodide',
+      config: { autoLoadFromImports: false },
+    })
+    expect(runtime({ autoLoadFromImports: false }, true)).toEqual({
+      name: 'pyodide',
+      config: { autoLoadFromImports: false },
+    })
   })
 })

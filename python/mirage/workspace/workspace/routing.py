@@ -345,12 +345,13 @@ class Router:
 
         commands: list[CommandContext] = []
         for item, explained in judged:
-            view, ns, vfs = handles(item.session)
-            commands.extend(
-                dataclasses.replace(one.ctx, session=view, ns=ns, vfs=vfs)
-                for one in explained
-                if one.ctx is not None
-            )
+            for one in explained:
+                if one.ctx is None:
+                    continue
+                view, ns, vfs = handles(one.session or item.session)
+                commands.append(
+                    dataclasses.replace(one.ctx, session=view, ns=ns, vfs=vfs)
+                )
         view, ns, vfs = handles(session)
         return RouteContext(
             line=line,

@@ -358,6 +358,66 @@
       }
     },
     {
+      "id": "scriptwasm_plants_a_module_named_like_the_programs_import",
+      "seq": 923284,
+      "targets": [
+        "ram-scripted",
+        "ram-scripted-pyodide"
+      ],
+      "session": "scriptedwasm",
+      "command": "echo 'raise SystemExit(0)' > /scratch/shlex.py",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptwasm_a_module_in_the_cwd_cannot_answer_for_the_program",
+      "seq": 923285,
+      "targets": [
+        "ram-scripted",
+        "ram-scripted-pyodide"
+      ],
+      "session": "scriptedwasm",
+      "command": "cd /scratch && cat /repo/sealed/k",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "cat: Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptwasm_a_session_import_path_cannot_answer_for_the_program",
+      "seq": 923286,
+      "targets": [
+        "ram-scripted",
+        "ram-scripted-pyodide"
+      ],
+      "session": "scriptedwasm",
+      "command": "cd / && export PYTHONPATH=/scratch && cat /repo/sealed/k",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "cat: Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptwasm_removes_the_planted_module",
+      "seq": 923287,
+      "targets": [
+        "ram-scripted",
+        "ram-scripted-pyodide"
+      ],
+      "session": "scriptedwasm",
+      "command": "cd / && unset PYTHONPATH && rm /scratch/shlex.py",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
       "id": "script_deny_reaches_input_substitution",
       "seq": 1346040,
       "targets": [

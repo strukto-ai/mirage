@@ -1274,6 +1274,32 @@ describe('what a hook sees', () => {
     }
   })
 
+  class SeeRoute implements Policy {
+    readonly seen: [string, string, string | undefined][][] = []
+
+    preExecute(ctx: RouteContext): Action | null {
+      this.seen.push(ctx.commands.map((c) => [c.command, c.cwd, c.session?.cwd()]))
+      return null
+    }
+  }
+
+  it('preExecute shows a nested command in the session it runs in', async () => {
+    // eval's line runs after its own cd: the command in it stands in
+    // /data, while eval itself stands where the line was typed.
+    const spy = new SeeRoute()
+    const ws = executableWorkspace(undefined, [spy])
+    try {
+      await ws.shell("eval 'cd /data; cat x'")
+      expect(spy.seen.at(-1)).toEqual([
+        ['eval', '/', '/'],
+        ['cd', '/', '/'],
+        ['cat', '/data', '/data'],
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a route policy reads the session as data', async () => {
     const seen: Record<string, unknown>[] = []
     const ws = new Workspace(

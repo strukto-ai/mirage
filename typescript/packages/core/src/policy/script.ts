@@ -28,6 +28,7 @@ import {
   DEFAULT_ASK_REASON,
   DEFAULT_DENY_REASON,
   METHODS,
+  PROGRAM_FLAGS,
   PROGRAM_RUNTIMES,
 } from './constants.ts'
 import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
@@ -188,10 +189,14 @@ export interface ScriptWiring {
  * session's programs through the narrow `SessionScriptsQuery` by the
  * session id the entry point put in the context.
  *
- * A program runs as any program does on its runtime: never edited, with
- * the context as JSON (`scriptContext`) in `CTX_ENV` and on stdin, the
- * session's cwd and environment, and its answer printed on stdout
- * (`scriptAction`). Every failure fails closed: a program that exits
+ * A program runs as any program does on its runtime: never edited, in the
+ * session's cwd, with the context as JSON (`scriptContext`) in `CTX_ENV`
+ * and on stdin, and its answer printed on stdout (`scriptAction`).
+ * `CTX_ENV` is its only environment variable: the session's variables are
+ * in the context, so none the agent sets changes how the program starts,
+ * and on pyodide it runs with `-P` (`PROGRAM_FLAGS`), so no file the agent
+ * writes stands in for a module it imports. Every failure fails closed: a
+ * program that exits
  * non-zero, runs past the timeout, prints something else, or names a
  * runtime that cannot be built refuses the action with a reason naming
  * the profile, and is logged.
@@ -268,10 +273,9 @@ export class ScriptPolicy implements Policy, SessionScoped {
     if (programs.length === 0) return null
     const payload = JSON.stringify(scriptContext(ctx))
     const cwd = await this.cwd(ctx)
-    const env = { ...(ctx.session?.snapshot() ?? {}) }
     const answers: (Deny | Ask | Route)[] = []
     for (const entry of programs) {
-      const answer = await this.run(entry, method, payload, cwd, env)
+      const answer = await this.run(entry, method, payload, cwd)
       if (answer !== null) answers.push(answer)
       if (answer?.kind === 'deny') break
     }
@@ -297,7 +301,6 @@ export class ScriptPolicy implements Policy, SessionScoped {
     method: ScriptMethod,
     payload: string,
     cwd: string,
-    env: Record<string, string>,
   ): Promise<Deny | Ask | Route | null> {
     let result: RunResult
     try {
@@ -315,8 +318,9 @@ export class ScriptPolicy implements Policy, SessionScoped {
               code: entry.script.source,
               args: [],
               cwd: PathSpec.fromStrPath(cwd),
-              env: { ...env, [CTX_ENV]: payload },
+              env: { [CTX_ENV]: payload },
               stdin: ENCODER.encode(payload),
+              flags: { ...PROGRAM_FLAGS.get(entry.runtime) },
               signal: cancel.signal,
               timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
             }),

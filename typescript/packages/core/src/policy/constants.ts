@@ -98,6 +98,15 @@ export const METHODS = {
 export const PROGRAM_RUNTIMES: ReadonlySet<string> = new Set(['monty', 'pyodide'])
 
 /**
+ * The interpreter switches a program runs with, per runtime: `-P` keeps
+ * the session's directory off `sys.path`, so no file there stands in for
+ * a module the program imports. Monty has no `sys.path`.
+ */
+export const PROGRAM_FLAGS: ReadonlyMap<string, Readonly<Record<string, boolean>>> = new Map([
+  ['pyodide', { P: true }],
+])
+
+/**
  * The environment variable a policy program reads its context from, as
  * JSON; the same text arrives on stdin.
  */

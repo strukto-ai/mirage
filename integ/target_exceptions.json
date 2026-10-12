@@ -73,6 +73,18 @@
     "integ/session/commands/script.json :: scriptwasm_deny_follows_the_cwd": {
       "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
     },
+    "integ/session/commands/script.json :: scriptwasm_plants_a_module_named_like_the_programs_import": {
+      "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
+    },
+    "integ/session/commands/script.json :: scriptwasm_a_module_in_the_cwd_cannot_answer_for_the_program": {
+      "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
+    },
+    "integ/session/commands/script.json :: scriptwasm_a_session_import_path_cannot_answer_for_the_program": {
+      "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
+    },
+    "integ/session/commands/script.json :: scriptwasm_removes_the_planted_module": {
+      "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
+    },
     "integ/session/commands/script.json :: scriptwasm_only_profile_installs_every_command": {
       "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
     },
