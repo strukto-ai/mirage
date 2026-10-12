@@ -394,6 +394,22 @@ enforcing floors; CI always enforces them. Reports live in
 `.cache/integ-shell-coverage/` and are uploaded by `integ-shell-coverage`, which
 is required by `integ-gate` and uses the existing core/TypeScript path filters.
 
+The percentages are regression measures within each implementation, not a
+cross-language parity score. Both hosts run the same cases over the module
+families listed in the shared config, but coverage.py counts executable Python
+lines and control-flow arcs, while c8 converts V8 execution ranges through
+source maps. The current V8 converter emits a statement entry for each source
+line, including header comments; its branch entries are not Python's arcs.
+For example, the mirrored diagnostic helper reports 11 statements / 2 branches
+in Python and 36 statement entries / 11 branches in TypeScript. Equal shell
+outputs therefore do not imply equal coverage percentages. The shared goldens
+establish behavior parity; these independent floors catch coverage regressions.
+
+The PR 1 Linux CI RAM measurement was Python 85.04% statements / 75.80% branches
+and TypeScript 89.24% / 84.26%. The floors leave roughly one to two percentage
+points of headroom in each host. Tighten a host's floors when its measured coverage
+increases, without copying the other coverage engine's percentage.
+
 The real Chrome suite additionally suspends two sessions with opposite mount
 permissions, hidden paths, umasks and glob options. Its explicit session access
 is also exercised by the fallback-context unit tests. Python retains native

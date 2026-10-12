@@ -13,8 +13,8 @@
   ],
   "minimum": {
     "python": {
-      "statements": 75,
-      "branches": 66
+      "statements": 84,
+      "branches": 74
     },
     "typescript": {
       "statements": 88,

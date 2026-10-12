@@ -407,10 +407,17 @@ describe('withDispatchRuleGuard', () => {
       // A metadata op is never judged: deny is present and refused.
       await bound('stat', spec('/data/f'))
     })
+    await bound('read', spec('/data/after'))
+    const captured = await runWithAdmission(gate, () =>
+      Promise.resolve(withDispatchRuleGuard(inner)),
+    )
+    await captured('read', spec('/data/captured'))
     expect(seen).toEqual([
       ['read', undefined],
       ['read', gate],
       ['stat', undefined],
+      ['read', gate],
+      ['read', gate],
     ])
     // The wrapper judges nothing itself: the dispatcher does, on its own paths.
     expect(asked).toEqual([])
