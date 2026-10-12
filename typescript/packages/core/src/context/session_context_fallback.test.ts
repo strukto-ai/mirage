@@ -1322,3 +1322,50 @@ it('judges a named facade’s op by its own rules when a wider session binds mea
     await ws.close()
   }
 })
+
+it('expands an ambient glob under every live session’s hides', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const hider = ws.createSession('hider', {
+    profile: parseSessionProfile({ paths: { hide: ['/data/secret'] } }),
+  })
+  const wide = ws.createSession('wide')
+  const [held, release] = gate()
+  const [entered, enter] = gate()
+  const [wideHeld, releaseWide] = gate()
+  let seen: string[] = []
+  ws.registerCli(
+    'globber',
+    new CLI({
+      spec: new CommandSpec({ name: 'globber' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            enter()
+            await held
+            seen = await ws.glob('/data/*')
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  try {
+    await ws.vfs.write('/data/secret', 's')
+    await ws.vfs.write('/data/open', 'o')
+    const line = ws.shell('globber', { sessionId: hider.sessionId })
+    await entered
+    const other = runWithSession(wide, () => wideHeld, { owner: ws.sessionManager })
+    release()
+    await line
+    releaseWide()
+    await other
+    expect(seen).toEqual(['/data/open'])
+  } finally {
+    release()
+    releaseWide()
+    await ws.close()
+  }
+})

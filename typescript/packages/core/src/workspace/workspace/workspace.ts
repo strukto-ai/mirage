@@ -672,7 +672,11 @@ export class Workspace {
   runtimeContext(sessionId?: string): RuntimeContext {
     const session =
       sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId)
-    const dispatcher = this.dispatcher.forSession(session)
+    // Only a named owner binds the bridge: the session an unnamed capture
+    // finds on the fallback storage may be a newer, wider binding, so that
+    // capture keeps the dispatcher's fold across every live session.
+    const dispatcher =
+      sessionId === undefined ? this.dispatcher : this.dispatcher.forSession(session)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
       ...captureOpPolicies(),
@@ -1423,9 +1427,11 @@ export class Workspace {
   async glob(pattern: string, sessionId?: string): Promise<string[]> {
     return this.bindSession(sessionId ?? null, async (bound) => {
       const session = bound ?? getCurrentSessionFor(this.sessionManager)
-      // Captured before the first await, so a newer binding on the fallback
-      // storage cannot lend this expansion its hides or glob options.
-      const access = session === null ? undefined : sessionAccess(session)
+      // A session this call bound is its owner, captured before the first
+      // await so a newer binding on the fallback storage cannot lend the
+      // expansion its hides or glob options; an ambient one keeps the fold
+      // across every live session.
+      const access = bound === null ? undefined : sessionAccess(bound)
       const spec = classifyBarePath(pattern, this.registry, session?.cwd ?? '/', access)
       if (typeof spec === 'string') return []
       if (spec.pattern === null) return (await this.vfs.exists(spec.virtual)) ? [spec.virtual] : []
