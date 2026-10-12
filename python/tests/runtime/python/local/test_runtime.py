@@ -485,8 +485,11 @@ async def test_close_kills_an_interpreter_still_running():
 def test_close_leaves_a_blocked_loops_child_to_that_loop():
     # A sync `with` block exits inside its caller's loop, which runs
     # nothing until the exit returns, while the close runs on another.
+    # The close waits until that loop is blocked: closing while it still
+    # ran would let it reap the child before it ever saw one.
     runtime = LocalRuntime()
     owner = asyncio.new_event_loop()
+    blocked = threading.Event()
     release = threading.Event()
     results = []
 
@@ -496,6 +499,7 @@ def test_close_leaves_a_blocked_loops_child_to_that_loop():
         )
         while not runtime._children:
             await asyncio.sleep(0.01)
+        blocked.set()
         release.wait(10)
         results.append(await run)
 
@@ -505,8 +509,7 @@ def test_close_leaves_a_blocked_loops_child_to_that_loop():
         daemon=True,
     )
     worker.start()
-    while not runtime._children:
-        time.sleep(0.01)
+    assert blocked.wait(10)
     try:
         asyncio.run(asyncio.wait_for(runtime.close(), timeout=5))
     finally:
