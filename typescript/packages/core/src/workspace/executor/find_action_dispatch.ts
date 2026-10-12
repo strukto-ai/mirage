@@ -56,7 +56,9 @@ export interface FindActionOptions {
   // Runs an `-exec` line in the session; absent outside a workspace,
   // where `-exec` is refused.
   executeFn?: ExecuteFn
-  sessionId?: string
+  // The session find runs in: its `-exec` lines run there, and the head
+  // each one names is looked up in it.
+  session?: SessionState
   // The invocation's abort, checked between matches so a cancelled
   // `-delete` or `-exec` stops at the next row instead of the last one.
   signal?: AbortSignal
@@ -149,7 +151,7 @@ export async function programHead(
 
 async function runExec(
   executeFn: ExecuteFn,
-  sessionId: string,
+  session: SessionState | null,
   registry: MountRegistry,
   cwd: string,
   statPath: StatPath | null,
@@ -164,7 +166,7 @@ async function runExec(
   // \;` runs each match itself.
   const words = execWords(action, paths)
   const head = words[0] ?? action.argv[0] ?? ''
-  const [missing, shadowed] = await programHead(head, getCurrentSession(), registry, cwd, statPath)
+  const [missing, shadowed] = await programHead(head, session, registry, cwd, statPath)
   if (missing) {
     errors.push(encodeText(`find: '${head}': No such file or directory\n`))
     return false
@@ -174,9 +176,8 @@ async function runExec(
   // program run for the session, so a builtin that doubles as a program
   // answers as the program (`printf -v` is a format).
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
-  const sess = getCurrentSession()
-  const run = () => executeFn(`( ${line} )`, { sessionId, stdin })
-  const io = sess === null ? await run() : await runAsProgram(sess, run)
+  const run = () => executeFn(`( ${line} )`, { sessionId: session?.sessionId ?? '', stdin })
+  const io = session === null ? await run() : await runAsProgram(session, run)
   if (io.stdout !== null) {
     const data = await materialize(io.stdout)
     if (data.byteLength > 0) out.push(data)
@@ -424,7 +425,7 @@ export async function applyFindActions(
   if (execs.length > 0 && executeFn === undefined) {
     return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
-  const sessionId = options.sessionId ?? ''
+  const session = options.session ?? getCurrentSession()
   const ns = options.ns ?? null
   const statPath = options.statPath ?? null
   const dispatch = options.dispatch ?? null
@@ -478,7 +479,7 @@ export async function applyFindActions(
         if (
           !(await runExec(
             executeFn,
-            sessionId,
+            session,
             registry,
             cwd,
             statPath,
@@ -525,7 +526,7 @@ export async function applyFindActions(
     if (
       !(await runExec(
         executeFn,
-        sessionId,
+        session,
         registry,
         cwd,
         statPath,

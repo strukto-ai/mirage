@@ -635,6 +635,9 @@ export interface RouteContext {
  * browser has no twin of. */
 export interface VfsContext {
   access?: SessionAccess
+  /** The rule gate of the command that issued the op, when the op carries
+   * one; the bound admission answers otherwise. */
+  gate?: EntryGate | null
   /** The function called, as `vfsCall` declares it; a rename's or a copy's
    * destination is judged under the same call with `creates` set. */
   call: VfsCall

@@ -120,7 +120,7 @@ import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine, explainedLine, holds, lineJudgments } from '../node/explain.ts'
 import { Documents } from '../documentation/documents.ts'
-import { getCurrentSessionFor } from '../../context/session_context.ts'
+import { getCurrentSessionFor, sessionAccess } from '../../context/session_context.ts'
 import { abortable } from '../../utils/abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
@@ -533,7 +533,18 @@ export class Workspace {
         const mount = this.registry.tryMountFor(path)
         return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.name }
       },
-      { bind: (sessionId, run) => this.bindSession(sessionId, run) },
+      {
+        bind: (sessionId, run) => this.bindSession(sessionId, run),
+        // A facade that bound its own session dispatches as that owner,
+        // so on the fallback storage a newer binding cannot judge its op.
+        dispatchAs: (owner) => {
+          const bound = this.dispatcher.forSession(owner)
+          return (op, path, args, kwargs, report) => {
+            if (this.isShuttingDown()) throw new Error('Workspace is closed')
+            return bound.dispatch(op, path, args, kwargs, report)
+          }
+        },
+      },
     )
     this.documents = new Documents(
       this.registry,
@@ -661,6 +672,7 @@ export class Workspace {
   runtimeContext(sessionId?: string): RuntimeContext {
     const session =
       sessionId === undefined ? this.callSession() : this.sessionManager.get(sessionId)
+    const dispatcher = this.dispatcher.forSession(session)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
       ...captureOpPolicies(),
@@ -669,11 +681,12 @@ export class Workspace {
     return captureBinding(
       this.runtimeBinding,
       {
-        ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch, session),
+        ns: namespaceViewOf(this.registry, this.namespace, dispatcher.dispatch, session),
         sessionView: sessionView(session, this.policies),
         processes: this.processView(session),
         cwd: PathSpec.fromStrPath(session.cwd),
         env: envSnapshot(session),
+        dispatch: this.buildWorkspaceBridge(undefined, dispatcher),
       },
       scope,
     )
@@ -807,13 +820,17 @@ export class Workspace {
   // lifts onto the dispatcher's context and never forwards to a backend:
   // it is how a profile policy's own reads reach its `preVfs` marked as
   // its own, as an argument rather than ambient state.
-  private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
+  private buildWorkspaceBridge(
+    issuer?: symbol,
+    dispatcher: Dispatcher = this.dispatcher,
+  ): BridgeDispatchFn {
     return workspaceBridge((name, path, args, kwargs = {}) =>
       this.dispatchInternal(
         name,
         path,
         args,
         issuer === undefined ? kwargs : { ...kwargs, issuer },
+        dispatcher,
       ),
     )
   }
@@ -1404,9 +1421,12 @@ export class Workspace {
    * directory. Mirrors Python's `Workspace.glob`.
    */
   async glob(pattern: string, sessionId?: string): Promise<string[]> {
-    return this.bindSession(sessionId ?? null, async () => {
-      const session = getCurrentSessionFor(this.sessionManager)
-      const spec = classifyBarePath(pattern, this.registry, session?.cwd ?? '/')
+    return this.bindSession(sessionId ?? null, async (bound) => {
+      const session = bound ?? getCurrentSessionFor(this.sessionManager)
+      // Captured before the first await, so a newer binding on the fallback
+      // storage cannot lend this expansion its hides or glob options.
+      const access = session === null ? undefined : sessionAccess(session)
+      const spec = classifyBarePath(pattern, this.registry, session?.cwd ?? '/', access)
       if (typeof spec === 'string') return []
       if (spec.pattern === null) return (await this.vfs.exists(spec.virtual)) ? [spec.virtual] : []
       const matches = await resolveGlobs([spec], this.registry, false, this.namespace, {
@@ -1414,6 +1434,7 @@ export class Workspace {
         failglob: false,
         globstar: true,
         extglob: false,
+        ...(access === undefined ? {} : { access }),
       })
       return matches.filter((m): m is PathSpec => m instanceof PathSpec).map((m) => m.virtual)
     })
@@ -1438,15 +1459,18 @@ export class Workspace {
    * `ws.dispatch`) keeps whatever is bound there, which is what a
    * command's runtime reaching it relies on.
    */
-  private async bindSession<T>(sessionId: string | null, run: () => Promise<T>): Promise<T> {
-    if (this.ambientFor(sessionId) !== null) return run()
+  private async bindSession<T>(
+    sessionId: string | null,
+    run: (bound: SessionState | null) => Promise<T>,
+  ): Promise<T> {
+    if (this.ambientFor(sessionId) !== null) return run(null)
     // The full hydration path, discovery record first: a workspace
     // attached to a shared store adopts the persisted default session's
     // id there, and binding before that would run as a freshly minted,
     // unrestricted default instead.
     await this.ensureSessionsLoaded()
     const session = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
-    return runWithSession(session, run, { owner: this.sessionManager })
+    return runWithSession(session, () => run(session), { owner: this.sessionManager })
   }
 
   /** The ambient session the dispatcher keeps for a facade, or null. */
@@ -1491,6 +1515,7 @@ export class Workspace {
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    dispatcher: Dispatcher = this.dispatcher,
   ): Promise<unknown> {
     // The Dispatcher owns the whole pipeline: pre-dispatch
     // initialization (namespace load, pending drift checks), symlink
@@ -1499,7 +1524,7 @@ export class Workspace {
     // enforcement, per-op commandLimits on the executing mount,
     // revisions, overlay stat, and post-write invalidation. The same
     // single path Python's Workspace.dispatch delegates to.
-    const [result] = await this.dispatcher.dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
+    const [result] = await dispatcher.dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
     return result
   }
 

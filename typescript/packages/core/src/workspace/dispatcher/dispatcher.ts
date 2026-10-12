@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SessionState } from '../session/session.ts'
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
@@ -488,7 +487,7 @@ export class Dispatcher {
     this.reconciler = new Reconciler(cache, namespace)
   }
 
-  forSession(session: SessionState | null): Dispatcher {
+  forSession(session: SessionAccess | null): Dispatcher {
     const bound = new Dispatcher(
       this.namespace,
       this.cache,
@@ -927,11 +926,12 @@ export class Dispatcher {
     // name: the POSIX names are known here, a custom one only to the VFS
     // that defines it.
     call.write = call.write || WRITE_EFFECTS.includes(mark.effect)
+    const gate = call.ruleGate === null ? {} : { gate: call.ruleGate }
     await boundary.admit(
       mark,
       call.path,
       call.write && !COPY_OPS.has(call.name),
-      { final: call.dst === null },
+      { final: call.dst === null, ...gate },
       call.issuer,
     )
     if (call.dst !== null) {
@@ -939,12 +939,12 @@ export class Dispatcher {
         { ...mark, creates: true },
         call.dst,
         true,
-        {},
+        gate,
         call.issuer,
       )
     }
     for (const [, other] of operands(call.name, call.args, call.kwargs)) {
-      await boundary.admit(mark, other, call.write, {}, call.issuer)
+      await boundary.admit(mark, other, call.write, gate, call.issuer)
     }
   }
 

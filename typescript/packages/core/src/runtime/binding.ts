@@ -71,6 +71,9 @@ export function captureBinding(
     processes?: ProcessView
     cwd?: PathSpec
     env?: Readonly<Record<string, string>>
+    // The bridge bound to the session the views describe; the binding's
+    // own serves a context captured with no session named.
+    dispatch?: BridgeDispatchFn
   } = {},
   scope = new ContextScope([
     ...captureSessionContext(),
@@ -127,7 +130,7 @@ export function captureBinding(
         }
   return Object.freeze({
     binding,
-    dispatch: scope.wrap(binding.dispatch),
+    dispatch: scope.wrap(views.dispatch ?? binding.dispatch),
     resolver: {
       prefixes: scope.wrap(() => binding.resolver.prefixes()),
       ownerOf: scope.wrap((path: string) => binding.resolver.ownerOf(path)),

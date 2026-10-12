@@ -18,7 +18,7 @@ import type { ProcessView } from '../process/view.ts'
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
-import type { Limit, PathSpec } from '../types.ts'
+import type { Limit, PathSpec, WalkProbe } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
 import type { DispatchFn, ShellFn } from '../runtime/types.ts'
 import type {
@@ -97,6 +97,11 @@ export interface ExecContext {
 export interface CommandIO<A extends Accessor = Accessor> {
   admission?: EntryGate | null
   access?: SessionAccess
+  // What the walk guards prove an operand's `.` and `..` with: the
+  // command's own dispatcher, bound per invocation like `access`, so a
+  // command on the browser fallback storage never walks with another
+  // session's probe.
+  walkProbe?: WalkProbe
   readdir: ReaddirOp<A>
   readBytes: ReadBytesOp<A>
   stat: StatOp<A>

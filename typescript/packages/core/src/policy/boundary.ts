@@ -15,6 +15,7 @@
 import type { SessionAccess } from '../view/types.ts'
 import { limitResult } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from './decisions.ts'
+import type { EntryGate } from './types.ts'
 import type { Policies } from './policies.ts'
 import { postVfsGate, preVfsGate } from './policies.ts'
 import type { MountMode, PathSpec } from '../types.ts'
@@ -39,7 +40,7 @@ export class Boundary {
     call: VfsCall,
     path: PathSpec,
     write: boolean,
-    access: { checkHidden?: boolean; final?: boolean } = {},
+    access: { checkHidden?: boolean; final?: boolean; gate?: EntryGate | null } = {},
     issuer?: symbol,
   ): Promise<void> {
     await preVfsGate(this.policies, call, path, write, this.prefix, this.sessionId, issuer, {

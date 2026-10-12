@@ -98,7 +98,7 @@ export async function handleReadlink(
   const lines: string[] = []
   let exitCode = 0
   for (const op of operands) {
-    const absOp = operandAbs(namespace, op, session.cwd)
+    const absOp = operandAbs(namespace, op, session.cwd, session.visibility)
     const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
     // The link entry is namespace state behind the dispatcher: session grants
     // and admission policies decide whether this session may read the

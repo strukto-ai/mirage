@@ -43,7 +43,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       !pathVisible(vis, prefix)
     )
       continue
-    const mode = effectivePathMode(prefix, mount.prefix, mount.mode)
+    const mode = effectivePathMode(prefix, mount.prefix, mount.mode, session)
     parts.push(`## \`${prefix}\`\n\nBackend: \`${mount.vfs.name}\`. Access: ${MODE_LINES[mode]}.`)
     if (
       vis.paths === null &&
@@ -59,7 +59,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     for (const entry of vis.shown?.entries ?? []) {
       if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue
       if (registry.tryMountFor(entry.path) === mount) {
-        const effective = effectivePathMode(entry.path, mount.prefix, mount.mode)
+        const effective = effectivePathMode(entry.path, mount.prefix, mount.mode, session)
         parts.push(`- \`${entry.path}\`: ${MODE_LINES[effective]}.`)
       }
     }

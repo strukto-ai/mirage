@@ -41,7 +41,7 @@ import { IOResult, materialize } from '../io/types.ts'
 import { handleXargs as streamXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
 import { seedVar, sessionView } from '../workspace/session/state.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import type { CommandRule, EntryGate } from '../policy/types.ts'
+import { type CommandRule, type Decision, type EntryGate, Outcome, Scope } from '../policy/types.ts'
 import type { Policy } from '../policy/base.ts'
 import { type Policies, runWithOpPolicies, getOpPolicies } from '../policy/policies.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
@@ -1062,6 +1062,263 @@ it('walks a nested mount under the command’s own gate while another session’
     ])
   } finally {
     release()
+    await ws.close()
+  }
+})
+
+it('walks dotted operands with the command’s own probe while another session runs on the mount', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const wide = ws.createSession('wide')
+  const hider = ws.createSession('hider', {
+    profile: parseSessionProfile({ paths: { hide: ['/data/h'] } }),
+  })
+  const [held, release] = gate()
+  const [started, start] = gate()
+  async function* slow(): AsyncIterable<Uint8Array> {
+    start()
+    await held
+    yield new TextEncoder().encode('done\n')
+  }
+  try {
+    await ws.vfs.mkdir('/data/h')
+    await ws.vfs.write('/data/h/x', 'x')
+    await ws.vfs.write('/data/f', 'f')
+    const line = 'stat -c %n /data/h/..; ls -d /data/h/..; cat /data/h/../f'
+    const alone = await ws.shell(line, { sessionId: hider.sessionId })
+    const reading = ws.shell('cat', { sessionId: wide.sessionId, cwd: '/data', stdin: slow() })
+    await started
+    const overlapped = await ws.shell(line, { sessionId: hider.sessionId })
+    release()
+    expect((await reading).stdoutText).toBe('done\n')
+    expect([overlapped.exitCode, overlapped.stdoutText, overlapped.stderrText]).toEqual([
+      alone.exitCode,
+      alone.stdoutText,
+      alone.stderrText,
+    ])
+    expect(alone.stdoutText).toBe('')
+  } finally {
+    release()
+    await ws.close()
+  }
+})
+
+it('links under the command’s own hides while another session’s hides are live', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const hider = ws.createSession('hider', {
+    profile: parseSessionProfile({ paths: { hide: ['/data/x'] } }),
+  })
+  const wide = ws.createSession('wide')
+  const [held, release] = gate()
+  const [entered, enter] = gate()
+  ws.registerCli(
+    'pause',
+    new CLI({
+      spec: new CommandSpec({ name: 'pause' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => {
+            enter()
+            await held
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  try {
+    await ws.shell('mkdir -p /data/x; echo t > /data/target; ln -s /data/target /data/x/link', {
+      sessionId: wide.sessionId,
+    })
+    const line = (name: string): string =>
+      `ln /data/x/link /data/${name}; readlink /data/${name}; echo rc=$?`
+    const alone = await ws.shell(line('h1'), { sessionId: wide.sessionId })
+    const paused = ws.shell('pause', { sessionId: hider.sessionId })
+    await entered
+    const overlapped = await ws.shell(line('h2'), { sessionId: wide.sessionId })
+    release()
+    await paused
+    expect([alone.stdoutText, alone.stderrText]).toEqual(['/data/target\nrc=0\n', ''])
+    expect([overlapped.stdoutText, overlapped.stderrText]).toEqual([alone.stdoutText, ''])
+  } finally {
+    release()
+    await ws.close()
+  }
+})
+
+/** A `pause` CLI each session's line enters and holds until released. */
+function registerPauses(ws: Workspace): Map<string, [Promise<void>, () => void, Promise<void>]> {
+  const holds = new Map<string, [Promise<void>, () => void, Promise<void>]>()
+  const entries = new Map<string, () => void>()
+  for (const who of ['a', 'b']) {
+    const [held, release] = gate()
+    const [entered, enter] = gate()
+    holds.set(who, [held, release, entered])
+    entries.set(who, enter)
+  }
+  ws.registerCli(
+    'pause',
+    new CLI({
+      spec: new CommandSpec({ name: 'pause' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async (inv) => {
+            const who = inv.env.WHO ?? 'b'
+            entries.get(who)?.()
+            await holds.get(who)?.[0]
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    }),
+  )
+  return holds
+}
+
+describe('a line beside another session’s paused line on the fallback storage', () => {
+  it('keeps a once-granted ask path for the command it was granted to', async () => {
+    const allowOnce = (asked: Decision): Promise<Decision> =>
+      Promise.resolve({ ...asked, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser(), onAsk: allowOnce },
+    )
+    const asker = ws.createSession('asker', {
+      profile: parseSessionProfile({
+        commands: { ask: [{ reason: 'review', paths: ['/data/review/*'] }] },
+      }),
+    })
+    const other = ws.createSession('other')
+    const holds = registerPauses(ws)
+    try {
+      await ws.vfs.mkdir('/data/review')
+      await ws.vfs.write('/data/review/f', 'reviewed\n')
+      const alone = await ws.shell('cat /data/review/f', { sessionId: asker.sessionId })
+      const paused = ws.shell('pause', { sessionId: other.sessionId })
+      await holds.get('b')?.[2]
+      const overlapped = await ws.shell('cat /data/review/f', { sessionId: asker.sessionId })
+      holds.get('b')?.[1]()
+      await paused
+      expect([alone.exitCode, alone.stdoutText]).toEqual([0, 'reviewed\n'])
+      expect([overlapped.exitCode, overlapped.stdoutText, overlapped.stderrText]).toEqual([
+        0,
+        'reviewed\n',
+        '',
+      ])
+    } finally {
+      for (const [, release] of holds.values()) release()
+      await ws.close()
+    }
+  })
+
+  it('reports the session’s own mount mode', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    const narrow = ws.createSession('narrow', {
+      profile: parseSessionProfile({ mounts: { '/data': 'r' } }),
+    })
+    const wide = ws.createSession('wide')
+    const holds = registerPauses(ws)
+    try {
+      const alone = await ws.shell('mount -t ram', { sessionId: wide.sessionId })
+      const paused = ws.shell('pause', { sessionId: narrow.sessionId })
+      await holds.get('b')?.[2]
+      const overlapped = await ws.shell('mount -t ram', { sessionId: wide.sessionId })
+      holds.get('b')?.[1]()
+      await paused
+      expect(alone.stdoutText).toContain('on /data type ram (rw')
+      expect(overlapped.stdoutText).toBe(alone.stdoutText)
+    } finally {
+      for (const [, release] of holds.values()) release()
+      await ws.close()
+    }
+  })
+
+  it('runs find -exec as find’s own session', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    const a = ws.createSession('a')
+    const b = ws.createSession('b')
+    const holds = registerPauses(ws)
+    try {
+      await ws.vfs.write('/data/f', 'f')
+      const line = 'find /data -name f -exec printf -v x %s {} + ; echo'
+      const alone = await ws.shell(line, { sessionId: a.sessionId })
+      const first = ws.shell(`pause; ${line}`, { sessionId: a.sessionId, env: { WHO: 'a' } })
+      await holds.get('a')?.[2]
+      const second = ws.shell('pause', { sessionId: b.sessionId, env: { WHO: 'b' } })
+      await holds.get('b')?.[2]
+      holds.get('a')?.[1]()
+      const overlapped = await first
+      holds.get('b')?.[1]()
+      await second
+      expect(alone.stdoutText).toBe('-v\n')
+      expect([overlapped.stdoutText, overlapped.stderrText]).toEqual([
+        alone.stdoutText,
+        alone.stderrText,
+      ])
+    } finally {
+      for (const [, release] of holds.values()) release()
+      await ws.close()
+    }
+  })
+})
+
+it('judges a named facade’s op by its own rules when a wider session binds meanwhile', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  ws.createSession('sealed', {
+    profile: parseSessionProfile({
+      commands: { deny: [{ reason: 'sealed', paths: ['/data/secret'] }] },
+    }),
+  })
+  const free = ws.createSession('free')
+  const ns = (ws as unknown as { namespace: { ensureLoaded: () => Promise<void> } }).namespace
+  const loaded = ns.ensureLoaded.bind(ns)
+  const [hold, release] = gate()
+  const [entered, enter] = gate()
+  const [freeHeld, releaseFree] = gate()
+  try {
+    await ws.vfs.write('/data/secret', 'secret')
+    const refusal = (run: Promise<unknown>): Promise<string> =>
+      run.then(
+        () => 'read',
+        (error: unknown) => (error as Error).message,
+      )
+    const alone = await refusal(ws.vfs.forSession('sealed').read('/data/secret'))
+    let first = true
+    ns.ensureLoaded = async () => {
+      if (first) {
+        first = false
+        enter()
+        await hold
+      }
+      return loaded()
+    }
+    const reading = refusal(ws.vfs.forSession('sealed').read('/data/secret'))
+    await entered
+    const other = runWithSession(free, () => freeHeld, { owner: ws.sessionManager })
+    release()
+    const overlapped = await reading
+    releaseFree()
+    await other
+    expect(alone).not.toBe('read')
+    expect(overlapped).toBe(alone)
+  } finally {
+    ns.ensureLoaded = loaded
+    release()
+    releaseFree()
     await ws.close()
   }
 })

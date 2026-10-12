@@ -21,7 +21,7 @@ import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { getCurrentSession } from '../context/session_context.ts'
-import type { NamespaceLinks, OpKwargs, SessionBind } from '../view/types.ts'
+import type { NamespaceLinks, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
@@ -36,6 +36,9 @@ export type OwnerOf = (path: string) => MountOwner | null
 /** What a derived facade carries over and a constructor may set. */
 export interface FilesOptions {
   bind?: SessionBind | null
+  // The dispatcher bound to the session a bind put in place; the plain
+  // dispatch serves an op that kept the caller's ambient session.
+  dispatchAs?: ((owner: SessionAccess) => DispatchFn) | null
   sessionId?: string | null
   records?: OpRecord[]
 }
@@ -115,6 +118,7 @@ export class Files {
   readonly links: NamespaceLinks | null
   private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
+  private readonly dispatchAs: ((owner: SessionAccess) => DispatchFn) | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
   /**
@@ -136,6 +140,7 @@ export class Files {
     this.links = links
     this.ownerOf = ownerOf
     this.bind = options.bind ?? null
+    this.dispatchAs = options.dispatchAs ?? null
     this.sessionId = options.sessionId ?? null
     this.records = options.records ?? []
   }
@@ -155,6 +160,7 @@ export class Files {
   forSession(sessionId: string): Files {
     return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
       bind: this.bind,
+      dispatchAs: this.dispatchAs,
       sessionId,
       records: this.records,
     })
@@ -221,12 +227,14 @@ export class Files {
     // bind, since the facade's own id may be null (the default) and a
     // session bound by the caller is kept over it.
     let seen: string | null = null
-    const run = (): Promise<[unknown, IOResult]> => {
-      seen = getCurrentSession()?.sessionId ?? null
+    const run = (bound: SessionAccess | null = null): Promise<[unknown, IOResult]> => {
+      seen = bound?.sessionId ?? getCurrentSession()?.sessionId ?? null
       // Resolved against the root: the dots simplified away for the op,
       // the typed spelling kept for the walk that proves them.
       const typed = PathSpec.fromStrPath(path, undefined, '/')
-      return this.dispatchFn(op, typed, args, kwargs, report)
+      const dispatch =
+        bound === null || this.dispatchAs === null ? this.dispatchFn : this.dispatchAs(bound)
+      return dispatch(op, typed, args, kwargs, report)
     }
     let result: unknown
     let owner: MountOwner | null = null

@@ -91,7 +91,9 @@ export async function applyUnary(
     }
   }
   if (op === '-L' || op === '-h') {
-    return ctx.namespace.isLink(operandAbs(ctx.namespace, val, ctx.session.cwd))
+    return ctx.namespace.isLink(
+      operandAbs(ctx.namespace, val, ctx.session.cwd, ctx.session.visibility),
+    )
   }
   if (FILE_UNARY.has(op)) {
     if (!(val instanceof PathSpec) && text === '') return false

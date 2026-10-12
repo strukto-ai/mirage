@@ -248,9 +248,14 @@ export interface NamespaceView {
  * Run one facade op as a session: `(sessionId, run) => result`, null
  * naming the workspace's default session as it is when the op runs.
  * The workspace supplies it, so the facade binds the session the way a
- * shell line does without holding the session manager itself.
+ * shell line does without holding the session manager itself. `run` is
+ * handed the session the bind put in place, or null when it kept the
+ * caller's ambient one, so the op can dispatch as that owner.
  */
-export type SessionBind = <T>(sessionId: string | null, run: () => Promise<T>) => Promise<T>
+export type SessionBind = <T>(
+  sessionId: string | null,
+  run: (bound: SessionAccess | null) => Promise<T>,
+) => Promise<T>
 
 /** The calling session's read-only access and shell settings. */
 export interface SessionAccess {

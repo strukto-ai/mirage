@@ -636,13 +636,21 @@ export function redirectTargetJudged(virtual: string): boolean {
 }
 
 /**
- * The mount mode after narrowing by the current session's profile. The
- * mount's own mode is the strongest one available; a profile's mode can
- * only weaken it (a READ mount stays read-only whatever the profile says).
- * A mount the profile does not name keeps its own mode.
+ * The mount mode after narrowing by the owner's profile, or the live
+ * sessions' when no owner is supplied. The mount's own mode is the
+ * strongest one available; a profile's mode can only weaken it (a READ
+ * mount stays read-only whatever the profile says). A mount the profile
+ * does not name keeps its own mode.
  */
-export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): MountMode {
-  return weakerMode(mountMode, sessionMode(mountPrefix))
+export function effectiveMountMode(
+  mountPrefix: string,
+  mountMode: MountMode,
+  access?: SessionAccess,
+): MountMode {
+  return weakerMode(
+    mountMode,
+    access === undefined ? sessionMode(mountPrefix) : sessionModeOf(access, mountPrefix),
+  )
 }
 
 /**
@@ -855,17 +863,13 @@ export function requireMountWritable(mountPrefix: string, access?: SessionAccess
   const gate = mountGateFor(mountPrefix)
   if (gate === null) return
   const [prefix, mode] = gate
-  if (
-    (access === undefined
-      ? effectiveMountMode(prefix, mode)
-      : effectivePathMode(prefix, prefix, mode, access)) === MountMode.READ
-  ) {
+  if (effectiveMountMode(prefix, mode, access) === MountMode.READ) {
     throw erofs(prefix, `mount ${prefix} is read-only`)
   }
 }
 
 /** Bind access to its owner before an asynchronous operation can suspend. */
-export function sessionAccess(session: SessionState | null): SessionAccess {
+export function sessionAccess(session: SessionAccess | null): SessionAccess {
   return (
     session ?? {
       sessionId: '',

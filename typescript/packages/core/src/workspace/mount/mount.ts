@@ -41,7 +41,7 @@ import type {
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import type { LinkView, OpKwargs, SessionAccess } from '../../view/types.ts'
+import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import {
   commandIo,
   resolveGlobOf,
@@ -92,6 +92,7 @@ import {
   type Limit,
   type ReadSpec,
   type SetAttrFields,
+  type WalkProbe,
   DEFAULT_READ_SPEC,
   WritePolicy,
   FileType,
@@ -102,7 +103,6 @@ import { ebusy, enotsup } from '../../errors/fs.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -232,16 +232,13 @@ export interface MountInit {
 
 // What the command tier's walk guard proves an operand's `.` and `..` with:
 // the handler reaches its backend past the dispatcher, so the dispatcher's stat and link
-// follow are bound around it. No dispatcher (a mount driven directly) binds
-// nothing. Mirrors the Python set_walk_probe binding in Mount.run_command.
-function withWalkProbe<T>(
-  prefix: string,
-  dispatch: DispatchFn | undefined,
-  links: LinkView | undefined,
-  fn: () => Promise<T>,
-): Promise<T> {
-  if (dispatch === undefined) return fn()
-  return runWithWalkProbe(prefix, { stat: dispatchStat(dispatch), follow: linkFollow(links) }, fn)
+// follow are bound around it, and handed to the handler's table as well. No
+// dispatcher (a mount driven directly) binds nothing. Mirrors the Python
+// set_walk_probe binding in Mount.run_command.
+function walkProbeOf(context: ExecContext): WalkProbe | null {
+  const dispatch = context.dispatch
+  if (dispatch === undefined) return null
+  return { stat: dispatchStat(dispatch), follow: linkFollow(context.ns?.links) }
 }
 
 export class MountEntry {
@@ -423,11 +420,12 @@ export class MountEntry {
   }
 
   /**
-   * This mount's mode narrowed by the current session's cap. The
-   * configured mode is the ceiling; a session's mode can only weaken it.
+   * This mount's mode narrowed by the owner's cap, or the live sessions'
+   * when no owner is supplied. The configured mode is the ceiling; a
+   * session's mode can only weaken it.
    */
-  effectiveMode(): MountMode {
-    return effectiveMountMode(this.prefix, this.mode)
+  effectiveMode(access?: SessionAccess): MountMode {
+    return effectiveMountMode(this.prefix, this.mode, access)
   }
 
   // ── command registration ──────────────────────────
@@ -924,8 +922,9 @@ export class MountEntry {
         ]
       }
       const keyedPaths = this.keyedPaths(cmdName, paths)
-      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context)
-      return this.inCommandScope(context, async (): Promise<[ByteSource | null, IOResult]> => {
+      const probe = walkProbeOf(context)
+      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context, probe)
+      return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal = this.readOnlyRefusal(cmdName, cmd, flags, context.access)
           if (refusal !== null) return [null, refusal]
@@ -1044,6 +1043,7 @@ export class MountEntry {
     cmdName: string,
     flags: Record<string, FlagValue>,
     context: ExecContext,
+    probe: WalkProbe | null,
   ): CommandOpts {
     return {
       ...(context.admission === undefined ? {} : { admission: context.admission }),
@@ -1058,6 +1058,7 @@ export class MountEntry {
         ...dispatchedIo(this.io, context.dispatch),
         ...(context.admission === undefined ? {} : { admission: context.admission }),
         ...(context.access === undefined ? {} : { access: context.access }),
+        ...(probe === null ? {} : { walkProbe: probe }),
       },
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
@@ -1084,17 +1085,17 @@ export class MountEntry {
    * with, the recorder's mount, the mount's cache manager and write context,
    * and the snapshot revision pins. Mirrors Python's MountEntry._command_scope.
    */
-  private inCommandScope<T>(context: ExecContext, fn: () => Promise<T>): Promise<T> {
+  private inCommandScope<T>(probe: WalkProbe | null, fn: () => Promise<T>): Promise<T> {
+    const scoped = (): Promise<T> =>
+      runWithMountContext(
+        () =>
+          this.runWithCaches(() =>
+            runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn),
+          ),
+        this.mountId,
+      )
     return runWithMountGate(this.prefix, this.mode, () =>
-      withWalkProbe(this.prefix, context.dispatch, context.ns?.links, () =>
-        runWithMountContext(
-          () =>
-            this.runWithCaches(() =>
-              runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn),
-            ),
-          this.mountId,
-        ),
-      ),
+      probe === null ? scoped() : runWithWalkProbe(this.prefix, probe, scoped),
     )
   }
 

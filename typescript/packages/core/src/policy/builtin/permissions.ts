@@ -78,9 +78,10 @@ export class PermissionsPolicy implements Policy, SessionScoped {
     if (redirectTargetJudged(ctx.path.virtual)) return null
     // The grants belong to the line, not the session: a once grant is
     // spent as the command is admitted, so by the time its own walk
-    // reaches the dispatcher the session holds nothing and only the bound
-    // gate still remembers the nod.
-    const gate = getAdmission()
+    // reaches the dispatcher the session holds nothing and only the
+    // command's gate still remembers the nod: the one its op carries, or the
+    // bound one for an op that carries none.
+    const gate = ctx.gate ?? getAdmission()
     const ruled = opRuling(this.sessions.commandsOf(ctx.sessionId ?? ''), ctx, gate?.granted ?? [])
     if (ruled === null) return null
     const [rule, asks] = ruled

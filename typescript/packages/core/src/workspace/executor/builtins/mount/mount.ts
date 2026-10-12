@@ -93,7 +93,7 @@ export function handleMount(
     .map(
       (m) =>
         `${m.vfs.name} on ${m.prefix.replace(/\/+$/, '') || '/'} type ${m.vfs.name} ` +
-        `(${MODE_OPTIONS[m.effectiveMode()]})\n`,
+        `(${MODE_OPTIONS[m.effectiveMode(session)]})\n`,
     )
   return ok('mount', lines.length > 0 ? encodeText(lines.join('')) : null)
 }

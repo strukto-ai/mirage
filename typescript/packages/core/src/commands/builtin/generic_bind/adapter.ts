@@ -1115,7 +1115,7 @@ export function withCommandGuards<A extends Accessor>(
   ops: CommandIO<A>,
   prefix?: string,
 ): CommandIO<A> {
-  const probe = prefix === undefined ? null : walkProbeFor(prefix)
+  const probe = ops.walkProbe ?? (prefix === undefined ? null : walkProbeFor(prefix))
   const scope = opPolicyScope(prefix ?? null, ops.access)
   const prepared = namespaceOps({ ...ops, readdir: policyCall(scope, ops.readdir, 'readdir') })
   const guarded = { ...prepared }

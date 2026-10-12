@@ -150,7 +150,7 @@ async function finishFind(
     session.cwd,
     {
       ...(executeFn !== undefined ? { executeFn } : {}),
-      sessionId: session.sessionId,
+      session,
       ns: ns ?? null,
       statPath,
       dispatch,

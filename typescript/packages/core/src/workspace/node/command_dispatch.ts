@@ -933,7 +933,9 @@ async function routeArgv(
     )
     // ls resolves a command-line link only when it leads to a directory, and
     // only a stat can tell where it leads.
-    if (lsMode === 'directory') operands = await followDirectoryLinks(namespace, dispatch, operands)
+    if (lsMode === 'directory') {
+      operands = await followDirectoryLinks(namespace, dispatch, operands, session.visibility)
+    }
     argv = argv.withOperands(operands)
   }
 
@@ -1018,7 +1020,14 @@ async function routeArgv(
           ]
         }
       } else if (name === 'mv') {
-        const prepared = await prepareMv(namespace, dispatch, operands, argv.args, session.cwd)
+        const prepared = await prepareMv(
+          namespace,
+          dispatch,
+          operands,
+          argv.args,
+          session.cwd,
+          session.visibility,
+        )
         operands = prepared.items
         if (prepared.early !== null) return prepared.early
       }

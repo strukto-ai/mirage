@@ -392,6 +392,50 @@ describe('the path axis modes', () => {
     })
     requireMountWritable('/trello')
   })
+
+  it('requireMountWritable judges an explicit owner as it judges the bound one', async () => {
+    // A show entry's mode governs the paths below it; an id-addressed
+    // write names none, so only the profile's mount mode narrows it.
+    const shown = new SessionState({
+      sessionId: 'shown',
+      visibility: { shown: { entries: [{ path: '/t', mode: MountMode.READ }] } },
+    })
+    const capped = new SessionState({
+      sessionId: 'capped',
+      mountModes: new Map([['/t', MountMode.READ]]),
+    })
+    const outcome = (run: () => void): string => {
+      try {
+        run()
+        return 'ok'
+      } catch (error) {
+        return (error as { code?: string }).code ?? String(error)
+      }
+    }
+    for (const [sess, expected] of [
+      [shown, 'ok'],
+      [capped, 'EROFS'],
+    ] as const) {
+      await runWithMountGate('/t', MountMode.WRITE, () => {
+        expect(
+          outcome(() => {
+            requireMountWritable('/t', sess)
+          }),
+        ).toBe(expected)
+        return Promise.resolve()
+      })
+      await runWithSession(sess, () =>
+        runWithMountGate('/t', MountMode.WRITE, () => {
+          expect(
+            outcome(() => {
+              requireMountWritable('/t')
+            }),
+          ).toBe(expected)
+          return Promise.resolve()
+        }),
+      )
+    }
+  })
 })
 
 describe('the per-operand hide gate', () => {

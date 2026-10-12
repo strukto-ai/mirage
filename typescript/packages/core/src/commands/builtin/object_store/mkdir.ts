@@ -54,8 +54,9 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
         if (collision.message !== null) errors.push(collision.message)
         continue
       }
-      const names = verbose ? await createdNames(path, parents, links) : []
-      const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links)
+      const probe = opts.io?.walkProbe
+      const names = verbose ? await createdNames(path, parents, links, probe) : []
+      const failed = await makeDirectory(mkdirImpl, accessor, path, parents, links, probe)
       if (failed !== null) {
         errors.push(failed)
         continue

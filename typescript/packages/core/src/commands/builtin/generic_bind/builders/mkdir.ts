@@ -24,7 +24,7 @@ import { mkdirLinkRefusal } from '../../utils/slash_links.ts'
 import { descendantPath, entryKind, nearestAncestor } from '../../utils/paths.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { LinkView } from '../../../../view/types.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { FileType, PathSpec, type WalkProbe } from '../../../../types.ts'
 import { mountPrefixOf } from '../../../../utils/key_prefix.ts'
 import { CycleError, norm, parent, walkNodes } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -51,6 +51,7 @@ async function enterNode<A extends Accessor>(
   node: string,
   root: string,
   links: LinkView | null,
+  probe: WalkProbe | null,
 ): Promise<string | null> {
   if (links !== null && links.statAt(node) !== null) {
     try {
@@ -63,7 +64,6 @@ async function enterNode<A extends Accessor>(
     if (target === null) return posixPhrase('EEXIST')
     return target.type === FileType.DIRECTORY ? null : posixPhrase('ENOTDIR')
   }
-  const probe = walkProbeFor(path.virtual)
   if (probe !== null) {
     const { exists, isDir } = await entryKind(probe.stat, PathSpec.fromStrPath(node))
     if (exists) return isDir ? null : posixPhrase('ENOTDIR')
@@ -88,13 +88,14 @@ async function makeWalked<A extends Accessor>(
   path: PathSpec,
   dotted: string,
   links: LinkView | null,
+  probe: WalkProbe | null,
 ): Promise<string | null> {
   const root = rstripSlash(mountPrefixOf(path.virtual, path.vfsPath))
   const follow = links === null ? null : (virtual: string) => links.resolve(virtual)
   for (const [node, spelled] of walkNodes(dotted, path.rawPath, follow)) {
     let why: string | null
     try {
-      why = await enterNode(mkdir, accessor, path, node, root, links)
+      why = await enterNode(mkdir, accessor, path, node, root, links, probe)
     } catch (err) {
       if (!isFsError(err)) throw err
       why =
@@ -128,8 +129,8 @@ export async function createdNames(
   path: PathSpec,
   parents: boolean,
   links: LinkView | null = null,
+  probe: WalkProbe | null = walkProbeFor(path.virtual),
 ): Promise<string[]> {
-  const probe = walkProbeFor(path.virtual)
   if (!parents || probe === null) return [operandSpelling(path.virtual, path)]
   const named = PathSpec.fromStrPath(path.virtual)
   const names: string[] = []
@@ -167,13 +168,21 @@ export async function makeDirectory<A extends Accessor>(
   path: PathSpec,
   parents: boolean,
   links: LinkView | null = null,
+  probe: WalkProbe | null = walkProbeFor(path.virtual),
 ): Promise<string | null> {
   let target = path
   // -p enters the names in front of the operand one at a time, so a dot
   // among them, or a link loop the walk refused the operand for, is met at
   // that name and GNU quotes it rather than the operand.
   if (parents && (path.dotted !== null || path.walkError === 'ELOOP')) {
-    const failed = await makeWalked(mkdir, accessor, path, path.dotted ?? path.virtual, links)
+    const failed = await makeWalked(
+      mkdir,
+      accessor,
+      path,
+      path.dotted ?? path.virtual,
+      links,
+      probe,
+    )
     if (failed !== null) return failed
     // The walk has entered every name the spelling passes through, so the
     // operand is made by its resolved path alone: walking it again would ask
@@ -235,8 +244,8 @@ const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       if (collision.message !== null) errors.push(collision.message)
       continue
     }
-    const names = verbose ? await createdNames(p, parents, links) : []
-    const failed = await makeDirectory(mkdirOp, accessor, p, parents, links)
+    const names = verbose ? await createdNames(p, parents, links, ops.walkProbe) : []
+    const failed = await makeDirectory(mkdirOp, accessor, p, parents, links, ops.walkProbe)
     if (failed !== null) {
       errors.push(failed)
       continue

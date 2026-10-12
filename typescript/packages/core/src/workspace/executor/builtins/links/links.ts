@@ -276,6 +276,7 @@ export async function followDirectoryLinks(
   namespace: Namespace,
   dispatch: DispatchFn,
   items: readonly (string | PathSpec)[],
+  vis: Visibility | null,
 ): Promise<(string | PathSpec)[]> {
   const out: (string | PathSpec)[] = []
   for (const item of items) {
@@ -283,7 +284,7 @@ export async function followDirectoryLinks(
       out.push(item)
       continue
     }
-    const followed = followPaths(namespace, [item])[0]
+    const followed = followPaths(namespace, [item], true, true, vis)[0]
     const target =
       followed instanceof PathSpec && followed.walkError === null
         ? await statOrNull(dispatch, followed)
@@ -309,6 +310,7 @@ export async function prepareMv(
   items: (string | PathSpec)[],
   args: readonly string[],
   cwd: string,
+  vis: Visibility | null,
 ): Promise<PreparedMv> {
   const paths = items.filter((p): p is PathSpec => p instanceof PathSpec)
   const spec = SPECS.mv
@@ -316,14 +318,14 @@ export async function prepareMv(
   const fl = new FlagView(parseToKwargs(parseCommand(spec, [...args], cwd, 'mv')), spec)
   const target = fl.raw('target_directory')
   if (target !== undefined || paths.length > 2) {
-    return prepareMany(namespace, items, paths, target)
+    return prepareMany(namespace, items, paths, target, vis)
   }
   const src = paths[0]
   const dst = paths[1]
   if (paths.length !== 2 || src === undefined || dst === undefined) {
     return { items, early: null }
   }
-  return preparePair(namespace, dispatch, items, src, dst, fl)
+  return preparePair(namespace, dispatch, items, src, dst, fl, vis)
 }
 
 function landingKey(path: string): string {
@@ -346,6 +348,7 @@ function prepareMany(
   items: (string | PathSpec)[],
   paths: readonly PathSpec[],
   target: FlagValue | undefined,
+  vis: Visibility | null,
 ): PreparedMv {
   let dst: PathSpec | undefined
   if (target !== undefined) {
@@ -361,7 +364,7 @@ function prepareMany(
   if (dst?.walkError !== null) {
     return { items, early: null }
   }
-  const followed = followPaths(namespace, [dst])[0]
+  const followed = followPaths(namespace, [dst], true, true, vis)[0]
   if (!(followed instanceof PathSpec)) return { items, early: null }
   const rewritten = items.map((item) => (item === dst ? followed : item))
   return { items: rewritten, early: null }
@@ -376,6 +379,7 @@ async function preparePair(
   src: PathSpec,
   dst: PathSpec,
   fl: FlagView,
+  vis: Visibility | null,
 ): Promise<PreparedMv> {
   if (src.walkError !== null || dst.walkError !== null) {
     // The walk refused the operand, so there is no entry to move or land
@@ -437,7 +441,9 @@ async function preparePair(
 
   const rewritten =
     intoDir && namespace.isLink(dst.virtual)
-      ? items.map((item) => (item === dst ? (followPaths(namespace, [dst])[0] ?? dst) : item))
+      ? items.map((item) =>
+          item === dst ? (followPaths(namespace, [dst], true, true, vis)[0] ?? dst) : item,
+        )
       : items
   return { items: rewritten, early: null }
 }

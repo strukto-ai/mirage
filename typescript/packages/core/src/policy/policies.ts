@@ -245,7 +245,7 @@ export async function preVfsGate(
   prefix: string,
   sessionId = '',
   issuer?: symbol,
-  access: Pick<VfsContext, 'mode' | 'access'> & {
+  access: Pick<VfsContext, 'mode' | 'access' | 'gate'> & {
     checkHidden?: boolean
     decisions?: Decisions | null
     final?: boolean

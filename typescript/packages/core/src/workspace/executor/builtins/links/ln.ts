@@ -26,7 +26,7 @@ import {
   usageHint,
 } from '../../../../commands/spec/usage.ts'
 import { type ByteSource, materialize } from '../../../../io/types.ts'
-import { type FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
+import { type FileStat, FileType, PathSpec, type Visibility, wordText } from '../../../../types.ts'
 import {
   absentDestError,
   dispatchStat,
@@ -50,7 +50,6 @@ import {
 } from '../../../../errors/fs.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
-import { sessionVisibility } from '../../../../context/session_context.ts'
 import { pathVisible } from '../../../../utils/hidden.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -230,14 +229,14 @@ async function listedByParent(dispatch: DispatchFn, virtual: string): Promise<bo
 // link, and every namespace read in this module has to answer the same
 // way, or a link inside hidden space leads ln out of it: into the
 // directory it points at, or to the target string a hard link would copy.
-function visibleLink(namespace: Namespace, virtual: string): boolean {
-  return pathVisible(sessionVisibility(), virtual) && namespace.isLink(virtual)
+function visibleLink(namespace: Namespace, vis: Visibility | null, virtual: string): boolean {
+  return pathVisible(vis, virtual) && namespace.isLink(virtual)
 }
 
 // Resolve the links along a path the session may see; a hidden path
 // stays as typed. Throws CycleError as `follow` does.
-function followVisible(namespace: Namespace, virtual: string): string {
-  return pathVisible(sessionVisibility(), virtual) ? namespace.follow(virtual) : virtual
+function followVisible(namespace: Namespace, vis: Visibility | null, virtual: string): string {
+  return pathVisible(vis, virtual) ? namespace.follow(virtual) : virtual
 }
 
 // An operand as the path the kernel reaches, its final name kept. Command
@@ -246,9 +245,14 @@ function followVisible(namespace: Namespace, virtual: string): string {
 // walked here, and every namespace read sees the name the dispatcher will. A hidden
 // path stays as typed, and a loop is left for the dispatcher to report when the
 // link is made. Mirrors Python's operand_abs.
-export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: string): string {
+export function operandAbs(
+  namespace: Namespace,
+  arg: string | PathSpec,
+  cwd: string,
+  vis: Visibility | null,
+): string {
   const virtual = absPath(arg, cwd)
-  if (arg instanceof PathSpec || !pathVisible(sessionVisibility(), virtual)) return virtual
+  if (arg instanceof PathSpec || !pathVisible(vis, virtual)) return virtual
   try {
     return posixNormpath(namespace.followParent(dottedSpelling(arg, cwd) ?? virtual))
   } catch (err) {
@@ -266,13 +270,14 @@ export function operandAbs(namespace: Namespace, arg: string | PathSpec, cwd: st
 // Mirrors Python's _walk_verdict.
 function walkVerdict(
   namespace: Namespace,
+  vis: Visibility | null,
   word: string | PathSpec,
   cwd: string,
   followLast = false,
 ): FsCondition | null {
   if (wordText(word) === '') return 'ENOENT'
   const virtual = absPath(word, cwd)
-  if (!pathVisible(sessionVisibility(), virtual)) return null
+  if (!pathVisible(vis, virtual)) return null
   const trimmed = rstripSlash(virtual) || '/'
   try {
     if (followLast) namespace.follow(trimmed)
@@ -302,12 +307,13 @@ function refused(flags: LnFlags, typed: string, targetTyped: string, why: FsCond
 
 async function dirAt(
   namespace: Namespace,
+  vis: Visibility | null,
   dispatch: DispatchFn,
   virtual: string,
   noDereference: boolean,
 ): Promise<[string, FileStat | null]> {
   let resolved = virtual
-  if (visibleLink(namespace, virtual)) {
+  if (visibleLink(namespace, vis, virtual)) {
     if (noDereference) return [virtual, null]
     try {
       resolved = namespace.follow(virtual)
@@ -343,6 +349,7 @@ function into(source: string | PathSpec, dirAbs: string, dirTyped: string): Link
 // the plans, or an empty list with the refusal to print.
 export async function planLinks(
   namespace: Namespace,
+  vis: Visibility | null,
   dispatch: DispatchFn,
   cwd: string,
   operands: readonly (string | PathSpec)[],
@@ -353,7 +360,7 @@ export async function planLinks(
   const hint = `${usageHint('ln')}\n`
   if (targetDir !== null) {
     const typed = targetTyped ?? targetDir
-    const why = walkVerdict(namespace, typed, cwd, true)
+    const why = walkVerdict(namespace, vis, typed, cwd, true)
     if (why !== null) return [[], `ln: failed to access '${typed}': ${posixPhrase(why)}\n`]
     const unwalked = await dotRefusal(
       dispatchStat(dispatch),
@@ -368,8 +375,9 @@ export async function planLinks(
     }
     const [resolved, stat] = await dirAt(
       namespace,
+      vis,
       dispatch,
-      operandAbs(namespace, targetDir, cwd),
+      operandAbs(namespace, targetDir, cwd, vis),
       flags.noDereference,
     )
     if (stat === null) {
@@ -395,18 +403,24 @@ export async function planLinks(
     const link = operands[1]
     if (link === undefined) return [[], null]
     return [
-      [{ source: first, linkAbs: operandAbs(namespace, link, cwd), linkTyped: wordText(link) }],
+      [
+        {
+          source: first,
+          linkAbs: operandAbs(namespace, link, cwd, vis),
+          linkTyped: wordText(link),
+        },
+      ],
       null,
     ]
   }
   const last = operands[operands.length - 1] ?? first
-  const lastAbs = operandAbs(namespace, last, cwd)
+  const lastAbs = operandAbs(namespace, last, cwd, vis)
   // The empty name reads as the working directory in `lastAbs`, and it is
   // no directory to link into.
   const [resolved, stat] =
     wordText(last) === ''
       ? [lastAbs, null]
-      : await dirAt(namespace, dispatch, lastAbs, flags.noDereference)
+      : await dirAt(namespace, vis, dispatch, lastAbs, flags.noDereference)
   const isDir = stat !== null && stat.type === FileType.DIRECTORY
   if (operands.length === 2 && !isDir) {
     return [[{ source: first, linkAbs: lastAbs, linkTyped: wordText(last) }], null]
@@ -416,7 +430,7 @@ export async function planLinks(
       // A link standing at the name that leads nowhere, dangling or
       // looping, is ENOENT to GNU; a loop above it is ELOOP.
       const why =
-        wordText(last) === '' || visibleLink(namespace, lastAbs)
+        wordText(last) === '' || visibleLink(namespace, vis, lastAbs)
           ? 'ENOENT'
           : await missCondition(dispatch, resolved)
       return [[], `ln: target '${wordText(last)}': ${posixPhrase(why)}\n`]
@@ -429,6 +443,7 @@ export async function planLinks(
 // The bytes a hard link copies, or the refusal in ln's words.
 async function sourceBytes(
   namespace: Namespace,
+  vis: Visibility | null,
   dispatch: DispatchFn,
   srcAbs: string,
   typed: string,
@@ -436,7 +451,7 @@ async function sourceBytes(
   flags: LnFlags,
 ): Promise<[Uint8Array | null, string | null]> {
   let resolved = srcAbs
-  if (visibleLink(namespace, srcAbs)) {
+  if (visibleLink(namespace, vis, srcAbs)) {
     try {
       resolved = namespace.follow(srcAbs)
     } catch (err) {
@@ -483,6 +498,7 @@ async function sourceBytes(
 // file is a byte copy through the dispatcher.
 export async function makeLink(
   namespace: Namespace,
+  vis: Visibility | null,
   dispatch: DispatchFn,
   cwd: string,
   plan: LinkPlan,
@@ -508,13 +524,13 @@ export async function makeLink(
     return
   }
   if (!flags.symbolic) {
-    const why = walkVerdict(namespace, plan.source, cwd, flags.logical)
+    const why = walkVerdict(namespace, vis, plan.source, cwd, flags.logical)
     if (why !== null) {
       errors.push(`ln: failed to access '${targetTyped}': ${posixPhrase(why)}\n`)
       return
     }
   }
-  const nameWhy = walkVerdict(namespace, typed, cwd)
+  const nameWhy = walkVerdict(namespace, vis, typed, cwd)
   if (nameWhy !== null) {
     errors.push(refused(flags, typed, targetTyped, nameWhy))
     return
@@ -557,20 +573,21 @@ export async function makeLink(
       let linkDir = gnuDirname(plan.linkAbs)
       let targetAbs = absPath(plan.source, cwd)
       try {
-        targetAbs = followVisible(namespace, targetAbs)
-        linkDir = followVisible(namespace, linkDir)
+        targetAbs = followVisible(namespace, vis, targetAbs)
+        linkDir = followVisible(namespace, vis, linkDir)
       } catch (err) {
         if (!(err instanceof CycleError)) throw err
       }
       linkTarget = posixRelative(targetAbs, linkDir)
     }
   } else {
-    const srcAbs = operandAbs(namespace, plan.source, cwd)
-    if (visibleLink(namespace, srcAbs) && !flags.logical) {
+    const srcAbs = operandAbs(namespace, plan.source, cwd, vis)
+    if (visibleLink(namespace, vis, srcAbs) && !flags.logical) {
       linkTarget = namespace.readlink(srcAbs)
     } else {
       const [bytes, refusal] = await sourceBytes(
         namespace,
+        vis,
         dispatch,
         srcAbs,
         targetTyped,
@@ -584,7 +601,7 @@ export async function makeLink(
       data = bytes
     }
   }
-  if (pathVisible(sessionVisibility(), plan.linkAbs) && namespace.isMountRoot(plan.linkAbs)) {
+  if (pathVisible(vis, plan.linkAbs) && namespace.isMountRoot(plan.linkAbs)) {
     errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
     return
   }
@@ -604,7 +621,7 @@ export async function makeLink(
     // inside it in planLinks, so only a non-directory and the absent name
     // are settled here, and a plain file without a flag falls to the
     // dispatcher's "File exists" below.
-    const linked = visibleLink(namespace, plan.linkAbs)
+    const linked = visibleLink(namespace, vis, plan.linkAbs)
     const behind = linked
       ? await linkTargetStat(namespace, dispatch, plan.linkAbs, null)
       : await pathStat(dispatch, plan.linkAbs)
@@ -628,8 +645,8 @@ export async function makeLink(
   if (
     flags.force &&
     !backs &&
-    operandAbs(namespace, plan.source, cwd) === plan.linkAbs &&
-    (visibleLink(namespace, plan.linkAbs) || (await pathStat(dispatch, plan.linkAbs)) !== null)
+    operandAbs(namespace, plan.source, cwd, vis) === plan.linkAbs &&
+    (visibleLink(namespace, vis, plan.linkAbs) || (await pathStat(dispatch, plan.linkAbs)) !== null)
   ) {
     errors.push(`ln: '${targetTyped}' and '${typed}' are the same file\n`)
     return
@@ -642,14 +659,14 @@ export async function makeLink(
   // there is what -T names, and that one is backed up.
   let occupied = false
   if (data !== null || backs) {
-    const found = visibleLink(namespace, plan.linkAbs)
+    const found = visibleLink(namespace, vis, plan.linkAbs)
       ? null
       : await pathStat(dispatch, plan.linkAbs)
     if (backs && found !== null && found.type === FileType.DIRECTORY) {
       errors.push(`ln: ${typed}: cannot overwrite directory\n`)
       return
     }
-    occupied = found !== null || visibleLink(namespace, plan.linkAbs)
+    occupied = found !== null || visibleLink(namespace, vis, plan.linkAbs)
   }
   if (occupied && backs) {
     const backup = await backupTarget(
@@ -805,6 +822,7 @@ export async function handleLn(
   }
   const [plans, refused] = await planLinks(
     namespace,
+    session.visibility,
     dispatch,
     session.cwd,
     operands,
@@ -816,7 +834,7 @@ export async function handleLn(
   const errors: string[] = []
   const out: string[] = []
   for (const plan of plans) {
-    await makeLink(namespace, dispatch, session.cwd, plan, flags, errors, out)
+    await makeLink(namespace, session.visibility, dispatch, session.cwd, plan, flags, errors, out)
   }
   return result('ln', {
     out: out.length > 0 ? encodeText(out.join('')) : null,
