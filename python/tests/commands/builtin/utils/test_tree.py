@@ -34,11 +34,11 @@ class _Mount:
     def __init__(self, answer=None, refuse=None) -> None:
         self.answer = answer
         self.refuse = refuse
-        self.asked: list[tuple[str, int | None]] = []
+        self.asked: list[str] = []
         self.calls: list[str] = []
 
-    async def read_tree(self, path: PathSpec, maxdepth: int | None):
-        self.asked.append((path.virtual, maxdepth))
+    async def read_tree(self, path: PathSpec):
+        self.asked.append(path.virtual)
         if self.refuse is not None:
             raise self.refuse("ram", "read_tree", path)
         return self.answer
@@ -52,10 +52,8 @@ class _Mount:
         return FileStat(name=path.virtual, type=FILE)
 
 
-def _walk(mount: _Mount, maxdepth: int | None = None, answered=None):
-    return tree_walk(
-        mount.read_tree, mount.readdir, mount.stat, maxdepth, answered
-    )
+def _walk(mount: _Mount, answered=None):
+    return tree_walk(mount.read_tree, mount.readdir, mount.stat, answered)
 
 
 @pytest.mark.asyncio
@@ -70,7 +68,7 @@ async def test_one_answer_lists_and_stats_the_whole_walk():
     implied = await stat(PathSpec.from_str_path("/m/a"))
     assert (implied.name, implied.type) == ("a", DIR)
     assert (await stat(PathSpec.from_str_path("/m/a/c.txt"))).size == 3
-    assert mount.asked == [("/m", None)]
+    assert mount.asked == ["/m"]
     assert mount.calls == []
     assert answered == {"/m", "/m/a", "/m/e"}
 
@@ -95,7 +93,7 @@ async def test_the_root_and_paths_the_answer_lacks_go_to_the_mount():
     await stat(PathSpec.from_str_path("/m/zz"))
     await readdir(PathSpec.from_str_path("/other"))
     assert mount.calls == ["stat /m", "stat /m/zz"]
-    assert mount.asked == [("/m", None), ("/other", None)]
+    assert mount.asked == ["/m", "/other"]
 
 
 @pytest.mark.asyncio
@@ -109,7 +107,7 @@ async def test_no_answer_walks_the_usual_way_and_asks_once(mount):
     for _ in range(2):
         await readdir(PathSpec.from_str_path("/m"))
     assert mount.calls == ["readdir /m", "readdir /m"]
-    assert mount.asked == [("/m", None)]
+    assert mount.asked == ["/m"]
 
 
 @pytest.mark.asyncio
@@ -118,17 +116,6 @@ async def test_a_backends_refusal_propagates():
     readdir, _ = _walk(_Mount(refuse=enotsup))
     with pytest.raises(OSError):
         await readdir(PathSpec.from_str_path("/m"))
-
-
-@pytest.mark.asyncio
-async def test_maxdepth_bounds_what_the_answer_stands_in_for():
-    mount = _Mount({"a": FileStat(name="a", type=DIR)})
-    readdir, stat = _walk(mount, maxdepth=1)
-    assert await readdir(PathSpec.from_str_path("/m")) == ["/m/a"]
-    assert (await stat(PathSpec.from_str_path("/m/a"))).type == DIR
-    await readdir(PathSpec.from_str_path("/m/a"))
-    assert mount.asked == [("/m", 1)]
-    assert mount.calls == ["readdir /m/a"]
 
 
 def test_no_read_tree_hands_back_the_walk():

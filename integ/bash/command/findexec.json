@@ -753,7 +753,7 @@
         "stdout": "rc=0\nrc=0\nrc=0\nrc=1\n",
         "stderr": "find: 'loop1': Too many levels of symbolic links\n"
       },
-      "note": "Rows go to /dev/null: on a backend whose native find ignores the mtime window every row prints, so only the exit codes and the loop refusal are backend-independent here; the mtime comparison itself is pinned on ram in test_find_refs.py / find_refs.test.ts."
+      "note": "Rows go to /dev/null: the case asks only the exit codes and the loop refusal; the mtime comparison itself is pinned on ram in test_find_refs.py / find_refs.test.ts."
     },
     {
       "id": "find_actions_keep_newline_boundaries_0",

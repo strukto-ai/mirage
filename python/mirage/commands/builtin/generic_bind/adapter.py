@@ -582,7 +582,7 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
                 _slot_call,
                 dispatch,
                 "read_tree",
-                ("maxdepth", "index"),
+                ("index",),
                 nofollow=True,
             )
             if ops.read_tree is not None

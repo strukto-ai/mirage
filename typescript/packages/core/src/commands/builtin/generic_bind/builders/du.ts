@@ -133,10 +133,9 @@ function treeOf<A extends Accessor>(
   const answered = new Set<string>()
   const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, index),
+    readTree === undefined ? undefined : (p) => readTree(accessor, p, index),
     (p: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, p, i),
     (p: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, p, i),
-    null,
     answered,
   )
   return { readdir, stat, answered }

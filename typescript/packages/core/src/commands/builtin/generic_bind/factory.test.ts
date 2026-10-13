@@ -63,7 +63,7 @@ describe('GENERIC_COMMANDS', () => {
       const index = new RAMIndexCacheStore()
       const io = makeOps({
         local: false,
-        readTree: (_accessor, path, maxdepth, idx) => tree(accessor, path, maxdepth, idx),
+        readTree: (_accessor, path, idx) => tree(accessor, path, idx),
         stat: (_accessor, path, idx) => stat(accessor, path, idx),
         mkdir: () => Promise.resolve(),
         copy: (_accessor, _src, dst) => {

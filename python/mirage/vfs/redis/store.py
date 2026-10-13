@@ -225,6 +225,47 @@ class RedisStore:
             for k, v in raw.items()
         }
 
+    async def stat_many(
+        self, paths: list[tuple[str, bool]]
+    ) -> list[tuple[dict[str, str], int | None, str | None]]:
+        """The attributes, length and modified time of many paths, what
+        ``get_attrs``, ``file_len`` and ``get_modified`` answer for each,
+        in one pipeline. A directory has no length.
+
+        Args:
+            paths (list[tuple[str, bool]]): each path, and whether it is
+                a directory.
+        """
+        if not paths:
+            return []
+        async with self._client.pipeline(transaction=False) as pipe:
+            for path, is_dir in paths:
+                pipe.hgetall(self._ak(path))
+                if not is_dir:
+                    pipe.strlen(self._fk(path))
+                pipe.get(self._mk(path))
+            replies = iter(await pipe.execute())
+        out: list[tuple[dict[str, str], int | None, str | None]] = []
+        for _path, is_dir in paths:
+            raw = next(replies)
+            size = None if is_dir else int(next(replies))
+            modified = next(replies)
+            out.append(
+                (
+                    {
+                        (k.decode() if isinstance(k, bytes) else k): (
+                            v.decode() if isinstance(v, bytes) else v
+                        )
+                        for k, v in raw.items()
+                    },
+                    size,
+                    modified.decode()
+                    if isinstance(modified, bytes)
+                    else modified,
+                )
+            )
+        return out
+
     async def set_attrs(self, path: str, fields: dict[str, str]) -> None:
         await cast(
             "Awaitable[int]", self._client.hset(self._ak(path), mapping=fields)

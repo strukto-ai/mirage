@@ -138,6 +138,29 @@ describe.skipIf(skip)('RedisStore', () => {
     expect((await store.listDirs()).size).toBe(0)
   })
 
+  it('statMany answers what the single getters do', async () => {
+    await store.setFile('/a.txt', new TextEncoder().encode('hello'))
+    await store.setModified('/a.txt', '2026-01-01T00:00:00+00:00')
+    await store.setAttrs('/a.txt', { mode: '420' })
+    await store.addDir('/d')
+    const paths: [string, boolean][] = [
+      ['/a.txt', false],
+      ['/d', true],
+      ['/gone', false],
+    ]
+    const singles = []
+    for (const [p, isDir] of paths) {
+      singles.push([
+        await store.getAttrs(p),
+        isDir ? null : await store.fileLen(p),
+        await store.getModified(p),
+      ])
+    }
+    expect(await store.statMany(paths)).toEqual(singles)
+    expect(singles[0]).toEqual([{ mode: '420' }, 5, '2026-01-01T00:00:00+00:00'])
+    expect(await store.statMany([])).toEqual([])
+  })
+
   it('clear drops a staging key left by a chunked browser write', async () => {
     const c = await store.client()
     await c.set(`${prefix}tmp:/big:abc`, 'partial')

@@ -30,7 +30,6 @@ export type ReaddirFn<A extends Accessor> = (
 export type TreeFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
-  maxdepth?: number | null,
   index?: IndexCacheStore,
 ) => Promise<Map<string, FileStat> | null>
 

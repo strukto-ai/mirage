@@ -102,7 +102,7 @@ def test_walk_budget_with_no_cap_charges_each_mount_its_own():
 
 
 def _tree(refusal=None):
-    async def read_tree(_accessor, path, maxdepth=None, index=None):
+    async def read_tree(_accessor, path, index=None):
         if refusal is not None:
             raise refusal("ram", "read_tree", path)
         return {
@@ -135,6 +135,20 @@ async def test_a_tree_answer_costs_no_budget():
     ops = dataclasses.replace(_ops(max_du_entries=1), read_tree=_tree())
     out, code, _ = await _run(ops, "/db")
     assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_tree_answer_at_a_root_mount_costs_no_budget():
+    base = _ops(max_du_entries=1)
+
+    async def stat(accessor, path, index=None):
+        if path.virtual == "/":
+            return FileStat(name="/", type=FileType.DIRECTORY)
+        return await base.stat(accessor, path, index)
+
+    ops = dataclasses.replace(base, stat=stat, read_tree=_tree())
+    out, code, _ = await _run(ops, "/")
+    assert (out, code) == ("2\t/sub\n5\t/\n", 0)
 
 
 @pytest.mark.asyncio

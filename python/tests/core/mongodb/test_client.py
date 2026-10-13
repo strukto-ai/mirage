@@ -15,6 +15,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from bson import Timestamp
 
 from mirage.core.mongodb.client import (
     get_indexes,
@@ -23,6 +24,7 @@ from mirage.core.mongodb.client import (
     iter_documents,
     iter_inserts,
     list_collections,
+    operation_time,
 )
 from mirage.core.mongodb.types import EntityKind
 
@@ -257,6 +259,42 @@ async def test_iter_inserts_yields_full_documents():
     col.watch.assert_awaited_once_with(
         [{"$match": {"operationType": "insert"}}]
     )
+
+
+@pytest.mark.asyncio
+async def test_iter_inserts_after_a_time_starts_there_and_drops_it():
+    client, col = _build_watch_client([])
+    after = Timestamp(100, 3)
+    async for _doc in iter_inserts(client, "db1", "coll1", after):
+        pass
+    col.watch.assert_awaited_once_with(
+        [
+            {
+                "$match": {
+                    "operationType": "insert",
+                    "clusterTime": {"$gt": after},
+                }
+            }
+        ],
+        start_at_operation_time=after,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply, expected",
+    [
+        ({"ok": 1, "operationTime": Timestamp(7, 1)}, Timestamp(7, 1)),
+        ({"ok": 1}, None),
+    ],
+)
+async def test_operation_time_reads_the_ping_reply(reply, expected):
+    db = MagicMock()
+    db.command = AsyncMock(return_value=reply)
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    assert await operation_time(client, "db1") == expected
+    db.command.assert_awaited_once_with("ping")
 
 
 @pytest.mark.asyncio

@@ -138,6 +138,20 @@ describe('du walk fallback under a path rule', () => {
     expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/db/sub\n5\t/db\n', 0])
   })
 
+  // Mirrors test_a_tree_answer_at_a_root_mount_costs_no_budget.
+  it('charges no budget for a tree answer at a root mount', async () => {
+    const rooted: CommandIO = {
+      ...TREED,
+      maxDuEntries: 1,
+      stat: (a, p, i) =>
+        p.virtual === '/'
+          ? Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
+          : OPS.stat(a, p, i),
+    } as CommandIO
+    const [out, io] = await runScoped(rooted, [PathSpec.fromStrPath('/')])
+    expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/sub\n5\t/\n', 0])
+  })
+
   it("does not walk a backend's own refusal", async () => {
     const refusing: CommandIO = {
       ...OPS,

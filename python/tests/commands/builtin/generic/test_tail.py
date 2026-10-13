@@ -11,6 +11,7 @@ from mirage.commands.builtin.generic.tail import (
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.io.stream import close_quietly
 from mirage.shell.console import Channel
 from mirage.types import (
     FileStat,
@@ -955,6 +956,42 @@ async def test_follow_streams_what_the_mount_hands_over():
     chunks = await _drain_for(stream, 0.15)
     await lander
     assert b"".join(chunks) == b"c\nd\n"
+
+
+@pytest.mark.asyncio
+async def test_a_reader_that_stops_in_the_first_print_closes_the_follow():
+    fs = _Growing({"/d/log": b"a\nb\nc\n"})
+    closed: list[bool] = []
+
+    class _Added:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> bytes:
+            raise AssertionError("the follow was read")
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    async def last_lines(p: PathSpec, n: int) -> bytes:
+        return b"c\n"
+
+    async def follow(p: PathSpec):
+        return _Added()
+
+    stream, _ = await tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(n="1"),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+        last_lines,
+        follow,
+    )
+    assert await anext(stream) == b"c\n"
+    await close_quietly(stream)
+    assert closed == [True]
 
 
 @pytest.mark.asyncio

@@ -58,10 +58,9 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
 
   override readTree(
     path: PathSpec,
-    maxdepth: number | null = null,
     index?: IndexCacheStore,
   ): Promise<Map<string, FileStat> | null> {
-    return s3Tree(this.accessor, path, maxdepth, index)
+    return s3Tree(this.accessor, path, index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

@@ -19,6 +19,7 @@ from mirage.commands.builtin.utils.operands import (
     split_opened,
 )
 from mirage.commands.builtin.utils.stream import (
+    is_stdin,
     operand_label,
     resolve_source,
     stdin_stat,
@@ -28,6 +29,8 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -303,13 +306,24 @@ async def head_generic(
                         ):
                             yield chunk
                         return
-                    if pushed and first_lines is not None:
+                    if pushed and first_lines is not None and not is_stdin(p):
                         lines = await first_lines(p, n)
                         if lines is not None:
                             yield lines
                             return
                     async for chunk in source:
                         yield chunk
+                except FS_ERRORS as exc:
+                    if len(opened) == 1:
+                        raise
+                    # A read that fails once the stat passed (a table past
+                    # its read cap) is reported, and the next operand
+                    # still prints.
+                    held = io.stderr if isinstance(io.stderr, bytes) else b""
+                    io.stderr = held + encode_text(
+                        fs_error_line("head", p, exc)
+                    )
+                    io.exit_code = 1
                 finally:
                     await close_quietly(source)
 

@@ -94,10 +94,9 @@ class DropboxVFS(BaseVFS):
     async def read_tree(
         self,
         path: PathSpec,
-        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path, maxdepth, index)
+        return await _tree(self.accessor, path, index)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)

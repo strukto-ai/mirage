@@ -19,7 +19,8 @@ import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.redis.readdir import readdir
+from mirage.core.redis.readdir import readdir, tree
+from mirage.core.redis.stat import stat
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -200,3 +201,19 @@ async def test_readdir_orphan_below_a_missing_dir_is_not_found(
             )
     await s.clear()
     await s.close()
+
+
+@pytest.mark.asyncio
+async def test_tree_answers_each_entry_as_stat_does(accessor):
+    found = await tree(accessor, PathSpec.from_str_path("/sub"))
+    assert found is not None
+    assert sorted(found) == ["c.txt", "d.txt", "deep", "deep/e.txt"]
+    for rel, st in found.items():
+        assert st == await stat(
+            accessor, PathSpec.from_str_path("/sub/" + rel)
+        )
+
+
+@pytest.mark.asyncio
+async def test_tree_of_no_directory_is_none(accessor):
+    assert await tree(accessor, PathSpec.from_str_path("/a.txt")) is None

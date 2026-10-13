@@ -249,7 +249,6 @@ export type LineCountOp<A extends Accessor = Accessor> = (
 export type ReadTreeOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
-  maxdepth?: number | null,
   index?: IndexCacheStore,
 ) => Promise<Map<string, FileStat> | null>
 

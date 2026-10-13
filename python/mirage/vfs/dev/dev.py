@@ -66,7 +66,6 @@ class DevVFS(RAMVFS):
     async def read_tree(
         self,
         path: PathSpec,
-        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, FileStat] | None:
         """None: the devices stat as character devices, which a RAM
@@ -74,7 +73,6 @@ class DevVFS(RAMVFS):
 
         Args:
             path (PathSpec): the directory.
-            maxdepth (int | None): unused.
             index (IndexCacheStore): unused.
         """
         return None

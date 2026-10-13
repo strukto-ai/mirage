@@ -52,9 +52,16 @@ export interface MongoDriver {
     collection: string,
     options?: MongoIterOptions,
   ): AsyncIterableIterator<T>
+  /**
+   * The cluster's operation time now, from a `ping`, as the server's own
+   * timestamp; null from a server that reports none.
+   */
+  operationTime(database: string): Promise<unknown>
+  /** Each inserted document, after the operation time `after` when given. */
   iterInserts<T = Record<string, unknown>>(
     database: string,
     collection: string,
+    after?: unknown,
   ): AsyncIterableIterator<T>
   countDocuments(
     database: string,

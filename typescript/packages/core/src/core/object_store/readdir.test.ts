@@ -14,8 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { FileType } from '../../types.ts'
 import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
-import { makeReaddir } from './readdir.ts'
+import { makeReaddir, makeTree } from './readdir.ts'
 
 const accessor = new FakeAccessor()
 
@@ -71,5 +72,40 @@ describe('object_store readdir', () => {
     const second = await readdir(accessor, spec('/'), index)
     expect(second).toEqual(first)
     expect(store.connects).toBe(connects)
+  })
+})
+
+// Mirrors the make_tree tests in test_readdir.py.
+describe('object_store makeTree', () => {
+  it('answers each entry and implied directory', async () => {
+    const store = new FakeStore({ 'a.txt': 'hi', 'dir/sub/f.txt': 'x', '/': '' })
+    const found = await makeTree(makeDriver(store))(accessor, spec('/'))
+    expect([...(found ?? new Map()).keys()].sort()).toEqual([
+      'a.txt',
+      'dir',
+      'dir/sub',
+      'dir/sub/f.txt',
+    ])
+    expect(found?.get('dir/sub/f.txt')?.size).toBe(1)
+    expect(found?.get('dir')?.type).toBe(FileType.DIRECTORY)
+  })
+
+  it.each([
+    ['file-and-prefix', { 'dir/a': 'f', 'dir/a/b.txt': 'x' }],
+    ['empty-segment', { 'dir/a//b.txt': 'x' }],
+  ])('declines what readdir lists its own way: %s', async (_label, objects) => {
+    const tree = makeTree(makeDriver(new FakeStore(objects)))
+    await expect(tree(accessor, spec('/dir'))).resolves.toBeNull()
+  })
+
+  it('declines a row without a size', async () => {
+    const driver = {
+      ...makeDriver(new FakeStore({ 'dir/a.txt': 'x' })),
+      // eslint-disable-next-line @typescript-eslint/require-await
+      listSubtree: async function* () {
+        yield { key: 'dir/a.txt' }
+      },
+    }
+    await expect(makeTree(driver)(accessor, spec('/dir'))).resolves.toBeNull()
   })
 })

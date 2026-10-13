@@ -37,16 +37,20 @@ function decodeAttrs(raw: Record<string, string>): {
   return out
 }
 
-/**
- * What `stat` answers for the normalized key `p` the store holds. Mirrors
- * Python's `key_stat`.
- */
-export async function keyStat(store: RedisStoreLike, p: string, isDir: boolean): Promise<FileStat> {
-  const attrs = decodeAttrs(await store.getAttrs(p))
+// The stat of the normalized key `p` from what the store holds for it.
+// Mirrors Python's `_from_fields`.
+function fromFields(
+  p: string,
+  isDir: boolean,
+  raw: Record<string, string>,
+  size: number | null,
+  modified: string | null,
+): FileStat {
+  const attrs = decodeAttrs(raw)
   if (isDir) {
     return new FileStat({
       name: gnuBasename(p),
-      modified: await store.getModified(p),
+      modified,
       type: FileType.DIRECTORY,
       mode: attrs.mode ?? null,
       uid: attrs.uid ?? null,
@@ -56,14 +60,36 @@ export async function keyStat(store: RedisStoreLike, p: string, isDir: boolean):
   }
   return new FileStat({
     name: gnuBasename(p),
-    size: await store.fileLen(p),
-    modified: await store.getModified(p),
+    size,
+    modified,
     type: FileType.FILE,
     content: contentTypeForPath(p),
     mode: attrs.mode ?? null,
     uid: attrs.uid ?? null,
     gid: attrs.gid ?? null,
     atime: attrs.atime ?? null,
+  })
+}
+
+/**
+ * What `stat` answers for the normalized key `p` the store holds. Mirrors
+ * Python's `key_stat`.
+ */
+export async function keyStat(store: RedisStoreLike, p: string, isDir: boolean): Promise<FileStat> {
+  const raw = await store.getAttrs(p)
+  const size = isDir ? null : await store.fileLen(p)
+  return fromFields(p, isDir, raw, size, await store.getModified(p))
+}
+
+/** `keyStat` for many keys, in one pipeline. Mirrors Python's `key_stats`. */
+export async function keyStats(
+  store: RedisStoreLike,
+  keys: readonly [string, boolean][],
+): Promise<FileStat[]> {
+  const fields = await store.statMany(keys)
+  return keys.map(([p, isDir], i) => {
+    const [raw, size, modified] = fields[i] ?? [{}, null, null]
+    return fromFields(p, isDir, raw, size, modified)
   })
 }
 

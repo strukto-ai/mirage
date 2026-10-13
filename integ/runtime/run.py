@@ -489,15 +489,15 @@ class FailingRAMVFS(RAMVFS):
     listing names it, and every question about it errors with whatever
     the upstream said, which is no filesystem error at all. Its commands
     ask the same functions, so ``ls`` and ``find`` meet the record where
-    a remote mount's commands do, and with no find of its own, as such a
-    mount has none, ``find`` walks.
+    a remote mount's commands do, and with no ``read_tree`` of its own,
+    as such a mount has none, ``find`` stats each entry.
 
     Args:
         failing (list[str]): names, spelled as a mount's ``files``
             spells them, whose stat and read fail.
     """
 
-    find = BaseVFS.find
+    read_tree = BaseVFS.read_tree
 
     def __init__(self, failing: list[str]) -> None:
         super().__init__()

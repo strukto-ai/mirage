@@ -204,6 +204,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       ['s/b', 'file', 4],
       ['s', 'directory', null],
     ])
+    for (const [rel, st] of found ?? []) expect(st).toEqual(await stat(acc, spec(`/d/${rel}`)))
     expect(await tree(acc, spec('/d/a'))).toBeNull()
   })
 

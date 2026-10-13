@@ -60,10 +60,9 @@ export function findWalk<A extends Accessor>(
     opts,
     (root, options) => {
       const [readdir, stat] = treeWalk<string[], FileStat>(
-        readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, idx),
+        readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
         (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
         (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
-        options.maxDepth ?? null,
       )
       return walkFind(
         root,

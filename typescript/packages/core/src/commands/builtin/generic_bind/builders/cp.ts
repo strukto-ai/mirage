@@ -68,7 +68,7 @@ export const BUILDER: GenericCommand = {
     // (mirrors Python's _make_find). Passing the index lets stat classify
     // entries from the cache instead of re-fetching, matching find.
     const [readdir, stat] = treeWalk<string[], FileStat>(
-      readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, idx),
+      readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
       (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
       (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
     )

@@ -423,7 +423,6 @@ class BaseVFS:
     async def read_tree(
         self,
         path: PathSpec,
-        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, FileStat] | None:
         """Every entry under a directory, in one answer.
@@ -432,17 +431,15 @@ class BaseVFS:
         this before they walk a directory, so a backend that can list a
         subtree on its own (a recursive listing, one query over many
         folders) does not take a ``readdir`` per directory. The answer
-        stands in for the walk: every file and directory below ``path``
-        down to ``maxdepth`` levels, keyed by its path below ``path``
-        (``a``, ``a/b.txt``), each with the stat ``stat`` gives for it.
+        stands in for the walk: every file and directory below ``path``,
+        keyed by its path below ``path`` (``a``, ``a/b.txt``), each with
+        the stat ``stat`` gives for it.
         The walk lists each directory from it in name order. Return None
         to have the command walk ``readdir`` the usual way; raise what
         ``readdir`` of ``path`` raises otherwise.
 
         Args:
             path (PathSpec): the directory.
-            maxdepth (int | None): how many levels below ``path`` the
-                walk reads, None for all of them.
             index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "read_tree", path)

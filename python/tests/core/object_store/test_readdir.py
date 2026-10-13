@@ -13,11 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.object_store.readdir import make_readdir
+from mirage.core.object_store.driver import TreeEntry
+from mirage.core.object_store.readdir import make_readdir, make_tree
+from mirage.types import FileType
 from tests.core.object_store.conftest import FakeStore, make_driver, spec
 
 
@@ -75,3 +78,35 @@ def test_readdir_serves_a_cached_listing_without_connecting(accessor):
     second = asyncio.run(readdir(accessor, spec("/"), index=index))
     assert first == second
     assert store.connects == connects
+
+
+def test_tree_answers_each_entry_and_implied_directory(accessor):
+    store = FakeStore({"a.txt": b"hi", "dir/sub/f.txt": b"x", "/": b""})
+    found = asyncio.run(make_tree(make_driver(store))(accessor, spec("/")))
+    assert found is not None
+    assert sorted(found) == ["a.txt", "dir", "dir/sub", "dir/sub/f.txt"]
+    assert found["dir/sub/f.txt"].size == 1
+    assert found["dir"].type == FileType.DIRECTORY
+
+
+@pytest.mark.parametrize(
+    "objects",
+    [
+        {"dir/a": b"f", "dir/a/b.txt": b"x"},
+        {"dir/a//b.txt": b"x"},
+    ],
+    ids=["file-and-prefix", "empty-segment"],
+)
+def test_tree_declines_what_readdir_lists_its_own_way(accessor, objects):
+    tree = make_tree(make_driver(FakeStore(objects)))
+    assert asyncio.run(tree(accessor, spec("/dir"))) is None
+
+
+def test_tree_declines_a_row_without_a_size(accessor):
+    async def list_subtree(conn, stem):
+        yield TreeEntry(key="dir/a.txt", size=None)
+
+    driver = replace(
+        make_driver(FakeStore({"dir/a.txt": b"x"})), list_subtree=list_subtree
+    )
+    assert asyncio.run(make_tree(driver)(accessor, spec("/dir"))) is None

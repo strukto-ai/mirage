@@ -48,7 +48,6 @@ class TreeFn(Protocol[A_contra]):
         self,
         accessor: A_contra,
         path: PathSpec,
-        maxdepth: int | None = ...,
         index: IndexCacheStore = ...,
     ) -> Awaitable[dict[str, FileStat] | None]: ...
 

@@ -115,9 +115,14 @@ export class HttpMongoDriver implements MongoDriver {
     for (const d of docs) yield d
   }
 
+  operationTime(_database: string): Promise<unknown> {
+    return Promise.resolve(null)
+  }
+
   iterInserts<T = Record<string, unknown>>(
     _database: string,
     _collection: string,
+    _after?: unknown,
   ): AsyncIterableIterator<T> {
     return {
       next: () =>

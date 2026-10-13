@@ -304,9 +304,8 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       : {}),
     ...(has('readTree')
       ? {
-          readTree: withoutAccessor(
-            (path: PathSpec, maxdepth?: number | null, index?: IndexCacheStore) =>
-              vfs.readTree(path, maxdepth ?? null, index),
+          readTree: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+            vfs.readTree(path, index),
           ),
         }
       : {}),
@@ -454,11 +453,11 @@ const DISPATCHED_SLOTS = {
       (await dispatchedCall(dispatch, 'follow', path)) as AsyncIterable<Uint8Array> | null,
   readTree:
     (dispatch: DispatchFn): CommandIO['readTree'] =>
-    async (_accessor, path, maxdepth) =>
+    async (_accessor, path) =>
       // A walk lists the name it is handed, never a link's target: its own
       // readdir reaches the backend past the namespace, so the subtree read
       // does not follow a link at the final name either.
-      (await dispatchedCall(dispatch, 'read_tree', path, [maxdepth ?? null], {
+      (await dispatchedCall(dispatch, 'read_tree', path, [], {
         nofollow: true,
       })) as Map<string, FileStat> | null,
 } satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>

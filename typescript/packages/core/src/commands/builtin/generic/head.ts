@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { operandLabel } from '../utils/stream.ts'
+import { isStdin, operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { isFsError } from '../../../errors/fs.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
@@ -223,19 +225,27 @@ export async function headGeneric(
     if (opened.length === 0) return [null, io]
     const pushed = parsed.bytesMode === null && !parsed.zeroTerminated && parsed.lines > 0
     const sourceFor = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
-      const source = stream(p)
-      if ((await stat(p)).type === FileType.CHAR_DEVICE && parsed.bytesMode === null) {
-        yield* truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
-        return
-      }
-      if (pushed && firstLines !== undefined) {
-        const lines = await firstLines(p, parsed.lines)
-        if (lines !== null) {
-          yield lines
+      try {
+        const source = stream(p)
+        if ((await stat(p)).type === FileType.CHAR_DEVICE && parsed.bytesMode === null) {
+          yield* truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
           return
         }
+        if (pushed && firstLines !== undefined && !isStdin(p)) {
+          const lines = await firstLines(p, parsed.lines)
+          if (lines !== null) {
+            yield lines
+            return
+          }
+        }
+        yield* source
+      } catch (err) {
+        if (opened.length === 1 || !isFsError(err)) throw err
+        // A read that fails once the stat passed (a table past its read cap)
+        // is reported, and the next operand still prints.
+        io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine('head', p, err))])
+        io.exitCode = 1
       }
-      yield* source
     }
     return [
       headMulti(

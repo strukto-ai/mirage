@@ -467,15 +467,15 @@ async function ensureMongo(): Promise<void> {
  * names it, and every question about it errors with whatever the
  * upstream said, which is no filesystem code at all. Its commands ask the
  * same functions, so ls and find meet the record where a remote mount's
- * commands do, and with no find of its own, as such a mount has none,
- * find walks.
+ * commands do, and with no readTree of its own, as such a mount has none,
+ * find stats each entry.
  */
 class FailingRAMVFS extends RAMVFS {
   static {
     Object.defineProperty(
       this.prototype,
-      'find',
-      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'find') ?? {},
+      'readTree',
+      Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'readTree') ?? {},
     )
   }
 

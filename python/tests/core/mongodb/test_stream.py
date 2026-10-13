@@ -14,10 +14,11 @@
 
 import datetime as dt
 import json
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from bson import Decimal128, ObjectId
+from bson import Decimal128, ObjectId, Timestamp
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -71,11 +72,19 @@ def _patched_iter(docs):
     )
 
 
-def _patched_watch(docs):
-    return patch(
-        "mirage.core.mongodb.stream.iter_inserts",
-        new=lambda *args, **kwargs: _gen(docs),
-    )
+@contextmanager
+def _patched_watch(docs, after=None):
+    with (
+        patch(
+            "mirage.core.mongodb.stream.iter_inserts",
+            new=lambda *args, **kwargs: _gen(docs),
+        ),
+        patch(
+            "mirage.core.mongodb.stream.operation_time",
+            new=AsyncMock(return_value=after),
+        ),
+    ):
+        yield
 
 
 def _path(s: str) -> PathSpec:
@@ -290,11 +299,44 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
             consumed.append(i)
             yield {"_id": ObjectId(), "i": i}
 
-    with patch("mirage.core.mongodb.stream.iter_inserts", new=_instrumented):
+    with (
+        patch("mirage.core.mongodb.stream.iter_inserts", new=_instrumented),
+        patch(
+            "mirage.core.mongodb.stream.operation_time",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
         gen = await _followed(accessor, DOCS_PATH, index)
         await gen.__anext__()
         await close_quietly(gen)
     assert len(consumed) <= 2
+
+
+@pytest.mark.asyncio
+async def test_follow_starts_at_the_time_it_was_asked(accessor, index):
+    after = Timestamp(42, 1)
+    calls: list[str] = []
+    seen: list[Timestamp | None] = []
+
+    async def _timed(*_args):
+        calls.append("ping")
+        return after
+
+    async def _inserts(_client, _database, _name, since=None):
+        calls.append("watch")
+        seen.append(since)
+        yield {"_id": 1}
+
+    with (
+        patch("mirage.core.mongodb.stream.iter_inserts", new=_inserts),
+        patch("mirage.core.mongodb.stream.operation_time", new=_timed),
+    ):
+        gen = await _followed(accessor, DOCS_PATH, index)
+        assert calls == ["ping"]
+        assert await gen.__anext__() == b'{"_id": 1}\n'
+        await close_quietly(gen)
+    assert calls == ["ping", "watch"]
+    assert seen == [after]
 
 
 @pytest.mark.asyncio
@@ -440,6 +482,7 @@ async def test_a_collection_outside_the_scope_is_enoent_to_every_stream(
     with (
         patch("mirage.core.mongodb.stream.iter_documents", new=fetched),
         patch("mirage.core.mongodb.stream.iter_inserts", new=fetched),
+        patch("mirage.core.mongodb.stream.operation_time", new=fetched),
         patch("mirage.core.mongodb.stream.find_documents", new=fetched),
         patch("mirage.core.mongodb.stream.count_documents", new=fetched),
     ):

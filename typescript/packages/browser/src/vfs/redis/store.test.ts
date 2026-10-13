@@ -57,6 +57,37 @@ describe('UpstashRedisStore', () => {
     expect(await store.hasDir('/')).toBe(true)
   })
 
+  it('statMany answers what the single getters do, in one pipeline', async () => {
+    const { fake, store } = make()
+    await store.setFile('/a.txt', ENC.encode('hello'))
+    await store.setModified('/a.txt', '2026-01-01T00:00:00+00:00')
+    await store.setAttrs('/a.txt', { mode: '420' })
+    await store.addDir('/d')
+    const paths: [string, boolean][] = [
+      ['/a.txt', false],
+      ['/d', true],
+      ['/gone', false],
+    ]
+    const singles = []
+    for (const [p, isDir] of paths) {
+      singles.push([
+        await store.getAttrs(p),
+        isDir ? null : await store.fileLen(p),
+        await store.getModified(p),
+      ])
+    }
+    const sizes: number[] = []
+    const counted = new UpstashRedisStore({
+      url: fake.url,
+      token: fake.token,
+      keyPrefix: 'mirage:fs:',
+      fetchImpl: countingFetch(fake, sizes),
+    })
+    expect(await counted.statMany(paths)).toEqual(singles)
+    expect(sizes).toEqual([8])
+    expect(singles[0]).toEqual([{ mode: '420' }, 5, '2026-01-01T00:00:00+00:00'])
+  })
+
   it('setFile and getFile round-trip every byte value', async () => {
     const { store } = make()
     await store.setFile('/a.bin', ALL_BYTES)

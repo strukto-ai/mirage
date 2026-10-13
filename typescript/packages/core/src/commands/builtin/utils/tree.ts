@@ -17,10 +17,7 @@ import type { WalkDeclinedError } from '../../../errors/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
-export type ReadTree = (
-  path: PathSpec,
-  maxdepth: number | null,
-) => Promise<Map<string, FileStat> | null>
+export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
 
 export type WalkCall<R> = (path: PathSpec, index?: IndexCacheStore) => Promise<R>
 
@@ -72,7 +69,6 @@ export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,
   stat: WalkCall<S>,
-  maxdepth: number | null = null,
   answered?: Set<string>,
 ): [WalkCall<D>, WalkCall<S>] {
   if (readTree === undefined) return [readdir, stat]
@@ -86,10 +82,6 @@ export function treeWalk<D, S>(
     }
     return null
   }
-  const within = (rel: string, levels: number): boolean => {
-    const depth = rel === '' ? 0 : rel.split('/').length
-    return maxdepth === null || depth < maxdepth + levels
-  }
   const treeReaddir: WalkCall<D> = async (path, index) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = covering(virtual)
@@ -97,7 +89,7 @@ export function treeWalk<D, S>(
       asked.add(virtual)
       let found: Map<string, FileStat> | null
       try {
-        found = await readTree(path, maxdepth)
+        found = await readTree(path)
       } catch (err) {
         if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
         found = null
@@ -111,7 +103,7 @@ export function treeWalk<D, S>(
     if (hit !== null) {
       const [root, rel] = hit
       const listing = roots.get(root)?.[1].get(rel)
-      if (listing !== undefined && within(rel, 0)) {
+      if (listing !== undefined) {
         answered?.add(virtual)
         const base = root.replace(/\/+$/, '') + '/'
         return listing.map((name) => base + name) as D
@@ -122,7 +114,7 @@ export function treeWalk<D, S>(
   const treeStat: WalkCall<S> = async (path, index) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     const hit = covering(virtual)
-    if (hit !== null && hit[1] !== '' && within(hit[1], 1)) {
+    if (hit !== null && hit[1] !== '') {
       const found = roots.get(hit[0])?.[0].get(hit[1])
       if (found !== undefined) return found as S
     }

@@ -106,10 +106,9 @@ export class RedisResourceBase extends BaseVFS {
 
   override readTree(
     path: PathSpec,
-    maxdepth: number | null = null,
     index?: IndexCacheStore,
   ): Promise<Map<string, FileStat> | null> {
-    return redisTree(this.accessor, path, maxdepth, index)
+    return redisTree(this.accessor, path, index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

@@ -25,7 +25,7 @@ const grep: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, idx),
+    readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
     (p: PathSpec) => ops.readdir(accessor, p, idx),
     (p: PathSpec) => ops.stat(accessor, p, idx),
   )

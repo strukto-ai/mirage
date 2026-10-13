@@ -12,16 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.find import (
-    find_walk_generic,
-    parse_find_args,
-    parse_flags,
-)
+from mirage.commands.builtin.generic.find import find_walk_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
@@ -31,28 +26,6 @@ from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
-
-logger = logging.getLogger(__name__)
-
-
-def _maxdepth(texts: list[str], opts: CommandOpts) -> int | None:
-    """How many levels below a start point the expression reads.
-
-    Asked of the mount's ``read_tree`` so ``find -maxdepth 1`` lists one
-    level; None when the expression reads them all, or does not parse
-    (the walk reports that).
-
-    Args:
-        texts (list[str]): the raw expression words.
-        opts (CommandOpts): the parsed flags.
-    """
-    try:
-        return parse_find_args(
-            tuple(texts), maxdepth=parse_flags(opts.flags).maxdepth
-        ).maxdepth
-    except ValueError as exc:
-        logger.debug("find: no maxdepth for read_tree: %s", exc)
-        return None
 
 
 async def find(
@@ -69,7 +42,6 @@ async def find(
         bound_op(ops.read_tree, accessor, opts.index),
         partial(ops.readdir, accessor),
         partial(ops.stat, accessor),
-        _maxdepth(texts, opts),
     )
     # -mtime must see namespace times (touch results, observed writes on
     # mtime-less backends), same as ls.

@@ -59,6 +59,14 @@ export interface RedisStoreLike {
   setModified(path: string, ts: string): Promise<void>
   delModified(path: string): Promise<void>
   getAttrs(path: string): Promise<Record<string, string>>
+  /**
+   * The attributes, length and modified time of many paths, what `getAttrs`,
+   * `fileLen` and `getModified` answer for each, in one round trip where the
+   * transport allows. A directory (`true`) has no length.
+   */
+  statMany(
+    paths: readonly (readonly [string, boolean])[],
+  ): Promise<[Record<string, string>, number | null, string | null][]>
   setAttrs(path: string, fields: Record<string, string>): Promise<void>
   delAttrs(path: string): Promise<void>
   listAttrs(): Promise<Record<string, Record<string, string>>>

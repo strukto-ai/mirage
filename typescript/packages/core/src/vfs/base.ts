@@ -422,19 +422,14 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * walk a directory, so a backend that can list a subtree on its own (a
    * recursive listing, one query over many folders) does not take a
    * `readdir` per directory. The answer stands in for the walk: every file and
-   * directory below `path` down to `maxdepth` levels (all of them when null),
-   * keyed by its path below `path` (`a`, `a/b.txt`), each with the stat `stat`
-   * gives for it. The walk lists each directory from it in name order.
+   * directory below `path`, keyed by its path below `path` (`a`, `a/b.txt`),
+   * each with the stat `stat` gives for it. The walk lists each directory from it in name order.
    * Resolve null to have the command walk `readdir` the usual way; reject with
    * what `readdir` of `path` rejects with otherwise. Mirrors Python's
    * `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  readTree(
-    path: PathSpec,
-    _maxdepth: number | null = null,
-    _index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
+  readTree(path: PathSpec, _index?: IndexCacheStore): Promise<Map<string, FileStat> | null> {
     return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 

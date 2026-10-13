@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tree import parse_flags, tree_generic
+from mirage.commands.builtin.generic.tree import tree_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
@@ -40,7 +40,6 @@ async def tree(
         bound_op(ops.read_tree, accessor, opts.index),
         partial(ops.readdir, accessor),
         partial(ops.stat, accessor),
-        parse_flags(opts.flags).max_depth,
     )
     return await tree_generic(resolved, list(texts), opts, readdir, stat)
 

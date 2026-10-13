@@ -81,10 +81,9 @@ export class HfBucketsVFS extends BaseVFS {
 
   override readTree(
     path: PathSpec,
-    maxdepth: number | null = null,
     index?: IndexCacheStore,
   ): Promise<Map<string, FileStat> | null> {
-    return hfTree(this.accessor, path, maxdepth, index)
+    return hfTree(this.accessor, path, index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

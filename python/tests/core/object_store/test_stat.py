@@ -116,7 +116,7 @@ async def test_recursive_metadata_requires_a_fresh_listing(
     tree = make_tree(driver)
     with patch("mirage.cache.index.ram.datetime") as clock:
         clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        await tree(accessor, path, None, index)
+        await tree(accessor, path, index)
         store.connects = 0
         assert (await stat(accessor, path, index)).type == FileType.DIRECTORY
         assert store.connects == 0
@@ -132,7 +132,7 @@ async def test_recursive_metadata_requires_a_fresh_listing(
         if replacement == "deleted":
             with pytest.raises(FileNotFoundError):
                 await stat(accessor, path, index)
-            assert await tree(accessor, path, None, index) is None
+            assert await tree(accessor, path, index) is None
         else:
             current = await stat(accessor, path, index)
             assert current.type == (
@@ -140,7 +140,7 @@ async def test_recursive_metadata_requires_a_fresh_listing(
             )
         with pytest.raises(FileNotFoundError):
             await stat(accessor, spec("/data/old.txt"), index)
-        found = await tree(accessor, path, None, index)
+        found = await tree(accessor, path, index)
         if replacement == "directory":
             assert _size(found) == len(b"new contents")
 
@@ -155,12 +155,12 @@ async def test_refresh_does_not_revive_an_expired_folder(accessor, refresh):
     tree = make_tree(driver)
     with patch("mirage.cache.index.ram.datetime") as clock:
         clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        await tree(accessor, path, None, index)
+        await tree(accessor, path, index)
         store.objects.clear()
         store.objects.update({"data": b"file", "data/new.txt": b"new"})
         clock.now.return_value += timedelta(seconds=61)
         if refresh == "tree":
-            await tree(accessor, path, None, index)
+            await tree(accessor, path, index)
         else:
             await make_readdir(driver)(accessor, path, index)
         assert (

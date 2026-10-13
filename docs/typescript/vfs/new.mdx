@@ -86,7 +86,7 @@ Every other function is optional, and each stands alone:
 | Functions | Purpose |
 | --- | --- |
 | `readdir`, `read`, `stat` | Required filesystem behavior. |
-| `readStream`, `exists`, `find`, `duSize` with `duEntries` | Optional equivalent fast paths. |
+| `readStream`, `exists`, `readTree`, `firstLines`, `lastLines`, `lineCount`, `follow` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setattr` | Individually supported mutations. |
 | `search`, `searchMany` | Optional resource search. |
 | `filesContaining`, `linesContaining`, `beforeFullScan` | Optional: let grep and rg skip what your search rules out. |
@@ -95,10 +95,8 @@ Every other function is optional, and each stands alone:
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
 both built from `read` and `write`, so define them only when the backend writes
 a range natively. Use `FileStat.size=null` when rendered size is unknown.
-`duSize` and `duEntries` come as a pair: the generic derives its per-directory
-rows from the entries, so one without the other is not served. All functions
-enforce the same resource scope, including direct reads of known IDs. A partial
-listing cannot prove an omitted resource absent.
+All functions enforce the same resource scope, including direct reads of known
+IDs. A partial listing cannot prove an omitted resource absent.
 
 Defining `write` does not enable deletion or rename. Every generic command is
 registered either way: `gzip -c` and `tar -t` run as readers, a line that needs
@@ -194,8 +192,7 @@ are not required. Leaving `search` undefined also works.
 request. Errors propagate, and a truncated result is never a complete answer.
 Expose semantic or service-specific queries through a custom command that calls
 the same function with its own options. grep and rg never ask `search`; they
-use the functions below. Native traversal (`find`) and size enumeration
-(`duSize` with `duEntries`) remain independent functions.
+use the functions below.
 
 ### Let grep and rg use your search
 
@@ -518,7 +515,7 @@ places:
 | --- | --- |
 | `new BaseVFS({ name, accessor, io: new VFSAdapter({ read: { readdir, readBytes, stat } }) })` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `readBytes` and `readRange` | one `read(path, index, offset, size)`; set `readsRanges` true when it fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `find`, `duSize` and `duEntries`, `write`, ..., `search`, `searchMany`) |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `readTree`, `write`, ..., `search`, `searchMany`) |
 | `ops()`, `makeGenericOps`, `RegisteredOp`, `OPS` tables, `autoOps` | nothing to declare: the mount serves the functions; mark a custom one `@vfsCall({ effect })` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.ts` | `registerBackendCommands(cls, ...)` in `commands/builtin/backends.ts`; `commands()` returns only the commands the VFS was handed |
 | `new DriverOps(vfs)` and `checkDriverContract(vfs, fixture)` | call the functions on the VFS directly; `checkReadContract(vfs, fixture)` |

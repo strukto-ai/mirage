@@ -31,9 +31,7 @@ const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const recursive = new FlagView(opts.flags, specOf('ls')).asBool('recursive')
   const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    !recursive || readTree === undefined
-      ? undefined
-      : (p, depth) => readTree(accessor, p, depth, idx),
+    !recursive || readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
     (p: PathSpec) => ops.readdir(accessor, p, idx),
     (p: PathSpec) => ops.stat(accessor, p, idx),
   )

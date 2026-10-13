@@ -88,12 +88,17 @@ export function iterDocuments<T = Record<string, unknown>>(
   return accessor.driver.iterDocuments<T>(database, collection, options)
 }
 
+export function operationTime(accessor: MongoDBAccessor, database: string): Promise<unknown> {
+  return accessor.driver.operationTime(database)
+}
+
 export function iterInserts<T = Record<string, unknown>>(
   accessor: MongoDBAccessor,
   database: string,
   collection: string,
+  after: unknown = null,
 ): AsyncIterableIterator<T> {
-  return accessor.driver.iterInserts<T>(database, collection)
+  return accessor.driver.iterInserts<T>(database, collection, after)
 }
 
 export async function countDocuments(

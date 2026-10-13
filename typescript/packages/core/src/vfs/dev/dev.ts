@@ -74,7 +74,6 @@ export class DevVFS extends RAMVFS {
    */
   override readTree(
     _path: PathSpec,
-    _maxdepth: number | null = null,
     _index?: IndexCacheStore,
   ): Promise<Map<string, FileStat> | null> {
     return Promise.resolve(null)

@@ -745,9 +745,7 @@ export class MountEntry {
       case 'follow':
         return [(scope, _args, kw) => vfs.follow(scope, kw.index)]
       case 'read_tree':
-        return [
-          (scope, args, kw) => vfs.readTree(scope, (args[0] ?? null) as number | null, kw.index),
-        ]
+        return [(scope, _args, kw) => vfs.readTree(scope, kw.index)]
       case 'search':
         return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, kw.index)]
       case 'truncate':

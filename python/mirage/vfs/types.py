@@ -381,7 +381,6 @@ class ReadTreeOp(Protocol):
         self,
         accessor: Any,
         path: PathSpec,
-        maxdepth: int | None = ...,
         /,
         index: IndexCacheStore = ...,
     ) -> Awaitable[dict[str, FileStat] | None]: ...

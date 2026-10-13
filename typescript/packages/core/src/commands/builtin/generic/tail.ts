@@ -277,73 +277,79 @@ async function* follow(
     how,
   ])
   let last: number | null = null
-  for (const entry of [...active]) {
-    const [slot, p] = entry
-    if (unread.has(p.virtual)) {
+  try {
+    for (const entry of [...active]) {
+      const [slot, p] = entry
+      if (unread.has(p.virtual)) {
+        if (showHeaders) {
+          yield encodeText(
+            `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
+          )
+        }
+        last = slot
+        active.splice(active.indexOf(entry), 1)
+        continue
+      }
+      let raw: Uint8Array
+      try {
+        if (
+          followOp !== undefined &&
+          paths.length === 1 &&
+          pending.length === 0 &&
+          !flags.byName &&
+          !isStdin(p)
+        ) {
+          added = await followOp(p)
+        }
+        raw =
+          added !== null && readFirst !== null ? await readFirst(p) : await materialize(stream(p))
+      } catch (err) {
+        await closeQuietly(added)
+        added = null
+        if (!isFsError(err)) throw err
+        // There is no handle to hold, so this first read is the open: one
+        // that fails after the operand's stat passed is GNU's failed open,
+        // reported the way the stat's failure would have been, and under
+        // --retry waited for like a file that was never there (this is the
+        // initial open that a descriptor follow's --retry covers).
+        note(io, fsErrorLine('tail', p, err))
+        io.exitCode = 1
+        active.splice(active.indexOf(entry), 1)
+        if (flags.retry) waiting.push([slot, p, APPEARED])
+        continue
+      }
       if (showHeaders) {
         yield encodeText(
           `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
         )
       }
       last = slot
-      active.splice(active.indexOf(entry), 1)
-      continue
+      yield tailBytes(raw, counts)
+      positions.set(slot, raw.byteLength)
     }
-    let raw: Uint8Array
-    try {
-      if (
-        followOp !== undefined &&
-        paths.length === 1 &&
-        pending.length === 0 &&
-        !flags.byName &&
-        !isStdin(p)
-      ) {
-        added = await followOp(p)
+    if (added !== null) {
+      // A stream waits for the next line, so an abort ends the wait rather
+      // than the next line.
+      const lines = added[Symbol.asyncIterator]()
+      try {
+        for (;;) {
+          const next = await abortable(lines.next(), signal)
+          if (next.done === true) break
+          yield next.value
+        }
+      } catch (err) {
+        if (aborted(signal)) return
+        throw err
       }
-      raw = added !== null && readFirst !== null ? await readFirst(p) : await materialize(stream(p))
-    } catch (err) {
-      await closeQuietly(added)
-      added = null
-      if (!isFsError(err)) throw err
-      // There is no handle to hold, so this first read is the open: one
-      // that fails after the operand's stat passed is GNU's failed open,
-      // reported the way the stat's failure would have been, and under
-      // --retry waited for like a file that was never there (this is the
-      // initial open that a descriptor follow's --retry covers).
-      note(io, fsErrorLine('tail', p, err))
+      note(io, 'tail: no files remaining\n')
       io.exitCode = 1
-      active.splice(active.indexOf(entry), 1)
-      if (flags.retry) waiting.push([slot, p, APPEARED])
-      continue
+      return
     }
-    if (showHeaders) {
-      yield encodeText(
-        `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
-      )
-    }
-    last = slot
-    yield tailBytes(raw, counts)
-    positions.set(slot, raw.byteLength)
-  }
-  if (added !== null) {
-    // A stream waits for the next line, so an abort ends the wait rather
-    // than the next line; the stream is closed without waiting on it.
-    const lines = added[Symbol.asyncIterator]()
-    try {
-      for (;;) {
-        const next = await abortable(lines.next(), signal)
-        if (next.done === true) break
-        yield next.value
-      }
-    } catch (err) {
-      if (aborted(signal)) return
-      throw err
-    } finally {
-      void closeQuietly(lines as AsyncIterableIterator<Uint8Array>)
-    }
-    note(io, 'tail: no files remaining\n')
-    io.exitCode = 1
-    return
+  } finally {
+    // The stream follow opened holds the mount busy, so it closes however
+    // the print ends, a reader that stops early included; it may be
+    // waiting for the next line, so the close is not waited on.
+    if (added !== null) void closeQuietly(added as AsyncIterableIterator<Uint8Array>)
   }
   for (const entry of active.filter(([, p]) => isStdin(p))) active.splice(active.indexOf(entry), 1)
   if (onlyStdin) return

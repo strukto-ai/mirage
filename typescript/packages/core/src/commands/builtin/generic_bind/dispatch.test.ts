@@ -245,11 +245,10 @@ class Counted extends RAMVFS {
 
   override readTree(
     path: PathSpec,
-    maxdepth: number | null = null,
     index?: IndexCacheStore,
   ): Promise<Map<string, FileStat> | null> {
     this.trees += 1
-    return super.readTree(path, maxdepth, index)
+    return super.readTree(path, index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

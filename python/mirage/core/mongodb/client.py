@@ -15,6 +15,7 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from bson import Timestamp
 from pymongo import AsyncMongoClient
 
 from mirage.core.mongodb.types import EntityKind
@@ -138,14 +139,45 @@ async def count_documents(
     return await col.count_documents(filter or {})
 
 
+async def operation_time(
+    client: AsyncMongoClient[Any], database: str
+) -> Timestamp | None:
+    """The cluster's operation time now, from a ``ping``: a change stream
+    started after it misses nothing written once this returns. None from
+    a server that reports none.
+
+    Args:
+        client (AsyncMongoClient[Any]): the client.
+        database (str): the database to ping.
+    """
+    reply = await client[database].command("ping")
+    found = reply.get("operationTime")
+    return found if isinstance(found, Timestamp) else None
+
+
 async def iter_inserts(
     client: AsyncMongoClient[Any],
     database: str,
     collection: str,
+    after: Timestamp | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
+    """Each document inserted into a collection, from a change stream.
+
+    Args:
+        client (AsyncMongoClient[Any]): the client.
+        database (str): the database.
+        collection (str): the collection.
+        after (Timestamp | None): the operation time the inserts come
+            after, however late the stream opens; None for those after
+            it opens.
+    """
     col = client[database][collection]
-    pipeline = [{"$match": {"operationType": "insert"}}]
-    async with await col.watch(pipeline) as stream:
+    match: dict[str, Any] = {"operationType": "insert"}
+    options: dict[str, Any] = {}
+    if after is not None:
+        match["clusterTime"] = {"$gt": after}
+        options["start_at_operation_time"] = after
+    async with await col.watch([{"$match": match}], **options) as stream:
         async for change in stream:
             doc = change.get("fullDocument")
             if doc is not None:

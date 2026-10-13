@@ -4,7 +4,7 @@ icon: /images/mongodb-logo.svg
 description: Mount a MongoDB GridFS bucket as a MIRAGE filesystem from Node.
 ---
 
-`GridFSVFS` mounts a MongoDB GridFS bucket (file metadata in `<bucket>.files`, content chunks in `<bucket>.chunks`) as a read-write filesystem. Files are keyed by slash-separated filenames, writes keep old revisions, and `find` pushes `-name`/`-type`/`-size` filters into the `fs.files` query server-side.
+`GridFSVFS` mounts a MongoDB GridFS bucket (file metadata in `<bucket>.files`, content chunks in `<bucket>.chunks`) as a read-write filesystem. Files are keyed by slash-separated filenames, writes keep old revisions, and a walk (`find`, `du`, `ls -R`, `tree`, `grep -r`) reads the whole subtree with one `fs.files` query ([Walks](/home/integration/walks)).
 
 Setup steps for the connection URI live at [GridFS Credentials](/home/setup/gridfs).
 

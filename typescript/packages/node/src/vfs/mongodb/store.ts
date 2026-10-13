@@ -42,6 +42,7 @@ interface MongoCollectionLike {
   aggregate: (pipeline: unknown[]) => { toArray: () => Promise<Record<string, unknown>[]> }
   watch: (
     pipeline?: unknown[],
+    options?: { startAtOperationTime?: unknown },
   ) => AsyncIterableIterator<Record<string, unknown>> & { close: () => Promise<void> }
 }
 
@@ -59,6 +60,7 @@ interface MongoDbLike {
     toArray: () => Promise<Record<string, unknown>[]>
   }
   collection: (name: string) => MongoCollectionLike
+  command: (command: Record<string, unknown>) => Promise<Record<string, unknown>>
   admin: () => { listDatabases: () => Promise<{ databases: { name: string }[] }> }
 }
 
@@ -158,15 +160,24 @@ export class MongoDBStore implements MongoDriver {
     }
   }
 
+  async operationTime(database: string): Promise<unknown> {
+    const c = await this._client()
+    const reply = await c.db(database).command({ ping: 1 })
+    return reply.operationTime ?? null
+  }
+
   async *iterInserts<T = Record<string, unknown>>(
     database: string,
     collection: string,
+    after: unknown = null,
   ): AsyncIterableIterator<T> {
     const c = await this._client()
+    const match: Record<string, unknown> = { operationType: 'insert' }
+    if (after !== null) match.clusterTime = { $gt: after }
     const stream = c
       .db(database)
       .collection(collection)
-      .watch([{ $match: { operationType: 'insert' } }])
+      .watch([{ $match: match }], after === null ? {} : { startAtOperationTime: after })
     try {
       for await (const change of stream as AsyncIterableIterator<Record<string, unknown>>) {
         const doc = change.fullDocument

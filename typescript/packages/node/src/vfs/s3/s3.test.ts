@@ -20,6 +20,7 @@ import { ops } from '@struktoai/mirage-core/test-utils'
 import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { writeConditions } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -211,11 +212,9 @@ describe('S3VFS (mocked integration)', () => {
       await ops(vfs).write(mkPath('/du/sub/b'), ENC.encode('y'.repeat(20)))
       const found = await treeCore(vfs.accessor, mkPath('/du/'))
       expect(
-        [...(found ?? new Map<string, FileStat>()).entries()].map(([k, st]) => [
-          k,
-          st.type,
-          st.size,
-        ]),
+        [...(found ?? new Map<string, FileStat>()).entries()]
+          .sort(([a], [b]) => compareCodePoints(a, b))
+          .map(([k, st]) => [k, st.type, st.size]),
       ).toEqual([
         ['a', 'file', 10],
         ['sub', 'directory', null],

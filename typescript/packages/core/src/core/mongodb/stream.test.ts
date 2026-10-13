@@ -133,6 +133,31 @@ describe('mongodb read stand-ins', () => {
     if (added !== null) expect(await drain(added)).toBe('{"_id": 7, "name": "gus"}\n')
   })
 
+  it('follows from the operation time it was asked at', async () => {
+    const calls: string[] = []
+    const seen: unknown[] = []
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
+      operationTime: () => {
+        calls.push('ping')
+        return Promise.resolve('t42')
+      },
+      iterInserts: <T>(_database: string, _collection: string, after?: unknown) => {
+        calls.push('watch')
+        seen.push(after)
+        return arrayIter([{ _id: 1 }])<T>()
+      },
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const added = await follow(accessor, docs('app'))
+    expect(calls).toEqual(['ping'])
+    expect(added).not.toBeNull()
+    if (added !== null) expect(await drain(added)).toBe('{"_id": 1}\n')
+    expect(calls).toEqual(['ping', 'watch'])
+    expect(seen).toEqual(['t42'])
+  })
+
   it('leaves another file to the read and a view to the polls', async () => {
     const [accessor] = accessorOver([], 3)
     const schema = new PathSpec({

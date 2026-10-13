@@ -17,7 +17,13 @@ import { EJSON } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { countDocuments, findDocuments, iterDocuments, iterInserts } from './client.ts'
+import {
+  countDocuments,
+  findDocuments,
+  iterDocuments,
+  iterInserts,
+  operationTime,
+} from './client.ts'
 import { entityGuard } from './readdir.ts'
 import { detectScope, entityKind } from './scope.ts'
 import { EntityKind, PRIMARY_KEY } from './types.ts'
@@ -180,8 +186,10 @@ export async function lineCount(
 /**
  * The documents inserted into a collection from now on, one documents.jsonl
  * line each, from a change stream. Null for a view, which has no change
- * stream, and for any other file. Mirrors `follow` in
- * `mirage/core/mongodb/stream.py`.
+ * stream, and for any other file. "Now" is the cluster's operation time
+ * when this returns: the stream opens when first read, after tail prints the
+ * last lines, and starts from that time, so nothing inserted in between is
+ * lost. Mirrors `follow` in `mirage/core/mongodb/stream.py`.
  */
 export async function follow(
   accessor: MongoDBAccessor,
@@ -191,7 +199,9 @@ export async function follow(
   const scope = detectScope(path)
   if (scope.kind !== 'documents' || entityKind(scope) !== EntityKind.COLLECTION) return null
   await entityGuard(accessor, scope, path.virtual)
-  return inserted(accessor, scope.slots.database ?? '', scope.slots.name ?? '')
+  const database = scope.slots.database ?? ''
+  const after = await operationTime(accessor, database)
+  return inserted(accessor, database, scope.slots.name ?? '', after)
 }
 
 // Each document inserted into the collection, rendered as a line. Mirrors
@@ -200,9 +210,10 @@ async function* inserted(
   accessor: MongoDBAccessor,
   database: string,
   name: string,
+  after: unknown,
 ): AsyncIterableIterator<Uint8Array> {
   const elide = elisionPaths(accessor, database, name)
-  for await (const doc of iterInserts(accessor, database, name)) {
+  for await (const doc of iterInserts(accessor, database, name, after)) {
     yield encodeLine(elide.size > 0 ? applyElision(doc, elide) : doc)
   }
 }

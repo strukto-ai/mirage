@@ -231,9 +231,9 @@ class _Counted(RAMVFS):
         self.trees = 0
         self.listings = 0
 
-    async def read_tree(self, path, maxdepth=None, index=NULL_INDEX):
+    async def read_tree(self, path, index=NULL_INDEX):
         self.trees += 1
-        return await super().read_tree(path, maxdepth, index)
+        return await super().read_tree(path, index)
 
     async def readdir(self, path, index=NULL_INDEX):
         self.listings += 1

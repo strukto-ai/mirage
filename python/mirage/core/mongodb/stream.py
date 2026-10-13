@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from typing import Any
 
+from bson import Timestamp
 from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
 from mirage.accessor.mongodb import MongoDBAccessor
@@ -25,6 +26,7 @@ from mirage.core.mongodb.client import (
     find_documents,
     iter_documents,
     iter_inserts,
+    operation_time,
 )
 from mirage.core.mongodb.readdir import entity_guard
 from mirage.core.mongodb.scope import detect_scope, entity_kind
@@ -176,6 +178,10 @@ async def follow(
     documents.jsonl line each, from a change stream. None for a view,
     which has no change stream, and for any other file.
 
+    "Now" is the cluster's operation time when this returns: the stream
+    opens when first read, after ``tail`` prints the last lines, and
+    starts from that time, so nothing inserted in between is lost.
+
     Args:
         accessor (MongoDBAccessor): Backend accessor.
         path (PathSpec): the file.
@@ -188,11 +194,16 @@ async def follow(
     ):
         return None
     await entity_guard(accessor, scope, path.virtual)
-    return _inserted(accessor, scope.slots["database"], scope.slots["name"])
+    database = scope.slots["database"]
+    after = await operation_time(accessor.client, database)
+    return _inserted(accessor, database, scope.slots["name"], after)
 
 
 async def _inserted(
-    accessor: MongoDBAccessor, database: str, name: str
+    accessor: MongoDBAccessor,
+    database: str,
+    name: str,
+    after: Timestamp | None,
 ) -> AsyncIterator[bytes]:
     """Each document inserted into the collection, rendered as a line.
 
@@ -200,9 +211,10 @@ async def _inserted(
         accessor (MongoDBAccessor): Backend accessor.
         database (str): the database.
         name (str): the collection.
+        after (Timestamp | None): the operation time they come after.
     """
     elide = _elision_paths(accessor.config, database, name)
-    async for doc in iter_inserts(accessor.client, database, name):
+    async for doc in iter_inserts(accessor.client, database, name, after):
         if elide:
             doc = _apply_elision(doc, elide)
         yield (render_doc(doc) + "\n").encode()

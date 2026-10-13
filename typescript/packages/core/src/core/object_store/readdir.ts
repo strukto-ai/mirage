@@ -295,46 +295,52 @@ export async function readTree<A extends Accessor, C>(
 /**
  * Build `readTree` over one driver: one recursive listing. A file stats as a
  * listing leaves it in the index (its size, time and content type); a
- * directory, a marker or a key prefix alike, carries nothing but its name.
- * Nothing under the prefix resolves null, so the walk's readdir reports what
- * is there. Mirrors Python's `make_tree`.
+ * directory, a marker or a key prefix alike, carries nothing but its name. A
+ * marker for `path` itself names no entry. Null, so the walk's readdir and
+ * stat answer instead, when nothing is under the prefix, when a row has no
+ * size, when a key has an empty segment, and when one name is both a file and
+ * a prefix, which a readdir lists as a directory. Mirrors Python's
+ * `make_tree`.
  */
 export function makeTree<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): TreeFn<A> {
-  return async (accessor, path, maxdepth = null, index) => {
+  return async (accessor, path, index) => {
     const rows = await readTree(driver, accessor, path, index)
     const prefix = kp.applyDir(driver.keyPrefixOf(accessor), path.mountPath)
     if (!rows.some((row) => row.key.startsWith(prefix))) return null
     const found = new Map<string, FileStat>()
+    const dirs = new Set<string>()
     for (const row of rows) {
-      if (!row.key.startsWith(prefix) || row.key === prefix) continue
+      if (!row.key.startsWith(prefix)) continue
       const raw = row.key.slice(prefix.length)
       const isDir = raw.endsWith('/')
       const rel = rstripSlash(raw)
+      if (rel === '') continue
       const parts = rel.split('/')
-      for (let depth = 1; depth < parts.length; depth++) {
-        const parent = parts.slice(0, depth).join('/')
-        if (!found.has(parent)) {
-          found.set(
-            parent,
-            new FileStat({ name: parts[depth - 1] ?? parent, type: FileType.DIRECTORY }),
-          )
-        }
+      if (parts.includes('') || (!isDir && (row.size ?? null) === null)) return null
+      for (let depth = 1; depth < parts.length; depth++) dirs.add(parts.slice(0, depth).join('/'))
+      if (isDir) {
+        dirs.add(rel)
+        continue
       }
       const name = parts[parts.length - 1] ?? rel
       found.set(
         rel,
-        isDir
-          ? new FileStat({ name, type: FileType.DIRECTORY })
-          : new FileStat({
-              name,
-              size: row.size ?? null,
-              modified: row.modified !== undefined && row.modified !== '' ? row.modified : null,
-              type: FileType.FILE,
-              content: contentTypeForPath(name),
-            }),
+        new FileStat({
+          name,
+          size: row.size ?? null,
+          modified: row.modified !== undefined && row.modified !== '' ? row.modified : null,
+          type: FileType.FILE,
+          content: contentTypeForPath(name),
+        }),
       )
     }
-    if (maxdepth === null) return found
-    return new Map([...found].filter(([rel]) => rel.split('/').length <= maxdepth))
+    for (const rel of dirs) {
+      if (found.has(rel)) return null
+      found.set(
+        rel,
+        new FileStat({ name: rel.slice(rel.lastIndexOf('/') + 1), type: FileType.DIRECTORY }),
+      )
+    }
+    return found
   }
 }

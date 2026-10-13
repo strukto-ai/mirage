@@ -37,12 +37,12 @@ it.each(['tree', 'readdir'])('%s refresh does not revive an expired folder', asy
   const tree = makeTree(driver)
   const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
   try {
-    await tree(accessor, path, null, index)
+    await tree(accessor, path, index)
     store.objects.clear()
     store.objects.set('data', new TextEncoder().encode('file'))
     store.objects.set('data/new.txt', new TextEncoder().encode('new'))
     clock.mockReturnValue(62000)
-    if (refresh === 'tree') await tree(accessor, path, null, index)
+    if (refresh === 'tree') await tree(accessor, path, index)
     else await makeReaddir(driver)(accessor, path, index)
     expect((await makeStat(driver)(accessor, path, index)).type).toBe(FileType.FILE)
   } finally {
@@ -63,7 +63,7 @@ describe('a tree caches expiring metadata', () => {
         const tree = makeTree(driver)
         const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
         try {
-          await tree(accessor, path, null, index)
+          await tree(accessor, path, index)
           store.connects = 0
           expect((await stat(accessor, path, index)).type).toBe(FileType.DIRECTORY)
           expect(store.connects).toBe(0)
@@ -76,7 +76,7 @@ describe('a tree caches expiring metadata', () => {
           else await index.invalidateDir(path.virtual)
           if (replacement === 'deleted') {
             await expect(stat(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
-            expect(await tree(accessor, path, null, index)).toBeNull()
+            expect(await tree(accessor, path, index)).toBeNull()
           } else {
             expect((await stat(accessor, path, index)).type).toBe(
               replacement === 'file' ? FileType.FILE : FileType.DIRECTORY,
@@ -86,7 +86,7 @@ describe('a tree caches expiring metadata', () => {
             code: 'ENOENT',
           })
           if (replacement === 'directory') {
-            expect(sizeOf(await tree(accessor, path, null, index))).toBe('new contents'.length)
+            expect(sizeOf(await tree(accessor, path, index))).toBe('new contents'.length)
           }
         } finally {
           clock.mockRestore()

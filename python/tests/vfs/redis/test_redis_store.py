@@ -162,3 +162,23 @@ async def test_prefix_with_glob_metacharacters_matches_literally(redis_prefix):
         await neighbour.clear()
         await mine.close()
         await neighbour.close()
+
+
+@pytest.mark.asyncio
+async def test_stat_many_answers_what_the_single_getters_do(store):
+    await store.set_file("/a.txt", b"hello")
+    await store.set_modified("/a.txt", "2026-01-01T00:00:00+00:00")
+    await store.set_attrs("/a.txt", {"mode": "420"})
+    await store.add_dir("/d")
+    paths = [("/a.txt", False), ("/d", True), ("/gone", False)]
+    singles = [
+        (
+            await store.get_attrs(p),
+            None if is_dir else await store.file_len(p),
+            await store.get_modified(p),
+        )
+        for p, is_dir in paths
+    ]
+    assert await store.stat_many(paths) == singles
+    assert singles[0] == ({"mode": "420"}, 5, "2026-01-01T00:00:00+00:00")
+    assert await store.stat_many([]) == []

@@ -48,7 +48,6 @@ def tree_walk(
     read_tree: ReadTree | None,
     readdir: WalkCall,
     stat: WalkCall,
-    maxdepth: int | None = None,
     answered: set[str] | None = None,
 ) -> tuple[WalkCall, WalkCall]:
     """A walk's ``readdir`` and ``stat``, answered from the mount's
@@ -65,11 +64,9 @@ def tree_walk(
 
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
-            its accessor and index, called as ``read_tree(path, maxdepth)``.
+            its accessor and index, called as ``read_tree(path)``.
         readdir (WalkCall): the walk's own readdir.
         stat (WalkCall): the walk's own stat.
-        maxdepth (int | None): how many levels below a directory the walk
-            reads, None for all of them.
         answered (set[str] | None): collects each directory listed from
             an answer, for a walk that charges a budget per request.
     """
@@ -87,17 +84,13 @@ def tree_walk(
                 return root, virtual[len(base) :]
         return None
 
-    def within(rel: str, levels: int) -> bool:
-        depth = rel.count("/") + 1 if rel else 0
-        return maxdepth is None or depth < maxdepth + levels
-
     async def tree_readdir(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
         hit = covering(virtual)
         if hit is None and virtual not in asked and not path.pattern:
             asked.add(virtual)
             try:
-                found = await read_tree(path, maxdepth)
+                found = await read_tree(path)
             except WalkDeclinedError:
                 found = None
             if found is not None:
@@ -107,7 +100,7 @@ def tree_walk(
         if hit is not None:
             root, rel = hit
             listing = roots[root][1].get(rel)
-            if listing is not None and within(rel, 0):
+            if listing is not None:
                 if answered is not None:
                     answered.add(virtual)
                 base = root.rstrip("/") + "/"
@@ -117,7 +110,7 @@ def tree_walk(
     async def tree_stat(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
         hit = covering(virtual)
-        if hit is not None and hit[1] and within(hit[1], 1):
+        if hit is not None and hit[1]:
             found = roots[hit[0]][0].get(hit[1])
             if found is not None:
                 return found

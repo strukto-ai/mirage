@@ -821,6 +821,38 @@ describe('tail asks the mount for the last lines', () => {
     expect(await drainFor(stream, 120, abort)).toBe('c\nd\n')
   })
 
+  it('closes the follow when the reader stops in the first print', async () => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'a\nb\nc\n')
+    const abort = new AbortController()
+    const closed: boolean[] = []
+    const added: AsyncIterableIterator<Uint8Array> = {
+      next: () => Promise.reject(new Error('the follow was read')),
+      return: () => {
+        closed.push(true)
+        return Promise.resolve({ value: undefined, done: true })
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    }
+    const result = await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort, { n: '1' }),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+      () => Promise.resolve(ENC.encode('c\n')),
+      () => Promise.resolve(added),
+    )
+    const [stream] = result as [AsyncIterable<Uint8Array>, IOResult]
+    const lines = stream[Symbol.asyncIterator]()
+    expect(DEC.decode((await lines.next()).value as Uint8Array)).toBe('c\n')
+    await lines.return?.()
+    expect(closed).toEqual([true])
+  })
+
   it('reads the first print whole when the follow polls', async () => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'a\nb\n')

@@ -90,7 +90,6 @@ export async function readdir(
 export function tree(
   accessor: RAMAccessor,
   path: PathSpec,
-  maxdepth: number | null = null,
   _index?: IndexCacheStore,
 ): Promise<Map<string, FileStat> | null> {
   const store = accessor.store
@@ -100,11 +99,8 @@ export function tree(
   const found = new Map<string, FileStat>()
   for (const key of [...store.files.keys(), ...store.dirs]) {
     if (!key.startsWith(base) || key === p) continue
-    const rel = key.slice(base.length)
     const entry = keyStat(store, key)
-    if (entry !== null && (maxdepth === null || rel.split('/').length <= maxdepth)) {
-      found.set(rel, entry)
-    }
+    if (entry !== null) found.set(key.slice(base.length), entry)
   }
   return Promise.resolve(found)
 }

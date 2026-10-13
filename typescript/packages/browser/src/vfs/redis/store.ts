@@ -440,6 +440,31 @@ export class UpstashRedisStore implements RedisStoreLike {
     return pairsToRecord(expectStrings(await this.command(['HGETALL', this.ak(path)]), 'HGETALL'))
   }
 
+  /** The attributes, length and modified time of many paths, in one pipeline. */
+  async statMany(
+    paths: readonly (readonly [string, boolean])[],
+  ): Promise<[Record<string, string>, number | null, string | null][]> {
+    const commands: CommandArg[][] = []
+    for (const [path, isDir] of paths) {
+      commands.push(['HGETALL', this.ak(path)])
+      if (!isDir) commands.push(['STRLEN', this.fk(path)])
+      commands.push(['GET', this.mk(path)])
+    }
+    const replies = await this.pipeline(commands)
+    let at = 0
+    return paths.map(([, isDir]) => {
+      const raw = pairsToRecord(expectStrings(replies[at++] ?? null, 'HGETALL'))
+      let size: number | null = null
+      if (!isDir) {
+        const reply = replies[at++] ?? null
+        if (typeof reply !== 'number') throw new Error('upstash: STRLEN did not answer an integer')
+        size = reply
+      }
+      const modified = replies[at++] ?? null
+      return [raw, size, modified === null ? null : expectString(modified, 'GET')]
+    })
+  }
+
   async setAttrs(path: string, fields: Record<string, string>): Promise<void> {
     const flat = Object.entries(fields).flat()
     if (flat.length === 0) return

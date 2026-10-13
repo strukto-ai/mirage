@@ -168,7 +168,7 @@ async def _du_walk(
         _account_for_walk_error(exc, path, budget)
         return 0
     total = 0
-    free = path.virtual.rstrip("/") in answered
+    free = (path.virtual.rstrip("/") or "/") in answered
     for child in children:
         if not free and not budget.spend(path.virtual):
             break

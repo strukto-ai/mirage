@@ -86,7 +86,6 @@ async def readdir(
 async def tree(
     accessor: RAMAccessor,
     path: PathSpec,
-    maxdepth: int | None = None,
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, FileStat] | None:
     """Every key under a directory, each as ``stat`` answers it; None
@@ -95,7 +94,6 @@ async def tree(
     Args:
         accessor (RAMAccessor): the mount's store.
         path (PathSpec): the directory.
-        maxdepth (int | None): the deepest level kept.
         index (IndexCacheStore): unused; the store answers directly.
     """
     store = accessor.store
@@ -107,10 +105,7 @@ async def tree(
     for key in [*store.files, *store.dirs]:
         if not key.startswith(base) or key == p:
             continue
-        rel = key[len(base) :]
         entry = key_stat(store, key)
-        if entry is not None and (
-            maxdepth is None or rel.count("/") < maxdepth
-        ):
-            found[rel] = entry
+        if entry is not None:
+            found[key[len(base) :]] = entry
     return found

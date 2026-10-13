@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { efbig } from '../../../errors/fs.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -172,5 +173,45 @@ describe('head asks the mount for the first lines', () => {
     )
     expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('x\ny\n')
     expect(reads).toEqual(['/t'])
+  })
+
+  it('reads standard input without asking the first lines', async () => {
+    const result = await headGeneric(
+      [PathSpec.fromStrPath('-')],
+      [],
+      { ...opts({ lines: '1' }), stdin: ENC.encode('in\nmore\n') } as unknown as CommandOpts,
+      fileStat,
+      // eslint-disable-next-line require-yield
+      async function* () {
+        await Promise.resolve()
+        throw new Error('read a file')
+      },
+      (p) => Promise.reject(new Error(`asked firstLines of ${p.virtual}`)),
+    )
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('in\n')
+    expect(result?.[1].exitCode).toBe(0)
+  })
+
+  it('reports a failed operand and prints the next', async () => {
+    const result = await headGeneric(
+      [PathSpec.fromStrPath('/big'), PathSpec.fromStrPath('/small')],
+      [],
+      opts({ lines: '1' }),
+      fileStat,
+      // eslint-disable-next-line require-yield
+      async function* () {
+        await Promise.resolve()
+        throw new Error('read a file')
+      },
+      (p) =>
+        p.virtual === '/big' ? Promise.reject(efbig(p)) : Promise.resolve(ENC.encode('ok\n')),
+    )
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(
+      '==> /big <==\n\n==> /small <==\nok\n',
+    )
+    expect(result?.[1].exitCode).toBe(1)
+    expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
+      "head: error reading '/big': File too large\n",
+    )
   })
 })

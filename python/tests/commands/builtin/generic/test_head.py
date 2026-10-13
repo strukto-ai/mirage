@@ -4,6 +4,7 @@ import pytest
 
 from mirage.commands.builtin.generic.head import head, head_generic, head_multi
 from mirage.commands.config import CommandOpts
+from mirage.errors.fs import efbig
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -182,3 +183,42 @@ async def test_head_reads_a_file_first_lines_leaves_to_the_read():
     )
     assert await materialize(out) == b"x\ny\n"
     assert reads == ["/t"]
+
+
+@pytest.mark.asyncio
+async def test_head_reads_standard_input_without_first_lines():
+    async def first_lines(p: PathSpec, n: int) -> bytes:
+        raise AssertionError(f"asked first_lines of {p.virtual}")
+
+    out, io = await head_generic(
+        [PathSpec.from_str_path("-")],
+        [],
+        CommandOpts(flags={"lines": "1"}, stdin=b"in\nmore\n"),
+        _file_stat,
+        _counted_reads(b"", []),
+        first_lines,
+    )
+    assert await materialize(out) == b"in\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_head_reports_a_failed_operand_and_prints_the_next():
+    async def first_lines(p: PathSpec, n: int) -> bytes:
+        if p.virtual == "/big":
+            raise efbig(p)
+        return b"ok\n"
+
+    out, io = await head_generic(
+        [PathSpec.from_str_path("/big"), PathSpec.from_str_path("/small")],
+        [],
+        CommandOpts(flags={"lines": "1"}),
+        _file_stat,
+        _counted_reads(b"", []),
+        first_lines,
+    )
+    assert await materialize(out) == (b"==> /big <==\n\n==> /small <==\nok\n")
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == (
+        b"head: error reading '/big': File too large\n"
+    )

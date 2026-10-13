@@ -30,14 +30,14 @@ function found(): Map<string, FileStat> {
 
 // Mirrors test_tree.py.
 class Mount {
-  readonly asked: [string, number | null][] = []
+  readonly asked: string[] = []
   readonly calls: string[] = []
   constructor(
     readonly answer: Map<string, FileStat> | null = null,
     readonly refuse?: (vfs: string, op: string, path: PathSpec) => Error,
   ) {}
-  readTree = (path: PathSpec, maxdepth: number | null): Promise<Map<string, FileStat> | null> => {
-    this.asked.push([path.virtual, maxdepth])
+  readTree = (path: PathSpec): Promise<Map<string, FileStat> | null> => {
+    this.asked.push(path.virtual)
     if (this.refuse !== undefined) return Promise.reject(this.refuse('ram', 'read_tree', path))
     return Promise.resolve(this.answer)
   }
@@ -49,8 +49,8 @@ class Mount {
     this.calls.push(`stat ${path.virtual}`)
     return Promise.resolve(new FileStat({ name: path.virtual, type: FILE }))
   }
-  walk(maxdepth: number | null = null, answered?: Set<string>) {
-    return treeWalk<string[], FileStat>(this.readTree, this.readdir, this.stat, maxdepth, answered)
+  walk(answered?: Set<string>) {
+    return treeWalk<string[], FileStat>(this.readTree, this.readdir, this.stat, answered)
   }
 }
 
@@ -60,14 +60,14 @@ describe('treeWalk', () => {
   it('lists and stats the whole walk from one answer', async () => {
     const mount = new Mount(found())
     const answered = new Set<string>()
-    const [readdir, stat] = mount.walk(null, answered)
+    const [readdir, stat] = mount.walk(answered)
     expect(await readdir(at('/m'))).toEqual(['/m/a', '/m/b.txt', '/m/e'])
     expect(await readdir(at('/m/a'))).toEqual(['/m/a/c.txt'])
     expect(await readdir(at('/m/e'))).toEqual([])
     const implied = await stat(at('/m/a'))
     expect([implied.name, implied.type]).toEqual(['a', DIR])
     expect((await stat(at('/m/a/c.txt'))).size).toBe(3)
-    expect(mount.asked).toEqual([['/m', null]])
+    expect(mount.asked).toEqual(['/m'])
     expect(mount.calls).toEqual([])
     expect([...answered].sort()).toEqual(['/m', '/m/a', '/m/e'])
   })
@@ -97,22 +97,12 @@ describe('treeWalk', () => {
     const [readdir] = mount.walk()
     for (let i = 0; i < 2; i++) await readdir(at('/m'))
     expect(mount.calls).toEqual(['readdir /m', 'readdir /m'])
-    expect(mount.asked).toEqual([['/m', null]])
+    expect(mount.asked).toEqual(['/m'])
   })
 
   it("propagates a backend's own refusal", async () => {
     const [readdir] = new Mount(null, enotsup).walk()
     await expect(readdir(at('/m'))).rejects.toMatchObject({ code: 'ENOTSUP' })
-  })
-
-  it('bounds what the answer stands in for by maxdepth', async () => {
-    const mount = new Mount(new Map([['a', new FileStat({ name: 'a', type: DIR })]]))
-    const [readdir, stat] = mount.walk(1)
-    expect(await readdir(at('/m'))).toEqual(['/m/a'])
-    expect((await stat(at('/m/a'))).type).toBe(DIR)
-    await readdir(at('/m/a'))
-    expect(mount.asked).toEqual([['/m', 1]])
-    expect(mount.calls).toEqual(['readdir /m/a'])
   })
 
   it('hands back the walk without a readTree', () => {

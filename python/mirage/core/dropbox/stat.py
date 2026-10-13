@@ -147,7 +147,6 @@ async def stat(
 async def tree(
     accessor: DropboxAccessor,
     path: PathSpec,
-    maxdepth: int | None = None,
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, FileStat] | None:
     """Every entry under a folder from one recursive ``list_folder``,
@@ -161,7 +160,6 @@ async def tree(
     Args:
         accessor (DropboxAccessor): backend handle.
         path (PathSpec): the folder.
-        maxdepth (int | None): the deepest level kept.
         index (IndexCacheStore): unused; the listing is read whole.
     """
     folder = dropbox_path_from_key(
@@ -188,6 +186,5 @@ async def tree(
         above = places[parent]
         rel = f"{above}/{entry['name']}" if above else str(entry["name"])
         places[lower] = rel
-        if maxdepth is None or rel.count("/") < maxdepth:
-            found[rel] = stat_from_entry(entry)
+        found[rel] = stat_from_entry(entry)
     return found

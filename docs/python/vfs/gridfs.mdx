@@ -69,23 +69,12 @@ per filename, and snapshot-pinned reads resolve old revisions by their file
 filename server-side (history moves with the file), while `rm` deletes all
 revisions of the file.
 
-## Server-side find
+## Walks
 
-Unlike object stores that page through every key, GridFS metadata lives in
-an ordinary MongoDB collection, so a `find` that can only print files
-(`-type f`) pushes its filters into the `fs.files` query itself:
-
-- `-name` / `-iname` globs become anchored regexes on the filename
-- `-type f` drops the directory markers
-- `-size` bounds map to the stored `length`
-
-`find /gridfs/ -type f -name '*.csv' -size +1M` narrows inside MongoDB and
-only matching metadata comes back, so `find` stays cheap even on large
-buckets. Without `-type f` the filters run on the results instead: a
-directory that exists only because files sit under it has no document of
-its own, so a narrowed query would lose it. Semantics are identical to
-every other backend: the shared predicate evaluation still runs on the
-results.
+GridFS metadata lives in an ordinary MongoDB collection, so a walk (`find`,
+`du`, `ls -R`, `tree`, `grep -r`, `rg`, `cp -r`) reads every file under the
+start directory with one `fs.files` query and answers each directory below it
+from that answer. See [Walks](/home/integration/walks).
 
 ## Cache
 

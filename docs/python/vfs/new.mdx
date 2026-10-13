@@ -89,7 +89,7 @@ Every other function is optional, and each stands alone:
 | Functions | Purpose |
 | --- | --- |
 | `readdir`, `read`, `stat` | Required filesystem behavior. |
-| `read_stream`, `exists`, `find`, `du_size` with `du_entries` | Optional equivalent fast paths. |
+| `read_stream`, `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
 | `search`, `search_many` | Optional resource search. |
 | `files_containing`, `lines_containing`, `before_full_scan` | Optional: let grep and rg skip what your search rules out. |
@@ -98,8 +98,6 @@ Every other function is optional, and each stands alone:
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
 both built from `read` and `write`, so define them only when the backend writes
 a range natively. Use `FileStat.size=None` when rendered size is unknown.
-`du_size` and `du_entries` come as a pair: the generic derives its
-per-directory rows from the entries, so one without the other is not served.
 All functions enforce the same resource scope, including direct reads of known
 IDs. A partial listing cannot prove an omitted resource absent.
 
@@ -284,9 +282,6 @@ Raise from it (or from `files_containing`) to refuse: the error's message is
 what the command prints (an `OSError` raised at a file is that file's read error), and each reason's value is a sentence
 to put in it.
 `examples/python/other/custom_vfs.py` defines `files_containing` for its wiki.
-
-Native traversal (`find`) and size enumeration (`du_size` with `du_entries`)
-remain separate functions.
 
 To make the backend constructible by name (workspace YAML, snapshots, the daemon), register it:
 
@@ -566,7 +561,7 @@ places:
 | --- | --- |
 | `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `read_bytes` and `read_range` | one `read(path, index, offset, size)`; set `reads_ranges = True` when it fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `find`, `du_size` and `du_entries`, `write`, ..., `search`, `search_many`) |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `commands/builtin/backends.py`; `commands()` returns only the commands the VFS was handed |
 | `DriverOps(vfs)` and `check_driver_contract(vfs, fixture)` | call the functions on the VFS directly; `check_read_contract(vfs, fixture)` |

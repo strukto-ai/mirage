@@ -145,12 +145,12 @@ def _tree():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("texts, depth", [([], None), (["-maxdepth", "1"], 1)])
-async def test_find_reads_the_tree_in_one_call(texts, depth):
-    asked: list[tuple[str, int | None]] = []
+@pytest.mark.parametrize("texts", [[], ["-maxdepth", "1"]])
+async def test_find_reads_the_tree_in_one_call(texts):
+    asked: list[str] = []
 
-    async def read_tree(_accessor, path, maxdepth=None, index=None):
-        asked.append((path.virtual, maxdepth))
+    async def read_tree(_accessor, path, index=None):
+        asked.append(path.virtual)
         return _tree()
 
     async def run(ops: CommandIO) -> list[str]:
@@ -158,4 +158,4 @@ async def test_find_reads_the_tree_in_one_call(texts, depth):
         return (await materialize(stdout)).decode().splitlines()
 
     assert await run(_ops([], read_tree)) == await run(_ops([]))
-    assert asked == [("/mnt", depth)]
+    assert asked == ["/mnt"]

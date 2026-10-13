@@ -148,7 +148,6 @@ export async function stat(
 export async function tree(
   accessor: DropboxAccessor,
   path: PathSpec,
-  maxdepth: number | null = null,
   _index?: IndexCacheStore,
 ): Promise<Map<string, FileStat> | null> {
   const folder = dropboxPathFromKey(accessor.rootPath, stripSlash(path.mountPath))
@@ -170,7 +169,7 @@ export async function tree(
     if (lower === base || above === undefined) continue
     const rel = above === '' ? entry.name : `${above}/${entry.name}`
     places.set(lower, rel)
-    if (maxdepth === null || rel.split('/').length <= maxdepth) found.set(rel, statFromEntry(entry))
+    found.set(rel, statFromEntry(entry))
   }
   return found
 }

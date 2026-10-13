@@ -565,67 +565,74 @@ async def _follow(
     active = list(enumerate(paths))
     waiting = [(len(paths) + i, p, how) for i, (p, how) in enumerate(pending)]
     last: int | None = None
-    for slot, p in list(active):
-        if p.virtual in unread:
+    # The stream follow opened holds the mount busy, so it closes however
+    # the print ends, a reader that stops early included.
+    try:
+        for slot, p in list(active):
+            if p.virtual in unread:
+                if show_headers:
+                    header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
+                    yield encode_text(
+                        ("\n" if last is not None else "") + header
+                    )
+                last = slot
+                active.remove((slot, p))
+                continue
+            box = [0]
+            try:
+                if (
+                    follow is not None
+                    and len(paths) == 1
+                    and not pending
+                    and not flags.follow_name
+                    and not is_stdin(p)
+                ):
+                    added = await follow(p)
+                first = (
+                    read if added is None or read_last is None else read_last
+                )
+                chunks = [
+                    chunk
+                    async for chunk in tail(
+                        _counted(first(p), box),
+                        n=counts.lines,
+                        c=counts.byte_count,
+                        from_line=counts.from_line,
+                        from_byte=counts.from_byte,
+                    )
+                ]
+            except FS_ERRORS as exc:
+                if added is not None:
+                    await close_quietly(added)
+                    added = None
+                # There is no handle to hold, so this first read is the
+                # open: one that fails after the operand's stat passed is
+                # GNU's failed open, reported the way the stat's failure
+                # would have been, and under --retry waited for like a
+                # file that was never there (this is the initial open that
+                # a descriptor follow's --retry covers).
+                _note(io, fs_error_line("tail", p, exc))
+                io.exit_code = 1
+                active.remove((slot, p))
+                if flags.retry:
+                    waiting.append((slot, p, APPEARED))
+                continue
             if show_headers:
                 header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
                 yield encode_text(("\n" if last is not None else "") + header)
             last = slot
-            active.remove((slot, p))
-            continue
-        box = [0]
-        try:
-            if (
-                follow is not None
-                and len(paths) == 1
-                and not pending
-                and not flags.follow_name
-                and not is_stdin(p)
-            ):
-                added = await follow(p)
-            first = read if added is None or read_last is None else read_last
-            chunks = [
-                chunk
-                async for chunk in tail(
-                    _counted(first(p), box),
-                    n=counts.lines,
-                    c=counts.byte_count,
-                    from_line=counts.from_line,
-                    from_byte=counts.from_byte,
-                )
-            ]
-        except FS_ERRORS as exc:
-            if added is not None:
-                await close_quietly(added)
-                added = None
-            # There is no handle to hold, so this first read is the
-            # open: one that fails after the operand's stat passed is
-            # GNU's failed open, reported the way the stat's failure
-            # would have been, and under --retry waited for like a
-            # file that was never there (this is the initial open that
-            # a descriptor follow's --retry covers).
-            _note(io, fs_error_line("tail", p, exc))
-            io.exit_code = 1
-            active.remove((slot, p))
-            if flags.retry:
-                waiting.append((slot, p, APPEARED))
-            continue
-        if show_headers:
-            header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-            yield encode_text(("\n" if last is not None else "") + header)
-        last = slot
-        for chunk in chunks:
-            yield chunk
-        positions[slot] = box[0]
-    if added is not None:
-        try:
+            for chunk in chunks:
+                yield chunk
+            positions[slot] = box[0]
+        if added is not None:
             async for chunk in added:
                 yield chunk
-        finally:
+            _note(io, "tail: no files remaining\n")
+            io.exit_code = 1
+            return
+    finally:
+        if added is not None:
             await close_quietly(added)
-        _note(io, "tail: no files remaining\n")
-        io.exit_code = 1
-        return
     active = [(slot, p) for slot, p in active if not is_stdin(p)]
     if only_stdin:
         return

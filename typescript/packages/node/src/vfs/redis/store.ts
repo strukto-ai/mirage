@@ -220,6 +220,28 @@ export class RedisStore implements RedisStoreLike {
     return { ...raw }
   }
 
+  /**
+   * The attributes, length and modified time of many paths. node-redis
+   * pipelines commands issued in the same tick, so this is one round trip.
+   */
+  async statMany(
+    paths: readonly (readonly [string, boolean])[],
+  ): Promise<[Record<string, string>, number | null, string | null][]> {
+    const c = await this.client()
+    return Promise.all(
+      paths.map(
+        async ([path, isDir]): Promise<[Record<string, string>, number | null, string | null]> => {
+          const [raw, size, modified] = await Promise.all([
+            c.hGetAll(this.ak(path)),
+            isDir ? null : c.strLen(this.fk(path)),
+            c.get(this.mk(path)),
+          ])
+          return [{ ...raw }, size, modified]
+        },
+      ),
+    )
+  }
+
   async setAttrs(path: string, fields: Record<string, string>): Promise<void> {
     const c = await this.client()
     await c.hSet(this.ak(path), fields)

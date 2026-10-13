@@ -336,20 +336,21 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
     async def tree(
         accessor: A,
         path: PathSpec,
-        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, FileStat] | None:
         """Every key under ``path`` as the walk's readdir and stat see it.
 
         A file stats as a listing leaves it in the index (its size,
         time and content type); a directory, a marker or a key prefix
-        alike, carries nothing but its name. Nothing under the prefix
-        answers None, so the walk's readdir reports what is there.
+        alike, carries nothing but its name. A marker for ``path``
+        itself names no entry. None, so the walk's readdir and stat
+        answer instead, when nothing is under the prefix, when a row has
+        no size, when a key has an empty segment, and when one name is
+        both a file and a prefix, which a readdir lists as a directory.
 
         Args:
             accessor (Accessor): backend accessor.
             path (PathSpec): the directory.
-            maxdepth (int | None): the deepest level kept.
             index (IndexCacheStore): the invocation's index.
         """
         rows = await read_tree(driver, accessor, path, index)
@@ -358,37 +359,37 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
         if not any(row.key.startswith(prefix) for row in rows):
             return None
         found: dict[str, FileStat] = {}
+        dirs: set[str] = set()
         for row in rows:
-            if not row.key.startswith(prefix) or row.key == prefix:
+            if not row.key.startswith(prefix):
                 continue
             rel = row.key[len(prefix) :]
             is_dir = rel.endswith("/")
             rel = rel.rstrip("/")
+            if not rel:
+                continue
             parts = rel.split("/")
-            for depth in range(1, len(parts)):
-                parent = "/".join(parts[:depth])
-                if parent not in found:
-                    found[parent] = FileStat(
-                        name=parts[depth - 1], type=FileType.DIRECTORY
-                    )
-            name = parts[-1]
-            found[rel] = (
-                FileStat(name=name, type=FileType.DIRECTORY)
-                if is_dir
-                else FileStat(
-                    name=name,
-                    size=row.size,
-                    modified=row.modified or None,
-                    type=FileType.FILE,
-                    content=content_type_for_path(name),
-                )
+            if "" in parts or (not is_dir and row.size is None):
+                return None
+            dirs.update(
+                "/".join(parts[:depth]) for depth in range(1, len(parts))
             )
-        if maxdepth is not None:
-            found = {
-                rel: st
-                for rel, st in found.items()
-                if rel.count("/") < maxdepth
-            }
+            if is_dir:
+                dirs.add(rel)
+                continue
+            found[rel] = FileStat(
+                name=parts[-1],
+                size=row.size,
+                modified=row.modified or None,
+                type=FileType.FILE,
+                content=content_type_for_path(parts[-1]),
+            )
+        if not dirs.isdisjoint(found):
+            return None
+        for rel in dirs:
+            found[rel] = FileStat(
+                name=rel.rsplit("/", 1)[-1], type=FileType.DIRECTORY
+            )
         return found
 
     return tree

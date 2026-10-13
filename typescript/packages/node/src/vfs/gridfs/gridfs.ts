@@ -82,10 +82,9 @@ export class GridFSVFS extends BaseVFS {
 
   override readTree(
     path: PathSpec,
-    maxdepth: number | null = null,
     index?: IndexCacheStore,
   ): Promise<Map<string, FileStat> | null> {
-    return gridfsTree(this.accessor, path, maxdepth, index)
+    return gridfsTree(this.accessor, path, index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

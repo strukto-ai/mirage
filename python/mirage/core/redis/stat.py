@@ -36,20 +36,29 @@ def _decode_attrs(raw: dict[str, str]) -> dict[str, Any]:
     return out
 
 
-async def key_stat(store: RedisStore, p: str, is_dir: bool) -> FileStat:
-    """What ``stat`` answers for the normalized key ``p`` the store holds.
+def _from_fields(
+    p: str,
+    is_dir: bool,
+    raw: dict[str, str],
+    size: int | None,
+    modified: str | None,
+) -> FileStat:
+    """The stat of the normalized key ``p`` from what the store holds
+    for it.
 
     Args:
-        store (RedisStore): the mount's store.
         p (str): the normalized key.
         is_dir (bool): whether ``p`` is a directory.
+        raw (dict[str, str]): its stored attributes.
+        size (int | None): its length, None for a directory.
+        modified (str | None): its stored modified time.
     """
-    attrs = _decode_attrs(await store.get_attrs(p))
+    attrs = _decode_attrs(raw)
     if is_dir:
         return FileStat(
             name=p.rsplit("/", 1)[-1] or "/",
             size=None,
-            modified=await store.get_modified(p),
+            modified=modified,
             type=FileType.DIRECTORY,
             mode=attrs.get("mode"),
             uid=attrs.get("uid"),
@@ -58,8 +67,8 @@ async def key_stat(store: RedisStore, p: str, is_dir: bool) -> FileStat:
         )
     return FileStat(
         name=p.rsplit("/", 1)[-1],
-        size=await store.file_len(p),
-        modified=await store.get_modified(p),
+        size=size,
+        modified=modified,
         type=FileType.FILE,
         content=content_type_for_path(p),
         mode=attrs.get("mode"),
@@ -67,6 +76,36 @@ async def key_stat(store: RedisStore, p: str, is_dir: bool) -> FileStat:
         gid=attrs.get("gid"),
         atime=attrs.get("atime"),
     )
+
+
+async def key_stat(store: RedisStore, p: str, is_dir: bool) -> FileStat:
+    """What ``stat`` answers for the normalized key ``p`` the store holds.
+
+    Args:
+        store (RedisStore): the mount's store.
+        p (str): the normalized key.
+        is_dir (bool): whether ``p`` is a directory.
+    """
+    raw = await store.get_attrs(p)
+    size = None if is_dir else await store.file_len(p)
+    return _from_fields(p, is_dir, raw, size, await store.get_modified(p))
+
+
+async def key_stats(
+    store: RedisStore, keys: list[tuple[str, bool]]
+) -> list[FileStat]:
+    """``key_stat`` for many keys, in one pipeline.
+
+    Args:
+        store (RedisStore): the mount's store.
+        keys (list[tuple[str, bool]]): each normalized key, and whether
+            it is a directory.
+    """
+    fields = await store.stat_many(keys)
+    return [
+        _from_fields(p, is_dir, *held)
+        for (p, is_dir), held in zip(keys, fields, strict=True)
+    ]
 
 
 async def stat(
