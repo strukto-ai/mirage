@@ -242,7 +242,6 @@ export {
 } from './vfs/ssh/config.ts'
 export { SSHAccessor } from './accessor/ssh.ts'
 export { PROMPT as SSH_PROMPT } from './vfs/ssh/prompt.ts'
-export { SSH_COMMANDS } from './commands/builtin/ssh/index.ts'
 export { NextcloudAccessor } from './accessor/nextcloud.ts'
 export { NextcloudVFS, type NextcloudVFSState } from './vfs/nextcloud/nextcloud.ts'
 export {
@@ -407,7 +406,6 @@ export {
   type VFSFactory,
 } from './vfs/registry.ts'
 export { MODULE_SUFFIXES, isModulePath, loadAttr, splitRef } from './vfs/loader.ts'
-export { DISK_COMMANDS } from './commands/builtin/disk/index.ts'
 export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'
 export {
   absolutizeScripts,

@@ -33,10 +33,8 @@ import type { TargetStat } from '../utils/glob_walk.ts'
 import type {
   BeforeFullScanOp,
   CopyOp,
-  DuOps,
   ExistsOp,
   FilesContainingOp,
-  FindOp,
   FirstLinesOp,
   FollowOp,
   LastLinesOp,
@@ -48,6 +46,7 @@ import type {
   ReadBytesOp,
   ReaddirOp,
   ReadStreamOp,
+  ReadTreeOp,
   RenameOp,
   RmdirOp,
   SearchOps,
@@ -118,8 +117,6 @@ export interface CommandIO<A extends Accessor = Accessor> {
     size: number | null,
   ) => Promise<Uint8Array>
   exists?: ExistsOp<A>
-  find?: FindOp<A>
-  du?: DuOps<A>
   write?: WriteOp<A>
   append?: WriteOp<A>
   pwrite?: PwriteOp<A>
@@ -147,6 +144,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   lastLines?: LastLinesOp<A>
   lineCount?: LineCountOp<A>
   follow?: FollowOp<A>
+  readTree?: ReadTreeOp<A>
   // Child names the namespace owes a directory (nested mount roots and
   // symlinks). Stamped per invocation from opts.childMounts by the
   // factory, because it is session-scoped state while the adapter itself

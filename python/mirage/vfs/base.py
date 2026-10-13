@@ -14,7 +14,7 @@
 
 from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
-from typing import Any, Unpack
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -34,9 +34,7 @@ from mirage.vfs.call import vfs_call
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
-    DuEntries,
     Effect,
-    FindOptions,
     ScanReason,
     SearchQuery,
     Target,
@@ -422,54 +420,32 @@ class BaseVFS:
         raise enotsup(self.name, "follow", path)
 
     @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
-    async def find(
+    async def read_tree(
         self,
         path: PathSpec,
+        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **predicates: Unpack[FindOptions],
-    ) -> list[str]:
-        """Answer ``find`` natively instead of walking ``readdir``.
+    ) -> dict[str, FileStat] | None:
+        """Every entry under a directory, in one answer.
+
+        ``find``, ``du``, ``ls -R``, ``tree``, ``grep -r`` and ``rg`` ask
+        this before they walk a directory, so a backend that can list a
+        subtree on its own (a recursive listing, one query over many
+        folders) does not take a ``readdir`` per directory. The answer
+        stands in for the walk: every file and directory below ``path``
+        down to ``maxdepth`` levels, keyed by its path below ``path``
+        (``a``, ``a/b.txt``), each with the stat ``stat`` gives for it.
+        The walk lists each directory from it in name order. Return None
+        to have the command walk ``readdir`` the usual way; raise what
+        ``readdir`` of ``path`` raises otherwise.
 
         Args:
-            path (PathSpec): where the search starts.
-            index (IndexCacheStore): the mount's index.
-            **predicates (Unpack[FindOptions]): the parsed ``find`` expression.
-        """
-        raise enotsup(self.name, "find", path)
-
-    @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        """The recursive byte total under ``path``, natively.
-
-        Native ``du`` is both ``du_size`` and ``du_entries``: the generic
-        derives its per-directory rows from the entries, so one without
-        the other is not served.
-
-        Args:
-            path (PathSpec): the path.
+            path (PathSpec): the directory.
+            maxdepth (int | None): how many levels below ``path`` the
+                walk reads, None for all of them.
             index (IndexCacheStore): the mount's index.
         """
-        raise enotsup(self.name, "du", path)
-
-    @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        """Every stored file under ``path`` with its size, natively.
-
-        A native answer comes from one pass over the stored files, so a
-        directory holding no file never appears in the entries and gets no
-        row, where the shared readdir walk prints its ``0`` row. The
-        difference is accepted for the speed and pinned in
-        ``integ/unix/du/empty.json``.
-
-        Args:
-            path (PathSpec): the path.
-            index (IndexCacheStore): the mount's index.
-        """
-        raise enotsup(self.name, "du", path)
+        raise enotsup(self.name, "read_tree", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def write(self, path: PathSpec, data: bytes) -> None:

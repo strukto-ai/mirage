@@ -43,6 +43,16 @@ class ReaddirFn(Protocol[A_contra]):
     ) -> Awaitable[list[str]]: ...
 
 
+class TreeFn(Protocol[A_contra]):
+    def __call__(
+        self,
+        accessor: A_contra,
+        path: PathSpec,
+        maxdepth: int | None = ...,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[dict[str, FileStat] | None]: ...
+
+
 class StatFn(Protocol[A_contra]):
     def __call__(
         self,
@@ -260,29 +270,6 @@ async def keep_lost(
 
 
 @dataclass(frozen=True, slots=True)
-class FindHints:
-    """The find predicates a driver may push into its native query.
-
-    Every pushed condition must select a superset of the GNU semantics;
-    the shared client-side ``keep()`` pass stays authoritative.
-
-    Args:
-        name (str | None): -name glob.
-        iname (str | None): -iname glob.
-        min_size (int | None): inclusive lower size bound.
-        max_size (int | None): inclusive upper size bound.
-        pushdown (bool): a ``-type f`` find with no complex predicate
-            tree; only the prefix condition may be used otherwise.
-    """
-
-    name: str | None
-    iname: str | None
-    min_size: int | None
-    max_size: int | None
-    pushdown: bool
-
-
-@dataclass(frozen=True, slots=True)
 class ObjectStoreDriver(Generic[A, C]):
     """The native surface of one keyed byte store.
 
@@ -353,10 +340,6 @@ class ObjectStoreDriver(Generic[A, C]):
             refuses one client-side (hf): an empty directory cannot
             exist there, ``make_mkdir`` has nothing to write, and a
             directory exists exactly while it holds a key.
-        find_tree (Callable | None): find's listing with native
-            predicate push-down, returning the iterator and whether the
-            query was narrowed beyond the prefix; None means find walks
-            ``list_tree`` unnarrowed.
         put_if (Callable | None): ``put`` carrying a write condition; a
             lost one raises :class:`ConditionLostError`. None when the store
             cannot condition a write.
@@ -399,10 +382,6 @@ class ObjectStoreDriver(Generic[A, C]):
     move_prefix: Callable[[C, str, str], Awaitable[bool]] | None = None
     copy_file: Callable[[C, str, str], Awaitable[bool]] | None = None
     markers_supported: bool = True
-    find_tree: (
-        Callable[[C, str, FindHints], tuple[AsyncIterator[TreeEntry], bool]]
-        | None
-    ) = None
     put_if: (
         Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]
         | None

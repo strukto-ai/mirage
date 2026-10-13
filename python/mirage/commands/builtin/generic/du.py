@@ -532,9 +532,9 @@ def drop_shadowed(
 def link_leaves(links: LinkView | None, root: str) -> list[tuple[str, int]]:
     """Symlinks under an operand as du leaf entries.
 
-    Links live in the namespace, so neither a backend's native du op nor
-    a readdir walk reports them. Merging here, above that fork, is what
-    keeps a backend with a native op and one without from disagreeing.
+    Links live in the namespace, so neither a mount's ``read_tree`` nor
+    a readdir walk reports them. Merging here, above the walk, is what
+    keeps a mount with ``read_tree`` and one without from disagreeing.
 
     Deliberate divergence: GNU sizes a symlink at 0 because it counts
     disk blocks and a short target is stored inside the inode. mirage

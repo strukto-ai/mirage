@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeReaddir } from '../object_store/readdir.ts'
+import { makeReaddir, makeTree } from '../object_store/readdir.ts'
 import { DRIVER } from './driver.ts'
 
 export const readdir = makeReaddir(DRIVER)
+export const tree = makeTree(DRIVER)

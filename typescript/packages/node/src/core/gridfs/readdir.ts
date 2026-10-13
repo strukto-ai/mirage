@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeReaddir } from '@struktoai/mirage-core/core/object_store/readdir'
+import { makeReaddir, makeTree } from '@struktoai/mirage-core/core/object_store/readdir'
 import { DRIVER } from './driver.ts'
 
 export const readdir = makeReaddir(DRIVER)
+export const tree = makeTree(DRIVER)

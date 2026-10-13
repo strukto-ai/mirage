@@ -8,11 +8,10 @@ from mirage.commands.builtin.generic.du import (
     rollup,
     to_virtual,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandOpts
 from mirage.io.types import SizedRun
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.ram import RAMVFS
-from mirage.vfs.types import DuOps
 from mirage.view.types import LinkView, MountView
 
 
@@ -59,26 +58,6 @@ def _make_backend(tree: dict[str, int]):
         return found, sum(size for _, size in found)
 
     return compute_size, compute_entries
-
-
-def test_native_du_is_all_or_nothing():
-    """Half a native du is unconstructable, so it cannot be wired.
-
-    A backend offering only the cheaper ``size`` used to degrade du to
-    one operand line with no directory rows and an inert ``-a``. Pairing
-    the two halves in ``DuOps`` makes that shape unreachable (#645).
-    """
-    with pytest.raises(TypeError):
-        DuOps(size=lambda *_a, **_k: None)
-    with pytest.raises(TypeError):
-        DuOps(entries=lambda *_a, **_k: None)
-
-
-def test_command_io_omitting_du_keeps_the_walk_fallback():
-    """No native du means the generic walk, never the degraded path."""
-    assert CommandIO.__dataclass_fields__["du"].default is None
-    assert "du_size" not in CommandIO.__dataclass_fields__
-    assert "du_entries" not in CommandIO.__dataclass_fields__
 
 
 @pytest.mark.asyncio

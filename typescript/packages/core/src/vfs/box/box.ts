@@ -14,23 +14,18 @@
 
 import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
-
 import { BoxTokenManager } from '../../core/box/client.ts'
-
 import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
-
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/box/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { DuEntries } from '../types.ts'
 import { readdir as boxReaddir } from '../../core/box/readdir.ts'
 import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
 import { stat as boxStat } from '../../core/box/stat.ts'
 import { exists as boxExists } from '../../core/box/exists.ts'
-import { makeWalkedDu } from '../../core/generic/du.ts'
 import { write as boxWrite } from '../../core/box/write.ts'
 import { create as boxCreate } from '../../core/box/create.ts'
 import { mkdir as boxMkdir } from '../../core/box/mkdir.ts'
@@ -40,8 +35,6 @@ import { rename as boxRename } from '../../core/box/rename.ts'
 import { copy as boxCopy } from '../../core/box/copy.ts'
 import { truncate as boxTruncate } from '../../core/box/truncate.ts'
 import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
-
-const du = makeWalkedDu(boxStat, boxReaddir)
 
 export interface BoxVFSState {
   type: string
@@ -104,14 +97,6 @@ export class BoxVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return boxExists(this.accessor, path)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return du.size(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return du.entries(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

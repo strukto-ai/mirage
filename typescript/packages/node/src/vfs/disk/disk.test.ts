@@ -16,20 +16,33 @@ import { chmodSync, existsSync, statSync } from 'node:fs'
 import { chmod, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
 import '../../commands/builtin/backends.ts'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { CapacityState, FileType, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { copy as copyCore } from '../../core/disk/copy.ts'
-import { size as duSize } from '../../core/disk/du/index.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
-import { find as findCore } from '../../core/disk/find.ts'
 import { rmR as rmRCore } from '../../core/disk/rm.ts'
 import { readStream as streamCore } from '../../core/disk/stream.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
+import { Workspace } from '../../workspace.ts'
 import { DiskVFS } from './disk.ts'
+
+const DEC = new TextDecoder()
+
+// The walk find and du take over this mount, through one workspace, which
+// closes the mount when it closes.
+async function shell(vfs: DiskVFS, ...lines: string[]): Promise<string[]> {
+  const ws = new Workspace({ '/data': vfs })
+  try {
+    const out: string[] = []
+    for (const line of lines) out.push(DEC.decode((await ws.shell(line)).stdout))
+    return out
+  } finally {
+    await ws.close()
+  }
+}
 
 let root: string
 let cleanup: () => void
@@ -51,8 +64,8 @@ describe('DiskVFS — identity', () => {
     expect(res.root).toBe(root)
   })
 
-  it('serves DISK_COMMANDS', () => {
-    expect(commandsFor(res)).toEqual(DISK_COMMANDS)
+  it('serves no commands of its own', () => {
+    expect(commandsFor(res)).toEqual([])
   })
 
   it('capacity reports a real quota (df numbers, not fabricated)', async () => {
@@ -145,25 +158,11 @@ describe('DiskVFS — fs methods', () => {
     expect(await existsCore(res.accessor, spec('/d'))).toBe(false)
   })
 
-  it('du sums file sizes under a path', async () => {
-    await ops(res).mkdir(spec('/d'))
-    await ops(res).write(spec('/d/a'), new Uint8Array([1, 2, 3]))
-    await ops(res).write(spec('/d/b'), new Uint8Array([4, 5]))
-    expect(await duSize(res.accessor, spec('/d'))).toBe(5)
-  })
-
   it('stream yields file bytes', async () => {
     await ops(res).write(spec('/big'), new TextEncoder().encode('chunk'))
     const chunks: Uint8Array[] = []
     for await (const c of streamCore(res.accessor, spec('/big'))) chunks.push(c)
     expect(new TextDecoder().decode(chunks[0])).toBe('chunk')
-  })
-
-  it('find returns matching paths', async () => {
-    await ops(res).write(spec('/a.json'), new Uint8Array())
-    await ops(res).write(spec('/b.txt'), new Uint8Array())
-    const found = await findCore(res.accessor, spec('/'), { name: '*.json' })
-    expect(found).toEqual(['/a.json'])
   })
 })
 
@@ -258,10 +257,10 @@ describe('DiskVFS — shared host-link contract', () => {
 
   it('uses the same visible tree for snapshots, find, du and the op table', async () => {
     expect(Object.keys((await vfs.getState()).files).sort()).toEqual(fixture.visible_files)
-    expect(await findCore(vfs.accessor, spec('/'), { type: 'f' })).toEqual(
-      fixture.visible_files.map((p) => '/' + p),
-    )
-    expect(await duSize(vfs.accessor, spec('/'))).toBe(13)
+    expect(await shell(vfs, 'find /data -type f', 'du -s /data')).toEqual([
+      fixture.visible_files.map((p) => `/data/${p}\n`).join(''),
+      '13\t/data\n',
+    ])
     for (const p of fixture.hidden_paths) {
       expect(await existsCore(vfs.accessor, spec(p))).toBe(false)
       await expect(ops(vfs).read(spec(p))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -276,7 +275,7 @@ describe('DiskVFS — shared host-link contract', () => {
     const alias = join(root, 'alias')
     await symlink(vfs.root, alias)
     const mounted = new DiskVFS({ root: alias })
-    expect(await duSize(mounted.accessor, spec('/'))).toBe(13)
+    expect(await shell(mounted, 'du -s /data')).toEqual(['13\t/data\n'])
     expect(Object.keys((await mounted.getState()).files).sort()).toEqual(fixture.visible_files)
   })
 
@@ -342,16 +341,10 @@ describe('DiskVFS — shared host-link contract', () => {
         code: 'EACCES',
         message: file.virtual,
       })
-      for (const operation of [
-        () => findCore(vfs.accessor, directory),
-        () => duSize(vfs.accessor, directory),
-        () => ops(vfs).readdir(directory),
-      ]) {
-        await expect(operation()).rejects.toMatchObject({
-          code: 'EACCES',
-          message: directory.virtual,
-        })
-      }
+      await expect(ops(vfs).readdir(directory)).rejects.toMatchObject({
+        code: 'EACCES',
+        message: directory.virtual,
+      })
     } finally {
       await chmod(join(root, 'root/lib'), 0o700)
     }

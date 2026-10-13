@@ -14,23 +14,19 @@
 
 import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-
 import { DropboxTokenManager } from '../../core/dropbox/client.ts'
-
 import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
-
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/dropbox/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { DuEntries, MkdirOp } from '../types.ts'
+import type { MkdirOp } from '../types.ts'
 import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
 import { read as dropboxRead, readStream as dropboxStream } from '../../core/dropbox/read.ts'
-import { stat as dropboxStat } from '../../core/dropbox/stat.ts'
+import { stat as dropboxStat, tree as dropboxTree } from '../../core/dropbox/stat.ts'
 import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
-import { makeWalkedDu } from '../../core/generic/du.ts'
 import { truncateByRewrite } from '../../core/generic/rewrite.ts'
 import { write as dropboxWrite } from '../../core/dropbox/write.ts'
 import { create as dropboxCreate } from '../../core/dropbox/create.ts'
@@ -41,8 +37,6 @@ import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
 import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
 import { copy as dropboxCopy } from '../../core/dropbox/copy.ts'
 import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
-
-const du = makeWalkedDu(dropboxStat, dropboxReaddir)
 
 const mkdirOp: MkdirOp<DropboxAccessor> = (accessor, path, parents) =>
   dropboxMkdir(accessor, path, parents)
@@ -80,6 +74,14 @@ export class DropboxVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return dropboxTree(this.accessor, path, maxdepth, index)
+  }
+
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return dropboxReaddir(this.accessor, path, index)
   }
@@ -104,14 +106,6 @@ export class DropboxVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return dropboxExists(this.accessor, path)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return du.size(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return du.entries(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

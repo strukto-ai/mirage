@@ -5,22 +5,17 @@ import {
   type SharePointConfig,
   type SharePointConfigRedacted,
 } from '../../accessor/sharepoint.ts'
-
 import { VFSName } from '../../types.ts'
 import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { buildDeltaHook } from '../../core/sharepoint/watch.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../types.ts'
-import type { DuEntries } from '../types.ts'
 import { readdir } from '../../core/sharepoint/readdir.ts'
 import { read } from '../../core/sharepoint/read.ts'
 import { stat } from '../../core/sharepoint/stat.ts'
 import { readStream } from '../../core/sharepoint/stream.ts'
 import { exists } from '../../core/sharepoint/exists.ts'
-import { find } from '../../core/sharepoint/find.ts'
-import { makeWalkedDu } from '../../core/generic/du.ts'
 import { write } from '../../core/sharepoint/write.ts'
 import { create } from '../../core/sharepoint/create.ts'
 import { mkdir } from '../../core/sharepoint/mkdir.ts'
@@ -31,8 +26,6 @@ import { rename } from '../../core/sharepoint/rename.ts'
 import { copy } from '../../core/sharepoint/copy.ts'
 import { truncate } from '../../core/sharepoint/truncate.ts'
 import { filesContaining } from '../../core/sharepoint/search.ts'
-
-const du = makeWalkedDu(stat, readdir)
 
 export interface SharePointVFSState {
   type: string
@@ -87,18 +80,6 @@ export class SharePointVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return exists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return find(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return du.size(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return du.entries(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

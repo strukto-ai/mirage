@@ -179,7 +179,7 @@ def _paginate_directory(objects, prefix):
 def _paginate_flat(objects, prefix):
     return {
         "Contents": [
-            {"Key": k, "Size": len(v)}
+            {"Key": k, "Size": len(v), "LastModified": LAST_MODIFIED}
             for k, v in sorted(objects.items())
             if k.startswith(prefix)
         ]

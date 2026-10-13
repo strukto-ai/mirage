@@ -17,7 +17,6 @@ import '../../commands/builtin/backends.ts'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../core/ssh/_test_utils.ts'
 import type { SSHConfig } from './config.ts'
 import { PROMPT } from './prompt.ts'
@@ -55,10 +54,8 @@ describe('SSHVFS — identity', () => {
     expect(res.prompt).toBe(PROMPT)
   })
 
-  it('serves SSH_COMMANDS', () => {
-    const res = makeVfs(state)
-    expect(commandsFor(res)).toEqual(SSH_COMMANDS)
-    expect(SSH_COMMANDS.map((c) => c.name)).toEqual(['cp', 'du', 'find'])
+  it('serves no commands of its own', () => {
+    expect(commandsFor(makeVfs(state))).toEqual([])
   })
 })
 

@@ -36,10 +36,8 @@ from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.types import (
     BeforeFullScanOp,
-    DuOps,
     ExistsOp,
     FilesContainingOp,
-    FindOp,
     FirstLinesOp,
     FollowOp,
     IsMountedOp,
@@ -54,6 +52,7 @@ from mirage.vfs.types import (
     ReaddirOp,
     ReadRangeOp,
     ReadStreamOp,
+    ReadTreeOp,
     ResolveGlobOp,
     RmdirOp,
     RmTreeOp,
@@ -139,8 +138,6 @@ class CommandIO:
     access: SessionAccess | None = None
     read_range: ReadRangeOp | None = None
     exists: ExistsOp | None = None
-    find: FindOp | None = None
-    du: DuOps | None = None
     write: WriteOp | None = None
     append: WriteOp | None = None
     pwrite: PwriteOp | None = None
@@ -166,6 +163,7 @@ class CommandIO:
     last_lines: LastLinesOp | None = None
     line_count: LineCountOp | None = None
     follow: FollowOp | None = None
+    read_tree: ReadTreeOp | None = None
     glob_children: ChildMounts | None = None
     glob_target_stat: LinkTargetStat | None = None
 

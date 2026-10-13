@@ -21,7 +21,6 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type {
   ChildEntry,
-  FindHints,
   ObjectStoreConnection,
   ObjectStoreDriver,
   ObjectMeta,
@@ -93,14 +92,7 @@ export function spec(mountPath: string): PathSpec {
   })
 }
 
-function escapeRegExp(raw: string): string {
-  return raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-export function makeDriver(
-  store: FakeStore,
-  findNarrowing = false,
-): ObjectStoreDriver<FakeAccessor, FakeStore> {
+export function makeDriver(store: FakeStore): ObjectStoreDriver<FakeAccessor, FakeStore> {
   function keyPrefixOf(accessor: FakeAccessor): string {
     return accessor.keyPrefix
   }
@@ -214,23 +206,6 @@ export function makeDriver(
     return false
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async function* narrowed(conn: FakeStore, pfx: string, rx: RegExp): AsyncIterable<TreeEntry> {
-    for (const key of conn.under(pfx)) {
-      if (rx.test(key)) yield { key, size: conn.objects.get(key)?.byteLength ?? 0 }
-    }
-  }
-
-  function findTree(
-    conn: FakeStore,
-    pfx: string,
-    hints: FindHints,
-  ): [AsyncIterable<TreeEntry>, boolean] {
-    if (!(hints.pushdown && hints.name !== null)) return [listTree(conn, pfx), false]
-    const rx = new RegExp(`^${escapeRegExp(pfx)}(.*/)?${hints.name.replaceAll('*', '[^/]*')}$`)
-    return [narrowed(conn, pfx, rx), true]
-  }
-
   return {
     vfs: 'fake',
     scopeError: 5000,
@@ -249,7 +224,6 @@ export function makeDriver(
     copyFile,
     probePrefix,
     isNotFound,
-    ...(findNarrowing ? { findTree } : {}),
   }
 }
 

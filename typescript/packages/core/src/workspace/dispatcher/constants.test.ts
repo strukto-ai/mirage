@@ -62,7 +62,7 @@ describe('dispatcher op sets', () => {
     expect(sorted(STAMP_WRITE_OPS)).toEqual([...writes, 'mkdir'].sort())
     expect(sorted(COPY_OPS)).toEqual(['copy', 'dir_copy'])
     expect(sorted(DESTINATION_OPS)).toEqual(['copy', 'dir_copy', 'rename'])
-    const subtree = ['dir_copy', 'du_entries', 'du_size', 'find', 'rename', 'rm_r', 'search']
+    const subtree = ['dir_copy', 'read_tree', 'rename', 'rm_r', 'search']
     expect(sorted(SUBTREE_OPS)).toEqual(subtree)
     expect(sorted(NATIVE_WALK_OPS)).toEqual(
       [...subtree.filter((name) => name !== 'rename'), 'copy'].sort(),

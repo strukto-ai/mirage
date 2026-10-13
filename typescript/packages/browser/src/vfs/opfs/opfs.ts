@@ -21,15 +21,11 @@ import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
-import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
 import { read as opfsRead } from '../../core/opfs/read.ts'
 import { stat as opfsStat } from '../../core/opfs/stat.ts'
 import { readStream as opfsStream } from '../../core/opfs/stream.ts'
 import { exists as opfsExists } from '../../core/opfs/exists.ts'
-import { find as opfsFind } from '../../core/opfs/find.ts'
-import { size as opfsDu, entries as opfsDuAll } from '../../core/opfs/du/index.ts'
 import { write as opfsWrite } from '../../core/opfs/write.ts'
 import { appendBytes as opfsAppend } from '../../core/opfs/append.ts'
 import { create as opfsCreate } from '../../core/opfs/create.ts'
@@ -41,6 +37,7 @@ import { rename as opfsRename } from '../../core/opfs/rename.ts'
 import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
 import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
+
 export interface OPFSVFSOptions {
   root?: string
 }
@@ -167,18 +164,6 @@ export class OPFSVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return opfsExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return opfsFind(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return opfsDu(this.accessor, path)
-  }
-
-  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return opfsDuAll(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

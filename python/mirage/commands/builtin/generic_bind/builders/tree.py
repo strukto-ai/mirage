@@ -15,8 +15,12 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tree import tree_generic
-from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic.tree import parse_flags, tree_generic
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    bound_op,
+)
+from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -32,13 +36,13 @@ async def tree(
     if not ops.is_mounted(accessor):
         raise ValueError("tree: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    return await tree_generic(
-        resolved,
-        list(texts),
-        opts,
+    readdir, stat = tree_walk(
+        bound_op(ops.read_tree, accessor, opts.index),
         partial(ops.readdir, accessor),
         partial(ops.stat, accessor),
+        parse_flags(opts.flags).max_depth,
     )
+    return await tree_generic(resolved, list(texts), opts, readdir, stat)
 
 
 BUILDER = GenericCommand("tree", tree)

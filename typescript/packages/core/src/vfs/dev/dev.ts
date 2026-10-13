@@ -16,7 +16,7 @@ import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 
 import { RAMVFS } from '../ram/ram.ts'
 import type { RAMStore } from '../ram/store.ts'
@@ -66,6 +66,18 @@ export class DevVFS extends RAMVFS {
       this.store.modified.delete(path.slice(4))
       this.store.attrs.delete(path.slice(4))
     }
+  }
+
+  /**
+   * Null: the devices stat as character devices, which a RAM listing does not
+   * know, and a walk of /dev is one readdir. Mirrors Python's `read_tree`.
+   */
+  override readTree(
+    _path: PathSpec,
+    _maxdepth: number | null = null,
+    _index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return Promise.resolve(null)
   }
 
   /**

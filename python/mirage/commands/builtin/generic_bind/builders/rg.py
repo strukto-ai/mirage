@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
 )
 from mirage.commands.builtin.generic_bind.search import search_reads
+from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -37,12 +38,17 @@ async def rg(
     read_bytes, read_stream = await search_reads(
         ops, "rg", accessor, paths, texts, opts
     )
+    readdir, stat = tree_walk(
+        bound_op(ops.read_tree, accessor, opts.index),
+        bound_op(ops.readdir, accessor, opts.index),
+        bound_op(ops.stat, accessor, opts.index),
+    )
     return await rg_generic(
         paths,
         texts,
         opts,
-        readdir=bound_op(ops.readdir, accessor, opts.index),
-        stat=bound_op(ops.stat, accessor, opts.index),
+        readdir=readdir,
+        stat=stat,
         read_bytes=read_bytes,
         read_stream=read_stream,
         stdin=opts.stdin,

@@ -23,14 +23,7 @@ import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { methodName, vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import {
-  type DuEntries,
-  type FindOptions,
-  Effect,
-  type ScanReason,
-  type SearchQuery,
-  Target,
-} from './types.ts'
+import { Effect, type ScanReason, type SearchQuery, Target } from './types.ts'
 
 /**
  * The two keys the snapshot machinery reads out of a VFS's state.
@@ -422,32 +415,27 @@ export class BaseVFS<A extends Accessor = Accessor> {
     return Promise.reject(enotsup(this.name, 'follow', path))
   }
 
-  /** Answer `find` natively instead of walking `readdir`. */
-  @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  find(path: PathSpec, _options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return Promise.reject(enotsup(this.name, 'find', path))
-  }
-
   /**
-   * The recursive byte total under `path`, natively. Native `du` is both
-   * `duSize` and `duEntries`: the generic derives its per-directory rows
-   * from the entries, so one without the other is not served.
+   * Every entry under a directory, in one answer.
+   *
+   * `find`, `du`, `ls -R`, `tree`, `grep -r` and `rg` ask this before they
+   * walk a directory, so a backend that can list a subtree on its own (a
+   * recursive listing, one query over many folders) does not take a
+   * `readdir` per directory. The answer stands in for the walk: every file and
+   * directory below `path` down to `maxdepth` levels (all of them when null),
+   * keyed by its path below `path` (`a`, `a/b.txt`), each with the stat `stat`
+   * gives for it. The walk lists each directory from it in name order.
+   * Resolve null to have the command walk `readdir` the usual way; reject with
+   * what `readdir` of `path` rejects with otherwise. Mirrors Python's
+   * `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return Promise.reject(enotsup(this.name, 'du', path))
-  }
-
-  /**
-   * Every stored file under `path` with its size, natively. A native answer
-   * comes from one pass over the stored files, so a directory holding no
-   * file never appears in the entries and gets no row, where the shared
-   * readdir walk prints its `0` row. The difference is accepted for the
-   * speed and pinned in `integ/unix/du/empty.json`.
-   */
-  @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return Promise.reject(enotsup(this.name, 'du', path))
+  readTree(
+    path: PathSpec,
+    _maxdepth: number | null = null,
+    _index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 
   /** Replace a file's bytes, creating it when missing. */

@@ -22,8 +22,8 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.redis import RedisVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.ssh import SSHVFS, SSHConfig
-from tests.commands.builtin.ssh.test_ssh_commands import MockSFTPClient
 from tests.e2e.gdrive_mock import FakeGDrive
+from tests.vfs.ssh.test_ssh_commands import MockSFTPClient
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 

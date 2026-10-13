@@ -17,38 +17,43 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 import { lookupError } from './dest.ts'
+import type { RAMStore } from '../../vfs/ram/store.ts'
 
-export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
-  const p = norm(path.mountPath)
-  const attrs = accessor.store.attrs.get(p) ?? {}
-  if (accessor.store.dirs.has(p)) {
-    return Promise.resolve(
-      new FileStat({
-        name: gnuBasename(p),
-        modified: accessor.store.modified.get(p) ?? null,
-        type: FileType.DIRECTORY,
-        mode: attrs.mode ?? null,
-        uid: attrs.uid ?? null,
-        gid: attrs.gid ?? null,
-        atime: attrs.atime ?? null,
-      }),
-    )
-  }
-  const data = accessor.store.files.get(p)
-  if (data === undefined) {
-    throw lookupError(accessor, path, p)
-  }
-  return Promise.resolve(
-    new FileStat({
+/**
+ * What `stat` answers for the normalized key `p`, null when nothing is there.
+ * Mirrors Python's `key_stat`.
+ */
+export function keyStat(store: RAMStore, p: string): FileStat | null {
+  const attrs = store.attrs.get(p) ?? {}
+  if (store.dirs.has(p)) {
+    return new FileStat({
       name: gnuBasename(p),
-      size: data.byteLength,
-      modified: accessor.store.modified.get(p) ?? null,
-      type: FileType.FILE,
-      content: contentTypeForPath(p),
+      modified: store.modified.get(p) ?? null,
+      type: FileType.DIRECTORY,
       mode: attrs.mode ?? null,
       uid: attrs.uid ?? null,
       gid: attrs.gid ?? null,
       atime: attrs.atime ?? null,
-    }),
-  )
+    })
+  }
+  const data = store.files.get(p)
+  if (data === undefined) return null
+  return new FileStat({
+    name: gnuBasename(p),
+    size: data.byteLength,
+    modified: store.modified.get(p) ?? null,
+    type: FileType.FILE,
+    content: contentTypeForPath(p),
+    mode: attrs.mode ?? null,
+    uid: attrs.uid ?? null,
+    gid: attrs.gid ?? null,
+    atime: attrs.atime ?? null,
+  })
+}
+
+export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
+  const p = norm(path.mountPath)
+  const found = keyStat(accessor.store, p)
+  if (found === null) throw lookupError(accessor, path, p)
+  return Promise.resolve(found)
 }

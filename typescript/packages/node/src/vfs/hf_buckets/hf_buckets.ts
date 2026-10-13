@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
@@ -28,21 +27,18 @@ import {
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
-import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
 import { read as hfRead } from '../../core/hf_buckets/read.ts'
 import { stat as hfStat } from '../../core/hf_buckets/stat.ts'
 import { readStream as hfStream } from '../../core/hf_buckets/stream.ts'
 import { exists as hfExists } from '../../core/hf_buckets/exists.ts'
-import { find as hfFind } from '../../core/hf_buckets/find.ts'
-import { size as hfDu, entries as hfDuAll } from '../../core/hf_buckets/du/index.ts'
 import { write as hfWrite } from '../../core/hf_buckets/write.ts'
 import { create as hfCreate } from '../../core/hf_buckets/create.ts'
 import { mkdir as hfMkdir } from '../../core/hf_buckets/mkdir.ts'
 import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
 import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
 import { SCOPE_ERROR } from '../../core/hf_buckets/constants.ts'
+import { tree as hfTree } from '../../core/hf_buckets/readdir.ts'
 
 export interface HfBucketsVFSState {
   type: string
@@ -83,6 +79,14 @@ export class HfBucketsVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return hfTree(this.accessor, path, maxdepth, index)
+  }
+
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return hfReaddir(this.accessor, path, index)
   }
@@ -107,18 +111,6 @@ export class HfBucketsVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return hfExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, index?: IndexCacheStore): Promise<string[]> {
-    return hfFind(this.accessor, path, options, index)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return hfDu(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return hfDuAll(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

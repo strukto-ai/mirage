@@ -1,0 +1,88 @@
+---
+title: Walks
+description: The VFS method find, du, ls -R, tree, grep -r and rg ask before they walk a directory.
+icon: folder-tree
+---
+
+A command that walks a directory lists it, then each directory below it, one
+`readdir` at a time. On a service that is one request per directory. A VFS
+that defines `read_tree` answers the whole walk at once: an object store lists
+every key under a prefix in one paged listing, Dropbox lists a folder
+recursively. The answer stands in for the walk, so the output is the same.
+
+## Interface
+
+<CodeGroup>
+
+```python Python
+from mirage import NULL_INDEX, BaseVFS, FileStat, PathSpec
+
+
+class MyVFS(BaseVFS):
+    async def read_tree(
+        self, path: PathSpec, maxdepth: int | None = None, index=NULL_INDEX
+    ) -> dict[str, FileStat] | None: ...
+```
+
+```ts TypeScript
+import { BaseVFS, type FileStat, type PathSpec } from '@struktoai/mirage-core'
+
+class MyVFS extends BaseVFS {
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+  ): Promise<Map<string, FileStat> | null> { /* ... */ }
+}
+```
+
+</CodeGroup>
+
+| Answer | Otherwise |
+| --- | --- |
+| every file and directory below `path`, keyed by its path below it (`a`, `a/b.txt`), each with the stat `stat` gives for it | `None`: the command walks `readdir` |
+
+`maxdepth` is how many levels below `path` the walk reads (`None` for all of
+them); entries deeper than that may be left out. A directory a deeper key
+implies may be left out too, and stats as a bare directory. Each directory is
+listed from the answer in name order, as `readdir` lists it. Raise the error
+`readdir` of `path` would raise, such as `NotADirectoryError` for a file.
+
+An entry's stat must be the one `stat` returns for it, since the walk uses it
+in its place: `ls -lR` prints its size, mode and time, `find -mtime` and
+`-size` test them, `du` sums the sizes. A path the answer does not hold is
+asked of `stat` and `readdir` as usual.
+
+`read_tree` is a dispatcher call, like `read`. When a hide or a path rule
+reaches below `path`, the dispatcher declines it and the command walks entry
+by entry, so each entry meets the checks its own `readdir` and `stat` meet.
+
+## Commands and flags
+
+| Command | Asks `read_tree` for | `maxdepth` |
+| --- | --- | --- |
+| `find` | each start point that is a directory | `-maxdepth` |
+| `du` | each operand that is a directory | none |
+| `ls -R` | each directory operand; `ls` without `-R` reads one directory | none |
+| `tree` | each operand | `-L` |
+| `grep -r`, `-R` or `-d recurse`, `rg` | each directory the search walks | none |
+| `cp -r` | each source directory | none |
+
+Each command asks once per directory it starts a walk at. A mount without
+`read_tree`, or a call that answers `None`, walks as before. `du` caps a walk
+at the mount's `max_du_entries`, since each directory costs a request; the
+entries of a `read_tree` answer cost none and do not count toward the cap.
+
+## Backends
+
+| Backend | `read_tree` |
+| --- | --- |
+| S3 and every S3-compatible store (R2, GCS, MinIO, Backblaze, Wasabi, and the rest) | one listing of every key under the prefix |
+| GridFS | one `fs.files` query under the prefix |
+| Hugging Face buckets | one recursive listing |
+| Dropbox | one recursive `list_folder` |
+| Redis | one key scan |
+| RAM | the store in memory |
+
+A walk on any other mount reads one directory at a time. GitHub and the
+Hugging Face Hub already answer every `readdir` from the repository tree they
+fetch once.

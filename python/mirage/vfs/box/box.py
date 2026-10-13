@@ -34,15 +34,11 @@ from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
 from mirage.core.box.watch import build_delta_hook
 from mirage.core.box.write import write as _write
-from mirage.core.generic.du import make_walked_du
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.box.prompt import PROMPT
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
-
-_du = make_walked_du(_stat, _readdir)
 
 
 class BoxVFS(BaseVFS):
@@ -95,16 +91,6 @@ class BoxVFS(BaseVFS):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du.size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du.entries(self.accessor, path, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

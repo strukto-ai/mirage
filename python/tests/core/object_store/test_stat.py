@@ -23,9 +23,7 @@ import pytest_asyncio
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
-from mirage.core.object_store.du import make_du_size
-from mirage.core.object_store.find import make_find
-from mirage.core.object_store.readdir import make_readdir
+from mirage.core.object_store.readdir import make_readdir, make_tree
 from mirage.core.object_store.stat import make_stat
 from mirage.types import FileType
 from tests.core.object_store.conftest import (
@@ -100,26 +98,25 @@ def test_stat_listed_parent_negative_caches_enoent(accessor):
     assert store.connects == connects
 
 
+def _size(found) -> int:
+    return sum(st.size or 0 for st in (found or {}).values())
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("warmup", ["find", "du"])
 @pytest.mark.parametrize("expiry", ["expired", "missing"])
 @pytest.mark.parametrize("replacement", ["deleted", "file", "directory"])
 async def test_recursive_metadata_requires_a_fresh_listing(
-    accessor, warmup, expiry, replacement
+    accessor, expiry, replacement
 ):
     store = FakeStore({"data/old.txt": b"old"})
     driver = make_driver(store)
     index = RAMIndexCacheStore(ttl=60)
     path = spec("/data")
     stat = make_stat(driver)
-    find = make_find(driver)
-    size = make_du_size(driver)
+    tree = make_tree(driver)
     with patch("mirage.cache.index.ram.datetime") as clock:
         clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        if warmup == "find":
-            await find(accessor, path, index=index)
-        else:
-            await size(accessor, path, index)
+        await tree(accessor, path, None, index)
         store.connects = 0
         assert (await stat(accessor, path, index)).type == FileType.DIRECTORY
         assert store.connects == 0
@@ -135,7 +132,7 @@ async def test_recursive_metadata_requires_a_fresh_listing(
         if replacement == "deleted":
             with pytest.raises(FileNotFoundError):
                 await stat(accessor, path, index)
-            assert await find(accessor, path, index=index) == []
+            assert await tree(accessor, path, None, index) is None
         else:
             current = await stat(accessor, path, index)
             assert current.type == (
@@ -143,33 +140,32 @@ async def test_recursive_metadata_requires_a_fresh_listing(
             )
         with pytest.raises(FileNotFoundError):
             await stat(accessor, spec("/data/old.txt"), index)
-        assert await size(accessor, path, index) == sum(
-            map(len, store.objects.values())
-        )
+        found = await tree(accessor, path, None, index)
+        if replacement == "directory":
+            assert _size(found) == len(b"new contents")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("refresh", ["find", "readdir"])
+@pytest.mark.parametrize("refresh", ["tree", "readdir"])
 async def test_refresh_does_not_revive_an_expired_folder(accessor, refresh):
     store = FakeStore({"data/old.txt": b"old"})
     driver = make_driver(store)
     index = RAMIndexCacheStore(ttl=60)
     path = spec("/data")
-    find = make_find(driver)
+    tree = make_tree(driver)
     with patch("mirage.cache.index.ram.datetime") as clock:
         clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        await find(accessor, path, index=index)
+        await tree(accessor, path, None, index)
         store.objects.clear()
         store.objects.update({"data": b"file", "data/new.txt": b"new"})
         clock.now.return_value += timedelta(seconds=61)
-        if refresh == "find":
-            await find(accessor, path, index=index)
+        if refresh == "tree":
+            await tree(accessor, path, None, index)
         else:
             await make_readdir(driver)(accessor, path, index)
         assert (
             await make_stat(driver)(accessor, path, index)
         ).type == FileType.FILE
-        assert await make_du_size(driver)(accessor, path, index) == 7
 
 
 @pytest_asyncio.fixture(params=["ram", "redis"])

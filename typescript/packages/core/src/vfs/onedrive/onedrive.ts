@@ -5,22 +5,17 @@ import {
   type OneDriveConfig,
   type OneDriveConfigRedacted,
 } from '../../accessor/onedrive.ts'
-
 import { VFSName } from '../../types.ts'
 import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { buildDeltaHook } from '../../core/onedrive/watch.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../types.ts'
-import type { DuEntries } from '../types.ts'
 import { readdir } from '../../core/onedrive/readdir.ts'
 import { read } from '../../core/onedrive/read.ts'
 import { stat } from '../../core/onedrive/stat.ts'
 import { readStream } from '../../core/onedrive/stream.ts'
 import { exists } from '../../core/onedrive/exists.ts'
-import { find } from '../../core/onedrive/find.ts'
-import { makeWalkedDu } from '../../core/generic/du.ts'
 import { write } from '../../core/onedrive/write.ts'
 import { create } from '../../core/onedrive/create.ts'
 import { mkdir } from '../../core/onedrive/mkdir.ts'
@@ -32,8 +27,6 @@ import { copy } from '../../core/onedrive/copy.ts'
 import { truncate } from '../../core/onedrive/truncate.ts'
 import { filesContaining } from '../../core/msgraph/search.ts'
 import { driveLoc } from '../../core/onedrive/client.ts'
-
-const du = makeWalkedDu(stat, readdir)
 
 export interface OneDriveVFSState {
   type: string
@@ -88,18 +81,6 @@ export class OneDriveVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return exists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return find(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return du.size(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return du.entries(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

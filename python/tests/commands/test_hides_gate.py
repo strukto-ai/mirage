@@ -56,11 +56,12 @@ def _registered() -> tuple[list[Command], list[str]]:
 
 
 def test_the_chokepoints_read_the_gate():
-    """The three shared fast-path forks consume the per-operand gate;
+    """The shared fast-path forks consume the per-operand gate;
     deleting a read is how the guard silently dies, so each is pinned
-    the way test_links_optin pins ``opts.ns.links``."""
+    the way test_links_optin pins ``opts.ns.links``. find and the other
+    walks ask ``read_tree``, which the dispatcher declines under the
+    same gate."""
     for module_name in (
-        "mirage.commands.builtin.generic_bind.builders.find",
         "mirage.commands.builtin.generic_bind.search",
         "mirage.commands.builtin.generic.du",
     ):

@@ -137,12 +137,16 @@ def host_tree(tmp_path):
 @pytest.mark.asyncio
 async def test_host_link_contract(host_tree):
     vfs, fixture = host_tree
-    root = PathSpec.from_str_path("/")
     assert sorted(vfs.get_state()["files"]) == fixture["visible_files"]
-    assert await vfs.find(root, type="f") == [
-        "/" + p for p in fixture["visible_files"]
-    ]
-    assert await vfs.du_size(root) == 13
+    ws = Workspace({"/data/": vfs})
+    try:
+        found = await ws.shell("find /data -type f")
+        assert found.stdout.decode().splitlines() == [
+            "/data/" + p for p in fixture["visible_files"]
+        ]
+        assert (await ws.shell("du -s /data")).stdout == b"13\t/data\n"
+    finally:
+        await ws.close()
     for path in fixture["hidden_paths"]:
         spec = PathSpec.from_str_path(path)
         assert not await vfs.exists(spec)
@@ -211,8 +215,6 @@ async def test_unreadable_tree_is_not_absent_or_empty(host_tree):
     try:
         operations = (
             (vfs.exists, "lib/a.txt"),
-            (vfs.find, "lib"),
-            (vfs.du_size, "lib"),
             (vfs.readdir, "lib"),
         )
         for operation, key in operations:
@@ -243,7 +245,11 @@ async def test_root_alias_keeps_the_same_visible_tree(host_tree):
     alias = vfs.root.parent / "alias"
     alias.symlink_to(vfs.root)
     mounted = DiskVFS(str(alias))
-    assert await mounted.du_size(PathSpec.from_str_path("/")) == 13
+    ws = Workspace({"/data/": mounted})
+    try:
+        assert (await ws.shell("du -s /data")).stdout == b"13\t/data\n"
+    finally:
+        await ws.close()
     assert sorted(mounted.get_state()["files"]) == fixture["visible_files"]
 
 

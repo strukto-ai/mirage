@@ -652,19 +652,9 @@ describe('withAbortGuard', () => {
         calls.push(`exists ${path.virtual}`)
         return Promise.resolve(true)
       },
-      find: (_a, path) => {
-        calls.push(`find ${path.virtual}`)
-        return Promise.resolve([])
-      },
-      du: {
-        size: (_a, path) => {
-          calls.push(`du.size ${path.virtual}`)
-          return Promise.resolve(0)
-        },
-        entries: (_a, path) => {
-          calls.push(`du.entries ${path.virtual}`)
-          return Promise.resolve([[], 0] as [[string, number][], number])
-        },
+      readTree: (_a, path) => {
+        calls.push(`readTree ${path.virtual}`)
+        return Promise.resolve(null)
       },
       unlink: (_a, path) => {
         calls.push(`unlink ${path.virtual}`)
@@ -719,13 +709,7 @@ describe('withAbortGuard', () => {
     await expect(guarded.exists?.(accessor, spec('/data/b'))).rejects.toMatchObject({
       name: 'AbortError',
     })
-    await expect(guarded.find?.(accessor, spec('/data'), {})).rejects.toMatchObject({
-      name: 'AbortError',
-    })
-    await expect(guarded.du?.size(accessor, spec('/data'))).rejects.toMatchObject({
-      name: 'AbortError',
-    })
-    await expect(guarded.du?.entries(accessor, spec('/data'))).rejects.toMatchObject({
+    await expect(guarded.readTree?.(accessor, spec('/data'))).rejects.toMatchObject({
       name: 'AbortError',
     })
     expect(calls).toEqual([])

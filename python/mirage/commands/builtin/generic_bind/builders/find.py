@@ -12,45 +12,47 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import (
-    find_generic,
     find_walk_generic,
+    parse_find_args,
+    parse_flags,
 )
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
+    bound_op,
     overlaid_stat,
 )
+from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
-from mirage.view.namespace_view import paths_scoped
+
+logger = logging.getLogger(__name__)
 
 
-async def _dir_is_empty(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    search: PathSpec,
-) -> bool:
-    """Whether a directory start point holds nothing, for ``-empty``.
+def _maxdepth(texts: list[str], opts: CommandOpts) -> int | None:
+    """How many levels below a start point the expression reads.
 
-    Only the native-op path needs this: the walk answers the same
-    question with the readdir it already takes (``_is_empty_entry``).
-    Asked once, for the start point, and only when the expression
-    mentions ``-empty``.
+    Asked of the mount's ``read_tree`` so ``find -maxdepth 1`` lists one
+    level; None when the expression reads them all, or does not parse
+    (the walk reports that).
 
     Args:
-        ops (CommandIO): the backend's op table.
-        accessor (Accessor): the mounted backend.
-        index (IndexCacheStore): cache index threaded through reads.
-        search (PathSpec): the directory start point.
+        texts (list[str]): the raw expression words.
+        opts (CommandOpts): the parsed flags.
     """
-    return not await ops.readdir(accessor, search, index=index)
+    try:
+        return parse_find_args(
+            tuple(texts), maxdepth=parse_flags(opts.flags).maxdepth
+        ).maxdepth
+    except ValueError as exc:
+        logger.debug("find: no maxdepth for read_tree: %s", exc)
+        return None
 
 
 async def find(
@@ -63,55 +65,24 @@ async def find(
     if not ops.is_mounted(accessor):
         raise ValueError("find: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    overlay = opts.ns.stat_overlay if opts.ns is not None else None
-    # A native find op classifies on the raw backend tree, so under
-    # hidden paths its predicates would answer for entries the session
-    # cannot see (-empty omits a visible directory whose only child is
-    # hidden, which also reveals that the child exists), and under a
-    # path rule it would list a directory the rule refuses to open. The
-    # walk classifies through the guarded readdir/stat, so it sees
-    # exactly the visible tree and reports the refusal where GNU does;
-    # same trade du makes for its summarize fast path. Per operand, not
-    # per session: a hidden .env under /repo must not force find on
-    # /s3 off its native op. -empty takes the walk too: a native op
-    # judges a directory from its own listing, and the object stores, ssh
-    # and gdrive call every directory non-empty.
-    if (
-        ops.find is None
-        or "-empty" in texts
-        or paths_scoped(opts.ns, resolved)
-    ):
-        # -mtime must see namespace times (touch results, observed
-        # writes on mtime-less backends), same as ls.
-        walk_stat: Callable[..., Awaitable[FileStat]] = partial(
-            ops.stat, accessor
-        )
-        if overlay is not None:
-            walk_stat = partial(overlaid_stat, walk_stat, overlay)
-        return await find_walk_generic(
-            resolved,
-            list(texts),
-            opts,
-            readdir=partial(ops.readdir, accessor),
-            stat=walk_stat,
-        )
-    stat: Callable[..., Awaitable[FileStat]] | None = (
-        partial(ops.stat, accessor, index=opts.index) if ops.local else None
+    readdir, stat = tree_walk(
+        bound_op(ops.read_tree, accessor, opts.index),
+        partial(ops.readdir, accessor),
+        partial(ops.stat, accessor),
+        _maxdepth(texts, opts),
     )
-    if stat is not None and overlay is not None:
-        stat = partial(
-            overlaid_stat,
-            partial(ops.stat, accessor),
-            overlay,
-            index=opts.index,
-        )
-    return await find_generic(
+    # -mtime must see namespace times (touch results, observed writes on
+    # mtime-less backends), same as ls.
+    walk_stat: Callable[..., Awaitable[FileStat]] = stat
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    if overlay is not None:
+        walk_stat = partial(overlaid_stat, walk_stat, overlay)
+    return await find_walk_generic(
         resolved,
         list(texts),
         opts,
-        find_core=partial(ops.find, accessor, index=opts.index),
-        stat=stat,
-        dir_empty=partial(_dir_is_empty, ops, accessor, opts.index),
+        readdir=readdir,
+        stat=walk_stat,
     )
 
 

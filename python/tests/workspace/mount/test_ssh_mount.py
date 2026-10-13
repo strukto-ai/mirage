@@ -36,6 +36,4 @@ def test_ssh_mount_command_resolution():
     mount = registry.mount_for("/remote/test.py")
     assert mount is not None
     assert mount.resolve_command("cat", None) is generic("cat")
-    find = mount.resolve_command("find", None)
-    assert find is not None
-    assert find.vfs == "ssh"
+    assert mount.resolve_command("find", None) is generic("find")

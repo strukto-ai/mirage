@@ -19,7 +19,8 @@ import { SPECS } from '../../spec/index.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
-import { MountMode, type PathSpec } from '../../../types.ts'
+import { type FileStat, MountMode, type PathSpec } from '../../../types.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -235,4 +236,81 @@ it('reads a cached file from the cache instead', async () => {
   } finally {
     await ws.close()
   }
+})
+
+// A RAM mount that counts its listings. Mirrors `_Counted` in test_dispatch.py.
+class Counted extends RAMVFS {
+  trees = 0
+  listings = 0
+
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    this.trees += 1
+    return super.readTree(path, maxdepth, index)
+  }
+
+  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+    this.listings += 1
+    return super.readdir(path, index)
+  }
+}
+
+// A RAM mount without readTree: every walk lists each directory.
+class Untreed extends RAMVFS {}
+// eslint-disable-next-line @typescript-eslint/unbound-method
+Object.defineProperty(Untreed.prototype, 'readTree', { value: BaseVFS.prototype.readTree })
+
+const WALKS = [
+  'find /m',
+  'find /m -maxdepth 1',
+  'find /m -type d',
+  'find /m -empty',
+  'du -a /m',
+  'du -s /m/a',
+  'ls -R /m',
+  'ls -lR /m/a',
+  'tree /m',
+  'tree -L 1 /m',
+  'grep -r ada /m',
+  'rg ada /m',
+  'cp -r /m/a /m/copy && find /m/copy',
+]
+
+async function walks(vfs: RAMVFS): Promise<[number, string, string][]> {
+  const enc = new TextEncoder()
+  vfs.loadState({
+    type: 'ram',
+    files: {
+      '/a/x.txt': enc.encode('ada\n'),
+      '/a/b/y.py': enc.encode('print(1)\n'),
+      '/a/b/c/z.md': enc.encode('ada lovelace\n'),
+      '/top': enc.encode('t\n'),
+    },
+  })
+  for (const dir of ['/a', '/a/b', '/a/b/c', '/a/empty']) vfs.store.dirs.add(dir)
+  const ws = new Workspace(
+    { '/m': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const dec = new TextDecoder()
+  try {
+    const out: [number, string, string][] = []
+    for (const line of WALKS) {
+      const r = await ws.shell(line)
+      out.push([r.exitCode, dec.decode(r.stdout), dec.decode(r.stderr)])
+    }
+    return out
+  } finally {
+    await ws.close()
+  }
+}
+
+it('reads a walked tree in one call and prints the same', async () => {
+  const counted = new Counted()
+  expect(await walks(counted)).toEqual(await walks(new Untreed()))
+  expect(counted.trees).toBeGreaterThan(0)
+  expect(counted.listings).toBe(0)
 })

@@ -13,28 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
-
 import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
 import { PROMPT } from './prompt.ts'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/gridfs/watch.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
-import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir as gridfsReaddir } from '../../core/gridfs/readdir.ts'
 import { read as gridfsRead } from '../../core/gridfs/read.ts'
 import { stat as gridfsStat } from '../../core/gridfs/stat.ts'
 import { readStream as gridfsStream } from '../../core/gridfs/stream.ts'
 import { exists as gridfsExists } from '../../core/gridfs/exists.ts'
-import { find as gridfsFind } from '../../core/gridfs/find.ts'
-import { size as gridfsDu, entries as gridfsDuAll } from '../../core/gridfs/du/index.ts'
 import { write as gridfsWrite } from '../../core/gridfs/write.ts'
 import { create as gridfsCreate } from '../../core/gridfs/create.ts'
 import { mkdir as gridfsMkdir } from '../../core/gridfs/mkdir.ts'
@@ -45,6 +38,7 @@ import { rename as gridfsRename } from '../../core/gridfs/rename.ts'
 import { copy as gridfsCopy } from '../../core/gridfs/copy.ts'
 import { truncate as gridfsTruncate } from '../../core/gridfs/truncate.ts'
 import { SCOPE_ERROR } from '../../core/gridfs/constants.ts'
+import { tree as gridfsTree } from '../../core/gridfs/readdir.ts'
 
 export interface GridFSVFSState {
   type: string
@@ -86,6 +80,14 @@ export class GridFSVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return gridfsTree(this.accessor, path, maxdepth, index)
+  }
+
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return gridfsReaddir(this.accessor, path, index)
   }
@@ -110,18 +112,6 @@ export class GridFSVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return gridfsExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, index?: IndexCacheStore): Promise<string[]> {
-    return gridfsFind(this.accessor, path, options, index)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return gridfsDu(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return gridfsDuAll(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

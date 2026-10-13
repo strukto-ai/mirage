@@ -12,10 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TypeVar
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -24,24 +22,26 @@ from mirage.commands.builtin.generic.du import (
     ComputeSize,
     du_generic,
 )
-from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.adapter import (
+    GenericCommand,
+    bound_op,
+)
+from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 from mirage.vfs.types import DuEntries
 from mirage.view.types import MountView
 
-T = TypeVar("T")
-
 
 @dataclass(slots=True)
 class WalkBudget:
     """Entry allowance shared by every operand of one ``du`` invocation.
 
-    Backends with no native du op are walked one ``readdir`` at a time,
-    which on an API-backed tree is one request per directory. Slack, for
+    A walk the mount's ``read_tree`` does not answer takes one
+    ``readdir`` per directory, which on an API-backed tree is one request
+    per directory. Slack, for
     instance, exposes a directory per channel per day, so an unbounded
     walk of a real workspace is tens of thousands of requests. The budget
     stops the walk and records that the answer is partial.
@@ -143,15 +143,15 @@ def _account_for_walk_error(
 
 
 async def _du_walk(
-    ops: CommandIO,
-    accessor: Accessor,
+    walk: tuple[WalkCall, WalkCall, set[str]],
     index: IndexCacheStore,
     path: PathSpec,
     budget: WalkBudget,
     entries: list[tuple[str, int]] | None,
 ) -> int:
+    readdir, stat, answered = walk
     try:
-        info = await ops.stat(accessor, path, index)
+        info = await stat(path, index)
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
@@ -163,13 +163,14 @@ async def _du_walk(
         return size
     budget.directories.append(path.virtual)
     try:
-        children = await ops.readdir(accessor, path, index)
+        children = await readdir(path, index)
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
     total = 0
+    free = path.virtual.rstrip("/") in answered
     for child in children:
-        if not budget.spend(path.virtual):
+        if not free and not budget.spend(path.virtual):
             break
         child_spec = PathSpec(
             virtual=child,
@@ -177,10 +178,30 @@ async def _du_walk(
             resolved=False,
             vfs_path=rekey(path.virtual, path.vfs_path, child),
         )
-        total += await _du_walk(
-            ops, accessor, index, child_spec, budget, entries
-        )
+        total += await _du_walk(walk, index, child_spec, budget, entries)
     return total
+
+
+def _walk(
+    ops: CommandIO, accessor: Accessor, index: IndexCacheStore
+) -> tuple[WalkCall, WalkCall, set[str]]:
+    """The walk's readdir and stat, answered from the mount's
+    ``read_tree`` where it can, and the directories listed that way,
+    which cost no request and so no budget.
+
+    Args:
+        ops (CommandIO): the mount's table.
+        accessor (Accessor): the mounted backend.
+        index (IndexCacheStore): cache index threaded through reads.
+    """
+    answered: set[str] = set()
+    readdir, stat = tree_walk(
+        bound_op(ops.read_tree, accessor, index),
+        partial(ops.readdir, accessor),
+        partial(ops.stat, accessor),
+        answered=answered,
+    )
+    return readdir, stat, answered
 
 
 async def walk_size(
@@ -190,7 +211,9 @@ async def walk_size(
     budget: WalkBudget,
     path: PathSpec,
 ) -> int:
-    return await _du_walk(ops, accessor, index, path, budget, None)
+    return await _du_walk(
+        _walk(ops, accessor, index), index, path, budget, None
+    )
 
 
 async def walk_entries(
@@ -201,27 +224,11 @@ async def walk_entries(
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
-    total = await _du_walk(ops, accessor, index, path, budget, entries)
+    total = await _du_walk(
+        _walk(ops, accessor, index), index, path, budget, entries
+    )
     entries.sort()
     return entries, total
-
-
-async def _native_or_walk(
-    native: Callable[[PathSpec], Awaitable[T]],
-    walk: Callable[[PathSpec], Awaitable[T]],
-    path: PathSpec,
-) -> T:
-    """The native answer for ``path``, or the walk's where it is declined.
-
-    Args:
-        native (Callable): the backend's one-call answer.
-        walk (Callable): the walk's answer.
-        path (PathSpec): the operand.
-    """
-    try:
-        return await native(path)
-    except WalkDeclinedError:
-        return await walk(path)
 
 
 async def du(
@@ -236,27 +243,12 @@ async def du(
     budget = WalkBudget(
         ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
     )
-    native = ops.du
     compute_size: ComputeSize = partial(
         walk_size, ops, accessor, opts.index, budget
     )
     compute_entries: ComputeEntries = partial(
         walk_entries, ops, accessor, opts.index, budget
     )
-    # The dispatcher declines a native du whose tree a hide or a path
-    # rule reaches, and the walk is what reports a directory a rule
-    # refuses to open.
-    if native is not None:
-        compute_size = partial(
-            _native_or_walk,
-            partial(native.size, accessor, index=opts.index),
-            compute_size,
-        )
-        compute_entries = partial(
-            _native_or_walk,
-            partial(native.entries, accessor, index=opts.index),
-            compute_entries,
-        )
     return await du_generic(
         paths,
         list(texts),

@@ -821,7 +821,9 @@ describe('trailing slash (POSIX pathname resolution)', () => {
     expect(dec((await ws.shell("stat -c '%F' /data/base/dlink/")).stdout)).toBe('directory\n')
     // The link's own target-string length, then the target's contents.
     expect(dec((await ws.shell('du /data/base/dlink')).stdout)).toBe('3\t/data/base/dlink\n')
-    expect(dec((await ws.shell('du /data/base/dlink/')).stdout)).toBe('21\t/data/base/dlink/\n')
+    expect(dec((await ws.shell('du /data/base/dlink/')).stdout)).toBe(
+      '0\t/data/base/dlink/emptydir\n21\t/data/base/dlink/\n',
+    )
     expect(dec((await ws.shell('file /data/base/dlink/')).stdout)).toBe(
       '/data/base/dlink/: directory\n',
     )

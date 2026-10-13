@@ -27,7 +27,6 @@ from mirage.commands.builtin.generic_bind.factory import (
     _run_with_namespace_globs,
     generic,
     scan_io,
-    walked,
     with_probe_answers,
     with_slash_guard,
     with_stat_cache,
@@ -35,7 +34,6 @@ from mirage.commands.builtin.generic_bind.factory import (
 from mirage.commands.config import Command, CommandIO, CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.vfs.types import DuOps
 from mirage.view.types import LinkView, NamespaceView
 
 
@@ -99,7 +97,7 @@ def test_generic_hands_back_the_shared_command():
 
 
 def test_generic_with_a_table_registers_a_copy_for_one_backend():
-    ls = generic("ls", vfs="dify", table=walked)
+    ls = generic("ls", vfs="dify", table=with_stat_cache)
     assert (ls.name, ls.vfs) == ("ls", "dify")
     assert ls is not generic("ls")
     assert ls.spec == generic("ls").spec
@@ -117,21 +115,6 @@ def test_scan_io_guards_only_a_judged_mount():
         assert scan is io and not scoped
     scan, scoped = scan_io(io, judged, "/s3/")
     assert scan is not io and scoped
-
-
-async def _native(*args, **kwargs):
-    return None
-
-
-def test_walked_sets_the_native_find_and_du_aside():
-    io = replace(
-        _ops(_CountingBackend(b"payload")),
-        find=_native,
-        du=DuOps(size=_native, entries=_native),
-    )
-    rest = walked(io)
-    assert rest.find is None and rest.du is None
-    assert rest.readdir is io.readdir and rest.stat is io.stat
 
 
 async def _no_target(virtual: str):
@@ -252,7 +235,7 @@ async def test_slash_guard_leaves_write_absent_when_the_backend_has_none():
     assert guarded.truncate is None
 
 
-@pytest.mark.parametrize("table", [None, walked])
+@pytest.mark.parametrize("table", [None, with_stat_cache])
 def test_a_name_no_builder_has_is_refused(table):
     with pytest.raises(ValueError, match="no generic command named 'lss'"):
         generic("lss", vfs="fake", table=table)

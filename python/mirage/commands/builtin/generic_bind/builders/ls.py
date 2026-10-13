@@ -19,9 +19,13 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.ls import ls_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
+    bound_op,
     overlaid_stat,
 )
+from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
 
@@ -45,13 +49,18 @@ async def ls(
             )
         ]
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    stat_fn: Callable[..., Awaitable[FileStat]] = partial(ops.stat, accessor)
+    readdir: WalkCall = partial(ops.readdir, accessor)
+    stat: WalkCall = partial(ops.stat, accessor)
+    # Only -R walks; a plain listing reads one directory.
+    if FlagView(opts.flags, spec=SPECS["ls"]).as_bool("recursive"):
+        readdir, stat = tree_walk(
+            bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+        )
+    stat_fn: Callable[..., Awaitable[FileStat]] = stat
     overlay = opts.ns.stat_overlay if opts.ns is not None else None
     if overlay is not None:
         stat_fn = partial(overlaid_stat, stat_fn, overlay)
-    return await ls_generic(
-        resolved, list(texts), opts, partial(ops.readdir, accessor), stat_fn
-    )
+    return await ls_generic(resolved, list(texts), opts, readdir, stat_fn)
 
 
 BUILDER = GenericCommand("ls", ls)

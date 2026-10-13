@@ -30,7 +30,7 @@ function resourceTypeFor(entry: DropboxEntry): string {
   return 'dropbox/file'
 }
 
-function dropboxPathFromKey(root: string, key: string): string {
+export function dropboxPathFromKey(root: string, key: string): string {
   if (key === '') return root
   return `${root}/${key}`
 }

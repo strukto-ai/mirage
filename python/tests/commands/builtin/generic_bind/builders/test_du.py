@@ -22,7 +22,6 @@ from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.vfs.types import DuOps
 from mirage.view.types import MountView
 
 TREE = {
@@ -102,25 +101,40 @@ def test_walk_budget_with_no_cap_charges_each_mount_its_own():
     assert budget.hit is True
 
 
-def _native(refusal) -> DuOps:
-    async def refuse(_accessor, path, index=None):
-        raise refusal("ram", "du_size", path)
+def _tree(refusal=None):
+    async def read_tree(_accessor, path, maxdepth=None, index=None):
+        if refusal is not None:
+            raise refusal("ram", "read_tree", path)
+        return {
+            "a.txt": FileStat(name="a.txt", type=FileType.FILE, size=3),
+            "sub": FileStat(name="sub", type=FileType.DIRECTORY),
+            "sub/b.txt": FileStat(name="b.txt", type=FileType.FILE, size=2),
+        }
 
-    return DuOps(size=refuse, entries=refuse)
+    return read_tree
 
 
 @pytest.mark.asyncio
-async def test_walks_when_the_dispatcher_declines_the_native_du():
-    ops = dataclasses.replace(_ops(), du=_native(walk_declined))
+async def test_walks_when_the_dispatcher_declines_read_tree():
+    ops = dataclasses.replace(_ops(), read_tree=_tree(walk_declined))
     out, code, _ = await _run(ops, "/db")
     assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_a_backends_own_refusal_is_not_walked():
-    ops = dataclasses.replace(_ops(), du=_native(enotsup))
+    ops = dataclasses.replace(_ops(), read_tree=_tree(enotsup))
     with pytest.raises(OperationNotSupportedError):
         await _run(ops, "/db")
+
+
+@pytest.mark.asyncio
+async def test_a_tree_answer_costs_no_budget():
+    """The budget bounds a walk that takes a request per directory; a
+    tree read in one call is summed whole."""
+    ops = dataclasses.replace(_ops(max_du_entries=1), read_tree=_tree())
+    out, code, _ = await _run(ops, "/db")
+    assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
 
 
 @pytest.mark.asyncio

@@ -23,7 +23,6 @@ import {
   GENERIC_COMMANDS,
   generic,
   scanIo,
-  walked,
   withProbeAnswers,
   withSlashGuard,
   withStatCache,
@@ -33,7 +32,7 @@ import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
 import { runInCommandScope } from '../../../cache/index/scope.ts'
 import { CacheManager } from '../../../cache/manager.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
-import { makeFind } from '../../../core/object_store/find.ts'
+import { makeTree } from '../../../core/object_store/readdir.ts'
 import { makeStat } from '../../../core/object_store/stat.ts'
 import { FakeAccessor, FakeStore, makeDriver, spec } from '../../../core/object_store/fakes.ts'
 
@@ -53,18 +52,18 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
 
 describe('GENERIC_COMMANDS', () => {
   it.each(['find', 'cp'])(
-    '%s passes the invocation index through the guarded native find',
+    '%s passes the invocation index through the guarded readTree',
     async (name) => {
       const accessor = new FakeAccessor()
       const store = new FakeStore({ 'data/a.txt': 'abc' })
       const driver = makeDriver(store)
-      const find = makeFind(driver)
+      const tree = makeTree(driver)
       const stat = makeStat(driver)
       const copied: string[] = []
       const index = new RAMIndexCacheStore()
       const io = makeOps({
         local: false,
-        find: (_accessor, path, options, idx) => find(accessor, path, options, idx),
+        readTree: (_accessor, path, maxdepth, idx) => tree(accessor, path, maxdepth, idx),
         stat: (_accessor, path, idx) => stat(accessor, path, idx),
         mkdir: () => Promise.resolve(),
         copy: (_accessor, _src, dst) => {
@@ -110,7 +109,7 @@ describe('GENERIC_COMMANDS', () => {
   })
 
   it('registers a copy over a changed table for one backend', () => {
-    const ls = generic('ls', { vfs: 'dify', table: walked })
+    const ls = generic('ls', { vfs: 'dify', table: withStatCache })
     expect([ls.name, ls.vfs]).toEqual(['ls', 'dify'])
     expect(ls).not.toBe(generic('ls'))
     expect(ls.spec).toEqual(generic('ls').spec)
@@ -118,7 +117,7 @@ describe('GENERIC_COMMANDS', () => {
 
   it('refuses a name no builder has', () => {
     expect(() => generic('lss')).toThrow(/no generic command named 'lss'/)
-    expect(() => generic('lss', { vfs: 'fake', table: walked })).toThrow(
+    expect(() => generic('lss', { vfs: 'fake', table: withStatCache })).toThrow(
       /no generic command named 'lss'/,
     )
   })
@@ -190,19 +189,6 @@ describe('withSlashGuard on the write tier', () => {
     const guarded = withSlashGuard(makeOps())
     expect(guarded.write).toBeUndefined()
     expect(guarded.append).toBeUndefined()
-  })
-})
-
-describe('walked', () => {
-  it('sets the native find and du aside', () => {
-    const io = makeOps({
-      find: () => Promise.resolve([]),
-      du: { size: () => Promise.resolve(0), entries: () => Promise.resolve([[], 0]) },
-    })
-    const rest = walked(io)
-    expect(rest.find).toBeUndefined()
-    expect(rest.du).toBeUndefined()
-    expect(rest.readdir).toBe(io.readdir)
   })
 })
 

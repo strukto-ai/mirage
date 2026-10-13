@@ -73,9 +73,7 @@ def test_the_op_classes_follow_the_declarations():
         "rename",
         "rm_r",
         "dir_copy",
-        "find",
-        "du_size",
-        "du_entries",
+        "read_tree",
         "search",
     }
     assert NATIVE_WALK_OPS == SUBTREE_OPS - {"rename"} | {"copy"}

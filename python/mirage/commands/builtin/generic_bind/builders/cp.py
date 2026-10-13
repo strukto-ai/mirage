@@ -29,6 +29,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.links import typed_link
+from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -61,14 +62,12 @@ async def _walk_find(
 def _make_find(
     ops: CommandIO, accessor: Accessor, index: IndexCacheStore
 ) -> OperationFn:
-    if ops.find is not None:
-        return partial(ops.find, accessor, index=index)
-    return partial(
-        _walk_find,
+    readdir, stat = tree_walk(
+        bound_op(ops.read_tree, accessor, index),
         partial(ops.readdir, accessor),
         partial(ops.stat, accessor),
-        index,
     )
+    return partial(_walk_find, readdir, stat, index)
 
 
 def overlayable_stat(
@@ -117,7 +116,7 @@ async def cp(
     # takes the entry-by-entry walk up front there, which is where GNU's
     # per-entry refusals are worded.
     if paths_scoped(opts.ns, paths, opts.mount_prefix):
-        ops = replace(ops, copy=None, dir_copy=None, find=None)
+        ops = replace(ops, copy=None, dir_copy=None)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     mkdir = partial(ops.mkdir, accessor) if ops.mkdir else None
@@ -131,11 +130,11 @@ async def cp(
     strategy: NativeCopy | PrimitiveCopy
     primitive = ops.copy is None
     if primitive and ops.write is not None:
-        # A native copy moves a tree in one backend call and a native
-        # find lists it, neither of which passes an entry through the
-        # guard the way a read does; while a path rule scopes cp, or a
-        # hide could cover an entry under an operand (the native find
-        # listed hidden names and the per-file read then printed them
+        # A native copy moves a tree in one backend call and read_tree
+        # lists it, neither of which passes an entry through the guard
+        # the way a read does; while a path rule scopes cp, or a hide
+        # could cover an entry under an operand (a one-call listing
+        # names hidden entries and the per-file read then prints them
         # in its refusal), the primitive walk copies entry by entry
         # (the cross-mount relay's own path), which is also where GNU's
         # per-entry refusals are worded.

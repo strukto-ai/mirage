@@ -18,16 +18,17 @@ from mirage.core.ram.dest import lookup_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import norm
+from mirage.vfs.ram.store import RAMStore
 
 
-async def stat(
-    accessor: RAMAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    path = path_spec.mount_path
-    store = accessor.store
-    p = norm(path)
+def key_stat(store: RAMStore, p: str) -> FileStat | None:
+    """What ``stat`` answers for the normalized key ``p``, None when
+    nothing is there.
+
+    Args:
+        store (RAMStore): the mount's store.
+        p (str): the normalized key.
+    """
     attrs = store.attrs.get(p, {})
     if p in store.dirs:
         return FileStat(
@@ -53,4 +54,17 @@ async def stat(
             gid=attrs.get("gid"),
             atime=attrs.get("atime"),
         )
-    raise lookup_error(store, path_spec, p)
+    return None
+
+
+async def stat(
+    accessor: RAMAccessor,
+    path_spec: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> FileStat:
+    store = accessor.store
+    p = norm(path_spec.mount_path)
+    found = key_stat(store, p)
+    if found is None:
+        raise lookup_error(store, path_spec, p)
+    return found

@@ -21,14 +21,12 @@ from mirage.core.ram.append import append_bytes as _append
 from mirage.core.ram.constants import SCOPE_ERROR
 from mirage.core.ram.copy import copy as _copy
 from mirage.core.ram.create import create as _create
-from mirage.core.ram.du import entries as _du_entries
-from mirage.core.ram.du import size as _du_size
 from mirage.core.ram.exists import exists as _exists
-from mirage.core.ram.find import find as _find
 from mirage.core.ram.mkdir import mkdir as _mkdir
 from mirage.core.ram.pwrite import pwrite as _pwrite
 from mirage.core.ram.read import read as _read
 from mirage.core.ram.readdir import readdir as _readdir
+from mirage.core.ram.readdir import tree as _tree
 from mirage.core.ram.rename import rename as _rename
 from mirage.core.ram.rm import rm_r as _rm_r
 from mirage.core.ram.rmdir import rmdir as _rmdir
@@ -42,7 +40,6 @@ from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.prompt import PROMPT
 from mirage.vfs.ram.store import RAMStore
-from mirage.vfs.types import DuEntries
 
 
 class RAMVFS(BaseVFS):
@@ -91,23 +88,13 @@ class RAMVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def find(
+    async def read_tree(
         self,
         path: PathSpec,
+        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du_size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du_entries(self.accessor, path, index)
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, maxdepth, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

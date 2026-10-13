@@ -14,13 +14,11 @@
 
 import type {
   ChildEntry,
-  FindHints,
   ObjectMeta,
   ObjectStoreConnection,
   ObjectStoreDriver,
   TreeEntry,
 } from '@struktoai/mirage-core/core/object_store/driver'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { toIsoZ } from '@struktoai/mirage-core/utils/dates'
 import type { ObjectId } from 'mongodb'
@@ -36,65 +34,6 @@ import {
 } from './client.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { isNoFileError } from './read.ts'
-
-/**
- * Translate a find -name glob into a regex fragment matching one path
- * segment. Returns null for character classes we do not translate (the
- * caller falls back to the unpushed prefix query; client-side keep()
- * still applies the exact semantics).
- */
-export function globRegex(pattern: string): string | null {
-  if (pattern.includes('[') || pattern.includes(']')) return null
-  let out = ''
-  for (const ch of pattern) {
-    if (ch === '*') out += '[^/]*'
-    else if (ch === '?') out += '[^/]'
-    else out += escapeRegex(ch)
-  }
-  return out
-}
-
-/**
- * Build the fs.files query, pushing -name/-iname/-size server-side when
- * the translation is exact. A pushed query selects files only, since
- * `pushdown` is set for a `-type f` find alone, and every condition is a
- * superset of what GNU prints (an unpushable glob falls back to the prefix
- * scan), so the client-side keep() pass stays authoritative.
- */
-export function buildQuery(
-  pfx: string,
-  options: FindOptions,
-  pushdown: boolean,
-): Record<string, unknown> {
-  const conds: Record<string, unknown>[] = []
-  const base = prefixQuery(pfx)
-  if (Object.keys(base).length > 0) conds.push(base)
-  if (pushdown) {
-    const escaped = escapeRegex(pfx)
-    const globs: [string | null | undefined, string][] = [
-      [options.name, ''],
-      [options.iname, 'i'],
-    ]
-    for (const [pat, flags] of globs) {
-      if (pat === undefined || pat === null) continue
-      const rx = globRegex(pat)
-      if (rx === null) continue
-      const regex: Record<string, unknown> = { $regex: `^${escaped}(.*/)?${rx}$` }
-      if (flags !== '') regex.$options = flags
-      conds.push({ filename: regex })
-    }
-    conds.push({ filename: { $not: { $regex: '/$' } } })
-    if (options.minSize != null || options.maxSize != null) {
-      const sizeCond: Record<string, number> = {}
-      if (options.minSize != null) sizeCond.$gte = options.minSize
-      if (options.maxSize != null) sizeCond.$lte = options.maxSize
-      conds.push({ length: sizeCond })
-    }
-  }
-  if (conds.length === 0) return {}
-  if (conds.length === 1) return conds[0] ?? {}
-  return { $and: conds }
-}
 
 /** Match the file at `stem` plus everything beneath it. */
 function subtreeQuery(stem: string): Record<string, unknown> {
@@ -148,24 +87,6 @@ async function* listSubtree(conn: GridFSAccessor, stem: string): AsyncIterable<T
   for await (const doc of iterLatest(conn, subtreeQuery(stem))) {
     yield { key: doc.filename, size: doc.length, modified: toIsoZ(doc.uploadDate) }
   }
-}
-
-async function* iterQuery(
-  conn: GridFSAccessor,
-  query: Record<string, unknown>,
-): AsyncIterable<TreeEntry> {
-  for await (const doc of iterLatest(conn, query)) {
-    yield { key: doc.filename, size: doc.length, modified: toIsoZ(doc.uploadDate) }
-  }
-}
-
-function findTree(
-  conn: GridFSAccessor,
-  pfx: string,
-  hints: FindHints,
-): [AsyncIterable<TreeEntry>, boolean] {
-  const query = buildQuery(pfx, hints, hints.pushdown)
-  return [iterQuery(conn, query), JSON.stringify(query) !== JSON.stringify(prefixQuery(pfx))]
 }
 
 async function head(conn: GridFSAccessor, key: string): Promise<ObjectMeta | null> {
@@ -320,5 +241,4 @@ export const DRIVER: ObjectStoreDriver<GridFSAccessor, GridFSAccessor> = {
   copyFile,
   probePrefix,
   isNotFound: isNoFileError,
-  findTree,
 }

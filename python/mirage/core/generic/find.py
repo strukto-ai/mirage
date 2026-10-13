@@ -511,6 +511,7 @@ async def walk_find(
     follow: bool = False,
     unreadable: list[str] | None = None,
     unstatted: dict[str, Exception] | None = None,
+    root: FileStat | None = None,
 ) -> list[str]:
     """Walk readdir/stat under one start point and match every entry.
 
@@ -533,6 +534,9 @@ async def walk_find(
         unreadable (list[str] | None): collects refused directories.
         unstatted (dict[str, Exception] | None): collects entries whose
             stat failed.
+        root (FileStat | None): the start point's stat when the caller
+            has it, which is how a directory only a mount below it
+            makes still reports itself; None stats it.
     """
     collected: list[tuple[str, str]] = []
     prefix = mount_prefix_of(search_path.virtual, search_path.vfs_path)
@@ -589,7 +593,11 @@ async def walk_find(
                 return []
         return await readdir(spec, cache)
 
-    root_stat = await _stat_entry(stat, root_path, prefix, index)
+    root_stat = (
+        root
+        if root is not None
+        else await _stat_entry(stat, root_path, prefix, index)
+    )
     if root_stat is not None:
         collected.append((root_path, printf_kind(root_stat)))
     # GNU depth convention: the search root is depth 0, its children are

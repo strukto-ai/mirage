@@ -22,20 +22,7 @@
       "seq": 1301081,
       "targets": [
         "disk",
-        "ssh"
-      ],
-      "command": "du /data/due",
-      "expect": {
-        "exit": 0,
-        "stdout": "0\t/data/due/e\n0\t/data/due/g/h\n0\t/data/due/g\n3\t/data/due\n",
-        "stderr": ""
-      },
-      "note": "The shared readdir walk, which disk and ssh use, prints a row for every directory, an empty one included (0 bytes under -ab, as GNU does), children before their parent and siblings sorted."
-    },
-    {
-      "id": "du_empty_dirs_native_op_has_no_row",
-      "seq": 1301082,
-      "targets": [
+        "ssh",
         "ram",
         "redis",
         "opfs"
@@ -43,17 +30,20 @@
       "command": "du /data/due",
       "expect": {
         "exit": 0,
-        "stdout": "3\t/data/due\n",
+        "stdout": "0\t/data/due/e\n0\t/data/due/g/h\n0\t/data/due/g\n3\t/data/due\n",
         "stderr": ""
       },
-      "note": "Accepted divergence: ram and redis answer du from one pass over the stored files, so a directory holding no file (/data/due/e, /data/due/g, /data/due/g/h) gets no row; GNU and the walk print 0 for each. See du_entries on BaseVFS."
+      "note": "Every directory gets a row, an empty one included (0 bytes under -ab, as GNU does), children before their parent and siblings sorted, whether the walk lists each directory or the mount's read_tree lists the subtree."
     },
     {
       "id": "du_empty_dirs_with_files",
       "seq": 1301083,
       "targets": [
         "disk",
-        "ssh"
+        "ssh",
+        "ram",
+        "redis",
+        "opfs"
       ],
       "command": "du -a /data/due",
       "expect": {
@@ -84,7 +74,10 @@
       "seq": 1301084,
       "targets": [
         "disk",
-        "ssh"
+        "ssh",
+        "ram",
+        "redis",
+        "opfs"
       ],
       "command": "du --max-depth=1 /data/due",
       "expect": {
@@ -98,7 +91,10 @@
       "seq": 1301085,
       "targets": [
         "disk",
-        "ssh"
+        "ssh",
+        "ram",
+        "redis",
+        "opfs"
       ],
       "command": "du / | grep '/due'",
       "expect": {

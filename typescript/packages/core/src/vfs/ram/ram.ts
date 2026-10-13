@@ -19,15 +19,11 @@ import { PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../types.ts'
-import type { DuEntries } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
 import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
 import { readStream as devAwareStream } from '../../core/dev/stream.ts'
 import { exists as ramExists } from '../../core/ram/exists.ts'
-import { find as ramFind } from '../../core/ram/find.ts'
-import { size as ramDu, entries as ramDuAll } from '../../core/ram/du/index.ts'
 import { write as ramWrite } from '../../core/ram/write.ts'
 import { appendBytes as ramAppend } from '../../core/ram/append.ts'
 import { pwrite as ramPwrite } from '../../core/ram/pwrite.ts'
@@ -41,6 +37,8 @@ import { copy as ramCopy } from '../../core/ram/copy.ts'
 import { truncate as ramTruncate } from '../../core/ram/truncate.ts'
 import { setAttrs as ramSetAttrs } from '../../core/ram/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/ram/constants.ts'
+import { tree as ramTree } from '../../core/ram/readdir.ts'
+
 export interface RAMVFSState {
   type: string
   files?: Record<string, Uint8Array>
@@ -63,6 +61,14 @@ export class RAMVFS extends BaseVFS {
   override readonly local: boolean = true
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
+
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return ramTree(this.accessor, path, maxdepth, index)
+  }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return ramReaddir(this.accessor, path, index)
@@ -89,18 +95,6 @@ export class RAMVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return ramExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return ramFind(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return ramDu(this.accessor, path)
-  }
-
-  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return ramDuAll(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array, signal?: AbortSignal): Promise<void> {

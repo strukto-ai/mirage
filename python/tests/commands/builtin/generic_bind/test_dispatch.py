@@ -24,6 +24,7 @@ from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import install, replaces
@@ -220,3 +221,74 @@ async def test_a_cached_file_is_read_from_the_cache_instead():
         assert vfs.asked == []
     finally:
         await ws.close()
+
+
+class _Counted(RAMVFS):
+    """A RAM mount that counts its listings."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trees = 0
+        self.listings = 0
+
+    async def read_tree(self, path, maxdepth=None, index=NULL_INDEX):
+        self.trees += 1
+        return await super().read_tree(path, maxdepth, index)
+
+    async def readdir(self, path, index=NULL_INDEX):
+        self.listings += 1
+        return await super().readdir(path, index)
+
+
+class _Untreed(RAMVFS):
+    """A RAM mount without read_tree: every walk lists each directory."""
+
+    read_tree = BaseVFS.read_tree
+
+
+_WALKS = (
+    "find /m",
+    "find /m -maxdepth 1",
+    "find /m -type d",
+    "find /m -empty",
+    "du -a /m",
+    "du -s /m/a",
+    "ls -R /m",
+    "ls -lR /m/a",
+    "tree /m",
+    "tree -L 1 /m",
+    "grep -r ada /m",
+    "rg ada /m",
+    "cp -r /m/a /m/copy && find /m/copy",
+)
+
+
+async def _walks(vfs: RAMVFS) -> list[tuple[int, bytes, bytes]]:
+    vfs.load_state(
+        {
+            "files": {
+                "/a/x.txt": b"ada\n",
+                "/a/b/y.py": b"print(1)\n",
+                "/a/b/c/z.md": b"ada lovelace\n",
+                "/top": b"t\n",
+            }
+        }
+    )
+    vfs._store.dirs.update({"/a", "/a/b", "/a/b/c", "/a/empty"})
+    ws = Workspace({"/m/": vfs}, mode=MountMode.WRITE)
+    try:
+        out = []
+        for line in _WALKS:
+            r = await ws.shell(line)
+            out.append((r.exit_code, r.stdout, r.stderr or b""))
+        return out
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_walk_reads_the_tree_in_one_call_and_prints_the_same():
+    counted = _Counted()
+    assert await _walks(counted) == await _walks(_Untreed())
+    assert counted.trees > 0
+    assert counted.listings == 0

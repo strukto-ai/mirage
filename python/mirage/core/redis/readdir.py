@@ -19,8 +19,9 @@ from mirage.cache.index import (
     IndexEntry,
     ResourceType,
 )
+from mirage.core.redis.stat import key_stat
 from mirage.errors.fs import readdir_error
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 
@@ -79,3 +80,36 @@ async def readdir(
     ]
     await index.set_dir(virtual_key, index_entries)
     return virtual_entries
+
+
+async def tree(
+    accessor: RedisAccessor,
+    path: PathSpec,
+    maxdepth: int | None = None,
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, FileStat] | None:
+    """Every key under a directory from one scan, each as ``stat``
+    answers it; None when ``path`` is no directory, so the walk's readdir
+    reports it.
+
+    Args:
+        accessor (RedisAccessor): the mount's store.
+        path (PathSpec): the directory.
+        maxdepth (int | None): the deepest level kept.
+        index (IndexCacheStore): unused; the store answers directly.
+    """
+    store = accessor.store
+    p = norm(path.mount_path)
+    if not await store.has_dir(p):
+        return None
+    base = p.rstrip("/") + "/"
+    dirs = await store.list_dirs()
+    keys = [(key, False) for key in await store.list_files(base)]
+    keys += [(key, True) for key in sorted(dirs) if key.startswith(base)]
+    found: dict[str, FileStat] = {}
+    for key, is_dir in keys:
+        rel = key[len(base) :]
+        if key == p or (maxdepth is not None and rel.count("/") >= maxdepth):
+            continue
+        found[rel] = await key_stat(store, key, is_dir)
+    return found

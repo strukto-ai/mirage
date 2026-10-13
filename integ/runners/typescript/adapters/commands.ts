@@ -16,14 +16,10 @@ import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggrega
 import { CLI as CLIProgram, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import {
-  commandIo,
-  generic,
-  walked,
-} from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { commandIo, generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { command, type Command } from '@struktoai/mirage-core/commands/config'
+import { command, type Command, type CommandIO } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { eacces } from '@struktoai/mirage-core/errors/fs'
@@ -34,6 +30,14 @@ const GATE = {
   peak: 0,
   release: null as (() => void) | null,
   ready: null as Promise<void> | null,
+}
+
+// The table with its one-call subtree read set aside, so a walk lists through
+// readdir. Mirrors Python's `_without_tree`.
+function withoutTree(io: CommandIO): CommandIO {
+  const rest = { ...io }
+  delete rest.readTree
+  return rest
 }
 
 export class CommandService extends RAMVFS {
@@ -109,7 +113,7 @@ export class CommandService extends RAMVFS {
     // list through readdir, which refuses what it hides.
     const walks =
       this.dropped.length > 0
-        ? ['du', 'find'].map((name) => generic(name, { vfs: 'ram', table: walked }))
+        ? ['du', 'find'].map((name) => generic(name, { vfs: 'ram', table: withoutTree }))
         : []
     return [
       ...handlers,

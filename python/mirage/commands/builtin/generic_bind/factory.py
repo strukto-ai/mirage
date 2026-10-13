@@ -270,20 +270,6 @@ async def _run_with_namespace_globs(
     return await fn(bound, accessor, paths, texts, opts)
 
 
-def walked(io: CommandIO) -> CommandIO:
-    """A mount's table with its native ``find`` and ``du`` set aside.
-
-    Shell traversals need partial results and per-directory errors,
-    which the shared readdir/stat walker owns; the VFS's own aggregate
-    methods stay strict. Disk and ssh run ``cp``, ``du`` and ``find``
-    over it.
-
-    Args:
-        io (CommandIO): the mount's table.
-    """
-    return replace(io, find=None, du=None)
-
-
 _BY_NAME = {b.name: b for b in BUILDERS}
 
 

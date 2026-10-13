@@ -22,13 +22,11 @@ from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.gridfs.constants import SCOPE_ERROR
 from mirage.core.gridfs.copy import copy as _copy
 from mirage.core.gridfs.create import create as _create
-from mirage.core.gridfs.du import entries as _du_entries
-from mirage.core.gridfs.du import size as _du_size
 from mirage.core.gridfs.exists import exists as _exists
-from mirage.core.gridfs.find import find as _find
 from mirage.core.gridfs.mkdir import mkdir as _mkdir
 from mirage.core.gridfs.read import read as _read
 from mirage.core.gridfs.readdir import readdir as _readdir
+from mirage.core.gridfs.readdir import tree as _tree
 from mirage.core.gridfs.rename import rename as _rename
 from mirage.core.gridfs.rm import rm_r as _rm_r
 from mirage.core.gridfs.rmdir import rmdir as _rmdir
@@ -42,7 +40,6 @@ from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gridfs.config import GridFSConfig
 from mirage.vfs.gridfs.prompt import PROMPT
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
@@ -95,23 +92,13 @@ class GridFSVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def find(
+    async def read_tree(
         self,
         path: PathSpec,
+        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du_size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du_entries(self.accessor, path, index)
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, maxdepth, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

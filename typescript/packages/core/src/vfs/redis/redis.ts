@@ -22,15 +22,11 @@ import { PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../types.ts'
-import type { DuEntries } from '../types.ts'
 import { readdir as redisReaddir } from '../../core/redis/readdir.ts'
 import { read as redisRead } from '../../core/redis/read.ts'
 import { stat as redisStat } from '../../core/redis/stat.ts'
 import { readStream as redisStream } from '../../core/redis/stream.ts'
 import { exists as redisExists } from '../../core/redis/exists.ts'
-import { find as redisFind } from '../../core/redis/find.ts'
-import { size as redisDu, entries as redisDuEntries } from '../../core/redis/du/index.ts'
 import { write as redisWrite } from '../../core/redis/write.ts'
 import { appendBytes as redisAppend } from '../../core/redis/append.ts'
 import { create as redisCreate } from '../../core/redis/create.ts'
@@ -43,6 +39,8 @@ import { copy as redisCopy } from '../../core/redis/copy.ts'
 import { truncate as redisTruncate } from '../../core/redis/truncate.ts'
 import { setAttrs as redisSetAttrs } from '../../core/redis/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/redis/constants.ts'
+import { tree as redisTree } from '../../core/redis/readdir.ts'
+
 export interface RedisVFSState {
   type: string
   config: {
@@ -106,6 +104,14 @@ export class RedisResourceBase extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return redisTree(this.accessor, path, maxdepth, index)
+  }
+
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return redisReaddir(this.accessor, path, index)
   }
@@ -130,18 +136,6 @@ export class RedisResourceBase extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return redisExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return redisFind(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return redisDu(this.accessor, path)
-  }
-
-  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return redisDuEntries(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isEacces, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
-import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { treeWalk, type WalkCall } from '../../utils/tree.ts'
 import { type ComputeEntries, type ComputeSize, duGeneric } from '../../generic/du.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
@@ -29,8 +29,8 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 /**
  * Entry allowance shared by every operand of one `du` invocation.
  *
- * Backends with no native du op are walked one `readdir` at a time, which on an
- * API-backed tree is one request per directory. Slack, for instance, exposes a
+ * A walk the mount's `readTree` does not answer takes one `readdir` per
+ * directory, which on an API-backed tree is one request per directory. Slack, for instance, exposes a
  * directory per channel per day, so an unbounded walk of a real workspace is
  * tens of thousands of requests. The budget stops the walk and records that the
  * answer is partial.
@@ -116,9 +116,34 @@ function accountForWalkError(err: unknown, path: PathSpec, budget: WalkBudget): 
   if (!isMissingPath(err) && !isEnotdir(err)) throw err
 }
 
-async function duWalk<A extends Accessor>(
+// The walk's readdir and stat, answered from the mount's `readTree` where it
+// can, and the directories listed that way, which cost no request and so no
+// budget. Mirrors Python's `_walk`.
+interface Walk {
+  readdir: WalkCall<string[]>
+  stat: WalkCall<FileStat>
+  answered: Set<string>
+}
+
+function treeOf<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
+  index: IndexCacheStore | undefined,
+): Walk {
+  const answered = new Set<string>()
+  const { readTree } = ops
+  const [readdir, stat] = treeWalk<string[], FileStat>(
+    readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, index),
+    (p: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, p, i),
+    (p: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, p, i),
+    null,
+    answered,
+  )
+  return { readdir, stat, answered }
+}
+
+async function duWalk(
+  walk: Walk,
   index: IndexCacheStore | undefined,
   path: PathSpec,
   budget: WalkBudget,
@@ -126,7 +151,7 @@ async function duWalk<A extends Accessor>(
 ): Promise<number> {
   let info
   try {
-    info = await ops.stat(accessor, path, index)
+    info = await walk.stat(path, index)
   } catch (err) {
     accountForWalkError(err, path, budget)
     return 0
@@ -142,17 +167,17 @@ async function duWalk<A extends Accessor>(
   budget.directories.push(path.virtual)
   let children: string[]
   try {
-    children = await ops.readdir(accessor, path, index)
+    children = await walk.readdir(path, index)
   } catch (err) {
     accountForWalkError(err, path, budget)
     return 0
   }
   let total = 0
+  const free = walk.answered.has(path.virtual.replace(/\/+$/, '') || '/')
   for (const child of children) {
-    if (!budget.spend(path.virtual)) break
+    if (!free && !budget.spend(path.virtual)) break
     total += await duWalk(
-      ops,
-      accessor,
+      walk,
       index,
       PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child)),
       budget,
@@ -169,7 +194,7 @@ export function walkSize<A extends Accessor>(
   budget: WalkBudget,
   path: PathSpec,
 ): Promise<number> {
-  return duWalk(ops, accessor, index, path, budget, null)
+  return duWalk(treeOf(ops, accessor, index), index, path, budget, null)
 }
 
 export async function walkEntries<A extends Accessor>(
@@ -180,51 +205,19 @@ export async function walkEntries<A extends Accessor>(
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
-  const total = await duWalk(ops, accessor, index, path, budget, entries)
+  const total = await duWalk(treeOf(ops, accessor, index), index, path, budget, entries)
   entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }
 
-/**
- * The native answer, or the walk's where the dispatcher declines it. Mirrors
- * Python's `_native_or_walk`.
- */
-async function nativeOrWalk<T>(native: () => Promise<T>, walk: () => Promise<T>): Promise<T> {
-  try {
-    return await native()
-  } catch (err) {
-    if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
-    return walk()
-  }
-}
-
 const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
-  // The dispatcher declines a native du whose tree a hide or a path rule
-  // reaches, and the walk is what reports a directory a rule refuses to open.
-  const native = ops.du
   const budget = new WalkBudget(
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
     opts.ns?.mounts,
   )
-  const walkedSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, p)
-  const walkedEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, p)
-  const computeSize: ComputeSize =
-    native === undefined
-      ? walkedSize
-      : (p) =>
-          nativeOrWalk(
-            () => native.size(accessor, p, idx),
-            () => walkedSize(p),
-          )
-  const computeEntries: ComputeEntries =
-    native === undefined
-      ? walkedEntries
-      : (p) =>
-          nativeOrWalk(
-            () => native.entries(accessor, p, idx),
-            () => walkedEntries(p),
-          )
+  const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, p)
+  const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, p)
 
   return duGeneric(
     paths,

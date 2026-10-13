@@ -419,7 +419,7 @@ async def test_custom_vfs_copies_without_native_copy(flags):
     store = RAMStore()
     store.dirs.update({"/src", "/src/empty", "/src/sub"})
     store.files["/src/sub/file"] = b"payload"
-    vfs = ram_without(store, "copy", "find")
+    vfs = ram_without(store, "copy", "read_tree")
     ws = Workspace({"/custom": vfs}, mode=MountMode.WRITE)
     try:
         result = await ws.shell(f"cp {flags} /custom/src /custom/dst")

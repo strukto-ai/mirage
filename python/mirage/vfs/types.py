@@ -12,8 +12,6 @@ from typing import (
     Any,
     NamedTuple,
     Protocol,
-    TypedDict,
-    Unpack,
     runtime_checkable,
 )
 
@@ -22,26 +20,9 @@ from mirage.io.types import ByteSource
 from mirage.types import FileStat, JsonValue, PathSpec
 
 if TYPE_CHECKING:
-    from mirage.core.generic.find_eval import PredNode
+    pass
 
 DuEntries = tuple[list[tuple[str, int]], int]
-
-
-class FindOptions(TypedDict, total=False):
-    name: str | None
-    type: str | None
-    min_size: int | None
-    max_size: int | None
-    maxdepth: int | None
-    mindepth: int | None
-    name_exclude: str | None
-    or_names: list[str] | None
-    iname: str | None
-    path_pattern: str | None
-    empty: bool
-    tree: "PredNode | None"
-    mtime_min: float | None
-    mtime_max: float | None
 
 
 class Effect(StrEnum):
@@ -255,30 +236,6 @@ class IsMountedOp(Protocol):
     def __call__(self, accessor: Any, /) -> bool: ...
 
 
-class DuSizeOp(Protocol):
-    def __call__(
-        self, accessor: Any, path: PathSpec, /, index: IndexCacheStore = ...
-    ) -> Awaitable[int]: ...
-
-
-class FindOp(Protocol):
-    def __call__(
-        self,
-        accessor: Any,
-        path: PathSpec,
-        /,
-        *,
-        index: IndexCacheStore = ...,
-        **predicates: Unpack[FindOptions],
-    ) -> Awaitable[list[str]]: ...
-
-
-class DuEntriesOp(Protocol):
-    def __call__(
-        self, accessor: Any, path: PathSpec, /, index: IndexCacheStore = ...
-    ) -> Awaitable[DuEntries]: ...
-
-
 class ResolveGlobOp(Protocol):
     """Glob resolution as the builders consume it.
 
@@ -295,32 +252,6 @@ class ResolveGlobOp(Protocol):
         /,
         index: IndexCacheStore = ...,
     ) -> Awaitable[list[PathSpec]]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class DuOps:
-    """A backend's native ``du`` implementation, both halves at once.
-
-    ``size`` and ``entries`` are not independent: the generic derives its
-    per-directory rows from ``entries``, so a backend offering only the
-    cheaper ``size`` would silently print operand totals with no
-    directory rows and an inert ``-a``. Pairing them in one value makes
-    native du all-or-nothing, so that degraded shape cannot be reached
-    by omission.
-
-    A native op answers from one pass over the stored files, so a
-    directory holding no file never appears in ``entries`` and gets no
-    row, where the shared readdir walk (and GNU) prints its ``0`` row.
-    The difference is accepted for the speed and pinned in
-    ``integ/unix/du/empty.json``.
-
-    Args:
-        size (DuSizeOp): recursive byte total for one path.
-        entries (DuEntriesOp): per-file breakdown, leaf files only.
-    """
-
-    size: DuSizeOp
-    entries: DuEntriesOp
 
 
 class ScanReason(StrEnum):
@@ -440,6 +371,20 @@ class LineCountOp(Protocol):
         /,
         index: IndexCacheStore = ...,
     ) -> Awaitable[int | None]: ...
+
+
+class ReadTreeOp(Protocol):
+    """Every entry under ``path``, keyed by its path below it; None when
+    the directory is to be walked."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        maxdepth: int | None = ...,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[dict[str, FileStat] | None]: ...
 
 
 class FollowOp(Protocol):

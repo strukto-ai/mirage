@@ -461,9 +461,9 @@ function dropShadowed(entries: [string, number][], roots: string[]): [string, nu
 
 // Symlinks under an operand as du leaf entries.
 //
-// Links live in the namespace, so no backend du op or readdir walk
-// reports them. Merging here, above that fork, is what keeps a backend
-// with a native op and one without from disagreeing.
+// Links live in the namespace, so neither a mount's readTree nor a readdir
+// walk reports them. Merging here, above the walk, is what keeps a mount
+// with readTree and one without from disagreeing.
 //
 // Deliberate divergence: GNU sizes a symlink at 0 because it counts
 // disk blocks and a short target is stored inside the inode. mirage

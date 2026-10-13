@@ -956,7 +956,9 @@ async def test_trailing_slash_resolves_a_directory_link():
     r = await ws.shell("du /data/base/dlink")
     assert r.stdout.decode() == "3\t/data/base/dlink\n"
     r = await ws.shell("du /data/base/dlink/")
-    assert r.stdout.decode() == "21\t/data/base/dlink/\n"
+    assert r.stdout.decode() == (
+        "0\t/data/base/dlink/emptydir\n21\t/data/base/dlink/\n"
+    )
     r = await ws.shell("file /data/base/dlink/")
     assert r.stdout.decode() == "/data/base/dlink/: directory\n"
     r = await ws.shell("ls /data/base/dlink/")

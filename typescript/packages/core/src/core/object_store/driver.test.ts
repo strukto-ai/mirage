@@ -13,15 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { ChildEntry, FindHints, ObjectMeta, TreeEntry } from './driver.ts'
+import type { ChildEntry, ObjectMeta, TreeEntry } from './driver.ts'
 import { FakeAccessor, FakeStore, makeDriver } from './fakes.ts'
 
 describe('object_store driver', () => {
-  it('findTree defaults to absent', () => {
-    expect(makeDriver(new FakeStore()).findTree).toBeUndefined()
-    expect(makeDriver(new FakeStore(), true).findTree).toBeDefined()
-  })
-
   it('entry fields the store omits stay unset for the kit to default', () => {
     const child: ChildEntry = { key: 'k', kind: 'f' }
     expect(child.size).toBeUndefined()
@@ -29,14 +24,6 @@ describe('object_store driver', () => {
     expect(tree.size).toBeUndefined()
     const meta: ObjectMeta = { size: 1 }
     expect(meta.extra).toBeUndefined()
-    const hints: FindHints = {
-      name: null,
-      iname: null,
-      minSize: null,
-      maxSize: null,
-      pushdown: false,
-    }
-    expect(hints.pushdown).toBe(false)
   })
 
   it('the fake connect hands out the store and counts connections', async () => {

@@ -27,6 +27,13 @@ export type ReaddirFn<A extends Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<string[]>
 
+export type TreeFn<A extends Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  maxdepth?: number | null,
+  index?: IndexCacheStore,
+) => Promise<Map<string, FileStat> | null>
+
 export type StatFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
@@ -115,24 +122,6 @@ export interface ObjectMeta {
   revision?: string | null
   /** Backend-shaped stat extras, forwarded into `FileStat.extra` verbatim. */
   extra?: Record<string, string>
-}
-
-/**
- * The find predicates a driver may push into its native query.
- *
- * Every pushed condition must select a superset of the GNU semantics;
- * the shared client-side `keep()` pass stays authoritative.
- */
-export interface FindHints {
-  name: string | null
-  iname: string | null
-  minSize: number | null
-  maxSize: number | null
-  /**
-   * A `-type f` find with no complex predicate tree; only the prefix
-   * condition may be used otherwise.
-   */
-  pushdown: boolean
 }
 
 /**
@@ -246,12 +235,6 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * key.
    */
   markersSupported?: boolean
-  /**
-   * Find's listing with native predicate push-down, returning the
-   * iterator and whether the query was narrowed beyond the prefix;
-   * absent means find walks `listTree` unnarrowed.
-   */
-  findTree?: (conn: C, pfx: string, hints: FindHints) => [AsyncIterable<TreeEntry>, boolean]
   /**
    * `put` carrying a write condition; a lost one throws `ConditionLostError`.
    * Absent when the store cannot condition a write.

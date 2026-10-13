@@ -18,9 +18,7 @@ import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import { SCOPE_ERROR } from '../../core/s3/constants.ts'
 import { copy as s3Copy } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
-import { size as s3Du, entries as s3DuAll } from '../../core/s3/du/index.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
-import { find as s3Find } from '../../core/s3/find.ts'
 import { mkdir as s3Mkdir } from '../../core/s3/mkdir.ts'
 import { read as s3Read } from '../../core/s3/read.ts'
 import { readdir as s3Readdir } from '../../core/s3/readdir.ts'
@@ -34,8 +32,7 @@ import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import { write as s3Write } from '../../core/s3/write.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
-import type { FindOptions } from '../types.ts'
-import type { DuEntries } from '../types.ts'
+import { tree as s3Tree } from '../../core/s3/readdir.ts'
 
 /**
  * S3's functions over its accessor, which the node and browser
@@ -57,6 +54,14 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
   /** Whether requests go through presigned URLs, which carry no condition. */
   get presigned(): boolean {
     return this.accessor.config.presignedUrlProvider !== undefined
+  }
+
+  override readTree(
+    path: PathSpec,
+    maxdepth: number | null = null,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return s3Tree(this.accessor, path, maxdepth, index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
@@ -83,18 +88,6 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
 
   override exists(path: PathSpec): Promise<boolean> {
     return s3Exists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, index?: IndexCacheStore): Promise<string[]> {
-    return s3Find(this.accessor, path, options, index)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return s3Du(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return s3DuAll(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

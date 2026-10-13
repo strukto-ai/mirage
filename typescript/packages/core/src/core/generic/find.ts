@@ -39,7 +39,7 @@ import type { LinkView } from '../../view/types.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE, contentSize } from '../../utils/stat_view.ts'
-import { printfKind } from './find_eval.ts'
+import { type PrintfKind, printfKind } from './find_eval.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
@@ -67,6 +67,9 @@ interface WalkEntry {
   path: string
   depth: number
   file: boolean
+  // What -type tests: the stat's own kind (a device is `c`), `d` for a
+  // directory a trailing slash proves.
+  kind: PrintfKind
 }
 
 export function modifiedTs(modified: string | null): number | null {
@@ -163,14 +166,13 @@ async function walk(
     // beyond that guessed wrong (attachments and uploads carry whatever
     // name the sender gave them) and are gone.
     const trimmed = child.endsWith('/') ? rstripSlash(child) : child
-    let isFolder: boolean
-    if (child.endsWith('/')) {
-      isFolder = true
-    } else {
+    let kind: PrintfKind = 'd'
+    if (!child.endsWith('/')) {
       const s = await statEntry(deps, trimmed, mountPrefixOf(spec.virtual, spec.vfsPath), index)
-      isFolder = s !== null && s.type === FileType.DIRECTORY
+      kind = s === null ? 'f' : printfKind(s)
     }
-    out.push({ path: trimmed, depth, file: !isFolder })
+    const isFolder = kind === 'd'
+    out.push({ path: trimmed, depth, file: !isFolder, kind })
     if (isFolder) {
       const childSpec = new PathSpec({
         virtual: trimmed,
@@ -228,7 +230,12 @@ export async function walkFind(
     if (!isEnoent(err)) throw err
   }
   if (rootStat !== null) {
-    collected.push({ path: rootPath, depth: 0, file: rootStat.type !== FileType.DIRECTORY })
+    collected.push({
+      path: rootPath,
+      depth: 0,
+      file: rootStat.type !== FileType.DIRECTORY,
+      kind: printfKind(rootStat),
+    })
   }
   // GNU depth convention: the search root is depth 0, its children are
   // depth 1, so the walk starts at 1 and -maxdepth 0 descends nowhere. A
@@ -275,7 +282,7 @@ export async function walkFind(
     const findEntry: FindEntry = {
       key,
       name,
-      kind: entry.file ? 'f' : 'd',
+      kind: entry.kind,
       depth: entry.depth,
       isEmpty,
       mtime: learned.get(key) ?? null,

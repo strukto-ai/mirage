@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -22,7 +21,6 @@ import pytest
 from mirage.accessor.base import Accessor
 from mirage.core.object_store.driver import (
     ChildEntry,
-    FindHints,
     ObjectMeta,
     ObjectStoreDriver,
     TreeEntry,
@@ -79,7 +77,7 @@ def spec(mount_path: str) -> PathSpec:
 
 
 def make_driver(
-    store: FakeStore, find_narrowing: bool = False
+    store: FakeStore,
 ) -> ObjectStoreDriver[FakeAccessor, FakeStore]:
     def key_prefix_of(accessor: FakeAccessor) -> str:
         return accessor.key_prefix
@@ -168,27 +166,6 @@ def make_driver(
     def is_not_found(exc: Exception) -> bool:
         return isinstance(exc, KeyError)
 
-    def find_tree(
-        conn: FakeStore, pfx: str, hints: FindHints
-    ) -> tuple[AsyncIterator[TreeEntry], bool]:
-        if not (hints.pushdown and hints.name is not None):
-            return list_tree(conn, pfx), False
-        rx = re.compile(
-            "^"
-            + re.escape(pfx)
-            + "(.*/)?"
-            + hints.name.replace("*", "[^/]*")
-            + "$"
-        )
-        return _narrowed(conn, pfx, rx), True
-
-    async def _narrowed(
-        conn: FakeStore, pfx: str, rx: "re.Pattern[str]"
-    ) -> AsyncIterator[TreeEntry]:
-        for key in conn.under(pfx):
-            if rx.match(key):
-                yield TreeEntry(key=key, size=len(conn.objects[key]))
-
     return ObjectStoreDriver(
         vfs="fake",
         scope_error=5000,
@@ -207,7 +184,6 @@ def make_driver(
         copy_file=copy_file,
         probe_prefix=probe_prefix,
         is_not_found=is_not_found,
-        find_tree=find_tree if find_narrowing else None,
     )
 
 

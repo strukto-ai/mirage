@@ -27,7 +27,7 @@ TREE = {
 DIRS = {"/mnt", "/mnt/table1"}
 
 
-def _ops(stat_calls: list[str], find_op=None) -> CommandIO:
+def _ops(stat_calls: list[str], read_tree=None) -> CommandIO:
     async def readdir(_accessor, path, _index):
         return TREE.get(path.virtual.rstrip("/") or "/", [])
 
@@ -65,7 +65,7 @@ def _ops(stat_calls: list[str], find_op=None) -> CommandIO:
         stat=stat,
         is_mounted=lambda _a: True,
         local=False,
-        find=find_op,
+        read_tree=read_tree,
     )
 
 
@@ -122,40 +122,40 @@ async def test_walk_honors_multiple_start_points():
     )
 
 
+def _tree():
+    return {
+        "notes.txt": FileStat(
+            type=FileType.FILE,
+            name="notes.txt",
+            size=3,
+            modified="2099-01-01T00:00:00+00:00",
+        ),
+        "table1": FileStat(
+            name="table1",
+            type=FileType.DIRECTORY,
+            modified="2099-01-01T00:00:00+00:00",
+        ),
+        "table1/rows.jsonl": FileStat(
+            type=FileType.FILE,
+            name="rows.jsonl",
+            size=3,
+            modified="2099-01-01T00:00:00+00:00",
+        ),
+    }
+
+
 @pytest.mark.asyncio
-async def test_native_find_honors_multiple_start_points():
-    stat_calls: list[str] = []
+@pytest.mark.parametrize("texts, depth", [([], None), (["-maxdepth", "1"], 1)])
+async def test_find_reads_the_tree_in_one_call(texts, depth):
+    asked: list[tuple[str, int | None]] = []
 
-    async def find_op(_accessor, path, **_kw):
-        key = "/" + path.vfs_path.strip("/") if path.vfs_path else "/"
-        if key == "/table1":
-            return ["/table1/rows.jsonl"]
-        if key == "/notes.txt":
-            return ["/notes.txt"]
-        return []
+    async def read_tree(_accessor, path, maxdepth=None, index=None):
+        asked.append((path.virtual, maxdepth))
+        return _tree()
 
-    ops = _ops(stat_calls, find_op=find_op)
-    roots = [
-        PathSpec(
-            virtual="/mnt/table1",
-            directory="/mnt/table1",
-            resolved=False,
-            vfs_path="table1",
-        ),
-        PathSpec(
-            virtual="/mnt/notes.txt",
-            directory="/mnt",
-            resolved=False,
-            vfs_path="notes.txt",
-        ),
-    ]
-    stdout, _io = await find(ops, None, roots, [], CommandOpts())
-    data = await materialize(stdout)
-    lines = data.decode().splitlines()
-    # The native-op path walks every start point too, in operand order;
-    # it used to drop everything after paths[0].
-    assert "/mnt/table1/rows.jsonl" in lines
-    assert "/mnt/notes.txt" in lines
-    assert lines.index("/mnt/table1/rows.jsonl") < lines.index(
-        "/mnt/notes.txt"
-    )
+    async def run(ops: CommandIO) -> list[str]:
+        stdout, _io = await find(ops, None, [_root()], texts, CommandOpts())
+        return (await materialize(stdout)).decode().splitlines()
+
+    assert await run(_ops([], read_tree)) == await run(_ops([]))
+    assert asked == [("/mnt", depth)]

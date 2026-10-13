@@ -161,8 +161,8 @@ For `tar -cf a.tar -C /mnt /data`:
   `source`, `bytes` and timing.
 - `call` is the function called: its `name`, `effect` (read, write,
   metadata), `target`, and whether it `creates` or reaches the `subtree`.
-  Every function a VFS marks reaches `pre_vfs` and `post_vfs`: `find`,
-  `du_size`, `search` and `copy` too.
+  Every function a VFS marks reaches `pre_vfs` and `post_vfs`:
+  `read_tree`, `search` and `copy` too.
 
 A method only reads. A write it makes through Mirage is refused (`EROFS`
 for a file, `EACCES` for a variable), and its reads are not judged again.

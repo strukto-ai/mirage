@@ -20,13 +20,11 @@ from mirage.core.redis.append import append_bytes as _append
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.create import create as _create
-from mirage.core.redis.du import entries as _du_entries
-from mirage.core.redis.du import size as _du_size
 from mirage.core.redis.exists import exists as _exists
-from mirage.core.redis.find import find as _find
 from mirage.core.redis.mkdir import mkdir as _mkdir
 from mirage.core.redis.read import read as _read
 from mirage.core.redis.readdir import readdir as _readdir
+from mirage.core.redis.readdir import tree as _tree
 from mirage.core.redis.rename import rename as _rename
 from mirage.core.redis.rm import rm_r as _rm_r
 from mirage.core.redis.rmdir import rmdir as _rmdir
@@ -37,7 +35,6 @@ from mirage.core.redis.truncate import truncate as _truncate
 from mirage.core.redis.unlink import unlink as _unlink
 from mirage.core.redis.write import write as _write
 from mirage.types import FileStat, PathSpec
-from mirage.vfs.types import DuEntries
 
 try:
     import redis as sync_redis
@@ -107,23 +104,13 @@ class RedisVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def find(
+    async def read_tree(
         self,
         path: PathSpec,
+        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du_size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du_entries(self.accessor, path, index)
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, maxdepth, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

@@ -27,7 +27,6 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.dev.dev.DevVFS": "mirage.commands.builtin.dev",
     "mirage.vfs.dify.dify.DifyVFS": "mirage.commands.builtin.dify",
     "mirage.vfs.discord.discord.DiscordVFS": "mirage.commands.builtin.discord",
-    "mirage.vfs.disk.disk.DiskVFS": "mirage.commands.builtin.disk",
     "mirage.vfs.email.email.EmailVFS": "mirage.commands.builtin.email",
     "mirage.vfs.gcal.gcal.GCalVFS": "mirage.commands.builtin.gcal",
     "mirage.vfs.gdocs.gdocs.GDocsVFS": "mirage.commands.builtin.gdocs",
@@ -41,7 +40,6 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.mongodb.mongodb.MongoDBVFS": "mirage.commands.builtin.mongodb",
     "mirage.vfs.qdrant.qdrant.QdrantVFS": "mirage.commands.builtin.qdrant",
     "mirage.vfs.s3.s3.S3VFS": "mirage.commands.builtin.s3",
-    "mirage.vfs.ssh.ssh.SSHVFS": "mirage.commands.builtin.ssh",
     "mirage.vfs.trello.trello.TrelloVFS": "mirage.commands.builtin.trello",
 }
 

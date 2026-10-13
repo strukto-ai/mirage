@@ -25,10 +25,7 @@ from mirage.core.disk.append import append_bytes as _append
 from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
-from mirage.core.disk.du import entries as _du_entries
-from mirage.core.disk.du import size as _du_size
 from mirage.core.disk.exists import exists as _exists
-from mirage.core.disk.find import find as _find
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.pwrite import pwrite as _pwrite
 from mirage.core.disk.read import read as _read
@@ -60,7 +57,6 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk.prompt import PROMPT
 from mirage.vfs.errors import VFSConfigError
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
@@ -133,24 +129,6 @@ class DiskVFS(BaseVFS):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
-
-    async def find(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du_size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du_entries(self.accessor, path, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

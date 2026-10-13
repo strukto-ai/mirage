@@ -990,6 +990,7 @@ async def find_walk_generic(
                     follow=parsed.follow,
                     unreadable=unreadable,
                     unstatted=unstatted,
+                    root=start.stat,
                 )
                 rows = respell_raw(walked, search.virtual, search.raw_path)
                 # GNU names a directory it may not open in the walk's own

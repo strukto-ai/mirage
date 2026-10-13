@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.hf_buckets.driver import DRIVER
-from mirage.core.object_store.readdir import make_readdir
+from mirage.core.object_store.readdir import make_readdir, make_tree
 
 readdir = make_readdir(DRIVER)
+tree = make_tree(DRIVER)

@@ -23,11 +23,10 @@ const MARK = Symbol.for('mirage.vfsCall')
 const DISPATCH_NAMES: ReadonlyMap<string, string> = new Map([
   ['rmR', 'rm_r'],
   ['dirCopy', 'dir_copy'],
-  ['duSize', 'du_size'],
-  ['duEntries', 'du_entries'],
   ['firstLines', 'first_lines'],
   ['lastLines', 'last_lines'],
   ['lineCount', 'line_count'],
+  ['readTree', 'read_tree'],
 ])
 const METHOD_NAMES: ReadonlyMap<string, string> = new Map(
   [...DISPATCH_NAMES].map(([method, name]) => [name, method]),

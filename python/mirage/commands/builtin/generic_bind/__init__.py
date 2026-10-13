@@ -18,30 +18,24 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mirage.commands.builtin.generic_bind.factory import (
         generic,
-        walked,
         with_stat_cache,
     )
     from mirage.utils.glob_walk import make_resolve_glob
-    from mirage.vfs.types import DuOps
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.commands.builtin.generic_bind.factory": (
         "generic",
-        "walked",
         "with_stat_cache",
     ),
     "mirage.utils.glob_walk": ("make_resolve_glob",),
-    "mirage.vfs.types": ("DuOps",),
 }
 _MODULE_OF = {
     name: module for module, names in _EXPORTS.items() for name in names
 }
 
 __all__ = [
-    "DuOps",
     "generic",
     "make_resolve_glob",
-    "walked",
     "with_stat_cache",
 ]
 

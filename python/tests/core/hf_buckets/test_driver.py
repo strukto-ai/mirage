@@ -69,13 +69,12 @@ class _MetalessListOperator(FakeAsyncOperator):
 
 def test_driver_contract_pins():
     # No markers (the Hub refuses create_dir), no native move or copy
-    # (rename/cp stay unwired → ENOTSUP), no query push-down.
+    # (rename/cp stay unwired → ENOTSUP).
     assert DRIVER.vfs == "hf"
     assert DRIVER.markers_supported is False
     assert DRIVER.move_file is None
     assert DRIVER.move_prefix is None
     assert DRIVER.copy_file is None
-    assert DRIVER.find_tree is None
 
 
 def test_key_prefix_rides_the_operator_root():

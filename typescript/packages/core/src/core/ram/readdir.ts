@@ -17,7 +17,8 @@ import { rstripSlash } from '../../utils/slash.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
 import { ResourceType } from '../../cache/index/config.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { keyStat } from './stat.ts'
 import { readdirError } from '../../errors/fs.ts'
 import { norm } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -80,4 +81,30 @@ export async function readdir(
     await index.setDir(virtualKey, entries)
   }
   return virtualEntries
+}
+
+/**
+ * Every key under a directory, each as `stat` answers it; null when `path` is
+ * no directory, so the walk's readdir reports it. Mirrors Python's `tree`.
+ */
+export function tree(
+  accessor: RAMAccessor,
+  path: PathSpec,
+  maxdepth: number | null = null,
+  _index?: IndexCacheStore,
+): Promise<Map<string, FileStat> | null> {
+  const store = accessor.store
+  const p = norm(path.mountPath)
+  if (!store.dirs.has(p)) return Promise.resolve(null)
+  const base = rstripSlash(p) + '/'
+  const found = new Map<string, FileStat>()
+  for (const key of [...store.files.keys(), ...store.dirs]) {
+    if (!key.startsWith(base) || key === p) continue
+    const rel = key.slice(base.length)
+    const entry = keyStat(store, key)
+    if (entry !== null && (maxdepth === null || rel.split('/').length <= maxdepth)) {
+      found.set(rel, entry)
+    }
+  }
+  return Promise.resolve(found)
 }

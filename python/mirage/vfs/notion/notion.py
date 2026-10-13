@@ -17,7 +17,6 @@ from typing import Any
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.find import find as _find
 from mirage.core.notion.read import read as _read
 from mirage.core.notion.readdir import readdir as _readdir
 from mirage.core.notion.stat import stat as _stat
@@ -58,14 +57,6 @@ class NotionVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
-
-    async def find(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

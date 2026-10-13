@@ -3,11 +3,9 @@ from typing import Any
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.generic.du import make_walked_du
 from mirage.core.sharepoint.copy import copy as _copy
 from mirage.core.sharepoint.create import create as _create
 from mirage.core.sharepoint.exists import exists as _exists
-from mirage.core.sharepoint.find import find as _find
 from mirage.core.sharepoint.mkdir import mkdir as _mkdir
 from mirage.core.sharepoint.read import read as _read
 from mirage.core.sharepoint.readdir import readdir as _readdir
@@ -26,10 +24,7 @@ from mirage.core.sharepoint.write import write as _write
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.sharepoint.prompt import PROMPT
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
-
-_du = make_walked_du(_stat, _readdir)
 
 
 class SharePointVFS(BaseVFS):
@@ -86,24 +81,6 @@ class SharePointVFS(BaseVFS):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
-
-    async def find(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du.size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du.entries(self.accessor, path, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

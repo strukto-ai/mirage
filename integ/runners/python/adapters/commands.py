@@ -17,7 +17,7 @@ from dataclasses import replace
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
-from mirage.commands.builtin.generic_bind import generic, walked
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.cli.types import (
     CLI as CLIProgram,
@@ -37,6 +37,16 @@ from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
+
+
+def _without_tree(io: CommandIO) -> CommandIO:
+    """The table with its one-call subtree read set aside, so a walk lists
+    through ``readdir``.
+
+    Args:
+        io (CommandIO): the mount's table.
+    """
+    return replace(io, read_tree=None)
 
 
 class Gate:
@@ -66,7 +76,7 @@ class CommandService(RAMVFS):
         # and du list through readdir, which refuses what it hides.
         if metadata_only:
             handlers.extend(
-                generic(name, vfs="ram", table=walked)
+                generic(name, vfs="ram", table=_without_tree)
                 for name in ("du", "find")
             )
 

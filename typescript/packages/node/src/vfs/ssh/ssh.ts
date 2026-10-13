@@ -13,27 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-
 import { VFSName } from '@struktoai/mirage-core/types'
-
 import { SSHAccessor } from '../../accessor/ssh.ts'
-
 import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './config.ts'
 import { PROMPT } from './prompt.ts'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/ssh/watch.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
-import type { DuEntries, MkdirOp } from '@struktoai/mirage-core/vfs/types'
+import type { MkdirOp } from '@struktoai/mirage-core/vfs/types'
 import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
 import { read as sshRead } from '../../core/ssh/read.ts'
 import { stat as sshStat } from '../../core/ssh/stat.ts'
 import { readStream as sshStream } from '../../core/ssh/stream.ts'
 import { exists as sshExists } from '../../core/ssh/exists.ts'
-import { find as sshFind } from '../../core/ssh/find.ts'
 import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
-import { size as sshDu, entries as sshDuAll } from '../../core/ssh/du/index.ts'
 import { write as sshWrite } from '../../core/ssh/write.ts'
 import { appendBytes as sshAppend } from '../../core/ssh/append.ts'
 import { pwrite as sshPwrite } from '../../core/ssh/pwrite.ts'
@@ -109,10 +103,6 @@ export class SSHVFS extends BaseVFS {
     return sshExists(this.accessor, path)
   }
 
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return sshFind(this.accessor, path, options)
-  }
-
   override filesContaining(
     text: string,
     under: PathSpec[],
@@ -120,14 +110,6 @@ export class SSHVFS extends BaseVFS {
     _index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     return sshFilesContaining(this.accessor, text, under, opts.ignoreCase)
-  }
-
-  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return sshDu(this.accessor, path)
-  }
-
-  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return sshDuAll(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

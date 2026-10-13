@@ -14,14 +14,12 @@
 
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { find as notionFind } from '../../core/notion/find.ts'
 import { read as notionRead } from '../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
-import type { FindOptions } from '../types.ts'
 
 /**
  * Notion's functions over its accessor, which the node and browser
@@ -44,9 +42,5 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return notionStat(this.accessor, path, index)
-  }
-
-  override find(path: PathSpec, options: FindOptions, index?: IndexCacheStore): Promise<string[]> {
-    return notionFind(this.accessor, path, options, index)
   }
 }

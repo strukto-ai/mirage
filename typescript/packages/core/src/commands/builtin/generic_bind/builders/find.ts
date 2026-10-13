@@ -14,61 +14,28 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
-import { pathsScoped } from '../../../../view/namespace_view.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { treeWalk } from '../../utils/tree.ts'
+import type { IndexCacheStore } from '../../../../cache/index/store.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandFnResult, CommandOpts, CommandIO } from '../../../config.ts'
-import { type GenericCommand, overlaidStat, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'find',
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const { find } = ops
-    // Whether a directory start point holds nothing, for `-empty`. Asked
-    // once, for the start point, and only when the expression mentions it.
-    const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
-      (await ops.readdir(accessor, spec, idx)).length === 0
-    // A native find op classifies on the raw backend tree, so under
-    // hidden paths its predicates would answer for entries the session
-    // cannot see (-empty omits a visible directory whose only child is
-    // hidden, which also reveals that the child exists), and under a
-    // path rule it would list a directory the rule refuses to open. The
-    // walk classifies through the guarded readdir/stat, so it sees
-    // exactly the visible tree and reports the refusal where GNU does;
-    // same trade du makes for its summarize fast path. Per operand, not
-    // per session: a hidden .env under /repo must not force find on /s3
-    // off its native op. -empty takes the walk too: a native op judges a
-    // directory from its own listing, and the object stores, ssh and gdrive
-    // call every directory non-empty.
-    if (find !== undefined && !texts.includes('-empty') && !pathsScoped(opts.ns, resolved)) {
-      // -mtime must see namespace times (touch results, observed
-      // writes), so local backends post-filter through the overlay-
-      // aware stat instead of pushing the window into the core.
-      const stat =
-        ops.local === true
-          ? overlaidStat((spec) => ops.stat(accessor, spec, idx), opts.ns?.statOverlay)
-          : undefined
-      return findGeneric(
-        resolved,
-        texts,
-        opts,
-        (root, options) => find(accessor, root, options, idx),
-        stat,
-        dirEmpty,
-      )
-    }
     return findWalk(ops, accessor, resolved, texts, opts)
   },
 }
 
 /**
- * Walk readdir/stat for find, the fork taken when no native find op may
- * answer: no backend op, hidden paths or a path rule in force, or (github)
- * a truncated tree that names only some paths.
+ * Walk readdir/stat for find. Each start point asks the mount's `readTree`
+ * for its subtree first, down to the expression's `-maxdepth`, so the walk
+ * costs one call where the mount can answer.
  */
 export function findWalk<A extends Accessor>(
   ops: CommandIO<A>,
@@ -81,6 +48,7 @@ export function findWalk<A extends Accessor>(
   const flags = new FlagView(opts.flags, specOf('find'))
   const bounded = flags.asBool('xdev') || flags.asBool('mount')
   const mounts = opts.ns?.mounts
+  const { readTree } = ops
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
   // reported by the generic per start point.
@@ -90,8 +58,14 @@ export function findWalk<A extends Accessor>(
     resolved,
     texts,
     opts,
-    (root, options) =>
-      walkFind(
+    (root, options) => {
+      const [readdir, stat] = treeWalk<string[], FileStat>(
+        readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, idx),
+        (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
+        (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
+        options.maxDepth ?? null,
+      )
+      return walkFind(
         root,
         {
           unreadable: closed,
@@ -101,11 +75,11 @@ export function findWalk<A extends Accessor>(
             mounts !== undefined &&
             mounts.rootOf(spec.virtual) !== mounts.rootOf(root.virtual)
               ? []
-              : ops.readdir(accessor, spec, i),
+              : readdir(spec, i),
           // -mtime must see namespace times (touch results, observed
           // writes on mtime-less backends), same as ls.
           stat: async (spec, i) => {
-            const st = await ops.stat(accessor, spec, i)
+            const st = await stat(spec, i)
             const overlay = opts.ns?.statOverlay
             return overlay !== undefined ? overlay(spec.virtual, st) : st
           },
@@ -115,7 +89,8 @@ export function findWalk<A extends Accessor>(
         },
         options,
         idx,
-      ),
+      )
+    },
     undefined,
     undefined,
     () => closed.splice(0),

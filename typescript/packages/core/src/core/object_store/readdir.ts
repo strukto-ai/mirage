@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindHints, TreeEntry } from './driver.ts'
+import type { TreeEntry } from './driver.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import { listingError } from '../../errors/fs.ts'
@@ -22,7 +23,7 @@ import * as kp from '../../utils/key_prefix.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { ObjectStoreDriver, ReaddirFn } from './driver.ts'
+import type { ObjectStoreDriver, ReaddirFn, TreeFn } from './driver.ts'
 
 async function probeFile<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
@@ -234,14 +235,17 @@ async function cacheTree(
   }
 }
 
-/** Reuse complete metadata trees; narrowed searches never publish listings. */
+/**
+ * Reuse a complete tree, or cache a successful backend listing. The rows are
+ * the key at the path itself and every key under it, as `listSubtree` gives
+ * them, markers included. Mirrors Python's `read_tree`.
+ */
 export async function readTree<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-  hints?: FindHints,
-): Promise<[TreeEntry[], boolean]> {
+): Promise<TreeEntry[]> {
   const kpfx = driver.keyPrefixOf(accessor)
   const stem = rstripSlash(kp.apply(kpfx, path.mountPath))
   const prefix = stem === '' ? '' : stem + '/'
@@ -250,57 +254,87 @@ export async function readTree<A extends Accessor, C>(
   const knownDirectory =
     path.mountPath.replaceAll('/', '') === '' || root?.resourceType === ResourceType.FOLDER
   const cached =
-    !root?.extra.object_store_collision && (hints !== undefined || knownDirectory)
+    root?.extra.object_store_collision !== true && knownDirectory
       ? await cachedTree(index, virtual, prefix)
       : null
-  if (cached !== null) return [cached, false]
-  if (hints === undefined && index !== undefined) {
-    const entry = root
+  if (cached !== null) return cached
+  if (index !== undefined) {
     const parent = await index.listDir(virtual.slice(0, virtual.lastIndexOf('/')) || '/')
     if (
       parent.entries?.includes(virtual) === true &&
-      entry?.resourceType === ResourceType.FILE &&
-      entry.size != null
+      root?.resourceType === ResourceType.FILE &&
+      root.size != null
     ) {
-      return [[{ key: stem, size: entry.size }], false]
+      return [{ key: stem, size: root.size }]
     }
   }
   const { conn, close } = await driver.connect(accessor)
-  let narrowed = false
   const entries: TreeEntry[] = []
-  let exists = false
   try {
-    let iterator: AsyncIterable<TreeEntry>
-    if (hints === undefined) iterator = driver.listSubtree(conn, stem)
-    else if (driver.findTree !== undefined)
-      [iterator, narrowed] = driver.findTree(conn, prefix, hints)
-    else iterator = driver.listTree(conn, prefix)
-    for await (const entry of iterator) entries.push(entry)
-    exists = narrowed && entries.length === 0 && (await driver.probePrefix(conn, prefix))
-    if (
-      !narrowed &&
-      !entries.some((e) => e.key === stem) &&
-      (entries.some((e) => e.key.startsWith(prefix)) || path.mountPath.replaceAll('/', '') === '')
-    ) {
-      await cacheTree(index, virtual, prefix, entries)
-      // A find prefix omits a coexisting file root. Verify that slot
-      // before publishing a folder that later commands trust.
-      if (
-        hints === undefined ||
-        (knownDirectory && !root?.extra.object_store_collision) ||
-        (index !== undefined && (await driver.head(conn, stem)) === null)
-      )
-        await index?.put(
-          virtual,
-          new IndexEntry({
-            id: virtual,
-            name: virtual.slice(virtual.lastIndexOf('/') + 1) || '/',
-            resourceType: ResourceType.FOLDER,
-          }),
-        )
-    }
+    for await (const entry of driver.listSubtree(conn, stem)) entries.push(entry)
   } finally {
     await close()
   }
-  return [entries, exists]
+  if (
+    !entries.some((e) => e.key === stem) &&
+    (entries.some((e) => e.key.startsWith(prefix)) || path.mountPath.replaceAll('/', '') === '')
+  ) {
+    await cacheTree(index, virtual, prefix, entries)
+    await index?.put(
+      virtual,
+      new IndexEntry({
+        id: virtual,
+        name: virtual.slice(virtual.lastIndexOf('/') + 1) || '/',
+        resourceType: ResourceType.FOLDER,
+      }),
+    )
+  }
+  return entries
+}
+
+/**
+ * Build `readTree` over one driver: one recursive listing. A file stats as a
+ * listing leaves it in the index (its size, time and content type); a
+ * directory, a marker or a key prefix alike, carries nothing but its name.
+ * Nothing under the prefix resolves null, so the walk's readdir reports what
+ * is there. Mirrors Python's `make_tree`.
+ */
+export function makeTree<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): TreeFn<A> {
+  return async (accessor, path, maxdepth = null, index) => {
+    const rows = await readTree(driver, accessor, path, index)
+    const prefix = kp.applyDir(driver.keyPrefixOf(accessor), path.mountPath)
+    if (!rows.some((row) => row.key.startsWith(prefix))) return null
+    const found = new Map<string, FileStat>()
+    for (const row of rows) {
+      if (!row.key.startsWith(prefix) || row.key === prefix) continue
+      const raw = row.key.slice(prefix.length)
+      const isDir = raw.endsWith('/')
+      const rel = rstripSlash(raw)
+      const parts = rel.split('/')
+      for (let depth = 1; depth < parts.length; depth++) {
+        const parent = parts.slice(0, depth).join('/')
+        if (!found.has(parent)) {
+          found.set(
+            parent,
+            new FileStat({ name: parts[depth - 1] ?? parent, type: FileType.DIRECTORY }),
+          )
+        }
+      }
+      const name = parts[parts.length - 1] ?? rel
+      found.set(
+        rel,
+        isDir
+          ? new FileStat({ name, type: FileType.DIRECTORY })
+          : new FileStat({
+              name,
+              size: row.size ?? null,
+              modified: row.modified !== undefined && row.modified !== '' ? row.modified : null,
+              type: FileType.FILE,
+              content: contentTypeForPath(name),
+            }),
+      )
+    }
+    if (maxdepth === null) return found
+    return new Map([...found].filter(([rel]) => rel.split('/').length <= maxdepth))
+  }
 }

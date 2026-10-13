@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.object_store.readdir import make_readdir
+from mirage.core.object_store.readdir import make_readdir, make_tree
 from mirage.core.s3.driver import DRIVER
 
 readdir = make_readdir(DRIVER)
+tree = make_tree(DRIVER)

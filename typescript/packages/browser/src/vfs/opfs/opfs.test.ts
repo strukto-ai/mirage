@@ -17,9 +17,7 @@ import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { FileType, VFSName } from '@struktoai/mirage-core/types'
 import { copy as copyCore } from '../../core/opfs/copy.ts'
-import { size as duSizeCore } from '../../core/opfs/du/index.ts'
 import { exists as existsCore } from '../../core/opfs/exists.ts'
-import { find as findCore } from '../../core/opfs/find.ts'
 import { rmR as rmRCore } from '../../core/opfs/rm.ts'
 import { readStream as streamCore } from '../../core/opfs/stream.ts'
 import { installFakeNavigator, makeMockRoot, spec } from '../../test-utils.ts'
@@ -96,11 +94,9 @@ describe('OPFSVFS — fs methods', () => {
     expect(new TextDecoder().decode(await ops(res).read(spec('/c')))).toBe('A')
   })
 
-  it('truncate / stream / du', async () => {
+  it('truncate / stream', async () => {
     await ops(res).mkdir(spec('/d'))
     await ops(res).write(spec('/d/a'), new Uint8Array([1, 2, 3]))
-    await ops(res).write(spec('/d/b'), new Uint8Array([4, 5]))
-    expect(await duSizeCore(res.accessor, spec('/d'))).toBe(5)
 
     await ops(res).truncate(spec('/d/a'), 1)
     const chunks: Uint8Array[] = []
@@ -113,12 +109,6 @@ describe('OPFSVFS — fs methods', () => {
     await ops(res).write(spec('/d/x'), new TextEncoder().encode('x'))
     await rmRCore(res.accessor, spec('/d'))
     expect(await existsCore(res.accessor, spec('/d'))).toBe(false)
-  })
-
-  it('find returns matches', async () => {
-    await ops(res).write(spec('/a.json'), new Uint8Array())
-    await ops(res).write(spec('/b.txt'), new Uint8Array())
-    expect(await findCore(res.accessor, spec('/'), { name: '*.json' })).toEqual(['/a.json'])
   })
 })
 

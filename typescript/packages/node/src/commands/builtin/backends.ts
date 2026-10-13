@@ -13,17 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { registerBackendCommands } from '@struktoai/mirage-core/commands/builtin/backends'
-import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { EmailVFS } from '../../vfs/email/email.ts'
 import { GridFSVFS } from '../../vfs/gridfs/gridfs.ts'
-import { SSHVFS } from '../../vfs/ssh/ssh.ts'
-import { DISK_COMMANDS } from './disk/index.ts'
 import { EMAIL_COMMANDS } from './email/index.ts'
 import { GRIDFS_COMMANDS } from './gridfs/index.ts'
-import { SSH_COMMANDS } from './ssh/index.ts'
 
 // The shell commands of the backends this package ships.
-registerBackendCommands(DiskVFS, () => DISK_COMMANDS)
 registerBackendCommands(EmailVFS, () => EMAIL_COMMANDS)
 registerBackendCommands(GridFSVFS, () => GRIDFS_COMMANDS)
-registerBackendCommands(SSHVFS, () => SSH_COMMANDS)

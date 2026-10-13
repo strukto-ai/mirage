@@ -91,14 +91,24 @@ const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
   status: 429,
 })
 
-// A native du op the dispatcher declines, as it does when a path rule or
-// a hide reaches below the operand: the builder walks instead.
+// A readTree the dispatcher declines, as it does when a path rule or a
+// hide reaches below the operand: the builder walks instead.
 const NATIVE: CommandIO = {
   ...OPS,
-  du: {
-    size: (_a, p) => Promise.reject(walkDeclined('ram', 'du_size', p)),
-    entries: (_a, p) => Promise.reject(walkDeclined('ram', 'du_entries', p)),
-  },
+  readTree: (_a, p) => Promise.reject(walkDeclined('ram', 'read_tree', p)),
+} as CommandIO
+
+// The tree OPS walks, answered in one call.
+const TREED: CommandIO = {
+  ...OPS,
+  readTree: () =>
+    Promise.resolve(
+      new Map([
+        ['a.txt', new FileStat({ name: 'a.txt', type: FileType.FILE, size: 3 })],
+        ['sub', new FileStat({ name: 'sub', type: FileType.DIRECTORY })],
+        ['sub/b.txt', new FileStat({ name: 'b.txt', type: FileType.FILE, size: 2 })],
+      ]),
+    ),
 } as CommandIO
 
 async function runScoped(
@@ -114,18 +124,24 @@ async function runScoped(
 }
 
 describe('du walk fallback under a path rule', () => {
-  it('walks when the native du op declines', async () => {
+  it('walks when the dispatcher declines readTree', async () => {
     const [out] = await runScoped(NATIVE, [PathSpec.fromStrPath('/db')])
     expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
+  })
+
+  // The budget bounds a walk that takes a request per directory; a tree
+  // read in one call is summed whole. Mirrors test_a_tree_answer_costs_no_budget.
+  it('charges no budget for a tree answer', async () => {
+    const [out, io] = await runScoped({ ...TREED, maxDuEntries: 1 } as CommandIO, [
+      PathSpec.fromStrPath('/db'),
+    ])
+    expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/db/sub\n5\t/db\n', 0])
   })
 
   it("does not walk a backend's own refusal", async () => {
     const refusing: CommandIO = {
       ...OPS,
-      du: {
-        size: (_a, p) => Promise.reject(enotsup('ram', 'du_size', p)),
-        entries: (_a, p) => Promise.reject(enotsup('ram', 'du_entries', p)),
-      },
+      readTree: (_a, p) => Promise.reject(enotsup('ram', 'read_tree', p)),
     } as CommandIO
     await expect(runScoped(refusing, [PathSpec.fromStrPath('/db')])).rejects.toMatchObject({
       code: 'ENOTSUP',

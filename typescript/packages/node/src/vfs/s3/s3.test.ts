@@ -13,12 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { copy as copyCore } from '@struktoai/mirage-core/core/s3/copy'
-import { size as duSize } from '@struktoai/mirage-core/core/s3/du/index'
 import { exists as existsCore } from '@struktoai/mirage-core/core/s3/exists'
-import { find as findCore } from '@struktoai/mirage-core/core/s3/find'
+import { tree as treeCore } from '@struktoai/mirage-core/core/s3/readdir'
 import { rmR as rmRCore } from '@struktoai/mirage-core/core/s3/rm'
 import { ops } from '@struktoai/mirage-core/test-utils'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { writeConditions } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { HttpProxyAgent } from 'http-proxy-agent'
@@ -207,11 +206,21 @@ describe('S3VFS (mocked integration)', () => {
   })
 
   describe('recursive', () => {
-    it('du sums sizes under a prefix', async () => {
+    it('reads the tree under a prefix in one listing', async () => {
       await ops(vfs).write(mkPath('/du/a'), ENC.encode('x'.repeat(10)))
-      await ops(vfs).write(mkPath('/du/b'), ENC.encode('y'.repeat(20)))
-      const total = await duSize(vfs.accessor, mkPath('/du/'))
-      expect(total).toBe(30)
+      await ops(vfs).write(mkPath('/du/sub/b'), ENC.encode('y'.repeat(20)))
+      const found = await treeCore(vfs.accessor, mkPath('/du/'))
+      expect(
+        [...(found ?? new Map<string, FileStat>()).entries()].map(([k, st]) => [
+          k,
+          st.type,
+          st.size,
+        ]),
+      ).toEqual([
+        ['a', 'file', 10],
+        ['sub', 'directory', null],
+        ['sub/b', 'file', 20],
+      ])
     })
 
     it('rmR deletes every object under the prefix', async () => {
@@ -220,21 +229,6 @@ describe('S3VFS (mocked integration)', () => {
       await rmRCore(vfs.accessor, mkPath('/rmr/'))
       expect(await existsCore(vfs.accessor, mkPath('/rmr/x.txt'))).toBe(false)
       expect(await existsCore(vfs.accessor, mkPath('/rmr/sub/y.txt'))).toBe(false)
-    })
-
-    it('find with name glob matches expected entries', async () => {
-      await ops(vfs).write(mkPath('/find/a.txt'), ENC.encode('a'))
-      await ops(vfs).write(mkPath('/find/b.md'), ENC.encode('b'))
-      await ops(vfs).write(mkPath('/find/c.txt'), ENC.encode('c'))
-      const txts = await findCore(vfs.accessor, mkPath('/find/'), { name: '*.txt' })
-      expect(txts.sort()).toEqual(['/find/a.txt', '/find/c.txt'])
-    })
-
-    it('find with minSize skips small files and keeps directories (DIR_SIZE)', async () => {
-      await ops(vfs).write(mkPath('/sz/small'), ENC.encode('x'))
-      await ops(vfs).write(mkPath('/sz/big'), ENC.encode('x'.repeat(100)))
-      const results = await findCore(vfs.accessor, mkPath('/sz/'), { minSize: 10 })
-      expect(results).toEqual(['/sz', '/sz/big'])
     })
   })
 })

@@ -18,10 +18,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive.copy import copy as _copy
 from mirage.core.gdrive.create import create as _create
-from mirage.core.gdrive.du import entries as _du_entries
-from mirage.core.gdrive.du import size as _du_size
 from mirage.core.gdrive.exists import exists as _exists
-from mirage.core.gdrive.find import find as _find
 from mirage.core.gdrive.mkdir import mkdir as _mkdir
 from mirage.core.gdrive.read import read as _read
 from mirage.core.gdrive.readdir import readdir as _readdir
@@ -39,7 +36,6 @@ from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.prompt import PROMPT
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
@@ -86,24 +82,6 @@ class GoogleDriveVFS(BaseVFS):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
-
-    async def find(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du_size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du_entries(self.accessor, path, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

@@ -14,18 +14,14 @@
 
 import { BaseVFS, type VFSStateBase } from '../base.ts'
 import { HistoryAccessor } from '../../accessor/history.ts'
-
 import type { Observer } from '../../observe/observer.ts'
-
 import { VFSName } from '../../types.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import type { FindOptions } from '../types.ts'
 import { readdir as historyReaddir } from '../../core/history/readdir.ts'
 import { read as historyRead } from '../../core/history/read.ts'
 import { stat as historyStat } from '../../core/history/stat.ts'
-import { find } from '../../core/history/find.ts'
 
 export const HISTORY_PREFIX = '/.bash_history'
 
@@ -69,10 +65,6 @@ export class HistoryViewVFS extends BaseVFS {
 
   override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
     return historyStat(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return find(this.accessor, path, options)
   }
 
   /** The view owns nothing, so its type alone rebuilds it. */

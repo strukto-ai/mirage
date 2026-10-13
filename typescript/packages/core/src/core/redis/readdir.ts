@@ -14,7 +14,8 @@
 
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { keyStat } from './stat.ts'
 import { readdirError } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -79,4 +80,33 @@ export async function readdir(
     await index.setDir(virtualKey, entries)
   }
   return virtualEntries
+}
+
+/**
+ * Every key under a directory from one scan, each as `stat` answers it; null
+ * when `path` is no directory, so the walk's readdir reports it. Mirrors
+ * Python's `tree`.
+ */
+export async function tree(
+  accessor: RedisAccessor,
+  path: PathSpec,
+  maxdepth: number | null = null,
+  _index?: IndexCacheStore,
+): Promise<Map<string, FileStat> | null> {
+  const store = accessor.store
+  const p = norm(path.mountPath)
+  if (!(await store.hasDir(p))) return null
+  const base = rstripSlash(p) + '/'
+  const dirs = [...(await store.listDirs())].sort(compareCodePoints)
+  const keys: [string, boolean][] = [
+    ...(await store.listFiles(base)).map((key): [string, boolean] => [key, false]),
+    ...dirs.filter((key) => key.startsWith(base)).map((key): [string, boolean] => [key, true]),
+  ]
+  const found = new Map<string, FileStat>()
+  for (const [key, isDir] of keys) {
+    const rel = key.slice(base.length)
+    if (key === p || (maxdepth !== null && rel.split('/').length > maxdepth)) continue
+    found.set(rel, await keyStat(store, key, isDir))
+  }
+  return found
 }

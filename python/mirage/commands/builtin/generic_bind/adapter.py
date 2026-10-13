@@ -59,7 +59,6 @@ from mirage.utils.path import norm, parent
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared
 from mirage.vfs.types import (
-    DuOps,
     Effect,
     OperationFn,
     SearchOps,
@@ -359,15 +358,6 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         ),
         read_range=read_bytes if vfs.reads_ranges else None,
         exists=slot("exists") or functools.partial(_exists_by_stat, vfs),
-        find=slot("find"),
-        du=(
-            DuOps(
-                size=_without_accessor(vfs.du_size),
-                entries=_without_accessor(vfs.du_entries),
-            )
-            if vfs.supports("du_size") and vfs.supports("du_entries")
-            else None
-        ),
         write=slot("write"),
         append=slot("append"),
         pwrite=slot("pwrite"),
@@ -401,6 +391,7 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         last_lines=slot("last_lines"),
         line_count=slot("line_count"),
         follow=slot("follow"),
+        read_tree=slot("read_tree"),
     )
 
 
@@ -489,7 +480,6 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "dir_copy": ("dir_copy", ("dst",)),
     "truncate": ("truncate", ("length", "no_create")),
     "set_attrs": ("setattr", ()),
-    "find": ("find", ("index",)),
     "first_lines": ("first_lines", ("n", "index")),
     "last_lines": ("last_lines", ("n", "index")),
     "line_count": ("line_count", ("index",)),
@@ -499,7 +489,6 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
 # The slots that change the mount: with no dispatcher there is nowhere to
 # judge and settle them.
 _DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {
-    "find",
     "first_lines",
     "last_lines",
     "line_count",
@@ -558,9 +547,9 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
     The dispatcher checks hides, the command's path rule, the mount's mode and
     policy, serves a warm copy and fills a cold one, settles a write's
     caches and receipt under its name's hold, and declines a one-call walk
-    (find, du, search, a tree copy or removal) whose subtree the caller's
-    view restricts, so a command's call answers what the same call
-    through ``ws.vfs`` or FUSE answers. A slot the backend does not have
+    (a subtree read, search, a tree copy or removal) whose subtree the
+    caller's view restricts, so a command's call answers what the same
+    call through ``ws.vfs`` or FUSE answers. A slot the backend does not have
     stays absent. With no dispatcher (a host running a command straight
     on its mount) the reads stay the backend's and each write is refused
     as one the backend does not have: the dispatcher is where a write is
@@ -585,16 +574,18 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
         read_bytes=reader,
         read_stream=functools.partial(_dispatched_stream, dispatch),
         read_range=reader if ops.read_range is not None else None,
-        du=(
-            DuOps(
-                size=functools.partial(
-                    _slot_call, dispatch, "du_size", ("index",)
-                ),
-                entries=functools.partial(
-                    _slot_call, dispatch, "du_entries", ("index",)
-                ),
+        # A walk lists the name it is handed, never a link's target: its
+        # own readdir reaches the backend past the namespace, so the
+        # subtree read does not follow a link at the final name either.
+        read_tree=(
+            functools.partial(
+                _slot_call,
+                dispatch,
+                "read_tree",
+                ("maxdepth", "index"),
+                nofollow=True,
             )
-            if ops.du is not None
+            if ops.read_tree is not None
             else None
         ),
         search=(

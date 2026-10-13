@@ -31,7 +31,6 @@ from mirage.core.gridfs.client import (
 from mirage.core.gridfs.constants import SCOPE_ERROR
 from mirage.core.object_store.driver import (
     ChildEntry,
-    FindHints,
     ObjectMeta,
     ObjectStoreDriver,
     TreeEntry,
@@ -39,88 +38,6 @@ from mirage.core.object_store.driver import (
 from mirage.utils.dates import to_iso_z
 
 _COPY_CHUNK = 1024 * 1024
-
-
-def glob_regex(pattern: str) -> str | None:
-    """Translate a find -name glob into an anchored-safe regex fragment.
-
-    Args:
-        pattern (str): Glob pattern (``*``, ``?`` supported).
-
-    Returns:
-        str | None: Regex fragment matching one path segment, or None
-        when the pattern uses character classes we do not translate
-        (caller falls back to the unpushed prefix query; client-side
-        ``keep()`` still applies the exact semantics).
-    """
-    if "[" in pattern or "]" in pattern:
-        return None
-    parts: list[str] = []
-    for ch in pattern:
-        if ch == "*":
-            parts.append("[^/]*")
-        elif ch == "?":
-            parts.append("[^/]")
-        else:
-            parts.append(re.escape(ch))
-    return "".join(parts)
-
-
-def build_query(
-    pfx: str,
-    name: str | None,
-    iname: str | None,
-    min_size: int | None,
-    max_size: int | None,
-    pushdown: bool,
-) -> dict[str, Any]:
-    """Build the fs.files query, pushing filters server-side when exact.
-
-    A pushed query selects files only, since pushdown is set for a
-    ``-type f`` find alone, and every condition is a superset of what
-    GNU prints (an unpushable glob falls back to the prefix scan), so
-    the client-side ``keep()`` pass stays authoritative.
-
-    Args:
-        pfx (str): Key prefix of the start directory ("" for root).
-        name (str | None): -name glob.
-        iname (str | None): -iname glob.
-        min_size (int | None): Inclusive lower size bound.
-        max_size (int | None): Inclusive upper size bound.
-        pushdown (bool): a ``-type f`` find with no complex predicate
-            tree; only the prefix condition is used otherwise.
-    """
-    conds: list[dict[str, Any]] = []
-    base = prefix_query(pfx)
-    if base:
-        conds.append(base)
-    if pushdown:
-        escaped = re.escape(pfx)
-        for pat, options in ((name, ""), (iname, "i")):
-            if pat is None:
-                continue
-            rx = glob_regex(pat)
-            if rx is None:
-                continue
-            regex: dict[str, Any] = {
-                "$regex": f"^{escaped}(.*/)?{rx}$",
-            }
-            if options:
-                regex["$options"] = options
-            conds.append({"filename": regex})
-        conds.append({"filename": {"$not": {"$regex": "/$"}}})
-        if min_size is not None or max_size is not None:
-            size_cond: dict[str, Any] = {}
-            if min_size is not None:
-                size_cond["$gte"] = min_size
-            if max_size is not None:
-                size_cond["$lte"] = max_size
-            conds.append({"length": size_cond})
-    if not conds:
-        return {}
-    if len(conds) == 1:
-        return conds[0]
-    return {"$and": conds}
 
 
 def subtree_query(stem: str) -> dict[str, Any]:
@@ -197,32 +114,6 @@ async def _list_subtree(
             size=doc["length"],
             modified=to_iso_z(upload) if upload else "",
         )
-
-
-async def _iter_query(
-    conn: GridFSAccessor, query: dict[str, Any]
-) -> AsyncIterator[TreeEntry]:
-    async for doc in iter_latest(conn, query):
-        upload = doc.get("uploadDate")
-        yield TreeEntry(
-            key=doc["filename"],
-            size=doc["length"],
-            modified=to_iso_z(upload) if upload else "",
-        )
-
-
-def _find_tree(
-    conn: GridFSAccessor, pfx: str, hints: FindHints
-) -> tuple[AsyncIterator[TreeEntry], bool]:
-    query = build_query(
-        pfx,
-        hints.name,
-        hints.iname,
-        hints.min_size,
-        hints.max_size,
-        hints.pushdown,
-    )
-    return _iter_query(conn, query), query != prefix_query(pfx)
 
 
 async def _head(conn: GridFSAccessor, key: str) -> ObjectMeta | None:
@@ -379,5 +270,4 @@ DRIVER: ObjectStoreDriver[GridFSAccessor, GridFSAccessor] = ObjectStoreDriver(
     copy_file=_copy_file,
     probe_prefix=_probe_prefix,
     is_not_found=_is_not_found,
-    find_tree=_find_tree,
 )

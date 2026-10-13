@@ -21,5 +21,5 @@ export {
   overlaidStat,
   resolveGlobOf,
 } from './adapter.ts'
-export { type DuOps, type ResolveGlobOp } from '../../../vfs/types.ts'
-export { GENERIC_COMMANDS, generic, scanIo, walked } from './factory.ts'
+export { type ResolveGlobOp } from '../../../vfs/types.ts'
+export { GENERIC_COMMANDS, generic, scanIo } from './factory.ts'

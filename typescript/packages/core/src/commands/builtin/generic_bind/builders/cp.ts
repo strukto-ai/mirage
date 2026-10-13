@@ -16,7 +16,8 @@ import { transferLinksOf } from '../../generic/crossmount/utils.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { StatOverlay } from '../../../../view/types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import type { NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../types.ts'
+import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../types.ts'
+import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
 import { typedLink } from '../../utils/links.ts'
@@ -52,9 +53,8 @@ export const BUILDER: GenericCommand = {
     if (pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')) {
       delete ops.copy
       delete ops.dirCopy
-      delete ops.find
     }
-    const { dirCopy, find } = ops
+    const { dirCopy, readTree } = ops
     // Without a file transfer capability, creating directories would
     // leave an uncopyable destination tree. Keep the refusal guarded.
     const mkdir =
@@ -64,28 +64,22 @@ export const BUILDER: GenericCommand = {
     const copy = requireOp(ops.copy, 'copy')
     const idx = opts.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    // No native find op: fall back to a readdir walk (mirrors Python's
-    // _make_find). Passing the index lets stat classify entries from the
-    // cache instead of re-fetching, matching the find command.
-    const findFn: NativeCopy['find'] =
-      find !== undefined
-        ? (src, options) => find(accessor, src, options, idx)
-        : (src, options) =>
-            walkFind(
-              src,
-              {
-                readdir: (spec, i) => ops.readdir(accessor, spec, i),
-                stat: (spec, i) => ops.stat(accessor, spec, i),
-              },
-              options,
-              idx,
-            )
+    // The tree to copy, walked from the mount's readTree where it answers
+    // (mirrors Python's _make_find). Passing the index lets stat classify
+    // entries from the cache instead of re-fetching, matching find.
+    const [readdir, stat] = treeWalk<string[], FileStat>(
+      readTree === undefined ? undefined : (p, depth) => readTree(accessor, p, depth, idx),
+      (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
+      (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
+    )
+    const findFn: NativeCopy['find'] = (src, options) =>
+      walkFind(src, { readdir, stat }, options, idx)
     const parsed = parseFlags(new FlagView(opts.flags, specOf('cp')))
-    // A native copy moves a tree in one backend call and a native find
-    // lists it, neither of which passes an entry through the guard the
-    // way a read does; while a path rule scopes cp, or a hide could
-    // cover an entry under an operand (the native find listed hidden
-    // names and the per-file read then printed them in its refusal),
+    // A native copy moves a tree in one backend call and readTree lists
+    // it, neither of which passes an entry through the guard the way a
+    // read does; while a path rule scopes cp, or a hide could cover an
+    // entry under an operand (a one-call listing names hidden entries and
+    // the per-file read then prints them in its refusal),
     // the primitive walk copies entry by entry (the cross-mount
     // relay's own path), which is also where GNU's per-entry refusals
     // are worded.

@@ -18,6 +18,7 @@ import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
+import type { RedisStoreLike } from '../../vfs/redis/store.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 
 function decodeAttrs(raw: Record<string, string>): {
@@ -36,15 +37,13 @@ function decodeAttrs(raw: Record<string, string>): {
   return out
 }
 
-export async function stat(
-  accessor: RedisAccessor,
-  path: PathSpec,
-  _index?: IndexCacheStore,
-): Promise<FileStat> {
-  const p = norm(path.mountPath)
-  const store = accessor.store
-  if (await store.hasDir(p)) {
-    const attrs = decodeAttrs(await store.getAttrs(p))
+/**
+ * What `stat` answers for the normalized key `p` the store holds. Mirrors
+ * Python's `key_stat`.
+ */
+export async function keyStat(store: RedisStoreLike, p: string, isDir: boolean): Promise<FileStat> {
+  const attrs = decodeAttrs(await store.getAttrs(p))
+  if (isDir) {
     return new FileStat({
       name: gnuBasename(p),
       modified: await store.getModified(p),
@@ -55,20 +54,27 @@ export async function stat(
       atime: attrs.atime ?? null,
     })
   }
-  if (await store.hasFile(p)) {
-    const size = await store.fileLen(p)
-    const attrs = decodeAttrs(await store.getAttrs(p))
-    return new FileStat({
-      name: gnuBasename(p),
-      size,
-      modified: await store.getModified(p),
-      type: FileType.FILE,
-      content: contentTypeForPath(p),
-      mode: attrs.mode ?? null,
-      uid: attrs.uid ?? null,
-      gid: attrs.gid ?? null,
-      atime: attrs.atime ?? null,
-    })
-  }
+  return new FileStat({
+    name: gnuBasename(p),
+    size: await store.fileLen(p),
+    modified: await store.getModified(p),
+    type: FileType.FILE,
+    content: contentTypeForPath(p),
+    mode: attrs.mode ?? null,
+    uid: attrs.uid ?? null,
+    gid: attrs.gid ?? null,
+    atime: attrs.atime ?? null,
+  })
+}
+
+export async function stat(
+  accessor: RedisAccessor,
+  path: PathSpec,
+  _index?: IndexCacheStore,
+): Promise<FileStat> {
+  const p = norm(path.mountPath)
+  const store = accessor.store
+  if (await store.hasDir(p)) return keyStat(store, p, true)
+  if (await store.hasFile(p)) return keyStat(store, p, false)
   throw await lookupError(store, path, p)
 }

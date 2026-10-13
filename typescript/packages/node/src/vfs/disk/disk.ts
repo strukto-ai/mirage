@@ -18,10 +18,8 @@ import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'nod
 import { createWriteStream, mkdirSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
-
 import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { CapacityResult } from '@struktoai/mirage-core/types'
-
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { PROMPT } from './prompt.ts'
@@ -29,15 +27,11 @@ import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/disk/watch/index.ts'
 import type { FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
-import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
 import { read as diskRead, readRange as diskReadRange } from '../../core/disk/read.ts'
 import { stat as diskStat } from '../../core/disk/stat.ts'
 import { readStream as diskStream } from '../../core/disk/stream.ts'
 import { exists as diskExists } from '../../core/disk/exists.ts'
-import { find as diskFind } from '../../core/disk/find.ts'
-import { size as diskDu, entries as diskDuAll } from '../../core/disk/du/index.ts'
 import { write as diskWrite } from '../../core/disk/write.ts'
 import { appendBytes as diskAppend } from '../../core/disk/append.ts'
 import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
@@ -168,18 +162,6 @@ export class DiskVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return diskExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return diskFind(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return diskDu(this.accessor, path)
-  }
-
-  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return diskDuAll(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

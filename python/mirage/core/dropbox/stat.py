@@ -19,12 +19,12 @@ from typing import Any
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.core.dropbox.api import get_metadata
+from mirage.core.dropbox.api import get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
 from mirage.core.dropbox.fingerprint import token_of
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.core.dropbox.readdir import readdir
+from mirage.core.dropbox.readdir import dropbox_path_from_key, readdir
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -142,3 +142,52 @@ async def stat(
             "resource_type": result.entry.resource_type,
         },
     )
+
+
+async def tree(
+    accessor: DropboxAccessor,
+    path: PathSpec,
+    maxdepth: int | None = None,
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, FileStat] | None:
+    """Every entry under a folder from one recursive ``list_folder``,
+    each as ``stat`` answers it from a listing.
+
+    Dropbox matches paths without case, so each entry's place comes from
+    its lowercased path and its name from the entry, as a listing of its
+    folder names it. A folder Dropbox refuses to list (a missing path, a
+    file) answers None, so the walk's readdir reports it.
+
+    Args:
+        accessor (DropboxAccessor): backend handle.
+        path (PathSpec): the folder.
+        maxdepth (int | None): the deepest level kept.
+        index (IndexCacheStore): unused; the listing is read whole.
+    """
+    folder = dropbox_path_from_key(
+        accessor.root_path, path.mount_path.strip("/")
+    )
+    try:
+        entries = await list_folder(
+            accessor.token_manager, folder, recursive=True
+        )
+    except DropboxApiError as exc:
+        if exc.status == 409:
+            return None
+        raise
+    base = folder.lower().rstrip("/")
+    places: dict[str, str] = {base: ""}
+    found: dict[str, FileStat] = {}
+    for entry in sorted(
+        entries, key=lambda e: str(e.get("path_lower", "")).count("/")
+    ):
+        lower = str(entry.get("path_lower", ""))
+        parent, _, _ = lower.rpartition("/")
+        if lower == base or parent not in places:
+            continue
+        above = places[parent]
+        rel = f"{above}/{entry['name']}" if above else str(entry["name"])
+        places[lower] = rel
+        if maxdepth is None or rel.count("/") < maxdepth:
+            found[rel] = stat_from_entry(entry)
+    return found

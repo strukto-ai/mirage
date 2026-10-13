@@ -60,7 +60,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect, type FindOptions, type SearchQuery } from '../../vfs/types.ts'
+import { Effect, type SearchQuery } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
@@ -736,12 +736,6 @@ export class MountEntry {
         return [(scope, args) => vfs.dirCopy(scope, dstArg(args[0]))]
       case 'rm_r':
         return [(scope) => vfs.rmR(scope)]
-      case 'find':
-        return [(scope, args, kw) => vfs.find(scope, (args[0] ?? {}) as FindOptions, kw.index)]
-      case 'du_size':
-        return [(scope, _args, kw) => vfs.duSize(scope, kw.index)]
-      case 'du_entries':
-        return [(scope, _args, kw) => vfs.duEntries(scope, kw.index)]
       case 'first_lines':
         return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, kw.index)]
       case 'last_lines':
@@ -750,6 +744,10 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.lineCount(scope, kw.index)]
       case 'follow':
         return [(scope, _args, kw) => vfs.follow(scope, kw.index)]
+      case 'read_tree':
+        return [
+          (scope, args, kw) => vfs.readTree(scope, (args[0] ?? null) as number | null, kw.index),
+        ]
       case 'search':
         return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, kw.index)]
       case 'truncate':

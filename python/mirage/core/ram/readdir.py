@@ -21,8 +21,9 @@ from mirage.cache.index import (
     IndexEntry,
     ResourceType,
 )
+from mirage.core.ram.stat import key_stat
 from mirage.errors.fs import readdir_error
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 from mirage.vfs.ram.store import RAMStore
@@ -80,3 +81,36 @@ async def readdir(
     ]
     await index.set_dir(virtual_key, index_entries)
     return virtual_entries
+
+
+async def tree(
+    accessor: RAMAccessor,
+    path: PathSpec,
+    maxdepth: int | None = None,
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, FileStat] | None:
+    """Every key under a directory, each as ``stat`` answers it; None
+    when ``path`` is no directory, so the walk's readdir reports it.
+
+    Args:
+        accessor (RAMAccessor): the mount's store.
+        path (PathSpec): the directory.
+        maxdepth (int | None): the deepest level kept.
+        index (IndexCacheStore): unused; the store answers directly.
+    """
+    store = accessor.store
+    p = norm(path.mount_path)
+    if p not in store.dirs:
+        return None
+    base = p.rstrip("/") + "/"
+    found: dict[str, FileStat] = {}
+    for key in [*store.files, *store.dirs]:
+        if not key.startswith(base) or key == p:
+            continue
+        rel = key[len(base) :]
+        entry = key_stat(store, key)
+        if entry is not None and (
+            maxdepth is None or rel.count("/") < maxdepth
+        ):
+            found[rel] = entry
+    return found

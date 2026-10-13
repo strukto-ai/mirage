@@ -15,7 +15,7 @@
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
@@ -24,12 +24,10 @@ import { appendBytes } from '@struktoai/mirage-core/core/redis/append'
 import { SCOPE_ERROR } from '@struktoai/mirage-core/core/redis/constants'
 import { copy } from '@struktoai/mirage-core/core/redis/copy'
 import { create } from '@struktoai/mirage-core/core/redis/create'
-import { size, entries } from '@struktoai/mirage-core/core/redis/du/index'
 import { exists } from '@struktoai/mirage-core/core/redis/exists'
-import { find } from '@struktoai/mirage-core/core/redis/find'
 import { mkdir } from '@struktoai/mirage-core/core/redis/mkdir'
 import { read } from '@struktoai/mirage-core/core/redis/read'
-import { readdir } from '@struktoai/mirage-core/core/redis/readdir'
+import { readdir, tree } from '@struktoai/mirage-core/core/redis/readdir'
 import { rename } from '@struktoai/mirage-core/core/redis/rename'
 import { rmR } from '@struktoai/mirage-core/core/redis/rm'
 import { rmdir } from '@struktoai/mirage-core/core/redis/rmdir'
@@ -193,14 +191,20 @@ describe.skipIf(skip)('core/redis ops', () => {
     expect(await exists(acc, spec('/t'))).toBe(false)
   })
 
-  it('du sums file sizes under path', async () => {
+  it('tree reads every key under a directory with its stat', async () => {
     await mkdir(acc, spec('/d'))
+    await mkdir(acc, spec('/d/s'))
     await write(acc, spec('/d/a'), ENC.encode('abc'))
-    await write(acc, spec('/d/b'), ENC.encode('defg'))
-    expect(await size(acc, spec('/d'))).toBe(7)
-    const [found, total] = await entries(acc, spec('/d'))
-    expect(found).toHaveLength(2)
-    expect(total).toBe(7)
+    await write(acc, spec('/d/s/b'), ENC.encode('defg'))
+    const found = await tree(acc, spec('/d'))
+    expect(
+      [...(found ?? new Map<string, FileStat>()).entries()].map(([k, st]) => [k, st.type, st.size]),
+    ).toEqual([
+      ['a', 'file', 3],
+      ['s/b', 'file', 4],
+      ['s', 'directory', null],
+    ])
+    expect(await tree(acc, spec('/d/a'))).toBeNull()
   })
 
   it('readdir returns mount-prefixed entries', async () => {
@@ -218,13 +222,6 @@ describe.skipIf(skip)('core/redis ops', () => {
     await mkdir(acc, spec('/d'))
     const ds = await stat(acc, spec('/d'))
     expect(ds.type).toBe('directory')
-  })
-
-  it('find filters by name pattern', async () => {
-    await write(acc, spec('/a.txt'), ENC.encode('.'))
-    await write(acc, spec('/b.md'), ENC.encode('.'))
-    const r = await find(acc, spec('/'), { name: '*.txt' })
-    expect(r).toEqual(['/a.txt'])
   })
 
   it('stream yields file contents once', async () => {

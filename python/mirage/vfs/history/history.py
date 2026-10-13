@@ -16,7 +16,6 @@ from typing import Any
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.history.find import find
 from mirage.core.history.read import read as _read
 from mirage.core.history.readdir import readdir as _readdir
 from mirage.core.history.stat import stat as _stat
@@ -68,14 +67,6 @@ class HistoryViewVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
-
-    async def find(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await find(self.accessor, path, **predicates)
 
     def get_state(self) -> dict[str, Any]:
         return {"type": self.name}

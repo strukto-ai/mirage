@@ -15,7 +15,6 @@
 import {
   Effect,
   Target,
-  type DuEntries,
   type ReadBytesOp,
   type ResolveGlobOp,
   type ScanReason,
@@ -24,7 +23,6 @@ import {
 import { activeCacheManager } from '../../../cache/context.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { declared } from '../../../vfs/call.ts'
-import type { FindOptions } from '../../../vfs/types.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
 import { ensureStream } from '../../../io/stream.ts'
@@ -183,25 +181,6 @@ export function commandIo(vfs: BaseVFS): CommandIO {
     exists: has('exists')
       ? withoutAccessor((path: PathSpec) => vfs.exists(path))
       : (_a: Accessor, path: PathSpec) => existsByStat(vfs, path),
-    ...(has('find')
-      ? {
-          find: withoutAccessor((path: PathSpec, options: FindOptions, index?: IndexCacheStore) =>
-            vfs.find(path, options, index),
-          ),
-        }
-      : {}),
-    ...(has('duSize') && has('duEntries')
-      ? {
-          du: {
-            size: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-              vfs.duSize(path, index),
-            ),
-            entries: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-              vfs.duEntries(path, index),
-            ),
-          },
-        }
-      : {}),
     ...(has('write')
       ? { write: withoutAccessor((p: PathSpec, d: Uint8Array) => vfs.write(p, d)) }
       : {}),
@@ -320,6 +299,14 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       ? {
           follow: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
             vfs.follow(path, index),
+          ),
+        }
+      : {}),
+    ...(has('readTree')
+      ? {
+          readTree: withoutAccessor(
+            (path: PathSpec, maxdepth?: number | null, index?: IndexCacheStore) =>
+              vfs.readTree(path, maxdepth ?? null, index),
           ),
         }
       : {}),
@@ -449,10 +436,6 @@ const DISPATCHED_SLOTS = {
         string,
         number | string
       >,
-  find:
-    (dispatch: DispatchFn): CommandIO['find'] =>
-    async (_accessor, path, options) =>
-      (await dispatchedCall(dispatch, 'find', path, [options])) as string[],
   firstLines:
     (dispatch: DispatchFn): CommandIO['firstLines'] =>
     async (_accessor, path, n) =>
@@ -469,13 +452,22 @@ const DISPATCHED_SLOTS = {
     (dispatch: DispatchFn): CommandIO['follow'] =>
     async (_accessor, path) =>
       (await dispatchedCall(dispatch, 'follow', path)) as AsyncIterable<Uint8Array> | null,
+  readTree:
+    (dispatch: DispatchFn): CommandIO['readTree'] =>
+    async (_accessor, path, maxdepth) =>
+      // A walk lists the name it is handed, never a link's target: its own
+      // readdir reaches the backend past the namespace, so the subtree read
+      // does not follow a link at the final name either.
+      (await dispatchedCall(dispatch, 'read_tree', path, [maxdepth ?? null], {
+        nofollow: true,
+      })) as Map<string, FileStat> | null,
 } satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
 
 // The slots that change the mount: with no dispatcher there is nowhere to
 // judge and settle them.
 const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
   (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
-    (slot) => !['find', 'firstLines', 'lastLines', 'lineCount', 'follow'].includes(slot),
+    (slot) => !['firstLines', 'lastLines', 'lineCount', 'follow', 'readTree'].includes(slot),
   ),
 )
 
@@ -495,7 +487,7 @@ export function dispatchedSlots(
  *
  * The dispatcher checks hides, the command's path rule, the mount's mode and
  * policy, serves a warm copy and fills a cold one, settles a write's caches
- * and receipt under its name's hold, and declines a one-call walk (find, du,
+ * and receipt under its name's hold, and declines a one-call walk (a subtree read,
  * search, a tree copy or removal) whose subtree the caller's view restricts,
  * so a command's call answers what the same call through `ws.vfs` or FUSE
  * answers. A slot the backend does not have stays absent. With no dispatcher
@@ -522,16 +514,6 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
         (slot) => ops[slot] !== undefined,
       ),
     ),
-    ...(ops.du === undefined
-      ? {}
-      : {
-          du: {
-            size: async (_accessor: Accessor, path: PathSpec) =>
-              (await dispatchedCall(dispatch, 'du_size', path)) as number,
-            entries: async (_accessor: Accessor, path: PathSpec) =>
-              (await dispatchedCall(dispatch, 'du_entries', path)) as DuEntries,
-          },
-        }),
     ...(ops.search === undefined
       ? {}
       : {
@@ -971,7 +953,7 @@ type MutationSlot = keyof typeof MUTATIONS
 const mutationSlots = Object.keys(MUTATIONS) as MutationSlot[]
 
 type GuardedSlot =
-  | 'du'
+  | 'readTree'
   | 'search'
   | MutationSlot
   | 'readBytes'
@@ -980,7 +962,6 @@ type GuardedSlot =
   | 'readdir'
   | 'stat'
   | 'exists'
-  | 'find'
 
 function mutationOf(slot: string): Mutation | undefined {
   return Object.hasOwn(MUTATIONS, slot) ? MUTATIONS[slot as MutationSlot] : undefined
@@ -1074,7 +1055,7 @@ function refusedAfterAbort<T extends unknown[], R>(
  * there without each handler reading the signal. A slot already in
  * flight settles on its own, and `readStream` is left alone because the
  * reader it returns is guarded as it is drained (`guardInput`). The
- * presence facts (stat, exists, find, du) are refused too. They cost no
+ * presence facts (stat, exists, readTree) are refused too. They cost no
  * write, which is why the policy guard leaves them, but each one is a
  * request on an API-backed mount: `stat a b` whose first call outlives
  * the grace would start the second after the caller was released. The
@@ -1096,13 +1077,7 @@ export function withAbortGuard<A extends Accessor = Accessor>(
   }
   if (ops.readRange !== undefined) guarded.readRange = refusedAfterAbort(signal, ops.readRange)
   if (ops.exists !== undefined) guarded.exists = refusedAfterAbort(signal, ops.exists)
-  if (ops.find !== undefined) guarded.find = refusedAfterAbort(signal, ops.find)
-  if (ops.du !== undefined) {
-    guarded.du = {
-      size: refusedAfterAbort(signal, ops.du.size),
-      entries: refusedAfterAbort(signal, ops.du.entries),
-    }
-  }
+  if (ops.readTree !== undefined) guarded.readTree = refusedAfterAbort(signal, ops.readTree)
   if (ops.write !== undefined) guarded.write = refusedAfterAbort(signal, ops.write)
   if (ops.mkdir !== undefined) guarded.mkdir = refusedAfterAbort(signal, ops.mkdir)
   if (ops.append !== undefined) guarded.append = refusedAfterAbort(signal, ops.append)

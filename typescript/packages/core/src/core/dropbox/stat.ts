@@ -19,11 +19,11 @@ import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
-import { getMetadata, type DropboxEntry } from './api.ts'
+import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
-import { readdir as coreReaddir } from './readdir.ts'
+import { readdir as coreReaddir, dropboxPathFromKey } from './readdir.ts'
 import { enoent, isEnoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
@@ -135,4 +135,42 @@ export async function stat(
       resource_type: result.entry.resourceType,
     },
   })
+}
+
+/**
+ * Every entry under a folder from one recursive `list_folder`, each as `stat`
+ * answers it from a listing. Dropbox matches paths without case, so each
+ * entry's place comes from its lowercased path and its name from the entry,
+ * as a listing of its folder names it. A folder Dropbox refuses to list (a
+ * missing path, a file) resolves null, so the walk's readdir reports it.
+ * Mirrors Python's `tree`.
+ */
+export async function tree(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+  maxdepth: number | null = null,
+  _index?: IndexCacheStore,
+): Promise<Map<string, FileStat> | null> {
+  const folder = dropboxPathFromKey(accessor.rootPath, stripSlash(path.mountPath))
+  let entries: DropboxEntry[]
+  try {
+    entries = await listFolder(accessor.tokenManager, folder, { recursive: true })
+  } catch (err) {
+    if (err instanceof DropboxApiError && err.status === 409) return null
+    throw err
+  }
+  const base = folder.toLowerCase().replace(/\/+$/, '')
+  const depthOf = (e: DropboxEntry): number => (e.path_lower ?? '').split('/').length
+  const places = new Map<string, string>([[base, '']])
+  const found = new Map<string, FileStat>()
+  for (const entry of [...entries].sort((a, b) => depthOf(a) - depthOf(b))) {
+    const lower = entry.path_lower ?? ''
+    const parent = lower.slice(0, Math.max(lower.lastIndexOf('/'), 0))
+    const above = places.get(parent)
+    if (lower === base || above === undefined) continue
+    const rel = above === '' ? entry.name : `${above}/${entry.name}`
+    places.set(lower, rel)
+    if (maxdepth === null || rel.split('/').length <= maxdepth) found.set(rel, statFromEntry(entry))
+  }
+  return found
 }

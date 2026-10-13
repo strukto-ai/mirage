@@ -18,7 +18,6 @@ import pytest
 
 from mirage.core.object_store.driver import (
     ChildEntry,
-    FindHints,
     ObjectMeta,
     TreeEntry,
 )
@@ -31,19 +30,8 @@ def test_driver_is_frozen():
         driver.vfs = "other"  # type: ignore[misc]
 
 
-def test_find_tree_defaults_to_none():
-    assert make_driver(FakeStore()).find_tree is None
-    assert make_driver(FakeStore(), find_narrowing=True).find_tree is not None
-
-
 def test_entry_defaults():
     assert ChildEntry(key="k", kind="f").size is None
     assert TreeEntry(key="k").size == 0
     meta = ObjectMeta(size=1)
     assert meta.extra == {}
-    assert (
-        FindHints(
-            name=None, iname=None, min_size=None, max_size=None, pushdown=False
-        ).pushdown
-        is False
-    )

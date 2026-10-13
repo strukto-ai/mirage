@@ -1,10 +1,7 @@
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-
 import { VFSName } from '@struktoai/mirage-core/types'
-
 import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-
 import { buildDeltaHook } from '../../core/nextcloud/watch.ts'
 import {
   redactNextcloudConfig,
@@ -14,19 +11,12 @@ import {
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/types'
-import type { DuEntries } from '@struktoai/mirage-core/vfs/types'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'
 import { read } from '../../core/nextcloud/read.ts'
 import { stat } from '../../core/nextcloud/stat.ts'
 import { readStream } from '../../core/nextcloud/stream.ts'
 import { exists } from '../../core/nextcloud/exists.ts'
-import { find } from '../../core/nextcloud/find.ts'
-import {
-  size as nextcloudDuSize,
-  entries as nextcloudDuEntries,
-} from '../../core/nextcloud/du/index.ts'
 import { write } from '../../core/nextcloud/write.ts'
 import { create } from '../../core/nextcloud/create.ts'
 import { mkdir } from '../../core/nextcloud/mkdir.ts'
@@ -86,18 +76,6 @@ export class NextcloudVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return exists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return find(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, _index?: IndexCacheStore): Promise<number> {
-    return nextcloudDuSize(this.accessor, path)
-  }
-
-  override duEntries(path: PathSpec, _index?: IndexCacheStore): Promise<DuEntries> {
-    return nextcloudDuEntries(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

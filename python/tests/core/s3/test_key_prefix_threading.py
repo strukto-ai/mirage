@@ -2,9 +2,8 @@ import asyncio
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.s3.find import find
 from mirage.core.s3.read import read
-from mirage.core.s3.readdir import readdir
+from mirage.core.s3.readdir import readdir, tree
 from mirage.types import PathSpec
 from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
@@ -56,12 +55,12 @@ def test_read_bytes_with_key_prefix():
     assert data == b"hello"
 
 
-def test_find_strips_key_prefix_from_results():
+def test_tree_strips_key_prefix_from_keys():
     store = {"test-bucket": {"prod/dir/a.txt": b"a", "prod/dir/b.txt": b"b"}}
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
         path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
-        results = asyncio.run(find(accessor, path))
-    for r in results:
-        assert "prod" not in r, f"key_prefix leaked into find result: {r}"
+        found = asyncio.run(tree(accessor, path))
+    assert found is not None
+    assert sorted(found) == ["a.txt", "b.txt"]

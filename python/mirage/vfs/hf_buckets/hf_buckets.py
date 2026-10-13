@@ -18,13 +18,11 @@ from typing import Any
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.create import create as _create
-from mirage.core.hf_buckets.du import entries as _du_entries
-from mirage.core.hf_buckets.du import size as _du_size
 from mirage.core.hf_buckets.exists import exists as _exists
-from mirage.core.hf_buckets.find import find as _find
 from mirage.core.hf_buckets.mkdir import mkdir as _mkdir
 from mirage.core.hf_buckets.read import read as _read
 from mirage.core.hf_buckets.readdir import readdir as _readdir
+from mirage.core.hf_buckets.readdir import tree as _tree
 from mirage.core.hf_buckets.rm import rm_r as _rm_r
 from mirage.core.hf_buckets.stat import stat as _stat
 from mirage.core.hf_buckets.stream import read_stream as _read_stream
@@ -35,7 +33,6 @@ from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
 from mirage.vfs.hf_buckets.prompt import PROMPT
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
 
 
@@ -90,23 +87,13 @@ class HfBucketsVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def find(
+    async def read_tree(
         self,
         path: PathSpec,
+        maxdepth: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **predicates: Any,
-    ) -> list[str]:
-        return await _find(self.accessor, path, index=index, **predicates)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du_size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du_entries(self.accessor, path, index)
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, maxdepth, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

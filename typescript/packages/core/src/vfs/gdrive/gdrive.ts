@@ -14,25 +14,18 @@
 
 import { BaseVFS } from '../base.ts'
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
-
 import { TokenManager } from '../../core/google/client.ts'
-
 import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
-
 import { redactGDriveConfig, type GDriveConfig, type GDriveConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/gdrive/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../types.ts'
-import type { DuEntries } from '../types.ts'
 import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
 import { read as gdriveRead } from '../../core/gdrive/read.ts'
 import { stat as gdriveStat } from '../../core/gdrive/stat.ts'
 import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
-import { find as gdriveFind } from '../../core/gdrive/find.ts'
-import { size as gdriveDu, entries as gdriveDuAll } from '../../core/gdrive/du/index.ts'
 import { write as gdriveWrite } from '../../core/gdrive/write.ts'
 import { create as gdriveCreate } from '../../core/gdrive/create.ts'
 import { mkdir as gdriveMkdir } from '../../core/gdrive/mkdir.ts'
@@ -88,18 +81,6 @@ export class GDriveVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return gdriveExists(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {
-    return gdriveFind(this.accessor, path, options)
-  }
-
-  override duSize(path: PathSpec, index?: IndexCacheStore): Promise<number> {
-    return gdriveDu(this.accessor, path, index)
-  }
-
-  override duEntries(path: PathSpec, index?: IndexCacheStore): Promise<DuEntries> {
-    return gdriveDuAll(this.accessor, path, index)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

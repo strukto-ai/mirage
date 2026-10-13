@@ -30,19 +30,16 @@ from mirage.core.dropbox.rm import rm_r as _rm_r
 from mirage.core.dropbox.rmdir import rmdir as _rmdir
 from mirage.core.dropbox.search import files_containing as _files_containing
 from mirage.core.dropbox.stat import stat as _stat
+from mirage.core.dropbox.stat import tree as _tree
 from mirage.core.dropbox.unlink import unlink as _unlink
 from mirage.core.dropbox.watch import build_delta_hook
 from mirage.core.dropbox.write import write as _write
-from mirage.core.generic.du import make_walked_du
 from mirage.core.generic.rewrite import truncate_by_rewrite
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.dropbox.prompt import PROMPT
-from mirage.vfs.types import DuEntries
 from mirage.watch.base import DeltaHook
-
-_du = make_walked_du(_stat, _readdir)
 
 
 class DropboxVFS(BaseVFS):
@@ -94,18 +91,16 @@ class DropboxVFS(BaseVFS):
     ) -> AsyncIterator[bytes]:
         return _stream(self.accessor, path, index)
 
+    async def read_tree(
+        self,
+        path: PathSpec,
+        maxdepth: int | None = None,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, maxdepth, index)
+
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
-
-    async def du_size(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int:
-        return await _du.size(self.accessor, path, index)
-
-    async def du_entries(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> DuEntries:
-        return await _du.entries(self.accessor, path, index)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

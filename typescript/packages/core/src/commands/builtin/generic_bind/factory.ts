@@ -161,19 +161,6 @@ function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView
   }
 }
 
-/**
- * A mount's table with its native `find` and `du` set aside. Shell traversals
- * need partial results and per-directory errors, which the shared readdir/stat
- * walker owns; the VFS's own aggregate methods stay strict. Disk and ssh run
- * `cp`, `du` and `find` over it. Mirrors Python's `walked`.
- */
-export function walked(io: CommandIO): CommandIO {
-  const rest = { ...io }
-  delete rest.find
-  delete rest.du
-  return rest
-}
-
 function bind(
   b: GenericCommand,
   vfs: string | null,

@@ -52,9 +52,11 @@ VFS_FUNCTIONS = (
     "stat",
     "read_stream",
     "exists",
-    "find",
-    "du_size",
-    "du_entries",
+    "first_lines",
+    "last_lines",
+    "line_count",
+    "follow",
+    "read_tree",
     "write",
     "append",
     "pwrite",
@@ -359,9 +361,9 @@ def _capabilities() -> dict[str, dict[str, Any]]:
     not: node's GitHubVFS carried no prompt, so its file prompt left every
     GitHub mount out while python and the browser described theirs.
     ``functions`` lists the ``BaseVFS`` functions the class overrides: a
-    backend that drops ``du_size`` or ``find`` quietly falls back to the
-    capped readdir walk while its twin pushes the work down to the API,
-    and the list turns that omission into a spec diff.
+    backend that drops ``read_tree`` quietly falls back to the capped
+    readdir walk while its twin lists the subtree in one call, and the
+    list turns that omission into a spec diff.
     """
     out: dict[str, dict[str, Any]] = {}
     for name in sorted(REGISTRY):

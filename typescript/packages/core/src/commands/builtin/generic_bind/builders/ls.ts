@@ -13,6 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { lsGeneric } from '../../generic/ls.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import { treeWalk } from '../../utils/tree.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 import {
   type GenericCommand,
   overlaidStat,
@@ -23,12 +27,17 @@ import {
 const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return lsGeneric(
-    resolved,
-    opts,
-    (p) => ops.readdir(accessor, p, idx),
-    overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
+  // Only -R walks; a plain listing reads one directory.
+  const recursive = new FlagView(opts.flags, specOf('ls')).asBool('recursive')
+  const { readTree } = ops
+  const [readdir, stat] = treeWalk<string[], FileStat>(
+    !recursive || readTree === undefined
+      ? undefined
+      : (p, depth) => readTree(accessor, p, depth, idx),
+    (p: PathSpec) => ops.readdir(accessor, p, idx),
+    (p: PathSpec) => ops.stat(accessor, p, idx),
   )
+  return lsGeneric(resolved, opts, readdir, overlaidStat(stat, opts.ns?.statOverlay))
 }
 
 export const BUILDER: GenericCommand = {
