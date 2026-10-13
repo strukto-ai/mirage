@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LOOP_BUDGET } from '../../../concurrency/constants.ts'
 import { runIsolated } from '../../../concurrency/worker.ts'
+import { edScript, normalDiff, unifiedDiff } from '../diff_format.ts'
 import type { Argument } from '../../spec/types.ts'
 import { compileSpec } from '../../spec/compile.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -240,6 +242,11 @@ async function side(walk: Walk, path: PathSpec, absent: boolean): Promise<string
   return absent ? '' : DEC.decode(await materialize(walk.stream(path)))
 }
 
+/**
+ * Diff two files' text in the format the flags choose. A diff within
+ * LOOP_BUDGET runs here and a larger one in a worker, where Python runs
+ * every diff on the loop (strukto-ai/mirage#1590).
+ */
 async function diffPair(
   walk: Walk,
   path1: PathSpec,
@@ -269,23 +276,29 @@ async function diffPair(
   if (flags.brief) return ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)
   const aLines = splitLinesKeepends(textA)
   const bLines = splitLinesKeepends(textB)
+  const here = (aLines.length + bLines.length) ** 2 <= LOOP_BUDGET
   let result: string[]
-  if (flags.ed) result = await runIsolated<string[]>('edScript', [aLines, bLines], walk.signal)
-  else if (flags.unified)
-    result = await runIsolated<string[]>(
-      'unifiedDiff',
-      [
-        aLines,
-        bLines,
-        cEscape(path1.rawPath),
-        cEscape(path2.rawPath),
-        flags.context,
-        await headerTime(walk, path1, absent[0]),
-        await headerTime(walk, path2, absent[1]),
-      ],
-      walk.signal,
-    )
-  else result = await runIsolated<string[]>('normalDiff', [aLines, bLines], walk.signal)
+  if (flags.ed)
+    result = here
+      ? edScript(aLines, bLines)
+      : await runIsolated<string[]>('edScript', [aLines, bLines], walk.signal)
+  else if (flags.unified) {
+    const args = [
+      aLines,
+      bLines,
+      cEscape(path1.rawPath),
+      cEscape(path2.rawPath),
+      flags.context,
+      await headerTime(walk, path1, absent[0]),
+      await headerTime(walk, path2, absent[1]),
+    ] as const
+    result = here
+      ? unifiedDiff(...args)
+      : await runIsolated<string[]>('unifiedDiff', args, walk.signal)
+  } else
+    result = here
+      ? normalDiff(aLines, bLines)
+      : await runIsolated<string[]>('normalDiff', [aLines, bLines], walk.signal)
   return ENC.encode(result.join(''))
 }
 

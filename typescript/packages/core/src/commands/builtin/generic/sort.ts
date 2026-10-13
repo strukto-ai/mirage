@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runIsolated } from '../../../concurrency/worker.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
@@ -26,7 +26,9 @@ import { SortKeyError } from '../errors.ts'
 import {
   buildConfig,
   compareLines,
+  merged,
   parseKeydef,
+  sortLines,
   type KeyMods,
   type SortConfig,
   type SortGlobals,
@@ -57,6 +59,8 @@ const CHECK_ARGS: readonly (readonly string[])[] = [['quiet', 'silent'], ['diagn
 export const MULTIPLE_OUTPUTS = 'sort: multiple output files specified'
 
 export const CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
+
+const CHUNK = 128
 
 // sort.c's `sort_die` prefixes. GNU tests every input with euidaccess(R_OK)
 // before it reads any (`cannot read`), opens the output and the one input
@@ -253,6 +257,46 @@ function labelOf(path: PathSpec | null): string {
   return path === null ? '-' : path.rawPath
 }
 
+async function drain(lines: Iterable<string>, budget: YieldBudget): Promise<string[]> {
+  const out: string[] = []
+  for (const line of lines) {
+    out.push(line)
+    await budget.run()
+  }
+  return out
+}
+
+/**
+ * The records in output order, worked out on the loop. Sorting always ends,
+ * so it needs no worker, only steps a YieldBudget paces: every CHUNK records
+ * sort as one step, then the sorted chunks merge pairwise, a tie going to the
+ * earlier chunk, which is the order one stable sort of every record gives,
+ * `-u` included. Under `-m` the inputs merge as given. A large sort shares the
+ * loop's core rather than using another (strukto-ai/mirage#1590).
+ */
+async function orderedRecords(
+  runs: string[][],
+  cfg: SortConfig,
+  merge: boolean,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const budget = new YieldBudget(signal)
+  if (merge) return drain(merged(runs, cfg), budget)
+  const records = runs.flat()
+  let chunks: string[][] = []
+  for (let start = 0; start < records.length; start += CHUNK) {
+    chunks.push(sortLines(records.slice(start, start + CHUNK), cfg))
+    await budget.run()
+  }
+  while (chunks.length > 1) {
+    const paired: string[][] = []
+    for (let i = 0; i < chunks.length; i += 2)
+      paired.push(await drain(merged(chunks.slice(i, i + 2), cfg), budget))
+    chunks = paired
+  }
+  return chunks[0] ?? []
+}
+
 // Every input's records, one run per input, or the line refusing one. Each
 // input is split on its own, so a file that lacks a final newline still
 // ends its last line there instead of running into the next file's first,
@@ -339,11 +383,7 @@ export async function sortGeneric(
       }),
     ]
   }
-  const ordered = await runIsolated<string[]>(
-    parsed.merge ? 'mergeLines' : 'sortLines',
-    [parsed.merge ? runs : runs.flat(), cfg],
-    opts.signal,
-  )
+  const ordered = await orderedRecords(runs, cfg, parsed.merge, opts.signal)
   const separator = parsed.zeroTerminated ? '\0' : '\n'
   const output: Uint8Array =
     ordered.length === 0 ? new Uint8Array() : ENC.encode(ordered.join(separator) + separator)

@@ -20,7 +20,7 @@ import {
   computeFields,
   extract,
   type KeyMods,
-  mergeLines,
+  merged,
   parseKeydef,
   type SortConfig,
   sortLines,
@@ -373,15 +373,17 @@ describe('numeric keys', () => {
 })
 
 // Mirrors TestMergeLines in test_sort_keys.py.
-describe('mergeLines', () => {
+describe('merged', () => {
+  const merge = (runs: string[][], cfg: SortConfig): string[] => [...merged(runs, cfg)]
+
   it('never reorders a run', () => {
-    expect(mergeLines([['b', 'a']], configOf())).toEqual(['b', 'a'])
+    expect(merge([['b', 'a']], configOf())).toEqual(['b', 'a'])
   })
 
   it('emits the smallest head first', () => {
-    expect(mergeLines([['c', 'a'], ['b']], configOf())).toEqual(['b', 'c', 'a'])
+    expect(merge([['c', 'a'], ['b']], configOf())).toEqual(['b', 'c', 'a'])
     expect(
-      mergeLines(
+      merge(
         [
           ['a', 'd'],
           ['b', 'e'],
@@ -394,20 +396,20 @@ describe('mergeLines', () => {
 
   it('gives a tie to the earlier run', () => {
     const runs = [['k 3'], ['k 1'], ['k 2']]
-    expect(mergeLines(runs, configOf({ k: '1,1', s: true }))).toEqual(['k 3', 'k 1', 'k 2'])
-    expect(mergeLines(runs, configOf({ k: '1,1' }))).toEqual(['k 1', 'k 2', 'k 3'])
+    expect(merge(runs, configOf({ k: '1,1', s: true }))).toEqual(['k 3', 'k 1', 'k 2'])
+    expect(merge(runs, configOf({ k: '1,1' }))).toEqual(['k 1', 'k 2', 'k 3'])
   })
 
   it('skips empty runs', () => {
-    expect(mergeLines([[], ['b', 'a'], []], configOf())).toEqual(['b', 'a'])
-    expect(mergeLines([[], []], configOf())).toEqual([])
+    expect(merge([[], ['b', 'a'], []], configOf())).toEqual(['b', 'a'])
+    expect(merge([[], []], configOf())).toEqual([])
   })
 
   it('collapses only adjacent duplicates under unique', () => {
     const cfg = configOf({ u: true })
-    expect(mergeLines([['a', 'b', 'a']], cfg)).toEqual(['a', 'b', 'a'])
+    expect(merge([['a', 'b', 'a']], cfg)).toEqual(['a', 'b', 'a'])
     expect(
-      mergeLines(
+      merge(
         [
           ['a', 'b'],
           ['a', 'c'],
@@ -418,7 +420,7 @@ describe('mergeLines', () => {
   })
 
   it('keeps the first line of a key-equal series under unique', () => {
-    expect(mergeLines([['x 1'], ['a 1']], configOf({ k: '2,2', u: true }))).toEqual(['x 1'])
-    expect(mergeLines([['b'], ['B']], configOf({ f: true, u: true }))).toEqual(['b'])
+    expect(merge([['x 1'], ['a 1']], configOf({ k: '2,2', u: true }))).toEqual(['x 1'])
+    expect(merge([['b'], ['B']], configOf({ f: true, u: true }))).toEqual(['b'])
   })
 })

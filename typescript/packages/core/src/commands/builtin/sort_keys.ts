@@ -511,8 +511,12 @@ function mergeBefore(
 // `ord` table, so a merge of `k` runs costs `log k` comparisons a line.
 // Under `-u` a line is dropped when it compares equal to the first line of
 // the series it would extend, so only adjacent duplicates collapse: `a b a`
-// stays three lines. Mirrors merge_lines in sort_keys.py.
-export function mergeLines(runs: readonly (readonly string[])[], cfg: SortConfig): string[] {
+// stays three lines. Lines come one at a time, so a caller can yield to the
+// loop between them. Mirrors merged in sort_keys.py.
+export function* merged(
+  runs: readonly (readonly string[])[],
+  cfg: SortConfig,
+): Generator<string, void, undefined> {
   const heads = runs.map(() => 0)
   const order: number[] = []
   for (let run = 0; run < runs.length; run++) {
@@ -521,14 +525,13 @@ export function mergeLines(runs: readonly (readonly string[])[], cfg: SortConfig
     while (slot > 0 && mergeBefore(runs, heads, run, order[slot - 1] ?? 0, cfg)) slot -= 1
     order.splice(slot, 0, run)
   }
-  const merged: string[] = []
   let saved: string | null = null
   while (order.length > 0) {
     const run = order[0] ?? 0
     const lines = runs[run] ?? []
     const line = lines[heads[run] ?? 0] ?? ''
     if (!cfg.unique || saved === null || compareLines(saved, line, cfg) !== 0) {
-      merged.push(line)
+      yield line
       saved = line
     }
     heads[run] = (heads[run] ?? 0) + 1
@@ -545,5 +548,4 @@ export function mergeLines(runs: readonly (readonly string[])[], cfg: SortConfig
     }
     order.splice(0, lo, ...order.slice(1, lo), run)
   }
-  return merged
 }

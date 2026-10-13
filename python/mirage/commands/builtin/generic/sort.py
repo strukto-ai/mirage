@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
@@ -8,7 +8,7 @@ from mirage.commands.builtin.sort_keys import (
     SortConfig,
     build_config,
     compare_lines,
-    merge_lines,
+    merged,
     parse_keydef,
     sort_lines,
 )
@@ -20,11 +20,11 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
-from mirage.concurrency.worker import run_isolated
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
 from mirage.io.types import ByteSource, IOResult
+from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
 from mirage.utils.quote import shell_quote
 
@@ -35,6 +35,8 @@ CHECK_ARGS = (("quiet", "silent"), ("diagnose-first",))
 MULTIPLE_OUTPUTS = "sort: multiple output files specified"
 
 CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
+
+CHUNK = 128
 
 # sort.c's `sort_die` prefixes. GNU tests every input with
 # euidaccess(R_OK) before it reads any (`cannot read`), opens the output
@@ -296,6 +298,47 @@ def _label(path: PathSpec | None) -> str:
     return path.raw_path
 
 
+async def _drain(lines: Iterator[str], budget: YieldBudget) -> list[str]:
+    out: list[str] = []
+    for line in lines:
+        out.append(line)
+        await budget.run()
+    return out
+
+
+async def _ordered_records(
+    runs: list[list[str]], cfg: SortConfig, merge: bool
+) -> list[str]:
+    """The records in output order, worked out on the loop.
+
+    Sorting always ends, so it needs no worker, only steps a YieldBudget
+    paces: every CHUNK records sort as one step, then the sorted chunks
+    merge pairwise, a tie going to the earlier chunk, which is the order
+    one stable sort of every record gives, ``-u`` included. Under ``-m``
+    the inputs merge as given. A large sort shares the loop's core rather
+    than using another (strukto-ai/mirage#1590).
+
+    Args:
+        runs (list[list[str]]): one record list per input.
+        cfg (SortConfig): the comparison.
+        merge (bool): whether ``-m`` merges the inputs as given.
+    """
+    budget = YieldBudget()
+    if merge:
+        return await _drain(merged(runs, cfg), budget)
+    records = [record for run in runs for record in run]
+    chunks: list[list[str]] = []
+    for start in range(0, len(records), CHUNK):
+        chunks.append(sort_lines(records[start : start + CHUNK], cfg))
+        await budget.run()
+    while len(chunks) > 1:
+        chunks = [
+            await _drain(merged(chunks[i : i + 2], cfg), budget)
+            for i in range(0, len(chunks), 2)
+        ]
+    return chunks[0] if chunks else []
+
+
 async def _read_runs(
     paths: list[PathSpec],
     read_bytes: Callable[[PathSpec], Awaitable[bytes]],
@@ -429,12 +472,7 @@ async def sort_generic(
                 return b"", IOResult(stderr=error.encode(), exit_code=1)
         return b"", IOResult()
 
-    if parsed.merge:
-        ordered = await run_isolated(merge_lines, runs, cfg)
-    else:
-        ordered = await run_isolated(
-            sort_lines, [record for run in runs for record in run], cfg
-        )
+    ordered = await _ordered_records(runs, cfg, parsed.merge)
     separator = b"\x00" if parsed.zero_terminated else b"\n"
     output = separator.join(record.encode() for record in ordered)
     if ordered:

@@ -1,8 +1,6 @@
 const computations: Record<string, () => Promise<unknown>> = {
   scan: async () => (await import('../utils/regex_scan.ts')).scan,
   jqRunTexts: async () => (await import('../core/jq/eval.ts')).jqRunTexts,
-  sortLines: async () => (await import('../commands/builtin/sort_keys.ts')).sortLines,
-  mergeLines: async () => (await import('../commands/builtin/sort_keys.ts')).mergeLines,
   edScript: async () => (await import('../commands/builtin/diff_format.ts')).edScript,
   unifiedDiff: async () => (await import('../commands/builtin/diff_format.ts')).unifiedDiff,
   normalDiff: async () => (await import('../commands/builtin/diff_format.ts')).normalDiff,

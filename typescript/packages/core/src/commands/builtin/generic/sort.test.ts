@@ -18,6 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
+import { buildConfig, sortLines } from '../sort_keys.ts'
 import { parseFlags, sortGeneric } from './sort.ts'
 
 const DEC = new TextDecoder()
@@ -263,5 +264,30 @@ describe('sort inputs', () => {
       flags: { merge: true },
     })
     expect(two).toBe('b\nc\na\n')
+  })
+})
+
+describe('sort past one chunk', () => {
+  const words = ['b', 'a', 'B', '10', '9', 'c x', 'a y', 'a x']
+  const lines = Array.from(
+    { length: 128 * 5 + 3 },
+    (_, i) =>
+      `${words[i % words.length] ?? ''} ${words[(i * 7) % words.length] ?? ''} ${String(i % 5)}`,
+  )
+  it.each<CommandOpts['flags']>([
+    {},
+    { reverse: true },
+    { unique: true },
+    { numeric_sort: true, unique: true },
+    { key: ['2,2'], stable: true },
+    { ignore_case: true, unique: true, reverse: true },
+  ])('orders as one stable sort under %o', async (flags) => {
+    const [out] = await run({
+      paths: [spec('/data/in.txt')],
+      files: { '/data/in.txt': bytes(lines.join('\n')) },
+      flags,
+    })
+    const want = sortLines(lines, buildConfig(parseFlags(flags)))
+    expect(out).toBe(want.map((line) => line + '\n').join(''))
   })
 })

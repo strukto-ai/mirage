@@ -230,6 +230,18 @@ async def _diff_pair(
     walk: _Walk,
     absent: Absent = PRESENT,
 ) -> bytes:
+    """Diff two files' text in the format the flags choose.
+
+    The line diff runs on the loop at any size, with no yield inside it,
+    where TypeScript sends one past ``LOOP_BUDGET`` to a worker
+    (strukto-ai/mirage#1590).
+
+    Args:
+        path1 (PathSpec): the first file.
+        path2 (PathSpec): the second file.
+        walk (_Walk): the comparison's flags and readers.
+        absent (Absent): which sides read as an absent, empty file.
+    """
     flags = walk.flags
     name1 = _name(path1)
     name2 = _name(path2)

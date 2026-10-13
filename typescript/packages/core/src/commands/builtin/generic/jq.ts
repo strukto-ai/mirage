@@ -447,6 +447,10 @@ export function parseReport(failure: JqParseError, opts: JqOptions): string {
  * before each document it reads, so it stops after the run of the document
  * the failing read went on to, and the exit status is 2 whatever the runs
  * answered. `sources` are the inputs, in order, not yet opened.
+ *
+ * Every run goes to the invocation's worker, even a short one: a jq program
+ * can loop forever and jq-wasm cannot be interrupted, so no run is known to
+ * end (strukto-ai/mirage#1590).
  */
 export class MainLoop {
   private readonly worker = new Worker()

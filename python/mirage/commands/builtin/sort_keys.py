@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cmp_to_key, partial
 from typing import TypeAlias
@@ -578,7 +579,7 @@ def _merge_before(
     return c < 0 or (c == 0 and a < b)
 
 
-def merge_lines(runs: list[list[str]], cfg: SortConfig) -> list[str]:
+def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str]:
     """GNU sort's ``mergefps``: merge runs it trusts to be sorted already.
 
     The line emitted next is always the smallest head, a tie going to the
@@ -589,7 +590,8 @@ def merge_lines(runs: list[list[str]], cfg: SortConfig) -> list[str]:
     ``k`` runs costs ``log k`` comparisons a line. Under ``-u`` a line is
     dropped when it compares equal to the first line of the series it
     would extend, so only adjacent duplicates collapse: ``a b a`` stays
-    three lines.
+    three lines. Lines come one at a time, so a caller can yield to the
+    loop between them.
 
     Args:
         runs (list[list[str]]): one record list per input, in operand
@@ -605,7 +607,6 @@ def merge_lines(runs: list[list[str]], cfg: SortConfig) -> list[str]:
         ):
             slot -= 1
         order.insert(slot, run)
-    merged: list[str] = []
     saved: str | None = None
     while order:
         run = order[0]
@@ -615,7 +616,7 @@ def merge_lines(runs: list[list[str]], cfg: SortConfig) -> list[str]:
             or saved is None
             or compare_lines(saved, line, cfg) != 0
         ):
-            merged.append(line)
+            yield line
             saved = line
         heads[run] += 1
         if heads[run] == len(runs[run]):
@@ -629,4 +630,3 @@ def merge_lines(runs: list[list[str]], cfg: SortConfig) -> list[str]:
             else:
                 lo = probe + 1
         order[0:lo] = order[1:lo] + [run]
-    return merged

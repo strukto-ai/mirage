@@ -7,7 +7,7 @@ export interface Match {
   indices: RegExpExecArray['indices']
 }
 
-/** Evaluate the native regexp only inside an invocation-owned worker. */
+/** Evaluate the native regexp: in place within loopLimit, in the invocation's worker past it. */
 export function scan(
   source: string,
   flags: string,

@@ -8,7 +8,7 @@ from mirage.commands.builtin.sort_keys import (
     _extract,
     build_config,
     compare_lines,
-    merge_lines,
+    merged,
     parse_keydef,
     sort_lines,
 )
@@ -31,6 +31,10 @@ def _cfg(key_defs=None, **kw):
     )
     defaults.update(kw)
     return build_config(key_defs or [], **defaults)
+
+
+def _merge(runs, cfg):
+    return list(merged(runs, cfg))
 
 
 def _lines(text, key_defs=None, **kw):
@@ -533,11 +537,11 @@ class TestUniqueStopsAtTheKeys:
 
 class TestMergeLines:
     def test_a_run_is_never_reordered(self):
-        assert merge_lines([["b", "a"]], _cfg()) == ["b", "a"]
+        assert _merge([["b", "a"]], _cfg()) == ["b", "a"]
 
     def test_the_smallest_head_goes_first(self):
-        assert merge_lines([["c", "a"], ["b"]], _cfg()) == ["b", "c", "a"]
-        assert merge_lines([["a", "d"], ["b", "e"], ["c", "f"]], _cfg()) == [
+        assert _merge([["c", "a"], ["b"]], _cfg()) == ["b", "c", "a"]
+        assert _merge([["a", "d"], ["b", "e"], ["c", "f"]], _cfg()) == [
             "a",
             "b",
             "c",
@@ -548,26 +552,26 @@ class TestMergeLines:
 
     def test_a_tie_goes_to_the_earlier_run(self):
         runs = [["k 3"], ["k 1"], ["k 2"]]
-        assert merge_lines(runs, _cfg(["1,1"], stable=True)) == [
+        assert _merge(runs, _cfg(["1,1"], stable=True)) == [
             "k 3",
             "k 1",
             "k 2",
         ]
-        assert merge_lines(runs, _cfg(["1,1"])) == ["k 1", "k 2", "k 3"]
+        assert _merge(runs, _cfg(["1,1"])) == ["k 1", "k 2", "k 3"]
 
     def test_empty_runs_are_skipped(self):
-        assert merge_lines([[], ["b", "a"], []], _cfg()) == ["b", "a"]
-        assert merge_lines([[], []], _cfg()) == []
+        assert _merge([[], ["b", "a"], []], _cfg()) == ["b", "a"]
+        assert _merge([[], []], _cfg()) == []
 
     def test_unique_collapses_only_adjacent_duplicates(self):
         cfg = _cfg(unique=True)
-        assert merge_lines([["a", "b", "a"]], cfg) == ["a", "b", "a"]
-        assert merge_lines([["a", "b"], ["a", "c"]], cfg) == ["a", "b", "c"]
+        assert _merge([["a", "b", "a"]], cfg) == ["a", "b", "a"]
+        assert _merge([["a", "b"], ["a", "c"]], cfg) == ["a", "b", "c"]
 
     def test_unique_keeps_the_first_line_of_a_key_equal_series(self):
-        assert merge_lines([["x 1"], ["a 1"]], _cfg(["2,2"], unique=True)) == [
+        assert _merge([["x 1"], ["a 1"]], _cfg(["2,2"], unique=True)) == [
             "x 1"
         ]
-        assert merge_lines(
-            [["b"], ["B"]], _cfg(fold_case=True, unique=True)
-        ) == ["b"]
+        assert _merge([["b"], ["B"]], _cfg(fold_case=True, unique=True)) == [
+            "b"
+        ]

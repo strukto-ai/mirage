@@ -1,16 +1,23 @@
 import { Worker } from '../concurrency/worker.ts'
 import { foldsAsciiOnly } from './posix.ts'
-import type { Match } from './regex_scan.ts'
+import { loopLimit } from './regex_cost.ts'
+import { scan, type Match } from './regex_scan.ts'
 
 /**
- * Matches found in a worker, rendered here. Each subject is its own call, so
- * a slow subject sent ahead never holds back the answer for one before it.
+ * Matches found where each subject's worst case allows, rendered here. A
+ * subject within the pattern's loopLimit is scanned in place: its search
+ * cannot run past LOOP_BUDGET steps. Any other subject is its own call to the
+ * worker, which only that starts, so a slow subject sent ahead never holds
+ * back the answer for one before it, and a runaway search stays killable
+ * (strukto-ai/mirage#1590).
  */
 export class AsyncRegex extends RegExp {
   private readonly worker: Worker
   private readonly ownsWorker: boolean
+  private readonly limit: number
+  private readonly ascii: boolean
   private readonly cache = new Map<string, RegExpExecArray[]>()
-  private readonly sent = new Map<string, Promise<RegExpExecArray[]>>()
+  private readonly sent = new Map<string, Promise<Match[]>>()
   constructor(
     private readonly original: RegExp,
     private readonly signal?: AbortSignal,
@@ -20,9 +27,14 @@ export class AsyncRegex extends RegExp {
     super(original.source, original.flags)
     this.ownsWorker = worker === undefined
     this.worker = worker ?? new Worker()
+    this.limit = loopLimit(original)
+    this.ascii = foldsAsciiOnly(original)
   }
 
-  /** Fetch `text`'s matches, sending the subjects buffered behind it along. */
+  /**
+   * Fetch `text`'s matches, sending the subjects buffered behind it that are
+   * past the limit along.
+   */
   async prepare(text: string, following?: () => string[]): Promise<void> {
     const cached = this.cache.get(text)
     if (cached !== undefined) {
@@ -30,45 +42,51 @@ export class AsyncRegex extends RegExp {
       this.cache.set(text, cached)
       return
     }
+    if (text.length <= this.limit) {
+      this.signal?.throwIfAborted()
+      const { source, flags } = this.original
+      this.remember(text, scan(source, flags, this.ascii, text, this.allMatches))
+    } else await this.fetch(text, following)
+    while (this.cache.size > 32) this.cache.delete(this.cache.keys().next().value ?? '')
+  }
+
+  private async fetch(text: string, following?: () => string[]): Promise<void> {
     if (!this.sent.has(text))
       for (const subject of [text, ...(following?.() ?? [])])
-        if (!this.cache.has(subject) && !this.sent.has(subject))
+        if (subject.length > this.limit && !this.cache.has(subject) && !this.sent.has(subject))
           this.sent.set(subject, this.scan(subject))
     // Answers come in order, so every subject sent before `text` has one too.
     for (const [subject, matches] of this.sent) {
       this.sent.delete(subject)
-      this.cache.set(subject, await matches)
+      this.remember(subject, await matches)
       if (subject === text) break
     }
-    while (this.cache.size > 32) this.cache.delete(this.cache.keys().next().value ?? '')
   }
 
-  private scan(subject: string): Promise<RegExpExecArray[]> {
-    const matches = this.worker
-      .call<Match[]>(
-        'scan',
-        [
-          this.original.source,
-          this.original.flags,
-          foldsAsciiOnly(this.original),
-          subject,
-          this.allMatches,
-        ],
-        this.signal,
-      )
-      .then((found) =>
-        found.map((match) => {
-          const native = match.values as RegExpExecArray
-          native.index = match.index
-          native.input = subject
-          if (match.groups !== undefined) native.groups = match.groups
-          if (match.indices !== undefined) native.indices = match.indices
-          return native
-        }),
-      )
+  private scan(subject: string): Promise<Match[]> {
+    const { source, flags } = this.original
+    const matches = this.worker.call<Match[]>(
+      'scan',
+      [source, flags, this.ascii, subject, this.allMatches],
+      this.signal,
+    )
     // prepare awaits it in order; one it never reaches is dropped unread.
     matches.catch(() => undefined)
     return matches
+  }
+
+  private remember(subject: string, found: Match[]): void {
+    this.cache.set(
+      subject,
+      found.map((match) => {
+        const native = match.values as RegExpExecArray
+        native.index = match.index
+        native.input = subject
+        if (match.groups !== undefined) native.groups = match.groups
+        if (match.indices !== undefined) native.indices = match.indices
+        return native
+      }),
+    )
   }
 
   matches(text: string): RegExpExecArray[] {

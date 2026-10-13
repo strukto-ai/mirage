@@ -3,7 +3,13 @@ from collections.abc import Awaitable, Callable
 import pytest
 
 from mirage.commands.builtin.errors import SortKeyError
-from mirage.commands.builtin.generic.sort import parse_flags, sort_generic
+from mirage.commands.builtin.generic.sort import (
+    CHUNK,
+    _config,
+    parse_flags,
+    sort_generic,
+)
+from mirage.commands.builtin.sort_keys import sort_lines
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult, materialize
 from mirage.shell.descriptors import unreadable_stdin
@@ -251,3 +257,32 @@ async def test_merge_trusts_its_inputs_and_never_reorders_one():
         flags={"merge": True},
     )
     assert await materialize(stdout) == b"b\nc\na\n"
+
+
+WORDS = ["b", "a", "B", "10", "9", "c x", "a y", "a x"]
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {},
+        {"reverse": True},
+        {"unique": True},
+        {"numeric_sort": True, "unique": True},
+        {"key": ["2,2"], "stable": True},
+        {"ignore_case": True, "unique": True, "reverse": True},
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_sort_past_one_chunk_orders_as_one_stable_sort(flags):
+    lines = [
+        f"{WORDS[i % len(WORDS)]} {WORDS[i * 7 % len(WORDS)]} {i % 5}"
+        for i in range(CHUNK * 5 + 3)
+    ]
+    stdout, _ = await sort_generic(
+        [_spec("/data/in.txt")],
+        read_bytes=_reader({"/data/in.txt": "\n".join(lines).encode()}),
+        flags=flags,
+    )
+    want = sort_lines(lines, _config(parse_flags(flags)))
+    assert (await materialize(stdout)).decode().splitlines() == want

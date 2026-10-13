@@ -34,7 +34,8 @@ def scan(
     all_matches: bool = True,
     restart: bool = False,
 ) -> list[tuple[tuple[int, int], ...]]:
-    """Each match's group spans, found where the engine cannot block the loop.
+    """Each match's group spans: in place for a subject within the
+    pattern's ``loop_limit``, in a worker for any other.
 
     Args:
         pattern (re.Pattern[str]): the compiled host pattern.
