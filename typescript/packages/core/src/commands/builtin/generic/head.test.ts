@@ -18,6 +18,12 @@ import type { CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { headGeneric } from './head.ts'
 
+// A first pull that stalls for 2 s, then returns a line.
+async function* stalled(): AsyncIterable<Uint8Array> {
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  yield new TextEncoder().encode('late\n')
+}
+
 describe('headGeneric line counts', () => {
   // Every pull is ready and no line ends, so only the scan's own checkpoint
   // lets the abort timer run.
@@ -83,10 +89,6 @@ describe('headGeneric line counts', () => {
   it.each([{ lines: '1' }, { bytes: '1' }])(
     '%o ends a stalled pull at the abort',
     async (flags) => {
-      async function* stalled(): AsyncIterable<Uint8Array> {
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-        yield new TextEncoder().encode('late\n')
-      }
       const abort = new AbortController()
       const opts = { stdin: stalled(), flags, cwd: '/', vfs: {}, signal: abort.signal }
       const result = await headGeneric(

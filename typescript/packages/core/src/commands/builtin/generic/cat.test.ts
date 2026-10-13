@@ -23,6 +23,12 @@ import { catGeneric } from './cat.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
+// A first pull that stalls for 2 s, then returns a line.
+async function* stalled(): AsyncIterable<Uint8Array> {
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  yield ENC.encode('late\n')
+}
+
 const FILES: Record<string, string> = {
   '/a.txt': 'a1\na2\na3\n',
   '/b.txt': 'b1\nb2\n',
@@ -199,10 +205,6 @@ describe('displayLines flags', () => {
   // A backend cat calls the scan without the factory's guard, so a pull that
   // stalls must still lose to the abort, and its late line must not print.
   it('ends a stalled pull at the abort', async () => {
-    async function* stalled(): AsyncIterable<Uint8Array> {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      yield ENC.encode('late\n')
-    }
     const abort = new AbortController()
     const result = await catGeneric(
       [],
