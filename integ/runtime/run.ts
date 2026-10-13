@@ -343,22 +343,6 @@ class RedactReads implements TestPolicy<VfsResultContext> {
   }
 }
 
-class OpReadCap implements TestPolicy<VfsResultContext> {
-  readonly hook = 'postVfs'
-  private readonly suffix: string
-  private readonly maxBytes: number
-  constructor(spec: PolicySpec) {
-    this.suffix = spec.suffix ?? ''
-    this.maxBytes = spec.max_bytes ?? 0
-  }
-  decide(ctx: VfsResultContext): Action | null {
-    if (ctx.call.name === 'read' && ctx.path.virtual.endsWith(this.suffix)) {
-      return new Limit({ maxBytes: this.maxBytes })
-    }
-    return null
-  }
-}
-
 class LineCap implements TestPolicy<ExecuteResultContext> {
   readonly hook = 'postExecute'
   private readonly limit: Limit
@@ -385,7 +369,6 @@ const POLICY_KINDS: Record<string, new (spec: PolicySpec) => TestPolicy<never>> 
   lock_writes: LockWrites,
   seal_reads: SealReads,
   redact_reads: RedactReads,
-  op_read_cap: OpReadCap,
   line_cap: LineCap,
   boom: Boom,
 }

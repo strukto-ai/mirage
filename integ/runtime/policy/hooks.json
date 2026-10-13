@@ -205,7 +205,7 @@
       ]
     },
     {
-      "id": "hook_post_vfs_cap_and_deny_wins",
+      "id": "hook_post_vfs_deny_wins_and_a_read_is_never_cut",
       "world": {
         "mounts": {
           "/ram": {
@@ -214,15 +214,15 @@
               "big.log": "abcdefghij\n",
               "note.txt": "abcdefghij\n",
               "secret.log": "TOPSECRET plans\n"
+            },
+            "limits": {
+              "read": {
+                "max_bytes": 5
+              }
             }
           }
         },
         "policies": [
-          {
-            "name": "op_read_cap",
-            "suffix": ".log",
-            "max_bytes": 5
-          },
           {
             "name": "redact_reads",
             "marker": "TOPSECRET"
@@ -233,7 +233,7 @@
         {
           "read_op": "/ram/big.log",
           "expect": {
-            "content": "abcde"
+            "content": "abcdefghij\n"
           }
         },
         {

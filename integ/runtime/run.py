@@ -298,21 +298,6 @@ class RedactReads(Policy):
         return None
 
 
-class OpReadCap(Policy):
-    """Test-only post_vfs policy: cap read bytes on a path suffix."""
-
-    HOOK = "post_vfs"
-
-    def __init__(self, spec: dict[str, Any]) -> None:
-        self._suffix = spec["suffix"]
-        self._max_bytes = spec["max_bytes"]
-
-    def decide(self, ctx: VfsResultContext) -> Limit | None:
-        if ctx.call.name == "read" and ctx.path.virtual.endswith(self._suffix):
-            return Limit(max_bytes=self._max_bytes)
-        return None
-
-
 class LineCap(Policy):
     """Test-only post_execute policy: bound every line's output."""
 
@@ -345,7 +330,6 @@ POLICY_KINDS = {
     "lock_writes": LockWrites,
     "seal_reads": SealReads,
     "redact_reads": RedactReads,
-    "op_read_cap": OpReadCap,
     "line_cap": LineCap,
     "boom": Boom,
 }
