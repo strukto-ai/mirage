@@ -353,6 +353,28 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
+  it('keeps the rendering of a removed file for a reader beside a writer', async () => {
+    // A writable open beside it reads the stored bytes, and the reader still
+    // sees what the mount renders, as it did before the removal.
+    const vfs = render(new RAMVFS(), '.tally', () =>
+      Promise.resolve(new TextEncoder().encode('rendered')),
+    )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/b.tally', 'stored')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const reader = await fs.promises.open('/data/b.tally', 'r')
+    const writer = await fs.promises.open('/data/b.tally', 'r+')
+    await fs.promises.unlink('/data/b.tally')
+    const seen = await reader.read(Buffer.alloc(8), 0, 8, 0)
+    const own = await writer.read(Buffer.alloc(6), 0, 6, 0)
+    expect(seen.buffer.toString('utf8', 0, seen.bytesRead)).toBe('rendered')
+    expect(own.buffer.toString('utf8', 0, own.bytesRead)).toBe('stored')
+    await reader.close()
+    await writer.close()
+    await ws.close()
+  })
+
   it('keeps a handle through a rename onto its own name', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

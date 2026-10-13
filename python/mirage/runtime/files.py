@@ -24,7 +24,7 @@ from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.handles import FlushStep
+from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
@@ -145,6 +145,33 @@ class RuntimeFiles:
             context.resolver,
             None if links is None else links.resolve,
         )
+
+    def kept(self, path: str, *, stored: bool, rendered: bool) -> Kept:
+        """What the handles open on ``path`` keep once its name goes: the
+        stored bytes for one that writes, the rendering for one that only
+        reads, read once and shared when the two agree. A read that fails
+        is kept as the error their later reads report, so the removal
+        still goes ahead.
+
+        Args:
+            path (str): guest-absolute virtual path.
+            stored (bool): a handle that writes is open on it.
+            rendered (bool): a handle that only reads is open on it.
+        """
+        kept = Kept()
+        try:
+            raw = self.read(path, raw=True) if stored else None
+            shown = self.read(path) if rendered else None
+        except OSError as err:
+            logger.warning("keeping %s before it goes failed: %r", path, err)
+            kept.error = err
+            return kept
+        if raw is not None:
+            kept.data = raw
+            kept.rendering = shown if shown not in (None, raw) else None
+        elif shown is not None:
+            kept.data = shown
+        return kept
 
     def walked(self, path: str, *, follow: bool = True) -> str:
         """The path an op on ``path`` lands on once the namespace's links

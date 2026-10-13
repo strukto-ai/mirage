@@ -30,7 +30,7 @@ import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { CycleError, resolvePath } from '../utils/path.ts'
-import type { FlushStep } from './handles/index.ts'
+import type { FlushStep, Kept } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import type { RuntimeContext } from './binding.ts'
@@ -151,6 +151,37 @@ export class RuntimeFiles {
       context.resolver,
       links === undefined ? null : links.resolve.bind(links),
     )
+  }
+
+  /**
+   * What the handles open on `path` keep once its name goes: the stored
+   * bytes for one that writes, the rendering for one that only reads, read
+   * once and shared when the two agree. A read that fails is kept as the
+   * error their later reads report, so the removal still goes ahead.
+   * Mirrors Python's RuntimeFiles.kept.
+   */
+  async kept(path: string, opts: { stored: boolean; rendered: boolean }): Promise<Kept> {
+    const kept: Kept = { data: new Uint8Array(), rendering: null, error: null }
+    let raw: Uint8Array | null = null
+    let shown: Uint8Array | null = null
+    try {
+      if (opts.stored) raw = await this.read(path, { raw: true })
+      if (opts.rendered) shown = await this.read(path)
+    } catch (err) {
+      console.warn(`runtime files: keeping ${path} before it goes failed`, err)
+      kept.error = err instanceof Error ? err : new Error(String(err))
+      return kept
+    }
+    if (raw !== null) {
+      kept.data = raw
+      const seen = raw
+      const same =
+        shown !== null && shown.length === seen.length && shown.every((b, i) => b === seen[i])
+      kept.rendering = shown === null || same ? null : shown
+    } else if (shown !== null) {
+      kept.data = shown
+    }
+    return kept
   }
 
   /**

@@ -23,7 +23,7 @@ from mirage.commands.builtin.utils.paths import walk_spelling
 from mirage.errors.fs import fs_error
 from mirage.errors.types import FsCondition
 from mirage.runtime.files import RuntimeFiles
-from mirage.runtime.handles import FileHandle, Kept
+from mirage.runtime.handles import FileHandle, Kept, apply_flush
 from mirage.runtime.handles.mode import OpenMode, parse_mode
 from mirage.runtime.open import apply_open
 from mirage.runtime.python.host.file import (
@@ -206,11 +206,15 @@ class Descriptors:
             offset (int): where the range starts.
             size (int | None): how many bytes; None reads to the end.
         """
-        if desc.kept is not None:
-            if desc.kept.error is not None:
-                raise desc.kept.error
+        kept = desc.kept
+        if kept is not None:
+            if kept.error is not None:
+                raise kept.error
             end = None if size is None else offset + size
-            return desc.kept.data[offset:end]
+            view = (
+                kept.data if raw or kept.rendering is None else kept.rendering
+            )
+            return view[offset:end]
         return syscall(self._adapter.read)(
             desc.path, offset=offset, size=size, raw=raw
         )
@@ -328,7 +332,9 @@ class Descriptors:
             return
         if desc.kept is not None:
             if handle.dirty:
-                desc.kept.data = handle.pread(0, handle.size)
+                desc.kept.data = apply_flush(
+                    desc.kept.data, handle.flush_plan()
+                )
                 handle.settle(functools.partial(self._fetch, desc, True))
             return
         steps = handle.flush_plan()
@@ -368,9 +374,9 @@ class Descriptors:
 
     def hold(self, path: str) -> list[tuple[Descriptor, Kept]]:
         """Read what the files open on ``path`` need before its name is
-        removed or replaced; ``keep`` them once it has gone. They share one
-        read, and a read that fails (a policy refusing it, say) is kept as
-        the error later reads report, so the removal it allows goes ahead.
+        removed or replaced; ``keep`` them once it has gone. They share
+        what ``RuntimeFiles.kept`` reads, so a read that fails (a policy
+        refusing it, say) still lets the removal it allows go ahead.
 
         Args:
             path (str): the path about to go.
@@ -383,17 +389,19 @@ class Descriptors:
             and desc.kept is None
             and desc.handle is not None
         ]
-        kept = Kept()
-        # A file no descriptor can read needs nothing kept.
-        if any(desc.facts.readable for desc in held):
-            raw = any(desc.facts.writable for desc in held)
-            try:
-                kept.data = syscall(self._adapter.read)(path, raw=raw)
-            except OSError as err:
-                logger.warning(
-                    "host: keeping %s before it goes failed: %r", path, err
-                )
-                kept.error = err
+        if not held:
+            return []
+        # A descriptor that cannot read needs nothing kept for it.
+        kept = syscall(self._adapter.kept)(
+            path,
+            stored=any(
+                desc.facts.writable and desc.facts.readable for desc in held
+            ),
+            rendered=any(
+                desc.facts.readable and not desc.facts.writable
+                for desc in held
+            ),
+        )
         return [(desc, kept) for desc in held]
 
     @staticmethod

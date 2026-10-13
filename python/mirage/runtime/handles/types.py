@@ -37,10 +37,15 @@ class Kept:
     shared by every handle open on it, as POSIX keeps one inode for them.
 
     Args:
-        data (bytes): the file's bytes, with what its handles landed since.
+        data (bytes): the stored bytes, with what its handles landed since.
+        rendering (bytes | None): what a handle that only reads sees, when
+            the mount renders the file other than it stores it; None when
+            the two agree, so a reader reads ``data`` and every write
+            landed on it.
         error (OSError | None): why its bytes could not be read before
             the name went, which every later read reports.
     """
 
     data: bytes = b""
+    rendering: bytes | None = None
     error: OSError | None = None

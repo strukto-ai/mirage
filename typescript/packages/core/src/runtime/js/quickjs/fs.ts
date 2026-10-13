@@ -21,7 +21,7 @@ import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
-import { FileHandle, FileTable, type Kept, type OpenMode } from '../../handles/index.ts'
+import { applyFlush, FileHandle, FileTable, type Kept, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { VFSStat } from '../../types.ts'
@@ -125,32 +125,18 @@ export function installQuickJsFs(
   }
 
   // Read what the files open on `path` need before its name is removed or
-  // replaced; `keep` them once it has gone. They share one read, and a read
-  // that fails is kept as the error later reads report, so the removal
-  // still goes ahead. A file no stream can read needs nothing kept.
+  // replaced; `keep` them once it has gone. They share what
+  // RuntimeFiles.kept reads, so a read that fails still lets the removal go
+  // ahead. A stream that cannot read needs nothing kept for it.
   const hold = async (bound: RuntimeFiles, path: string): Promise<[Place, Kept][]> => {
     const named = bound.walked(path, false)
     const open = [...places.values()].filter((p) => p.path === named && p.kept === null)
-    const kept: Kept = { data: new Uint8Array(), error: null }
-    if (open.some((p) => p.readable)) {
-      try {
-        kept.data = await bound.read(named, { raw: open.some((p) => p.raw) })
-      } catch (err) {
-        console.warn(`quickjs: keeping ${named} before it goes failed`, err)
-        kept.error = err instanceof Error ? err : new Error(String(err))
-      }
-    }
+    if (open.length === 0) return []
+    const kept = await bound.kept(named, {
+      stored: open.some((p) => p.readable && p.raw),
+      rendered: open.some((p) => p.readable && !p.raw),
+    })
     return open.map((place) => [place, kept])
-  }
-  // The whole of what a stream holds, its writes over the stored bytes,
-  // which a read answers only once the bytes are in hand.
-  const whole = async (file: FileHandle): Promise<Uint8Array> => {
-    const pos = file.pos
-    file.pos = 0
-    while (file.lacks(-1)) await file.fill(-1)
-    const data = file.pread(0, file.size)
-    file.pos = pos
-    return data
   }
   const keep = (held: [Place, Kept][]): void => {
     for (const [place, kept] of held) place.kept = kept
@@ -272,9 +258,8 @@ export function installQuickJsFs(
                 )
               }
               if (kept.error !== null) return Promise.reject(kept.error)
-              return Promise.resolve(
-                kept.data.slice(offset, size === null ? undefined : offset + size),
-              )
+              const view = mode.writable || kept.rendering === null ? kept.data : kept.rendering
+              return Promise.resolve(view.slice(offset, size === null ? undefined : offset + size))
             },
         { size: row?.size ?? 0, writable: mode.writable, append: mode.append },
       )
@@ -300,7 +285,7 @@ export function installQuickJsFs(
     if (file === undefined || place === undefined) return ctx.undefined
     if (!file.dirty || files === null) return ctx.undefined
     if (place.kept === null) await files.flush(place.path, file.flushPlan())
-    else place.kept.data = await whole(file)
+    else place.kept.data = applyFlush(place.kept.data, file.flushPlan())
     return ctx.undefined
   })
 
@@ -457,7 +442,9 @@ export function installQuickJsFs(
     // The dispatcher refuses a pair on different mounts with EXDEV, which this
     // engine numbers -75, as the real engine does.
     try {
-      if (src === dst) {
+      // A rename onto its own file changes nothing, its streams included,
+      // whichever spelling (a link above the name) reached it.
+      if (files.walked(src, false) === files.walked(dst, false)) {
         await files.rename(src, dst)
         return ctx.newNumber(0)
       }

@@ -27,12 +27,15 @@ export type FileFetch = (offset: number, size: number | null) => Promise<Uint8Ar
 
 /**
  * What a file still holds once its name was removed or replaced, shared by
- * every handle open on it as POSIX keeps one inode for them: its bytes with
- * what those handles landed since, or why its bytes could not be read
- * before the name went, which every later read reports. Mirrors Python's
- * `Kept`.
+ * every handle open on it as POSIX keeps one inode for them. `data` is the
+ * stored bytes with what its handles landed since; `rendering` is what a
+ * handle that only reads sees when the mount renders the file other than it
+ * stores it, null when the two agree (a reader then reads `data` and every
+ * write landed on it); `error` is why its bytes could not be read before the
+ * name went, which every later read reports. Mirrors Python's `Kept`.
  */
 export interface Kept {
   data: Uint8Array
+  rendering: Uint8Array | null
   error: Error | null
 }

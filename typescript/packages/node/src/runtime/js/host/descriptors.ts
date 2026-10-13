@@ -18,6 +18,7 @@ import { walkSpelling } from '@struktoai/mirage-core/commands/builtin/utils/path
 import { ebadf, eisdir, eloop, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import type { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 import { FileHandle } from '@struktoai/mirage-core/runtime/handles/file_handle'
+import { applyFlush } from '@struktoai/mirage-core/runtime/handles/flush'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/mode'
 import type { FileFetch, Kept } from '@struktoai/mirage-core/runtime/handles/types'
 import { applyOpen } from '@struktoai/mirage-core/runtime/open'
@@ -231,7 +232,8 @@ export class Descriptors {
       const kept = desc.kept
       if (kept !== null) {
         if (kept.error !== null) return Promise.reject(kept.error)
-        return Promise.resolve(kept.data.slice(offset, size === null ? undefined : offset + size))
+        const view = raw || kept.rendering === null ? kept.data : kept.rendering
+        return Promise.resolve(view.slice(offset, size === null ? undefined : offset + size))
       }
       return this.files.read(desc.path, size === null ? { raw } : { offset, size, raw })
     }
@@ -245,7 +247,7 @@ export class Descriptors {
     if (handle === null) return
     if (desc.kept !== null) {
       if (handle.dirty) {
-        desc.kept.data = await readAt(handle, 0, handle.size)
+        desc.kept.data = applyFlush(desc.kept.data, handle.flushPlan())
         handle.settle(this.fetch(desc, true))
       }
       return
@@ -279,26 +281,20 @@ export class Descriptors {
   }
 
   /** Read what the descriptors open on `path` need before its name is
-   * removed or replaced; `keep` them once it has gone. They share one read,
-   * and a read that fails (a policy refusing it, say) is kept as the error
-   * later reads report, so the removal it allows goes ahead. */
+   * removed or replaced; `keep` them once it has gone. They share what
+   * RuntimeFiles.kept reads, so a read that fails (a policy refusing it,
+   * say) still lets the removal it allows go ahead. A descriptor that
+   * cannot read needs nothing kept for it. */
   async hold(path: string): Promise<[Descriptor, Kept][]> {
     const named = this.walked(path, false)
     const held = [...this.table.values()].filter(
       (desc) => desc.path === named && desc.kept === null && desc.handle !== null,
     )
-    const kept: Kept = { data: new Uint8Array(), error: null }
-    // A file no descriptor can read needs nothing kept.
-    if (held.some((desc) => desc.mode.readable)) {
-      try {
-        kept.data = await this.files.read(named, {
-          raw: held.some((desc) => desc.mode.writable),
-        })
-      } catch (err) {
-        console.warn(`host: keeping ${named} before it goes failed`, err)
-        kept.error = err instanceof Error ? err : new Error(String(err))
-      }
-    }
+    if (held.length === 0) return []
+    const kept = await this.files.kept(named, {
+      stored: held.some((desc) => desc.mode.readable && desc.mode.writable),
+      rendered: held.some((desc) => desc.mode.readable && !desc.mode.writable),
+    })
     return held.map((desc) => [desc, kept])
   }
 

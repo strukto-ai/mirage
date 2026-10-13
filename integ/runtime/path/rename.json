@@ -458,6 +458,94 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_rename_onto_its_own_file_through_a_link_keeps_its_handles",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "real/f": "hello"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/real /data/alias",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nf = open('/data/real/f', 'r+')\nos.rename('/data/real/f', '/data/alias/f')\nf.write('X')\nf.close()\nprint(open('/data/real/f').read())",
+            "js": "const f = std.open('/data/real/f', 'r+')\nconsole.log(os.rename('/data/real/f', '/data/alias/f'))\nf.puts('X')\nf.close()\nconsole.log(std.open('/data/real/f', 'r').readAsString())",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/real/f', 'r+')\nawait fs.rename('/data/real/f', '/data/alias/f')\nawait f.write('X', 0)\nawait f.close()\nconsole.log(await fs.readFile('/data/real/f', 'utf8'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0\nXello\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "writers_on_a_removed_file_keep_each_others_writes",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "w.txt": "hello"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\na = os.open('/data/w.txt', os.O_RDWR)\nb = os.open('/data/w.txt', os.O_RDWR)\nc = os.open('/data/w.txt', os.O_RDONLY)\nos.read(b, 5)\nos.unlink('/data/w.txt')\nos.write(a, b'A')\nos.close(a)\nos.lseek(b, 4, 0)\nos.write(b, b'B')\nos.close(b)\nprint(os.read(c, 5).decode())\nos.close(c)",
+            "js": "const a = std.open('/data/w.txt', 'r+')\nconst b = std.open('/data/w.txt', 'r+')\nconst c = std.open('/data/w.txt', 'r')\nb.readAsString()\nos.remove('/data/w.txt')\na.puts('A')\na.close()\nb.seek(4, std.SEEK_SET)\nb.puts('B')\nb.close()\nconsole.log(c.readAsString())\nc.close()",
+            "node": "const fs = require('node:fs').promises\nconst a = await fs.open('/data/w.txt', 'r+')\nconst b = await fs.open('/data/w.txt', 'r+')\nconst c = await fs.open('/data/w.txt', 'r')\nawait b.read(Buffer.alloc(5), 0, 5, 0)\nawait fs.unlink('/data/w.txt')\nawait a.write('A', 0)\nawait a.close()\nawait b.write('B', 4)\nawait b.close()\nconst { bytesRead, buffer } = await c.read(Buffer.alloc(5), 0, 5, 0)\nconsole.log(buffer.toString('utf8', 0, bytesRead))\nawait c.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "AellB\n"
+          }
+        }
+      ]
     }
   ]
 }

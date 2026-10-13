@@ -18,7 +18,7 @@ from typing import Any
 from mirage.errors.fs import einval, enoent, exdev
 from mirage.runtime.constants import ABSENT_PATH
 from mirage.runtime.files import RuntimeFiles
-from mirage.runtime.handles import FlushStep
+from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
@@ -320,6 +320,19 @@ class WasmView:
         """
         self._deny_build(path)
         self._core_call("symlink", path, target=target)
+
+    def kept(self, path: str, *, stored: bool, rendered: bool) -> Kept:
+        """What the fds open on ``path`` keep once its name goes
+        (``RuntimeFiles.kept``); nothing when no workspace is attached.
+
+        Args:
+            path (str): guest-absolute path.
+            stored (bool): an fd that writes is open on it.
+            rendered (bool): an fd that only reads is open on it.
+        """
+        if self._files is None:
+            return Kept()
+        return self._files.kept(path, stored=stored, rendered=rendered)
 
     def walked(self, path: str, *, follow: bool = True) -> str:
         """Where the namespace's links lead ``path`` (``RuntimeFiles.walked``);

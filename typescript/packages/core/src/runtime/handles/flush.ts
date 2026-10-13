@@ -60,3 +60,34 @@ export function planFlush(facts: {
   if (size > end) steps.push({ kind: 'truncate', length: size })
   return steps
 }
+
+/**
+ * The bytes a file holds once `steps` land on `data`, as a mount takes a
+ * closing handle's plan: only what the handle changed, so what another
+ * handle landed between its ranges stays. Mirrors Python's `apply_flush`.
+ */
+export function applyFlush(data: Uint8Array, steps: readonly FlushStep[]): Uint8Array {
+  let out = data
+  for (const step of steps) {
+    const bytes = step.data ?? new Uint8Array()
+    if (step.kind === 'write') {
+      out = bytes.slice()
+    } else if (step.kind === 'append') {
+      const next = new Uint8Array(out.length + bytes.length)
+      next.set(out)
+      next.set(bytes, out.length)
+      out = next
+    } else if (step.kind === 'pwrite') {
+      const offset = step.offset ?? 0
+      const next = new Uint8Array(Math.max(out.length, offset + bytes.length))
+      next.set(out)
+      next.set(bytes, offset)
+      out = next
+    } else {
+      const next = new Uint8Array(step.length ?? 0)
+      next.set(out.subarray(0, next.length))
+      out = next
+    }
+  }
+  return out
+}

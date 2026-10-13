@@ -38,6 +38,7 @@ from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.driver_ops import ops as driver_ops
+from tests.fixtures.vfs_io import render
 
 from .conftest import make_ops_with_dir, run
 
@@ -90,6 +91,10 @@ HOST_FD_CALLS = frozenset(
 class _NoStats(Policy):
     async def pre_vfs(self, ctx):
         return Deny("no stat") if ctx.call.name == "stat" else None
+
+
+async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
+    return b"RENDERED"
 
 
 class _NoReads(Policy):
@@ -624,6 +629,23 @@ class TestDescriptors:
             patched.read(fd, 4)
         patched.close(fd)
         assert not patched.path.exists("/data/f.txt")
+
+    def test_a_reader_keeps_the_rendering_of_a_removed_file(self):
+        # A writable open beside it reads the stored bytes, and the reader
+        # still sees what the mount renders, as it did before the removal.
+        ws = Workspace(
+            {"/data/": render(RAMVFS(), ".tally", _read_tally)},
+            mode=MountMode.WRITE,
+        )
+        run(ws.vfs.write("/data/b.tally", b"STORED"))
+        patched = make_os_module(ws.vfs)
+        reader = patched.open("/data/b.tally", os.O_RDONLY)
+        writer = patched.open("/data/b.tally", os.O_RDWR)
+        patched.unlink("/data/b.tally")
+        assert patched.read(reader, 8) == b"RENDERED"
+        assert patched.read(writer, 6) == b"STORED"
+        patched.close(reader)
+        patched.close(writer)
 
     def test_a_rename_onto_its_own_name_keeps_the_descriptor(self):
         ops, patched = seeded()

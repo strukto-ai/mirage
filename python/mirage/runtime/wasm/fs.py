@@ -23,7 +23,7 @@ from typing import Any, Callable, Literal
 
 from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.handles import FileHandle, FileTable, Kept
+from mirage.runtime.handles import FileHandle, FileTable, Kept, apply_flush
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
 from mirage.runtime.stat import posix_stat
@@ -367,7 +367,7 @@ class WasiFs:
             if entry.kept is None:
                 self._fs.flush(entry.path, h.flush_plan())
             else:
-                entry.kept.data = h.pread(0, h.size)
+                entry.kept.data = apply_flush(entry.kept.data, h.flush_plan())
         return OK
 
     def close_all(self) -> list[str]:
@@ -671,7 +671,10 @@ class WasiFs:
         dst = self._path_arg(caller, dst_dirfd, dst_ptr, dst_length)
         if src is None or dst is None:
             return EBADF
-        if src == dst:
+        # A rename onto its own file changes nothing, its fds included,
+        # whichever spelling (a link above the name) reached it.
+        walked = self._fs.walked
+        if walked(src, follow=False) == walked(dst, follow=False):
             self._fs.rename(src, dst)
             return OK
         held = self._hold(dst)
@@ -704,18 +707,22 @@ class WasiFs:
             offset (int): where the range starts.
             size (int | None): how many bytes; None reads to the end.
         """
-        if entry.kept is not None:
-            if entry.kept.error is not None:
-                raise entry.kept.error
+        kept = entry.kept
+        if kept is not None:
+            if kept.error is not None:
+                raise kept.error
             end = None if size is None else offset + size
-            return entry.kept.data[offset:end]
+            view = (
+                kept.data if raw or kept.rendering is None else kept.rendering
+            )
+            return view[offset:end]
         return self._fs.read(entry.path, offset=offset, size=size, raw=raw)
 
     def _hold(self, path: str) -> list[tuple[FdEntry, Kept]]:
         """Read what the file fds open on ``path`` need before its name is
-        removed or replaced; ``_keep`` them once it has gone. The fds share
-        one read, and a read that fails is kept as the error later reads
-        report, so the removal itself still goes ahead.
+        removed or replaced; ``_keep`` them once it has gone. They share
+        what ``WasmView.kept`` reads, so a read that fails still lets the
+        removal go ahead.
 
         Args:
             path (str): the guest path about to go.
@@ -728,16 +735,13 @@ class WasiFs:
                 continue
             if entry.path == named:
                 entries.append((entry, h))
-        kept = Kept()
-        if any(h.base is not None for _, h in entries):
-            raw = any(h.writable for _, h in entries)
-            try:
-                kept.data = self._fs.read(named, raw=raw)
-            except OSError as err:
-                logger.warning(
-                    "wasi: keeping %s before it goes failed: %r", named, err
-                )
-                kept.error = err
+        if not entries:
+            return []
+        kept = self._fs.kept(
+            named,
+            stored=any(h.writable for _, h in entries),
+            rendered=any(not h.writable for _, h in entries),
+        )
         return [(entry, kept) for entry, _ in entries]
 
     @staticmethod
@@ -779,7 +783,7 @@ class WasiFs:
         if entry.kind != "file" or h is None or not h.dirty:
             return
         if entry.kept is not None:
-            entry.kept.data = h.pread(0, h.size)
+            entry.kept.data = apply_flush(entry.kept.data, h.flush_plan())
             h.settle(functools.partial(self._fetch, entry, True))
             return
         self._fs.flush(entry.path, h.flush_plan())

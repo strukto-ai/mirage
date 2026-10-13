@@ -59,3 +59,28 @@ def plan_flush(
     if size > end:
         steps.append(FlushStep("truncate", length=size))
     return steps
+
+
+def apply_flush(data: bytes, steps: Sequence[FlushStep]) -> bytes:
+    """The bytes a file holds once ``steps`` land on ``data``, as a mount
+    takes a closing handle's plan: only what the handle changed, so what
+    another handle landed between its ranges stays.
+
+    Args:
+        data (bytes): the file's bytes now.
+        steps (Sequence[FlushStep]): a handle's ``flush_plan()``.
+    """
+    out = bytearray(data)
+    for step in steps:
+        if step.kind == "write":
+            out = bytearray(step.data)
+        elif step.kind == "append":
+            out += step.data
+        elif step.kind == "pwrite":
+            if step.offset > len(out):
+                out += bytes(step.offset - len(out))
+            out[step.offset : step.offset + len(step.data)] = step.data
+        else:
+            del out[step.length :]
+            out += bytes(step.length - len(out))
+    return bytes(out)

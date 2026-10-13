@@ -19,7 +19,7 @@ from mirage.runtime.handles.file_handle import (
     write_runs,
 )
 from mirage.runtime.handles.file_table import FileTable
-from mirage.runtime.handles.flush import plan_flush
+from mirage.runtime.handles.flush import apply_flush, plan_flush
 from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.handles.types import FlushKind, FlushStep, Kept
 
@@ -30,6 +30,7 @@ __all__ = [
     "FlushKind",
     "FlushStep",
     "Kept",
+    "apply_flush",
     "overlaid",
     "parse_mode",
     "plan_flush",

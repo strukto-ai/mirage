@@ -183,8 +183,8 @@ def test_a_read_that_fails_as_a_name_goes_fails_the_reads_after(monkeypatch):
     # empty file: every read after it reports why.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     asyncio.run(ws.vfs.write("/data/f.txt", b"body"))
-    view = WasmView(files=RuntimeFiles(ws.vfs.dispatch, None))
-    wasi_fs = WasiFs(view, b"")
+    files = RuntimeFiles(ws.vfs.dispatch, None)
+    wasi_fs = WasiFs(WasmView(files=files), b"")
     entry = FdEntry(kind="file", path="/data/f.txt")
     entry.handle = FileHandle.opened(
         "/data/f.txt",
@@ -194,7 +194,7 @@ def test_a_read_that_fails_as_a_name_goes_fails_the_reads_after(monkeypatch):
         append=False,
     )
     wasi_fs._fds.add(entry)
-    monkeypatch.setattr(view, "read", _refuse_read)
+    monkeypatch.setattr(files, "read", _refuse_read)
     wasi_fs._keep(wasi_fs._hold("/data/f.txt"))
     with pytest.raises(PermissionError):
         entry.handle.read(4)
