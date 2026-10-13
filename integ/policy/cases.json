@@ -243,10 +243,10 @@
   },
   {
    "id": "pre_vfs_and_post_vfs_answer_for_each_vfs_call",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}, "command_limits": {"read": {"max_bytes": 3}}}}},
    "steps": [
     {"op": "exec", "command": "echo h > /data/held; echo k > /data/k; echo w > /data/w; echo 0123456789 > /data/big", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
-    {"op": "register_policy", "id": "files", "pre_vfs": {"/data/held": {"ask": "held needs a nod"}}, "post_vfs": {"/data/k": {"deny": "k is withheld"}, "/data/w": {"ask": "w needs review"}, "/data/big": {"limit": {"max_bytes": 3}}}},
+    {"op": "register_policy", "id": "files", "pre_vfs": {"/data/held": {"ask": "held needs a nod"}}, "post_vfs": {"/data/k": {"deny": "k is withheld"}, "/data/w": {"ask": "w needs review"}}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/held"}, "expect": {"errno": "EACCES", "reason": "held needs a nod"}},
     {"op": "asks", "expect": {"value": [{"command": "", "paths": ["/data/held"], "reason": "held needs a nod"}]}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/held"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "ask", "reason": "held needs a nod", "answers": [{"kind": "ask", "policy": "RulePolicy", "reason": "held needs a nod"}], "refusal": "pending", "error": "EACCES"}}},
@@ -260,7 +260,7 @@
     {"op": "asks", "expect": {"value": [{"command": "", "paths": ["/data/w"], "reason": "w needs review"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "vfs", "call": "read", "args": {"path": "/data/w"}, "expect": {"value": {"data_base64": "dwo="}}},
-    {"op": "vfs", "call": "read", "args": {"path": "/data/big"}, "expect": {"value": {"data_base64": "MDEy"}}},
+    {"op": "vfs", "call": "read", "args": {"path": "/data/big"}, "expect": {"value": {"data_base64": "MDEyMzQ1Njc4OQo="}}},
     {"op": "exec", "command": "cat /data/big", "expect": {"value": {"exit_code": 0, "stdout": "0123456789\n", "stderr": "", "refusal": null}}}
    ]
   },
