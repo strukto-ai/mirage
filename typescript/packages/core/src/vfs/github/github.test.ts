@@ -31,6 +31,7 @@ vi.mock('../../core/github/constants.ts', async () => {
 })
 
 import { blobSha, FakeGitHub } from '../../core/github/_test_util.ts'
+import type { GitHubTreeItem } from '../../core/github/client.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
@@ -39,12 +40,12 @@ import { RAMVFS } from '../ram/ram.ts'
 import { GitHubVFS } from './github.ts'
 
 const DEC = new TextDecoder()
-const TREE = [
+const TREE: GitHubTreeItem[] = [
   { path: 'top.txt', type: 'blob', sha: 'a', size: 2 },
   { path: 'empty', type: 'tree', sha: 'b' },
 ]
 
-function offline(tree: object[] = TREE): void {
+function offline(tree: GitHubTreeItem[] = TREE): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: string | URL | Request) => {

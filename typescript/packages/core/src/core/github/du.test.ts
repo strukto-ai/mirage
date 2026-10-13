@@ -24,7 +24,7 @@ import type { FlagValue } from '../../commands/spec/types.ts'
 import { BUILDER } from '../../commands/builtin/generic_bind/builders/du.ts'
 
 vi.mock('./tree.ts', async (importActual) => ({
-  ...(await importActual<object>()),
+  ...(await importActual<typeof import('./tree.ts')>()),
   ensureTree: vi.fn().mockResolvedValue(undefined),
 }))
 
