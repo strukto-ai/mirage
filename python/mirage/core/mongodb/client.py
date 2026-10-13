@@ -12,17 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from bson import Timestamp
 from pymongo import AsyncMongoClient
+from pymongo.errors import OperationFailure, PyMongoError
 
-from mirage.core.mongodb.types import EntityKind
+from mirage.core.mongodb.types import NOT_A_REPLICA_SET, EntityKind
 from mirage.vfs.mongodb.config import MongoDBConfig
 
 if TYPE_CHECKING:
     from mirage.accessor.mongodb import MongoDBAccessor
+
+logger = logging.getLogger(__name__)
 
 
 async def list_databases(
@@ -145,10 +149,11 @@ async def find_snapshot(
     collection: str,
     sort: list[tuple[str, int]],
     limit: int,
-) -> tuple[list[dict[str, Any]], Timestamp]:
+) -> tuple[list[dict[str, Any]], Timestamp] | None:
     """Documents read at one snapshot, and that snapshot's cluster time:
     a change stream started after it holds each insert the read does
-    not, and none it does.
+    not, and none it does. None from a server outside a replica set,
+    which takes no snapshot read and has no change stream.
 
     Args:
         client (AsyncMongoClient[Any]): the client.
@@ -158,23 +163,39 @@ async def find_snapshot(
         limit (int): how many documents, at least 1.
     """
     db = client[database]
-    reply = await db.command(
-        "find",
-        collection,
-        sort=dict(sort),
-        limit=limit,
-        batchSize=limit,
-        readConcern={"level": "snapshot"},
-    )
+    try:
+        reply = await db.command(
+            "find",
+            collection,
+            sort=dict(sort),
+            limit=limit,
+            batchSize=limit,
+            readConcern={"level": "snapshot"},
+        )
+    except OperationFailure as exc:
+        if exc.code != NOT_A_REPLICA_SET:
+            raise
+        logger.debug("No snapshot read on %s: %s", database, exc)
+        return None
     cursor = reply["cursor"]
     at = cursor["atClusterTime"]
     docs = list(cursor["firstBatch"])
-    while cursor["id"]:
-        reply = await db.command(
-            "getMore", cursor["id"], collection=collection
-        )
-        cursor = reply["cursor"]
-        docs.extend(cursor["nextBatch"])
+    try:
+        while cursor["id"]:
+            reply = await db.command(
+                "getMore", cursor["id"], collection=collection
+            )
+            cursor = reply["cursor"]
+            docs.extend(cursor["nextBatch"])
+    finally:
+        # A failed or cancelled batch leaves the server cursor open.
+        if cursor["id"]:
+            try:
+                await db.command(
+                    "killCursors", collection, cursors=[cursor["id"]]
+                )
+            except PyMongoError:
+                logger.debug("killCursors failed on %s", collection)
     return docs, at
 
 

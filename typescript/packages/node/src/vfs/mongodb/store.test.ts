@@ -125,12 +125,11 @@ describe('MongoDBStore', () => {
       .mockResolvedValueOnce({ cursor: { id: 7, atClusterTime: 't9', firstBatch: [{ _id: 3 }] } })
       .mockResolvedValueOnce({ cursor: { id: big, nextBatch: [{ _id: 2 }] } })
       .mockResolvedValueOnce({ cursor: { id: 0, nextBatch: [{ _id: 1 }] } })
-    const [found, at] = await store.findSnapshot('app', 'profiles', {
+    const snapshot = await store.findSnapshot('app', 'profiles', {
       limit: 3,
       sort: { _id: -1 },
     })
-    expect(found).toEqual([{ _id: 3 }, { _id: 2 }, { _id: 1 }])
-    expect(at).toBe('t9')
+    expect(snapshot).toEqual([[{ _id: 3 }, { _id: 2 }, { _id: 1 }], 't9'])
     expect(db.command.mock.calls).toEqual([
       [
         {
@@ -144,6 +143,36 @@ describe('MongoDBStore', () => {
       [{ getMore: 7n, collection: 'profiles' }],
       [{ getMore: big, collection: 'profiles' }],
     ])
+  })
+
+  // Mirrors test_find_snapshot_is_none_outside_a_replica_set and
+  // test_find_snapshot_raises_another_refusal.
+  it('findSnapshot is null outside a replica set and raises another refusal', async () => {
+    const store = new MongoDBStore('mongodb://h')
+    await store.listDatabases()
+    const db = clients[0]?.db() as { command: AnyMock }
+    const refusal = (code: number): Error => Object.assign(new Error('refused'), { code })
+    db.command.mockRejectedValueOnce(refusal(123)).mockRejectedValueOnce(refusal(13))
+    const options = { limit: 1, sort: { _id: -1 as const } }
+    expect(await store.findSnapshot('app', 'profiles', options)).toBeNull()
+    await expect(store.findSnapshot('app', 'profiles', options)).rejects.toMatchObject({
+      code: 13,
+    })
+  })
+
+  // Mirrors test_find_snapshot_closes_the_cursor_a_failed_batch_leaves.
+  it('findSnapshot closes the cursor a failed batch leaves', async () => {
+    const store = new MongoDBStore('mongodb://h')
+    await store.listDatabases()
+    const db = clients[0]?.db() as { command: AnyMock }
+    db.command
+      .mockResolvedValueOnce({ cursor: { id: 7, atClusterTime: 't1', firstBatch: [] } })
+      .mockRejectedValueOnce(new Error('gone'))
+      .mockResolvedValueOnce({ ok: 1 })
+    await expect(
+      store.findSnapshot('app', 'profiles', { limit: 2, sort: { _id: -1 } }),
+    ).rejects.toThrow('gone')
+    expect(db.command.mock.calls[2]).toEqual([{ killCursors: 'profiles', cursors: [7n] }])
   })
 
   it('listDatabases returns names', async () => {

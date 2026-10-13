@@ -210,9 +210,10 @@ export async function lineCount(
 /**
  * The last `n` documents of a collection, then each one inserted after them,
  * one documents.jsonl line each. Null for a view, which has no change stream,
- * and for any other file. The last documents are read at one snapshot and the
- * change stream holds each insert after it, so the two meet at one point: no
- * insert is lost or printed twice.
+ * for a server outside a replica set, which has none either, and for any other
+ * file. The last documents are read at one snapshot and the change stream holds
+ * each insert after it, so the two meet at one point: no insert is lost or
+ * printed twice.
  * Mirrors `follow` in `mirage/core/mongodb/stream.py`.
  */
 export async function follow(
@@ -227,10 +228,12 @@ export async function follow(
   const database = scope.slots.database ?? ''
   const name = scope.slots.name ?? ''
   const limit = n > 0 ? await docLimit(accessor, path, database, name, n) : 1
-  const [docs, after] = await findSnapshot(accessor, database, name, {
+  const snapshot = await findSnapshot(accessor, database, name, {
     limit,
     sort: { [PRIMARY_KEY]: -1 },
   })
+  if (snapshot === null) return null
+  const [docs, after] = snapshot
   return followed(accessor, database, name, after, docs.slice(0, n).reverse())
 }
 

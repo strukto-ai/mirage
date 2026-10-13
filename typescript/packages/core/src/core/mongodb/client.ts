@@ -93,7 +93,7 @@ export function findSnapshot<T = Record<string, unknown>>(
   database: string,
   collection: string,
   options: MongoFindOptions,
-): Promise<[T[], unknown]> {
+): Promise<[T[], unknown] | null> {
   return accessor.driver.findSnapshot<T>(database, collection, options)
 }
 

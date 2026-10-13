@@ -55,13 +55,14 @@ export interface MongoDriver {
   /**
    * Documents read at one snapshot, and that snapshot's cluster time: a change
    * stream started after it holds each insert the read does not, and none it
-   * does.
+   * does. Null from a server outside a replica set, which takes no snapshot
+   * read and has no change stream.
    */
   findSnapshot<T = Record<string, unknown>>(
     database: string,
     collection: string,
     options: MongoFindOptions,
-  ): Promise<[T[], unknown]>
+  ): Promise<[T[], unknown] | null>
   /** Each inserted document, after the cluster time `after` when given. */
   iterInserts<T = Record<string, unknown>>(
     database: string,

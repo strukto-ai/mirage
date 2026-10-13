@@ -11,7 +11,7 @@ from mirage.commands.builtin.generic.tail import (
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
-from mirage.errors.fs import efbig, enoent
+from mirage.errors.fs import eacces, efbig, enoent
 from mirage.io.stream import close_quietly
 from mirage.shell.console import Channel
 from mirage.types import (
@@ -224,20 +224,28 @@ async def test_tail_multi(read, n, headers, expected):
 
 
 @pytest.mark.asyncio
-async def test_tail_multi_heads_an_operand_before_reading_it():
-    release = asyncio.Event()
+async def test_tail_heads_no_operand_whose_open_is_refused():
+    def read(p):
+        async def opened():
+            if p.virtual == "/locked":
+                raise eacces(p)
+            yield b"ok\n"
 
-    async def slow():
-        await release.wait()
-        yield b"x\n"
+        return opened()
 
-    out = tail_multi(
-        _paths("/a"), read=lambda p: slow(), from_line=1, show_headers=True
+    fs = _Growing({"/locked": b"", "/small": b""})
+    stream, io = await tail_generic(
+        _paths("/locked", "/small"),
+        [],
+        CommandOpts(flags={"lines": "1"}),
+        fs.stat,
+        read,
     )
-    assert await asyncio.wait_for(out.__anext__(), 1) == b"==> /a <==\n"
-    release.set()
-    assert await out.__anext__() == b"x\n"
-    await out.aclose()
+    assert await _drain(stream) == b"==> /small <==\nok\n"
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"tail: cannot open '/locked' for reading: Permission denied\n"
+    )
 
 
 @pytest.mark.asyncio

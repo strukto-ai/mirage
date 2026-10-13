@@ -209,9 +209,10 @@ tail -n 10 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 tail -f "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 ```
 
-`tail -f` requires a replica set on MongoDB 5.0 or later, for the
-snapshot read and the change stream; Atlas already satisfies this. Views fall through to the non-streaming path because
-change streams aren't defined on views.
+`tail -f` follows inserts on a replica set on MongoDB 5.0 or later, for
+the snapshot read and the change stream; Atlas already satisfies this. On
+a server outside a replica set it polls, and so does a view, which has no
+change stream.
 
 ## Cache
 

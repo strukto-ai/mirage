@@ -49,6 +49,9 @@ class IndexType(StrEnum):
 
 PRIMARY_KEY = "_id"
 
+# The server error a snapshot read meets on a server outside a replica set.
+NOT_A_REPLICA_SET = 123
+
 RESOURCE_TYPE_DATABASE = "mongodb/database"
 RESOURCE_TYPE_COLLECTION = "mongodb/collection"
 RESOURCE_TYPE_VIEW = "mongodb/view"

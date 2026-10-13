@@ -49,6 +49,9 @@ export type IndexType = (typeof IndexType)[keyof typeof IndexType]
 
 export const PRIMARY_KEY = '_id'
 
+// The server error a snapshot read meets on a server outside a replica set.
+export const NOT_A_REPLICA_SET = 123
+
 export const RESOURCE_TYPE_DATABASE = 'mongodb/database'
 const RESOURCE_TYPE_COLLECTION = 'mongodb/collection'
 const RESOURCE_TYPE_VIEW = 'mongodb/view'

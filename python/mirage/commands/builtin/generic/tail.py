@@ -309,17 +309,19 @@ async def _tail_multi(
                 yield pending
                 printed += 1
             continue
+        # A stream opens on its first read, so the header waits for that
+        # read: an operand whose open is refused prints no header, as
+        # tailGeneric's whole read does.
         try:
             source = read(p)
             if inspect.isawaitable(source):
                 source = await source
-            # Opened: the header goes out before any content is read.
-            if pending:
-                yield pending
-                pending = b""
             async for chunk in tail(
                 source, n=n, c=c, from_line=from_line, from_byte=from_byte
             ):
+                if pending:
+                    yield pending
+                    pending = b""
                 yield chunk
         except FS_ERRORS as exc:
             if io is None or len(paths) == 1:
@@ -332,6 +334,10 @@ async def _tail_multi(
                 pending = b""
             _note(io, fs_error_line("tail", p, exc))
             io.exit_code = 1
+        else:
+            if pending:
+                yield pending
+                pending = b""
         if header and not pending:
             printed += 1
 

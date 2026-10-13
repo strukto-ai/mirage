@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from bson import Timestamp
+from pymongo.errors import OperationFailure
 
 from mirage.core.mongodb.client import (
     find_snapshot,
@@ -26,7 +27,7 @@ from mirage.core.mongodb.client import (
     iter_inserts,
     list_collections,
 )
-from mirage.core.mongodb.types import EntityKind
+from mirage.core.mongodb.types import NOT_A_REPLICA_SET, EntityKind
 
 
 class _AsyncIter:
@@ -312,6 +313,51 @@ async def test_find_snapshot_reads_every_batch_at_one_snapshot():
     }
     assert db.command.await_args_list[1].args == ("getMore", 7)
     assert db.command.await_args_list[1].kwargs == {"collection": "coll1"}
+
+
+def _command_client(*replies):
+    db = MagicMock()
+    db.command = AsyncMock(side_effect=list(replies))
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    return client, db
+
+
+@pytest.mark.asyncio
+async def test_find_snapshot_is_none_outside_a_replica_set():
+    client, _ = _command_client(
+        OperationFailure("not a replica set", code=NOT_A_REPLICA_SET)
+    )
+    assert (
+        await find_snapshot(client, "db1", "c", sort=[("_id", -1)], limit=1)
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_find_snapshot_raises_another_refusal():
+    client, _ = _command_client(OperationFailure("denied", code=13))
+    with pytest.raises(OperationFailure):
+        await find_snapshot(client, "db1", "c", sort=[("_id", -1)], limit=1)
+
+
+@pytest.mark.asyncio
+async def test_find_snapshot_closes_the_cursor_a_failed_batch_leaves():
+    client, db = _command_client(
+        {
+            "cursor": {
+                "id": 7,
+                "atClusterTime": Timestamp(1, 1),
+                "firstBatch": [],
+            }
+        },
+        OperationFailure("gone", code=43),
+        {"ok": 1},
+    )
+    with pytest.raises(OperationFailure):
+        await find_snapshot(client, "db1", "c", sort=[("_id", -1)], limit=2)
+    assert db.command.await_args_list[2].args == ("killCursors", "c")
+    assert db.command.await_args_list[2].kwargs == {"cursors": [7]}
 
 
 @pytest.mark.asyncio

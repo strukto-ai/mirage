@@ -184,6 +184,17 @@ describe('mongodb read stand-ins', () => {
     expect(asked).toEqual([{ limit: 1, sort: { _id: -1 } }])
   })
 
+  // Mirrors test_follow_leaves_a_server_outside_a_replica_set_to_the_polls.
+  it('leaves a server outside a replica set to the polls', async () => {
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
+      findSnapshot: () => Promise.resolve(null),
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    expect(await follow(accessor, docs('app'), 2)).toBeNull()
+  })
+
   // Mirrors test_follow_prints_an_insert_that_renders_like_a_printed_one.
   it('prints an insert that renders like a printed one', async () => {
     const driver = stubMongoDriver({

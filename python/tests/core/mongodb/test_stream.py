@@ -366,6 +366,17 @@ async def test_follow_without_last_lines_still_starts_at_a_snapshot(
 
 
 @pytest.mark.asyncio
+async def test_follow_leaves_a_server_outside_a_replica_set_to_the_polls(
+    accessor, index
+):
+    with patch(
+        "mirage.core.mongodb.stream.find_snapshot",
+        new=AsyncMock(return_value=None),
+    ):
+        assert await follow(accessor, _path(DOCS_PATH), 2, index) is None
+
+
+@pytest.mark.asyncio
 async def test_follow_prints_an_insert_that_renders_like_a_printed_one(index):
     acc = MongoDBAccessor(
         config=MongoDBConfig(

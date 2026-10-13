@@ -18,7 +18,7 @@ import type {
   MongoFindOptions,
   MongoIterOptions,
 } from '@struktoai/mirage-core/core/mongodb/_driver'
-import { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
+import { EntityKind, NOT_A_REPLICA_SET } from '@struktoai/mirage-core/core/mongodb/types'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { VERSION } from '../../version.ts'
@@ -171,25 +171,43 @@ export class MongoDBStore implements MongoDriver {
     database: string,
     collection: string,
     options: MongoFindOptions,
-  ): Promise<[T[], unknown]> {
+  ): Promise<[T[], unknown] | null> {
     const db = (await this._client()).db(database)
-    const reply = await db.command({
-      find: collection,
-      sort: options.sort ?? {},
-      limit: options.limit ?? 0,
-      batchSize: options.limit ?? 0,
-      readConcern: { level: 'snapshot' },
-    })
+    let reply: Record<string, unknown>
+    try {
+      reply = await db.command({
+        find: collection,
+        sort: options.sort ?? {},
+        limit: options.limit ?? 0,
+        batchSize: options.limit ?? 0,
+        readConcern: { level: 'snapshot' },
+      })
+    } catch (err) {
+      if ((err as { code?: unknown }).code !== NOT_A_REPLICA_SET) throw err
+      console.debug(`no snapshot read on ${database}: ${String(err)}`)
+      return null
+    }
     let cursor = reply.cursor as SnapshotCursor<T>
     const at = cursor.atClusterTime
     const docs = [...(cursor.firstBatch ?? [])]
     // A cursor id past 2^53 arrives as a Long and goes back as one; a smaller
     // one arrives as a number, which goes back as an int64 only as a bigint.
-    while (String(cursor.id) !== '0') {
-      const id = typeof cursor.id === 'number' ? BigInt(cursor.id) : cursor.id
-      const more = await db.command({ getMore: id, collection })
-      cursor = more.cursor as SnapshotCursor<T>
-      docs.push(...(cursor.nextBatch ?? []))
+    const wire = (id: unknown): unknown => (typeof id === 'number' ? BigInt(id) : id)
+    try {
+      while (String(cursor.id) !== '0') {
+        const more = await db.command({ getMore: wire(cursor.id), collection })
+        cursor = more.cursor as SnapshotCursor<T>
+        docs.push(...(cursor.nextBatch ?? []))
+      }
+    } finally {
+      // A failed batch leaves the server cursor open.
+      if (String(cursor.id) !== '0') {
+        await db
+          .command({ killCursors: collection, cursors: [wire(cursor.id)] })
+          .catch((err: unknown) => {
+            console.debug(`killCursors failed on ${collection}: ${String(err)}`)
+          })
+      }
     }
     return [docs, at]
   }

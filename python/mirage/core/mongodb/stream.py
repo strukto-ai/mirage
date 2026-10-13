@@ -214,7 +214,8 @@ async def follow(
 ) -> AsyncIterator[bytes] | None:
     """The last ``n`` documents of a collection, then each one inserted
     after them, one documents.jsonl line each. None for a view, which has
-    no change stream, and for any other file.
+    no change stream, for a server outside a replica set, which has none
+    either, and for any other file.
 
     The last documents are read at one snapshot and the change stream
     holds each insert after it, so the two meet at one point: no insert
@@ -234,7 +235,7 @@ async def follow(
         return None
     await entity_guard(accessor, scope, path.virtual)
     database, name = scope.slots["database"], scope.slots["name"]
-    docs, after = await find_snapshot(
+    snapshot = await find_snapshot(
         accessor.client,
         database,
         name,
@@ -243,6 +244,9 @@ async def follow(
         if n > 0
         else 1,
     )
+    if snapshot is None:
+        return None
+    docs, after = snapshot
     docs = docs[:n]
     docs.reverse()
     return _followed(accessor, database, name, after, docs)
