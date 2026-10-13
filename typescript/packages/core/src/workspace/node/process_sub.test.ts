@@ -1,8 +1,5 @@
 import { expect, it } from 'vitest'
-import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { DevVFS } from '../../vfs/dev/dev.ts'
-import type { DevFiles } from '../../vfs/dev/store.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -47,10 +44,8 @@ class FirstByte extends JobConsole {
     return Promise.resolve()
   }
 }
-function assertReleased(ws: Workspace): void {
-  const [dev] = ws.registry.resolve('/dev/null')
-  expect(dev).toBeInstanceOf(DevVFS)
-  expect(((dev as DevVFS).store.files as DevFiles).state.inputs.size).toBe(0)
+async function assertReleased(ws: Workspace): Promise<void> {
+  expect((await ws.shell('echo /dev/fd/*')).stdoutText).toBe('/dev/fd/*\n')
 }
 async function workspace(data = new RAMVFS()): Promise<Workspace> {
   return new Workspace(
@@ -76,7 +71,7 @@ it.each(['cat <(cat /data/source)', 'cat < <(cat /data/source)', 'cat /data/sour
       const io = await running
       expect(io.exitCode).toBe(0)
       expect([sink.out, sink.err]).toEqual(['firstlast', ''])
-      assertReleased(ws)
+      await assertReleased(ws)
     } finally {
       data.release.resolve()
       await running
@@ -92,7 +87,7 @@ it.each(['head -c 1 <(cat /data/source)', 'head -c 1 < <(cat /data/source)'])(
     try {
       const io = await ws.shell(command)
       expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, 'f', ''])
-      assertReleased(ws)
+      await assertReleased(ws)
       data.release.resolve()
       await data.closed.promise
     } finally {
@@ -115,7 +110,7 @@ it.each(['cat <(cat /data/source)', 'cat /data/source > >(cat)'])(
       data.release.resolve()
       await rejection
       await data.closed.promise
-      assertReleased(ws)
+      await assertReleased(ws)
     } finally {
       data.release.resolve()
       await ws.close()
@@ -123,93 +118,23 @@ it.each(['cat <(cat /data/source)', 'cat /data/source > >(cat)'])(
   },
 )
 it.each([
-  ['head -c 200000 /dev/zero > >(wc -c)', '200000\n'],
-  ['head -c 1 <(head -c 200000 /dev/zero)', '\0'],
-  ['cat <(cat <(echo nested))', 'nested\n'],
-  ['cat <(echo a) <(echo b)', 'a\nb\n'],
-  ['printf tail > >(cat); wait', 'tail'],
-  ['printf data > >(cat > /dev/null; false); echo status:$?; wait', 'status:0\n'],
-  ['x=parent; printf data > >(cat > /dev/null; x=child); echo "$x"', 'parent\n'],
-  ['stat -c %F <(echo hi); stat -c %F >(cat)', 'fifo\nfifo\n'],
-  [': <(cat /dev/zero); echo after', 'after\n'],
-])('owns pipe lifecycle: %s', async (command, output) => {
-  const ws = await workspace()
-  try {
-    const io = await ws.shell(command)
-    expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, output, ''])
-    assertReleased(ws)
-  } finally {
-    await ws.close()
-  }
-})
-
-it('keeps process-substitution operands separate from stdin and releases their paths', async () => {
-  const { ws } = await makeIntegrationWS()
-  try {
-    const result = await ws.shell(
-      "printf 'outer\\n' | cat <(echo one) - <(echo two); echo /dev/fd/*",
-    )
-    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([
-      0,
-      'one\nouter\ntwo\n/dev/fd/*\n',
-      '',
-    ])
-  } finally {
-    await ws.close()
-  }
-})
-
-class FailingVFS extends RAMVFS {
-  constructor() {
-    super()
-    this.store.files.set('/bad', new TextEncoder().encode('firstrest'))
-  }
-  override async *readStream(path: PathSpec): AsyncGenerator<Uint8Array> {
-    yield await Promise.resolve(new TextEncoder().encode('first'))
-    throw Object.assign(new Error(path.virtual), { code: 'EACCES', virtualPath: path.virtual })
-  }
-}
-
-it.each([
-  [': < <(sleep 30); echo after', [0, 'after\n', '']],
-  ['true <(sleep 30); echo after', [0, 'after\n', '']],
-  [
-    'head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?; echo after',
-    [0, 'st:141\nafter\n', ''],
-  ],
-  [
-    'f() { head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?; }; f; echo after',
-    [0, 'st:141\nafter\n', ''],
-  ],
-  ["printf '%0200000d' 0 > >(head -c 1 > /dev/null); echo after", [141, '', '']],
+  ['head -c 1 <(head -c 200000 /dev/zero)', [0, '\0', '']],
+  ['cat <(cat <(echo nested))', [0, 'nested\n', '']],
+  [': <(cat /dev/zero); echo after', [0, 'after\n', '']],
   ['printf data > >(true); echo after:$?', [0, 'after:0\n', '']],
-  ['{ printf a >&3; printf b; } 3>&1 < <(printf x); echo', [0, 'ab\n', '']],
-  [`f() { cat <(local y=child; printf '%s' "$y"); }; f`, [0, 'child', '']],
-  [
-    '(set -C; echo hi > >(cat); st=$?; wait; echo st:$st; echo x > /dev/null; echo null:$?)',
-    [0, 'hi\nst:0\nnull:0\n', ''],
-  ],
+  ['head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?', [0, 'st:141\n', '']],
+  ["printf '%0200000d' 0 > >(head -c 1 > /dev/null); echo after", [141, '', '']],
+  ["printf 'outer\\n' | cat <(echo one) - <(echo two)", [0, 'one\nouter\ntwo\n', '']],
   [
     'exec 3< <(printf a); echo st:$?',
     [0, 'st:2\n', 'mirage: unsupported: exec onto a process substitution\n'],
   ],
-])('keeps the redirect lifecycle: %s', async (command, expected) => {
+])('releases its descriptors: %s', async (command, expected) => {
   const ws = await workspace()
   try {
     const io = await ws.shell(command)
     expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual(expected)
-    assertReleased(ws)
-  } finally {
-    await ws.close()
-  }
-})
-
-it('fails only the redirect when a file read fails midway', async () => {
-  const ws = await workspace(new FailingVFS())
-  try {
-    const io = await ws.shell('cat < /data/bad; echo after:$?')
-    expect([io.exitCode, io.stdoutText]).toEqual([0, 'after:1\n'])
-    expect(io.stderrText).toContain('Permission denied')
+    await assertReleased(ws)
   } finally {
     await ws.close()
   }

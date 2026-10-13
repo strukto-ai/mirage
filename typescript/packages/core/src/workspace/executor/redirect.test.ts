@@ -16,13 +16,16 @@ import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { DeviceInput, IOResult } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { makeIntegrationWS, run, runExit, runResult } from '../fixtures/integration_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { handleRedirect } from './redirect.ts'
 
 function encode(s: string): Uint8Array {
@@ -1105,4 +1108,29 @@ describe('stdin from a character device end-to-end', () => {
       await ws.close()
     }
   })
+})
+
+class FailingVFS extends RAMVFS {
+  constructor() {
+    super()
+    this.store.files.set('/bad', new TextEncoder().encode('firstrest'))
+  }
+  override async *readStream(path: PathSpec): AsyncGenerator<Uint8Array> {
+    yield await Promise.resolve(new TextEncoder().encode('first'))
+    throw Object.assign(new Error(path.virtual), { code: 'EACCES', virtualPath: path.virtual })
+  }
+}
+
+it('fails only the redirect when a file read fails midway', async () => {
+  const ws = new Workspace(
+    { '/data': new FailingVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    const io = await ws.shell('cat < /data/bad; echo after:$?')
+    expect([io.exitCode, io.stdoutText]).toEqual([0, 'after:1\n'])
+    expect(io.stderrText).toContain('Permission denied')
+  } finally {
+    await ws.close()
+  }
 })

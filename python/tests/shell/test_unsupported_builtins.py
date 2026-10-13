@@ -16,7 +16,6 @@ import asyncio
 
 import pytest
 
-from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -39,14 +38,4 @@ def test_unsupported_builtin_returns_clear_error(name):
     stderr = io.stderr or b""
     assert f"unsupported builtin: {name}".encode() in stderr, (
         f"expected 'unsupported builtin: {name}' in stderr, got {stderr!r}"
-    )
-
-
-def test_input_process_substitution_still_works():
-    ram = RAMVFS()
-    ram._store.files["/a"] = b"line1\nline2\n"
-    ws = Workspace({"/data": (ram, MountMode.READ)})
-    io = asyncio.run(ws.shell("cat <(cat /data/a)"))
-    assert io.exit_code == 0, (
-        f"input process substitution should still work, got {io}"
     )

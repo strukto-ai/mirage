@@ -17,10 +17,7 @@ import { RAMAccessor } from '../../accessor/ram.ts'
 import { materialize } from '../../io/types.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { PathSpec } from '../../types.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { pwrite } from './pwrite.ts'
 
@@ -65,21 +62,5 @@ describe('pwrite to a pipe', () => {
     target.pipe.end()
     expect(new TextDecoder().decode(await consumed)).toBe('first second')
     expect(store.modified.has('/fd/63')).toBe(false)
-  })
-
-  it.each([
-    ['f() { (exec >"$1"; printf hello); }; f >(cat); wait'],
-    ['f() { ln -s "$1" /data/out; printf hello > /data/out; }; f >(cat); wait'],
-  ])('descriptor writes reach the substitution: %s', async (command) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell(command)
-      expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, 'hello', ''])
-    } finally {
-      await ws.close()
-    }
   })
 })

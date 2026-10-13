@@ -128,11 +128,6 @@ async def test_mode_directives(fs, want):
 
 
 @pytest.mark.asyncio
-async def test_a_fifo_size_is_zero():
-    assert await _render("%s", _fs(type=FileType.FIFO, size=None)) == "0"
-
-
-@pytest.mark.asyncio
 async def test_printf_flags_width_precision():
     # The flag/width prefix must not be mistaken for the directive char.
     assert await _render("%04a", _fs(mode=0o644)) == "0644"

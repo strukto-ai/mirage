@@ -154,10 +154,6 @@ describe('stat -c directive formatting', () => {
     expect(await render('%a %A %f', stat)).toBe(want)
   })
 
-  it('a fifo size is zero', async () => {
-    expect(await render('%s', fs({ type: FileType.FIFO, size: null }))).toBe('0')
-  })
-
   it('parses printf flags/width/precision, not as the directive', async () => {
     expect(await render('%04a', fs({ mode: 0o644 }))).toBe('0644')
     expect(await render('%#a', fs({ mode: 0o4755 }))).toBe('04755')

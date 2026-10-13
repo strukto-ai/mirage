@@ -14,10 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { DevicePipe } from '../../core/dev/pipe.ts'
-import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { RAMVFS } from '../ram/ram.ts'
 import { DevFiles, DevStore } from './store.ts'
 
 function withPipe(): [DevFiles, string] {
@@ -162,28 +158,22 @@ describe('DevFiles descriptor rows', () => {
     expect([...files.entries()].at(-1)).toEqual([key, new Uint8Array()])
     expect([...files.values()].at(-1)).toEqual(new Uint8Array())
   })
+})
 
-  it.each([
-    ["f() { ls -l /dev/fd | awk 'NR > 1 { print $1, $5, $NF }'; }; f <(true)", 'prw------- 0 63\n'],
-    ['f() { ls -lL "$1" | awk \'{ print $1, $5 }\'; }; f <(true)', 'prw------- 0\n'],
-    ['f() { find /dev -type p > /dev/null; echo find=$?; }; f <(true)', 'find=0\n'],
-    ['f() { find /dev -type p; find /dev -size -1; }; f <(true)', '/dev/fd/63\n/dev/fd/63\n'],
-    ['f() { du -a /dev/fd; }; f <(true)', '0\t/dev/fd/63\n0\t/dev/fd\n'],
-    [
-      'f() { rm "$1"; mv "$1" /dev/x; echo "st=$?"; }; f <(true) 2>&1',
-      "rm: cannot remove '/dev/fd/63': Operation not permitted\n" +
-        "mv: cannot move '/dev/fd/63' to '/dev/x': Operation not permitted\nst=1\n",
-    ],
-  ])('listing an open substitution: %s', async (command, expected) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell(command)
-      expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, expected, ''])
-    } finally {
-      await ws.close()
-    }
-  })
+it('shares ordinary files but hides descriptors between bound sessions', () => {
+  const root = new DevFiles()
+  const left = root.forSession('left')
+  const right = root.forSession('right')
+  const endpoint = new DevicePipe(true)
+  const [path, allocation] = left.allocateInput(endpoint)
+  expect(left.pipeOf(path.slice(4))).toBe(endpoint)
+  expect(right.has(path.slice(4))).toBe(false)
+  expect(right.pipeOf(path.slice(4))).toBeNull()
+  left.set('/ordinary', new Uint8Array([1]))
+  expect(right.get('/ordinary')).toEqual(new Uint8Array([1]))
+  expect(left.releaseInput(path, allocation)).toBe(true)
+  const [replacement, nextAllocation] = right.allocateInput(new DevicePipe(false))
+  expect(replacement).toBe(path)
+  expect(left.releaseInput(path, allocation)).toBe(false)
+  expect(right.releaseInput(replacement, nextAllocation)).toBe(true)
 })

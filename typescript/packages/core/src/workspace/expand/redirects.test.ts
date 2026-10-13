@@ -146,20 +146,6 @@ describe('process substitution stdin redirect', () => {
   })
 })
 
-describe('process substitution output redirect', () => {
-  it.each([
-    ['echo hi > >(cat)', 'hi\n'],
-    ['echo hi >(cat); [[ -n >(true) ]]; echo after=$?', 'hi /dev/fd/63\nafter=0\n'],
-  ])('streams or exposes a descriptor: %s', async (command, expected) => {
-    const { ws } = await makeIntegrationWS()
-    try {
-      expect(await runResult(ws, command)).toEqual([0, expected, ''])
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
 it.each([
   'echo $(printf warning >&2) > >(cat)',
   'echo $(printf warning >&2) > >(cat) 2>/dev/null',

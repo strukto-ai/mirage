@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import errno
 
 import pytest
@@ -20,10 +19,8 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.unlink import unlink
-from mirage.types import MountMode, PathSpec
+from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
-from mirage.vfs.ram import RAMVFS
-from mirage.workspace import Workspace
 
 FD = PathSpec(vfs_path="fd/63", virtual="/dev/fd/63", directory="/dev/fd/")
 
@@ -38,19 +35,3 @@ async def test_unlink_of_a_live_descriptor_is_eperm_and_keeps_it():
     assert caught.value.errno == errno.EPERM
     assert caught.value.filename == "/dev/fd/63"
     assert store.files.pipe_of("/fd/63") is endpoint
-
-
-@pytest.mark.asyncio
-async def test_rm_of_a_substitution_leaves_it_readable():
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        io = await asyncio.wait_for(
-            ws.shell(
-                'f() { rm "$1"; echo "st=$?"; cat "$1"; }; f <(echo still)'
-            ),
-            5,
-        )
-        assert (io.exit_code, await io.stdout_str()) == (0, "st=1\nstill\n")
-        assert "/dev/fd/63" in await io.stderr_str()
-    finally:
-        await ws.close()

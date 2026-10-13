@@ -12,13 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import logging
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
 
 
@@ -843,3 +846,28 @@ async def test_stdin_from_a_character_device_leaves_rg_the_cwd():
     io = await ws.shell("cd /data && rg hit < /data/e")
     assert (io.stdout or b"", io.exit_code) == (b"", 1)
     assert await _out(ws, "cat < /dev/null") == ""
+
+
+class FailingVFS(RAMVFS):
+    def __init__(self):
+        super().__init__()
+        self._store.files["/bad"] = b"firstrest"
+
+    async def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        yield b"first"
+        raise PermissionError(13, "Permission denied", path.virtual)
+
+
+@pytest.mark.asyncio
+async def test_file_read_failing_midway_fails_the_redirect_alone():
+    ws = Workspace({"/data": FailingVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await asyncio.wait_for(
+            ws.shell("cat < /data/bad; echo after:$?"), 5
+        )
+        assert (io.exit_code, await io.stdout_str()) == (0, "after:1\n")
+        assert "Permission denied" in await io.stderr_str()
+    finally:
+        await ws.close()

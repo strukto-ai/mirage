@@ -12,16 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import errno
 
 import pytest
 
 from mirage.core.dev.pipe import DevicePipe
-from mirage.types import MountMode
 from mirage.vfs.dev.store import DevFiles, DevStore
-from mirage.vfs.ram import RAMVFS
-from mirage.workspace import Workspace
 
 
 def _with_pipe() -> tuple[DevFiles, str]:
@@ -149,46 +145,18 @@ def test_pipe_row_is_listed_and_counted_empty():
     assert files.values()[-1] == b""
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "command,expected",
-    [
-        (
-            "f() { ls -l /dev/fd | awk 'NR > 1 { print $1, $5, $NF }'; }; "
-            "f <(true)",
-            "prw------- 0 63\n",
-        ),
-        (
-            "f() { ls -lL \"$1\" | awk '{ print $1, $5 }'; }; f <(true)",
-            "prw------- 0\n",
-        ),
-        (
-            "f() { find /dev -type p > /dev/null; echo find=$?; }; f <(true)",
-            "find=0\n",
-        ),
-        (
-            "f() { find /dev -type p; find /dev -size -1; }; f <(true)",
-            "/dev/fd/63\n/dev/fd/63\n",
-        ),
-        ("f() { du -a /dev/fd; }; f <(true)", "0\t/dev/fd/63\n0\t/dev/fd\n"),
-        (
-            'f() { rm "$1"; mv "$1" /dev/x; echo "st=$?"; }; f <(true) 2>&1',
-            (
-                "rm: cannot remove '/dev/fd/63': Operation not permitted\n"
-                "mv: cannot move '/dev/fd/63' to '/dev/x': "
-                "Operation not permitted\nst=1\n"
-            ),
-        ),
-    ],
-)
-async def test_listing_an_open_substitution(command, expected):
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        io = await asyncio.wait_for(ws.shell(command), 5)
-        assert (
-            io.exit_code,
-            await io.stdout_str(),
-            await io.stderr_str(),
-        ) == (0, expected, "")
-    finally:
-        await ws.close()
+def test_session_views_share_files_but_hide_each_others_descriptors():
+    root = DevFiles()
+    left, right = root.for_session("left"), root.for_session("right")
+    endpoint = DevicePipe(True)
+    path, allocation = left.allocate_input(endpoint)
+    assert left.pipe_of(path[4:]) is endpoint
+    assert path[4:] not in right
+    assert right.pipe_of(path[4:]) is None
+    left["/ordinary"] = b"shared"
+    assert right["/ordinary"] == b"shared"
+    assert left.release_input(path, allocation)
+    replacement, next_allocation = right.allocate_input(DevicePipe(False))
+    assert replacement == path
+    assert not left.release_input(path, allocation)
+    assert right.release_input(replacement, next_allocation)

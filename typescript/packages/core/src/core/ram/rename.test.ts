@@ -16,11 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { rename } from './rename.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
@@ -185,20 +182,4 @@ describe('core/ram rename at a live descriptor', () => {
       expect(store.files.has('/moved')).toBe(false)
     },
   )
-
-  it.each([
-    ['f() { mv "$1" /dev/x; echo "st=$?"; cat "$1"; }; f <(echo still)', 'st=1\nstill\n'],
-    ['f() { mv "$1" "$2"; echo "st=$?"; }; f <(true) <(true)', 'st=1\n'],
-  ])('mv of a substitution leaves it readable: %s', async (command, expected) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell(command)
-      expect([io.exitCode, io.stdoutText]).toEqual([0, expected])
-    } finally {
-      await ws.close()
-    }
-  })
 })

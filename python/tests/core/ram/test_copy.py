@@ -20,11 +20,9 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.copy import copy
 from mirage.io.types import materialize
-from mirage.types import MountMode, PathSpec
+from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
-from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
-from mirage.workspace import Workspace
 
 
 def spec(path: str) -> PathSpec:
@@ -100,59 +98,28 @@ async def test_copy_to_root_child_is_allowed(accessor):
 
 
 @pytest.mark.asyncio
-async def test_copy_reads_a_pipe_source_through_its_reader():
-    store = dev_store()
-    source = DevicePipe(True)
-    path, _ = store.files.allocate_input(source)
-    await source.pipe.write(b"hello")
-    source.pipe.end()
-    await copy(RAMAccessor(store), dev_spec(path[4:]), dev_spec("/copied"))
-    assert store.files["/copied"] == b"hello"
-    assert store.files.pipe_of(path[4:]) is source
-
-
-@pytest.mark.asyncio
-async def test_copy_writes_into_a_pipe_destination():
-    store = dev_store()
-    store.files["/src"] = b"hello"
-    target = DevicePipe(False)
-    path, _ = store.files.allocate_input(target)
-    consumed = asyncio.create_task(materialize(target.pipe.stream()))
-    await copy(RAMAccessor(store), dev_spec("/src"), dev_spec(path[4:]))
-    target.pipe.end()
-    assert await asyncio.wait_for(consumed, 3) == b"hello"
-
-
-@pytest.mark.asyncio
-async def test_copy_between_two_pipes_streams_through_both():
-    store = dev_store()
-    source, target = DevicePipe(True), DevicePipe(False)
-    src, _ = store.files.allocate_input(source)
-    dst, _ = store.files.allocate_input(target)
-    await source.pipe.write(b"through")
-    source.pipe.end()
-    consumed = asyncio.create_task(materialize(target.pipe.stream()))
-    await copy(RAMAccessor(store), dev_spec(src[4:]), dev_spec(dst[4:]))
-    target.pipe.end()
-    assert await asyncio.wait_for(consumed, 3) == b"through"
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "command,expected",
-    [
-        ("cp <(printf hello) /dev/copied; cat /dev/copied", "hello"),
-        ("printf hello > /dev/src; cp /dev/src >(cat); wait", "hello"),
-    ],
+    "from_pipe,to_pipe", [(True, False), (False, True), (True, True)]
 )
-async def test_cp_through_a_substitution(command, expected):
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        io = await asyncio.wait_for(ws.shell(command), 5)
-        assert (
-            io.exit_code,
-            await io.stdout_str(),
-            await io.stderr_str(),
-        ) == (0, expected, "")
-    finally:
-        await ws.close()
+async def test_copy_through_a_pipe(from_pipe, to_pipe):
+    store = dev_store()
+    src, dst, consumed = "/src", "/copied", None
+    if from_pipe:
+        source = DevicePipe(True)
+        src = store.files.allocate_input(source)[0][4:]
+        await source.pipe.write(b"hello")
+        source.pipe.end()
+    else:
+        store.files[src] = b"hello"
+    if to_pipe:
+        target = DevicePipe(False)
+        dst = store.files.allocate_input(target)[0][4:]
+        consumed = asyncio.create_task(materialize(target.pipe.stream()))
+    await copy(RAMAccessor(store), dev_spec(src), dev_spec(dst))
+    if consumed is None:
+        assert store.files[dst] == b"hello"
+    else:
+        target.pipe.end()
+        assert await asyncio.wait_for(consumed, 3) == b"hello"
+    if from_pipe:
+        assert store.files.pipe_of(src) is source

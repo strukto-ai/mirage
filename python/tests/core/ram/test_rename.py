@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import errno
 
 import pytest
@@ -21,11 +20,9 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import push_cache_manager
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.rename import rename
-from mirage.types import MountMode, PathSpec
+from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
-from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
-from mirage.workspace import Workspace
 from tests.core.object_store.conftest import FakeManager
 
 
@@ -200,23 +197,3 @@ async def test_rename_at_a_live_descriptor_is_eperm(pipe_end):
     assert store.files.pipe_of(path[4:]) is endpoint
     assert store.files["/plain"] == b"x"
     assert "/moved" not in store.files
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "command,expected",
-    [
-        (
-            'f() { mv "$1" /dev/x; echo "st=$?"; cat "$1"; }; f <(echo still)',
-            "st=1\nstill\n",
-        ),
-        ('f() { mv "$1" "$2"; echo "st=$?"; }; f <(true) <(true)', "st=1\n"),
-    ],
-)
-async def test_mv_of_a_substitution_leaves_it_readable(command, expected):
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        io = await asyncio.wait_for(ws.shell(command), 5)
-        assert (io.exit_code, await io.stdout_str()) == (0, expected)
-    finally:
-        await ws.close()

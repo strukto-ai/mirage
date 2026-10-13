@@ -158,34 +158,6 @@ async def test_procsub_stdin_redirect():
     assert out == "a\nb\n"
 
 
-@pytest.mark.asyncio
-async def test_procsub_output_redirect_streams():
-    ws = await _workspace_at("/data")
-    try:
-        io = await ws.shell("echo hi > >(cat)")
-        assert (
-            io.exit_code,
-            await io.stdout_str(),
-            await io.stderr_str(),
-        ) == (0, "hi\n", "")
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_procsub_output_word_is_a_descriptor():
-    ws = await _workspace_at("/data")
-    try:
-        io = await ws.shell("echo hi >(cat); [[ -n >(true) ]]; echo after=$?")
-        assert (
-            io.exit_code,
-            await io.stdout_str(),
-            await io.stderr_str(),
-        ) == (0, "hi /dev/fd/63\nafter=0\n", "")
-    finally:
-        await ws.close()
-
-
 @pytest.mark.parametrize(
     "command",
     [

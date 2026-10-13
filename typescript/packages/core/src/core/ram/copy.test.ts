@@ -17,11 +17,8 @@ import { RAMAccessor } from '../../accessor/ram.ts'
 import { materialize } from '../../io/types.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { copy } from './copy.ts'
 
@@ -120,56 +117,28 @@ describe('core/ram copy', () => {
   })
 })
 
-describe('core/ram copy through a pipe', () => {
-  it('copy reads a pipe source through its reader', async () => {
-    const store = devStore()
-    const source = new DevicePipe(true)
-    const [path] = store.files.allocateInput(source)
+it.each([
+  [true, false],
+  [false, true],
+  [true, true],
+])('copies through a pipe (from %s, to %s)', async (fromPipe, toPipe) => {
+  const store = devStore()
+  const source = new DevicePipe(true)
+  const target = new DevicePipe(false)
+  let src = '/src'
+  let dst = '/copied'
+  if (fromPipe) {
+    src = store.files.allocateInput(source)[0].slice(4)
     await source.pipe.write(new TextEncoder().encode('hello'))
     source.pipe.end()
-    await copy(devAccessor(store), devPath(path.slice(4)), devPath('/copied'))
-    expect(DEC.decode(store.files.get('/copied'))).toBe('hello')
-    expect(store.files.pipeOf(path.slice(4))).toBe(source)
-  })
-
-  it('copy writes into a pipe destination', async () => {
-    const store = devStore()
-    store.files.set('/src', new TextEncoder().encode('hello'))
-    const target = new DevicePipe(false)
-    const [path] = store.files.allocateInput(target)
-    const consumed = materialize(target.pipe.stream())
-    await copy(devAccessor(store), devPath('/src'), devPath(path.slice(4)))
+  } else store.files.set(src, new TextEncoder().encode('hello'))
+  if (toPipe) dst = store.files.allocateInput(target)[0].slice(4)
+  const consumed = toPipe ? materialize(target.pipe.stream()) : null
+  await copy(devAccessor(store), devPath(src), devPath(dst))
+  if (consumed === null) expect(DEC.decode(store.files.get(dst))).toBe('hello')
+  else {
     target.pipe.end()
     expect(DEC.decode(await consumed)).toBe('hello')
-  })
-
-  it('copy between two pipes streams through both', async () => {
-    const store = devStore()
-    const source = new DevicePipe(true)
-    const target = new DevicePipe(false)
-    const [src] = store.files.allocateInput(source)
-    const [dst] = store.files.allocateInput(target)
-    await source.pipe.write(new TextEncoder().encode('through'))
-    source.pipe.end()
-    const consumed = materialize(target.pipe.stream())
-    await copy(devAccessor(store), devPath(src.slice(4)), devPath(dst.slice(4)))
-    target.pipe.end()
-    expect(DEC.decode(await consumed)).toBe('through')
-  })
-
-  it.each([
-    ['cp <(printf hello) /dev/copied; cat /dev/copied', 'hello'],
-    ['printf hello > /dev/src; cp /dev/src >(cat); wait', 'hello'],
-  ])('cp through a substitution: %s', async (command, expected) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell(command)
-      expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, expected, ''])
-    } finally {
-      await ws.close()
-    }
-  })
+  }
+  if (fromPipe) expect(store.files.pipeOf(src)).toBe(source)
 })

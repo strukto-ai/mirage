@@ -1089,6 +1089,113 @@
         "stdout": "st=141\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_background_readers_split_one_pipe",
+      "seq": 1346128,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { cat \"$1\" & cat \"$1\"; wait; }; f <(sleep 0.2; printf data)",
+      "expect": {
+        "exit": 0,
+        "stdout": "data",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_second_reader_finds_the_end",
+      "seq": 1346129,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { cat \"$1\"; cat \"$1\"; }; f <(printf once)",
+      "expect": {
+        "exit": 0,
+        "stdout": "once",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_fifo_symbolic_chmod_and_touch",
+      "seq": 1346130,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { chmod u+x \"$1\"; stat -L -c '%a' \"$1\"; touch -d '2020-01-02 03:04:05' \"$1\"; stat -L -c '%y' \"$1\"; }; f <(true)",
+      "expect": {
+        "exit": 0,
+        "stdout": "700\n2020-01-02 03:04:05.000000000 +0000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_dev_fd_lists_the_fifo",
+      "seq": 1346131,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ls -l /dev/fd | awk 'NR > 1 { print $1, $5, $NF }'; du -a /dev/fd; find /dev -type p; find /dev -size -1; }; f <(true)",
+      "expect": {
+        "exit": 0,
+        "stdout": "prw------- 0 63\n0\t/dev/fd/63\n0\t/dev/fd\n/dev/fd/63\n/dev/fd/63\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 on Linux prints \"0\\t/dev/fd\" and then every zero-size node under /dev. There /dev/fd is a symlink to procfs's /proc/self/fd, whose entries are links to pipe:[N], so ls -l shows the link alone, du does not follow it and find meets no FIFO. Mirage's /dev/fd is a directory holding the substitutions' FIFOs, which list, count and match as FIFOs."
+    },
+    {
+      "id": "procsub_rm_and_mv_refuse_the_descriptor",
+      "seq": 1346132,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { rm \"$1\"; mv \"$1\" /dev/x; echo \"st=$?\"; mv \"$1\" \"$2\"; echo \"st=$?\"; cat \"$1\"; }; f <(echo still) <(true)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nst=1\nstill\n",
+        "stderr": "rm: cannot remove '/dev/fd/63': Operation not permitted\nmv: cannot move '/dev/fd/63' to '/dev/x': Operation not permitted\nmv: cannot move '/dev/fd/63' to '/dev/fd/62': Operation not permitted\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 on Linux words the move to /dev/x \"mv: cannot remove '/dev/fd/63': Operation not permitted\". /dev/fd/63 lives in procfs there, so the rename crosses filesystems and GNU mv copies before it fails to remove the source. Mirage's /dev is one mount, where the rename itself is refused; the move between two descriptors is refused alike on both."
+    },
+    {
+      "id": "procsub_truncate_refuses_the_pipe_but_opens_it",
+      "seq": 1346133,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "truncate -s 0 >(cat); echo \"st=$?\"; f() { : > \"$1\"; echo \"st=$?\"; }; f >(cat)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nst=0\n",
+        "stderr": "truncate: failed to truncate '/dev/fd/63' at 0 bytes: Invalid argument\n"
+      }
+    },
+    {
+      "id": "procsub_test_fifo_type_and_mode",
+      "seq": 1346134,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { [[ -p $1 ]]; echo $?; [ -p /dev/null ]; echo $?; [ -x \"$1\" ]; echo $?; chmod 700 \"$1\"; [ -x \"$1\" ]; echo $?; }; f <(true)",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n1\n0\n",
+        "stderr": ""
+      }
     }
   ]
 }

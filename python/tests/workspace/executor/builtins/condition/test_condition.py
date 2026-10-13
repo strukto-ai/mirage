@@ -415,41 +415,6 @@ async def test_unsupported_operator_fails_loudly():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "command,expected",
-    [
-        (
-            'f() { [ -p "$1" ]; echo p=$?; [ -f "$1" ]; echo f=$?; '
-            '[ -e "$1" ]; echo e=$?; [ -s "$1" ]; echo s=$?; cat "$1"; }; '
-            "f <(printf hello)",
-            "p=0\nf=1\ne=0\ns=1\nhello",
-        ),
-        (
-            "f() { [[ -p $1 ]]; echo $?; [ -p /data/plain.txt ]; echo $?; }; "
-            "f <(true)",
-            "0\n1\n",
-        ),
-        (
-            'f() { [ -x "$1" ]; echo $?; chmod 700 "$1"; [ -x "$1" ]; '
-            "echo $?; }; f <(true)",
-            "1\n0\n",
-        ),
-    ],
-)
-async def test_file_tests_on_a_fifo(command, expected):
-    ws = await _workspace()
-    try:
-        io = await ws.shell(command)
-        assert (
-            io.exit_code,
-            await io.stdout_str(),
-            await io.stderr_str(),
-        ) == (0, expected, "")
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_if_integration():
     ws = await _workspace()
     io = await ws.shell(

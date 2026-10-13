@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.core.dev.pipe import DevicePipe
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
     SharedInput,
@@ -23,8 +22,7 @@ from mirage.io.async_line_iterator import (
     share,
 )
 from mirage.io.cooperative import chunks
-from mirage.io.types import DeviceInput, PipeStream, materialize
-from mirage.types import PathSpec
+from mirage.io.types import DeviceInput, materialize
 
 
 async def _chunks(parts: list[bytes]):
@@ -261,14 +259,6 @@ async def test_load_rest_ends_the_source_and_reads_on_from_memory():
     await lines.load_rest()
     assert ended == [True]
     assert [line async for line in lines] == [b"b", b"c"]
-
-
-@pytest.mark.asyncio
-async def test_a_descriptor_on_a_live_pipe_names_it_and_a_dup_keeps_it():
-    pipe = PathSpec.from_str_path("/dev/fd/63")
-    shared = SharedInput(PipeStream(_chunks([b"x"]), pipe, DevicePipe(True)))
-    assert shared.pipe is pipe and shared.dup().pipe is pipe
-    assert SharedInput(b"x").pipe is None
 
 
 @pytest.mark.asyncio

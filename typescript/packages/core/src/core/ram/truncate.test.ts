@@ -16,10 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { PathSpec } from '../../types.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { truncate } from './truncate.ts'
 
@@ -41,21 +38,5 @@ describe('truncate', () => {
       truncate(new RAMAccessor(store as unknown as RAMStore), FD, 0),
     ).rejects.toMatchObject({ code: 'EINVAL' })
     expect(store.files.pipeOf('/fd/63')).toBe(endpoint)
-  })
-
-  it.each([
-    ['truncate -s 0 >(cat); echo "st=$?"', 'st=1\n'],
-    ['f() { : > "$1"; echo "st=$?"; }; f >(cat)', 'st=0\n'],
-  ])('truncating a substitution fails but opening it does not: %s', async (command, expected) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell(command)
-      expect([io.exitCode, io.stdoutText]).toEqual([0, expected])
-    } finally {
-      await ws.close()
-    }
   })
 })

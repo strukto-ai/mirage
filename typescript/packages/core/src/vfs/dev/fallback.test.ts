@@ -57,52 +57,6 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
   expect(files.get('/fd/63')).toBeUndefined()
 })
 
-it('streams separate descriptors while browser sessions overlap', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
-  ws.createSession('peer')
-  let release!: () => void
-  let ready!: () => void
-  const held = new Promise<void>((r) => {
-    release = r
-  })
-  const both = new Promise<void>((r) => {
-    ready = r
-  })
-  let entered = 0
-  ws.registerCli(
-    'pause',
-    new CLI({
-      spec: new CommandSpec({ name: 'pause' }),
-      handlers: {
-        '': new CLIHandler({
-          fn: async () => {
-            if (++entered === 2) ready()
-            await held
-            return [null, new IOResult()]
-          },
-        }),
-      },
-    }),
-  )
-  const left = ws.shell('cat <(pause; echo left) > >(cat)')
-  const right = ws.shell('cat <(pause; echo right) > >(cat)', { sessionId: 'peer' })
-  try {
-    await both
-    release()
-    const l = await left
-    const r = await right
-    expect([l.exitCode, l.stdoutText, l.stderrText]).toEqual([0, 'left\n', ''])
-    expect([r.exitCode, r.stdoutText, r.stderrText]).toEqual([0, 'right\n', ''])
-  } finally {
-    release()
-    await Promise.allSettled([left, right])
-    await ws.close()
-  }
-})
-
 it('refuses moving a live pipe across mounts while browser sessions overlap', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },

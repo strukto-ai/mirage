@@ -16,10 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import type { RAMStore } from '../../vfs/ram/store.ts'
 import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { PathSpec } from '../../types.ts'
 import { DevicePipe } from '../dev/pipe.ts'
 import { unlink } from './unlink.ts'
 
@@ -35,19 +32,5 @@ describe('unlink', () => {
       virtualPath: '/dev/fd/63',
     })
     expect(store.files.pipeOf('/fd/63')).toBe(endpoint)
-  })
-
-  it('rm of a substitution leaves it readable', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell('f() { rm "$1"; echo "st=$?"; cat "$1"; }; f <(echo still)')
-      expect([io.exitCode, io.stdoutText]).toEqual([0, 'st=1\nstill\n'])
-      expect(io.stderrText).toContain('/dev/fd/63')
-    } finally {
-      await ws.close()
-    }
   })
 })
