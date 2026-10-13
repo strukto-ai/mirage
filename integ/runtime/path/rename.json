@@ -546,6 +546,58 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_handle_follows_a_rename_whose_destination_runs_through_a_moved_link",
+      "runtimes": [
+        "wasi",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "src/f": "hello",
+              "other/keep": "k"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/other /data/src/out",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nf = open('/data/src/f', 'r+')\nos.rename('/data/src', '/data/src/out/moved')\nf.write('X')\nf.close()\nprint(open('/data/other/moved/f').read())",
+            "js": "const f = std.open('/data/src/f', 'r+')\nconsole.log(os.rename('/data/src', '/data/src/out/moved'))\nf.puts('X')\nf.close()\nconsole.log(std.open('/data/other/moved/f', 'r').readAsString())",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/src/f', 'r+')\nawait fs.rename('/data/src', '/data/src/out/moved')\nawait f.write('X', 0)\nawait f.close()\nconsole.log(await fs.readFile('/data/other/moved/f', 'utf8'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0\nXello\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

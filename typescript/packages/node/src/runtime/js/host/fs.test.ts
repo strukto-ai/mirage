@@ -415,6 +415,42 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
+  it('holds a handle opened while a removal reads the file', async () => {
+    // The removal reads what its open handles keep; one opened while that
+    // read was out is open on the file too, so its writes stay off the name.
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'hello')
+    let gated = false
+    let reading = (): void => undefined
+    let release = (): void => undefined
+    const started = new Promise<void>((resolve) => (reading = resolve))
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    ws.policies.add({
+      preVfs: async (ctx) => {
+        if (gated && ctx.call.name === 'read') {
+          reading()
+          await gate
+        }
+        return null
+      },
+    })
+    const reader = await fs.promises.open('/data/f.txt', 'r')
+    gated = true
+    const removing = fs.promises.unlink('/data/f.txt')
+    await started
+    const late = await fs.promises.open('/data/f.txt', 'r+')
+    gated = false
+    release()
+    await removing
+    await late.write('X', 0)
+    await late.close()
+    await reader.close()
+    expect(await ws.vfs.exists('/data/f.txt')).toBe(false)
+    await ws.close()
+  })
+
   it('keeps a handle through a rename onto its own name', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

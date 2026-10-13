@@ -69,7 +69,9 @@ export function planFlush(facts: {
 export function applyFlush(data: Uint8Array, steps: readonly FlushStep[]): Uint8Array {
   // One buffer for every step, grown by doubling: a copy of the whole file
   // per range would cost the file's size times the ranges a handle wrote.
-  let out = data.slice()
+  // A plain copy: a Node Buffer's slice is a view over bytes another name
+  // may share.
+  let out = new Uint8Array(data)
   let length = out.length
   const reserve = (size: number): void => {
     if (size <= out.length) return
@@ -86,7 +88,7 @@ export function applyFlush(data: Uint8Array, steps: readonly FlushStep[]): Uint8
   for (const step of steps) {
     const bytes = step.data ?? new Uint8Array()
     if (step.kind === 'write') {
-      out = bytes.slice()
+      out = new Uint8Array(bytes)
       length = out.length
     } else if (step.kind === 'append') {
       extend(length + bytes.length)

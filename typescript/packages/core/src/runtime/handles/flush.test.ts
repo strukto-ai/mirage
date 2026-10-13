@@ -94,6 +94,11 @@ describe('applyFlush', () => {
     expect(applyFlush(enc.encode('hello'), [{ kind: 'write', data: enc.encode('new') }])).toEqual(
       enc.encode('new'),
     )
+    // A Node Buffer's slice is a view, so editing it would change every name
+    // that shares those bytes; the bytes handed in stay as they were.
+    const shared = Buffer.from('hello')
+    applyFlush(shared, [{ kind: 'pwrite', data: enc.encode('X'), offset: 0 }])
+    expect(shared.toString()).toBe('hello')
     // A cut hands back bytes of its own size, not a view over the old file.
     expect(
       applyFlush(new Uint8Array(1024), [{ kind: 'truncate', length: 0 }]).buffer.byteLength,

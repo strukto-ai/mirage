@@ -141,10 +141,9 @@ export function installQuickJsFs(
   const keep = (held: [Place, Kept][]): void => {
     for (const [place, kept] of held) place.kept = kept
   }
-  // Follow a rename: a file open on `old` or under it is at `next` now.
-  const moved = (bound: RuntimeFiles, from: string, to: string): void => {
-    const old = bound.walked(from, false)
-    const next = bound.walked(to, false)
+  // Follow a rename: a file open on `old` or under it is at `next` now,
+  // both as walked before the rename.
+  const moved = (old: string, next: string): void => {
     const under = `${rstripSlash(old)}/`
     for (const place of places.values()) {
       if (place.kept === null && (place.path === old || place.path.startsWith(under)))
@@ -447,16 +446,19 @@ export function installQuickJsFs(
     // The dispatcher refuses a pair on different mounts with EXDEV, which this
     // engine numbers -75, as the real engine does.
     try {
-      // A rename onto its own file changes nothing, its streams included,
-      // whichever spelling (a link above the name) reached it.
-      if (files.walked(src, false) === files.walked(dst, false)) {
+      // Both ends as the walk names them before the rename, which may move a
+      // link the walk takes. A rename onto its own file changes nothing, its
+      // streams included, whichever spelling reached it.
+      const old = files.walked(src, false)
+      const next = files.walked(dst, false)
+      if (old === next) {
         await files.rename(src, dst)
         return ctx.newNumber(0)
       }
       const held = await hold(files, dst)
       await files.rename(src, dst)
       keep(held)
-      moved(files, src, dst)
+      moved(old, next)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))

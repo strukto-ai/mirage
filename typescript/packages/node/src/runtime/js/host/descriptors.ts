@@ -270,11 +270,9 @@ export class Descriptors {
     }
   }
 
-  /** Follow a rename: a descriptor on `old` or under it names the same
-   * file at `next` now. */
-  moved(old: string, next: string): void {
-    const from = this.walked(old, false)
-    const to = this.walked(next, false)
+  /** Follow a rename: a descriptor on `from` or under it names the same
+   * file at `to` now, both as walked before the rename. */
+  moved(from: string, to: string): void {
     const under = `${from.replace(/\/+$/, '')}/`
     for (const desc of this.table.values()) {
       if (desc.kept === null && (desc.path === from || desc.path.startsWith(under))) {
@@ -286,19 +284,32 @@ export class Descriptors {
   /** Read what the descriptors open on `path` need before its name is
    * removed or replaced; `keep` them once it has gone. They share what
    * RuntimeFiles.kept reads, so a read that fails (a policy refusing it,
-   * say) still lets the removal it allows go ahead. A descriptor that
-   * cannot read needs nothing kept for it. */
+   * say) still lets the removal it allows go ahead. The descriptors are
+   * collected once the read is back, so one opened while it was out is held
+   * too, and a view the read skipped is read for it. */
   async hold(path: string): Promise<[Descriptor, Kept][]> {
     const named = this.walked(path, false)
-    const held = [...this.table.values()].filter(
-      (desc) => desc.path === named && desc.kept === null && desc.handle !== null,
-    )
-    if (held.length === 0) return []
-    const kept = await this.files.kept(named, {
+    const open = (): Descriptor[] =>
+      [...this.table.values()].filter(
+        (desc) => desc.path === named && desc.kept === null && desc.handle !== null,
+      )
+    // A descriptor that cannot read needs nothing kept for it.
+    const views = (held: Descriptor[]): { stored: boolean; rendered: boolean } => ({
       stored: held.some((desc) => desc.mode.writable),
       rendered: held.some((desc) => desc.mode.readable && !desc.mode.writable),
     })
-    return held.map((desc) => [desc, kept])
+    if (open().length === 0) return []
+    let read = views(open())
+    let kept = await this.files.kept(named, read)
+    for (;;) {
+      const held = open()
+      const want = views(held)
+      if ((!want.stored || read.stored) && (!want.rendered || read.rendered)) {
+        return held.map((desc) => [desc, kept])
+      }
+      read = { stored: read.stored || want.stored, rendered: read.rendered || want.rendered }
+      kept = await this.files.kept(named, read)
+    }
   }
 
   /** Detach the descriptors `hold` read for, now their name went. */

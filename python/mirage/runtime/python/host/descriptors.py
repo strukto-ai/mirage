@@ -355,10 +355,9 @@ class Descriptors:
         now.
 
         Args:
-            old (str): the path the rename took.
-            new (str): the path it gave.
+            old (str): the path the rename took, as walked before it.
+            new (str): the path it gave, as walked before it.
         """
-        old, new = self.walked(old, False), self.walked(new, False)
         under = old.rstrip("/") + "/"
         for desc in self._every():
             if desc.kept is None and (

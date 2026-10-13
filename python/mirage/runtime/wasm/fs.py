@@ -672,16 +672,18 @@ class WasiFs:
         dst = self._path_arg(caller, dst_dirfd, dst_ptr, dst_length)
         if src is None or dst is None:
             return EBADF
-        # A rename onto its own file changes nothing, its fds included,
-        # whichever spelling (a link above the name) reached it.
-        walked = self._fs.walked
-        if walked(src, follow=False) == walked(dst, follow=False):
+        # Both ends as the walk names them before the rename, which may
+        # move a link the walk takes. A rename onto its own file changes
+        # nothing, its fds included, whichever spelling reached it.
+        old = self._fs.walked(src, follow=False)
+        new = self._fs.walked(dst, follow=False)
+        if old == new:
             self._fs.rename(src, dst)
             return OK
         held = self._hold(dst)
         self._fs.rename(src, dst)
         self._keep(held)
-        self._moved(src, dst)
+        self._moved(old, new)
         return OK
 
     # -- stubs and no-ops -------------------------------------------------
@@ -754,11 +756,9 @@ class WasiFs:
         now, so its reads and its writes go there.
 
         Args:
-            old (str): the guest path the rename took.
-            new (str): the guest path it gave.
+            old (str): the path the rename took, as walked before it.
+            new (str): the path it gave, as walked before it.
         """
-        old = self._fs.walked(old, follow=False)
-        new = self._fs.walked(new, follow=False)
         under = old.rstrip("/") + "/"
         for entry in self._fds.values():
             if entry.preopen or entry.kept is not None:

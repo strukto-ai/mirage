@@ -998,14 +998,15 @@ class HostFs:
                 None,
                 _spelled(dst),
             )
-        # A rename onto its own name changes nothing, its descriptors
-        # included.
-        walked = self._descriptors.walked
-        same = walked(dest, False) == walked(source, False)
-        held = [] if same else self._descriptors.hold(dest)
+        # Both ends as the walk names them before the rename, which may
+        # move a link the walk takes. A rename onto its own name changes
+        # nothing, its descriptors included.
+        old = self._descriptors.walked(source, False)
+        new = self._descriptors.walked(dest, False)
+        held = [] if old == new else self._descriptors.hold(dest)
         self._adapter.rename(source, dest)
         self._descriptors.keep(held)
-        self._descriptors.moved(source, dest)
+        self._descriptors.moved(old, new)
 
     def renames(self, old: Any, new: Any) -> None:
         """Rename, creating the destination's parents and pruning the
