@@ -15,9 +15,10 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
-import { eexist, eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { eexist, einval, eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { type FsError } from '../../errors/types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
 // rename(2) resolves the destination: a component that does not exist is
@@ -31,6 +32,33 @@ import { mountedPath } from '../../utils/key_prefix.ts'
 export function checkDestParents(accessor: RAMAccessor, dst: PathSpec, d: string): void {
   const broken = brokenParent(accessor, dst, d)
   if (broken !== null) throw broken
+}
+
+// Refuse a rename that rename(2) refuses once both ends resolve. A file onto
+// a directory is EISDIR, a directory onto a file ENOTDIR, onto a directory
+// that holds entries ENOTEMPTY, and into its own subtree EINVAL. A keyed store
+// has no kernel to say so: without this a file and a directory end up under
+// one key, or two trees merge. A source the store does not hold is left to the
+// caller's lookup. Mirrors check_rename in dest.py.
+export function checkRename(
+  accessor: RAMAccessor,
+  src: PathSpec,
+  s: string,
+  dst: PathSpec,
+  d: string,
+): void {
+  const { store } = accessor
+  if (s === d) return
+  if (store.files.has(s)) {
+    if (store.dirs.has(d)) throw eisdir(dst)
+    return
+  }
+  if (!store.dirs.has(s)) return
+  if (d.startsWith(`${rstripSlash(s)}/`)) throw einval(src)
+  if (store.files.has(d)) throw enotdir(dst)
+  const prefix = `${rstripSlash(d)}/`
+  if (store.dirs.has(d) && [...store.files.keys(), ...store.dirs].some((k) => k.startsWith(prefix)))
+    throw enotempty(dst)
 }
 
 // The error a lookup of a key the store does not hold answers with.

@@ -215,6 +215,68 @@
           }
         }
       ]
+    },
+    {
+      "id": "rename_refuses_what_rename_2_refuses",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "bytes\n",
+              "d/g.txt": "g\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir /data/e",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nfor src, dst in [('/data/f.txt', '/data/e'), ('/data/d', '/data/f.txt'), ('/data/e', '/data/d'), ('/data/d', '/data/d/sub')]:\n    try:\n        os.rename(src, dst)\n        print('renamed')\n    except OSError as e:\n        print(type(e).__name__)",
+            "js": "for (const [src, dst] of [['/data/f.txt', '/data/e'], ['/data/d', '/data/f.txt'], ['/data/e', '/data/d'], ['/data/d', '/data/d/sub']]) console.log(os.rename(src, dst))",
+            "node": "const fs = require('node:fs')\nfor (const [src, dst] of [['/data/f.txt', '/data/e'], ['/data/d', '/data/f.txt'], ['/data/e', '/data/d'], ['/data/d', '/data/d/sub']]) {\n  try {\n    await fs.promises.rename(src, dst)\n    console.log('renamed')\n  } catch (e) {\n    console.log(e.code)\n  }\n}"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "IsADirectoryError\nNotADirectoryError\nOSError\nOSError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "-31\n-54\n-55\n-28\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "EISDIR\nENOTDIR\nENOTEMPTY\nEINVAL\n"
+            }
+          }
+        },
+        {
+          "command": "find /data | sort; cat /data/f.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data\n/data/d\n/data/d/g.txt\n/data/e\n/data/f.txt\nbytes\n"
+          }
+        }
+      ]
     }
   ]
 }

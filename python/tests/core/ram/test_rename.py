@@ -96,6 +96,33 @@ async def test_rename_dir_moves_nested_subdirectories(accessor):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "src, dst, code",
+    [
+        ("/a.txt", "/d", errno.EISDIR),
+        ("/dir", "/plain", errno.ENOTDIR),
+        ("/d", "/dir", errno.ENOTEMPTY),
+        ("/dir", "/dir/sub", errno.EINVAL),
+    ],
+)
+async def test_rename_refuses_what_rename_2_refuses(accessor, src, dst, code):
+    # The store has no kernel to refuse these: it kept a file and a
+    # directory under one key, or merged two trees.
+    before = (dict(accessor.store.files), set(accessor.store.dirs))
+    with pytest.raises(OSError) as info:
+        await rename(accessor, spec(src), spec(dst))
+    assert info.value.errno == code
+    assert (accessor.store.files, accessor.store.dirs) == before
+
+
+@pytest.mark.asyncio
+async def test_rename_dir_onto_an_empty_dir_replaces_it(accessor):
+    await rename(accessor, spec("/dir"), spec("/d"))
+    assert accessor.store.files["/d/f"] == b"x"
+    assert "/dir" not in accessor.store.dirs
+
+
+@pytest.mark.asyncio
 async def test_rename_missing_source(accessor):
     with pytest.raises(FileNotFoundError):
         await rename(accessor, spec("/nope"), spec("/d/x"))

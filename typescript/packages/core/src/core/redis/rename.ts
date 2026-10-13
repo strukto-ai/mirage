@@ -20,7 +20,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
-import { checkDestParents, lookupError } from './dest.ts'
+import { checkDestParents, checkRename, lookupError } from './dest.ts'
 
 // Re-key every descendant of a renamed directory. A synthetic-directory
 // store keeps subdirectories as members of their own set, so moving only
@@ -64,6 +64,7 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
   const now = nowIso()
   const store = accessor.store
   await checkDestParents(store, dst, d)
+  await checkRename(store, src, s, dst, d)
   if (await store.hasFile(s)) {
     const data = await store.getFile(s)
     const mod = await store.getModified(s)

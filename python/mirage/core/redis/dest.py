@@ -12,7 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.errors.fs import eexist, eisdir, enoent, enotdir
+from mirage.errors.fs import (
+    eexist,
+    einval,
+    eisdir,
+    enoent,
+    enotdir,
+    enotempty,
+)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
@@ -53,6 +60,55 @@ async def check_dest_parents(
     broken = await _broken_parent(store, dst_spec, d)
     if broken is not None:
         raise broken
+
+
+async def check_rename(
+    store: RedisStore,
+    src_spec: PathSpec,
+    s: str,
+    dst_spec: PathSpec,
+    d: str,
+) -> None:
+    """Refuse a rename that ``rename(2)`` refuses once both ends resolve.
+
+    A file onto a directory is EISDIR, a directory onto a file ENOTDIR,
+    onto a directory that holds entries ENOTEMPTY, and into its own
+    subtree EINVAL. A keyed store has no kernel to say so: without this a
+    file and a directory end up under one key, or two trees merge. A
+    source the store does not hold is left to the caller's lookup.
+
+    Args:
+        store (RedisStore): The backing store.
+        src_spec (PathSpec): Source operand, reported in the error.
+        s (str): Normalized source key.
+        dst_spec (PathSpec): Destination operand, reported in the error.
+        d (str): Normalized destination key.
+
+    Raises:
+        IsADirectoryError: A file onto a directory.
+        NotADirectoryError: A directory onto a file.
+        OSError: ENOTEMPTY onto a directory with entries, EINVAL into
+            the source's own subtree.
+    """
+    if s == d:
+        return
+    if await store.has_file(s):
+        if await store.has_dir(d):
+            raise eisdir(dst_spec)
+        return
+    if not await store.has_dir(s):
+        return
+    if d.startswith(s.rstrip("/") + "/"):
+        raise einval(src_spec)
+    if await store.has_file(d):
+        raise enotdir(dst_spec)
+    if not await store.has_dir(d):
+        return
+    prefix = d.rstrip("/") + "/"
+    if await store.list_files(prefix) or any(
+        key.startswith(prefix) for key in await store.list_dirs()
+    ):
+        raise enotempty(dst_spec)
 
 
 async def lookup_error(store: RedisStore, spec: PathSpec, key: str) -> OSError:

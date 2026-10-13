@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
-import { eexist, eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { eexist, einval, eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { type FsError } from '../../errors/types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { ancestors } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { RedisStoreLike } from '../../vfs/redis/store.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
@@ -40,6 +41,33 @@ export async function checkDestParents(
 ): Promise<void> {
   const broken = await brokenParent(store, dst, d)
   if (broken !== null) throw broken
+}
+
+// Refuse a rename that rename(2) refuses once both ends resolve. A file onto
+// a directory is EISDIR, a directory onto a file ENOTDIR, onto a directory
+// that holds entries ENOTEMPTY, and into its own subtree EINVAL. A keyed store
+// has no kernel to say so: without this a file and a directory end up under
+// one key, or two trees merge. A source the store does not hold is left to the
+// caller's lookup. Mirrors check_rename in dest.py.
+export async function checkRename(
+  store: RedisStoreLike,
+  src: PathSpec,
+  s: string,
+  dst: PathSpec,
+  d: string,
+): Promise<void> {
+  if (s === d) return
+  if (await store.hasFile(s)) {
+    if (await store.hasDir(d)) throw eisdir(dst)
+    return
+  }
+  if (!(await store.hasDir(s))) return
+  if (d.startsWith(`${rstripSlash(s)}/`)) throw einval(src)
+  if (await store.hasFile(d)) throw enotdir(dst)
+  if (!(await store.hasDir(d))) return
+  const prefix = `${rstripSlash(d)}/`
+  if ((await store.listFiles(prefix)).length > 0) throw enotempty(dst)
+  if ([...(await store.listDirs())].some((k) => k.startsWith(prefix))) throw enotempty(dst)
 }
 
 // The error a lookup of a key the store does not hold answers with.

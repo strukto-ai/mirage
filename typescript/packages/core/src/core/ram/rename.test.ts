@@ -86,6 +86,28 @@ describe('core/ram rename', () => {
     expect(acc.store.files.has('/dir/f')).toBe(true)
   })
 
+  it('refuses what rename(2) refuses and leaves the store as it was', async () => {
+    // The store has no kernel to refuse these: it kept a file and a
+    // directory under one key, or merged two trees.
+    for (const [src, dst, code] of [
+      ['/a.txt', '/d', 'EISDIR'],
+      ['/dir', '/plain', 'ENOTDIR'],
+      ['/d', '/dir', 'ENOTEMPTY'],
+      ['/dir', '/dir/sub', 'EINVAL'],
+    ] as const) {
+      const acc = mkAccessor()
+      const before = [[...acc.store.files.keys()], [...acc.store.dirs]]
+      expect(await codeOf(() => rename(acc, mkPath(src), mkPath(dst)))).toBe(code)
+      expect([[...acc.store.files.keys()], [...acc.store.dirs]]).toEqual(before)
+    }
+  })
+
+  it('replaces an empty directory with a directory', async () => {
+    const acc = mkAccessor()
+    await rename(acc, mkPath('/dir'), mkPath('/d'))
+    expect([acc.store.files.has('/d/f'), acc.store.dirs.has('/dir')]).toEqual([true, false])
+  })
+
   it('a missing source is ENOENT', async () => {
     const acc = mkAccessor()
     expect(await codeOf(() => rename(acc, mkPath('/nope'), mkPath('/d/x')))).toBe('ENOENT')

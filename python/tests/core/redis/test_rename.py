@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import os
 
 import pytest
@@ -83,6 +84,34 @@ async def test_rename_dir_moves_nested_subdirectories(accessor):
     assert not await store.has_file("/dir/sub/deep")
     # mtimes travel with the subtree; GNU mv preserves them.
     assert await store.get_modified("/d/moved/sub/deep") == "T0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "src, dst, code",
+    [
+        ("/a.txt", "/d", errno.EISDIR),
+        ("/dir", "/plain", errno.ENOTDIR),
+        ("/d", "/dir", errno.ENOTEMPTY),
+        ("/dir", "/dir/sub", errno.EINVAL),
+    ],
+)
+async def test_rename_refuses_what_rename_2_refuses(accessor, src, dst, code):
+    # The store has no kernel to refuse these: it kept a file and a
+    # directory under one key, or merged two trees.
+    store = accessor.store
+    before = (await store.list_files(), await store.list_dirs())
+    with pytest.raises(OSError) as info:
+        await rename(accessor, spec(src), spec(dst))
+    assert info.value.errno == code
+    assert (await store.list_files(), await store.list_dirs()) == before
+
+
+@pytest.mark.asyncio
+async def test_rename_dir_onto_an_empty_dir_replaces_it(accessor):
+    await rename(accessor, spec("/dir"), spec("/d"))
+    assert await accessor.store.get_file("/d/f") == b"x"
+    assert not await accessor.store.has_dir("/dir")
 
 
 @pytest.mark.asyncio

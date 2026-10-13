@@ -12,7 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.errors.fs import eexist, eisdir, enoent, enotdir
+from mirage.errors.fs import (
+    eexist,
+    einval,
+    eisdir,
+    enoent,
+    enotdir,
+    enotempty,
+)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
@@ -45,6 +52,53 @@ def check_dest_parents(store: RAMStore, dst_spec: PathSpec, d: str) -> None:
     broken = _broken_parent(store, dst_spec, d)
     if broken is not None:
         raise broken
+
+
+def check_rename(
+    store: RAMStore,
+    src_spec: PathSpec,
+    s: str,
+    dst_spec: PathSpec,
+    d: str,
+) -> None:
+    """Refuse a rename that ``rename(2)`` refuses once both ends resolve.
+
+    A file onto a directory is EISDIR, a directory onto a file ENOTDIR,
+    onto a directory that holds entries ENOTEMPTY, and into its own
+    subtree EINVAL. A keyed store has no kernel to say so: without this a
+    file and a directory end up under one key, or two trees merge. A
+    source the store does not hold is left to the caller's lookup.
+
+    Args:
+        store (RAMStore): The backing store.
+        src_spec (PathSpec): Source operand, reported in the error.
+        s (str): Normalized source key.
+        dst_spec (PathSpec): Destination operand, reported in the error.
+        d (str): Normalized destination key.
+
+    Raises:
+        IsADirectoryError: A file onto a directory.
+        NotADirectoryError: A directory onto a file.
+        OSError: ENOTEMPTY onto a directory with entries, EINVAL into
+            the source's own subtree.
+    """
+    if s == d:
+        return
+    if s in store.files:
+        if d in store.dirs:
+            raise eisdir(dst_spec)
+        return
+    if s not in store.dirs:
+        return
+    if d.startswith(s.rstrip("/") + "/"):
+        raise einval(src_spec)
+    if d in store.files:
+        raise enotdir(dst_spec)
+    prefix = d.rstrip("/") + "/"
+    if d in store.dirs and any(
+        key.startswith(prefix) for key in (*store.files, *store.dirs)
+    ):
+        raise enotempty(dst_spec)
 
 
 def lookup_error(store: RAMStore, spec: PathSpec, key: str) -> OSError:

@@ -19,7 +19,7 @@ import { norm } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { fsError } from '../../errors/fs.ts'
 import { activePipe } from '../dev/device.ts'
-import { checkDestParents, lookupError } from './dest.ts'
+import { checkDestParents, checkRename, lookupError } from './dest.ts'
 import { invalidateAfterMove } from '../../cache/context.ts'
 
 function moveAttrs(accessor: RAMAccessor, src: string, dst: string): void {
@@ -85,6 +85,7 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
     if (accessor.store.files.has(s) || accessor.store.dirs.has(s)) return
     throw lookupError(accessor, src, s)
   }
+  checkRename(accessor, src, s, dst, d)
   const srcFile = accessor.store.files.get(s)
   if (srcFile !== undefined) {
     accessor.store.files.set(d, srcFile)

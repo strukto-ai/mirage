@@ -14,7 +14,11 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_move
-from mirage.core.redis.dest import check_dest_parents, lookup_error
+from mirage.core.redis.dest import (
+    check_dest_parents,
+    check_rename,
+    lookup_error,
+)
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
@@ -77,6 +81,7 @@ async def rename(
     s, d = norm(src), norm(dst)
     now = now_iso()
     await check_dest_parents(store, dst_spec, d)
+    await check_rename(store, src_spec, s, dst_spec, d)
     # Only a folder carries a subtree; a file takes the unlink flavor.
     folder = False
     if await store.has_file(s):

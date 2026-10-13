@@ -15,7 +15,11 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_move
 from mirage.core.dev.device import active_pipe
-from mirage.core.ram.dest import check_dest_parents, lookup_error
+from mirage.core.ram.dest import (
+    check_dest_parents,
+    check_rename,
+    lookup_error,
+)
 from mirage.errors.fs import fs_error
 from mirage.errors.types import FsCondition
 from mirage.types import PathSpec
@@ -81,6 +85,7 @@ async def rename(
         raise fs_error(dst_spec, FsCondition.EPERM)
     now = now_iso()
     check_dest_parents(store, dst_spec, d)
+    check_rename(store, src_spec, s, dst_spec, d)
     # Only a folder carries a subtree; a file takes the unlink flavor.
     folder = False
     if s in store.files:
