@@ -334,6 +334,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _index?: IndexCacheStore,
     _offset = 0,
     _size: number | null = null,
+    _signal?: AbortSignal,
   ): Promise<Uint8Array> {
     return Promise.reject(enotsup(this.name, 'read', path))
   }

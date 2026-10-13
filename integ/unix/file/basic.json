@@ -241,6 +241,43 @@
       "flags": [
         "i"
       ]
+    },
+    {
+      "id": "file_i_names_a_character_device",
+      "seq": 15800081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "file -i /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "/dev/null: inode/chardevice; charset=binary\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
     }
   ]
 }

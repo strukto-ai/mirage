@@ -58,6 +58,22 @@ function parseFlags(bag: Record<string, FlagValue>): FileFlags {
   return { brief: fl.asBool('b'), mime: fl.asBool('i') }
 }
 
+/**
+ * How `file` describes a file it must not read, in libmagic's words: a
+ * character device, or a FIFO, whose read would drain it (`fifo (named
+ * pipe)`); null for any other file. Mirrors Python's _special_description.
+ */
+function specialDescription(s: FileStat, mime: boolean): string | null {
+  if (s.type === FileType.FIFO) return mime ? 'inode/fifo; charset=binary' : 'fifo (named pipe)'
+  if (s.type !== FileType.CHAR_DEVICE) return null
+  if (mime) return 'inode/chardevice; charset=binary'
+  const raw = s.extra[DEVICE_NUMBERS_KEY]
+  const device = Array.isArray(raw) && raw.length === 2 ? raw : null
+  return device !== null
+    ? `character special (${String(device[0])}/${String(device[1])})`
+    : 'character special'
+}
+
 export async function fileGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -87,15 +103,9 @@ export async function fileGeneric(
       lines.push(formatFileResult(p.rawPath, FileType.DIRECTORY, brief, mime))
       continue
     }
-    if (s.type === FileType.CHAR_DEVICE) {
-      const raw = s.extra[DEVICE_NUMBERS_KEY]
-      const device = Array.isArray(raw) && raw.length === 2 ? raw : null
-      const description = mime
-        ? 'inode/chardevice'
-        : device !== null
-          ? `character special (${String(device[0])}/${String(device[1])})`
-          : 'character special'
-      lines.push(formatFileResult(p.rawPath, description, brief, false))
+    const special = specialDescription(s, mime)
+    if (special !== null) {
+      lines.push(formatFileResult(p.rawPath, special, brief, false))
       continue
     }
     let header: Uint8Array

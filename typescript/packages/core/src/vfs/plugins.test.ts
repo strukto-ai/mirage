@@ -143,7 +143,7 @@ describe('a plug-in VFS', () => {
         ENC.encode('ell'),
       )
       expect(read).toHaveBeenCalledOnce()
-      expect(read.mock.calls[0]?.slice(2)).toEqual([1, 3])
+      expect(read.mock.calls[0]?.slice(2, 4)).toEqual([1, 3])
       const received: Uint8Array[] = []
       for await (const chunk of commandIo(vfs).readStream(accessor, PATH)) received.push(chunk)
       expect(received).toEqual([ENC.encode('hel'), ENC.encode('lo\n')])

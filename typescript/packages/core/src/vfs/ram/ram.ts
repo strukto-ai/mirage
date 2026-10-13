@@ -73,9 +73,10 @@ export class RAMVFS extends BaseVFS {
     index?: IndexCacheStore,
     offset = 0,
     size: number | null = null,
+    signal?: AbortSignal,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return devAwareRead(this.accessor, path, index)
-    return devAwareReadRange(this.accessor, path, index, offset, size)
+    if (offset === 0 && size === null) return devAwareRead(this.accessor, path, index, signal)
+    return devAwareReadRange(this.accessor, path, index, offset, size, signal)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

@@ -1287,6 +1287,37 @@
         "stdout": "st=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_timed_out_whole_read_leaves_data_for_the_next",
+      "seq": 1346141,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { timeout 0.1 tar -tf \"$1\"; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=124\nhello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_file_describes_a_pipe_without_reading_it",
+      "seq": 1346142,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { file \"$1\"; file -i \"$1\"; file -b \"$1\"; cat \"$1\"; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/dev/fd/63: fifo (named pipe)\n/dev/fd/63: inode/fifo; charset=binary\nfifo (named pipe)\nhello",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU file 5.46 under bash 5.2.37 describes Linux's /dev/fd/63, a procfs link, as \"symbolic link to pipe:[N]\" (inode/symlink under -i); with -L it prints these lines. Mirage's /dev/fd/63 is the FIFO itself, and neither reads it, so cat still gets the bytes."
     }
   ]
 }

@@ -26,9 +26,10 @@ export function read(
   accessor: RAMAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const pipe = activePipe(accessor, norm(path.mountPath))
-  if (pipe !== null) return pipe.read(path)
+  if (pipe !== null) return pipe.read(path, null, signal)
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) return ramRead(accessor, path, index)
   if (device === 'null') return Promise.resolve(new Uint8Array(0))
@@ -41,9 +42,10 @@ export function readRange(
   index: IndexCacheStore | undefined,
   offset: number,
   size: number | null,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const pipe = activePipe(accessor, norm(path.mountPath))
-  if (pipe !== null) return pipe.read(path, size)
+  if (pipe !== null) return pipe.read(path, size, signal)
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) {
     return ramRead(accessor, path, index, { offset, ...(size !== null ? { size } : {}) })

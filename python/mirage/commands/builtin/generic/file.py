@@ -54,6 +54,29 @@ async def _link_description(path: PathSpec, links: LinkView) -> str | None:
     return f"symbolic link to {target}"
 
 
+def _special_description(s: FileStat, mime: bool) -> str | None:
+    """How ``file`` describes a file it must not read, in libmagic's words:
+    a character device, or a FIFO, whose read would drain it (``fifo
+    (named pipe)``); None for any other file.
+
+    Args:
+        s (FileStat): the operand's stat.
+        mime (bool): -i, the MIME spelling.
+    """
+    if s.type == FileType.FIFO:
+        return "inode/fifo; charset=binary" if mime else "fifo (named pipe)"
+    if s.type != FileType.CHAR_DEVICE:
+        return None
+    if mime:
+        return "inode/chardevice; charset=binary"
+    dev = s.extra.get(DEVICE_NUMBERS_KEY) if s.extra else None
+    return (
+        f"character special ({dev[0]}/{dev[1]})"
+        if dev
+        else "character special"
+    )
+
+
 async def file_cmd(
     paths: list[PathSpec],
     *,
@@ -104,18 +127,9 @@ async def file_cmd(
                 format_file_result(p.raw_path, FileType.DIRECTORY, b, i)
             )
             continue
-        if s.type == FileType.CHAR_DEVICE:
-            dev = s.extra.get(DEVICE_NUMBERS_KEY) if s.extra else None
-            desc = (
-                "inode/chardevice"
-                if i
-                else (
-                    f"character special ({dev[0]}/{dev[1]})"
-                    if dev
-                    else "character special"
-                )
-            )
-            lines.append(format_file_result(p.raw_path, desc, b, False))
+        special = _special_description(s, i)
+        if special is not None:
+            lines.append(format_file_result(p.raw_path, special, b, False))
             continue
         try:
             header = (await read_bytes(p))[:512]

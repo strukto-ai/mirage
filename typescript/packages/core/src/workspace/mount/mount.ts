@@ -675,9 +675,9 @@ export class MountEntry {
         levels.push((scope, _args, kw) => readWindow(render.bind(vfs), true, scope, kw))
       }
       if (vfs.supports('read')) {
-        levels.push((scope, _args, kw) =>
-          readWindow(vfs.read.bind(vfs), vfs.readsRanges, scope, kw),
-        )
+        const read: ReadFn = (path, index, offset, size) =>
+          vfs.read(path, index, offset, size, callerSignal())
+        levels.push((scope, _args, kw) => readWindow(read, vfs.readsRanges, scope, kw))
       }
       return levels
     }
