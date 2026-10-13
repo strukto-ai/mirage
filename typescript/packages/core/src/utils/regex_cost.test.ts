@@ -3,10 +3,10 @@ import { LOOP_BUDGET } from '../concurrency/constants.ts'
 import { loopLimit } from './regex_cost.ts'
 
 describe('loopLimit', () => {
-  it.each([/(a+)+$/, /(?:a*)*b/, /(?:a|b)+/, /(a)\1/, /(?<x>a)\k<x>/, /(?=.*x)/])(
+  it.each(['(a+)+$', '(?:a*)*b', '(?:a|b)+', '(a)\\1', '(?<x>a)\\k<x>', '(?=.*x)'])(
     'never runs %s in place',
-    (pattern) => {
-      expect(loopLimit(pattern)).toBe(-1)
+    (source) => {
+      expect(loopLimit(new RegExp(source))).toBe(-1)
     },
   )
 

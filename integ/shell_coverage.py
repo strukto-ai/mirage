@@ -29,23 +29,32 @@ def run_together(
 ) -> None:
     """Run every leg at once and print each log whole once all have ended.
 
+    A leg that fails to start, or an interrupted wait, stops and reaps
+    every leg already running before the error goes on.
+
     Args:
         legs (list[tuple[list[str], Path, Path, dict[str, str] | None]]):
             each leg's argv, working directory, log file and environment.
     """
-    running = []
-    for argv, cwd, log, env in legs:
-        with log.open("wb") as out:
-            running.append(
-                (
-                    argv,
-                    log,
-                    subprocess.Popen(
-                        argv, cwd=cwd, env=env, stdout=out, stderr=out
-                    ),
+    running: list[tuple[list[str], Path, subprocess.Popen[bytes]]] = []
+    try:
+        for argv, cwd, log, env in legs:
+            with log.open("wb") as out:
+                running.append(
+                    (
+                        argv,
+                        log,
+                        subprocess.Popen(
+                            argv, cwd=cwd, env=env, stdout=out, stderr=out
+                        ),
+                    )
                 )
-            )
-    codes = [(argv, log, process.wait()) for argv, log, process in running]
+        codes = [(argv, log, process.wait()) for argv, log, process in running]
+    finally:
+        for _, _, process in running:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
     for _, log, code in codes:
         print(f"=== {log.name}: exit {code} ===", flush=True)
         sys.stdout.buffer.write(log.read_bytes())
