@@ -71,7 +71,13 @@ export class AppleContainerRuntime
     stdin: Uint8Array | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, signal !== undefined ? { signal } : {})
+    return runCli(
+      'container',
+      APPLE_CONTAINER_CLI_HINT,
+      args,
+      stdin,
+      signal !== undefined ? { signal } : {},
+    )
   }
 
   /**

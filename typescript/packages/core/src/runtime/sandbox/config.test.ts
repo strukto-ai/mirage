@@ -17,11 +17,14 @@ import { requireId } from './config.ts'
 import { E2BRuntime } from './e2b/runtime.ts'
 
 describe('requireId', () => {
-  it.each(['', '  ', undefined, 3])('refuses %j, which would reach the provider as no name', (id) => {
-    expect(() => {
-      requireId('docker', 'container', id)
-    }).toThrow('docker config needs a nonblank container')
-  })
+  it.each(['', '  ', undefined, 3])(
+    'refuses %j, which would reach the provider as no name',
+    (id) => {
+      expect(() => {
+        requireId('docker', 'container', id)
+      }).toThrow('docker config needs a nonblank container')
+    },
+  )
 
   it('takes an id with something in it', () => {
     expect(() => {

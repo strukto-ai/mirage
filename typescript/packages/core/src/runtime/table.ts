@@ -87,7 +87,11 @@ const ENTRY_KEYS: readonly string[] = ['captures', 'config']
 // when they load, so `registerRuntime` can refuse to shadow one the way
 // the VFS and CLI registries refuse a builtin name. A package's own
 // registration is the first under its name; any later one shadows it.
-const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([...Object.keys(NAMED), ...NODE_RUNTIMES, 'e2b'])
+const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([
+  ...Object.keys(NAMED),
+  ...NODE_RUNTIMES,
+  'e2b',
+])
 
 /**
  * Register a runtime class under a config name. Host-side only, like

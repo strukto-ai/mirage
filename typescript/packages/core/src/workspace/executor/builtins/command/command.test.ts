@@ -26,6 +26,7 @@ const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
 function makeRegistry(): MountRegistry {
   return {
     runtimeEntries: [],
+    runtimeBindings: {},
     mountForCommand: (name: string): unknown => (MOUNT_COMMANDS.has(name) ? {} : null),
     clis: new CLIRegistry(),
   } as unknown as MountRegistry

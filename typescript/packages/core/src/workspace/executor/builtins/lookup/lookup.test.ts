@@ -43,6 +43,7 @@ function makeRegistry(withCli = false): MountRegistry {
   if (withCli) clis.install('linear', TREE)
   return {
     runtimeEntries: [],
+    runtimeBindings: {},
     mountForCommand: (name: string): unknown => (MOUNT_COMMANDS.has(name) ? {} : null),
     clis,
   } as unknown as MountRegistry

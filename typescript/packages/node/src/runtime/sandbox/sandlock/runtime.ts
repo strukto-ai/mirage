@@ -75,12 +75,18 @@ export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExe
       argv.push('--env', `${key}=${value}`)
     argv.push('--', ...request.argv)
     // Only host PATH locates the CLI; requested variables go to the confined child.
-    const { stdout, stderr, code } = await runCli('sandlock', SANDLOCK_CLI_HINT, argv, request.stdin, {
-      cwd: request.cwd.virtual,
-      env: { PATH: process.env.PATH ?? '' },
-      children: this.children,
-      ...(request.signal !== undefined ? { signal: request.signal } : {}),
-    })
+    const { stdout, stderr, code } = await runCli(
+      'sandlock',
+      SANDLOCK_CLI_HINT,
+      argv,
+      request.stdin,
+      {
+        cwd: request.cwd.virtual,
+        env: { PATH: process.env.PATH ?? '' },
+        children: this.children,
+        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+      },
+    )
     return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   }
 
