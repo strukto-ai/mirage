@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 from mirage.core.dev.pipe import DevicePipe
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.console import Channel, JobConsole, Terminal
@@ -30,6 +32,8 @@ from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 
 class SubstitutionConsole(JobConsole):
@@ -46,6 +50,25 @@ class SubstitutionConsole(JobConsole):
                 raise asyncio.CancelledError() from exc
         else:
             await self.target.emit(channel, data)
+
+
+async def _close_readers(endpoint: DevicePipe) -> None:
+    """Close the streams readers opened on a pipe that ends with its
+    command: a later read finds the end of input either way, and nothing
+    is left open for the event loop to finalize.
+
+    Args:
+        endpoint (DevicePipe): the substitution's pipe.
+    """
+    readers = list(endpoint.readers)
+    endpoint.readers.clear()
+    for reader in readers:
+        try:
+            await reader.aclose()
+        except RuntimeError:
+            # A reader still mid-pull in another task (a background job)
+            # finds the end of input once that pull returns.
+            logger.debug("a pipe reader was still reading", exc_info=True)
 
 
 class ProcessSubScope:
@@ -110,7 +133,11 @@ class ProcessSubScope:
         if self.closed:
             return
         self.closed = True
+        held = self._held_inputs()
+        kept = {} if failed else held
         for child in self.held:
+            if child.path in kept:
+                continue
             if failed or child.endpoint.readable:
                 child.endpoint.pipe.close_reader()
                 child.task.cancel()
@@ -118,7 +145,13 @@ class ProcessSubScope:
                 child.endpoint.pipe.end()
         try:
             results = await asyncio.gather(
-                *(child.task for child in self.held), return_exceptions=True
+                *(
+                    lines.load_rest()
+                    for readers in kept.values()
+                    for lines in readers
+                ),
+                *(child.task for child in self.held),
+                return_exceptions=True,
             )
             for result in results:
                 if isinstance(result, BaseException) and not isinstance(
@@ -127,7 +160,33 @@ class ProcessSubScope:
                     raise result
         finally:
             for child in self.held:
+                await _close_readers(child.endpoint)
                 child.dev.release_input(child.path, child.allocation)
+
+    def _held_inputs(self) -> dict[str, list[AsyncLineIterator]]:
+        """The input pipes of this scope that a descriptor of the shell
+        still reads after the command, opened by its path (``exec
+        3<"$1"``) or duplicated from one, with the line buffers reading
+        each: they load the rest of it, and reads go on from memory once
+        the pipe is released. Every descriptor naming one stops naming
+        it, as the path is free for the next substitution once this
+        command ends.
+        """
+        inputs = {c.path for c in self.held if c.endpoint.readable}
+        held: dict[str, list[AsyncLineIterator]] = {}
+        for descriptor in self.context.session.descriptors.values():
+            source = descriptor.source
+            if (
+                source is None
+                or source.pipe is None
+                or source.pipe.virtual not in inputs
+            ):
+                continue
+            readers = held.setdefault(source.pipe.virtual, [])
+            if all(source.lines is not lines for lines in readers):
+                readers.append(source.lines)
+            source.pipe = None
+        return held
 
     async def settle(self) -> tuple[bytes, bytes]:
         """End the substitutions as a finished command does, for a node

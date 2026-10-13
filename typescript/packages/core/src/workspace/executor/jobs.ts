@@ -19,6 +19,7 @@ import { ExecutionScope } from '../execution.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { PipeClosed } from '../../io/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { FD_BOTH, FD_CLOSE, FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
@@ -94,15 +95,26 @@ export async function drained(
   try {
     await pump(sink, Channel.STDOUT, stdout)
   } catch (err) {
+    if (err instanceof PipeClosed) {
+      // SIGPIPE ends the writer where it was, but what it had already said on
+      // stderr stands (`cat /missing big > >(head -c 1)`).
+      await sendStderr(sink, io)
+      throw err
+    }
     await failedRead(io, err, execNode)
   }
   if (io.output !== null) execNode.exitCode = io.exitCode
+  await sendStderr(sink, io)
+  return [null, io, execNode]
+}
+
+/** Write a statement's stderr to its sink, emptying it in the result. Mirrors Python's _send_stderr. */
+async function sendStderr(sink: JobConsole, io: IOResult): Promise<void> {
   const stderr = await io.materializeStderr()
   if (stderr.byteLength > 0) {
     await sink.emit(Channel.STDERR, stderr)
     io.stderr = null
   }
-  return [null, io, execNode]
 }
 
 /**

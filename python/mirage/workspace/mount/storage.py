@@ -104,7 +104,7 @@ def check_unlink(registry: MountRegistry, path: PathSpec) -> None:
         PermissionError: the source is a live pipe.
     """
     owner = registry.try_mount_for(path.virtual)
-    if owner is not None and owner.reads_live(path.virtual):
+    if owner is not None and owner.live_pipe(path.virtual) is not None:
         raise fs_error(path, FsCondition.EPERM)
     for entry in registry.mounts():
         if (

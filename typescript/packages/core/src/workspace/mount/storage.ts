@@ -92,7 +92,7 @@ export function makeCheckUnlink(
 ): (path: PathSpec) => void {
   return (path: PathSpec): void => {
     const owner = registry.tryMountFor(path.virtual)
-    const live = owner?.readsLive(
+    const live = owner?.livePipe(
       new PathSpec({
         virtual: path.virtual,
         directory: path.directory,
@@ -100,7 +100,7 @@ export function makeCheckUnlink(
       }),
       access,
     )
-    if (live === true) throw fsError(path, 'EPERM')
+    if (live != null) throw fsError(path, 'EPERM')
     for (const entry of registry.allMounts()) {
       if (
         entry.write === WritePolicy.CONDITIONAL &&

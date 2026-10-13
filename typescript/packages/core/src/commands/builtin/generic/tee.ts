@@ -240,9 +240,13 @@ export async function writeOutput(
       await writeOne(path, raw, parsed, stream, write, append)
     } catch (err) {
       if (err instanceof PipeClosed) {
-        // The operand is a pipe whose reader has gone: SIGPIPE ends tee
-        // unless -p or --output-error said otherwise.
-        if (parsed.pipeErrors === PipeErrors.SIGNAL) throw err
+        // The operand is a pipe whose reader has gone: SIGPIPE ends tee there,
+        // with what it had already reported, unless -p or --output-error said
+        // otherwise.
+        if (parsed.pipeErrors === PipeErrors.SIGNAL) {
+          const stderr = errors.length > 0 ? encodeText(errors.join('')) : null
+          return [null, new IOResult({ exitCode: 141, stderr })]
+        }
         if (parsed.pipeErrors === PipeErrors.IGNORE) continue
         errors.push(errorLine(path, fsError(path, 'EPIPE')))
       } else errors.push(errorLine(path, err))

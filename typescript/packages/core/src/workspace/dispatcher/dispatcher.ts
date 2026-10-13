@@ -1040,8 +1040,11 @@ export class Dispatcher {
     const [source, records] = await commandRecords((mine) =>
       Promise.resolve([mount.readStream(scope, this.access), mine] as const),
     )
-    if (mount.readsLive(scope, this.access)) {
-      return new PipeStream(await opened(source, call.report))
+    const pipe = mount.livePipe(scope, this.access)
+    if (pipe !== null) {
+      const live = new PipeStream(await opened(source, call.report), call.path)
+      pipe.readers.add(new WeakRef(live))
+      return live
     }
     const stream =
       filler === null

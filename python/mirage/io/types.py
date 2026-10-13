@@ -49,10 +49,12 @@ class PipeStream(AsyncIterator[bytes]):
 
     Args:
         stream (AsyncIterator[bytes]): the pipe's opened read.
+        path (PathSpec): the descriptor it was opened at.
     """
 
-    def __init__(self, stream: AsyncIterator[bytes]) -> None:
+    def __init__(self, stream: AsyncIterator[bytes], path: PathSpec) -> None:
         self._stream = stream
+        self.path = path
 
     async def __anext__(self) -> bytes:
         return await anext(self._stream)

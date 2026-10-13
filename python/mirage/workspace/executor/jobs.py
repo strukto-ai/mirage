@@ -30,6 +30,7 @@ from mirage.context import (
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
+from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
@@ -134,13 +135,28 @@ async def drained(
         await pump(sink, Channel.STDOUT, stdout)
     except OSError as exc:
         await failed_read(io, exc, exec_node)
+    except PipeClosed:
+        # SIGPIPE ends the writer where it was, but what it had already
+        # said on stderr stands (`cat /missing big > >(head -c 1)`).
+        await _send_stderr(sink, io)
+        raise
     if io.output is not None:
         exec_node.exit_code = io.exit_code
+    await _send_stderr(sink, io)
+    return None, io, exec_node
+
+
+async def _send_stderr(sink: JobConsole, io: IOResult) -> None:
+    """Write a statement's stderr to its sink, emptying it in the result.
+
+    Args:
+        sink (JobConsole): where the statement writes.
+        io (IOResult): its result.
+    """
     stderr = await io.materialize_stderr()
     if stderr:
         await sink.emit(Channel.STDERR, stderr)
         io.stderr = None
-    return None, io, exec_node
 
 
 def _job_streams(

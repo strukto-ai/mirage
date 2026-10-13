@@ -1384,8 +1384,11 @@ class Dispatcher:
         """
         with command_records() as records:
             stream = mount.read_stream(call.path.virtual)
-        if mount.reads_live(call.path.virtual):
-            return PipeStream(await _opened(stream, call.report))
+        pipe = mount.live_pipe(call.path.virtual)
+        if pipe is not None:
+            live = PipeStream(await _opened(stream, call.report), call.path)
+            pipe.readers.add(live)
+            return live
         if filler is not None:
             stream = filler.fill_stream(
                 call.path,

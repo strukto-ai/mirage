@@ -17,6 +17,7 @@ import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
+import { PipeClosed } from '../../io/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import type { ExecutionNode, StatusWriter } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -396,7 +397,18 @@ export async function land(
   mergedIo: IOResult,
 ): Promise<IOResult> {
   if (sink !== null) {
-    for (const [channel, data] of written) await sink.emit(channel, data)
+    for (const [index, [channel, data]] of written.entries()) {
+      try {
+        await sink.emit(channel, data)
+      } catch (err) {
+        if (!(err instanceof PipeClosed)) throw err
+        // SIGPIPE ends the writer where it was, but what it had already said
+        // on stderr stands (`(cat /missing big) > >(head -c 1)`).
+        for (const [later, more] of written.slice(index + 1))
+          if (later === Channel.STDERR) await sink.emit(later, more)
+        throw err
+      }
+    }
     return mergedIo
   }
   const stdout = concat(written.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))

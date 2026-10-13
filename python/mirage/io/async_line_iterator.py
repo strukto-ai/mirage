@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.io.cooperative import chunks
-from mirage.io.types import ByteSource, DeviceInput
+from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.yield_budget import YieldBudget
+from mirage.types import PathSpec
 
 
 def char_width(data: bytes) -> int:
@@ -237,6 +238,20 @@ class AsyncLineIterator:
         self._exhausted = True
         await self._source.aclose()
 
+    async def load_rest(self) -> None:
+        """Read what the source has left into the buffer, for a descriptor
+        that outlives its source (a pipe whose substitution's command has
+        ended): reads go on from memory, and the source's stream ends."""
+        parts = [self._buf]
+        while not self._exhausted:
+            try:
+                await self._budget.run()
+                parts.append(await self._next_chunk())
+            except StopAsyncIteration:
+                self._exhausted = True
+        self._buf = b"".join(parts)
+        self._view = None
+
     async def read_chars(
         self, count: int, delim: bytes | None
     ) -> tuple[bytes, bool]:
@@ -309,17 +324,30 @@ class SharedInput:
     source, since a later command may still read it; whoever opened the
     source closes it, and a failed line discards it.
 
+    One over a live pipe (a process substitution's ``/dev/fd/N``) names
+    it in ``pipe`` while the substitution's command runs. When that
+    command ends, its scope keeps the rest of the pipe readable for a
+    descriptor the shell still holds (``f() { exec 3<"$1"; }; f <(cmd)``)
+    and clears the name.
+
     Args:
         source (ByteSource | AsyncLineIterator): what the descriptor
             reads, or the line buffer of the descriptor it duplicates.
+        pipe (PathSpec | None): the live pipe a duplicated descriptor
+            reads; one built over a ``PipeStream`` takes that stream's.
     """
 
-    def __init__(self, source: ByteSource | AsyncLineIterator) -> None:
+    def __init__(
+        self,
+        source: ByteSource | AsyncLineIterator,
+        pipe: PathSpec | None = None,
+    ) -> None:
         self.lines = (
             source
             if isinstance(source, AsyncLineIterator)
             else AsyncLineIterator(source)
         )
+        self.pipe = source.path if isinstance(source, PipeStream) else pipe
 
     def __aiter__(self) -> "SharedInput":
         return self
@@ -327,7 +355,7 @@ class SharedInput:
     def dup(self) -> "SharedInput":
         """Another descriptor on the same open file, as ``dup`` makes:
         a read through either moves the one offset."""
-        return SharedInput(self.lines)
+        return SharedInput(self.lines, self.pipe)
 
     async def __anext__(self) -> bytes:
         chunk = await self.lines.read_chunk()

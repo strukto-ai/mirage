@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import weakref
 from collections.abc import AsyncIterator
 
 from mirage.errors.fs import ebadf
 from mirage.io.pipe import BytePipe
+from mirage.io.types import PipeStream
 from mirage.types import PathSpec
 
 
@@ -24,10 +26,12 @@ class DevicePipe:
     """One directional virtual descriptor with bounded producer backpressure.
 
     The read end belongs to the scope that opened the descriptor, which
-    closes it with ``pipe.close_reader()`` when its command ends; no
-    reader closes it, so a function can read one substitution twice.
-    Readers take turns, one chunk each, so concurrent readers split the
-    stream between them and a ranged read leaves the rest of its chunk
+    closes it with ``pipe.close_reader()`` when its command ends, unless a
+    descriptor the shell still holds reads the rest first, and closes the
+    streams readers opened on it that are still open (``readers``, held
+    weakly); no reader closes it, so a function can read one substitution
+    twice. Readers take turns, one chunk each, so concurrent readers split
+    the stream between them and a ranged read leaves the rest of its chunk
     to the next reader. A chunk is pulled in a task of its own: a reader
     cancelled while it waits leaves that chunk to the next reader rather
     than ending the stream for every reader.
@@ -40,6 +44,7 @@ class DevicePipe:
         self._pull: asyncio.Task[bytes] | None = None
         self._pending = b""
         self._turn = asyncio.Lock()
+        self.readers: weakref.WeakSet[PipeStream] = weakref.WeakSet()
 
     async def write(self, data: bytes, path: PathSpec) -> None:
         if self.readable:

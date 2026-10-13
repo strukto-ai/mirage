@@ -62,6 +62,7 @@ from mirage.context import (
     strongest_mode_under,
 )
 from mirage.core.dev.device import active_pipe
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
     expect_offset,
@@ -1343,9 +1344,9 @@ class MountEntry:
                 reset_active_recorder(recording_token)
                 push_write_context(prev_write)
 
-    def reads_live(self, path: str) -> bool:
-        """Whether a read of ``path`` takes bytes another task is still
-        writing: a live pipe in a store with pipe endpoints, whose first
+    def live_pipe(self, path: str) -> DevicePipe | None:
+        """The live pipe a read of ``path`` takes bytes from, another task
+        still writing it: a pipe endpoint in a store with them, whose first
         byte must not be pulled before its reader asks for it.
 
         Args:
@@ -1353,9 +1354,9 @@ class MountEntry:
         """
         accessor = getattr(self.vfs, "accessor", None)
         if not isinstance(accessor, RAMAccessor):
-            return False
+            return None
         key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
-        return active_pipe(accessor, key) is not None
+        return active_pipe(accessor, key)
 
     def read_stream(self, path: str) -> AsyncIterator[bytes]:
         """The VFS's streamed read of ``path``, framed for later pulls.

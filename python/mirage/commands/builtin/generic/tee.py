@@ -259,9 +259,12 @@ async def write_output(
             )
         except PipeClosed:
             # The operand is a pipe whose reader has gone: SIGPIPE ends
-            # tee unless -p or --output-error said otherwise.
+            # tee there, with what it had already reported, unless -p or
+            # --output-error said otherwise.
             if parsed.pipe_errors is PipeErrors.SIGNAL:
-                raise
+                return None, IOResult(
+                    exit_code=141, stderr=b"".join(errors) or None
+                )
             if parsed.pipe_errors is PipeErrors.REPORT:
                 errors.append(
                     error_line(path, fs_error(path, FsCondition.EPIPE))

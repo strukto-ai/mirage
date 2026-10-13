@@ -78,12 +78,15 @@ export class DevVFS extends RAMVFS {
    * refusing read, and only the two bounded streaming commands opt into the
    * endless source (`commands/builtin/dev`).
    */
-  override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    // A live pipe is bound as the read opens, so a descriptor that holds it
+    // reads on after the pipe's path is released.
     const pipe = activePipe(this.accessor, norm(path.mountPath))
-    if (pipe !== null) {
-      yield* pipe.stream(path)
-      return
-    }
+    if (pipe !== null) return pipe.stream(path)
+    return this.readWhole(path, index)
+  }
+
+  private async *readWhole(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
     const data = await this.read(path, index)
     if (data.byteLength > 0) yield data
   }

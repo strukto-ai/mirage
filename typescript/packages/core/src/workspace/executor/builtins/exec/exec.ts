@@ -14,7 +14,7 @@
 
 import { SharedInput, share } from '../../../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
@@ -371,21 +371,24 @@ async function installDescriptor(
   const scope = scopeOf(target)
   try {
     if (redirect.kind === RedirectKind.STDIN || redirect.kind === RedirectKind.READWRITE) {
-      let data: ByteSource | null
+      let data: ByteSource
       try {
-        data = (await dispatch('read', scope))[0] as ByteSource | null
+        const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
+        // A pipe streams as its producer writes, as under any redirect, so a
+        // command reading it need not wait for the producer to end; a file is
+        // read whole here.
+        data = opened instanceof PipeStream ? opened : await materialize(opened)
       } catch (error) {
         if (redirect.kind !== RedirectKind.READWRITE || !isMissingPath(error)) throw error
         data = new Uint8Array()
       }
-      const bytes = await materialize(data)
       if (redirect.kind === RedirectKind.READWRITE) {
         await createFile(dispatch, session, scope, new Uint8Array(), true)
         const file = new FileDescription(scope)
         file.opened = true
-        file.source = new FileInput(file, bytes)
+        file.source = new FileInput(file, await materialize(data))
         bind(session, fd, OPEN_FOR_READ_WRITE + scope.virtual, false, file.source)
-      } else bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(bytes))
+      } else bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(data))
     } else {
       await createFile(dispatch, session, scope, new Uint8Array(), redirect.append)
       const file = new FileDescription(scope, redirect.append)
@@ -447,7 +450,8 @@ export async function divertStatement(
   const rest: Written[] = []
   let failed = false
   let unwritable = false
-  for (const [channel, data, kept] of runs(written)) {
+  const grouped = runs(written)
+  for (const [index, [channel, data, kept]] of grouped.entries()) {
     if (kept) {
       rest.push([channel, data, true])
       continue
@@ -457,6 +461,13 @@ export async function divertStatement(
       refused = await routed(dispatch, session, channel, data, rest)
     } catch (err) {
       if (!(err instanceof PipeClosed)) throw err
+      // SIGPIPE ends the writer where it was, but what it had already said on
+      // stderr stands.
+      for (const [later, more, keptLater] of grouped.slice(index + 1)) {
+        if (later !== Channel.STDERR) continue
+        if (keptLater) rest.push([later, more, true])
+        else await routed(dispatch, session, later, more, rest)
+      }
       if (!writerForks(statement, session, io.producer?.command ?? null)) throw new ExitSignal(141)
       io.exitCode = 141
       break
@@ -485,9 +496,9 @@ export async function divertStatement(
  * subshell, redirected or negated too, or a pipeline, whose commands are each
  * a child of their own. A command is judged by the producer its output names
  * (`producer`), what its head ran as (`$cmd`), when it names one. Mirrors
- * Python's _writer_forks.
+ * Python's writer_forks.
  */
-function writerForks(
+export function writerForks(
   statement: TSNodeLike | null,
   session: SessionState,
   producer: string | null,

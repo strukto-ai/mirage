@@ -49,7 +49,10 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (
+    divert_statement,
+    writer_forks,
+)
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
 from mirage.workspace.executor.statement import (
@@ -527,7 +530,18 @@ async def handle_subshell(
                 child,
                 last_exec.command or "",
             )
-            merged_io = await land(written, sink, all_stdout, merged_io)
+            try:
+                merged_io = await land(written, sink, all_stdout, merged_io)
+            except PipeClosed:
+                # What the statement wrote meets a pipe whose reader has
+                # gone: a child it forked (a program) dies of it alone,
+                # with 141, and the subshell goes on; the subshell's own
+                # write (a builtin's) ends it below.
+                producer = None if io.producer is None else io.producer.command
+                if not writer_forks(child, session, producer):
+                    raise
+                io.exit_code = 141
+                record_status(session, io.exit_code)
             merged_io = await merged_io.merge(io)
             merged_io = await land(
                 await run_err_trap(

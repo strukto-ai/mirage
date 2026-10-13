@@ -22,7 +22,8 @@ from mirage.io.async_line_iterator import (
     share,
 )
 from mirage.io.cooperative import chunks
-from mirage.io.types import DeviceInput, materialize
+from mirage.io.types import DeviceInput, PipeStream, materialize
+from mirage.types import PathSpec
 
 
 async def _chunks(parts: list[bytes]):
@@ -241,6 +242,32 @@ async def test_a_dup_is_another_descriptor_on_the_same_offset():
     assert await shared.lines.readline() == b"a"
     assert await copy.lines.readline() == b"b"
     assert await materialize(shared) == b"c\n"
+
+
+@pytest.mark.asyncio
+async def test_load_rest_ends_the_source_and_reads_on_from_memory():
+    ended = []
+
+    async def source():
+        try:
+            yield b"a\nb"
+            yield b"\nc\n"
+        finally:
+            ended.append(True)
+
+    lines = AsyncLineIterator(source())
+    assert await lines.readline() == b"a"
+    await lines.load_rest()
+    assert ended == [True]
+    assert [line async for line in lines] == [b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_a_descriptor_on_a_live_pipe_names_it_and_a_dup_keeps_it():
+    pipe = PathSpec.from_str_path("/dev/fd/63")
+    shared = SharedInput(PipeStream(_chunks([b"x"]), pipe))
+    assert shared.pipe is pipe and shared.dup().pipe is pipe
+    assert SharedInput(b"x").pipe is None
 
 
 @pytest.mark.asyncio

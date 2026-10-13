@@ -63,14 +63,19 @@ class DevVFS(RAMVFS):
     ) -> FileStat:
         return await dev_stat(self.accessor, path, index)
 
-    async def read_stream(
+    def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
+        # A live pipe is bound as the read opens, so a descriptor that
+        # holds it reads on after the pipe's path is released.
         pipe = active_pipe(self.accessor, norm(path.mount_path))
         if pipe is not None:
-            async for chunk in pipe.stream(path):
-                yield chunk
-            return
+            return pipe.stream(path)
+        return self._read_whole(path, index)
+
+    async def _read_whole(
+        self, path: PathSpec, index: IndexCacheStore
+    ) -> AsyncIterator[bytes]:
         data = await self.read(path, index)
         if data:
             yield data

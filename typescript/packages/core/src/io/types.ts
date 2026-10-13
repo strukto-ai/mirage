@@ -54,10 +54,22 @@ export class DeviceInput extends Uint8Array {}
  * rather than reading it whole first. Mirrors Python's PipeStream.
  */
 export class PipeStream implements AsyncIterable<Uint8Array> {
-  constructor(private readonly stream: AsyncIterable<Uint8Array>) {}
+  private iterator: AsyncIterator<Uint8Array> | undefined
+
+  /** `path` is the descriptor it was opened at. */
+  constructor(
+    private readonly stream: AsyncIterable<Uint8Array>,
+    readonly path: PathSpec,
+  ) {}
 
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
-    return this.stream[Symbol.asyncIterator]()
+    this.iterator ??= this.stream[Symbol.asyncIterator]()
+    return this.iterator
+  }
+
+  /** Close the read, for the scope that ends its pipe. Mirrors Python's PipeStream.aclose. */
+  async close(): Promise<void> {
+    await (this.iterator ?? this.stream[Symbol.asyncIterator]()).return?.()
   }
 }
 

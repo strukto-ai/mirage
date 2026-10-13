@@ -21,7 +21,8 @@ import {
   SharedInput,
 } from './async_line_iterator.ts'
 import { chunks } from './cooperative.ts'
-import { DeviceInput, materialize } from './types.ts'
+import { DeviceInput, materialize, PipeStream } from './types.ts'
+import { PathSpec } from '../types.ts'
 
 async function* fromChunks(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
   await Promise.resolve()
@@ -76,6 +77,25 @@ describe('AsyncLineIterator', () => {
     const lines: string[] = []
     for await (const line of it) lines.push(decode(line))
     expect(lines).toEqual(['a', '', 'b'])
+  })
+  it('loads the rest of its source and reads on from memory', async () => {
+    let ended = false
+    async function* source(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      try {
+        yield encode('a\nb')
+        yield encode('\nc\n')
+      } finally {
+        ended = true
+      }
+    }
+    const lines = new AsyncLineIterator(source())
+    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('a')
+    await lines.loadRest()
+    expect(ended).toBe(true)
+    const rest: string[] = []
+    for await (const line of lines) rest.push(decode(line))
+    expect(rest).toEqual(['b', 'c'])
   })
 })
 
@@ -246,6 +266,14 @@ describe('SharedInput', () => {
     expect(decode((await shared.lines.readline()) ?? new Uint8Array())).toBe('a')
     expect(decode((await copy.lines.readline()) ?? new Uint8Array())).toBe('b')
     expect(decode(await materialize(shared))).toBe('c\n')
+  })
+
+  it('names the live pipe it reads, and a dup keeps the name', () => {
+    const pipe = PathSpec.fromStrPath('/dev/fd/63')
+    const shared = new SharedInput(new PipeStream(fromChunks([encode('x')]), pipe))
+    expect(shared.pipe).toBe(pipe)
+    expect(shared.dup().pipe).toBe(pipe)
+    expect(new SharedInput(encode('x')).pipe).toBeNull()
   })
 
   it('leaves the rest when a reader stops early', async () => {

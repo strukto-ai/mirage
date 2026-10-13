@@ -15,7 +15,8 @@
 import { abortable } from '../utils/abort.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
-import { type ByteSource, DeviceInput } from './types.ts'
+import { type ByteSource, DeviceInput, PipeStream } from './types.ts'
+import type { PathSpec } from '../types.ts'
 
 const NEWLINE = 0x0a
 const BYTE_VIEW = new TextDecoder('latin1')
@@ -188,6 +189,29 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     return this.close()
   }
 
+  /**
+   * Read what the source has left into the buffer, for a descriptor that
+   * outlives its source (a pipe whose substitution's command has ended):
+   * reads go on from memory, and the source's stream ends. Mirrors Python's
+   * load_rest.
+   */
+  async loadRest(): Promise<void> {
+    const parts: Uint8Array[] = [this.buf]
+    try {
+      while (!this.exhausted) {
+        const pending = this.check()
+        if (pending !== undefined) await pending
+        const result = await this.pull()
+        if (result.done === true) this.exhausted = true
+        else parts.push(result.value)
+      }
+    } catch (error) {
+      await this.close()
+      throw error
+    }
+    this.buf = join(parts)
+  }
+
   private check(signal?: AbortSignal): Promise<void> | undefined {
     signal?.throwIfAborted()
     const pending = this.budget.run()
@@ -344,11 +368,20 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
  */
 export class SharedInput implements AsyncIterableIterator<Uint8Array> {
   lines: AsyncLineIterator
+  /**
+   * The live pipe (a process substitution's `/dev/fd/N`) this reads while
+   * the substitution's command runs. When that command ends, its scope
+   * keeps the rest of the pipe readable for a descriptor the shell still
+   * holds (`f() { exec 3<"$1"; }; f <(cmd)`) and clears the name.
+   */
+  pipe: PathSpec | null
 
   /** `source` is what the descriptor reads, or the line buffer of the
-   * descriptor it duplicates. */
-  constructor(source: ByteSource | AsyncLineIterator) {
+   * descriptor it duplicates, whose live pipe `pipe` names; one built over
+   * a `PipeStream` takes that stream's. */
+  constructor(source: ByteSource | AsyncLineIterator, pipe: PathSpec | null = null) {
     this.lines = source instanceof AsyncLineIterator ? source : new AsyncLineIterator(source)
+    this.pipe = source instanceof PipeStream ? source.path : pipe
   }
 
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
@@ -358,7 +391,7 @@ export class SharedInput implements AsyncIterableIterator<Uint8Array> {
   /** Another descriptor on the same open file, as `dup` makes: a read
    * through either moves the one offset. */
   dup(): SharedInput {
-    return new SharedInput(this.lines)
+    return new SharedInput(this.lines, this.pipe)
   }
 
   async next(): Promise<IteratorResult<Uint8Array>> {

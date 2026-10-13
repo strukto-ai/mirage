@@ -787,6 +787,97 @@
         "stdout": "st=124\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_exec_input_streams_while_command_runs",
+      "seq": 1346108,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { (exec <\"$1\"; : > {mount}/procsub-go; head -c 2); }; f <(printf x; for i in $(seq 30); do [ -e {mount}/procsub-go ] && break; sleep 0.1; done; [ -e {mount}/procsub-go ] && printf y || printf z); echo; rm -f {mount}/procsub-go",
+      "expect": {
+        "exit": 0,
+        "stdout": "xy\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_held_after_command_reads_rest",
+      "seq": 1346109,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(f() { exec 3<\"$1\"; }; f <(printf 'a\\nb\\n'); read -r x <&3; read -r y <&3; echo \"x=$x y=$y\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "x=a y=b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_keeps_writer_stderr",
+      "seq": 1346110,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero > {mount}/procsub-big; cat {mount}/procsub-missing {mount}/procsub-big > >(head -c 1 >/dev/null); echo st=$?; (cat {mount}/procsub-missing {mount}/procsub-big; echo st=$? >&2) > >(head -c 1 >/dev/null); echo sub=$?; rm {mount}/procsub-big",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=141\nsub=0\n",
+        "stderr": "cat: {mount}/procsub-missing: No such file or directory\ncat: {mount}/procsub-missing: No such file or directory\nst=141\n"
+      }
+    },
+    {
+      "id": "procsub_tee_closed_output_keeps_earlier_errors",
+      "seq": 1346111,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee {mount}/procsub-nodir/x >(head -c 1 >/dev/null) >/dev/null; echo st=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=141\n",
+        "stderr": "tee: {mount}/procsub-nodir/x: No such file or directory\n"
+      }
+    },
+    {
+      "id": "procsub_tee_closed_output_skips_later_outputs",
+      "seq": 1346112,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee >(head -c 1 >/dev/null) {mount}/procsub-nodir/x >/dev/null; echo st=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=141\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU coreutils' tee opens every output before it writes, so it also prints \"tee: .../procsub-nodir/x: No such file or directory\". Mirage's tee writes each output whole once its input has ended, and SIGPIPE at the pipe ends it before it reaches the outputs after it."
+    },
+    {
+      "id": "procsub_exec_input_background_reader_reads_during_command",
+      "seq": 1346113,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ( exec 3<\"$1\"; (sleep 0.2; cat <&3) & ); sleep 1; }; f <(printf hi); echo; echo end",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nend\n",
+        "stderr": ""
+      }
     }
   ]
 }

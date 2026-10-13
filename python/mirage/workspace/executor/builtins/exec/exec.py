@@ -25,7 +25,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import materialize
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, PipeStream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel
@@ -274,7 +274,12 @@ async def _install_descriptor(
     try:
         if redirect.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
             try:
-                data, _ = await dispatch("read", scope)
+                data, _ = await dispatch("read", scope, stream=True)
+                # A pipe streams as its producer writes, as under any
+                # redirect, so a command reading it need not wait for
+                # the producer to end; a file is read whole here.
+                if not isinstance(data, PipeStream):
+                    data = await materialize(data) or b""
             except FileNotFoundError:
                 if redirect.kind != RedirectKind.READWRITE:
                     raise
@@ -296,7 +301,7 @@ async def _install_descriptor(
                     fd,
                     OPEN_FOR_READING + scope.virtual,
                     False,
-                    SharedInput(await materialize(data) or b""),
+                    SharedInput(data),
                 )
         else:
             await create_file(
@@ -611,16 +616,28 @@ async def divert_statement(
     earned = io.exit_code
     rest: list[Written] = []
     failed = unwritable = False
-    for (channel, kept), run in groupby(written, key=itemgetter(0, 2)):
-        data = b"".join(chunk[1] for chunk in run)
+    runs = [
+        (channel, kept, b"".join(chunk[1] for chunk in run))
+        for (channel, kept), run in groupby(written, key=itemgetter(0, 2))
+    ]
+    for index, (channel, kept, data) in enumerate(runs):
         if kept:
             rest.append((channel, data, True))
             continue
         try:
             refused = await _routed(dispatch, session, channel, data, rest)
         except PipeClosed:
+            # SIGPIPE ends the writer where it was, but what it had
+            # already said on stderr stands.
+            for later, kept_later, more in runs[index + 1 :]:
+                if later != Channel.STDERR:
+                    continue
+                if kept_later:
+                    rest.append((later, more, True))
+                else:
+                    await _routed(dispatch, session, later, more, rest)
             producer = None if io.producer is None else io.producer.command
-            if not _writer_forks(statement, session, producer):
+            if not writer_forks(statement, session, producer):
                 raise ExitSignal(141) from None
             io.exit_code = 141
             break
@@ -642,7 +659,7 @@ async def divert_statement(
     return rest
 
 
-def _writer_forks(
+def writer_forks(
     statement: TSNodeLike | None, session: SessionState, producer: str | None
 ) -> bool:
     """Whether what a statement wrote came from a child bash forks for
@@ -661,9 +678,9 @@ def _writer_forks(
     if statement is None:
         return False
     if statement.type == NT.REDIRECTED_STATEMENT:
-        return _writer_forks(get_redirects(statement)[0], session, producer)
+        return writer_forks(get_redirects(statement)[0], session, producer)
     if statement.type == NT.NEGATED_COMMAND:
-        return _writer_forks(get_negated_command(statement), session, producer)
+        return writer_forks(get_negated_command(statement), session, producer)
     if statement.type == NT.PIPELINE:
         return True
     return forks(statement, session, None if producer is None else (producer,))

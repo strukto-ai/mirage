@@ -23,7 +23,7 @@ import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/st
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { divertStatement } from './builtins/exec/index.ts'
+import { divertStatement, writerForks } from './builtins/exec/index.ts'
 import {
   asWritten,
   carryStatus,
@@ -517,7 +517,17 @@ export async function handleSubshell(
         child,
         lastExec.command ?? '',
       )
-      mergedIo = await land(written, sink, allStdout, mergedIo)
+      try {
+        mergedIo = await land(written, sink, allStdout, mergedIo)
+      } catch (err) {
+        // What the statement wrote meets a pipe whose reader has gone: a child
+        // it forked (a program) dies of it alone, with 141, and the subshell
+        // goes on; the subshell's own write (a builtin's) ends it below.
+        if (!(err instanceof PipeClosed)) throw err
+        if (!writerForks(child, session, io.producer?.command ?? null)) throw err
+        io.exitCode = 141
+        recordStatus(session, io.exitCode)
+      }
       mergedIo = await mergedIo.merge(io)
       mergedIo = await land(
         await runErrTrap(runAction, child, io.exitCode, session, armed, stdin, callStack, lastExec),

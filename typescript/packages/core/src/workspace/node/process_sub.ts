@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DevicePipe } from '../../core/dev/pipe.ts'
+import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
 import { Channel, JobConsole, Terminal } from '../../shell/console/index.ts'
@@ -47,6 +48,17 @@ class SubstitutionConsole extends JobConsole {
       }
     } else await this.target.emit(channel, data)
   }
+}
+
+/**
+ * Close the streams readers opened on a pipe that ends with its command: a
+ * later read finds the end of input either way, and nothing is left open.
+ * Mirrors Python's _close_readers.
+ */
+async function closeReaders(endpoint: DevicePipe): Promise<void> {
+  const readers = [...endpoint.readers]
+  endpoint.readers.clear()
+  for (const reader of readers) await reader.deref()?.close()
 }
 
 /** Own the virtual descriptors and auxiliary children of one command node. */
@@ -119,15 +131,19 @@ export class ProcessSubScope {
   }
 
   private async finish(failed: boolean): Promise<void> {
+    const held = this.heldInputs()
+    const kept = failed ? new Map<string, AsyncLineIterator[]>() : held
     for (const child of this.held) {
+      if (kept.has(child.path)) continue
       if (failed || child.endpoint.readable) {
         child.endpoint.pipe.closeReader()
         child.abort.abort()
       } else child.endpoint.pipe.end()
     }
     try {
-      await Promise.all(
-        this.held.map(async (child) => {
+      await Promise.all([
+        ...[...kept.values()].flat().map((lines) => lines.loadRest()),
+        ...this.held.map(async (child) => {
           try {
             await joinOrAbort(child.task, child.signal)
           } catch (error) {
@@ -138,10 +154,35 @@ export class ProcessSubScope {
           }
           if (child.failure !== undefined) throw child.failure
         }),
-      )
+      ])
     } finally {
-      for (const child of this.held) child.dev.releaseInput(child.path, child.allocation)
+      for (const child of this.held) {
+        await closeReaders(child.endpoint)
+        child.dev.releaseInput(child.path, child.allocation)
+      }
     }
+  }
+
+  /**
+   * The input pipes of this scope that a descriptor of the shell still reads
+   * after the command, opened by its path (`exec 3<"$1"`) or duplicated from
+   * one, with the line buffers reading each: they load the rest of it, and
+   * reads go on from memory once the pipe is released. Every descriptor
+   * naming one stops naming it, as the path is free for the next substitution
+   * once this command ends. Mirrors Python's _held_inputs.
+   */
+  private heldInputs(): Map<string, AsyncLineIterator[]> {
+    const inputs = new Set(this.held.filter((c) => c.endpoint.readable).map((c) => c.path))
+    const held = new Map<string, AsyncLineIterator[]>()
+    for (const descriptor of this.context.session.descriptors.values()) {
+      const source = descriptor.source
+      if (source?.pipe == null || !inputs.has(source.pipe.virtual)) continue
+      const readers = held.get(source.pipe.virtual) ?? []
+      if (!readers.includes(source.lines)) readers.push(source.lines)
+      held.set(source.pipe.virtual, readers)
+      source.pipe = null
+    }
+    return held
   }
 
   /**

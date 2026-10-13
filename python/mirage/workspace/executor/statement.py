@@ -20,6 +20,7 @@ from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
+from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.console import Channel, JobConsole
@@ -494,8 +495,17 @@ async def land(
         merged_io (IOResult): the result so far.
     """
     if sink is not None:
-        for channel, data, _ in written:
-            await sink.emit(channel, data)
+        for index, (channel, data, _) in enumerate(written):
+            try:
+                await sink.emit(channel, data)
+            except PipeClosed:
+                # SIGPIPE ends the writer where it was, but what it had
+                # already said on stderr stands (`(cat /missing big) >
+                # >(head -c 1)`).
+                for later, more, _ in written[index + 1 :]:
+                    if later == Channel.STDERR:
+                        await sink.emit(later, more)
+                raise
         return merged_io
     stdout = b"".join(d for c, d, _ in written if c == Channel.STDOUT)
     if stdout:

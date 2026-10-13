@@ -15,6 +15,7 @@
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { activePipe } from '../../core/dev/device.ts'
+import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { norm } from '../../utils/path.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
@@ -394,14 +395,14 @@ export class MountEntry {
   }
 
   /**
-   * Whether a read of a scope keyed below the mount takes bytes another task
-   * is still writing: a live pipe in a store with pipe endpoints, whose first
-   * byte must not be pulled before its reader asks for it. Mirrors Python's
-   * `reads_live`.
+   * The live pipe a read of a scope keyed below the mount takes bytes from,
+   * another task still writing it: a pipe endpoint in a store with them,
+   * whose first byte must not be pulled before its reader asks for it.
+   * Mirrors Python's `live_pipe`.
    */
-  readsLive(scope: PathSpec, access?: SessionAccess): boolean {
+  livePipe(scope: PathSpec, access?: SessionAccess): DevicePipe | null {
     const accessor = this.viewFor(access).accessor
-    return accessor instanceof RAMAccessor && activePipe(accessor, norm(scope.mountPath)) !== null
+    return accessor instanceof RAMAccessor ? activePipe(accessor, norm(scope.mountPath)) : null
   }
 
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
