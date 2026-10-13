@@ -402,6 +402,7 @@ export async function copyTreeLinks(
       errors.push(`cp: cannot stat '${shown}': No such file or directory`)
       continue
     }
+    const placed = respelled(PathSpec.fromStrPath(landing), `${shownDst}/${rel}`)
     if (leads.type !== FileType.DIRECTORY) {
       const entry = respelled(PathSpec.fromStrPath(resolved), shown)
       await copyEntries(
@@ -409,7 +410,7 @@ export async function copyTreeLinks(
         copies.relay,
         copies.relayStat,
         entry,
-        PathSpec.fromStrPath(landing),
+        placed,
         [{ path: entry.virtual, kind: leads.type }],
         errors,
         undefined,
@@ -422,8 +423,7 @@ export async function copyTreeLinks(
       errors.push(`cp: cannot copy cyclic symbolic link '${shown}'`)
       continue
     }
-    const followed = PathSpec.fromStrPath(inside)
-    const placed = PathSpec.fromStrPath(landing)
+    const followed = respelled(PathSpec.fromStrPath(inside), shown)
     const entries = await cpWalk(
       copies.relay.readdir,
       copies.relayStat,
@@ -448,16 +448,7 @@ export async function copyTreeLinks(
         copies,
       },
     )
-    await copyTreeLinks(
-      copies,
-      deref,
-      respelled(followed, shown),
-      respelled(placed, `${shownDst}/${rel}`),
-      errors,
-      lines,
-      policy,
-      [...seen, base],
-    )
+    await copyTreeLinks(copies, deref, followed, placed, errors, lines, policy, [...seen, base])
   }
 }
 

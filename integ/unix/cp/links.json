@@ -321,6 +321,38 @@
       }
     },
     {
+      "id": "cp_rLv_names_what_a_link_leads_to_as_typed",
+      "seq": 1301031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( cd /data && mkdir -p cplv/real/d cplv/a cplv/b && printf y > cplv/real/d/g && printf x > cplv/real/f && ln -s ../real/d cplv/a/ld && ln -s ../real/f cplv/b/lf && cd cplv && cp -rLv a a2 && cp -rLv b b2; echo \"st=$?\" ); rm -r /data/cplv",
+      "expect": {
+        "exit": 0,
+        "stdout": "'a' -> 'a2'\n'a/ld' -> 'a2/ld'\n'a/ld/g' -> 'a2/ld/g'\n'b' -> 'b2'\n'b/lf' -> 'b2/lf'\nst=0\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "cp_P_and_d_keep_a_link_reached_through_a_linked_directory",
       "seq": 15600008,
       "targets": [

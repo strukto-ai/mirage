@@ -518,14 +518,18 @@ async def copy_tree_links(
                 f"cp: cannot stat '{shown}': No such file or directory"
             )
             continue
+        placed = replace(
+            PathSpec.from_str_path(landing), raw_path=f"{shown_dst}/{rel}"
+        )
         if leads.type != FileType.DIRECTORY:
+            entry = replace(PathSpec.from_str_path(resolved), raw_path=shown)
             await copy_entries(
                 "cp",
                 copies.relay,
                 copies.relay_stat,
-                replace(PathSpec.from_str_path(resolved), raw_path=shown),
-                PathSpec.from_str_path(landing),
-                [(PathSpec.from_str_path(resolved), leads.type)],
+                entry,
+                placed,
+                [(entry, leads.type)],
                 errors,
                 policy=policy,
                 lines=lines,
@@ -539,8 +543,7 @@ async def copy_tree_links(
         ):
             errors.append(f"cp: cannot copy cyclic symbolic link '{shown}'")
             continue
-        followed = PathSpec.from_str_path(inside)
-        placed = PathSpec.from_str_path(landing)
+        followed = replace(PathSpec.from_str_path(inside), raw_path=shown)
         entries = await walk(
             copies.relay.readdir,
             copies.relay_stat,
@@ -564,8 +567,8 @@ async def copy_tree_links(
         await copy_tree_links(
             copies,
             deref,
-            replace(followed, raw_path=shown),
-            replace(placed, raw_path=f"{shown_dst}/{rel}"),
+            followed,
+            placed,
             errors,
             lines,
             policy,

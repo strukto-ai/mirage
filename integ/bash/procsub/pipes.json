@@ -1343,11 +1343,11 @@
         "disk",
         "opfs"
       ],
-      "command": "f() { mkdir {mount}/procsub-held; printf hi > {mount}/procsub-held/f; ln -s \"$1\" {mount}/procsub-held/p; cp -rL {mount}/procsub-held {mount}/procsub-heldcopy; echo \"st=$?\"; ls {mount}/procsub-heldcopy; cat \"$1\"; rm -r {mount}/procsub-held {mount}/procsub-heldcopy; }; f <(printf hello)",
+      "command": "f() { ( cd {mount} && mkdir procsub-held && printf hi > procsub-held/f && ln -s \"$1\" procsub-held/p && cp -rL procsub-held procsub-heldcopy; echo \"st=$?\"; ls procsub-heldcopy; cat \"$1\"; rm -r procsub-held procsub-heldcopy ); }; f <(printf hello)",
       "expect": {
         "exit": 0,
         "stdout": "st=1\nf\nhello",
-        "stderr": "cp: cannot create fifo '{mount}/procsub-heldcopy/p': Operation not supported\n"
+        "stderr": "cp: cannot create fifo 'procsub-heldcopy/p': Operation not supported\n"
       },
       "note": "Divergence: GNU bash 5.2.37 prints \"st=0\\nf\\np\\nhello\": cp -rL recreates the pipe the link leads to as a FIFO. A Mirage mount cannot store a FIFO, so cp answers as GNU does where mknod fails; with mknod refused (EOPNOTSUPP) GNU prints exactly this case's output. The pipe is never read."
     },

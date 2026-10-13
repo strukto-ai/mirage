@@ -95,6 +95,39 @@
         "stdout": "1\n2\n3\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mv_refuses_a_device_it_cannot_make",
+      "seq": 459,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /dev/null /data/mvdev; echo \"st=$?\"; ls /dev/null; ls /data/mvdev",
+      "expect": {
+        "exit": 2,
+        "stdout": "st=1\n/dev/null\n",
+        "stderr": "mv: cannot create special file '/data/mvdev': Operation not supported\nls: cannot access '/data/mvdev': No such file or directory\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 (root in debian:stable-slim) prints \"st=0\\n/data/mvdev\\n\" and that /dev/null is gone: mv recreates the device node on the other filesystem and removes the source. A Mirage mount cannot store a device, so mv answers as GNU does where mknod fails and keeps the source; with mknod refused (EOPNOTSUPP) GNU prints exactly this case's output."
     }
   ]
 }
