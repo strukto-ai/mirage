@@ -49,6 +49,14 @@ def test_the_file_ends_where_a_fetch_comes_back_short(monkeypatch, data, size):
     assert handle.size == len(data)
 
 
+def test_an_empty_read_past_the_end_keeps_the_size(monkeypatch):
+    # A read past the end finds nothing, which does not put the end
+    # there: a seek to the end, and a write after it, stay at 3.
+    handle, _ = _handle(monkeypatch, b"abc", 3)
+    assert handle.pread(100, 4) == b""
+    assert handle.size == 3 and handle.seek(0, 2) == 3
+
+
 def test_pread_seek_and_drop(monkeypatch):
     handle, fetched = _handle(monkeypatch)
     assert handle.pread(8, 5) == b"89" and handle.pos == 0

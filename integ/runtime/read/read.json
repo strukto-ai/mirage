@@ -393,6 +393,52 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_read_past_the_end_leaves_the_end",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nwith open('/data/f.txt', 'r+b') as f:\n    f.seek(100)\n    print(f.read())\n    print(f.seek(0, 2))\n    f.write(b'X')\nprint(os.stat('/data/f.txt').st_size)",
+            "js": "const f = std.open('/data/f.txt', 'r+')\nf.seek(100, std.SEEK_SET)\nconsole.log(JSON.stringify(f.readAsString()))\nf.seek(0, std.SEEK_END)\nconsole.log(f.tell())\nf.puts('X')\nf.close()\nconsole.log(os.stat('/data/f.txt')[0].size)",
+            "node": "const h = await require('node:fs').promises.open('/data/f.txt', 'r+')\nconst { bytesRead } = await h.read(Buffer.alloc(4), 0, 4, 100)\nconsole.log(bytesRead, (await h.stat()).size)\nawait h.close()"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "b''\n3\n4\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"\"\n3\n4\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "0 3\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

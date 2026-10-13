@@ -90,16 +90,25 @@ class ChunkedHandle:
     def keep(self, offset: int, data: bytes, asked: int) -> None:
         """Keep a fetched chunk; a short one marks the end of the file.
 
+        An empty chunk past the bytes seen so far says only that the file
+        ends at or before ``offset``, so it caps the size without setting
+        it.
+
         Args:
             offset (int): where the chunk starts.
             data (bytes): the fetched bytes.
             asked (int): how many were asked for.
         """
+        seen = offset == 0 or (
+            bool(self._kept) and offset == self._start + len(self._kept)
+        )
         self._start = offset
         self._kept = data
         if len(data) < asked:
             self._end = offset + len(data)
-            self.size = self._end
+            self.size = (
+                self._end if data or seen else min(self.size, self._end)
+            )
 
     def peek(self, offset: int, size: int) -> bytes:
         """The kept bytes at ``offset``, without fetching.

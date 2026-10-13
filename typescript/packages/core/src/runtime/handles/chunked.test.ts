@@ -71,6 +71,15 @@ describe('ChunkedHandle', () => {
     }
   })
 
+  it('keeps the size when a read past the end finds nothing', async () => {
+    // Nothing at 100 does not put the end there: a seek to the end, and a
+    // write after it, stay at 3.
+    const { file } = handle('abc')
+    file.pos = 100
+    await filled(file, 4)
+    expect([file.read(4).length, file.size]).toEqual([0, 3])
+  })
+
   it('fills a line that runs across two chunks', async () => {
     // A synchronous guest reads only what the kept bytes hold, so a line
     // crossing a chunk edge must be held whole before it is read.

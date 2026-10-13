@@ -160,8 +160,11 @@ export class ChunkedHandle {
     }
     if (generation === this.generation) {
       if (bytes.length < asked) {
+        // An empty fetch past the bytes seen so far says only that the
+        // file ends at or before it, so it caps the size without setting it.
+        const seen = from === 0 || (kept.length > 0 && from === keptEnd)
         this.end = from + bytes.length
-        this.size = this.end
+        this.size = bytes.length > 0 || seen ? this.end : Math.min(this.size, this.end)
       }
       this.start = offset
       this.kept = joined
