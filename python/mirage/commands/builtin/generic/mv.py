@@ -57,6 +57,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
+    FileType,
     MoveStrategy,
     NativeMove,
     PathSpec,
@@ -180,7 +181,7 @@ async def _target_is_fifo(stat: StatFn, target: PathSpec) -> bool:
 async def _remove_entries(
     strategy: PrimitiveMove,
     stat: StatFn,
-    entries: list[tuple[PathSpec, bool]],
+    entries: list[tuple[PathSpec, FileType]],
     errors: list[str],
 ) -> bool:
     """Remove copied source entries children first, GNU rm style.
@@ -195,15 +196,16 @@ async def _remove_entries(
     Args:
         strategy (PrimitiveMove): Transfer primitives for both mounts.
         stat (StatFn): Stats a path; raises when missing.
-        entries (list[tuple[PathSpec, bool]]): ``walk`` output, parents
-            first; removal runs it in reverse.
+        entries (list[tuple[PathSpec, FileType]]): ``walk`` output,
+            parents first; removal runs it in reverse.
         errors (list[str]): Collected stderr lines, appended in place.
 
     Returns:
         bool: Whether the source is fully gone.
     """
     failed: list[str] = []
-    for entry, is_dir in reversed(entries):
+    for entry, kind in reversed(entries):
+        is_dir = kind == FileType.DIRECTORY
         base = entry.virtual.rstrip("/")
         if is_dir and any(f.startswith(base + "/") for f in failed):
             failed.append(base)
@@ -439,12 +441,13 @@ async def mv_generic(
     for src, target in copy_targets(
         sources, dst, dst_is_dir, dst_exists, dst_err
     ):
-        src_exists, src_is_dir, src_err = await source_kind(stat, src)
+        src_kind, src_err = await source_kind(stat, src)
         if src_err is not None:
             errors.append(
                 f"mv: cannot stat '{src.raw_path}': {posix_phrase(src_err)}"
             )
             continue
+        src_is_dir = src_kind == FileType.DIRECTORY
         if target.walk_error is not None and target.raw_path == "":
             # GNU stats an empty destination as the directory it is typed
             # in (gnulib reads the name as `.`): a file cannot overwrite

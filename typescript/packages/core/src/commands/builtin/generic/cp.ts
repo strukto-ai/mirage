@@ -69,6 +69,12 @@ import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 const ENC = new TextEncoder()
 
 const UPDATE_MODES = ['all', 'none', 'none-fail', 'older'] as const
+const SPECIAL_FILE_NOUNS: ReadonlyMap<FileType, string> = new Map([
+  [FileType.FIFO, 'fifo'],
+  [FileType.CHAR_DEVICE, 'special file'],
+  [FileType.BLOCK_DEVICE, 'special file'],
+  [FileType.SOCKET, 'special file'],
+])
 
 export interface CpFlags {
   recursive: boolean
@@ -404,7 +410,7 @@ export async function copyTreeLinks(
         copies.relayStat,
         entry,
         PathSpec.fromStrPath(landing),
-        [{ path: entry.virtual, isDir: false }],
+        [{ path: entry.virtual, kind: leads.type }],
         errors,
         undefined,
         { policy, lines, copies },
@@ -566,20 +572,30 @@ export function slashRefusesFile(
 export async function sourceKind(
   stat: StatFn,
   path: PathSpec,
-): Promise<{ exists: boolean; isDir: boolean; condition: FsCondition | null }> {
+): Promise<{ kind: FileType | null; condition: FsCondition | null }> {
   let info: FileStat | null = null
   try {
     info = await stat(path)
   } catch (err) {
     const code = (err as { code?: unknown }).code
-    if (code === 'ENOTDIR') return { exists: false, isDir: false, condition: 'ENOTDIR' }
-    if (code === 'ELOOP') return { exists: false, isDir: false, condition: 'ELOOP' }
+    if (code === 'ENOTDIR') return { kind: null, condition: 'ENOTDIR' }
+    if (code === 'ELOOP') return { kind: null, condition: 'ELOOP' }
     if (!isMissingPath(err)) throw err
   }
-  if (info !== null)
-    return { exists: true, isDir: info.type === FileType.DIRECTORY, condition: null }
+  if (info !== null) return { kind: info.type, condition: null }
   const [, isDir] = await nearestAncestor(stat, path)
-  return { exists: false, isDir: false, condition: isDir ? 'ENOENT' : 'ENOTDIR' }
+  return { kind: null, condition: isDir ? 'ENOENT' : 'ENOTDIR' }
+}
+
+// GNU's line for a special file that a recursive copy cannot make, null for a
+// kind copied as bytes. Under -R GNU recreates a FIFO or a device instead of
+// reading it. No mount can store one, so the create fails as mknod would,
+// with ENOTSUP, and the source is never read: a live pipe keeps its bytes.
+// Mirrors Python's `_special_file_error`.
+function specialFileError(cmdName: string, kind: FileType | null, dst: PathSpec): string | null {
+  const noun = kind === null ? undefined : SPECIAL_FILE_NOUNS.get(kind)
+  if (noun === undefined) return null
+  return `${cmdName}: cannot create ${noun} '${dst.rawPath}': ${posixPhrase('ENOTSUP')}`
 }
 
 // GNU dir/non-dir overwrite mismatch line, or null when compatible.
@@ -890,12 +906,13 @@ async function mirrorDirs(
   return true
 }
 
-// List a tree as {path, isDir} pairs, parents before children. The type is
+// List a tree as {path, kind} pairs, parents before children. The kind is
 // captured while the tree is intact so a caller that deletes as it goes (mv)
-// never re-stats a path whose virtual parent has since vanished. Mirrors the
-// Python cp `walk`; used only by the primitive (no native copy) path. A
-// folder a backend lists with a trailing slash (box, dropbox, gdrive) is
-// walked without it. A directory the session may not open, or an entry it may not stat (a rule
+// never re-stats a path whose virtual parent has since vanished, and a copy
+// knows a FIFO from a file without opening it. Mirrors the Python cp `walk`;
+// used only by the primitive (no native copy) path. A folder a backend lists
+// with a trailing slash (box, dropbox, gdrive) is walked without it. A
+// directory the session may not open, or an entry it may not stat (a rule
 // refused it below the operand), is GNU's `cannot access` / `cannot stat`
 // line when `errors` is given and the walk goes on without its contents;
 // with no channel the refusal propagates rather than leave a silent gap.
@@ -907,10 +924,12 @@ export async function cpWalk(
   cmdName = 'cp',
   errors?: string[],
   links?: LinkView,
-): Promise<{ path: string; isDir: boolean }[]> {
+): Promise<{ path: string; kind: FileType }[]> {
   const info = await stat(root, index)
-  if (info.type !== FileType.DIRECTORY) return [{ path: root.virtual, isDir: false }]
-  const entries: { path: string; isDir: boolean }[] = [{ path: root.virtual, isDir: true }]
+  if (info.type !== FileType.DIRECTORY) return [{ path: root.virtual, kind: info.type }]
+  const entries: { path: string; kind: FileType }[] = [
+    { path: root.virtual, kind: FileType.DIRECTORY },
+  ]
   const queue: PathSpec[] = [root]
   while (queue.length > 0) {
     const directory = queue.shift()
@@ -935,9 +954,8 @@ export async function cpWalk(
         errors.push(`${cmdName}: cannot stat '${childSpec.rawPath}': ${String(fsStrerror(err))}`)
         continue
       }
-      const isDir = childInfo.type === FileType.DIRECTORY
-      entries.push({ path: child, isDir })
-      if (isDir) queue.push(childSpec)
+      entries.push({ path: child, kind: childInfo.type })
+      if (childInfo.type === FileType.DIRECTORY) queue.push(childSpec)
     }
   }
   return entries
@@ -949,8 +967,9 @@ export async function cpWalk(
 // reported and the remaining entries still copy, like GNU cp/mv on a
 // cross-device transfer. Every error line carries fsStrerror, so a backend
 // missing the needed op reports `Operation not supported` instead of
-// aborting the command. `policy` applies -n/--update/--backup per file
-// entry, like GNU during a recursive merge (null overwrites
+// aborting the command. A FIFO or device is GNU's failed recreate
+// (specialFileError), never read. `policy` applies -n/--update/--backup per
+// file entry, like GNU during a recursive merge (null overwrites
 // unconditionally); `lines` is an optional per-entry sink. Returns whether
 // every entry landed.
 export async function copyEntries(
@@ -959,7 +978,7 @@ export async function copyEntries(
   stat: StatFn,
   src: PathSpec,
   target: PathSpec,
-  entries: { path: string; isDir: boolean }[],
+  entries: { path: string; kind: FileType }[],
   errors: string[],
   index?: IndexCacheStore,
   opts: {
@@ -971,10 +990,10 @@ export async function copyEntries(
   const srcBase = rstripSlash(src.virtual)
   const dstBase = rstripSlash(target.virtual)
   let copiedAll = true
-  for (const { path: entry, isDir } of entries) {
+  for (const { path: entry, kind } of entries) {
     const entrySpec = descendantPath(src, entry)
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
-    if (isDir) {
+    if (kind === FileType.DIRECTORY) {
       try {
         if (!(await isDirectory(stat, entryDstSpec, index))) {
           await strategy.mkdir(entryDstSpec)
@@ -1015,9 +1034,19 @@ export async function copyEntries(
       if (errors.length > errorCount) copiedAll = false
       continue
     }
+    if (
+      opts.policy !== undefined &&
+      !(await overwriteGate(opts.policy, stat, entrySpec, entryDstSpec, errors))
+    )
+      continue
+    const refusal = specialFileError(cmdName, kind, entryDstSpec)
+    if (refusal !== null) {
+      errors.push(refusal)
+      copiedAll = false
+      continue
+    }
     let backup: PathSpec | null = null
     if (opts.policy !== undefined) {
-      if (!(await overwriteGate(opts.policy, stat, entrySpec, entryDstSpec, errors))) continue
       const made = await makeBackup(
         opts.policy,
         strategy,
@@ -1175,11 +1204,12 @@ export async function cpGeneric(
       if (made) created.add(keyOf(target))
       continue
     }
-    const { isDir: srcIsDir, condition: srcErr } = await sourceKind(stat, src)
+    const { kind: srcKind, condition: srcErr } = await sourceKind(stat, src)
     if (srcErr !== null) {
       errors.push(`cp: cannot stat '${src.rawPath}': ${posixPhrase(srcErr)}`)
       continue
     }
+    const srcIsDir = srcKind === FileType.DIRECTORY
     if (flags.noTargetDir && !srcIsDir && target.walkError !== null && target.rawPath === '') {
       // Under -T, GNU stats an empty destination as the directory it is
       // typed in, which a file cannot overwrite (coreutils 9.7). A
@@ -1361,6 +1391,11 @@ export async function cpGeneric(
       continue
     }
     if (!(await overwriteGate(policy, stat, src, target, errors))) continue
+    const refusal = flags.recursive ? specialFileError('cp', srcKind, target) : null
+    if (refusal !== null) {
+      errors.push(refusal)
+      continue
+    }
     const made = await makeBackup(
       policy,
       strategy,

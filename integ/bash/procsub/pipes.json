@@ -1318,6 +1318,70 @@
         "stderr": ""
       },
       "note": "Divergence: GNU file 5.46 under bash 5.2.37 describes Linux's /dev/fd/63, a procfs link, as \"symbolic link to pipe:[N]\" (inode/symlink under -i); with -L it prints these lines. Mirage's /dev/fd/63 is the FIFO itself, and neither reads it, so cat still gets the bytes."
+    },
+    {
+      "id": "procsub_cp_r_refuses_the_fifos_in_a_tree",
+      "seq": 1346143,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { cp -r /dev/fd {mount}/procsub-fdcopy; echo \"st=$?\"; find {mount}/procsub-fdcopy | wc -l; cat \"$1\"; rm -r {mount}/procsub-fdcopy; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\n1\nhello",
+        "stderr": "cp: cannot create fifo '{mount}/procsub-fdcopy/63': Operation not supported\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 on Linux prints \"st=0\\n1\\nhello\": there /dev/fd is a symlink into procfs, which cp -r copies as a link. Mirage's /dev/fd is a directory of FIFOs, and a mount cannot store a FIFO, so cp -r answers each one as GNU does where it cannot make one (procsub_cp_rl_refuses_the_fifo_a_link_leads_to), copies the rest and leaves the pipe unread."
+    },
+    {
+      "id": "procsub_cp_rl_refuses_the_fifo_a_link_leads_to",
+      "seq": 1346144,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { mkdir {mount}/procsub-held; printf hi > {mount}/procsub-held/f; ln -s \"$1\" {mount}/procsub-held/p; cp -rL {mount}/procsub-held {mount}/procsub-heldcopy; echo \"st=$?\"; ls {mount}/procsub-heldcopy; cat \"$1\"; rm -r {mount}/procsub-held {mount}/procsub-heldcopy; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nf\nhello",
+        "stderr": "cp: cannot create fifo '{mount}/procsub-heldcopy/p': Operation not supported\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"st=0\\nf\\np\\nhello\": cp -rL recreates the pipe the link leads to as a FIFO. A Mirage mount cannot store a FIFO, so cp answers as GNU does where mknod fails; with mknod refused (EOPNOTSUPP) GNU prints exactly this case's output. The pipe is never read."
+    },
+    {
+      "id": "procsub_cp_r_refuses_a_fifo_operand",
+      "seq": 1346145,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { printf old > {mount}/procsub-taken; cp -r \"$1\" {mount}/procsub-fifocopy; echo \"st=$?\"; cp -r \"$1\" {mount}/procsub-taken; echo \"st=$?\"; cat {mount}/procsub-taken; echo; cat \"$1\"; rm -f {mount}/procsub-fifocopy {mount}/procsub-taken; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nst=1\nold\nhello",
+        "stderr": "cp: cannot create fifo '{mount}/procsub-fifocopy': Operation not supported\ncp: cannot create fifo '{mount}/procsub-taken': Operation not supported\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 on Linux prints \"st=0\\nst=0\\n\\nhello\" and that the taken file is gone: \"$1\" is a procfs link there, which cp -r copies as a link, over the file too. Given a real FIFO it cannot make, GNU reports these lines but has already removed the file standing at the name; Mirage leaves that file as it was. Without -r a FIFO operand is read (procsub_cp_from_input)."
+    },
+    {
+      "id": "procsub_cp_r_within_dev_leaves_the_fifo_out",
+      "seq": 1346146,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { cp -r /dev/fd /dev/procsub-x; echo \"st=$?\"; find /dev/procsub-x | wc -l; cat \"$1\"; rm -r /dev/procsub-x; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=0\n1\nhello",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints the same, but because /dev/fd is a procfs link there, which cp -r copies as a link. Within one Mirage mount cp copies natively, from find's lists of the tree's directories and files, so a FIFO is left out without a word where GNU would report one it cannot make. The pipe keeps its bytes."
     }
   ]
 }

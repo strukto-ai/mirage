@@ -81,7 +81,12 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
           // cannot list whole goes entry by entry, as does one the
           // dispatcher declines for the caller's view.
           const unlisted: string[] = []
-          let listed = verbose ? await cpWalk(listing, probe, p, idx, 'rm', unlisted) : []
+          let listed = verbose
+            ? (await cpWalk(listing, probe, p, idx, 'rm', unlisted)).map(({ path, kind }) => ({
+                path,
+                isDir: kind === FileType.DIRECTORY,
+              }))
+            : []
           let declined = unlisted.length > 0
           if (!declined) {
             try {

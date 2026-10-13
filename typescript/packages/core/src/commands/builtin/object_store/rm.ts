@@ -82,7 +82,9 @@ function build<A extends Accessor>(io: CommandIO<A>): CommandFn<A> {
           // dispatcher declines for the caller's view.
           const unlisted: string[] = []
           const listed = opts.verbose
-            ? await cpWalk(listing, probe, path, index ?? undefined, 'rm', unlisted)
+            ? (await cpWalk(listing, probe, path, index ?? undefined, 'rm', unlisted)).map(
+                ({ path: entry, kind }) => ({ path: entry, isDir: kind === FileType.DIRECTORY }),
+              )
             : []
           let declined = unlisted.length > 0
           if (!declined) {

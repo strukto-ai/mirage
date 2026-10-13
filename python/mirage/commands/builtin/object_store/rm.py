@@ -122,7 +122,12 @@ def _build(io: CommandIO) -> Callable[..., Any]:
                     # the caller's view.
                     unlisted: list[str] = []
                     listed = (
-                        await walk(listing, probe, path, "rm", unlisted)
+                        [
+                            (entry, kind == FileType.DIRECTORY)
+                            for entry, kind in await walk(
+                                listing, probe, path, "rm", unlisted
+                            )
+                        ]
                         if verbose
                         else []
                     )

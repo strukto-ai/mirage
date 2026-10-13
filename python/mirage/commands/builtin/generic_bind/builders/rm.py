@@ -101,7 +101,12 @@ async def rm(
                     # the caller's view.
                     unlisted: list[str] = []
                     listed = (
-                        await walk(readdir, stat, p, "rm", unlisted)
+                        [
+                            (entry, kind == FileType.DIRECTORY)
+                            for entry, kind in await walk(
+                                readdir, stat, p, "rm", unlisted
+                            )
+                        ]
                         if v
                         else []
                     )

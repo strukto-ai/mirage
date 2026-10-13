@@ -16,6 +16,7 @@ import { rekey, underPath } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
+  FileType,
   PathSpec,
   type MoveStrategy,
   type NativeMove,
@@ -177,25 +178,26 @@ async function removeEntries(
   strategy: PrimitiveMove,
   stat: StatFn,
   src: PathSpec,
-  entries: { path: string; isDir: boolean }[],
+  entries: { path: string; kind: FileType }[],
   errors: string[],
 ): Promise<boolean> {
   const failed: string[] = []
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const node = entries[i]
     if (node === undefined) continue
+    const isDir = node.kind === FileType.DIRECTORY
     const base = rstripSlash(node.path)
-    if (node.isDir && failed.some((f) => f.startsWith(base + '/'))) {
+    if (isDir && failed.some((f) => f.startsWith(base + '/'))) {
       failed.push(base)
       continue
     }
     const spec = PathSpec.fromStrPath(node.path, rekey(src.virtual, src.vfsPath, node.path))
     try {
-      if (node.isDir) await strategy.rmdir(spec)
+      if (isDir) await strategy.rmdir(spec)
       else await strategy.unlink(spec)
     } catch (err) {
       if (!isFsError(err)) throw err
-      if (await entryGone(strategy, stat, spec, node.isDir)) continue
+      if (await entryGone(strategy, stat, spec, isDir)) continue
       errors.push(`mv: cannot remove '${node.path}': ${String(fsStrerror(err))}`)
       failed.push(base)
       continue
@@ -361,7 +363,8 @@ export async function mvGeneric(
   const lines: string[] = []
   const created = new Set<string>()
   for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr)) {
-    const { isDir: srcIsDir, condition: srcErr } = await sourceKind(stat, src)
+    const { kind: srcKind, condition: srcErr } = await sourceKind(stat, src)
+    const srcIsDir = srcKind === FileType.DIRECTORY
     if (srcErr !== null) {
       errors.push(`mv: cannot stat '${src.rawPath}': ${posixPhrase(srcErr)}`)
       continue

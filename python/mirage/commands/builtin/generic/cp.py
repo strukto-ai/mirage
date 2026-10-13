@@ -73,6 +73,12 @@ from mirage.utils.quote import shell_quote_always
 from mirage.view.types import LinkView
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
+SPECIAL_FILE_NOUNS = {
+    FileType.FIFO: "fifo",
+    FileType.CHAR_DEVICE: "special file",
+    FileType.BLOCK_DEVICE: "special file",
+    FileType.SOCKET: "special file",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,7 +525,7 @@ async def copy_tree_links(
                 copies.relay_stat,
                 replace(PathSpec.from_str_path(resolved), raw_path=shown),
                 PathSpec.from_str_path(landing),
-                [(PathSpec.from_str_path(resolved), False)],
+                [(PathSpec.from_str_path(resolved), leads.type)],
                 errors,
                 policy=policy,
                 lines=lines,
@@ -703,8 +709,8 @@ def slash_refuses_file(
 
 async def source_kind(
     stat: StatFn, path: PathSpec
-) -> tuple[bool, bool, FsCondition | None]:
-    """Probe a source operand for ``(exists, is_dir, condition)``.
+) -> tuple[FileType | None, FsCondition | None]:
+    """Probe a source operand for ``(kind, condition)``.
 
     A source keeps the errno the kernel reports: ``cp /plain/child /dst`` is
     ``cannot stat 'X': Not a directory``, not "No such file or directory",
@@ -722,24 +728,46 @@ async def source_kind(
         path (PathSpec): The probed source operand.
 
     Returns:
-        tuple[bool, bool, FsCondition | None]: Whether it exists, whether
-        it is a directory, and the condition when it does not exist.
+        tuple[FileType | None, FsCondition | None]: Its kind, or None and
+        the condition when it does not exist.
     """
     try:
         info = await stat(path)
     except NotADirectoryError:
-        return False, False, FsCondition.ENOTDIR
+        return None, FsCondition.ENOTDIR
     except DotWalkLoop:
-        return False, False, FsCondition.ELOOP
+        return None, FsCondition.ELOOP
     except (FileNotFoundError, ValueError):
         pass
     else:
-        return True, info.type == FileType.DIRECTORY, None
+        return info.type, None
     _, is_dir = await nearest_ancestor(stat, path)
+    return None, FsCondition.ENOENT if is_dir else FsCondition.ENOTDIR
+
+
+def _special_file_error(
+    cmd_name: str, kind: FileType | None, dst: PathSpec
+) -> str | None:
+    """GNU's line for a special file that a recursive copy cannot make.
+
+    Under ``-R`` GNU recreates a FIFO or a device instead of reading it.
+    No mount can store one, so the create fails as ``mknod`` would, with
+    ENOTSUP, and the source is never read: a live pipe keeps its bytes.
+
+    Args:
+        cmd_name (str): the command the line names.
+        kind (FileType | None): the source entry's kind.
+        dst (PathSpec): where the copy was to land.
+
+    Returns:
+        str | None: the stderr line, None for a kind copied as bytes.
+    """
+    noun = SPECIAL_FILE_NOUNS.get(kind) if kind is not None else None
+    if noun is None:
+        return None
     return (
-        False,
-        False,
-        FsCondition.ENOENT if is_dir else FsCondition.ENOTDIR,
+        f"{cmd_name}: cannot create {noun} '{dst.raw_path}': "
+        f"{posix_phrase(FsCondition.ENOTSUP)}"
     )
 
 
@@ -1182,12 +1210,13 @@ async def walk(
     cmd_name: str = "cp",
     errors: list[str] | None = None,
     links: LinkView | None = None,
-) -> list[tuple[PathSpec, bool]]:
-    """List a tree as ``(path, is_dir)`` pairs, parents before children.
+) -> list[tuple[PathSpec, FileType]]:
+    """List a tree as ``(path, kind)`` pairs, parents before children.
 
-    The dir/file type is captured here, while the tree is intact, so a caller
-    that deletes as it goes (mv) never re-stats a path whose virtual parent dir
-    has since vanished (e.g. on S3). Used only by the primitive (no native
+    The kind is captured here, while the tree is intact, so a caller that
+    deletes as it goes (mv) never re-stats a path whose virtual parent dir
+    has since vanished (e.g. on S3), and a copy knows a FIFO from a file
+    without opening it. Used only by the primitive (no native
     ``copy``) path; backends that inject ``copy``/``find`` never reach it.
 
     A folder a backend lists with a trailing slash (box, dropbox,
@@ -1199,7 +1228,7 @@ async def walk(
 
     Args:
         readdir (Callable): Lists a directory's full child paths.
-        stat (Callable): Stats a path; ``.type`` distinguishes directories.
+        stat (Callable): Stats a path; ``.type`` is the entry's kind.
         root (PathSpec): Root of the tree.
         cmd_name (str): the command the diagnostics name.
         errors (list[str] | None): where a per-entry refusal is reported.
@@ -1208,8 +1237,8 @@ async def walk(
     """
     info = await stat(root)
     if info.type != FileType.DIRECTORY:
-        return [(root, False)]
-    entries = [(root, True)]
+        return [(root, info.type)]
+    entries = [(root, FileType.DIRECTORY)]
     queue = [root]
     while queue:
         directory = queue.pop(0)
@@ -1237,9 +1266,8 @@ async def walk(
                     f"{fs_strerror(exc)}"
                 )
                 continue
-            is_dir = child_info.type == FileType.DIRECTORY
-            entries.append((child, is_dir))
-            if is_dir:
+            entries.append((child, child_info.type))
+            if child_info.type == FileType.DIRECTORY:
                 queue.append(child)
     return entries
 
@@ -1250,7 +1278,7 @@ async def copy_entries(
     stat: StatFn,
     src: PathSpec,
     target: PathSpec,
-    entries: list[tuple[PathSpec, bool]],
+    entries: list[tuple[PathSpec, FileType]],
     errors: list[str],
     *,
     policy: TransferPolicy | None = None,
@@ -1265,7 +1293,9 @@ async def copy_entries(
     remaining entries still copy, like GNU cp/mv on a cross-device
     transfer. Every error line carries ``fs_strerror``, so a backend
     missing the needed op (``OperationNotSupportedError``) reports
-    ``Operation not supported`` instead of aborting the command.
+    ``Operation not supported`` instead of aborting the command. A FIFO
+    or device is GNU's failed recreate (``_special_file_error``), never
+    read.
     ``-n``/``--update``/``--backup`` apply per file entry, like GNU
     during a recursive merge.
 
@@ -1276,8 +1306,8 @@ async def copy_entries(
         stat (StatFn): Stats a path; raises when missing.
         src (PathSpec): Source operand the entries were walked from.
         target (PathSpec): Destination root for the copied tree.
-        entries (list[tuple[PathSpec, bool]]): ``walk`` output, parents
-            first.
+        entries (list[tuple[PathSpec, FileType]]): ``walk`` output,
+            parents first.
         errors (list[str]): Collected stderr lines, appended in place.
         policy (TransferPolicy | None): Per-entry overwrite policy; None
             overwrites unconditionally.
@@ -1289,13 +1319,13 @@ async def copy_entries(
         bool: Whether every entry landed.
     """
     copied_all = True
-    for entry, is_dir in entries:
+    for entry, kind in entries:
         entry_dst = descendant_path(
             target,
             target.virtual.rstrip("/")
             + entry.virtual[len(src.virtual.rstrip("/")) :],
         )
-        if is_dir:
+        if kind == FileType.DIRECTORY:
             try:
                 if not await is_directory(stat, entry_dst):
                     await strategy.mkdir(entry_dst)
@@ -1329,12 +1359,17 @@ async def copy_entries(
             if len(errors) > error_count:
                 copied_all = False
             continue
+        if policy is not None and not await overwrite_gate(
+            policy, stat, entry, entry_dst, errors
+        ):
+            continue
+        refusal = _special_file_error(cmd_name, kind, entry_dst)
+        if refusal is not None:
+            errors.append(refusal)
+            copied_all = False
+            continue
         backup: PathSpec | None = None
         if policy is not None:
-            if not await overwrite_gate(
-                policy, stat, entry, entry_dst, errors
-            ):
-                continue
             backup, ok = await make_backup(
                 policy,
                 strategy,
@@ -1524,12 +1559,13 @@ async def cp_generic(
             ):
                 created.add(key_of(target))
             continue
-        src_exists, src_is_dir, src_err = await source_kind(stat, src)
+        src_kind, src_err = await source_kind(stat, src)
         if src_err is not None:
             errors.append(
                 f"cp: cannot stat '{src.raw_path}': {posix_phrase(src_err)}"
             )
             continue
+        src_is_dir = src_kind == FileType.DIRECTORY
         if (
             flags.no_target_dir
             and not src_is_dir
@@ -1634,8 +1670,8 @@ async def cp_generic(
                 )
                 if into_itself:
                     entries = [
-                        (path, is_dir)
-                        for path, is_dir in entries
+                        (path, kind)
+                        for path, kind in entries
                         if not within(path.virtual, target.virtual)
                     ]
                 await copy_entries(
@@ -1764,6 +1800,14 @@ async def cp_generic(
             )
             continue
         if not await overwrite_gate(policy, stat, src, target, errors):
+            continue
+        refusal = (
+            _special_file_error("cp", src_kind, target)
+            if flags.recursive
+            else None
+        )
+        if refusal is not None:
+            errors.append(refusal)
             continue
         backup, ok = await make_backup(
             policy, strategy, stat, readdir, target, errors, copies
