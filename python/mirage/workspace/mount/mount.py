@@ -1310,8 +1310,8 @@ class MountEntry:
                 vfs_path=mount_key(path, mount_prefix),
             )
             kwargs.setdefault("index", self.index)
-            # Per-op caps are policy and fire at the dispatcher (post_vfs);
-            # only the timeout stays here, bounding the backend call itself.
+            # A file call is never cut: only the op entry's timeout
+            # applies, bounding the backend call itself.
             op_override = self.command_limits.get(name)
             op_timeout = (
                 op_override.timeout_seconds

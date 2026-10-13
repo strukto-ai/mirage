@@ -132,6 +132,11 @@ Caps apply to what each command prints, one command at a time:
 redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
 line. See [Output Limits](/python/quickstart#output-limits) for the SDK form.
 
+<Warning>
+  Caps apply only to commands run in Mirage's shell: a file read through a
+  FUSE or SFTP mount, or through `ws.vfs`, always returns the whole file.
+</Warning>
+
 ## The read policy
 
 `read: bounded` serves cached bytes and cached directory listings without asking the backend, for as long as `ttl:` allows. `read: fresh` revalidates against the backend's content token before serving a cached copy, at the cost of one backend stat per file read, and checks a cached listing before serving it: against the listing's stored version where the backend has one, otherwise by re-listing the folder once per command. See [listings under `fresh`](/home/cache#listings-under-fresh).

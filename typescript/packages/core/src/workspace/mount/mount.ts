@@ -1285,8 +1285,8 @@ export class MountEntry {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
       }
-      // Per-op caps are policy and fire at the dispatcher (postVfs); only
-      // the timeout stays here, bounding the backend call itself.
+      // A file call is never cut: only the op entry's timeout applies,
+      // bounding the backend call itself.
       const opOverride = this.commandLimits.get(name) ?? null
       const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
       return runWithMountContext(
