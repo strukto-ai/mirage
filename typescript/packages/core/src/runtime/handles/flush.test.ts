@@ -94,5 +94,9 @@ describe('applyFlush', () => {
     expect(applyFlush(enc.encode('hello'), [{ kind: 'write', data: enc.encode('new') }])).toEqual(
       enc.encode('new'),
     )
+    // A cut hands back bytes of its own size, not a view over the old file.
+    expect(
+      applyFlush(new Uint8Array(1024), [{ kind: 'truncate', length: 0 }]).buffer.byteLength,
+    ).toBe(0)
   })
 })

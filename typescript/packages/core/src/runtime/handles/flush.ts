@@ -106,5 +106,6 @@ export function applyFlush(data: Uint8Array, steps: readonly FlushStep[]): Uint8
       length = size
     }
   }
-  return out.subarray(0, length)
+  // Right-sized, so a cut does not keep the old file's whole allocation.
+  return length === out.length ? out : out.slice(0, length)
 }
