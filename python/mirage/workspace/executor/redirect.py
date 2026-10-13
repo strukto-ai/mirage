@@ -470,7 +470,6 @@ async def handle_redirect(
     )
     read_paths: dict[int, str] = {}
     piped: set[int] = set()
-    pipe_files: list[FileDescription] = []
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
         expanded.append(r)
@@ -603,10 +602,11 @@ async def handle_redirect(
                     if path == scope.virtual:
                         inputs[fd] = emptied
             file = FileDescription(
-                pipe or scope, append=r.append or pipe is not None, opened=True
+                pipe or scope,
+                append=r.append or pipe is not None,
+                opened=True,
+                pipe=pipe is not None,
             )
-            if pipe is not None:
-                pipe_files.append(file)
             if len(expanded) == len(redirects) and _output_only(name, args):
                 complete_output = file
             files.append(file)
@@ -624,9 +624,7 @@ async def handle_redirect(
             forward[channel] = (
                 Channel.STDOUT if target is _TO_STDOUT else Channel.STDERR
             )
-        elif isinstance(target, FileDescription) and any(
-            target is file for file in pipe_files
-        ):
+        elif isinstance(target, FileDescription) and target.pipe:
             streams[channel] = target.scope
     live = bool(streams) or bool(piped)
     recorder = PipeRecorder(

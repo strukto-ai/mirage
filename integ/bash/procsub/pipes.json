@@ -1257,6 +1257,36 @@
         "stderr": "mv: cannot move '/dev/fd' to '{mount}/procsub-saved': Operation not permitted\n"
       },
       "note": "Divergence: GNU bash 5.2.37 prints \"st=0\" and cat fails with \"No such file or directory\". On Linux /dev/fd is a symlink into procfs, which GNU mv (as root in a container) moves itself, so \"$1\" no longer resolves. Mirage's /dev/fd holds the live pipes, which a move would drain, so the move is refused with EPERM, as a pipe's own move is, and the pipe keeps its bytes."
+    },
+    {
+      "id": "procsub_copied_output_pipe_streams",
+      "seq": 1346139,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ { printf 'ready\\n'; while [ ! -e {mount}/procsub-ack ]; do sleep 0.1; done; } >&3; } 3> >(read -r line; : > {mount}/procsub-ack); echo \"st=$?\"; rm {mount}/procsub-ack",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_pipe_copy_streams",
+      "seq": 1346140,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { exec 3>\"$1\"; { printf 'ready\\n'; while [ ! -e {mount}/procsub-ack ]; do sleep 0.1; done; } >&3; exec 3>&-; echo \"st=$?\"; }; f >(read -r line; : > {mount}/procsub-ack); rm {mount}/procsub-ack",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

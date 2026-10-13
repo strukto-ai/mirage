@@ -324,7 +324,6 @@ export async function handleRedirect(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   const readPaths = new Map<number, string>()
   const piped = new Set<number>()
-  const pipeFiles: FileDescription[] = []
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
     expanded.push(r)
@@ -451,8 +450,7 @@ export async function handleRedirect(
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
-      const file = new FileDescription(pipe ?? scope, r.append || pipe !== null)
-      if (pipe !== null) pipeFiles.push(file)
+      const file = new FileDescription(pipe ?? scope, r.append || pipe !== null, pipe !== null)
       file.opened = true
       if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
       files.push(file)
@@ -474,8 +472,7 @@ export async function handleRedirect(
     const target = outputs.get(fd)
     if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
     else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
-    else if (target instanceof FileDescription && pipeFiles.includes(target))
-      streams.set(channel, target.scope)
+    else if (target instanceof FileDescription && target.pipe) streams.set(channel, target.scope)
   }
   const live = streams.size > 0 || piped.size > 0
   const recorder = new PipeRecorder(

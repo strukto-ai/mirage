@@ -74,6 +74,7 @@ export class FileDescription {
   constructor(
     readonly scope: PathSpec,
     readonly append = false,
+    readonly pipe = false,
   ) {}
 }
 

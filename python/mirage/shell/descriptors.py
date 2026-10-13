@@ -92,6 +92,7 @@ class FileDescription:
     scope: PathSpec
     append: bool = False
     opened: bool = False
+    pipe: bool = False
     offset: int = 0
     source: FileInput | None = None
     emit: Callable[[bytes], Awaitable[None]] | None = None

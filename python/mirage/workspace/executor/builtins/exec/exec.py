@@ -313,7 +313,12 @@ async def _install_descriptor(
                 dispatch, session, scope, b"", append=redirect.append
             )
             target = pipe or scope
-            file = FileDescription(target, append=redirect.append, opened=True)
+            file = FileDescription(
+                target,
+                append=redirect.append,
+                opened=True,
+                pipe=pipe is not None,
+            )
             for claimed in [1, 2] if fd == FD_BOTH else [fd]:
                 _bind(
                     session,
