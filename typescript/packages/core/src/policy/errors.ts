@@ -15,9 +15,9 @@
 import type { Refusal } from '../types.ts'
 
 /**
- * A policy returned something a hook may not return. Raised loudly at
+ * A policy returned something a method may not return. Raised loudly at
  * the seam (never silently dropped): an illegal Action kind for the
- * hook, or a value that is not an Action at all, is a programming
+ * method, or a value that is not an Action at all, is a programming
  * error in the policy, not a refusal.
  */
 export class PolicyError extends Error {

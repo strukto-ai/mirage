@@ -22,7 +22,7 @@ class HiddenPathsPolicy:
     """Hidden paths answer as absent, including at subtree boundaries.
 
     The built-in that answers ``Hide`` at the op boundary, before any
-    policy: not a ``Policy``, because no coded hook returns a Hide.
+    policy: not a ``Policy``, because no coded method returns a Hide.
     """
 
     async def pre_vfs(self, ctx: VfsContext) -> Hide | None:

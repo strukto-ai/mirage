@@ -1256,7 +1256,7 @@ export function sessionView(
 export const SHELL_BOOKKEEPING: ReadonlySet<string> = new Set(['PWD', 'OLDPWD', 'BASH_REMATCH'])
 
 /**
- * The value a `preSession` hook is shown for one variable: a scalar as
+ * The value a `preSession` method is shown for one variable: a scalar as
  * itself, an indexed array as its present elements joined by spaces, an
  * associative one in sorted-key order, and null for a variable that is
  * declared but unset. One rendering, so a rule reads the same text whether

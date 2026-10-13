@@ -256,7 +256,7 @@ console.log(result.exitCode, result.stdoutText)
 
 Consume `events` while the line runs, then await `wait()` for its final `ExecuteResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. The result describes finished work; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 
-A policy with a `postExecute` hook holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
+A policy with a `postExecute` method holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
 
 To collect the complete result while observing output, use `await execution.collect(callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
 

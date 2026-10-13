@@ -96,16 +96,16 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
             return Ask(rule.reason, rule)
         return Deny(rule.reason, rule=rule)
 
-    async def wants_for(self, hook: str, session_id: str) -> bool:
-        """Whether this session's rules speak at ``hook``: always at the
+    async def wants_for(self, method: str, session_id: str) -> bool:
+        """Whether this session's rules speak at ``method``: always at the
         command admission, and at the dispatcher only through a pure path
         rule, the one kind an op can meet (``op_reach``).
 
         Args:
-            hook (str): the hook in python spelling.
+            method (str): the method in python spelling.
             session_id (str): the session the dispatcher serves.
         """
-        if hook != "pre_vfs":
+        if method != "pre_vfs":
             return True
         rules = self._sessions.commands_of(session_id)
         if rules is None:

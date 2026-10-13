@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 class MountRootQuery(Protocol):
-    """The one registry question policy hooks may ask.
+    """The one registry question policy methods may ask.
 
     MountRegistry satisfies this structurally; the narrow protocol keeps
     this package a leaf (no workspace imports), so the registry can host
@@ -105,7 +105,7 @@ class Hide:
     refusal: no reason, no ``refusal`` record, no explain line. The
     entry point raises ``error`` as the terminal would for a missing name
     (ENOENT, or EACCES for a create landing in a visible directory). The
-    built-in hide answers it; no coded hook returns one.
+    built-in hide answers it; no coded method returns one.
 
     Args:
         error (OSError): what the entry point raises.
@@ -241,14 +241,14 @@ class Ruling:
 class Ask:
     """Go on only with a host approval.
 
-    Every hook may answer one. ``PermissionsPolicy`` returns one for a
+    Every method may answer one. ``PermissionsPolicy`` returns one for a
     ``commands.ask`` rule, a custom policy for a coded condition, and
     both route to the workspace's decision ledger (``Decisions``). A Deny
     from any policy outranks it: the chain keeps looking past an Ask
     for a Deny, so an approval can never re-open a refusal. A later
     Ask's rules are appended to the first one's ``rules``, so every Ask
-    a hook's chain answers is put to the host. A pre hook holds what it
-    guards until the host says yes; a post hook holds back what came
+    a method's chain answers is put to the host. A pre method holds what it
+    guards until the host says yes; a post method holds back what came
     back, and the approved rerun repeats the action.
 
     Args:
@@ -281,8 +281,8 @@ class Ask:
 # built-in's, the path is absent), then Deny (first opinion wins), then
 # Ask (defers to the host; a Deny anywhere in the chain still wins), then
 # Route and Limit (every Route has to agree; every Limit merges to the
-# tightest, Limit.aggr). A hook returns an Action to state an opinion or
-# None to stay silent; each hook accepts a fixed set of kinds
+# tightest, Limit.aggr). A method returns an Action to state an opinion or
+# None to stay silent; each method accepts a fixed set of kinds
 # (VALIDITY), enforced loud.
 Action = Hide | Deny | Limit | Ask | Route
 
@@ -691,7 +691,7 @@ class CommandWord:
 
 @dataclass(frozen=True, slots=True)
 class CommandContext:
-    """Facts about one classified command, as pre_command hooks see it.
+    """Facts about one classified command, as pre_command methods see it.
 
     Args:
         line (str): the line the command was parsed from: the line the
@@ -707,7 +707,7 @@ class CommandContext:
             tar's files) reads the operands here: ``tar -xf a.tar -C
             /mnt`` names ``/mnt`` as ``-C``'s value, not as a file.
         argv (tuple[str, ...]): raw argv after the command name; the
-            hook fires before flag parsing, so shorthand flags are raw
+            method fires before flag parsing, so shorthand flags are raw
             tokens.
         cwd (str): session working directory.
         session_id (str): the session running the line, set by the
@@ -733,12 +733,12 @@ class CommandContext:
             fan-out reruns the traversal in each descendant mount, and
             no admission fires again there.
         session (SessionView | None): the session, read only: a write
-            through it is refused. Filled when a hook is asked.
+            through it is refused. Filled when a method is asked.
         ns (NamespaceView | None): the session's namespace, as a command
-            gets it in ``opts.ns``. Filled when a hook is asked.
+            gets it in ``opts.ns``. Filled when a method is asked.
         vfs (Files | None): the session's files, read only: a write is
-            refused and no hook runs again for a read. Filled when a
-            hook is asked.
+            refused and no method runs again for a read. Filled when a
+            method is asked.
     """
 
     command: str
@@ -759,7 +759,7 @@ class CommandContext:
 
 @dataclass(frozen=True, slots=True)
 class CommandResultContext(CommandContext):
-    """One command or CLI that ran, as post_command hooks see it: what
+    """One command or CLI that ran, as post_command methods see it: what
     pre_command saw, plus what came back.
 
     Args:
@@ -777,7 +777,7 @@ class CommandResultContext(CommandContext):
 
 @dataclass(frozen=True, slots=True)
 class RouteContext:
-    """One line, as pre_execute hooks see it: the line and every
+    """One line, as pre_execute methods see it: the line and every
     command in it, each as ``pre_command`` will see it.
 
     For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``::
@@ -816,11 +816,11 @@ class RouteContext:
 
 @dataclass(frozen=True, slots=True)
 class VfsContext:
-    """Facts about one VFS op, as pre_vfs hooks see it.
+    """Facts about one VFS op, as pre_vfs methods see it.
 
     Fires at the dispatcher (the ``ws.vfs`` facade, which also serves
     FUSE), before any backend or cache I/O, so it holds however the
-    mount is reached. A running line's own ops never reach a user hook.
+    mount is reached. A running line's own ops never reach a user method.
 
     Args:
         call (VfsCall): the function called, as ``vfs_call`` declares
@@ -854,7 +854,7 @@ class VfsContext:
 
 @dataclass(frozen=True, slots=True)
 class VfsResultContext(VfsContext):
-    """One completed VFS op, as post_vfs hooks see it: what pre_vfs saw,
+    """One completed VFS op, as post_vfs methods see it: what pre_vfs saw,
     plus what came back.
 
     Args:
@@ -867,7 +867,7 @@ class VfsResultContext(VfsContext):
 
 @dataclass(frozen=True, slots=True)
 class ExecuteResultContext(RouteContext):
-    """One finished line, as post_execute hooks see it: what
+    """One finished line, as post_execute methods see it: what
     pre_execute saw, plus what came back.
 
     Fires at the workspace boundary before the line's output reaches
@@ -894,7 +894,7 @@ class ExecuteResultContext(RouteContext):
 
 @dataclass(frozen=True, slots=True)
 class SessionContext:
-    """Facts about one session-state mutation, as pre_session hooks see it.
+    """Facts about one session-state mutation, as pre_session methods see it.
 
     Fires on the session plane before the write lands, so it holds
     whichever tier asked. Not an VfsContext: a session key is not a
@@ -923,7 +923,7 @@ class SessionContext:
 
 @dataclass(frozen=True, slots=True)
 class SessionResultContext(SessionContext):
-    """One session write that landed, as post_session hooks see it: what
+    """One session write that landed, as post_session methods see it: what
     pre_session saw, plus the value it replaced.
 
     Args:
@@ -968,7 +968,7 @@ class Explanation:
     A line (:class:`ShellExplanation`), each of its commands
     (:class:`CommandExplanation`) and a VFS call
     (:class:`VfsExplanation`) extend it with what is theirs; ``answers``
-    holds what the hook judging that level said.
+    holds what the method judging that level said.
 
     Args:
         outcome (Outcome): ``ALLOW``, ``DENY`` or ``ASK`` (an ask an

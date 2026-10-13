@@ -57,7 +57,7 @@ import type { RouteContext } from './types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { posixPhrase } from '../errors/posix.ts'
 
-type Hook = keyof typeof VALIDITY
+type Method = keyof typeof VALIDITY
 
 /**
  * The command plane's rendering of a refusal: stderr and exit code. The
@@ -220,8 +220,8 @@ async function explainedOp(
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
  * FUSE, and the warm cache all pass through it. A running line's own I/O,
- * and a hook's own read, meet the hides, path rules and mount mode alone;
- * a hook's write is refused. `access` carries the
+ * and a method's own read, meet the hides, path rules and mount mode alone;
+ * a method's write is refused. `access` carries the
  * owning mount's mode (unset at an entry point that judges it itself), whether
  * the op creates the path or mutates below it, `checkHidden` false only
  * for an entry point that has already answered the hides itself, and the
@@ -308,7 +308,7 @@ async function refuseOp(
  * approved, drops the result with EACCES. Returns the merged Limit bound
  * (tightest per field across every opining policy) for the entry point to
  * apply to a byte-producing result, or null when no policy bounds this op.
- * Not fired for a running line's own I/O or a hook's own read.
+ * Not fired for a running line's own I/O or a method's own read.
  */
 export async function postVfsGate(
   policies: Policies,
@@ -411,7 +411,7 @@ async function sessionRefused(
  * reached: shell builtin, command view, or a later tier. Null policies (a
  * view constructed outside a workspace) gate nothing. An Ask goes to the
  * workspace's ledger (`Policies.decisions`), inside a line too. A write a
- * hook makes while it decides (`ctx.session`) throws EACCES.
+ * method makes while it decides (`ctx.session`) throws EACCES.
  */
 export async function preSessionGate(
   policies: Policies | null,
@@ -423,7 +423,7 @@ export async function preSessionGate(
 }
 
 /**
- * Ordered policies; at every hook the first Deny wins, and every Ask is
+ * Ordered policies; at every method the first Deny wins, and every Ask is
  * put to the host.
  *
  * Built-ins are seeded first (MountRegistry registers
@@ -435,12 +435,12 @@ export async function preSessionGate(
  * is shown, never whether a refusal holds.
  *
  * A policy that throws fails closed: the command is refused with a
- * whole-command Deny naming the policy. A policy that returns something the hook may
+ * whole-command Deny naming the policy. A policy that returns something the method may
  * not return (VALIDITY) throws PolicyError: that is a programming
  * error, not a refusal.
  *
  * The chain holds the decision ledger an Ask is put to (`decisions`), and
- * `views`, which the workspace sets to fill a hook's read-only `session`,
+ * `views`, which the workspace sets to fill a method's read-only `session`,
  * `ns` and `vfs`.
  */
 export class Policies {
@@ -448,7 +448,7 @@ export class Policies {
   private readonly hidden = new HiddenPathsPolicy()
   private readonly mode: Policy = new MountModePolicy()
   private placement: Policy | null = null
-  private wanted: ReadonlySet<Hook> = new Set()
+  private wanted: ReadonlySet<Method> = new Set()
   decisions: Decisions = new Decisions()
   views:
     | ((
@@ -475,16 +475,16 @@ export class Policies {
   }
 
   /**
-   * True when any policy defines `hook`. O(1); the op seam gates on it
+   * True when any policy defines `method`. O(1); the op seam gates on it
    * so a workspace with no op policies pays nothing per VFS op.
    */
-  wants(hook: Hook): boolean {
-    return this.wanted.has(hook)
+  wants(method: Method): boolean {
+    return this.wanted.has(method)
   }
 
   /**
    * Whether a postVfs policy may read an op's result. The built-in output cap
-   * answers from the op and the mount alone; any other hook, a subclass's
+   * answers from the op and the mount alone; any other method, a subclass's
    * override of the cap's included, may read `ctx.result`, so a streamed read
    * reaches it read whole. Mirrors
    * Python's `reads_results`.
@@ -497,30 +497,30 @@ export class Policies {
   }
 
   /**
-   * True when some policy will speak at `hook` for this session. The
-   * per-session refinement of `wants`: a policy that defines the hook
+   * True when some policy will speak at `method` for this session. The
+   * per-session refinement of `wants`: a policy that defines the method
    * counts, unless it speaks per session (`SessionScoped`) and says this
-   * is not one of its. For a seam that pays ahead for a hook rather than
+   * is not one of its. For a seam that pays ahead for a method rather than
    * gating on it: the secret fill drops its masks under a session-write
    * gate, and a profile's policy at that entry point is one profile's, not
    * every session's. `rulesOnly` counts the profile's rules alone, as
    * `chain` takes it.
    */
-  async wantsFor(hook: Hook, sessionId: string, rulesOnly = false): Promise<boolean> {
+  async wantsFor(method: Method, sessionId: string, rulesOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
     for (const policy of policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)) {
-      if (policy[hook] === undefined) continue
+      if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
-      if (await policy.wantsFor(hook, sessionId)) return true
+      if (await policy.wantsFor(method, sessionId)) return true
     }
     return false
   }
 
   private rescan(): void {
-    const wanted = new Set<Hook>()
+    const wanted = new Set<Method>()
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    for (const hook of Object.keys(VALIDITY) as Hook[]) {
-      if (policies.some((p) => p[hook] !== undefined)) wanted.add(hook)
+    for (const method of Object.keys(VALIDITY) as Method[]) {
+      if (policies.some((p) => p[method] !== undefined)) wanted.add(method)
     }
     this.wanted = wanted
   }
@@ -530,18 +530,18 @@ export class Policies {
    * `preExecute` (unless the caller placed the line), the registered
    * ones, and the built-in mount mode last at `preVfs`, after every
    * policy that could explain the refusal in its own words. A snapshot,
-   * so the order holds if the host edits registrations while a hook
+   * so the order holds if the host edits registrations while a method
    * awaits; changes take effect at the next gate. `rulesOnly` asks the
    * profile's rules alone (`PermissionsPolicy`), not the policies
    * registered in code or a profile's script: the line's passes, which
    * judge a line before it runs, and a command's own I/O.
    */
-  private chain(hook: Hook, placed: boolean, rulesOnly = false): Policy[] {
+  private chain(method: Method, placed: boolean, rulesOnly = false): Policy[] {
     let chain = this.policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)
-    if (hook === 'preExecute' && this.placement !== null && !placed) {
+    if (method === 'preExecute' && this.placement !== null && !placed) {
       chain = [this.placement, ...chain]
     }
-    if (hook === 'preVfs') chain = [...chain, this.mode]
+    if (method === 'preVfs') chain = [...chain, this.mode]
     return chain
   }
 
@@ -566,21 +566,21 @@ export class Policies {
 
   /**
    * The one loop every stage runs: each policy's answer, named and checked
-   * against what the hook may carry; a policy answering an array has each
+   * against what the method may carry; a policy answering an array has each
    * read in turn, as if its own policy had said it. The entry point stops
    * at the first Deny, since nothing after it can change the outcome;
    * `every` goes on, so `explain` shows the answers a Deny would hide. A
    * policy that throws answers with a Deny naming it (fail closed), except
-   * the built-in placement, which throws to the caller. A kind the hook
+   * the built-in placement, which throws to the caller. A kind the method
    * cannot carry (VALIDITY) throws PolicyError: a programming error, not a
    * refusal, and as loud in a dry run as at the entry point. A later Ask's
    * rules are appended to the first Ask's, so the first Ask carries every
-   * question the stage raised and the host grants each. Each hook runs as a
+   * question the stage raised and the host grants each. Each method runs as a
    * policy deciding, with its views filled unless the profile's rules alone
    * are asked. Mirrors the Python `_said`.
    */
   private async said(
-    hook: Hook,
+    method: Method,
     ctx:
       | CommandContext
       | RouteContext
@@ -595,8 +595,8 @@ export class Policies {
     const said: (Deny | Ask | Route)[] = []
     const limits: Limit[] = []
     let seen = ctx
-    for (const policy of this.chain(hook, placed, rulesOnly)) {
-      const fn = policy[hook]
+    for (const policy of this.chain(method, placed, rulesOnly)) {
+      const fn = policy[method]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'
       const handles =
@@ -617,14 +617,14 @@ export class Policies {
               SessionResultContext,
           )
         // Without task isolation the binding would reach other tasks' ops,
-        // so there a hook runs as it did before: it may write.
+        // so there a method runs as it did before: it may write.
         answered = await (asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask())
       } catch (err) {
         if (policy === this.placement) throw err
         // The agent reads which policy broke, never what it threw: the
         // error text is the deployment's to debug, in the log.
         const detail = err instanceof Error ? err.message : String(err)
-        console.error(`${hook} policy ${name} raised: ${detail}`)
+        console.error(`${method} policy ${name} raised: ${detail}`)
         said.push({ kind: 'deny', reason: `${name} failed`, policy: name, failed: true })
         if (!every) return [said, []]
         continue
@@ -632,10 +632,10 @@ export class Policies {
       for (const action of Array.isArray(answered) ? answered : [answered]) {
         if (action === null) continue
         const kind: unknown = typeof action === 'object' ? action.kind : undefined
-        if (typeof kind !== 'string' || !VALIDITY[hook].has(kind)) {
+        if (typeof kind !== 'string' || !VALIDITY[method].has(kind)) {
           throw new PolicyError(
-            `${hook} of ${name} returned ${JSON.stringify(action)}; ` +
-              `legal kinds here: ${[...VALIDITY[hook]].join(', ')}`,
+            `${method} of ${name} returned ${JSON.stringify(action)}; ` +
+              `legal kinds here: ${[...VALIDITY[method]].join(', ')}`,
           )
         }
         if (action instanceof Limit) {
@@ -676,7 +676,7 @@ export class Policies {
    * Ask's rules, when nothing refused.
    */
   private async fire(
-    hook: Hook,
+    method: Method,
     ctx:
       | CommandContext
       | RouteContext
@@ -687,7 +687,7 @@ export class Policies {
     placed = false,
     rulesOnly = false,
   ): Promise<[Deny | Ask | null, Limit | null, Route[]]> {
-    const [said, limits] = await this.said(hook, ctx, false, placed, rulesOnly)
+    const [said, limits] = await this.said(method, ctx, false, placed, rulesOnly)
     const deny = said.find((a): a is Deny => a.kind === 'deny')
     if (deny !== undefined) return [deny, null, []]
     const asked = said.find((a): a is Ask => a.kind === 'ask') ?? null
@@ -706,7 +706,7 @@ export class Policies {
    * `chain` takes it. Mirrors the Python `answers`.
    */
   async answers(
-    hook: Hook,
+    method: Method,
     ctx:
       | CommandContext
       | RouteContext
@@ -717,7 +717,7 @@ export class Policies {
     every = true,
     rulesOnly = false,
   ): Promise<(Deny | Ask | Route)[]> {
-    const [said] = await this.said(hook, ctx, every, false, rulesOnly)
+    const [said] = await this.said(method, ctx, every, false, rulesOnly)
     return said
   }
 
@@ -760,7 +760,7 @@ export class Policies {
    * hides answer before every policy, with a Hide that outranks whatever
    * a policy would say, so a refusal never tells a session a hidden name
    * exists; the built-in mount mode answers after them. Both hold
-   * whether or not any policy overrides the hook; `checkHidden` false
+   * whether or not any policy overrides the method; `checkHidden` false
    * only for an entry point that has already answered the hides itself,
    * and `rulesOnly` asks the profile's path rules alone, for an op a
    * running command makes.

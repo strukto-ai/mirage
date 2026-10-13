@@ -141,7 +141,7 @@ def ask_rule(
 
     Args:
         ctx (CommandContext | RouteContext | VfsContext |
-            ExecuteResultContext | SessionContext): what the hook saw.
+            ExecuteResultContext | SessionContext): what the method saw.
         ask (Ask): the policy's answer.
     """
     if ask.rule is not None:
@@ -222,7 +222,7 @@ def op_question(
 
     Args:
         ctx (VfsContext | SessionContext | RouteContext |
-            ExecuteResultContext): what the hook saw.
+            ExecuteResultContext): what the method saw.
         ask (Ask): the chain's answer.
     """
     rules = ask.rules or (ask_rule(ctx, ask),)

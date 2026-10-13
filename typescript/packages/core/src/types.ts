@@ -432,7 +432,7 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
  * (output caps today; budgets and attribution later) read it as
  * context. Facts only: no policy reads a decision off the envelope;
  * the one a chain hands down is written beside it as
- * `IOResult.refusal` after the last hook has spoken. `declared` is
+ * `IOResult.refusal` after the last method has spoken. `declared` is
  * the bound the command's own registration declared,
  * when the dispatch site knows it (e.g. a CLI leaf).
  */

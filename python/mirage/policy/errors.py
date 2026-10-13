@@ -18,10 +18,10 @@ from mirage.types import Refusal
 
 
 class PolicyError(Exception):
-    """A policy returned something a hook may not return.
+    """A policy returned something a method may not return.
 
     Raised loudly at the seam (never silently dropped): an illegal
-    Action kind for the hook, or a value that is not an Action at all,
+    Action kind for the method, or a value that is not an Action at all,
     is a programming error in the policy, not a refusal.
     """
 

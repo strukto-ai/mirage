@@ -20,7 +20,7 @@ import type { Hide, VfsContext } from '../types.ts'
 /**
  * Hidden paths answer as absent, including at subtree boundaries. The
  * built-in that answers `Hide` at the op boundary, before any policy:
- * not a `Policy`, because no coded hook returns a Hide.
+ * not a `Policy`, because no coded method returns a Hide.
  */
 export class HiddenPathsPolicy {
   /** Hide the op's path when the bound session cannot see it. */

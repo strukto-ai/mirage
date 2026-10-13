@@ -195,7 +195,7 @@ class IOResult:
             workspace boundary hands it to the policy layer as
             context. Facts ride the envelope as policy input; the
             decision a chain hands down rides beside them as
-            ``refusal``, written after the last hook has spoken.
+            ``refusal``, written after the last method has spoken.
         refusal (Refusal | None): why the line did not run, when a
             policy or an unanswered ask refused it; None on every
             ordinary run. stderr stays in bash's voice, this carries

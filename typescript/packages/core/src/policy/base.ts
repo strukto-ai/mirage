@@ -27,25 +27,25 @@ import type {
 /**
  * One concern's answers to the workspace lifecycle.
  *
- * Implementations define only the hooks they care about; a hook
+ * Implementations define only the methods they care about; a method
  * returns an Action to state an opinion, an array of them to state
  * several (each read as if its own policy had said it, as a profile's
  * programs answer), or null to stay silent (directly or as a promise;
- * the seam awaits either), and a hook that throws fails closed (the
+ * the seam awaits either), and a method that throws fails closed (the
  * command is refused, naming the policy).
- * Undefined hooks are detected at the seam and never called.
+ * Undefined methods are detected at the seam and never called.
  *
- * The hooks come in pairs, one per surface: the line (`preExecute` /
+ * The methods come in pairs, one per surface: the line (`preExecute` /
  * `postExecute`), each command or CLI (`preCommand` / `postCommand`),
  * each `ws.vfs` / `session.vfs` call (`preVfs` / `postVfs`) and each
- * session write (`preSession` / `postSession`). Every hook may answer
+ * session write (`preSession` / `postSession`). Every method may answer
  * Deny or Ask; a Limit only where a result comes back to cap (`postVfs`,
- * `postExecute`), a Route only at `preExecute`. A post hook sees what
- * its pre hook saw, plus what came back, and never undoes a side effect:
+ * `postExecute`), a Route only at `preExecute`. A post method sees what
+ * its pre method saw, plus what came back, and never undoes a side effect:
  * it holds back what came back. Hides, mount modes and path rules are
- * not hooks: they apply to every caller at the dispatcher. Every hook's
+ * not methods: they apply to every caller at the dispatcher. Every method's
  * context also carries the session (`session`), its namespace (`ns`) and
- * its files (`vfs`), all read only: a hook reads, and a write it makes is
+ * its files (`vfs`), all read only: a method reads, and a write it makes is
  * refused. Mirrors the Python Policy.
  */
 export interface Policy {

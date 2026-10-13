@@ -109,7 +109,7 @@ def test_ln_goes_through_the_dispatcher():
     assert ("symlink", "/a/lk") in seen
 
 
-def test_a_ws_vfs_symlink_fires_the_op_hooks():
+def test_a_ws_vfs_symlink_fires_the_op_methods():
     ws = _two_mounts(policies=[DenyOp("symlink")])
 
     async def run():

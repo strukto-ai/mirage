@@ -248,7 +248,7 @@ print(result.exit_code, await result.stdout_str())
 
 Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 
-A policy with a `post_execute` hook holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
+A policy with a `post_execute` method holds output until it approves the completed invocation. Such calls still use the same events and lifecycle, but their output arrives after that check. This policy buffer is separate from the bounded event queue.
 
 To collect the complete result while observing output, use `await execution.collect(on_event=callback)`. The async callback receives each event and is awaited before the next one is read. Collection owns cleanup, including when the callback fails.
 

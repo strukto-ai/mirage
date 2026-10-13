@@ -21,7 +21,7 @@ import type { WordKind } from '../commands/spec/types.ts'
 import type { NamespaceView, SessionView } from '../view/types.ts'
 
 /**
- * The one registry question policy hooks may ask. MountRegistry
+ * The one registry question policy methods may ask. MountRegistry
  * satisfies this structurally; the narrow interface keeps this package
  * a leaf (no workspace imports), so the registry can host a Policies
  * instance without a cycle. Mirrors the Python MountRootQuery.
@@ -84,7 +84,7 @@ export interface Deny {
  * refusal: no reason, no `refusal` record, no explain line. The entry point
  * throws `error` as the terminal would for a missing name (ENOENT, or
  * EACCES for a create landing in a visible directory). The built-in hide
- * answers it; no coded hook returns one. `kind` is the wire
+ * answers it; no coded method returns one. `kind` is the wire
  * discriminant shared with Python.
  */
 export interface Hide {
@@ -192,15 +192,15 @@ export interface Ruling {
 }
 
 /**
- * Go on only with a host approval. Every hook may answer one.
+ * Go on only with a host approval. Every method may answer one.
  * `PermissionsPolicy` returns one for a `commands.ask` rule, a custom
  * policy for a coded condition, and both route to the workspace's
  * decision ledger (`Decisions`). A Deny from any policy outranks it: the
  * chain keeps looking past an Ask for a Deny, so an approval can never
  * re-open a refusal. A later Ask's rules are appended to the first one's
- * `rules`, so every Ask a hook's chain answers is put to the host. A pre
- * hook holds what it guards
- * until the host says yes; a post hook holds back what came back, and
+ * `rules`, so every Ask a method's chain answers is put to the host. A pre
+ * method holds what it guards
+ * until the host says yes; a post method holds back what came back, and
  * the approved rerun repeats the action. `rule` is the document rule
  * that asked, absent for a coded condition, for which the ledger keys a
  * session answer on what was asked about. Mirrors the Python Ask.
@@ -229,8 +229,8 @@ export interface Ask {
  * built-in's, the path is absent), then Deny (first opinion wins), then
  * Ask (defers to the host; a Deny anywhere in the chain still wins),
  * then Route and Limit (every Route has to agree; every Limit merges to
- * the tightest, Limit.aggr). A hook returns an Action to state an
- * opinion or null to stay silent; each hook accepts a fixed set of kinds
+ * the tightest, Limit.aggr). A method returns an Action to state an
+ * opinion or null to stay silent; each method accepts a fixed set of kinds
  * (VALIDITY), enforced at the seam.
  */
 export type Action = Hide | Deny | Limit | Ask | Route
@@ -534,7 +534,7 @@ export class CommandWord {
   }
 }
 
-/** Facts about one classified command, as preCommand hooks see it. */
+/** Facts about one classified command, as preCommand methods see it. */
 export interface CommandContext {
   /**
    * The line the command was parsed from: the line the agent typed, or
@@ -555,7 +555,7 @@ export interface CommandContext {
    * names `/mnt` as `-C`'s value, not as a file.
    */
   words?: readonly CommandWord[]
-  /** Raw argv after the command name; hooks fire before flag parsing. */
+  /** Raw argv after the command name; methods fire before flag parsing. */
   argv: readonly string[]
   cwd: string
   /** The session running the line, set by the entry point; empty outside a workspace. */
@@ -586,14 +586,14 @@ export interface CommandContext {
    * admission fires again there. Absent reads as false.
    */
   walks?: boolean
-  /** The session, read only: a write through it is refused. Filled when a hook is asked. */
+  /** The session, read only: a write through it is refused. Filled when a method is asked. */
   session?: SessionView
-  /** The session's namespace, as a command gets it in `opts.ns`. Filled when a hook is asked. */
+  /** The session's namespace, as a command gets it in `opts.ns`. Filled when a method is asked. */
   ns?: NamespaceView
 }
 
 /**
- * One line, as preExecute hooks see it: the line and every command in
+ * One line, as preExecute methods see it: the line and every command in
  * it, each as `preCommand` will see it. `commands` lists them in source
  * order, nested ones included, each read as the gate that runs it will
  * read it: its words expanded where the text alone says what they are,
@@ -621,7 +621,7 @@ export interface RouteContext {
   ns?: NamespaceView
 }
 
-/** Facts about one VFS op, as preVfs hooks see it. Fires at the
+/** Facts about one VFS op, as preVfs methods see it. Fires at the
  * dispatcher (every access routes through it, FUSE included),
  * before any backend or cache I/O. `sessionId` is the session the dispatcher
  * serves, set from the session it already resolves for hides and
@@ -629,7 +629,7 @@ export interface RouteContext {
  * arrived with, when its caller stamped one: a policy whose own engine
  * reads through the dispatcher stamps those reads, and recognizes its token
  * here so the read an evaluation is waiting on is not judged by the
- * hook that is waiting. It travels with the op as an argument, never
+ * method that is waiting. It travels with the op as an argument, never
  * through ambient context, so no concurrent op can be taken for it;
  * python marks the same read with a task-local ContextVar, which a
  * browser has no twin of. */
@@ -657,7 +657,7 @@ export interface VfsContext {
 }
 
 /**
- * One command or CLI that ran, as postCommand hooks see it: what
+ * One command or CLI that ran, as postCommand methods see it: what
  * preCommand saw, plus what came back. `exitCode` is settled once its
  * output drained; `records` are its op records as `OpRecord.toJSON`
  * writes them. Mirrors the Python CommandResultContext.
@@ -668,14 +668,14 @@ export interface CommandResultContext extends CommandContext {
   records: readonly Record<string, unknown>[]
 }
 
-/** One completed VFS op, as postVfs hooks see it: what preVfs saw,
+/** One completed VFS op, as postVfs methods see it: what preVfs saw,
  * plus what came back; a Deny or an Ask drops the result. */
 export interface VfsResultContext extends VfsContext {
   result: unknown
 }
 
 /**
- * One finished line, as postExecute hooks see it: what preExecute saw,
+ * One finished line, as postExecute methods see it: what preExecute saw,
  * plus what came back. Fires at the workspace boundary before the
  * line's output reaches the caller, so a Limit returned here bounds
  * what the caller sees, and a Deny or an Ask drops it. `producer` is
@@ -697,7 +697,7 @@ export interface ExecuteResultContext extends RouteContext {
 }
 
 /**
- * Facts about one session-state mutation, as preSession hooks see it.
+ * Facts about one session-state mutation, as preSession methods see it.
  * Fires on the session plane before the write lands, so it holds
  * whichever tier asked. Not an VfsContext: a session key is not a
  * path, and a path-scoped policy must never receive one dressed as a
@@ -717,7 +717,7 @@ export interface SessionContext {
 }
 
 /**
- * One session write that landed, as postSession hooks see it: what
+ * One session write that landed, as postSession methods see it: what
  * preSession saw, plus the value it replaced (`old`, rendered as `value`
  * is; null when the name was unset). Mirrors the Python
  * SessionResultContext.
@@ -749,8 +749,8 @@ export const VALIDITY: Readonly<
   postSession: new Set(['deny', 'ask']),
 }
 
-/** The name of one Policy hook, as the interface spells it. */
-export type PolicyHook = keyof typeof VALIDITY
+/** The name of one Policy method, as the interface spells it. */
+export type PolicyMethod = keyof typeof VALIDITY
 
 /**
  * What a dry run's calls are while the policies decide the op it
@@ -770,7 +770,7 @@ export enum DryRun {
  * the call cannot be told different things. A line (`ShellExplanation`),
  * each of its commands (`CommandExplanation`) and a VFS call
  * (`VfsExplanation`) extend it with what is theirs; `answers` holds what
- * the hook judging that level said. Mirrors the Python Explanation.
+ * the method judging that level said. Mirrors the Python Explanation.
  */
 export interface Explanation {
   /** `ALLOW`, `DENY` or `ASK` (an ask an approval already covers stays `ASK` with no refusal). */

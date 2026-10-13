@@ -204,7 +204,7 @@ describe('Files existence probes', () => {
 })
 
 // `ws.vfs` is an entry point like the dispatcher: FUSE and programmatic
-// access read through it, so policy hooks must fire here too.
+// access read through it, so policy methods must fire here too.
 describe('Files policy entry point', () => {
   class SealReads implements Policy {
     preVfs(ctx: VfsContext): Action | null {
@@ -260,7 +260,7 @@ describe('Files policy entry point', () => {
     await expect(ws.vfs.read('/data/x.sealed')).rejects.toThrow(PolicyDenied)
   })
 
-  it('postVfs denies on result content the pre hook cannot see', async () => {
+  it('postVfs denies on result content the pre method cannot see', async () => {
     const ws = mkGuarded()
     await ws.vfs.write('/data/secret.txt', 'TOPSECRET plans\n')
     await expect(ws.vfs.read('/data/secret.txt')).rejects.toThrow(PolicyDenied)

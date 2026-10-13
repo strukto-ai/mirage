@@ -22,7 +22,7 @@ import {
   type Action,
   type CommandContext,
   type VfsContext,
-  type PolicyHook,
+  type PolicyMethod,
   type SessionCommandsQuery,
 } from '../types.ts'
 
@@ -91,12 +91,12 @@ export class PermissionsPolicy implements Policy, SessionScoped {
   }
 
   /**
-   * Whether this session's rules speak at `hook`: always at command
+   * Whether this session's rules speak at `method`: always at command
    * admission, and at the dispatcher only through a pure path rule, the one kind
    * an op can meet (`opReach`).
    */
-  wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
-    if (hook !== 'preVfs') return Promise.resolve(true)
+  wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean> {
+    if (method !== 'preVfs') return Promise.resolve(true)
     const rules = this.sessions.commandsOf(sessionId)
     if (rules === null) return Promise.resolve(false)
     return Promise.resolve([...rules.deny, ...rules.ask].some(posixLevel))

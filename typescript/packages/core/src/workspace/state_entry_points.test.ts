@@ -97,7 +97,7 @@ describe('name-plane writes go through the dispatcher', () => {
     expect(seen).toContainEqual(['symlink', '/a/lk'])
   })
 
-  it('a ws.vfs symlink fires the op hooks', async () => {
+  it('a ws.vfs symlink fires the op methods', async () => {
     const ws = await makeWs([new DenyOp('symlink')])
     await expect(ws.vfs.symlink('/a/lk', 'x.txt')).rejects.toThrow()
     expect(ws.namespace.isLink('/a/lk')).toBe(false)
@@ -664,9 +664,9 @@ async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
 // dispatcher too.
 const SEALED_SECRET = { commands: { deny: [{ reason: 'sealed', paths: ['/a/secret.txt'] }] } }
 
-describe('op hooks judge file calls and path rules judge a line', () => {
+describe('op methods judge file calls and path rules judge a line', () => {
   it("preVfs judges file calls, not a line's I/O", async () => {
-    // The boundary (Policy.preVfs): a coded op hook judges the `ws.vfs` /
+    // The boundary (Policy.preVfs): a coded op method judges the `ws.vfs` /
     // `session.vfs` calls, and a line's commands are preCommand's, so
     // neither a command's own I/O nor its redirects reach it. Pinned so a
     // move of the boundary is loud.
@@ -1933,7 +1933,7 @@ describe('command permissions end to end', () => {
 
   it('a hidden path reads as absent to every rule', async () => {
     // hide outranks every admission arm: a path the session cannot see
-    // is dropped before any hook, so a deny never names it, an ask is
+    // is dropped before any method, so a deny never names it, an ask is
     // never raised for it, and the dispatcher answers ENOENT as for any
     // absent path. The same lines under a session that sees them meet
     // the rules as usual.

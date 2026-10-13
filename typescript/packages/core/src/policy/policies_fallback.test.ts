@@ -22,7 +22,7 @@ import type { Policy } from './base.ts'
 import { Outcome, type Action, type CommandContext, type Decision } from './types.ts'
 
 // The browser-runtime branch under node's test runner: no task isolation,
-// so a hook cannot run as a policy deciding.
+// so a method cannot run as a policy deciding.
 vi.mock('../utils/async_context.ts', async (importOriginal) => {
   const real = await importOriginal<typeof asyncContextModule>()
   return {
@@ -34,7 +34,7 @@ vi.mock('../utils/async_context.ts', async (importOriginal) => {
   }
 })
 
-describe('a hook without task isolation', () => {
+describe('a method without task isolation', () => {
   it('reads the session, writes none of it and gets no files', async () => {
     const refused: string[] = []
     let files: unknown = null

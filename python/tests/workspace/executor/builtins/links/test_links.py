@@ -235,7 +235,7 @@ async def test_ln_keeps_going_after_a_source_it_cannot_read():
 
 
 @pytest.mark.asyncio
-async def test_unlink_of_a_link_meets_the_op_hooks():
+async def test_unlink_of_a_link_meets_the_op_methods():
     # The node table is written through the dispatcher, so a pre_vfs
     # policy protecting a link fires for an unlink of it as for any
     # other file call (the FUSE unlink hole). The mount is writable, so

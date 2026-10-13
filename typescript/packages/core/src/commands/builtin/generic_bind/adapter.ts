@@ -1108,7 +1108,7 @@ function commandCall<T extends (...args: never[]) => unknown>(
  * which judges each itself. `stat`, `exists` and `readdir` still reach the
  * backend past it, so here a hidden path answers as a missing one, a listing
  * drops the names the session hides, and a listed directory meets the
- * command's path rule and the coded preVfs hooks. Every slot's operand dots
+ * command's path rule and the coded preVfs methods. Every slot's operand dots
  * are walked, a read's as it starts, so a reader that words a failed open
  * itself gets the walk's refusal. Mirrors Python's `with_command_guards`.
  */

@@ -114,7 +114,7 @@ class CommandIO:
     Built from a mount's VFS by ``command_io``: each slot is one of its
     functions with the accessor commands still pass in front dropped,
     and a function the VFS does not define is an absent slot. Command
-    admission guards these calls; POSIX policy hooks belong to the
+    admission guards these calls; POSIX policy methods belong to the
     filesystem dispatcher and are not part of this interface.
 
     ``glob_children`` is the child names the namespace owes a directory

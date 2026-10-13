@@ -388,11 +388,11 @@ class Workspace:
         # built-ins the registry seeds: the profile's admission rules
         # (PermissionsPolicy, reading each session's compiled rules
         # from the manager by the id the entry point puts in the context), the
-        # profile's policy (ScriptPolicy, calling its hook per command
+        # profile's policy (ScriptPolicy, calling its method per command
         # through the same manager), then Policy instances, then anything added
         # later through ws.policies.add(). The route policy
         # (route_policy=) is the line-level counterpart until it is
-        # absorbed as a hook.
+        # absorbed as a method.
         self._registry.policies.add(PermissionsPolicy(self._session_mgr))
         # The entry points the runtime world attaches (below), so a profile
         # script reads the mounts an agent's program would, and through
@@ -418,9 +418,9 @@ class Workspace:
             self._session_mgr, on_ask
         )
 
-        # What every hook sees of its session: the one its context was
+        # What every method sees of its session: the one its context was
         # built from when given (a line explain walks), else the one the
-        # call is made under when the hook's is it (a call's cwd and env
+        # call is made under when the method's is it (a call's cwd and env
         # included), else the session the id names, the default for none;
         # nothing for an id this workspace holds no session for.
         def views(
@@ -840,7 +840,7 @@ class Workspace:
     def policies(self) -> Policies:
         """The workspace's admission policies; add() registers more.
 
-        Ordered, built-ins first; on a pre hook the first Deny wins, so
+        Ordered, built-ins first; on a pre method the first Deny wins, so
         adding a policy can only restrict the workspace.
         """
         return self._registry.policies

@@ -163,7 +163,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
 @pytest.mark.asyncio
 async def test_warm_cache_read_cannot_bypass_pre_vfs():
     # The #241 failure class: a cached read served without consulting
-    # the policy would make the cache a policy bypass. The hook fires
+    # the policy would make the cache a policy bypass. The method fires
     # before the cache lookup, so the warm path refuses identically.
     policies = Policies()
     policies.add(DenyLocked())

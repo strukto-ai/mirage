@@ -28,26 +28,26 @@ from mirage.policy.types import (
 class Policy:
     """One concern's answers to the workspace lifecycle.
 
-    Subclasses override only the hooks they care about; a hook returns
+    Subclasses override only the methods they care about; a method returns
     an Action to state an opinion, a tuple of them to state several
     (each read as if its own policy had said it, as a profile's
-    programs answer), or None to stay silent, and a hook that raises
+    programs answer), or None to stay silent, and a method that raises
     fails closed (the command or op is refused, naming the policy).
-    Hooks left un-overridden are detected at the seam and never called.
+    Methods left un-overridden are detected at the seam and never called.
 
-    The hooks come in pairs, one per surface: the line
+    The methods come in pairs, one per surface: the line
     (``pre_execute`` / ``post_execute``), each command or CLI
     (``pre_command`` / ``post_command``), each ``ws.vfs`` /
     ``session.vfs`` call (``pre_vfs`` / ``post_vfs``) and each session
-    write (``pre_session`` / ``post_session``). Every hook may answer
+    write (``pre_session`` / ``post_session``). Every method may answer
     Deny or Ask; a Limit only where a result comes back to cap
     (``post_vfs``, ``post_execute``), a Route only at ``pre_execute``.
-    A post hook sees what its pre hook saw, plus what came back, and
+    A post method sees what its pre method saw, plus what came back, and
     never undoes a side effect: it holds back what came back. Hides,
-    mount modes and path rules are not hooks: they apply to every
-    caller at the dispatcher. Every hook's context also carries the
+    mount modes and path rules are not methods: they apply to every
+    caller at the dispatcher. Every method's context also carries the
     session (``session``), its namespace (``ns``) and its files
-    (``vfs``), all read only: a hook reads, and a write it makes is
+    (``vfs``), all read only: a method reads, and a write it makes is
     refused.
     """
 

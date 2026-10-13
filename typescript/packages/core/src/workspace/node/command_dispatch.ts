@@ -703,7 +703,7 @@ async function runArgv(
         parser,
         admitted,
       )
-    // A post hook reads what the command did: its file records, gathered
+    // A post method reads what the command did: its file records, gathered
     // as it runs and as its output drains, and its result node, settled
     // once the output has drained.
     const gated = admitted
@@ -720,7 +720,7 @@ async function runArgv(
     if (!watched) return result
     const [stdout, io, node] = result
     // postCommand judges the command once its result is final: a streamed
-    // output settles its exit code as it drains, so the hook is asked when
+    // output settles its exit code as it drains, so the method is asked when
     // the stream ends or its reader stops, and at once for output already
     // whole. A refusal leaves what was sent as sent: exit 126, the refusal
     // line on stderr, the refusal record.

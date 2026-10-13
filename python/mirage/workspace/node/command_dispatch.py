@@ -703,7 +703,7 @@ async def _run_argv(
         # policies bind in the same window, whether or not a gate judged the
         # line, so the command tier's policy guard can fire pre_vfs for the
         # backend I/O a handler performs.
-        # A post hook reads what the command did: its file records,
+        # A post method reads what the command did: its file records,
         # gathered as it runs and as its output drains, and its result
         # node, settled once the output has drained.
         policies = registry.policies
@@ -740,7 +740,7 @@ async def _run_argv(
         stdout, io, node = result
 
         # post_command judges the command once its result is final: a
-        # streamed output settles its exit code as it drains, so the hook
+        # streamed output settles its exit code as it drains, so the method
         # is asked when the stream ends or its reader stops, and at once
         # for output already whole. A refusal leaves what was sent as
         # sent: exit 126, the refusal line on stderr, the refusal record.

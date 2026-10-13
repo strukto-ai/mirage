@@ -1226,7 +1226,7 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
     and ``readdir`` still reach the backend past it, so here a hidden
     path answers as a missing one, a listing drops the names the session
     hides, and a listed directory meets the command's path rule and the
-    coded pre_vfs hooks. Every slot's operand dots are walked, a read's
+    coded pre_vfs methods. Every slot's operand dots are walked, a read's
     as it starts, so a reader that words a failed open itself gets the
     walk's refusal.
 
@@ -1401,7 +1401,7 @@ async def _policy_call(
 ) -> Any:
     """Call a backend op after admitting its paths through pre_vfs.
 
-    Async, unlike the sync guards it wraps: the hooks are user
+    Async, unlike the sync guards it wraps: the methods are user
     coroutines. Every slot this wraps returns an awaitable, so the
     shape is preserved; readdir has its own wrapper.
 

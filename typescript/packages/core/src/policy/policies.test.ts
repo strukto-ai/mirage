@@ -238,7 +238,7 @@ describe('Policies', () => {
     ).toEqual(['tar: x: Cannot open\n', 2])
   })
 
-  it('skips undefined hooks and honors policy instances', async () => {
+  it('skips undefined methods and honors policy instances', async () => {
     const policies = new Policies()
     policies.add(silent)
     policies.add(new DenyWeird())
@@ -374,7 +374,7 @@ describe('workspace policies', () => {
 
   it('ws.policies.add wins over runtime placement', async () => {
     // python3 is runtime-bound in the default world; the preCommand
-    // hook fires ahead of runtime resolution, so the refusal wins.
+    // method fires ahead of runtime resolution, so the refusal wins.
     const ws = executableWorkspace()
     try {
       ws.policies.add(new NoInterpreters())
@@ -413,7 +413,7 @@ describe('workspace policies', () => {
   it('guards cover shell builtins and namespace routes', async () => {
     // source is a dispatch-level shell builtin and touch is
     // namespace-routed; neither reaches handleCommand, so this pins
-    // the hook at the dispatch chokepoint.
+    // the method at the dispatch chokepoint.
     const ws = executableWorkspace([
       { reason: 'disabled', commands: ['source'] },
       { reason: 'frozen', commands: ['touch'], paths: ['/data/prod/*'] },
@@ -919,7 +919,7 @@ describe('Ask in the chain', () => {
   })
 })
 
-it('removes by identity, refreshes hooks and preserves an admission in progress', async () => {
+it('removes by identity, refreshes methods and preserves an admission in progress', async () => {
   const policies = new Policies()
   const first: Policy = {
     preCommand: () => {
@@ -951,7 +951,7 @@ describe('the op-policies binding', () => {
   })
 })
 
-describe('every hook answers Deny and Ask', () => {
+describe('every method answers Deny and Ask', () => {
   class AskSecrets implements Policy {
     preSession(ctx: SessionContext): Action | null {
       return ctx.key.startsWith('SECRET') ? { kind: 'ask', reason: 'secret write' } : null
@@ -1028,7 +1028,7 @@ describe('every hook answers Deny and Ask', () => {
 
   it('a postVfs ask holds the result back until approved', async () => {
     // The call ran; what came back waits on the host, and the approved
-    // retry runs it again. The hook saw what preVfs saw.
+    // retry runs it again. The method saw what preVfs saw.
     const policy = new AskReads()
     const ws = executableWorkspace()
     try {
@@ -1197,7 +1197,7 @@ describe('postCommand and postSession', () => {
   })
 })
 
-describe('what a hook sees', () => {
+describe('what a method sees', () => {
   class ReadsAround implements Policy {
     readonly seen: [string, string | null, string, boolean][] = []
     readonly refused: string[] = []
@@ -1206,7 +1206,7 @@ describe('what a hook sees', () => {
       if (ctx.command !== 'echo') return null
       const { session, ns, vfs } = ctx
       if (session === undefined || ns?.mounts === undefined || vfs === undefined) {
-        throw new Error('a hook was asked without its handles')
+        throw new Error('a method was asked without its handles')
       }
       this.seen.push([
         session.cwd(),
@@ -1248,12 +1248,12 @@ describe('what a hook sees', () => {
       expect((await ws.shell('echo hi')).stdoutText).toBe('hi\n')
       expect(reader.seen).toEqual([['/data', 'core', 'core\n', true]])
       expect(reader.refused).toEqual(['EROFS', 'EACCES'])
-      // The hook's own read is judged by the rules alone: no user preVfs
+      // The method's own read is judged by the rules alone: no user preVfs
       // runs again for it.
       expect(recorder.asked).toEqual([])
       expect(new TextDecoder().decode(await ws.vfs.read('/data/owner.txt'))).toBe('core\n')
       expect((await ws.shell('echo $TEAM')).stdoutText).toBe('core\n')
-      // explain walks the `cd` on a copy, and the hook reads that copy.
+      // explain walks the `cd` on a copy, and the method reads that copy.
       await ws.explain('cd /; echo hi')
       expect(reader.seen.at(-1)?.[0]).toBe('/')
     } finally {

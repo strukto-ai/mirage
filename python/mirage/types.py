@@ -728,7 +728,7 @@ class Producer:
     (output caps today; budgets and attribution later) read it as
     context. Facts only: no policy reads a decision off the
     envelope; the one a chain hands down is written beside it as
-    ``IOResult.refusal`` after the last hook has spoken.
+    ``IOResult.refusal`` after the last method has spoken.
 
     Args:
         command (str): the producing command's name.

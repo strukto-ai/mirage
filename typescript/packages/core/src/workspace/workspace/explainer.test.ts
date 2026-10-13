@@ -151,7 +151,7 @@ describe('session.explain.vfs', () => {
     const errors: (string | undefined)[] = []
     ws.policies.add(busy(errors))
     // Inside a line an ask refuses like a deny, approved or not, and a
-    // hook writes nothing there either.
+    // method writes nothing there either.
     await new Session(ws, 'agent').shell('ls /data/new')
     expect(new Set(errors)).toEqual(new Set(['EACCES', 'EROFS']))
     expect(await ws.vfs.exists('/data/stamp')).toBe(false)

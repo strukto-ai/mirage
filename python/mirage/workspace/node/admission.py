@@ -414,7 +414,7 @@ async def gate(
         if name in CWD_DEFAULT_RAW
         else None
     )
-    # The hooks read the session this command is judged in, which for a
+    # The methods read the session this command is judged in, which for a
     # line explain walks is the walked one, not the stored one.
     views = registry.policies.views
     handles = (
@@ -493,7 +493,7 @@ async def admit(
     runtime takes whole (``admit_line``, per parsed command). A word
     the session's allow list leaves out is the profile's Deny, like any
     other rule's; a path the session cannot see is dropped before any
-    hook, so a rule never names it and the dispatcher answers ENOENT; a Deny
+    method, so a rule never names it and the dispatcher answers ENOENT; a Deny
     renders in the outcome table's voice; an Ask is answered by the
     entry point from the session's grants or the host. A command that gets
     through comes back as its ``Admitted`` gate, which its own I/O

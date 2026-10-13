@@ -175,7 +175,7 @@ const LINE_STOP = createAsyncContext<AbortController>()
 // itself are not held behind it.
 const WRITE_HELD = createAsyncContext<boolean>()
 
-// A hook's session write where it cannot run as a policy deciding.
+// A method's session write where it cannot run as a policy deciding.
 function refuseWrite(name: string): Promise<void> {
   return Promise.reject(eacces(name))
 }
@@ -395,10 +395,10 @@ export class Workspace {
     // built-ins the registry seeds: the document's command tiers
     // (PermissionsPolicy, reading each session's compiled layers from
     // the manager by the id the entry point puts in the context), the
-    // profile's policy (ScriptPolicy, calling its hook per command through
+    // profile's policy (ScriptPolicy, calling its method per command through
     // the same manager), then Policy instances, then anything added later
     // through ws.policies.add(). The runtime policy (policy option) is
-    // the line-level counterpart until it is absorbed as a hook.
+    // the line-level counterpart until it is absorbed as a method.
     this.registry.policies.add(new PermissionsPolicy(this.sessionManager))
     this.scriptPolicy = new ScriptPolicy(
       this.sessionManager,
@@ -413,9 +413,9 @@ export class Workspace {
     // the sessions, the host answers through `onAsk` (or just records
     // the question when none is wired) and reads `ws.decisions`.
     this.registry.policies.decisions = new Decisions(this.sessionManager, options.onAsk ?? null)
-    // What every hook sees of its session: the one its context was built
+    // What every method sees of its session: the one its context was built
     // from when given (a line explain walks, a call's cwd and env), else
-    // the one the call is made under when the hook's is it, else the
+    // the one the call is made under when the method's is it, else the
     // session the id names, the default for none; nothing for an id this
     // workspace holds no session for.
     this.registry.policies.views = (sessionId, given) => {
@@ -432,7 +432,7 @@ export class Workspace {
       if (asyncContextIsolatesTasks) {
         return { session: view, ns, vfs: this.vfs.forSession(session.sessionId) }
       }
-      // Without task isolation a hook cannot run as a policy deciding: its
+      // Without task isolation a method cannot run as a policy deciding: its
       // own calls could not be told from the ones it judges. There it gets
       // no `vfs`, and a session that refuses every write.
       return { session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite }, ns }
@@ -855,7 +855,7 @@ export class Workspace {
 
   /**
    * The workspace's admission policies; add() registers more. Ordered,
-   * built-ins first; on a pre hook the first Deny wins, and adding a
+   * built-ins first; on a pre method the first Deny wins, and adding a
    * policy can only tighten the workspace.
    */
   get policies(): Policies {

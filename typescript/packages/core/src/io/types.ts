@@ -150,7 +150,7 @@ export class IOResult {
   // ownership of every byte in a combined result. The workspace boundary hands it to the
   // policy layer as context. Facts ride the envelope as policy
   // input; the decision a chain hands down rides beside them as
-  // `refusal`, written after the last hook has spoken.
+  // `refusal`, written after the last method has spoken.
   output: OutputState | null = null
   outputFinalized = false
   producer: Producer | null

@@ -136,7 +136,7 @@ class OutputCapPolicy(Policy):
 
     Answers post_vfs with a mount's per-op bound. Command output is finalized
     at its terminal destination using resolve_producer; post_execute remains
-    the hook for explicit whole-invocation policies.
+    the method for explicit whole-invocation policies.
 
     Args:
         override_for (OverrideLookup): maps (mount prefix, command or

@@ -959,7 +959,7 @@ SHELL_BOOKKEEPING = frozenset({"PWD", "OLDPWD", "BASH_REMATCH"})
 
 
 def gate_rendering(value: ShellValue | None) -> str | None:
-    """The value a ``pre_session`` hook is shown for one variable.
+    """The value a ``pre_session`` method is shown for one variable.
 
     A scalar as itself, an indexed array as its present elements joined
     by spaces, an associative one in sorted-key order, and None for a

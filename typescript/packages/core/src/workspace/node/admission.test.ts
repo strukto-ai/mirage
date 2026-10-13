@@ -151,7 +151,7 @@ describe('admission', () => {
 
   it('a hidden path is no path to any policy', async () => {
     // A session that cannot see a path must not learn of it from a
-    // rule: the gate drops the operand before any hook, the rule does
+    // rule: the gate drops the operand before any method, the rule does
     // not fire, and the line goes on to the dispatcher, which answers ENOENT.
     const w = await ws()
     await w.shell('mkdir -p /data/private && echo s > /data/secret')

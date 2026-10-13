@@ -496,7 +496,7 @@ async def test_gate_restored_vars_leaves_the_shell_bookkeeping_alone():
         )
 
 
-def test_gate_rendering_is_what_set_var_shows_a_hook():
+def test_gate_rendering_is_what_set_var_shows_a_method():
     assert gate_rendering("x") == "x"
     assert gate_rendering({"b": "2", "a": "1"}) == "1 2"
     assert gate_rendering(make_array(["p", "q"])) == "p q"

@@ -16,26 +16,26 @@ from abc import ABC, abstractmethod
 
 
 class SessionScopedMixin(ABC):
-    """A policy whose hooks speak for some sessions and not others.
+    """A policy whose methods speak for some sessions and not others.
 
     A true mixin: no state, no constructor, one method. A Policy that
-    also inherits this overrides a hook on behalf of the sessions that
+    also inherits this overrides a method on behalf of the sessions that
     carry a rule for it (a profile's policy program speaks only for the
     sessions under that profile), and says so through ``wants_for``.
     ``Policies.wants`` is the static answer, true as soon as any policy
-    overrides the hook, and every entry point keeps gating on it; a seam that
-    pays ahead for a hook (the secret fill drops its masks under a
+    overrides the method, and every entry point keeps gating on it; a seam that
+    pays ahead for a method (the secret fill drops its masks under a
     session-write gate) asks ``Policies.wants_for`` instead, which
     consults this mixin so one profile's entry point does not charge every
     session.
     """
 
     @abstractmethod
-    async def wants_for(self, hook: str, session_id: str) -> bool:
-        """Whether this policy's ``hook`` will speak for one session.
+    async def wants_for(self, method: str, session_id: str) -> bool:
+        """Whether this policy's ``method`` will speak for one session.
 
         Args:
-            hook (str): the hook name (``pre_command``, ``pre_vfs``,
+            method (str): the method name (``pre_command``, ``pre_vfs``,
                 ``pre_session``, ...).
             session_id (str): the session, empty when none is bound.
         """

@@ -607,9 +607,9 @@ export class Files {
   }
 }
 
-// What a hook reads files through: added to the hook contexts here, where
+// What a method reads files through: added to the method contexts here, where
 // `Files` lives, so the policy and routing types import no workspace
-// module. Read only: a write is refused and no hook runs again for a read.
+// module. Read only: a write is refused and no method runs again for a read.
 declare module '../policy/types.ts' {
   interface CommandContext {
     vfs?: Files

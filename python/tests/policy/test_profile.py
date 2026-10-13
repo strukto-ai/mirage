@@ -1570,7 +1570,7 @@ VEILED_DOC = {
 @pytest.mark.asyncio
 async def test_a_hidden_path_reads_as_absent_to_every_rule():
     # hide outranks every rule: a path the session cannot see
-    # is dropped before any hook, so a deny never names it, an ask is
+    # is dropped before any method, so a deny never names it, an ask is
     # never raised for it, and the dispatcher answers ENOENT as for any
     # absent path. The same lines under a session that sees them meet
     # the rules as usual.

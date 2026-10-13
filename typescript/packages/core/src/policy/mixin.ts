@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Policy } from './base.ts'
-import type { PolicyHook } from './types.ts'
+import type { PolicyMethod } from './types.ts'
 
 /**
  * The nominal session-scoped brand (python's SessionScopedMixin
@@ -24,21 +24,21 @@ import type { PolicyHook } from './types.ts'
 export const SESSION_SCOPED: unique symbol = Symbol.for('mirage.policy.sessionScoped')
 
 /**
- * A policy whose hooks speak for some sessions and not others. A Policy
- * that also implements this defines a hook on behalf of the sessions
+ * A policy whose methods speak for some sessions and not others. A Policy
+ * that also implements this defines a method on behalf of the sessions
  * that carry a rule for it (a profile's policy program speaks only for
  * the sessions under that profile), and says so through `wantsFor`.
  * `Policies.wants` is the static answer, true as soon as any policy
- * defines the hook, and every entry point keeps gating on it; a seam that pays
- * ahead for a hook (the secret fill drops its masks under a
+ * defines the method, and every entry point keeps gating on it; a seam that pays
+ * ahead for a method (the secret fill drops its masks under a
  * session-write gate) asks `Policies.wantsFor` instead, which consults
  * this brand so one profile's entry point does not charge every session.
  */
 export interface SessionScoped {
   readonly [SESSION_SCOPED]: true
 
-  /** Whether this policy's `hook` will speak for one session. */
-  wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean>
+  /** Whether this policy's `method` will speak for one session. */
+  wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean>
 }
 
 /** Whether this policy speaks per session. */

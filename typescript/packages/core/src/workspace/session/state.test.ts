@@ -444,7 +444,7 @@ describe('gateRestoredVars', () => {
     )
   })
 
-  it('renders what setVar shows a hook', () => {
+  it('renders what setVar shows a method', () => {
     expect(gateRendering('x')).toBe('x')
     expect(gateRendering({ b: '2', a: '1' })).toBe('1 2')
     expect(gateRendering(['p', 'q'])).toBe('p q')

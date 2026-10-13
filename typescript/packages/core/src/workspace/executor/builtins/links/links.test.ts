@@ -259,7 +259,7 @@ describe('ln with a source it cannot read', () => {
 })
 
 describe('rm and unlink reach a link through the dispatcher', () => {
-  it('an unlink of a link meets the op hooks', async () => {
+  it('an unlink of a link meets the op methods', async () => {
     // The node table is written through the dispatcher, so a preVfs
     // policy protecting a link fires for an unlink of it as for any other
     // file call (the FUSE unlink hole). The mount is writable, so only the

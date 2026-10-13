@@ -105,7 +105,7 @@ async def test_workspace_guards_refuse_before_backend_io():
 @pytest.mark.asyncio
 async def test_policies_add_wins_over_runtime_placement():
     # python3 is runtime-bound in the default world; the pre_command
-    # hook fires ahead of runtime resolution, so the refusal wins.
+    # method fires ahead of runtime resolution, so the refusal wins.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         ws.policies.add(NoInterpreters())
@@ -138,7 +138,7 @@ async def test_policies_constructor_param_accepts_instances():
 async def test_guards_cover_shell_builtins_and_namespace_routes():
     # source is a dispatch-level shell builtin and touch is
     # namespace-routed; neither reaches handle_command, so this pins
-    # the hook at the dispatch chokepoint.
+    # the method at the dispatch chokepoint.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
@@ -479,7 +479,7 @@ class SealedPaths(Policy):
 
 @pytest.mark.asyncio
 async def test_pre_vfs_judges_file_calls_not_a_lines_io():
-    # The boundary (Policy.pre_vfs): a coded op hook judges the
+    # The boundary (Policy.pre_vfs): a coded op method judges the
     # ``ws.vfs`` / ``session.vfs`` calls, and a line's commands are
     # pre_command's, so neither a command's own I/O nor its redirects
     # reach it. Pinned so a move of the boundary is loud.
@@ -1360,7 +1360,7 @@ async def test_a_profile_policy_judges_its_sessions_file_calls():
             await files.unlink("/data/frozen/k")
         assert await ws.vfs.read("/data/frozen/k") == b"keep\n"
         # A line's I/O is its commands', which pre_command judges, and
-        # this script has no command hook.
+        # this script has no command method.
         ran = await ws.shell("echo x > /data/frozen/f", session_id="s")
         assert ran.exit_code == 0
         # Another session is not judged by it.
@@ -1389,11 +1389,11 @@ async def test_a_profile_policy_judges_the_session_view():
 
 
 @pytest.mark.asyncio
-async def test_a_policys_own_read_passes_the_dispatcher_its_op_hook_guards():
+async def test_a_policys_own_read_passes_the_dispatcher_its_op_method_guards():
     # pre_command opens the operand through the workspace's dispatcher while
     # pre_vfs stands at it: the read is the policy's own and is let
     # through rather than re-entering the evaluation waiting on it, so
-    # the content verdict lands and the op hook still refuses a write.
+    # the content verdict lands and the op method still refuses a write.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
@@ -1532,7 +1532,7 @@ class AskReads(Policy):
 @pytest.mark.asyncio
 async def test_a_post_vfs_ask_holds_the_result_back_until_approved():
     # The call ran; what came back waits on the host, and the approved
-    # retry runs it again. The hook saw what pre_vfs saw.
+    # retry runs it again. The method saw what pre_vfs saw.
     policy = AskReads()
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -1730,7 +1730,7 @@ class ReadsAround(Policy):
 
 
 @pytest.mark.asyncio
-async def test_a_hook_reads_the_session_and_its_files_and_writes_nothing():
+async def test_a_method_reads_the_session_and_its_files_and_writes_nothing():
     reader = ReadsAround()
     recorder = OpRecorder()
     ws = Workspace(
@@ -1745,12 +1745,12 @@ async def test_a_hook_reads_the_session_and_its_files_and_writes_nothing():
         assert (await ws.shell("echo hi")).stdout == b"hi\n"
         assert reader.seen == [("/data", "core", b"core\n", True)]
         assert reader.refused == ["EROFS", "EACCES"]
-        # The hook's own read is judged by the rules alone: no user
+        # The method's own read is judged by the rules alone: no user
         # pre_vfs runs again for it.
         assert recorder.asked == []
         assert await ws.vfs.read("/data/owner.txt") == b"core\n"
         assert (await ws.shell("echo $TEAM")).stdout == b"core\n"
-        # explain walks the `cd` on a copy, and the hook reads that copy.
+        # explain walks the `cd` on a copy, and the method reads that copy.
         await ws.explain("cd /; echo hi")
         assert reader.seen[-1][0] == "/"
     finally:

@@ -148,8 +148,8 @@ export interface WorkspaceOptions {
   profile?: string | null
   /**
    * Admission policies registered after the document's deny rules.
-   * Code only: each defines the lifecycle hooks it cares about; on a
-   * pre hook the first Deny wins and adding a policy can only tighten
+   * Code only: each defines the lifecycle methods it cares about; on a
+   * pre method the first Deny wins and adding a policy can only tighten
    * the workspace.
    */
   policies?: readonly Policy[]

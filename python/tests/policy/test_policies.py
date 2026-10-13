@@ -100,7 +100,7 @@ class AskOnOps(Policy):
 
 
 class SyncDeny(Policy):
-    """A hook written as a plain ``def``, the way TypeScript allows."""
+    """A method written as a plain ``def``, the way TypeScript allows."""
 
     def pre_command(  # type: ignore[override]
         self, ctx: CommandContext
@@ -183,7 +183,7 @@ async def test_builtin_runs_first_then_user_policies_in_order():
 
 
 @pytest.mark.asyncio
-async def test_policy_instances_and_unoverridden_hooks():
+async def test_policy_instances_and_unoverridden_methods():
     policies = Policies()
     policies.add(Silent())
     policies.add(DenyWeird())
@@ -205,13 +205,13 @@ async def test_a_raising_policy_fails_closed():
 
 
 @pytest.mark.asyncio
-async def test_a_sync_hook_is_awaited_like_the_typescript_seam():
+async def test_a_sync_method_is_awaited_like_the_typescript_seam():
     policies = Policies()
     policies.add(SyncDeny())
     deny = await policies.pre_command(_ctx("rm"))
     assert deny is not None
     assert deny.reason == "sync no"
-    # Silence from a sync hook is silence, not a swallowed TypeError.
+    # Silence from a sync method is silence, not a swallowed TypeError.
     assert await policies.pre_command(_ctx("ls")) is None
 
 
@@ -496,7 +496,7 @@ class ForSomeSessions(Policy, SessionScopedMixin):
     async def pre_session(self, ctx: SessionContext) -> Action | None:
         return None
 
-    async def wants_for(self, hook: str, session_id: str) -> bool:
+    async def wants_for(self, method: str, session_id: str) -> bool:
         return session_id == "a"
 
 
@@ -507,7 +507,7 @@ class ForEveryone(Policy):
 
 @pytest.mark.asyncio
 async def test_wants_for_refines_wants_per_session():
-    # The static answer is yes as soon as any policy overrides the hook,
+    # The static answer is yes as soon as any policy overrides the method,
     # and the entry points keep gating on it; the per-session answer asks a
     # session-scoped policy whether this session is one of its.
     scoped = Policies([ForSomeSessions()])
@@ -521,7 +521,7 @@ async def test_wants_for_refines_wants_per_session():
 
 
 @pytest.mark.asyncio
-async def test_remove_by_identity_refreshes_hooks_and_keeps_admission_order():
+async def test_remove_by_identity_refreshes_methods_and_keeps_admission_order():
     policies = Policies()
 
     class RemovesItself(Policy):

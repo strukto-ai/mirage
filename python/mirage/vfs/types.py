@@ -77,7 +77,7 @@ class Target(StrEnum):
 
 class VfsCall(NamedTuple):
     """What ``vfs_call`` declares for one function, and what a ``pre_vfs``
-    / ``post_vfs`` hook sees of the call.
+    / ``post_vfs`` method sees of the call.
 
     Args:
         name (str): the function's name (``read``, ``search``, ...).

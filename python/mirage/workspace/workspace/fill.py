@@ -391,7 +391,7 @@ def masked_names(
             own, one defined body's, or a stored statement's parent
             container (with ``before`` naming the statement).
         session (SessionState): the session the line runs in.
-        writes_gated (bool): a policy hooks ``pre_session``.
+        writes_gated (bool): a policy overrides ``pre_session``.
         in_body (bool): the unit is a function body, where ``local``
             assigns.
         before (TSNodeLike | None): stop at this child, so a
@@ -465,7 +465,7 @@ def _own_masks(
     Args:
         node (TSNodeLike): one walked unit past the line itself.
         session (SessionState): the session the line runs in.
-        writes_gated (bool): a policy hooks ``pre_session``.
+        writes_gated (bool): a policy overrides ``pre_session``.
     """
     own: frozenset[str] = frozenset()
     if node.type in _BODY_CONTAINERS:
@@ -597,7 +597,7 @@ def _wanted(
             CLIs read (``cli_env_names``).
         masked (frozenset[str]): names the line replaces before any
             read (``masked_names``).
-        writes_gated (bool): a policy hooks ``pre_session``, so no
+        writes_gated (bool): a policy overrides ``pre_session``, so no
             unit's masks are trusted to land.
     """
     referenced: set[str] = set()
@@ -689,7 +689,7 @@ def fill_names(
             runtime), so every managed name may be read.
         cli_env_names (frozenset[str]): env names the line's installed
             CLIs read (``cli_env_names``).
-        writes_gated (bool): a policy hooks ``pre_session``, so no
+        writes_gated (bool): a policy overrides ``pre_session``, so no
             assignment or unset is trusted to land (``masked_names``).
     """
     pending = _pending_of(session)

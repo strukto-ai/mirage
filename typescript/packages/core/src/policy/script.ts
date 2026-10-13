@@ -38,7 +38,7 @@ import {
   type Ask,
   type CommandContext,
   type Deny,
-  type PolicyHook,
+  type PolicyMethod,
   type ProfileScript,
   type Route,
   type RouteContext,
@@ -245,10 +245,10 @@ export class ScriptPolicy implements Policy, SessionScoped {
     return this.judge('preSession', ctx)
   }
 
-  /** Whether this session's profile names a program at `hook`. */
-  wantsFor(hook: PolicyHook, sessionId: string): Promise<boolean> {
-    const programs = Object.hasOwn(METHODS, hook)
-      ? this.sessions.scriptsOf(sessionId)[hook as ScriptMethod]
+  /** Whether this session's profile names a program at `method`. */
+  wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean> {
+    const programs = Object.hasOwn(METHODS, method)
+      ? this.sessions.scriptsOf(sessionId)[method as ScriptMethod]
       : []
     return Promise.resolve((programs?.length ?? 0) > 0)
   }

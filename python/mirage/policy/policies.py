@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-HookContext = (
+MethodContext = (
     CommandContext
     | RouteContext
     | VfsContext
@@ -195,8 +195,8 @@ async def pre_vfs_gate(
     call, so a refusal is byte-identical however the mount is reached:
     PermissionError with errno EACCES and the virtual path as filename,
     which the shell renders as "<cmd>: <path>: Permission denied" and
-    FUSE translates to -EACCES. A running line's own I/O, and a hook's
-    own read, meet the hides, path rules and mount mode alone; a hook's
+    FUSE translates to -EACCES. A running line's own I/O, and a method's
+    own read, meet the hides, path rules and mount mode alone; a method's
     write is refused. An Ask is a question only where no line is running and the entry
     point holds the ledger (a file tool, the host's facade): the ledger
     answers it from a standing grant or records it, and an unanswered
@@ -356,7 +356,7 @@ async def post_vfs_gate(
     Returns the merged Limit bound (tightest per field across every
     opining policy) for the entry point to apply to a byte-producing result,
     or None when no policy bounds this op. Not fired for a running
-    line's own I/O or a hook's own read.
+    line's own I/O or a method's own read.
 
     Args:
         policies (Policies): the workspace's admission policies.
@@ -364,7 +364,7 @@ async def post_vfs_gate(
         path (PathSpec): the resolved virtual path.
         write (bool): whether the call mutated this path.
         prefix (str): the owning mount's prefix.
-        result (Any): the op's raw result, offered to the hooks.
+        result (Any): the op's raw result, offered to the methods.
         session_id (str): the session the dispatcher serves.
         mode (MountMode | None): the owning mount's mode, as pre_vfs saw
             it.
@@ -410,7 +410,7 @@ async def pre_session_gate(
             exactly one place.
 
     Raises:
-        PermissionError: a write a hook makes while it decides
+        PermissionError: a write a method makes while it decides
             (``ctx.session``), which may read the session but not change
             it.
     """
@@ -566,7 +566,7 @@ def settled(
 
 
 class Policies:
-    """Ordered policies; at every hook the first Deny wins, and every
+    """Ordered policies; at every method the first Deny wins, and every
     Ask is put to the host.
 
     Built-ins are seeded first (MountRegistry registers
@@ -579,17 +579,17 @@ class Policies:
 
     A policy that raises fails closed: the command is refused with a
     whole-command Deny naming the policy, and the error is logged. A
-    policy that returns something the hook may not return (VALIDITY)
+    policy that returns something the method may not return (VALIDITY)
     raises PolicyError: that is a programming error, not a refusal.
 
-    A hook may be ``async def`` or a plain ``def``; the seam awaits
+    A method may be ``async def`` or a plain ``def``; the seam awaits
     whatever it returns, the way the TypeScript seam accepts a value
     or a promise. Without that a plain ``def`` raised inside the
     fail-closed arm and every command read ``policy X failed``.
 
     The chain holds the decision ledger an Ask is put to
     (``decisions``), and ``views``, which the workspace sets to fill a
-    hook's read-only ``session``, ``ns`` and ``vfs``.
+    method's read-only ``session``, ``ns`` and ``vfs``.
 
     Args:
         policies (list[Policy] | None): initial policies, consulted in
@@ -654,22 +654,22 @@ class Policies:
                 return True
         return False
 
-    def wants(self, hook: str) -> bool:
-        """True when any policy overrides ``hook``.
+    def wants(self, method: str) -> bool:
+        """True when any policy overrides ``method``.
 
         O(1); the op seams gate on it so a workspace with no op
         policies pays nothing per VFS op.
 
         Args:
-            hook (str): hook name (pre_command, pre_vfs, post_vfs).
+            method (str): method name (pre_command, pre_vfs, post_vfs).
         """
-        return hook in self._wanted
+        return method in self._wanted
 
     def reads_results(self) -> bool:
         """Whether a post_vfs policy may read an op's result.
 
         The built-in output cap answers from the op and the mount alone;
-        any other hook, a subclass's override of the cap's included, may
+        any other method, a subclass's override of the cap's included, may
         read ``ctx.result``, so a streamed read reaches it read whole.
         """
         blind = (Policy.post_vfs, OutputCapPolicy.post_vfs)
@@ -678,49 +678,49 @@ class Policies:
         )
 
     async def wants_for(
-        self, hook: str, session_id: str, rules_only: bool = False
+        self, method: str, session_id: str, rules_only: bool = False
     ) -> bool:
-        """True when some policy will speak at ``hook`` for this session.
+        """True when some policy will speak at ``method`` for this session.
 
         The per-session refinement of ``wants``: a policy that overrides
-        the hook counts, unless it speaks per session
+        the method counts, unless it speaks per session
         (``SessionScopedMixin``) and says this is not one of its. For
-        a seam that pays ahead for a hook rather than gating on it: the
+        a seam that pays ahead for a method rather than gating on it: the
         secret fill drops its masks under a session-write gate, and a
         profile's policy at that entry point is one profile's, not every
         session's.
 
         Args:
-            hook (str): hook name (pre_command, pre_vfs, pre_session).
+            method (str): method name (pre_command, pre_vfs, pre_session).
             session_id (str): the session, empty when none is bound.
             rules_only (bool): count the profile's rules alone, as
                 ``_chain`` takes it.
         """
-        base = getattr(Policy, hook)
+        base = getattr(Policy, method)
         for policy in (*self._policies, *filter(None, [self._placement])):
             if rules_only and not isinstance(policy, PermissionsPolicy):
                 continue
-            if getattr(type(policy), hook) is base:
+            if getattr(type(policy), method) is base:
                 continue
             if not isinstance(policy, SessionScopedMixin):
                 return True
-            if await policy.wants_for(hook, session_id):
+            if await policy.wants_for(method, session_id):
                 return True
         return False
 
     def _rescan(self) -> None:
         wanted = set()
         policies = [*self._policies, *filter(None, [self._placement])]
-        for hook in VALIDITY:
-            base = getattr(Policy, hook)
+        for method in VALIDITY:
+            base = getattr(Policy, method)
             for policy in policies:
-                if getattr(type(policy), hook) is not base:
-                    wanted.add(hook)
+                if getattr(type(policy), method) is not base:
+                    wanted.add(method)
                     break
         self._wanted = frozenset(wanted)
 
     def _chain(
-        self, hook: str, placed: bool, rules_only: bool = False
+        self, method: str, placed: bool, rules_only: bool = False
     ) -> tuple[Policy, ...]:
         """The policies a stage asks, in order: the built-in placement
         first at ``pre_execute`` (unless the caller placed the line),
@@ -729,7 +729,7 @@ class Policies:
         in its own words.
 
         Args:
-            hook (str): the hook in python spelling.
+            method (str): the method in python spelling.
             placed (bool): the caller placed the line itself.
             rules_only (bool): ask the profile's rules alone
                 (``PermissionsPolicy``), not the policies registered in
@@ -737,57 +737,57 @@ class Policies:
                 judge a line before it runs, and a command's own I/O.
         """
         # A snapshot, so the order holds if the host edits registrations
-        # while a hook awaits. Changes take effect at the next gate.
+        # while a method awaits. Changes take effect at the next gate.
         chain: tuple[Policy, ...] = tuple(
             p
             for p in self._policies
             if isinstance(p, PermissionsPolicy) or not rules_only
         )
-        if hook == "pre_execute" and self._placement and not placed:
+        if method == "pre_execute" and self._placement and not placed:
             chain = (self._placement, *chain)
-        if hook == "pre_vfs":
+        if method == "pre_vfs":
             chain = (*chain, self._mode)
         return chain
 
     async def _said(
         self,
-        hook: str,
-        ctx: HookContext,
+        method: str,
+        ctx: MethodContext,
         every: bool,
         placed: bool = False,
         rules_only: bool = False,
     ) -> tuple[list[Deny | Ask | Route], list[Limit]]:
         """The one loop every stage runs: each policy's answer, named and
-        checked against what the hook may carry; a policy answering a
+        checked against what the method may carry; a policy answering a
         tuple has each read in turn, as if its own policy had said it.
         A later Ask's rules are appended to the first Ask's, so the first
         Ask carries every question the stage raised and the host grants
-        each. Each hook runs as a policy deciding, with its views filled
+        each. Each method runs as a policy deciding, with its views filled
         unless the profile's rules alone are asked.
 
         The entry point stops at the first Deny, since nothing after it can
         change the outcome; ``every`` goes on, so ``explain`` shows the
         answers a Deny would hide. A policy that raises answers with a
         Deny naming it (fail closed), except the built-in placement,
-        which raises to the caller. A kind the hook cannot carry
+        which raises to the caller. A kind the method cannot carry
         (VALIDITY) raises PolicyError: a programming error, not a
         refusal, and as loud in a dry run as at the entry point.
 
         Args:
-            hook (str): the hook in python spelling.
-            ctx (HookContext): the context the stage sees.
+            method (str): the method in python spelling.
+            ctx (MethodContext): the context the stage sees.
             every (bool): ask every policy, past a Deny.
             placed (bool): the caller placed the line itself, so the
                 built-in placement is not asked.
             rules_only (bool): ask the profile's rules alone, as
                 ``_chain`` takes it.
         """
-        base = getattr(Policy, hook)
-        legal = VALIDITY[hook]
+        base = getattr(Policy, method)
+        legal = VALIDITY[method]
         said: list[Deny | Ask | Route] = []
         limits: list[Limit] = []
-        for policy in self._chain(hook, placed, rules_only):
-            if getattr(type(policy), hook) is base:
+        for policy in self._chain(method, placed, rules_only):
+            if getattr(type(policy), method) is base:
                 continue
             name = type(policy).__name__
             handles = (
@@ -802,7 +802,7 @@ class Policies:
                 ctx = replace(ctx, session=session, ns=ns, vfs=vfs)
             token = set_explaining(DryRun.DECIDING)
             try:
-                answered = getattr(policy, hook)(ctx)
+                answered = getattr(policy, method)(ctx)
                 if inspect.isawaitable(answered):
                     answered = await answered
             except Exception as exc:
@@ -811,7 +811,7 @@ class Policies:
                 # The agent reads which policy broke, never what it
                 # raised: the exception text is the deployment's to
                 # debug, in the log.
-                logger.error("%s policy %s raised: %s", hook, name, exc)
+                logger.error("%s policy %s raised: %s", method, name, exc)
                 said.append(Deny(f"{name} failed", policy=name, failed=True))
                 if not every:
                     return said, []
@@ -827,7 +827,7 @@ class Policies:
                     action.kind not in legal
                 ):
                     raise PolicyError(
-                        f"{hook} of {name} returned {action!r}; "
+                        f"{method} of {name} returned {action!r}; "
                         f"legal kinds here: {sorted(legal)}"
                     )
                 if isinstance(action, Limit):
@@ -855,8 +855,8 @@ class Policies:
 
     async def _fire(
         self,
-        hook: str,
-        ctx: HookContext,
+        method: str,
+        ctx: MethodContext,
         placed: bool = False,
         rules_only: bool = False,
     ) -> tuple[Deny | Ask | None, Limit | None, tuple[Route, ...]]:
@@ -871,13 +871,13 @@ class Policies:
         carrying every Ask's rules, when nothing refused.
 
         Args:
-            hook (str): the hook in python spelling.
-            ctx (HookContext): the context the stage sees.
+            method (str): the method in python spelling.
+            ctx (MethodContext): the context the stage sees.
             placed (bool): the caller placed the line itself.
             rules_only (bool): ask the profile's rules alone, as
                 ``_chain`` takes it.
         """
-        said, limits = await self._said(hook, ctx, False, placed, rules_only)
+        said, limits = await self._said(method, ctx, False, placed, rules_only)
         deny = next((a for a in said if isinstance(a, Deny)), None)
         if deny is not None:
             return deny, None, ()
@@ -887,8 +887,8 @@ class Policies:
 
     async def answers(
         self,
-        hook: str,
-        ctx: HookContext,
+        method: str,
+        ctx: MethodContext,
         every: bool = True,
         rules_only: bool = False,
     ) -> tuple[Deny | Ask | Route, ...]:
@@ -904,13 +904,13 @@ class Policies:
         ``pre_vfs``, as they do at the entry point.
 
         Args:
-            hook (str): the hook in python spelling.
-            ctx (HookContext): the context the stage would see.
+            method (str): the method in python spelling.
+            ctx (MethodContext): the context the stage would see.
             every (bool): ask every policy, past a Deny.
             rules_only (bool): ask the profile's rules alone, as
                 ``_chain`` takes it.
         """
-        said, _ = await self._said(hook, ctx, every, rules_only=rules_only)
+        said, _ = await self._said(method, ctx, every, rules_only=rules_only)
         return tuple(said)
 
     async def pre_command(self, ctx: CommandContext) -> Deny | Ask | None:
@@ -980,7 +980,7 @@ class Policies:
         outranks whatever a policy would say, so a refusal never tells a
         session a hidden name exists; the built-in mount mode answers
         after them. Both hold whether or not any policy overrides the
-        hook.
+        method.
 
         Args:
             ctx (VfsContext): the op about to run.

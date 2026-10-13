@@ -330,7 +330,7 @@ function seenWords(
  * runtime takes whole (`admitLine`, per parsed command). A word the
  * session's allow list leaves out is the profile's Deny, like any other
  * rule's; a path the session cannot see is
- * dropped before any hook, so a rule never names it and the dispatcher
+ * dropped before any method, so a rule never names it and the dispatcher
  * answers ENOENT; a Deny renders in the outcome table's voice; an Ask
  * is answered by the entry point from the session's grants or the host.
  * `agentId` is the agent the line is attributed to, for an approval
@@ -442,7 +442,7 @@ export async function gate(
     program,
     tool,
     walks: walksMounts(name, [name, ...args]),
-    // The hooks read the session this command is judged in, which for a
+    // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.
     ...(rulesOnly ? null : registry.policies.views?.(session.sessionId, session)),
   }

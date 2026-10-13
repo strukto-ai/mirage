@@ -162,7 +162,7 @@ async def test_a_line_s_policy_reads_as_the_running_line_does(ws):
     busy = _Busy(ws)
     ws.policies.add(busy)
     # Inside a line an ask refuses like a deny, approved or not, and a
-    # hook writes nothing there either.
+    # method writes nothing there either.
     await Session(ws, "agent").shell("ls /data/new")
     assert set(busy.errors) == {errno.EACCES, errno.EROFS}
     assert not await ws.vfs.exists("/data/stamp")

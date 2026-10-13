@@ -605,7 +605,7 @@ function wanted(
  * first, masks everything after it (a stored body or alias runs at an
  * invocation point, after the masking prefix), and a defined body's
  * masks only that body's reads (`ownMasks`). `writesGated` says a
- * policy hooks `preSession`, so no assignment or unset is trusted to
+ * policy overrides `preSession`, so no assignment or unset is trusted to
  * land (`maskedNames`).
  */
 export function fillNames(

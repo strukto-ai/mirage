@@ -264,14 +264,14 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("pre_session", ctx)
 
-    async def wants_for(self, hook: str, session_id: str) -> bool:
-        """Whether this session's profile names a program at ``hook``.
+    async def wants_for(self, method: str, session_id: str) -> bool:
+        """Whether this session's profile names a program at ``method``.
 
         Args:
-            hook (str): the method in python spelling.
+            method (str): the method in python spelling.
             session_id (str): the session the entry point serves.
         """
-        return bool(self._sessions.scripts_of(session_id).get(hook))
+        return bool(self._sessions.scripts_of(session_id).get(method))
 
     async def close(self) -> None:
         """Close every runtime a program ran on."""
