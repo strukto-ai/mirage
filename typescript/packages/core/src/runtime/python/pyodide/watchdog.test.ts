@@ -94,6 +94,19 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
     }
   })
 
+  it('starts a console session over once it passes the cap', async () => {
+    const rt = new PyodideRuntime({ config: { maxMemory: '64M', maxConcurrency: 2 } })
+    try {
+      const big = await rt.eval('x = bytearray(200 * 1024 * 1024)', { session: 's' })
+      expect(big.exitCode).toBe(1)
+      expect(DEC.decode(big.stderr ?? new Uint8Array())).toContain('MemoryError')
+      const fresh = await rt.eval('x', { session: 's' })
+      expect(DEC.decode(fresh.stderr ?? new Uint8Array())).toContain('NameError')
+    } finally {
+      await rt.close()
+    }
+  })
+
   it('refuses a cap that is not a size', () => {
     for (const bad of ['lots', '1.5G', '-5M', -1, 1.5]) {
       expect(() => new PyodideRuntime({ config: { maxMemory: bad } }), String(bad)).toThrow(

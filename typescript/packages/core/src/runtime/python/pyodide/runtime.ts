@@ -333,7 +333,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         ...captureOpPolicies(),
         ...captureRecordingContext(),
       ])
-    return this.schedule(() => {
+    return this.schedule(async () => {
       if (opts.session === undefined)
         return this.withPermit(() =>
           scope.run(() =>
@@ -349,15 +349,18 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         this.sessions.set(id, runtime)
       }
       const session = runtime
+      const over: { passed: string | null } = { passed: null }
       const task = async (): Promise<EvalResult> => {
         const result = await this.withPermit(() =>
           scope.run(() => session.evalOne(code, opts, context)),
         )
         const passed = this.passedCap(session)
+        over.passed = passed
         if (passed === null) return result
-        // The console's interpreter keeps its heap, so the session starts over.
-        this.sessions.delete(id)
-        await session.close()
+        // The console's interpreter keeps its heap, so the session starts
+        // over: no later call reaches it, and it closes once this one is
+        // out of its queue, which its close waits on.
+        if (this.sessions.get(id) === session) this.sessions.delete(id)
         return {
           ...result,
           value: null,
@@ -365,7 +368,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
           exitCode: 1,
         }
       }
-      return this.concurrent ? session.enqueue(task) : task()
+      const result = await (this.concurrent ? session.enqueue(task) : task())
+      if (over.passed !== null) await session.close()
+      return result
     })
   }
 
