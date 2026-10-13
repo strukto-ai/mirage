@@ -124,16 +124,18 @@ function servable(prefix: string): boolean {
 }
 
 /**
- * The mount prefix at or under `/lib`, where pyodide keeps its standard
- * library, if the workspace has one, without its trailing slash: mounted
- * there it would hide the library the interpreter imports from. Mirrors
- * the wasi runtime's check in Python.
+ * The mount prefix that covers pyodide's standard library, if the
+ * workspace has one, without its trailing slash: `/lib` itself, or
+ * anything under `/lib/python` (`/lib/python3.12`, `/lib/python312.zip`).
+ * Mounted there it would hide the library the interpreter imports from; a
+ * mount elsewhere under `/lib` (`/lib/app`) leaves it alone. Mirrors the
+ * wasi runtime's check in Python.
  *
  * Args:
  *   prefixes: the workspace's slash-terminated mount prefixes.
  */
 function stdlibMount(prefixes: readonly string[]): string | null {
-  const found = prefixes.find((prefix) => prefix.startsWith('/lib/'))
+  const found = prefixes.find((prefix) => prefix === '/lib/' || prefix.startsWith('/lib/python'))
   return found === undefined ? null : found.slice(0, -1)
 }
 

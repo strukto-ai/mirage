@@ -20,7 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.runtime.python import WasiRuntime
-from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV
+from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV, _stdlib_mount
 from mirage.runtime.types import RunArgs
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -72,6 +72,35 @@ async def test_a_mount_over_the_stdlib_refuses_the_run(tmp_path, prefix):
             f"'{prefix}', which hides the interpreter's standard library "
             "at /lib\n"
         )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.parametrize(
+    "prefixes, hiding",
+    [
+        (["/lib"], "/lib"),
+        (
+            ["/data", "/lib/python3.12/site-packages"],
+            "/lib/python3.12/site-packages",
+        ),
+        (["/lib/app", "/library"], None),
+    ],
+)
+def test_only_a_mount_over_the_stdlib_is_refused(prefixes, hiding):
+    assert _stdlib_mount(prefixes) == hiding
+
+
+@live
+@pytest.mark.asyncio
+async def test_a_mount_beside_the_stdlib_runs():
+    ws = Workspace(
+        {"/lib/app": RAMVFS()}, mode=MountMode.EXEC, runtimes=["wasi"]
+    )
+    try:
+        r = await ws.shell("python3 -c 'print(1)'")
+        assert r.exit_code == 0
+        assert (await r.stdout_str()) == "1\n"
     finally:
         await ws.close()
 

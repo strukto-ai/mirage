@@ -46,10 +46,11 @@ _BUILD_HINT = (
 
 
 def _stdlib_mount(prefixes: Sequence[str]) -> str | None:
-    """The mount prefix at or under ``/lib``, where the build's standard
-    library lives, if the workspace has one: a mount prefix wins over
-    the build directory, so it would hide the library the interpreter
-    starts from.
+    """The mount prefix that covers the build's standard library, if the
+    workspace has one: ``/lib`` itself, or anything under
+    ``/lib/python``. A mount prefix wins over the build directory, so it
+    would hide the library the interpreter starts from; a mount
+    elsewhere under ``/lib`` (``/lib/app``) leaves it alone.
 
     Args:
         prefixes (Sequence[str]): the workspace mount prefixes.
@@ -58,7 +59,7 @@ def _stdlib_mount(prefixes: Sequence[str]) -> str | None:
         (
             p
             for p in prefixes
-            if p.rstrip("/") == "/lib" or p.startswith("/lib/")
+            if p.rstrip("/") == "/lib" or p.startswith("/lib/python")
         ),
         None,
     )

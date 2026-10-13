@@ -188,6 +188,19 @@ describe('PyodideRuntime mount visibility', () => {
     },
   )
 
+  it('a mount beside the stdlib under /lib leaves the run alone', async () => {
+    const { dispatch } = makeBridge()
+    const rt = new PyodideRuntime()
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/lib/app/'])))
+    try {
+      const result = await rt.run({ code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() })
+      expect(result.exitCode).toBe(0)
+      expect(new TextDecoder().decode(result.stdout)).toBe('1\n')
+    } finally {
+      await rt.close()
+    }
+  }, 60_000)
+
   it('a refused create fails the open with the mount errno', async () => {
     const dispatch: BridgeDispatchFn = (op) => {
       if (op === 'stat')
