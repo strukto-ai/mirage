@@ -13,13 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { ChildProcess } from 'node:child_process'
+import { spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { closeChildren, runCli } from './cli.ts'
 
 const DEC = new TextDecoder()
+
+// Whether a process has exited: gone, or a zombie its new parent has not
+// reaped yet. Polled, since a kill lands asynchronously.
+async function ended(pid: number): Promise<boolean> {
+  for (let i = 0; i < 500; i++) {
+    const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+      encoding: 'utf8',
+    }).stdout.trim()
+    if (state === '' || state.startsWith('Z')) return true
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return false
+}
 
 describe('runCli', () => {
   it('returns both streams and the status', async () => {
@@ -61,7 +74,7 @@ describe('runCli', () => {
     controller.abort()
     await expect(run).rejects.toMatchObject({ name: 'AbortError' })
     expect(Date.now() - started).toBeLessThan(5000)
-    expect(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0)).toThrow()
+    expect(await ended(Number(readFileSync(pidFile, 'utf8')))).toBe(true)
   })
 
   it('closeChildren kills every running tree and waits for it', async () => {

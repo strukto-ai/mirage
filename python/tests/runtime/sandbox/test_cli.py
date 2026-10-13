@@ -20,6 +20,25 @@ import pytest
 from mirage.runtime.sandbox.cli import Children, close_children, run_cli
 
 
+async def _ended(pid: int) -> bool:
+    """Whether ``pid`` has exited: gone, or a zombie its new parent has
+    not reaped yet. Polled, since a kill lands asynchronously.
+
+    Args:
+        pid (int): the process to look for.
+    """
+    for _ in range(500):
+        ps = await asyncio.create_subprocess_exec(
+            "ps", "-o", "stat=", "-p", str(pid), stdout=asyncio.subprocess.PIPE
+        )
+        out, _ = await ps.communicate()
+        state = out.decode().strip()
+        if not state or state.startswith("Z"):
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
 @pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
     out, err, code = await run_cli(
@@ -75,8 +94,7 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
     async with asyncio.timeout(5):
         with pytest.raises(asyncio.CancelledError):
             await task
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_file.read_text()), 0)
+    assert await _ended(int(pid_file.read_text()))
 
 
 @pytest.mark.asyncio
@@ -98,5 +116,4 @@ async def test_close_children_kills_every_running_tree(tmp_path):
         await close_children(children)
         _, _, code = await task
     assert code != 0 and not children
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_file.read_text()), 0)
+    assert await _ended(int(pid_file.read_text()))
