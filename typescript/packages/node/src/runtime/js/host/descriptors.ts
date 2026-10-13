@@ -293,21 +293,19 @@ export class Descriptors {
       [...this.table.values()].filter(
         (desc) => desc.path === named && desc.kept === null && desc.handle !== null,
       )
-    // A descriptor that cannot read needs nothing kept for it.
-    const views = (held: Descriptor[]): { stored: boolean; rendered: boolean } => ({
-      stored: held.some((desc) => desc.mode.writable),
-      rendered: held.some((desc) => desc.mode.readable && !desc.mode.writable),
-    })
     if (open().length === 0) return []
-    let read = views(open())
-    let kept = await this.files.kept(named, read)
+    let read = { stored: false, rendered: false }
+    let kept: Kept | null = null
     for (;;) {
       const held = open()
-      const want = views(held)
-      if ((!want.stored || read.stored) && (!want.rendered || read.rendered)) {
-        return held.map((desc) => [desc, kept])
+      // A descriptor that cannot read needs nothing kept for it.
+      const stored = held.some((desc) => desc.mode.writable)
+      const rendered = held.some((desc) => desc.mode.readable && !desc.mode.writable)
+      if (kept !== null && (!stored || read.stored) && (!rendered || read.rendered)) {
+        const answer = kept
+        return held.map((desc) => [desc, answer])
       }
-      read = { stored: read.stored || want.stored, rendered: read.rendered || want.rendered }
+      read = { stored: read.stored || stored, rendered: read.rendered || rendered }
       kept = await this.files.kept(named, read)
     }
   }
