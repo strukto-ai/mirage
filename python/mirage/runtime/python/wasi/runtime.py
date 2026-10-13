@@ -45,6 +45,25 @@ _BUILD_HINT = (
 )
 
 
+def _stdlib_mount(prefixes: Sequence[str]) -> str | None:
+    """The mount prefix at or under ``/lib``, where the build's standard
+    library lives, if the workspace has one: a mount prefix wins over
+    the build directory, so it would hide the library the interpreter
+    starts from.
+
+    Args:
+        prefixes (Sequence[str]): the workspace mount prefixes.
+    """
+    return next(
+        (
+            p
+            for p in prefixes
+            if p.rstrip("/") == "/lib" or p.startswith("/lib/")
+        ),
+        None,
+    )
+
+
 class WasiRuntime(PythonRuntime):
     """Run Python code on a WASI CPython under wasmtime, in-process.
 
@@ -122,13 +141,22 @@ class WasiRuntime(PythonRuntime):
         self, args: RunArgs, context: RuntimeContext | None = None
     ) -> RunResult:
         context = context or self._capture_context()
+        files = RuntimeFiles.of(context) if context is not None else None
+        hiding = _stdlib_mount(files.prefixes()) if files is not None else None
+        if hiding is not None:
+            return RunResult(
+                stdout=b"",
+                stderr=(
+                    f"mirage: the {self.name} runtime cannot run with a mount "
+                    f"at '{hiding}', which hides the interpreter's standard "
+                    "library at /lib\n"
+                ).encode(),
+                exit_code=126,
+            )
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
-        fs = WasmView(
-            WasmFsConfig(host_root=str(self._root)),
-            RuntimeFiles.of(context) if context is not None else None,
-        )
+        fs = WasmView(WasmFsConfig(host_root=str(self._root)), files)
         # The guest sees the mounts, so the script's own directory heads
         # sys.path, as it does on CPython.
         source = prepare_source(args, search_path=True)

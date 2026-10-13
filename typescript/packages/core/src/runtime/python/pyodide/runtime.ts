@@ -124,6 +124,20 @@ function servable(prefix: string): boolean {
 }
 
 /**
+ * The mount prefix at or under `/lib`, where pyodide keeps its standard
+ * library, if the workspace has one, without its trailing slash: mounted
+ * there it would hide the library the interpreter imports from. Mirrors
+ * the wasi runtime's check in Python.
+ *
+ * Args:
+ *   prefixes: the workspace's slash-terminated mount prefixes.
+ */
+function stdlibMount(prefixes: readonly string[]): string | null {
+  const found = prefixes.find((prefix) => prefix.startsWith('/lib/'))
+  return found === undefined ? null : found.slice(0, -1)
+}
+
+/**
  * Drop every prefix nested inside another: only the shallowest of a
  * nested pair earns an Emscripten mountpoint, and its lookups descend
  * into the child through the dispatcher's merged readdir.
@@ -795,6 +809,17 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
     this.files = context !== undefined ? RuntimeFiles.of(context) : null
+    const hiding = stdlibMount(this.files?.prefixes() ?? [])
+    if (hiding !== null) {
+      return {
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(
+          `mirage: the ${this.name} runtime cannot run with a mount at '${hiding}', ` +
+            `which hides the interpreter's standard library at /lib\n`,
+        ),
+        exitCode: 126,
+      }
+    }
     const worker = await this.ensureWorker(context)
     if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && context !== undefined) {

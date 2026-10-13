@@ -56,6 +56,26 @@ def test_dir_without_stdlib_raises_hint(tmp_path):
         WasiRuntime(config={"home": str(tmp_path)})
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["/lib", "/lib/python3.12"])
+async def test_a_mount_over_the_stdlib_refuses_the_run(tmp_path, prefix):
+    (tmp_path / "python.wasm").write_bytes(b"\0asm")
+    (tmp_path / "lib" / "python3.12").mkdir(parents=True)
+    runtime = WasiRuntime(config={"home": str(tmp_path)})
+    ws = Workspace({prefix: RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    try:
+        r = await ws.shell("python3 -c 'print(1)'")
+        assert r.exit_code == 126
+        assert (await r.stdout_str()) == ""
+        assert (await r.stderr_str()) == (
+            f"mirage: the wasi runtime cannot run with a mount at "
+            f"'{prefix}', which hides the interpreter's standard library "
+            "at /lib\n"
+        )
+    finally:
+        await ws.close()
+
+
 # A program's whole answer: what it prints, its exit code, and a phrase
 # its stderr carries (None: nothing on stderr). The host's files and
 # network stay invisible, a run with no dispatch sees no mounts, and the

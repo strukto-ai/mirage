@@ -162,6 +162,32 @@ describe('PyodideRuntime mount visibility', () => {
     }
   }, 60_000)
 
+  it.each([['/lib/'], ['/lib/python3.12/']])(
+    'a mount at %s refuses the run instead of hiding the stdlib',
+    async (prefix) => {
+      const { dispatch, calls } = makeBridge()
+      const rt = new PyodideRuntime()
+      rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => [prefix])))
+      try {
+        const result = await rt.run({
+          code: 'print(1)',
+          args: [],
+          env: {},
+          stdin: new Uint8Array(),
+        })
+        expect(result.exitCode).toBe(126)
+        expect(result.stdout).toEqual(new Uint8Array())
+        expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe(
+          `mirage: the pyodide runtime cannot run with a mount at '${prefix.slice(0, -1)}', ` +
+            `which hides the interpreter's standard library at /lib\n`,
+        )
+        expect(calls).toHaveLength(0)
+      } finally {
+        await rt.close()
+      }
+    },
+  )
+
   it('a refused create fails the open with the mount errno', async () => {
     const dispatch: BridgeDispatchFn = (op) => {
       if (op === 'stat')
