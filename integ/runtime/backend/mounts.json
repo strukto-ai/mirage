@@ -37,7 +37,7 @@
       ]
     },
     {
-      "id": "link_op_limit",
+      "id": "link_read_is_never_cut_by_the_target_mounts_limit",
       "world": {
         "runtimes": [
           "monty",
@@ -67,7 +67,7 @@
         {
           "read_op": "/r/link",
           "expect": {
-            "content": "01234567"
+            "content": "0123456789abcdef\n"
           }
         }
       ]
