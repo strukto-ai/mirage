@@ -66,3 +66,8 @@ def test_a_repeat_counts_the_work_inside_each_count():
     assert loop_limit(re.compile("(?:(?=a{9})a)*b")) < loop_limit(
         re.compile("(?:a)*b")
     )
+
+
+def test_groups_nested_past_the_depth_go_to_the_worker():
+    assert loop_limit(re.compile("(" * 100 + "a" + ")" * 100)) == -1
+    assert loop_limit(re.compile("(" * 10 + "a" + ")" * 10)) > 0

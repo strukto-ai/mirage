@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LOOP_BUDGET } from '../concurrency/constants.ts'
+import { compilePosixRegex } from './posix.ts'
 import { loopLimit } from './regex_cost.ts'
 
 describe('loopLimit', () => {
@@ -39,6 +40,16 @@ describe('loopLimit', () => {
   it('counts the work inside each count of a repeat', () => {
     expect(loopLimit(new RegExp('^(?:(?=a{60000})a)*b'))).toBeLessThan(10)
     expect(loopLimit(/(?:(?=a{9})a)*b/)).toBeLessThan(loopLimit(/(?:a)*b/))
+  })
+
+  it('reads an ASCII ignore-case matcher as the folded source it runs', () => {
+    expect(loopLimit(compilePosixRegex('^[Aa]+b', 'i'))).toBe(-1)
+    expect(loopLimit(compilePosixRegex('needle', 'i'))).toBeGreaterThan(0)
+  })
+
+  it('sends groups nested past the depth to the worker', () => {
+    expect(loopLimit(new RegExp('('.repeat(5000) + 'a' + ')'.repeat(5000)))).toBe(-1)
+    expect(loopLimit(new RegExp('('.repeat(10) + 'a' + ')'.repeat(10)))).toBeGreaterThan(0)
   })
 
   it('never exceeds the budget', () => {

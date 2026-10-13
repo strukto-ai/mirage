@@ -62,6 +62,8 @@ export const CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
 
 const CHUNK = 128
 
+const CHUNK_CHARS = 16 * 1024
+
 // sort.c's `sort_die` prefixes. GNU tests every input with euidaccess(R_OK)
 // before it reads any (`cannot read`), opens the output and the one input
 // -c reads with open(2) (`open failed`), stats every input it is about to
@@ -266,10 +268,29 @@ async function drain(lines: Iterable<string | null>, budget: YieldBudget): Promi
   return out
 }
 
+function* chunked(records: string[]): Generator<string[], void, undefined> {
+  let start = 0
+  while (start < records.length) {
+    let end = start + 1
+    let size = records[start]?.length ?? 0
+    while (
+      end < records.length &&
+      end - start < CHUNK &&
+      size + (records[end]?.length ?? 0) <= CHUNK_CHARS
+    ) {
+      size += records[end]?.length ?? 0
+      end += 1
+    }
+    yield records.slice(start, end)
+    start = end
+  }
+}
+
 /**
  * The records in output order, worked out on the loop. Sorting always ends,
- * so it needs no worker, only steps a YieldBudget paces: every CHUNK records
- * sort as one step, then the sorted chunks merge pairwise, a tie going to the
+ * so it needs no worker, only steps a YieldBudget paces: up to CHUNK records,
+ * and CHUNK_CHARS characters unless one record alone is longer, sort as one
+ * step, then the sorted chunks merge pairwise, a tie going to the
  * earlier chunk, which is the order one stable sort of every record gives,
  * `-u` included. Under `-m` the inputs merge as given. A large sort shares the
  * loop's core rather than using another (strukto-ai/mirage#1590).
@@ -282,10 +303,9 @@ async function orderedRecords(
 ): Promise<string[]> {
   const budget = new YieldBudget(signal)
   if (merge) return drain(merged(runs, cfg), budget)
-  const records = runs.flat()
   let chunks: string[][] = []
-  for (let start = 0; start < records.length; start += CHUNK) {
-    chunks.push(sortLines(records.slice(start, start + CHUNK), cfg))
+  for (const chunk of chunked(runs.flat())) {
+    chunks.push(sortLines(chunk, cfg))
     await budget.run()
   }
   while (chunks.length > 1) {

@@ -291,3 +291,21 @@ describe('sort past one chunk', () => {
     expect(out).toBe(want.map((line) => line + '\n').join(''))
   })
 })
+
+describe('sort of long records', () => {
+  it('orders as one stable sort when records outgrow a chunk', async () => {
+    const words = ['b', 'a', 'B', '10', '9', 'c x', 'a y', 'a x']
+    const lines = Array.from(
+      { length: 60 },
+      (_, i) => `${(words[i % words.length] ?? '').repeat((i * 997) % 4000)} ${String(i % 3)}`,
+    )
+    const flags = { key: ['2,2'] }
+    const [out] = await run({
+      paths: [spec('/data/in.txt')],
+      files: { '/data/in.txt': bytes(lines.join('\n')) },
+      flags,
+    })
+    const want = sortLines(lines, buildConfig(parseFlags(flags)))
+    expect(out).toBe(want.map((line) => line + '\n').join(''))
+  })
+})

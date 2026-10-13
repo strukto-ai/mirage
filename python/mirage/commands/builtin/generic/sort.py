@@ -38,6 +38,8 @@ CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
 
 CHUNK = 128
 
+CHUNK_CHARS = 16 * 1024
+
 # sort.c's `sort_die` prefixes. GNU tests every input with
 # euidaccess(R_OK) before it reads any (`cannot read`), opens the output
 # and the one input -c reads with open(2) (`open failed`), stats every
@@ -309,13 +311,29 @@ async def _drain(
     return out
 
 
+def _chunked(records: list[str]) -> Iterator[list[str]]:
+    start = 0
+    while start < len(records):
+        end, size = start + 1, len(records[start])
+        while (
+            end < len(records)
+            and end - start < CHUNK
+            and size + len(records[end]) <= CHUNK_CHARS
+        ):
+            size += len(records[end])
+            end += 1
+        yield records[start:end]
+        start = end
+
+
 async def _ordered_records(
     runs: list[list[str]], cfg: SortConfig, merge: bool
 ) -> list[str]:
     """The records in output order, worked out on the loop.
 
     Sorting always ends, so it needs no worker, only steps a YieldBudget
-    paces: every CHUNK records sort as one step, then the sorted chunks
+    paces: up to CHUNK records, and CHUNK_CHARS characters unless one
+    record alone is longer, sort as one step, then the sorted chunks
     merge pairwise, a tie going to the earlier chunk, which is the order
     one stable sort of every record gives, ``-u`` included. Under ``-m``
     the inputs merge as given. A large sort shares the loop's core rather
@@ -329,10 +347,9 @@ async def _ordered_records(
     budget = YieldBudget()
     if merge:
         return await _drain(merged(runs, cfg), budget)
-    records = [record for run in runs for record in run]
     chunks: list[list[str]] = []
-    for start in range(0, len(records), CHUNK):
-        chunks.append(sort_lines(records[start : start + CHUNK], cfg))
+    for chunk in _chunked([record for run in runs for record in run]):
+        chunks.append(sort_lines(chunk, cfg))
         await budget.run()
     while len(chunks) > 1:
         chunks = [

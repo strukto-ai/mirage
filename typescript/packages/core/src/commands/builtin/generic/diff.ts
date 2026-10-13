@@ -243,9 +243,11 @@ async function side(walk: Walk, path: PathSpec, absent: boolean): Promise<string
 }
 
 /**
- * Diff two files' text in the format the flags choose. A diff within
- * LOOP_BUDGET runs here and a larger one in a worker, where Python runs
- * every diff on the loop (strukto-ai/mirage#1590).
+ * Diff two files' text in the format the flags choose. The matcher compares
+ * up to every pair of lines and each comparison can walk a whole line, so a
+ * diff whose line count times line count plus text length fits LOOP_BUDGET
+ * runs here and a larger one in a worker, where Python runs every diff on the
+ * loop (strukto-ai/mirage#1590).
  */
 async function diffPair(
   walk: Walk,
@@ -276,7 +278,8 @@ async function diffPair(
   if (flags.brief) return ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)
   const aLines = splitLinesKeepends(textA)
   const bLines = splitLinesKeepends(textB)
-  const here = (aLines.length + bLines.length) ** 2 <= LOOP_BUDGET
+  const lines = aLines.length + bLines.length
+  const here = lines * (lines + textA.length + textB.length) <= LOOP_BUDGET
   let result: string[]
   if (flags.ed)
     result = here

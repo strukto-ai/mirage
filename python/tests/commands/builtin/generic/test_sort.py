@@ -5,6 +5,8 @@ import pytest
 from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.generic.sort import (
     CHUNK,
+    CHUNK_CHARS,
+    _chunked,
     _config,
     parse_flags,
     sort_generic,
@@ -285,4 +287,28 @@ async def test_a_sort_past_one_chunk_orders_as_one_stable_sort(flags):
         flags=flags,
     )
     want = sort_lines(lines, _config(parse_flags(flags)))
+    assert (await materialize(stdout)).decode().splitlines() == want
+
+
+def test_a_chunk_ends_at_its_character_budget_unless_one_record_fills_it():
+    records = ["x" * (CHUNK_CHARS + 1), "a", "b", "y" * 9000, "z" * 9000]
+    assert [len(chunk) for chunk in _chunked(records)] == [1, 3, 1]
+    assert [len(chunk) for chunk in _chunked(["a"] * (CHUNK + 1))] == [
+        CHUNK,
+        1,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_long_records_sort_as_one_stable_sort():
+    lines = [
+        f"{WORDS[i % len(WORDS)] * (i * 997 % 4000)} {i % 3}"
+        for i in range(60)
+    ]
+    stdout, _ = await sort_generic(
+        [_spec("/data/in.txt")],
+        read_bytes=_reader({"/data/in.txt": "\n".join(lines).encode()}),
+        flags={"key": ["2,2"]},
+    )
+    want = sort_lines(lines, _config(parse_flags({"key": ["2,2"]})))
     assert (await materialize(stdout)).decode().splitlines() == want

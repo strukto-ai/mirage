@@ -590,9 +590,10 @@ def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str | None]:
     ``k`` runs costs ``log k`` comparisons a line. Under ``-u`` a line is
     dropped when it compares equal to the first line of the series it
     would extend, so only adjacent duplicates collapse: ``a b a`` stays
-    three lines. Records come one at a time, None standing for one that
-    ``-u`` drops, so a caller can yield to the loop at every record, a long
-    run of duplicates included.
+    three lines. Records come one at a time, None standing for a run
+    placed at the start or a record ``-u`` drops, so a caller can yield to
+    the loop at every step, many inputs or a long run of duplicates
+    included.
 
     Args:
         runs (list[list[str]]): one record list per input, in operand
@@ -602,12 +603,15 @@ def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str | None]:
     heads = [0] * len(runs)
     order: list[int] = []
     for run in (i for i, lines in enumerate(runs) if lines):
-        slot = len(order)
-        while slot > 0 and _merge_before(
-            runs, heads, run, order[slot - 1], cfg
-        ):
-            slot -= 1
-        order.insert(slot, run)
+        lo, hi = 0, len(order)
+        while lo < hi:
+            probe = (lo + hi) // 2
+            if _merge_before(runs, heads, run, order[probe], cfg):
+                hi = probe
+            else:
+                lo = probe + 1
+        order.insert(lo, run)
+        yield None
     saved: str | None = None
     while order:
         run = order[0]

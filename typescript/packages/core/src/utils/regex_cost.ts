@@ -1,8 +1,10 @@
 import { LOOP_BUDGET } from '../concurrency/constants.ts'
+import { foldRegexSource, foldsAsciiOnly } from './posix.ts'
 
 const QUANTIFIER = /\{(\d+)(,?)(\d*)\}/y
 const FLAGS = /\(\?([ims]*)(?:-([ims]*))?:/y
 const LOOKAROUNDS = ['(?=', '(?!', '(?<=', '(?<!'] as const
+const DEPTH = 64
 
 /**
  * How far a backtracking search of a pattern can branch: the steps one path
@@ -26,7 +28,8 @@ const ONE_CHAR: Shape = { width: 1, choices: 1, repeats: 0, scale: 1 }
  * Read a pattern's source into its search shape, or null for every construct
  * whose backtracking has no bound in the subject's length that this reading
  * can state: a backreference, a repeated group that branches or repeats
- * inside, a lookaround that repeats, or anything it does not recognize.
+ * inside, a lookaround that repeats, groups nested past DEPTH, or anything it
+ * does not recognize.
  */
 class Reader {
   pos = 0
@@ -100,6 +103,7 @@ class Reader {
       if (FLAGS.exec(source) === null) return null
       this.pos = FLAGS.lastIndex
     } else this.pos += 1
+    if (this.depth === DEPTH) return null
     this.depth += 1
     const inner = this.alternation()
     this.depth -= 1
@@ -200,14 +204,17 @@ function searchCost(shape: Shape, length: number, anchored: boolean): number {
  * bounded (-1), goes to a worker. The reading is conservative: some shapes
  * that would finish fast still take the worker, and a linear-time engine
  * would remove the worker for all but backreferences
- * (strukto-ai/mirage#1590).
+ * (strukto-ai/mirage#1590). An ASCII ignore-case matcher is read as the
+ * folded source it runs, where a letter widens into alternatives.
  */
 export function loopLimit(pattern: RegExp): number {
-  const reader = new Reader(pattern.source, pattern.flags.includes('v'))
+  const source = foldsAsciiOnly(pattern)
+    ? foldRegexSource(pattern.source, pattern.unicode)
+    : pattern.source
+  const reader = new Reader(source, pattern.flags.includes('v'))
   const shape = reader.alternation()
-  if (shape === null || reader.pos !== pattern.source.length) return -1
-  const anchored =
-    !pattern.flags.includes('m') && reader.branches === 1 && pattern.source.startsWith('^')
+  if (shape === null || reader.pos !== source.length) return -1
+  const anchored = !pattern.flags.includes('m') && reader.branches === 1 && source.startsWith('^')
   if (searchCost(shape, 0, anchored) > LOOP_BUDGET) return -1
   let low = 0
   let high = LOOP_BUDGET

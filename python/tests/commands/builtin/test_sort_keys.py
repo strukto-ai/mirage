@@ -578,5 +578,15 @@ class TestMergeLines:
 
     def test_every_record_comes_back_even_when_unique_drops_it(self):
         records = list(merged([["a"] * 1000, ["a"] * 1000], _cfg(unique=True)))
-        assert len(records) == 2000
+        assert len(records) == 2 + 2000
         assert [r for r in records if r is not None] == ["a"]
+
+    def test_every_run_placed_at_the_start_comes_back_as_a_step(self):
+        runs = [[str(n)] for n in range(500, 0, -1)]
+        records = merged(runs, _cfg(numeric=True))
+        assert next(records) is None
+        rest = list(records)
+        assert len(rest) == 499 + 500
+        assert [r for r in rest if r is not None] == [
+            str(n) for n in range(1, 501)
+        ]

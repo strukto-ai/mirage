@@ -511,9 +511,10 @@ function mergeBefore(
 // `ord` table, so a merge of `k` runs costs `log k` comparisons a line.
 // Under `-u` a line is dropped when it compares equal to the first line of
 // the series it would extend, so only adjacent duplicates collapse: `a b a`
-// stays three lines. Records come one at a time, null standing for one that
-// `-u` drops, so a caller can yield to the loop at every record, a long run of
-// duplicates included. Mirrors merged in sort_keys.py.
+// stays three lines. Records come one at a time, null standing for a run
+// placed at the start or a record `-u` drops, so a caller can yield to the
+// loop at every step, many inputs or a long run of duplicates included.
+// Mirrors merged in sort_keys.py.
 export function* merged(
   runs: readonly (readonly string[])[],
   cfg: SortConfig,
@@ -522,9 +523,15 @@ export function* merged(
   const order: number[] = []
   for (let run = 0; run < runs.length; run++) {
     if ((runs[run]?.length ?? 0) === 0) continue
-    let slot = order.length
-    while (slot > 0 && mergeBefore(runs, heads, run, order[slot - 1] ?? 0, cfg)) slot -= 1
-    order.splice(slot, 0, run)
+    let lo = 0
+    let hi = order.length
+    while (lo < hi) {
+      const probe = Math.floor((lo + hi) / 2)
+      if (mergeBefore(runs, heads, run, order[probe] ?? 0, cfg)) hi = probe
+      else lo = probe + 1
+    }
+    order.splice(lo, 0, run)
+    yield null
   }
   let saved: string | null = null
   while (order.length > 0) {

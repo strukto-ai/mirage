@@ -211,7 +211,7 @@ const FOLD_TOKEN =
 
 // Under `u` a bracket is read with `u` too, so a `\u{...}` member is one code
 // point rather than the letters of its spelling.
-function foldRegexSource(source: string, unicode: boolean): string {
+export function foldRegexSource(source: string, unicode: boolean): string {
   return source.replace(FOLD_TOKEN, (token) => {
     if (token.startsWith('[')) {
       const bracket = new RegExp(token, unicode ? 'u' : '')

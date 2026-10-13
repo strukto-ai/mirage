@@ -428,7 +428,18 @@ describe('merged', () => {
   it('hands back every record even when unique drops it', () => {
     const lines = Array.from({ length: 1000 }, () => 'a')
     const records = [...merged([lines, lines], configOf({ u: true }))]
-    expect(records).toHaveLength(2000)
+    expect(records).toHaveLength(2 + 2000)
     expect(records.filter((line) => line !== null)).toEqual(['a'])
+  })
+
+  it('hands back a step for every run placed at the start', () => {
+    const runs = Array.from({ length: 500 }, (_, i) => [String(500 - i)])
+    const records = merged(runs, configOf({ n: true }))
+    expect(records.next().value).toBeNull()
+    const rest = [...records]
+    expect(rest).toHaveLength(499 + 500)
+    expect(rest.filter((line) => line !== null)).toEqual(
+      Array.from({ length: 500 }, (_, i) => String(i + 1)),
+    )
   })
 })

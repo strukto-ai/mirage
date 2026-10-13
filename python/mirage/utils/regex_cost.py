@@ -7,6 +7,7 @@ from mirage.concurrency.constants import LOOP_BUDGET
 QUANTIFIER = re.compile(r"\{(\d*)(,?)(\d*)\}")
 FLAGS = re.compile(r"\(\?([aiLmsux]*)(?:-([imsx]*))?([:)])")
 LOOKAROUNDS = ("(?=", "(?!", "(?<=", "(?<!")
+DEPTH = 64
 
 
 class _Shape(NamedTuple):
@@ -39,8 +40,8 @@ class _Reader:
     None stands for every construct whose backtracking has no bound in
     the subject's length that this reading can state: a backreference, a
     conditional, a repeated group that branches or repeats inside, a
-    lookaround that repeats, a verbose group, or anything it does not
-    recognize.
+    lookaround that repeats, a verbose group, groups nested past DEPTH,
+    or anything it does not recognize.
     """
 
     def __init__(self, source: str) -> None:
@@ -127,6 +128,8 @@ class _Reader:
                 return ZERO_WIDTH, False
         else:
             self.pos += 1
+        if self.depth == DEPTH:
+            return None
         self.depth += 1
         inner = self.alternation()
         self.depth -= 1
