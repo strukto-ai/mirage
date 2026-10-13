@@ -170,6 +170,46 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_handle_reads_nothing",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "secret\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "f = open('/data/seed.txt', 'a')\ntry:\n    f.read()\n    print('read')\nexcept OSError as e:\n    print(type(e).__name__)\nf.close()",
+            "js": "const f = std.open('/data/seed.txt', 'a')\nf.seek(0, 0)\nconsole.log(JSON.stringify(f.readAsString()), f.error())\nf.clearerr()\nconsole.log(JSON.stringify(f.readAsString()), f.error())\nf.close()"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "UnsupportedOperation\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "\"\" true\n\"\" true\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

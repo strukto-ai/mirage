@@ -131,7 +131,7 @@ page. The others:
 | --- | --- |
 | `home` | Where the distribution loads from. Without it, `MIRAGE_PYODIDE_HOME`, then the installed package in Node or the pinned CDN in browsers. |
 | `max_concurrency` | Active top-level calls, default 1. |
-| `lockFileURL` | A custom `pyodide-lock.json` (this one key is camelCase in YAML too). |
+| `lock_file_url` | A custom `pyodide-lock.json`. |
 | `bootstrap_code` | Python run when each interpreter starts. |
 | `init_module` | A trusted host module whose default export receives Pyodide before `bootstrap_code`, and may return a cleanup. |
 

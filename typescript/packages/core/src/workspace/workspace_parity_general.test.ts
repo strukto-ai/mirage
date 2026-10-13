@@ -501,6 +501,8 @@ describe('workspace: cross-mount multi-file cat/head/grep/wc', () => {
 })
 
 describe('workspace: while loop iteration limit warning', () => {
+  // Ten thousand iterations take about 4.5 s on a CI runner, so the
+  // default 5 s timeout fails it on a slow one.
   it('while true emits warning after MAX iterations', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.shell('while true; do export X=$X.; done')
@@ -509,7 +511,7 @@ describe('workspace: while loop iteration limit warning', () => {
     expect(err).toContain('terminated after')
     expect(err).toContain('10000')
     await ws.close()
-  })
+  }, 30_000)
 
   it('while under limit has no warning', async () => {
     const { ws } = await makeWorkspace()

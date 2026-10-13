@@ -201,7 +201,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly sysPath: readonly string[]
   private readonly packages: readonly string[]
   private readonly packageBaseUrl: string | null
-  private readonly lockFileURL: string | null
+  private readonly lockFileUrl: string | null
   private files: RuntimeFiles | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly deferred = new Map<string, FlushFailure>()
@@ -248,7 +248,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     this.sysPath = config.sysPath ?? []
     this.packages = config.packages ?? []
     this.packageBaseUrl = config.packageBaseUrl ?? null
-    this.lockFileURL = config.lockFileURL ?? null
+    this.lockFileUrl = config.lockFileUrl ?? null
     const denied = new Set(this.denyPackages)
     const contradictory = this.packages.filter((name) => denied.has(name))
     if (contradictory.length > 0) {
@@ -529,7 +529,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     this.initPromise ??= loadPyodideRuntime({
       ...(this.home !== null ? { home: this.home } : {}),
       ...(this.packageBaseUrl !== null ? { packageBaseUrl: this.packageBaseUrl } : {}),
-      ...(this.lockFileURL !== null ? { lockFileURL: this.lockFileURL } : {}),
+      ...(this.lockFileUrl !== null ? { lockFileURL: this.lockFileUrl } : {}),
       ...(this.packages.length > 0 ? { packages: this.packages } : {}),
     }).then(async (py) => {
       const ref = (this.config as PyodideConfig).initModule

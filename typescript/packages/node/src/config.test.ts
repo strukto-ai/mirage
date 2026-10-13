@@ -218,6 +218,23 @@ describe('configToWorkspaceArgs', () => {
     },
   )
 
+  it('wires the Pyodide lock file and package base from snake_case YAML', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' } },
+      runtimes: [
+        {
+          name: 'pyodide',
+          config: { lock_file_url: '/opt/py/pyodide-lock.json', package_base_url: '/opt/py/' },
+        },
+      ],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect((args.options.runtimes?.[0] as PyodideRuntime).config).toEqual({
+      lockFileUrl: '/opt/py/pyodide-lock.json',
+      packageBaseUrl: '/opt/py/',
+    })
+  })
+
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '2', true, null])(
     'rejects an invalid Pyodide concurrency limit: %j',
     async (limit) => {

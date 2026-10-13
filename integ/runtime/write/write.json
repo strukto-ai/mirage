@@ -108,7 +108,6 @@
     },
     {
       "id": "a_read_only_mount_refuses_writes",
-      "note": "Pyodide writes its own MEMFS and replays the journal after the run, so a read-only mount refuses at that flush: the guest saw success and the line exits 1.",
       "runtimes": [
         "monty",
         "wasi",

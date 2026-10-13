@@ -94,9 +94,12 @@ export function installQuickJsFs(
   // fread answers what it got and sets the error flag, so every read of
   // it fails the way a directory's does instead of throwing at the guest.
   const unreadable = new Set<number>()
+  // A stream opened only to write (`w`, `a`): musl's fread fails on it
+  // with EBADF, as on a directory, and clearerr does not change that.
+  const writeOnly = new Set<number>()
   const failed = new Set<number>()
   const readFails = (fd: number, size = -1): boolean => {
-    if (!directories.has(fd) && !unreadable.has(fd)) return false
+    if (!directories.has(fd) && !unreadable.has(fd) && !writeOnly.has(fd)) return false
     if (size === 0) return true
     failed.add(fd)
     return true
@@ -212,6 +215,7 @@ export function installQuickJsFs(
     }
     const fd = table.add(handle)
     if (directory) directories.add(fd)
+    if (!mode.readable) writeOnly.add(fd)
     return ctx.newNumber(fd)
   })
 
@@ -219,6 +223,7 @@ export function installQuickJsFs(
     const fd = ctx.getNumber(fdH)
     directories.delete(fd)
     unreadable.delete(fd)
+    writeOnly.delete(fd)
     failed.delete(fd)
     const file = table.pop(fd)
     if (file === undefined) return ctx.undefined
@@ -234,13 +239,14 @@ export function installQuickJsFs(
   defineSync('__mirage_lacks', (fdH, sizeH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
-    const lacks = !unreadable.has(fd) && file?.lacks(ctx.getNumber(sizeH)) === true
+    const lacks =
+      !unreadable.has(fd) && !writeOnly.has(fd) && file?.lacks(ctx.getNumber(sizeH)) === true
     return lacks ? ctx.true : ctx.false
   })
 
   defineSync('__mirage_lacks_line', (fdH) => {
     const fd = ctx.getNumber(fdH)
-    const lacks = !unreadable.has(fd) && table.get(fd)?.lacksLine() === true
+    const lacks = !unreadable.has(fd) && !writeOnly.has(fd) && table.get(fd)?.lacksLine() === true
     return lacks ? ctx.true : ctx.false
   })
 

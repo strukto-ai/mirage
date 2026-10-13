@@ -34,7 +34,7 @@ export interface PyodideConfig {
    */
   packageBaseUrl?: string
   /** A custom pyodide-lock.json, for a prebuilt distribution. */
-  lockFileURL?: string
+  lockFileUrl?: string
   // Where the pyodide distribution loads from; falls back to
   // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
   // pinned CDN in the browser. Override for self-hosted assets.
@@ -51,5 +51,5 @@ export const KEYS: readonly (keyof PyodideConfig)[] = [
   'sysPath',
   'packages',
   'packageBaseUrl',
-  'lockFileURL',
+  'lockFileUrl',
 ]
