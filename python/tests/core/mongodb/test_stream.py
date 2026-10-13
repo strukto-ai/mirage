@@ -313,12 +313,23 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_follow_prints_the_last_documents_then_each_insert_once(
+async def test_follow_prints_the_last_documents_then_leaves_them_out(
     accessor, index
 ):
     last = [{"_id": 7, "name": "gus"}, {"_id": 6, "name": "fay"}]
+    times = iter([Timestamp(1, 1), Timestamp(2, 1)])
+    asked: list[tuple] = []
+
+    async def _timed(*_args):
+        return next(times)
+
+    async def _inserts(_client, _database, _name, *args):
+        asked.append(args)
+        yield {"_id": 8, "name": "hal"}
+
     with (
-        _patched_watch([{"_id": 7, "name": "gus"}, {"_id": 8, "name": "hal"}]),
+        patch("mirage.core.mongodb.stream.iter_inserts", new=_inserts),
+        patch("mirage.core.mongodb.stream.operation_time", new=_timed),
         patch(
             "mirage.core.mongodb.stream.find_documents",
             new=AsyncMock(return_value=last),
@@ -330,6 +341,26 @@ async def test_follow_prints_the_last_documents_then_each_insert_once(
         '{"_id": 7, "name": "gus"}',
         '{"_id": 8, "name": "hal"}',
     ]
+    assert asked == [(Timestamp(1, 1), [6, 7], Timestamp(2, 1))]
+
+
+@pytest.mark.asyncio
+async def test_follow_prints_an_insert_that_renders_like_a_printed_one(index):
+    acc = MongoDBAccessor(
+        config=MongoDBConfig(
+            uri="mongodb://localhost:27017",
+            elide_fields={"db1.coll1": ["_id"]},
+        )
+    )
+    with (
+        _patched_watch([{"_id": 2, "name": "gus"}]),
+        patch(
+            "mirage.core.mongodb.stream.find_documents",
+            new=AsyncMock(return_value=[{"_id": 1, "name": "gus"}]),
+        ),
+    ):
+        data = await _collect(await _followed(acc, DOCS_PATH, index, n=1))
+    assert data == b'{"name": "gus"}\n{"name": "gus"}\n'
 
 
 @pytest.mark.asyncio
@@ -342,9 +373,9 @@ async def test_follow_starts_at_the_time_it_was_asked(accessor, index):
         calls.append("ping")
         return after
 
-    async def _inserts(_client, _database, _name, since=None):
+    async def _inserts(_client, _database, _name, since, printed, until):
         calls.append("watch")
-        seen.append(since)
+        seen.append((since, printed, until))
         yield {"_id": 1}
 
     with (
@@ -356,7 +387,7 @@ async def test_follow_starts_at_the_time_it_was_asked(accessor, index):
         assert await gen.__anext__() == b'{"_id": 1}\n'
         await close_quietly(gen)
     assert calls == ["ping", "watch"]
-    assert seen == [after]
+    assert seen == [(after, [], None)]
 
 
 @pytest.mark.asyncio

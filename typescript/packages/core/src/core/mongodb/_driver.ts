@@ -57,11 +57,17 @@ export interface MongoDriver {
    * timestamp; null from a server that reports none.
    */
   operationTime(database: string): Promise<unknown>
-  /** Each inserted document, after the operation time `after` when given. */
+  /**
+   * Each inserted document, after the operation time `after` when given.
+   * An insert of a document whose `_id` is in `printed`, by the operation time
+   * `until`, is left out.
+   */
   iterInserts<T = Record<string, unknown>>(
     database: string,
     collection: string,
     after?: unknown,
+    printed?: unknown[],
+    until?: unknown,
   ): AsyncIterableIterator<T>
   countDocuments(
     database: string,

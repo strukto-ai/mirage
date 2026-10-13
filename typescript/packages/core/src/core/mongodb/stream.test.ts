@@ -133,19 +133,48 @@ describe('mongodb read stand-ins', () => {
     if (added !== null) expect(await drain(added)).toBe('{"_id": 7, "name": "gus"}\n')
   })
 
-  it('follows from the last documents, printing each once', async () => {
-    const [accessor] = accessorOver(
-      [
-        { _id: 7, name: 'gus' },
-        { _id: 6, name: 'fay' },
-      ],
-      7,
-    )
+  // Mirrors test_follow_prints_the_last_documents_then_leaves_them_out.
+  it('follows from the last documents, then leaves them out', async () => {
+    const times = ['t1', 't2']
+    const asked: unknown[][] = []
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
+      findDocuments: <T>() =>
+        Promise.resolve([
+          { _id: 7, name: 'gus' },
+          { _id: 6, name: 'fay' },
+        ] as T[]),
+      operationTime: () => Promise.resolve(times.shift()),
+      iterInserts: <T>(_database: string, _collection: string, ...rest: unknown[]) => {
+        asked.push(rest)
+        return arrayIter([{ _id: 8, name: 'hal' }])<T>()
+      },
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
     const added = await follow(accessor, docs('app'), 2)
-    expect(added).not.toBeNull()
-    if (added !== null) {
-      expect(await drain(added)).toBe('{"_id": 6, "name": "fay"}\n{"_id": 7, "name": "gus"}\n')
-    }
+    if (added === null) throw new Error('expected a follow')
+    expect(await drain(added)).toBe(
+      '{"_id": 6, "name": "fay"}\n{"_id": 7, "name": "gus"}\n{"_id": 8, "name": "hal"}\n',
+    )
+    expect(asked).toEqual([['t1', [6, 7], 't2']])
+  })
+
+  // Mirrors test_follow_prints_an_insert_that_renders_like_a_printed_one.
+  it('prints an insert that renders like a printed one', async () => {
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
+      findDocuments: <T>() => Promise.resolve([{ _id: 1, name: 'gus' }] as T[]),
+      iterInserts: <T>() => arrayIter([{ _id: 2, name: 'gus' }])<T>(),
+    })
+    const accessor = new MongoDBAccessor(
+      driver,
+      resolveMongoDBConfig({ uri: 'mongodb://h', elideFields: { 'app.users': ['_id'] } }),
+    )
+    const added = await follow(accessor, docs('app'), 1)
+    if (added === null) throw new Error('expected a follow')
+    expect(await drain(added)).toBe('{"name": "gus"}\n{"name": "gus"}\n')
   })
 
   it('ends a wait for the next insert when closed', async () => {

@@ -175,6 +175,8 @@ export class MongoDBStore implements MongoDriver {
     database: string,
     collection: string,
     after: unknown = null,
+    printed: unknown[] = [],
+    until: unknown = null,
   ): AsyncIterableIterator<T> {
     type Stream = ReturnType<MongoCollectionLike['watch']>
     let stream: Stream | null = null
@@ -186,6 +188,9 @@ export class MongoDBStore implements MongoDriver {
       const c = await this._client()
       const match: Record<string, unknown> = { operationType: 'insert' }
       if (after !== null) match.clusterTime = { $gt: after }
+      if (printed.length > 0 && until !== null) {
+        match.$nor = [{ clusterTime: { $lte: until }, 'documentKey._id': { $in: printed } }]
+      }
       const opened = c
         .db(database)
         .collection(collection)

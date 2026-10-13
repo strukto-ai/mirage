@@ -23,6 +23,7 @@ import {
   ReadPolicy,
 } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
+import { efbig, enoent } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { followFlags, tailGeneric } from './tail.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -796,6 +797,33 @@ describe('tail asks the mount for the last lines', () => {
     const data = DEC.decode(out as Uint8Array)
     expect(calls).toEqual(asked === null ? [] : [asked])
     if (asked !== null) expect(data).toBe('c\n')
+  })
+
+  // Mirrors test_tail_reports_a_failed_operand_and_prints_the_next.
+  it('reports a failed operand and prints the next', async () => {
+    const fs = new Growing(new Map())
+    for (const name of ['/big', '/gone', '/small']) fs.set(name, '')
+    const result = await tailGeneric(
+      [spec('/big'), spec('/gone'), spec('/small')],
+      [],
+      opts({ n: '1' }),
+      fs.stream,
+      fs.stat,
+      null,
+      (p) =>
+        p.virtual === '/big'
+          ? Promise.reject(efbig(p))
+          : p.virtual === '/gone'
+            ? Promise.reject(enoent(p))
+            : Promise.resolve(ENC.encode('ok\n')),
+    )
+    const [out, io] = result as [ByteSource, IOResult]
+    expect(DEC.decode(out as Uint8Array)).toBe('==> /big <==\n\n==> /small <==\nok\n')
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
+      "tail: error reading '/big': File too large\n" +
+        "tail: cannot open '/gone' for reading: No such file or directory\n",
+    )
   })
 
   it('streams what the mount hands over under -f, first print included', async () => {

@@ -30,7 +30,7 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
-from mirage.errors.constants import FS_ERRORS
+from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
@@ -250,6 +250,7 @@ def tail_multi(
     from_byte: int | None = None,
     show_headers: bool = False,
     unread: frozenset[str] = frozenset(),
+    io: IOResult | None = None,
 ) -> AsyncIterator[bytes]:
     """Run tail over multiple already-resolved paths.
 
@@ -264,6 +265,8 @@ def tail_multi(
             returns bytes, an awaitable of bytes, or an async byte iterator.
         unread (frozenset[str]): operands that opened but do not read (a
             directory): each prints its header and nothing else.
+        io (IOResult | None): the result a failed read is reported on,
+            so the next operand still prints; None lets it raise.
     """
     return _tail_multi(
         paths,
@@ -274,6 +277,7 @@ def tail_multi(
         from_byte=from_byte,
         show_headers=show_headers,
         unread=unread,
+        io=io,
     )
 
 
@@ -287,31 +291,62 @@ async def _tail_multi(
     from_byte: int | None = None,
     show_headers: bool = False,
     unread: frozenset[str] = frozenset(),
+    io: IOResult | None = None,
 ) -> AsyncIterator[bytes]:
-    for i, p in enumerate(paths):
+    printed = 0
+    for p in paths:
+        header = b""
         if show_headers:
-            header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-            if i > 0:
-                header = "\n" + header
-            yield encode_text(header)
+            # The blank line goes before a printed block, not an operand:
+            # a file after one that printed nothing starts without it.
+            label = operand_label(p, STDIN_HEADER_NAME)
+            header = encode_text(
+                ("\n" if printed else "") + f"==> {label} <==\n"
+            )
+        pending = header
         if p.virtual in unread:
+            if pending:
+                yield pending
+                printed += 1
             continue
-        source = read(p)
-        if inspect.isawaitable(source):
-            source = await source
-        async for chunk in tail(
-            source, n=n, c=c, from_line=from_line, from_byte=from_byte
-        ):
-            yield chunk
+        try:
+            source = read(p)
+            if inspect.isawaitable(source):
+                source = await source
+            async for chunk in tail(
+                source, n=n, c=c, from_line=from_line, from_byte=from_byte
+            ):
+                if pending:
+                    yield pending
+                    pending = b""
+                yield chunk
+        except FS_ERRORS as exc:
+            if io is None or len(paths) == 1:
+                raise
+            # A read that fails once the stat passed (a table past its
+            # read cap) is reported, and the next operand still prints.
+            # The open succeeded, so a read failure still heads it.
+            if pending and isinstance(exc, READ_FAILURES):
+                yield pending
+                pending = b""
+            _note(io, fs_error_line("tail", p, exc))
+            io.exit_code = 1
+        else:
+            if pending:
+                yield pending
+                pending = b""
+        if header and not pending:
+            printed += 1
 
 
 def _note(io: IOResult, message: str) -> None:
-    """Append a follow-time diagnostic to the result's stderr.
+    """Append a diagnostic raised while the output streams to the
+    result's stderr.
 
-    A following tail's stdout is a stream the caller drains as the
-    file grows, and its stderr is the bytes on the result, which the
-    caller reads once the stream ends; a notice raised mid-follow
-    lands there.
+    tail's stdout is a stream the caller drains, as the file grows when
+    it follows, and its stderr is the bytes on the result, which the
+    caller reads once the stream ends; a notice raised mid-stream lands
+    there.
 
     Args:
         io (IOResult): the result handed back with the stream.
@@ -901,6 +936,7 @@ async def tail_generic(
             from_byte=counts.from_byte,
             show_headers=show_headers,
             unread=unread,
+            io=io,
         ), io
     source = resolve_source(opts.stdin)
     body = tail(

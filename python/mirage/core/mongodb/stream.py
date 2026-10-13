@@ -89,19 +89,19 @@ async def last_lines(
     if scope.kind != "documents":
         return None
     await entity_guard(accessor, scope, path.virtual)
-    return await _last_lines_of(
-        accessor, path, scope.slots["database"], scope.slots["name"], n
-    )
+    database, name = scope.slots["database"], scope.slots["name"]
+    docs = await _last_docs(accessor, path, database, name, n)
+    return _render_lines(accessor, database, name, docs)
 
 
-async def _last_lines_of(
+async def _last_docs(
     accessor: MongoDBAccessor,
     path: PathSpec,
     database: str,
     name: str,
     n: int,
-) -> bytes:
-    """The last ``n`` documents rendered as lines, past the guard.
+) -> list[dict[str, Any]]:
+    """The last ``n`` documents, oldest first, past the guard.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
@@ -124,15 +124,31 @@ async def _last_lines_of(
         limit=min(n, cap),
     )
     docs.reverse()
-    if not docs:
-        return b""
+    return docs
+
+
+def _render_lines(
+    accessor: MongoDBAccessor,
+    database: str,
+    name: str,
+    docs: list[dict[str, Any]],
+) -> bytes:
+    """Documents as their documents.jsonl lines, with the mount's
+    hidden fields left out.
+
+    Args:
+        accessor (MongoDBAccessor): Backend accessor.
+        database (str): the database.
+        name (str): the collection or view.
+        docs (list[dict[str, Any]]): the documents.
+    """
     elide = _elision_paths(accessor.config, database, name)
-    lines = []
-    for doc in docs:
-        if elide:
-            doc = _apply_elision(doc, elide)
-        lines.append(render_doc(doc))
-    return ("\n".join(lines) + "\n").encode()
+    return b"".join(
+        (
+            render_doc(_apply_elision(doc, elide) if elide else doc) + "\n"
+        ).encode()
+        for doc in docs
+    )
 
 
 async def line_count(
@@ -201,7 +217,8 @@ async def follow(
 
     The change stream starts at the cluster's operation time from before
     the last documents are read, so nothing inserted in between is lost,
-    and a document that both print is skipped the second time.
+    and leaves out an insert, up to the operation time from after the
+    read, of a document the read already printed.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
@@ -218,12 +235,9 @@ async def follow(
     await entity_guard(accessor, scope, path.virtual)
     database, name = scope.slots["database"], scope.slots["name"]
     after = await operation_time(accessor.client, database)
-    first = (
-        await _last_lines_of(accessor, path, database, name, n)
-        if n > 0
-        else b""
-    )
-    return _followed(accessor, database, name, after, first)
+    docs = await _last_docs(accessor, path, database, name, n) if n > 0 else []
+    until = await operation_time(accessor.client, database) if docs else None
+    return _followed(accessor, database, name, after, docs, until)
 
 
 async def _followed(
@@ -231,27 +245,26 @@ async def _followed(
     database: str,
     name: str,
     after: Timestamp | None,
-    first: bytes,
+    docs: list[dict[str, Any]],
+    until: Timestamp | None,
 ) -> AsyncIterator[bytes]:
-    """``first``, then each document inserted after ``after`` that it
-    does not already hold, rendered as a line.
+    """``docs``, then each document inserted after ``after`` that is
+    not one of them, rendered as lines.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
         database (str): the database.
         name (str): the collection.
         after (Timestamp | None): the operation time they come after.
-        first (bytes): the last documents' lines.
+        docs (list[dict[str, Any]]): the last documents.
+        until (Timestamp | None): the operation time from after ``docs``
+            were read.
     """
+    first = _render_lines(accessor, database, name, docs)
     if first:
         yield first
-    printed = set(first.splitlines(keepends=True))
-    elide = _elision_paths(accessor.config, database, name)
-    async for doc in iter_inserts(accessor.client, database, name, after):
-        if elide:
-            doc = _apply_elision(doc, elide)
-        line = (render_doc(doc) + "\n").encode()
-        if line in printed:
-            printed.discard(line)
-            continue
-        yield line
+    printed = [doc[PRIMARY_KEY] for doc in docs]
+    async for doc in iter_inserts(
+        accessor.client, database, name, after, printed, until
+    ):
+        yield _render_lines(accessor, database, name, [doc])

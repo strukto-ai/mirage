@@ -25,6 +25,7 @@ interface MockClient {
 }
 
 const clients: MockClient[] = []
+const watched: unknown[][] = []
 
 const ClientCtor = vi.fn(function (_uri: string) {
   const cursor = {
@@ -37,6 +38,13 @@ const ClientCtor = vi.fn(function (_uri: string) {
     find: vi.fn(() => cursor),
     countDocuments: vi.fn(() => Promise.resolve(5)),
     listIndexes: vi.fn(() => ({ toArray: () => Promise.resolve([{ name: '_id_' }]) })),
+    watch: vi.fn((...args: unknown[]) => {
+      watched.push(args)
+      return {
+        next: () => Promise.resolve({ value: undefined, done: true }),
+        close: () => Promise.resolve(),
+      }
+    }),
   }
   const db = {
     listCollections: vi.fn(() => ({
@@ -67,6 +75,7 @@ vi.mock('mongodb', () => ({
 describe('MongoDBStore', () => {
   beforeEach(() => {
     clients.length = 0
+    watched.length = 0
     ClientCtor.mockClear()
   })
 
@@ -91,6 +100,27 @@ describe('MongoDBStore', () => {
     await store.listCollections('app')
     expect(ClientCtor).toHaveBeenCalledTimes(1)
     expect(clients[0]?.connect).toHaveBeenCalledTimes(1)
+  })
+
+  // Mirrors test_iter_inserts_leaves_out_the_printed_documents_until_a_time.
+  it('iterInserts leaves out the printed documents until a time', async () => {
+    const store = new MongoDBStore('mongodb://h')
+    const inserts = store.iterInserts('app', 'profiles', 't1', [6, 7], 't2')
+    expect((await inserts.next()).done).toBe(true)
+    expect(watched).toEqual([
+      [
+        [
+          {
+            $match: {
+              operationType: 'insert',
+              clusterTime: { $gt: 't1' },
+              $nor: [{ clusterTime: { $lte: 't2' }, 'documentKey._id': { $in: [6, 7] } }],
+            },
+          },
+        ],
+        { startAtOperationTime: 't1' },
+      ],
+    ])
   })
 
   it('listDatabases returns names', async () => {

@@ -97,8 +97,10 @@ export function iterInserts<T = Record<string, unknown>>(
   database: string,
   collection: string,
   after: unknown = null,
+  printed: unknown[] = [],
+  until: unknown = null,
 ): AsyncIterableIterator<T> {
-  return accessor.driver.iterInserts<T>(database, collection, after)
+  return accessor.driver.iterInserts<T>(database, collection, after, printed, until)
 }
 
 export async function countDocuments(

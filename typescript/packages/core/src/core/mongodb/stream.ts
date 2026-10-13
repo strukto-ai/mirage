@@ -149,18 +149,20 @@ export async function lastLines(
   const scope = detectScope(path)
   if (scope.kind !== 'documents') return null
   await entityGuard(accessor, scope, path.virtual)
-  return lastLinesOf(accessor, path, scope.slots.database ?? '', scope.slots.name ?? '', n)
+  const database = scope.slots.database ?? ''
+  const name = scope.slots.name ?? ''
+  return renderLines(accessor, database, name, await lastDocs(accessor, path, database, name, n))
 }
 
-// The last `n` documents rendered as lines, past the guard. Mirrors Python's
-// `_last_lines_of`.
-async function lastLinesOf(
+// The last `n` documents, oldest first, past the guard. Mirrors Python's
+// `_last_docs`.
+async function lastDocs(
   accessor: MongoDBAccessor,
   path: PathSpec,
   database: string,
   name: string,
   n: number,
-): Promise<Uint8Array> {
+): Promise<Record<string, unknown>[]> {
   const cap = accessor.config.maxDocLimit
   if (n > cap && (await countDocuments(accessor, database, name)) > cap) throw efbig(path)
   const docs = await findDocuments(
@@ -170,11 +172,22 @@ async function lastLinesOf(
     {},
     { limit: Math.min(n, cap), sort: { [PRIMARY_KEY]: -1 } },
   )
-  docs.reverse()
-  if (docs.length === 0) return new Uint8Array()
+  return docs.reverse()
+}
+
+// Documents as their documents.jsonl lines, with the mount's hidden fields
+// left out. Mirrors Python's `_render_lines`.
+function renderLines(
+  accessor: MongoDBAccessor,
+  database: string,
+  name: string,
+  docs: Record<string, unknown>[],
+): Uint8Array {
   const elide = elisionPaths(accessor, database, name)
-  const lines = docs.map((doc) => stringifyDoc(elide.size > 0 ? applyElision(doc, elide) : doc))
-  return new TextEncoder().encode(`${lines.join('\n')}\n`)
+  const lines = docs.map(
+    (doc) => `${stringifyDoc(elide.size > 0 ? applyElision(doc, elide) : doc)}\n`,
+  )
+  return new TextEncoder().encode(lines.join(''))
 }
 
 /**
@@ -198,7 +211,8 @@ export async function lineCount(
  * one documents.jsonl line each. Null for a view, which has no change stream,
  * and for any other file. The change stream starts at the cluster's operation
  * time from before the last documents are read, so nothing inserted in
- * between is lost, and a document that both print is skipped the second time.
+ * between is lost, and leaves out an insert, up to the operation time from
+ * after the read, of a document the read already printed.
  * Mirrors `follow` in `mirage/core/mongodb/stream.py`.
  */
 export async function follow(
@@ -213,12 +227,13 @@ export async function follow(
   const database = scope.slots.database ?? ''
   const name = scope.slots.name ?? ''
   const after = await operationTime(accessor, database)
-  const first = n > 0 ? await lastLinesOf(accessor, path, database, name, n) : new Uint8Array()
-  return followed(accessor, database, name, after, first)
+  const docs = n > 0 ? await lastDocs(accessor, path, database, name, n) : []
+  const until = docs.length > 0 ? await operationTime(accessor, database) : null
+  return followed(accessor, database, name, after, docs, until)
 }
 
-// `first`, then each document inserted after `after` that it does not already
-// hold, rendered as a line. An iterator rather than a generator: a generator
+// `docs`, then each document inserted after `after` that is not one of them,
+// rendered as lines. An iterator rather than a generator: a generator
 // queues `return` behind a pull waiting for the next insert, so an idle
 // `tail -f` could never close its change stream. Mirrors `_followed` in
 // `mirage/core/mongodb/stream.py`.
@@ -227,16 +242,11 @@ function followed(
   database: string,
   name: string,
   after: unknown,
-  first: Uint8Array,
+  docs: Record<string, unknown>[],
+  until: unknown,
 ): AsyncIterableIterator<Uint8Array> {
-  const elide = elisionPaths(accessor, database, name)
-  const printed = new Set(
-    new TextDecoder()
-      .decode(first)
-      .split('\n')
-      .slice(0, -1)
-      .map((line) => `${line}\n`),
-  )
+  const first = renderLines(accessor, database, name, docs)
+  const printed = docs.map((doc) => doc[PRIMARY_KEY])
   let pending: Uint8Array | null = first.byteLength > 0 ? first : null
   let inserts: AsyncIterableIterator<Record<string, unknown>> | null = null
   let closed = false
@@ -249,15 +259,10 @@ function followed(
         return { value, done: false }
       }
       if (closed) return done
-      inserts ??= iterInserts(accessor, database, name, after)
-      for (;;) {
-        const step = await inserts.next()
-        if (step.done === true) return done
-        const doc = elide.size > 0 ? applyElision(step.value, elide) : step.value
-        const line = `${stringifyDoc(doc)}\n`
-        if (printed.delete(line)) continue
-        return { value: new TextEncoder().encode(line), done: false }
-      }
+      inserts ??= iterInserts(accessor, database, name, after, printed, until)
+      const step = await inserts.next()
+      if (step.done === true) return done
+      return { value: renderLines(accessor, database, name, [step.value]), done: false }
     },
     async return(): Promise<IteratorResult<Uint8Array>> {
       closed = true

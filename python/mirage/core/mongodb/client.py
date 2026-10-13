@@ -160,6 +160,8 @@ async def iter_inserts(
     database: str,
     collection: str,
     after: Timestamp | None = None,
+    printed: list[Any] | None = None,
+    until: Timestamp | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Each document inserted into a collection, from a change stream.
 
@@ -170,6 +172,10 @@ async def iter_inserts(
         after (Timestamp | None): the operation time the inserts come
             after, however late the stream opens; None for those after
             it opens.
+        printed (list[Any] | None): ``_id`` values of documents already
+            printed: an insert of one by ``until`` is left out.
+        until (Timestamp | None): the operation time from after those
+            documents were read.
     """
     col = client[database][collection]
     match: dict[str, Any] = {"operationType": "insert"}
@@ -177,6 +183,13 @@ async def iter_inserts(
     if after is not None:
         match["clusterTime"] = {"$gt": after}
         options["start_at_operation_time"] = after
+    if printed and until is not None:
+        match["$nor"] = [
+            {
+                "clusterTime": {"$lte": until},
+                "documentKey._id": {"$in": printed},
+            }
+        ]
     async with await col.watch([{"$match": match}], **options) as stream:
         async for change in stream:
             doc = change.get("fullDocument")

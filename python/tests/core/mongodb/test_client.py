@@ -281,6 +281,33 @@ async def test_iter_inserts_after_a_time_starts_there_and_drops_it():
 
 
 @pytest.mark.asyncio
+async def test_iter_inserts_leaves_out_the_printed_documents_until_a_time():
+    client, col = _build_watch_client([])
+    after, until = Timestamp(100, 3), Timestamp(101, 1)
+    async for _doc in iter_inserts(
+        client, "db1", "coll1", after, [6, 7], until
+    ):
+        pass
+    col.watch.assert_awaited_once_with(
+        [
+            {
+                "$match": {
+                    "operationType": "insert",
+                    "clusterTime": {"$gt": after},
+                    "$nor": [
+                        {
+                            "clusterTime": {"$lte": until},
+                            "documentKey._id": {"$in": [6, 7]},
+                        }
+                    ],
+                }
+            }
+        ],
+        start_at_operation_time=after,
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply, expected",
     [

@@ -441,6 +441,19 @@
         "stdout": "4\n5\n5\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mongodb_tail_reports_a_capped_operand_and_prints_the_next",
+      "seq": 621015,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; tail -n 4 /mongo-limited/mirage_integ/collections/books/documents.jsonl /mongo-limited/mirage_integ/collections/authors/documents.jsonl | jq -rR 'if startswith(\"{\") then (fromjson | .name) else . end'",
+      "expect": {
+        "exit": 1,
+        "stdout": "==> /mongo-limited/mirage_integ/collections/books/documents.jsonl <==\n\n==> /mongo-limited/mirage_integ/collections/authors/documents.jsonl <==\nada\nben\ncara\n",
+        "stderr": "tail: error reading '/mongo-limited/mirage_integ/collections/books/documents.jsonl': File too large\n"
+      }
     }
   ]
 }

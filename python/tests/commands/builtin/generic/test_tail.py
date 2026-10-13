@@ -11,6 +11,7 @@ from mirage.commands.builtin.generic.tail import (
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.errors.fs import efbig, enoent
 from mirage.io.stream import close_quietly
 from mirage.shell.console import Channel
 from mirage.types import (
@@ -220,6 +221,32 @@ async def test_tail_multi(read, n, headers, expected):
         tail_multi(_paths("/a", "/b"), read=read, n=n, show_headers=headers)
     )
     assert out == expected
+
+
+@pytest.mark.asyncio
+async def test_tail_reports_a_failed_operand_and_prints_the_next():
+    async def last_lines(p: PathSpec, n: int) -> bytes:
+        if p.virtual == "/big":
+            raise efbig(p)
+        if p.virtual == "/gone":
+            raise enoent(p)
+        return b"ok\n"
+
+    fs = _Growing({"/big": b"", "/gone": b"", "/small": b""})
+    stream, io = await tail_generic(
+        _paths("/big", "/gone", "/small"),
+        [],
+        CommandOpts(flags={"lines": "1"}),
+        fs.stat,
+        fs.read,
+        last_lines=last_lines,
+    )
+    assert await _drain(stream) == b"==> /big <==\n\n==> /small <==\nok\n"
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"tail: error reading '/big': File too large\n"
+        b"tail: cannot open '/gone' for reading: No such file or directory\n"
+    )
 
 
 class _Growing:
