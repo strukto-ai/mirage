@@ -43,9 +43,14 @@ export class HistoryViewVFS extends BaseVFS {
   override readonly sizesAlwaysKnown = true
   override readonly accessor: HistoryAccessor
 
-  constructor(observer: Observer) {
+  constructor(observer: Observer, session: string | null = null) {
     super()
-    this.accessor = new HistoryAccessor(observer)
+    this.accessor = new HistoryAccessor(observer, session)
+  }
+
+  /** The view one session reads: its own commands, whatever else is bound. */
+  forSession(session: string): HistoryViewVFS {
+    return new HistoryViewVFS(this.accessor.observer, session)
   }
 
   override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {

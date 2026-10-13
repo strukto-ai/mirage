@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DevVFS } from '../../vfs/dev/dev.ts'
+import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { activePipe, pipeBelow } from '../../core/dev/device.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
@@ -383,12 +384,15 @@ export class MountEntry {
 
   /**
    * The VFS as the owner of `access` sees it: the device mount's view of that
-   * session's descriptors, which a browser call cannot find any other way.
+   * session's descriptors, or the history view of its commands, which a
+   * browser call cannot find any other way.
    */
   private viewFor(access?: SessionAccess): BaseVFS {
-    return this.vfs instanceof DevVFS && access !== undefined
-      ? this.vfs.forSession(access.sessionId)
-      : this.vfs
+    if (access === undefined) return this.vfs
+    if (this.vfs instanceof DevVFS || this.vfs instanceof HistoryViewVFS) {
+      return this.vfs.forSession(access.sessionId)
+    }
+    return this.vfs
   }
 
   /** The command I/O over `viewFor(access)`. */

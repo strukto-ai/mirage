@@ -15,12 +15,19 @@
 import type { Observer } from '../observe/observer.ts'
 import { Accessor } from './base.ts'
 
-/** Accessor over the hidden recorder for the /.bash_history view. */
+/**
+ * Accessor over the hidden recorder for the /.bash_history view.
+ *
+ * `session` names the reader when a session's own view was taken, null
+ * for the shared view, which finds the reader from the bound session.
+ */
 export class HistoryAccessor extends Accessor {
   readonly observer: Observer
+  readonly session: string | null
 
-  constructor(observer: Observer) {
+  constructor(observer: Observer, session: string | null = null) {
     super()
     this.observer = observer
+    this.session = session
   }
 }
