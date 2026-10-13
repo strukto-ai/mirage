@@ -1279,6 +1279,37 @@
           }
         }
       ]
+    },
+    {
+      "id": "an_interpreter_timeout_names_the_command",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "loop.js": "while (true) {}\n"
+            },
+            "limits": {
+              "node": {
+                "timeout_seconds": 1
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node /ram/loop.js",
+          "expect": {
+            "exit": 124,
+            "stderr": "node: timed out after 1s\n"
+          }
+        }
+      ]
     }
   ]
 }

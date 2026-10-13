@@ -225,7 +225,7 @@ class NamespaceLinks(Protocol):
     downward (workspace injects, lower layers never import workspace
     modules).
 
-    Read-only, and the TypeScript twin declares the same five members
+    Read-only, and the TypeScript twin declares the same six members
     in the same order. A link is created and removed through the
     dispatcher (``Files.symlink``, ``Files.unlink``), never here: the
     dispatcher is the only layer that sees both planes, so it is where
@@ -275,6 +275,16 @@ class NamespaceLinks(Protocol):
 
     def symlink_targets(self) -> dict[str, str]:
         """Every link path to its stored target, the whole table."""
+        ...
+
+    def link_names_under(self, directory: str) -> set[str]:
+        """The names of the links directly under ``directory``, which a
+        listing's link marks need; a link prefix resolves first, as the
+        listing itself does.
+
+        Args:
+            directory (str): absolute virtual directory path.
+        """
         ...
 
 

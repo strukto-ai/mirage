@@ -72,6 +72,7 @@ function linkTo(target: string): NamespaceLinks {
     readlink: (p) => (p === '/ram/lnk' ? target : null),
     linkStatAt: () => null,
     symlinkTargets: () => new Map([['/ram/lnk', target]]),
+    linkNamesUnder: (d) => new Set(d === '/ram' ? ['lnk'] : []),
   }
 }
 

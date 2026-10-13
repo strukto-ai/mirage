@@ -4,12 +4,13 @@ icon: js
 description: A small ES2023 engine in WebAssembly for node and js, in both Mirage SDKs.
 ---
 
-[QuickJS](https://github.com/quickjs-ng/quickjs) runs `node` and `js`: a
-bare ES2023 engine in WebAssembly, inside the Mirage process, for small
-scripts and pipe transforms. It is not Node: there is no `require`, npm,
-`fs` or `fetch`. The files it opens are the workspace's, under the same
-mount modes and permissions as shell commands. It is in the default runtimes
-of both SDKs.
+QuickJS runs `node` and `js`: a bare ES2023 engine in WebAssembly, inside the
+Mirage process, for small scripts and pipe transforms. It is not Node: there
+is no `require`, npm, `fs` or `fetch`. The files it opens are the workspace's,
+under the same mount modes and permissions as shell commands. It is in the
+default runtimes of both SDKs. The Python SDK runs
+[quickjs-ng](https://github.com/quickjs-ng/quickjs), and the TypeScript SDK
+runs [QuickJS](https://bellard.org/quickjs/) through quickjs-emscripten.
 
 ## Installation
 
@@ -115,6 +116,6 @@ In TypeScript, any `std` or `os` function not listed as supported throws
 - An error in async code fails the run. In TypeScript this holds for a
   module and for the promise a script ends with, as in `main()`; a promise
   the script drops before then is not reported.
-- QuickJS cannot reach host files or the network, but only `command_limits`
-  bound its CPU and memory. Run untrusted or heavy code in a
-  [sandbox](/home/setup/runtime/sandbox).
+- QuickJS cannot reach host files or the network. `command_limits` bound its
+  time and output, and in TypeScript a run also stops at 64 MiB of memory.
+  Run untrusted or heavy code in a [sandbox](/home/setup/runtime/sandbox).

@@ -189,6 +189,6 @@ class CommandTimeoutError(Exception):
     """
 
     def __init__(self, command: str, seconds: float) -> None:
-        super().__init__(f"{command}: timed out after {seconds}s")
+        super().__init__(f"{command}: timed out after {seconds:g}s")
         self.command = command
         self.seconds = seconds

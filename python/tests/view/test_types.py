@@ -23,7 +23,14 @@ from mirage.workspace import Workspace
 # (view/types.test.ts) pins this same list camelCased and in this same
 # order, so a member added, dropped or moved in one language fails the
 # other language's test instead of drifting quietly.
-MEMBERS = ("follow", "is_link", "readlink", "link_stat_at", "symlink_targets")
+MEMBERS = (
+    "follow",
+    "is_link",
+    "readlink",
+    "link_stat_at",
+    "symlink_targets",
+    "link_names_under",
+)
 
 
 def _declared() -> tuple[str, ...]:

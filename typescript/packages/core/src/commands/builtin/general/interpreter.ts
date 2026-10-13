@@ -371,8 +371,9 @@ export async function runCode(
     return runOutput(result)
   } catch (err) {
     // An in-VM limit interrupt is a timeout, not an interpreter
-    // failure: let it reach the workspace's 124 handler.
-    if (err instanceof CommandTimeoutError) throw err
+    // failure: let it reach the workspace's 124 handler, named after the
+    // command as the workspace's own timer names it.
+    if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(label, err.seconds)
     const message = err instanceof Error ? err.message : String(err)
     return failed(label, message, runtimeUnavailable(err) ? 127 : 1)
   }

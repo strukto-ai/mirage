@@ -17,7 +17,10 @@ import errno
 import pytest
 
 from mirage.errors.fs import erofs
-from mirage.runtime.python.host.syscall import as_raised, syscall
+from mirage.runtime.python.host.fs import HostFs
+from mirage.runtime.python.host.syscall import as_raised, host_files, syscall
+
+from .conftest import make_ops_with_dir, run
 
 
 def test_a_mirage_refusal_raises_as_the_builtin_class_for_its_errno():
@@ -40,3 +43,16 @@ def test_syscall_wraps_an_entry_point():
         syscall(_refuse)()
     assert type(caught.value) is OSError
     assert caught.value.errno == errno.EROFS
+
+
+def test_a_listing_marks_its_links_from_the_namespace():
+    # The mark comes with the listing, so telling a link apart costs no
+    # readlink per entry.
+    ops, _ = make_ops_with_dir()
+    run(ops.write("/data/dir/a.txt", b"hello"))
+    HostFs(ops, None).symlink("a.txt", "/data/dir/link")
+    rows = host_files(ops, None).readdir("/data/dir", classify=False)
+    assert [(row.path, row.is_link) for row in rows] == [
+        ("/data/dir/a.txt", False),
+        ("/data/dir/link", True),
+    ]

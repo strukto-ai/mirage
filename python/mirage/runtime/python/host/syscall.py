@@ -21,6 +21,7 @@ from mirage.errors import FsCondition, classify
 from mirage.errors.fs import fs_error
 from mirage.io import IOResult
 from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.resolver import PrefixResolver
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -54,7 +55,13 @@ def host_files(
             condition = classify(exc) or FsCondition.EIO
             raise fs_error(path, condition) from exc
 
-    return RuntimeFiles(dispatch, loop)
+    # No prefixes: the block routes every path itself (``HostFs``), so
+    # only a listing's link marks are asked of the namespace.
+    links = files.links
+    resolver = PrefixResolver(
+        list, None if links is None else links.link_names_under
+    )
+    return RuntimeFiles(dispatch, loop, resolver)
 
 
 def as_raised(exc: OSError) -> OSError:

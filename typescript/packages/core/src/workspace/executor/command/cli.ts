@@ -203,6 +203,9 @@ async function scriptOutput(
       ...(script.module ? { flags: { module: true } } : {}),
     })
   } catch (err) {
+    // A limit interrupt is named after the CLI, as the workspace's own
+    // timer names it.
+    if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(prog, err.seconds)
     // The interpreter is missing, not the program: 127, as the
     // interpreter command answers for the same runtime.
     if (!runtimeUnavailable(err)) throw err

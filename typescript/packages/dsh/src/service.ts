@@ -49,12 +49,14 @@ export interface MirageMountBlock {
 /** One mount entry: a live spec or instance, or a declarative block. */
 export type MirageMount = MountSpec | Mount | MirageMountBlock
 
-/** A runtime entry, YAML-friendly: a name, or a name with captures. */
+/** A runtime entry, YAML-friendly: a name, or a name with its options. */
 export interface MirageRuntimeBlock {
   /** Runtime registry name (`monty`, `pyodide`, `quickjs`, ...). */
   name: string
   /** Command words this runtime captures (e.g. `['python', 'python3']`). */
   captures?: string[]
+  /** The runtime's own config block; a key it does not have is refused. */
+  config?: Record<string, unknown>
 }
 
 /**
@@ -130,7 +132,8 @@ function parseProfiles(raw: Record<string, unknown>): Record<string, SessionProf
 
 function toRuntimeEntry(entry: string | MirageRuntimeBlock): RuntimeEntry {
   if (typeof entry === 'string') return entry
-  return buildRuntime(entry.name, entry.captures === undefined ? {} : { captures: entry.captures })
+  const { name, ...options } = entry
+  return buildRuntime(name, options)
 }
 
 // A name shorthand builds exactly as the workspace would build it; holding

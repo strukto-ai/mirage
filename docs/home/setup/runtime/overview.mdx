@@ -107,7 +107,6 @@ mounts:
         timeout_seconds: 30
 ```
 
-The deadline also stops the run in Monty, WASI, Pyodide, `local`, Sandlock
-and the Python SDK's QuickJS. The TypeScript SDK's QuickJS and the other
-sandboxes only stop waiting, so give untrusted code a finite workload; see
-[sandbox timeouts](/home/setup/runtime/sandbox#timeouts).
+The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, `local` and
+Sandlock. The other sandboxes only stop waiting, so give untrusted code a
+finite workload; see [sandbox timeouts](/home/setup/runtime/sandbox#timeouts).

@@ -44,20 +44,36 @@ const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = 
  */
 export const DEFAULT_ENTRIES: readonly string[] = ['monty', 'quickjs', 'workspace']
 
-/** Python-only runtime names a cross-language config may carry. */
-const PYTHON_ONLY_HINTS: Record<string, string> = {
+// The runtimes @struktoai/mirage-node registers when it is imported.
+const NODE_RUNTIMES: readonly string[] = [
+  'apple_container',
+  'daytona',
+  'docker',
+  'local',
+  'sandlock',
+  'smolvm',
+  'ssh',
+]
+
+const NODE_HINT =
+  'lives in @struktoai/mirage-node; import that package to register it. Browser ' +
+  "worlds support 'monty' (sandboxed, default), 'pyodide' (WASM CPython), and " +
+  "'quickjs' (sandboxed JavaScript)"
+
+/** Why a name a config may carry is not registered here, and where it lives. */
+const RUNTIME_HINTS: Record<string, string> = {
+  ...Object.fromEntries(NODE_RUNTIMES.map((name) => [name, `runtime '${name}' ${NODE_HINT}`])),
   wasi:
     "runtime 'wasi' is Python-only (a CPython WASI build); TypeScript " +
     "supports 'monty' (sandboxed, default), 'pyodide' (WASM CPython), " +
     "and 'quickjs' (sandboxed JavaScript)",
-  local:
-    "runtime 'local' (the host python3) lives in @struktoai/mirage-node; " +
-    'import that package to register it. Browser worlds support ' +
-    "'monty' (sandboxed, default), 'pyodide' (WASM CPython), and " +
-    "'quickjs' (sandboxed JavaScript)",
   sandlock:
     "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +
     'to register it. Sandlock requires Linux and the sandlock CLI on PATH.',
+  e2b:
+    "runtime 'e2b' registers when its module is imported: " +
+    "'@struktoai/mirage-core/runtime/sandbox/e2b/runtime' in a browser, or " +
+    '@struktoai/mirage-node, which imports it',
 }
 
 // Every runtime is constructed the same way; config keys are checked
@@ -67,10 +83,11 @@ const PYTHON_ONLY_HINTS: Record<string, string> = {
 // literal would silently swallow a typo key without it.
 const ENTRY_KEYS: readonly string[] = ['captures', 'config']
 
-// The names core ships, frozen before any package or host registers its
-// own, so `registerRuntime` can refuse to shadow one the way the VFS
-// and CLI registries refuse a builtin name.
-const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set(Object.keys(NAMED))
+// The names mirage ships: core's own, and the ones its packages register
+// when they load, so `registerRuntime` can refuse to shadow one the way
+// the VFS and CLI registries refuse a builtin name. A package's own
+// registration is the first under its name; any later one shadows it.
+const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([...Object.keys(NAMED), ...NODE_RUNTIMES, 'e2b'])
 
 /**
  * Register a runtime class under a config name. Host-side only, like
@@ -87,7 +104,9 @@ export function registerRuntime(
   name: string,
   cls: new (options?: RuntimeOptions<never>) => Runtime,
 ): void {
-  if (BUILTIN_RUNTIMES.has(name)) throw new Error(`cannot register '${name}': shadows a builtin`)
+  if (BUILTIN_RUNTIMES.has(name) && NAMED[name] !== undefined) {
+    throw new Error(`cannot register '${name}': shadows a builtin`)
+  }
   NAMED[name] = cls
 }
 
@@ -119,9 +138,9 @@ export function checkRuntimeOptions(name: string, options: Record<string, unknow
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
   const cls = NAMED[name]
   if (cls === undefined) {
-    const hint = PYTHON_ONLY_HINTS[name]
+    const hint = RUNTIME_HINTS[name]
     if (hint !== undefined) throw new Error(hint)
-    const known = Object.keys(NAMED)
+    const known = knownRuntimes()
       .map((n) => `'${n}'`)
       .join(', ')
     throw new Error(`unknown runtime: '${name}' (expected one of ${known})`)

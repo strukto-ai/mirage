@@ -64,7 +64,8 @@ describe('runtime table', () => {
 
   it.each<[string, RegExp]>([
     ['ghost', /unknown runtime: 'ghost'/],
-    ['docker', /unknown runtime/],
+    ['nope', /unknown runtime/],
+    ['docker', /mirage-node/],
     ['wasi', /Python-only/],
     ['local', /mirage-node/],
   ])('buildRuntime refuses %s, naming why', (name, refusal) => {
@@ -191,6 +192,19 @@ describe('registerRuntime', () => {
     expect(() => {
       registerRuntime('workspace', FakeRuntime)
     }).toThrow(/shadows a builtin/)
+  })
+
+  it('refuses a shipped name once its package registered it', () => {
+    registerRuntime('smolvm', FakeRuntime)
+    expect(() => {
+      registerRuntime('smolvm', Other)
+    }).toThrow(/shadows a builtin/)
+    expect(buildRuntime('smolvm')).toBeInstanceOf(FakeRuntime)
+  })
+
+  it('says where an unregistered shipped runtime lives', () => {
+    expect(() => buildRuntime('daytona')).toThrow(/@struktoai\/mirage-node/)
+    expect(() => buildRuntime('e2b')).toThrow(/runtime\/sandbox\/e2b\/runtime/)
   })
 
   it('replaces a custom name', () => {

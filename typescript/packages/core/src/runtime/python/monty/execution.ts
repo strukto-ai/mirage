@@ -278,11 +278,14 @@ export class MontyExecution {
       await session.close()
     }
     this.evalSessions.clear()
+    // A pool still being opened must be awaited before teardown, or its
+    // workers outlive the runtime that asked for them.
+    if (this.pool === null && this.poolPromise !== null) this.pool = await this.poolPromise
+    this.poolPromise = null
     if (this.pool !== null) {
       await this.pool.close()
       this.pool = null
     }
-    this.poolPromise = null
   }
 
   private async ensurePool(): Promise<MontyPoolLike> {

@@ -16,9 +16,8 @@ specific to the TypeScript SDK.
   has only the named fields (`st.st_size`).
 - **QuickJS:** a `std` and `os` shim with the calls the
   [QuickJS](/home/setup/runtime/quickjs) table lists. A write shows to other
-  commands once the file is closed. A timeout only stops waiting, so give
-  untrusted code a finite workload; the engine has its own memory and stack
-  caps.
+  commands once the file is closed. A timeout stops the run, and the engine
+  caps a run at 64 MiB of memory and 1 MiB of stack.
 - **Local:** in `@struktoai/mirage-node` only. With neither `home` nor
   `MIRAGE_LOCAL_HOME`, `python3` is the one on `PATH`.
 - **Sandboxes:** in `@struktoai/mirage-node`; `e2b` also runs in browsers.

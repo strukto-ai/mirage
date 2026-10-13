@@ -65,6 +65,21 @@ describe('MirageService', () => {
     await expect(ws.resolve('/scratch/a.txt')).rejects.toThrow('closed')
   })
 
+  it('hands a runtime block its config and refuses a key no runtime takes', async () => {
+    const ctx = new Context()
+    const mounts = { '/x': new RAMVFS() }
+    await expect(
+      ctx
+        .plugin(MirageService, { mounts, runtimes: [{ name: 'monty', config: { nope: 1 } }] })
+        .await(),
+    ).rejects.toThrow(/nope/)
+    await expect(
+      ctx
+        .plugin(MirageService, { mounts, runtimes: [{ name: 'monty', confg: {} } as never] })
+        .await(),
+    ).rejects.toThrow(/unknown monty runtime option 'confg'/)
+  })
+
   it('rejects an unknown declarative VFS name', async () => {
     const ctx = new Context()
     const fiber = ctx.plugin(MirageService, {

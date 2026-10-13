@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareComponents } from '../../../utils/sort.ts'
+
 /** A full entry path under `dir`, whatever shape the listing spelled. */
 function joinEntry(dir: string, name: string): string {
   const clean = name.endsWith('/') ? name.slice(0, -1) : name
@@ -19,30 +21,12 @@ function joinEntry(dir: string, name: string): string {
   return dir === '/' ? '/' + clean : dir + '/' + clean
 }
 
-/** Sort paths the way python sorts PurePosixPath: by parts, not raw bytes. */
-function sortPaths(paths: string[]): string[] {
-  return paths
-    .map((p): [string[], string] => [p.split('/'), p])
-    .sort((a, b) => {
-      const [pa] = a
-      const [pb] = b
-      const n = Math.min(pa.length, pb.length)
-      for (let i = 0; i < n; i++) {
-        const x = pa[i] ?? ''
-        const y = pb[i] ?? ''
-        if (x !== y) return x < y ? -1 : 1
-      }
-      return pa.length - pb.length
-    })
-    .map(([, p]) => p)
-}
-
 /**
- * A listing's entries as the guest's paths, sorted as pathlib sorts.
- * Backends spell entries differently (bare names, slash-marked
+ * A listing's entries as the guest's paths, sorted as pathlib sorts: by
+ * parts, each by code point. Backends spell entries differently (bare names, slash-marked
  * directories, full paths); joining each onto the directory takes all
  * three to one path.
  */
 export function childPaths(path: string, names: string[]): string[] {
-  return sortPaths([...new Set(names.map((name) => joinEntry(path, name)))])
+  return [...new Set(names.map((name) => joinEntry(path, name)))].sort(compareComponents)
 }

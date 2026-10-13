@@ -416,6 +416,34 @@
           }
         }
       ]
+    },
+    {
+      "id": "monty_lists_names_in_code_point_order",
+      "runtimes": [
+        "monty"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "ｚ.txt": "z\n",
+              "😀.txt": "e\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint([p.name for p in Path('/data').iterdir()])"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "['ｚ.txt', '😀.txt']\n"
+          }
+        }
+      ]
     }
   ]
 }

@@ -23,7 +23,14 @@ import type { NamespaceLinks } from './types.ts'
 // (tests/view/test_types.py) pins this same list snake_cased and in
 // this same order, so a member added, dropped or moved in one language
 // fails the other language's test instead of drifting quietly.
-const MEMBERS = ['follow', 'isLink', 'readlink', 'linkStatAt', 'symlinkTargets'] as const
+const MEMBERS = [
+  'follow',
+  'isLink',
+  'readlink',
+  'linkStatAt',
+  'symlinkTargets',
+  'linkNamesUnder',
+] as const
 
 // An interface has no runtime shape, so order is read back off the
 // source the way Python reads it off the class dict.
