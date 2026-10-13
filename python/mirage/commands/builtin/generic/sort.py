@@ -298,10 +298,13 @@ def _label(path: PathSpec | None) -> str:
     return path.raw_path
 
 
-async def _drain(lines: Iterator[str], budget: YieldBudget) -> list[str]:
+async def _drain(
+    lines: Iterator[str | None], budget: YieldBudget
+) -> list[str]:
     out: list[str] = []
     for line in lines:
-        out.append(line)
+        if line is not None:
+            out.append(line)
         await budget.run()
     return out
 

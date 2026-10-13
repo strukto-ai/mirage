@@ -257,10 +257,10 @@ function labelOf(path: PathSpec | null): string {
   return path === null ? '-' : path.rawPath
 }
 
-async function drain(lines: Iterable<string>, budget: YieldBudget): Promise<string[]> {
+async function drain(lines: Iterable<string | null>, budget: YieldBudget): Promise<string[]> {
   const out: string[] = []
   for (const line of lines) {
-    out.push(line)
+    if (line !== null) out.push(line)
     await budget.run()
   }
   return out

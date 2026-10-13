@@ -579,7 +579,7 @@ def _merge_before(
     return c < 0 or (c == 0 and a < b)
 
 
-def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str]:
+def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str | None]:
     """GNU sort's ``mergefps``: merge runs it trusts to be sorted already.
 
     The line emitted next is always the smallest head, a tie going to the
@@ -590,8 +590,9 @@ def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str]:
     ``k`` runs costs ``log k`` comparisons a line. Under ``-u`` a line is
     dropped when it compares equal to the first line of the series it
     would extend, so only adjacent duplicates collapse: ``a b a`` stays
-    three lines. Lines come one at a time, so a caller can yield to the
-    loop between them.
+    three lines. Records come one at a time, None standing for one that
+    ``-u`` drops, so a caller can yield to the loop at every record, a long
+    run of duplicates included.
 
     Args:
         runs (list[list[str]]): one record list per input, in operand
@@ -618,6 +619,8 @@ def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str]:
         ):
             yield line
             saved = line
+        else:
+            yield None
         heads[run] += 1
         if heads[run] == len(runs[run]):
             order.pop(0)

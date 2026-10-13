@@ -374,7 +374,8 @@ describe('numeric keys', () => {
 
 // Mirrors TestMergeLines in test_sort_keys.py.
 describe('merged', () => {
-  const merge = (runs: string[][], cfg: SortConfig): string[] => [...merged(runs, cfg)]
+  const merge = (runs: string[][], cfg: SortConfig): string[] =>
+    [...merged(runs, cfg)].filter((line) => line !== null)
 
   it('never reorders a run', () => {
     expect(merge([['b', 'a']], configOf())).toEqual(['b', 'a'])
@@ -422,5 +423,12 @@ describe('merged', () => {
   it('keeps the first line of a key-equal series under unique', () => {
     expect(merge([['x 1'], ['a 1']], configOf({ k: '2,2', u: true }))).toEqual(['x 1'])
     expect(merge([['b'], ['B']], configOf({ f: true, u: true }))).toEqual(['b'])
+  })
+
+  it('hands back every record even when unique drops it', () => {
+    const lines = Array.from({ length: 1000 }, () => 'a')
+    const records = [...merged([lines, lines], configOf({ u: true }))]
+    expect(records).toHaveLength(2000)
+    expect(records.filter((line) => line !== null)).toEqual(['a'])
   })
 })

@@ -59,3 +59,10 @@ def test_a_literal_brace_is_one_character():
 
 def test_no_limit_exceeds_the_budget():
     assert loop_limit(re.compile("")) <= LOOP_BUDGET
+
+
+def test_a_repeat_counts_the_work_inside_each_count():
+    assert loop_limit(re.compile(r"^(?:(?=a{60000})a)*b")) < 10
+    assert loop_limit(re.compile("(?:(?=a{9})a)*b")) < loop_limit(
+        re.compile("(?:a)*b")
+    )

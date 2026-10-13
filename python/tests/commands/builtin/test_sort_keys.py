@@ -34,7 +34,7 @@ def _cfg(key_defs=None, **kw):
 
 
 def _merge(runs, cfg):
-    return list(merged(runs, cfg))
+    return [line for line in merged(runs, cfg) if line is not None]
 
 
 def _lines(text, key_defs=None, **kw):
@@ -575,3 +575,8 @@ class TestMergeLines:
         assert _merge([["b"], ["B"]], _cfg(fold_case=True, unique=True)) == [
             "b"
         ]
+
+    def test_every_record_comes_back_even_when_unique_drops_it(self):
+        records = list(merged([["a"] * 1000, ["a"] * 1000], _cfg(unique=True)))
+        assert len(records) == 2000
+        assert [r for r in records if r is not None] == ["a"]

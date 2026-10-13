@@ -36,6 +36,11 @@ describe('loopLimit', () => {
     expect(loopLimit(/a{x}/)).toBe(loopLimit(/a[{]x}/))
   })
 
+  it('counts the work inside each count of a repeat', () => {
+    expect(loopLimit(new RegExp('^(?:(?=a{60000})a)*b'))).toBeLessThan(10)
+    expect(loopLimit(/(?:(?=a{9})a)*b/)).toBeLessThan(loopLimit(/(?:a)*b/))
+  })
+
   it('never exceeds the budget', () => {
     expect(loopLimit(/(?:)/)).toBeLessThanOrEqual(LOOP_BUDGET)
   })

@@ -13,19 +13,24 @@ class _Shape(NamedTuple):
     """How far a backtracking search of a pattern can branch.
 
     Args:
-        width (int): characters one path matches outside unbounded repeats.
+        width (int): steps one path takes outside unbounded repeats,
+            a lookaround's body included.
         choices (int): paths through alternation and bounded repeats.
         repeats (int): unbounded repeats, each up to one count per
             subject character.
+        scale (int): steps one count of an unbounded repeat takes, at
+            most: a repeated group's whole width, a lookaround inside
+            it included, though the count matches one character.
     """
 
     width: int
     choices: int
     repeats: int
+    scale: int
 
 
-ZERO_WIDTH = _Shape(0, 1, 0)
-ONE_CHAR = _Shape(1, 1, 0)
+ZERO_WIDTH = _Shape(0, 1, 0, 1)
+ONE_CHAR = _Shape(1, 1, 0, 1)
 
 
 class _Reader:
@@ -60,10 +65,11 @@ class _Reader:
             max(b.width for b in branches),
             sum(b.choices for b in branches),
             max(b.repeats for b in branches),
+            max(b.scale for b in branches),
         )
 
     def sequence(self) -> _Shape | None:
-        width, choices, repeats = 0, 1, 0
+        width, choices, repeats, scale = 0, 1, 0, 1
         while (
             self.pos < len(self.source) and self.source[self.pos] not in "|)"
         ):
@@ -76,7 +82,8 @@ class _Reader:
             width += shape.width
             choices *= shape.choices
             repeats += shape.repeats
-        return _Shape(width, choices, repeats)
+            scale = max(scale, shape.scale)
+        return _Shape(width, choices, repeats, scale)
 
     def item(self) -> tuple[_Shape, bool] | None:
         char = self.source[self.pos]
@@ -129,7 +136,7 @@ class _Reader:
         if lookaround:
             if inner.repeats:
                 return None
-            return _Shape(inner.width, inner.choices, 0), False
+            return _Shape(inner.width, inner.choices, 0, inner.scale), False
         fixed = inner.choices == 1 and inner.repeats == 0 and inner.width > 0
         return inner, fixed
 
@@ -190,16 +197,19 @@ class _Reader:
         if source.startswith(("?", "+"), self.pos):
             self.pos += 1
         if high is None:
-            return _Shape(low * shape.width, 1, 1)
-        return _Shape(high * shape.width, high - low + 1, 0)
+            return _Shape(
+                low * shape.width, 1, 1, max(shape.scale, shape.width)
+            )
+        return _Shape(high * shape.width, high - low + 1, 0, shape.scale)
 
 
 def _search_cost(shape: _Shape, length: int, anchored: bool) -> int:
     """The steps a search of one subject can take, at most.
 
     Each start tries every path: up to ``length + 1`` counts per
-    unbounded repeat, times the choices, each path walking its width.
-    An anchored pattern fails at once past its first start.
+    unbounded repeat, times the choices, each path walking its width
+    and each count taking up to ``scale`` steps. An anchored pattern
+    fails at once past its first start.
 
     Args:
         shape (_Shape): the pattern's shape.
@@ -207,7 +217,7 @@ def _search_cost(shape: _Shape, length: int, anchored: bool) -> int:
         anchored (bool): whether only the first start can match.
     """
     counts = math.prod([length + 1] * shape.repeats)
-    path = shape.choices * counts * (shape.width + 2)
+    path = shape.choices * counts * (shape.width + 2) * shape.scale
     return length + 1 + path if anchored else (length + 1) * path
 
 

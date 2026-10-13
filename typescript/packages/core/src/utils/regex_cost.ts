@@ -5,19 +5,22 @@ const FLAGS = /\(\?([ims]*)(?:-([ims]*))?:/y
 const LOOKAROUNDS = ['(?=', '(?!', '(?<=', '(?<!'] as const
 
 /**
- * How far a backtracking search of a pattern can branch: the characters one
- * path matches outside unbounded repeats, the paths through alternation and
- * bounded repeats, and the unbounded repeats, each up to one count per
- * subject character.
+ * How far a backtracking search of a pattern can branch: the steps one path
+ * takes outside unbounded repeats (a lookaround's body included), the paths
+ * through alternation and bounded repeats, the unbounded repeats, each up to
+ * one count per subject character, and the steps one such count takes at
+ * most: a repeated group's whole width, a lookaround inside it included,
+ * though the count matches one character.
  */
 interface Shape {
   width: number
   choices: number
   repeats: number
+  scale: number
 }
 
-const ZERO_WIDTH: Shape = { width: 0, choices: 1, repeats: 0 }
-const ONE_CHAR: Shape = { width: 1, choices: 1, repeats: 0 }
+const ZERO_WIDTH: Shape = { width: 0, choices: 1, repeats: 0, scale: 1 }
+const ONE_CHAR: Shape = { width: 1, choices: 1, repeats: 0, scale: 1 }
 
 /**
  * Read a pattern's source into its search shape, or null for every construct
@@ -49,6 +52,7 @@ class Reader {
       width: Math.max(...branches.map((b) => b.width)),
       choices: branches.reduce((sum, b) => sum + b.choices, 0),
       repeats: Math.max(...branches.map((b) => b.repeats)),
+      scale: Math.max(...branches.map((b) => b.scale)),
     }
   }
 
@@ -56,6 +60,7 @@ class Reader {
     let width = 0
     let choices = 1
     let repeats = 0
+    let scale = 1
     while (this.pos < this.source.length && !'|)'.includes(this.source[this.pos] ?? '')) {
       const item = this.item()
       if (item === null) return null
@@ -64,8 +69,9 @@ class Reader {
       width += shape.width
       choices *= shape.choices
       repeats += shape.repeats
+      scale = Math.max(scale, shape.scale)
     }
-    return { width, choices, repeats }
+    return { width, choices, repeats, scale }
   }
 
   item(): [Shape, boolean] | null {
@@ -101,7 +107,7 @@ class Reader {
     this.pos += 1
     if (lookaround) {
       if (inner.repeats > 0) return null
-      return [{ width: inner.width, choices: inner.choices, repeats: 0 }, false]
+      return [{ ...inner, repeats: 0 }, false]
     }
     return [inner, inner.choices === 1 && inner.repeats === 0 && inner.width > 0]
   }
@@ -165,19 +171,25 @@ class Reader {
     }
     if (!repeatable) return null
     if (source.startsWith('?', this.pos)) this.pos += 1
-    if (high === null) return { width: low * shape.width, choices: 1, repeats: 1 }
-    return { width: high * shape.width, choices: high - low + 1, repeats: 0 }
+    if (high === null)
+      return {
+        width: low * shape.width,
+        choices: 1,
+        repeats: 1,
+        scale: Math.max(shape.scale, shape.width),
+      }
+    return { width: high * shape.width, choices: high - low + 1, repeats: 0, scale: shape.scale }
   }
 }
 
 /**
  * The steps a search of one subject can take, at most: each start tries
  * every path, up to `length + 1` counts per unbounded repeat times the
- * choices, each path walking its width. An anchored pattern fails at once
- * past its first start.
+ * choices, each path walking its width and each count taking up to `scale`
+ * steps. An anchored pattern fails at once past its first start.
  */
 function searchCost(shape: Shape, length: number, anchored: boolean): number {
-  const path = shape.choices * (length + 1) ** shape.repeats * (shape.width + 2)
+  const path = shape.choices * (length + 1) ** shape.repeats * (shape.width + 2) * shape.scale
   return anchored ? length + 1 + path : (length + 1) * path
 }
 
