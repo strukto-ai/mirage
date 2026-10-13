@@ -277,6 +277,53 @@
           }
         }
       ]
+    },
+    {
+      "id": "an_open_file_follows_a_rename_and_outlives_an_unlink",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "h.txt": "hello"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nf = open('/data/tmp', 'w')\nf.write('payload')\nf.flush()\nos.replace('/data/tmp', '/data/final')\nf.write('+more')\nf.close()\nprint(sorted(os.listdir('/data')), open('/data/final').read())\ng = open('/data/h.txt', 'r+')\nos.unlink('/data/h.txt')\nprint(g.read())\ng.write('X')\ng.close()\nprint(os.path.exists('/data/h.txt'))",
+            "js": "const f = std.open('/data/tmp', 'w')\nf.puts('payload')\nf.flush()\nos.rename('/data/tmp', '/data/final')\nf.puts('+more')\nf.close()\nconsole.log(JSON.stringify(os.readdir('/data')[0].filter((n) => n[0] !== '.').sort()), std.open('/data/final', 'r').readAsString())\nconst g = std.open('/data/h.txt', 'r+')\nos.remove('/data/h.txt')\nconsole.log(g.readAsString())\ng.puts('X')\ng.close()\nconsole.log(os.stat('/data/h.txt')[1])",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/tmp', 'w')\nawait f.write('payload')\nawait fs.rename('/data/tmp', '/data/final')\nawait f.write('+more')\nawait f.close()\nconsole.log(JSON.stringify((await fs.readdir('/data')).sort()), await fs.readFile('/data/final', 'utf8'))\nconst g = await fs.open('/data/h.txt', 'r+')\nawait fs.unlink('/data/h.txt')\nconsole.log((await g.read(Buffer.alloc(10), 0, 10, 0)).bytesRead)\nawait g.write('X')\nawait g.close()\nconsole.log(await fs.access('/data/h.txt').then(() => true, () => false))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "['final', 'h.txt'] payload+more\nhello\nFalse\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "[\"final\",\"h.txt\"] payload+more\nhello\n44\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "[\"final\",\"h.txt\"] payload+more\n5\nfalse\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

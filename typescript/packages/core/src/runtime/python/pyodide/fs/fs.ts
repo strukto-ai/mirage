@@ -206,7 +206,8 @@ export class PyodideFs {
       open: this.streamOpen.bind(this),
       close: (stream) => {
         stream.node.opens = Math.max(0, (stream.node.opens ?? 1) - 1)
-        this.settle(this.nodes.pathOf(stream.node))
+        if (stream.node.unlinked === true) this.settle()
+        else this.settle(this.nodes.pathOf(stream.node))
       },
       read: this.streamRead.bind(this),
       write: this.streamWrite.bind(this),
@@ -258,7 +259,7 @@ export class PyodideFs {
     const fields = finalizing || isDevice ? null : changedAttrs(node, attr)
     const size = isDevice ? undefined : attr.size
     if (size !== undefined && size > 0) this.loadContents(node, true)
-    if (fields !== null) {
+    if (fields !== null && node.unlinked !== true) {
       // A link's own attrs go to the link, since the tree resolved to
       // the link node itself and the target's row is not what changed.
       if (this.host.isLink(node.mode)) fields.nofollow = true
@@ -267,8 +268,9 @@ export class PyodideFs {
     // A resize goes as a truncate to the new length. Recording here rather
     // than at close is what makes a bare `os.truncate(path, n)`, which
     // opens no handle at all, reach the mount.
-    if (size !== undefined) this.journal.markTruncate(this.nodes.pathOf(node), size)
-    this.settle(this.nodes.pathOf(node))
+    if (size !== undefined && node.unlinked !== true)
+      this.journal.markTruncate(this.nodes.pathOf(node), size)
+    if (node.unlinked !== true) this.settle(this.nodes.pathOf(node))
     // The chmod that finalizes a create carries the mode the create asked
     // for, so the umask comes off it as it did off the node.
     if (attr.mode !== undefined) node.mode = finalizing ? attr.mode & ~UMASK : attr.mode
@@ -347,6 +349,8 @@ export class PyodideFs {
     if (this.mountOf(from) !== this.mountOf(to)) {
       throw errnoError(this.host, this.errno, 'EXDEV')
     }
+    const replaced = this.nodes.childOf(newDir, newName)
+    if (replaced !== undefined && replaced !== node) this.orphan(replaced)
     this.journal.markRename(from, to)
     this.settle(from, to)
     this.nodes.move(node, newDir, newName)
@@ -354,9 +358,25 @@ export class PyodideFs {
 
   private unlink(parent: FSNode, name: string): void {
     const path = this.nodes.pathOf(parent) + '/' + name
+    const node = this.nodes.childOf(parent, name)
+    if (node !== undefined) this.orphan(node)
     this.journal.markUnlink(path)
     this.settle(path)
     this.nodes.detach(parent, name)
+  }
+
+  /**
+   * A file whose name is about to be removed or replaced. One a stream
+   * has open reads its bytes now, while its path still names it, and from
+   * then on writes nothing to the mount.
+   *
+   * Args:
+   *   node: the file losing its name.
+   */
+  private orphan(node: FSNode): void {
+    if ((node.opens ?? 0) === 0) return
+    this.loadContents(node, node.raw === true)
+    node.unlinked = true
   }
 
   private rmdir(parent: FSNode, name: string): void {
@@ -597,6 +617,7 @@ export class PyodideFs {
     // file ended goes as an append when the file had bytes or the stream
     // appends, and any other write as the bytes it changed, so another
     // writer's bytes elsewhere in the file survive.
+    if (node.unlinked === true) return length
     const path = this.nodes.pathOf(node)
     const appending = (stream.flags & O_APPEND) !== 0
     if (position === used && (used > 0 || appending)) this.journal.markAppend(path, used, written)

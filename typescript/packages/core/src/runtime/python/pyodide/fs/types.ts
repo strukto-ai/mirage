@@ -113,6 +113,9 @@ export interface FSNode {
    * rendering, and how many streams have the node open. */
   raw?: boolean
   opens?: number
+  /** Its name was removed or replaced while open: it keeps its bytes, and
+   * its writes never reach the mount, as POSIX keeps an open inode. */
+  unlinked?: boolean
   /**
    * A symlink's target, verbatim as it was typed. Emscripten's own
    * MEMFS keeps it under this name and `FS.readlink` reads it, so the

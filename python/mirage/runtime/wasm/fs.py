@@ -175,6 +175,9 @@ class FdEntry:
         dirents (list[tuple[str, int]] | None): a dir fd's cached
             listing, filled on the first fd_readdir.
         stat (VFSStat | None): a file's stat at open, for mtime.
+        kept (bytes | None): the bytes its file had when its name was
+            removed or replaced, which it reads from then on and never
+            lands on; None while it has a name.
     """
 
     kind: FdKind
@@ -183,6 +186,7 @@ class FdEntry:
     preopen: bool = False
     dirents: list[tuple[str, int]] | None = None
     stat: VFSStat | None = None
+    kept: bytes | None = None
 
 
 class WasiFs:
@@ -319,27 +323,26 @@ class WasiFs:
             if mode.writable:
                 raise
             return self._open_dir(caller, path, out)
+        # A file the open created or emptied has no row from before it,
+        # so fd_filestat_get answers from the row the open left behind.
+        entry = FdEntry(
+            kind="file",
+            path=path,
+            stat=self._fs.stat_or_none(path) if row is None else row,
+        )
         # Nothing is read at open: the handle fetches what a read lands
         # in. A handle that writes reads the stored bytes, since its
         # writes land on them; a read-only one sees the rendering.
-        handle = FileHandle.opened(
+        entry.handle = FileHandle.opened(
             path,
             None
             if row is None
-            else lambda offset, size: self._fs.read(
-                path, offset=offset, size=size, raw=mode.writable
-            ),
+            else functools.partial(self._fetch, entry, mode.writable),
             size=0 if row is None else row.size,
             writable=mode.writable,
             append=mode.append,
         )
-        # A file the open created or emptied has no row from before it,
-        # so fd_filestat_get answers from the row the open left behind.
-        if row is None:
-            row = self._fs.stat_or_none(path)
-        fd = self._fds.add(
-            FdEntry(kind="file", handle=handle, path=path, stat=row)
-        )
+        fd = self._fds.add(entry)
         self._store(caller, out, pack_u32(fd))
         return OK
 
@@ -355,7 +358,8 @@ class WasiFs:
         self._fds.pop(fd)
         h = entry.handle
         if entry.kind == "file" and h is not None and h.dirty:
-            self._fs.flush(h.path, h.flush_plan())
+            if entry.kept is None:
+                self._fs.flush(entry.path, h.flush_plan())
         return OK
 
     def close_all(self) -> list[str]:
@@ -373,15 +377,17 @@ class WasiFs:
             h = entry.handle
             if entry.kind != "file" or h is None or not h.dirty:
                 continue
+            if entry.kept is not None:
+                continue
             try:
-                self._fs.flush(h.path, h.flush_plan())
+                self._fs.flush(entry.path, h.flush_plan())
             except (
                 OSError,
                 ValueError,
                 NotImplementedError,
                 CrossMountError,
             ) as exc:
-                failures.append(f"{h.path}: {exc}")
+                failures.append(f"{entry.path}: {exc}")
         return failures
 
     def fd_renumber(self, caller: "wasmtime.Caller", fd: int, to: int) -> int:
@@ -620,7 +626,9 @@ class WasiFs:
         path = self._path_arg(caller, dirfd, ptr, length)
         if path is None:
             return EBADF
+        held = self._hold(path)
         self._fs.unlink(path)
+        self._keep(held)
         return OK
 
     def path_create_directory(
@@ -655,7 +663,13 @@ class WasiFs:
         dst = self._path_arg(caller, dst_dirfd, dst_ptr, dst_length)
         if src is None or dst is None:
             return EBADF
+        if src == dst:
+            self._fs.rename(src, dst)
+            return OK
+        held = self._hold(dst)
         self._fs.rename(src, dst)
+        self._keep(held)
+        self._moved(src, dst)
         return OK
 
     # -- stubs and no-ops -------------------------------------------------
@@ -670,8 +684,73 @@ class WasiFs:
     ) -> int:
         return OK
 
-    def _stored(self, path: str, offset: int, size: int | None) -> bytes:
-        return self._fs.read(path, offset=offset, size=size, raw=True)
+    def _fetch(
+        self, entry: FdEntry, raw: bool, offset: int, size: int | None
+    ) -> bytes:
+        """A range of a file fd's bytes: what it kept once its name went,
+        else what is at its path now.
+
+        Args:
+            entry (FdEntry): the fd's entry.
+            raw (bool): read the stored bytes rather than the rendering.
+            offset (int): where the range starts.
+            size (int | None): how many bytes; None reads to the end.
+        """
+        if entry.kept is not None:
+            end = None if size is None else offset + size
+            return entry.kept[offset:end]
+        return self._fs.read(entry.path, offset=offset, size=size, raw=raw)
+
+    def _hold(self, path: str) -> list[tuple[FdEntry, bytes]]:
+        """Read what the file fds open on ``path`` need before its name is
+        removed or replaced; ``_keep`` them once it has gone, as POSIX
+        keeps an open file on its inode.
+
+        Args:
+            path (str): the guest path about to go.
+        """
+        held: list[tuple[FdEntry, bytes]] = []
+        for entry in self._fds.values():
+            h = entry.handle
+            if entry.kind != "file" or h is None or entry.path != path:
+                continue
+            if entry.kept is not None:
+                continue
+            data = b""
+            if h.base is not None:
+                try:
+                    data = self._fetch(entry, h.writable, 0, None)
+                except OSError as err:
+                    logger.warning(
+                        "wasi: keeping %s before it goes failed: %r", path, err
+                    )
+            held.append((entry, data))
+        return held
+
+    @staticmethod
+    def _keep(held: list[tuple[FdEntry, bytes]]) -> None:
+        """Detach the fds ``_hold`` read for, now their name went.
+
+        Args:
+            held (list[tuple[FdEntry, bytes]]): what ``_hold`` returned.
+        """
+        for entry, data in held:
+            entry.kept = data
+
+    def _moved(self, old: str, new: str) -> None:
+        """Follow a rename: an fd open on ``old`` or under it is at ``new``
+        now, so its reads and its writes go there.
+
+        Args:
+            old (str): the guest path the rename took.
+            new (str): the guest path it gave.
+        """
+        under = old.rstrip("/") + "/"
+        for entry in self._fds.values():
+            if entry.preopen or entry.kept is not None:
+                continue
+            if entry.path == old or entry.path.startswith(under):
+                entry.path = new + entry.path[len(old) :]
 
     def _land(self, entry: FdEntry) -> None:
         """Land a file fd's writes now, as fsync(2) does: the mount and
@@ -684,9 +763,11 @@ class WasiFs:
         h = entry.handle
         if entry.kind != "file" or h is None or not h.dirty:
             return
-        self._fs.flush(h.path, h.flush_plan())
-        h.settle(functools.partial(self._stored, h.path))
-        entry.stat = self._fs.stat(h.path)
+        if entry.kept is not None:
+            return
+        self._fs.flush(entry.path, h.flush_plan())
+        h.settle(functools.partial(self._fetch, entry, True))
+        entry.stat = self._fs.stat(entry.path)
 
     def _land_path(self, path: str) -> None:
         """Land the writes of every file fd open on ``path``, which a

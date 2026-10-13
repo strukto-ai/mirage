@@ -14,6 +14,7 @@
 
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { PathSpec } from '../../../types.ts'
 import { WASI, errnoFor } from '../../../errors/wasi.ts'
 import { readdir } from './list.ts'
@@ -34,6 +35,18 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // wasm/errors.py keeps): guests compare against these, so host errno
 // numbering must not leak.
 const ENOENT = WASI.ENOENT
+
+/**
+ * Where an open file is now. A rename made through this engine moves it,
+ * and once its name is removed or replaced it reads the bytes it `kept`
+ * and never lands, as POSIX keeps an open file on its inode.
+ */
+interface Place {
+  path: string
+  kept: Uint8Array | null
+  readable: boolean
+  raw: boolean
+}
 
 /**
  * Hand text to the guest. The engine takes a C string, so text holding
@@ -86,6 +99,7 @@ export function installQuickJsFs(
   files: RuntimeFiles | null,
 ): () => Promise<string[]> {
   const table = new FileTable<FileHandle>()
+  const places = new Map<number, Place>()
   // qjs-libc's fopen opens a directory for reading, and every read of it
   // then fails: it answers nothing and sets the stream's error flag. A
   // read of zero bytes never reaches the stream, so it leaves the flag.
@@ -108,6 +122,37 @@ export function installQuickJsFs(
   const absolute = (handle: QuickJSHandle): string => {
     const path = ctx.getString(handle)
     return path === '' ? '' : resolvePath(path, cwd.virtual)
+  }
+
+  // Read what the files open on `path` need before its name is removed or
+  // replaced; `keep` them once it has gone. A file that cannot read needs
+  // nothing kept, and a read a policy refuses must not refuse the removal.
+  const hold = async (bound: RuntimeFiles, path: string): Promise<[Place, Uint8Array][]> => {
+    const held: [Place, Uint8Array][] = []
+    for (const place of places.values()) {
+      if (place.path !== path || place.kept !== null) continue
+      let data: Uint8Array = new Uint8Array()
+      if (place.readable) {
+        try {
+          data = await bound.read(path, { raw: place.raw })
+        } catch (err) {
+          console.warn(`quickjs: keeping ${path} before it goes failed`, err)
+        }
+      }
+      held.push([place, data])
+    }
+    return held
+  }
+  const keep = (held: [Place, Uint8Array][]): void => {
+    for (const [place, data] of held) place.kept = data
+  }
+  // Follow a rename: a file open on `old` or under it is at `next` now.
+  const moved = (old: string, next: string): void => {
+    const under = `${rstripSlash(old)}/`
+    for (const place of places.values()) {
+      if (place.kept === null && (place.path === old || place.path.startsWith(under)))
+        place.path = next + place.path.slice(old.length)
+    }
   }
 
   // The guest runs on the host's event loop, and a call a RAM mount
@@ -186,6 +231,7 @@ export function installQuickJsFs(
     // create-capable mode would create over content this open never saw.
     let handle: FileHandle
     let directory = false
+    const place: Place = { path, kept: null, readable: mode.readable, raw: mode.writable }
     try {
       let row: VFSStat | null
       try {
@@ -204,16 +250,21 @@ export function installQuickJsFs(
         row === null
           ? null
           : (offset, size) =>
-              bound.read(
-                path,
-                size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
-              ),
+              place.kept !== null
+                ? Promise.resolve(
+                    place.kept.slice(offset, size === null ? undefined : offset + size),
+                  )
+                : bound.read(
+                    place.path,
+                    size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
+                  ),
         { size: row?.size ?? 0, writable: mode.writable, append: mode.append },
       )
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
     }
     const fd = table.add(handle)
+    places.set(fd, place)
     if (directory) directories.add(fd)
     if (!mode.readable) writeOnly.add(fd)
     return ctx.newNumber(fd)
@@ -225,9 +276,12 @@ export function installQuickJsFs(
     unreadable.delete(fd)
     writeOnly.delete(fd)
     failed.delete(fd)
+    const place = places.get(fd)
+    places.delete(fd)
     const file = table.pop(fd)
-    if (file === undefined) return ctx.undefined
-    if (file.dirty && files !== null) await files.flush(file.path, file.flushPlan())
+    if (file === undefined || place === undefined) return ctx.undefined
+    if (file.dirty && files !== null && place.kept === null)
+      await files.flush(place.path, file.flushPlan())
     return ctx.undefined
   })
 
@@ -341,7 +395,9 @@ export function installQuickJsFs(
       if (st.isDir && st.isLink !== true) {
         await files.rmdir(path)
       } else {
+        const held = await hold(files, path)
         await files.unlink(path)
+        keep(held)
       }
       return ctx.newNumber(0)
     } catch (err) {
@@ -382,7 +438,14 @@ export function installQuickJsFs(
     // The dispatcher refuses a pair on different mounts with EXDEV, which this
     // engine numbers -75, as the real engine does.
     try {
+      if (src === dst) {
+        await files.rename(src, dst)
+        return ctx.newNumber(0)
+      }
+      const held = await hold(files, dst)
       await files.rename(src, dst)
+      keep(held)
+      moved(src, dst)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -393,12 +456,13 @@ export function installQuickJsFs(
 
   return async () => {
     const failures: string[] = []
-    for (const file of table.values()) {
-      if (!file.dirty || files === null) continue
+    for (const [fd, place] of places) {
+      const file = table.get(fd)
+      if (file?.dirty !== true || files === null || place.kept !== null) continue
       try {
-        await files.flush(file.path, file.flushPlan())
+        await files.flush(place.path, file.flushPlan())
       } catch (err) {
-        failures.push(`${file.path}: ${err instanceof Error ? err.message : String(err)}`)
+        failures.push(`${place.path}: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
     return failures
