@@ -25,6 +25,7 @@ import { MountMode, PathSpec, VFSName } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
+import { DevicePipe } from '../../core/dev/pipe.ts'
 import { DevVFS } from './dev.ts'
 
 function setupOps(): { dev: DevVFS } {
@@ -387,22 +388,17 @@ it('preserves a reused descriptor when an earlier substitution finishes', async 
   }
 })
 
-it('rejects stale writes and releases after the same session reuses an input', async () => {
+it('rejects stale releases after the same session reuses an input', async () => {
   const dev = new DevVFS()
   await runWithSession(new SessionState({ sessionId: 'owner' }), () => {
-    const [path, oldAllocation] = dev.allocateInput()
-    dev.store.files.delete(path.slice(4))
-    const [newPath, newAllocation] = dev.allocateInput()
+    const [path, oldAllocation] = dev.allocateInput(new DevicePipe(true))
+    dev.releaseInput(path, oldAllocation)
+    const [newPath, newAllocation] = dev.allocateInput(new DevicePipe(true))
     expect(newPath).toBe(path)
-    const data = new TextEncoder().encode('new')
-    dev.setInput(newPath, newAllocation, data)
     dev.store.modified.set(path.slice(4), '2026-09-23T00:00:00Z')
     dev.store.attrs.set(path.slice(4), { mode: 0o600 })
-    expect(() => {
-      dev.setInput(path, oldAllocation, new Uint8Array())
-    }).toThrow()
     dev.releaseInput(path, oldAllocation)
-    expect(dev.store.files.get(path.slice(4))).toEqual(data)
+    expect(dev.store.files.has(path.slice(4))).toBe(true)
     expect(dev.store.modified.get(path.slice(4))).toBe('2026-09-23T00:00:00Z')
     expect(dev.store.attrs.get(path.slice(4))).toEqual({ mode: 0o600 })
     dev.releaseInput(newPath, newAllocation)
@@ -425,8 +421,7 @@ it.each([false, true])(
     const owner = ws.createSession('owner')
     ws.createSession('peer')
     await runWithSession(owner, () => {
-      const [path, allocation] = dev.allocateInput()
-      dev.setInput(path, allocation, new TextEncoder().encode('private'))
+      dev.allocateInput(new DevicePipe(true))
       return Promise.resolve()
     })
     try {

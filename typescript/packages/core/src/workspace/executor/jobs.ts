@@ -17,7 +17,7 @@ import { retainPrograms } from '../../shell/parse/program.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
-import type { ByteSource, ClosedPipe } from '../../io/types.ts'
+import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
@@ -43,7 +43,7 @@ import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionState } from '../session/session.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
-import { failedRead, statementStdin } from './statement.ts'
+import { answerClosed, failedRead, statementStdin } from './statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { inheritTraps } from './traps.ts'
@@ -101,27 +101,13 @@ export async function drained(
       // answers its stdout's closed reader itself (`tee -p`) says what it
       // says and keeps going.
       await sendStderr(sink, io)
-      if (io.closedStdout === null) throw err
-      await answerClosed(sink, io.closedStdout, io, execNode)
+      if (!(await answerClosed(io, (channel, data) => sink.emit(channel, data)))) throw err
+      execNode.exitCode = io.exitCode
     } else await failedRead(io, err, execNode)
   }
   if (io.output !== null) execNode.exitCode = io.exitCode
   await sendStderr(sink, io)
   return [null, io, execNode]
-}
-
-/** Deliver a writer's own answer to its stdout's closed reader. Mirrors Python's _answer_closed. */
-async function answerClosed(
-  sink: JobConsole,
-  closed: ClosedPipe,
-  io: IOResult,
-  execNode: ExecutionNode,
-): Promise<void> {
-  if (closed.stderr.byteLength > 0) await sink.emit(Channel.STDERR, closed.stderr)
-  if (closed.exitCode !== null) {
-    io.exitCode = closed.exitCode
-    execNode.exitCode = closed.exitCode
-  }
 }
 
 /** Write a statement's stderr to its sink, emptying it in the result. Mirrors Python's _send_stderr. */

@@ -17,7 +17,6 @@ from mirage.workspace.executor.builtins.exec.exec import (
     divert_statement,
     handle_exec_command,
     install_exec_redirects,
-    writer_forks,
 )
 
 __all__ = [
@@ -25,5 +24,4 @@ __all__ = [
     "divert_statement",
     "handle_exec_command",
     "install_exec_redirects",
-    "writer_forks",
 ]

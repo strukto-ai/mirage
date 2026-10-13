@@ -16,7 +16,6 @@ import { rekey, underPath } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
-  FileType,
   PathSpec,
   type MoveStrategy,
   type NativeMove,
@@ -24,6 +23,7 @@ import {
   type ReaddirFn,
   type StatFn,
 } from '../../../types.ts'
+import { isFifo } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
 import { backupControl, siblingPath } from '../utils/backup.ts'
 import { DEFAULT_BACKUP_SUFFIX } from '../utils/constants.ts'
@@ -492,7 +492,7 @@ export async function mvGeneric(
       targetExists &&
       !targetIsDir &&
       !sourceLink &&
-      (await isFifo(stat, target))
+      (await targetIsFifo(stat, target))
     ) {
       errors.push(
         `mv: inter-device move failed: '${src.rawPath}' to '${target.rawPath}'; unable to remove target: ${posixPhrase('EPERM')}`,
@@ -590,10 +590,10 @@ export async function mvGeneric(
 }
 
 /** Whether a move's existing target is a pipe (a process substitution's
- * descriptor). Mirrors Python's _is_fifo. */
-async function isFifo(stat: StatFn, target: PathSpec): Promise<boolean> {
+ * descriptor). Mirrors Python's _target_is_fifo. */
+async function targetIsFifo(stat: StatFn, target: PathSpec): Promise<boolean> {
   try {
-    return (await stat(target)).type === FileType.FIFO
+    return isFifo(await stat(target))
   } catch (err) {
     if (!isFsError(err)) throw err
     return false

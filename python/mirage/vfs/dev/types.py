@@ -18,11 +18,10 @@ from mirage.core.dev.pipe import DevicePipe
 
 
 @dataclass
-class DeviceInput:
+class PipeRow:
     owner: str
     allocation: int
-    data: bytes = b""
-    pipe: DevicePipe | None = None
+    pipe: DevicePipe
 
 
 @dataclass
@@ -30,5 +29,5 @@ class DevFileState:
     files: dict[str, bytes] = field(default_factory=dict)
     dirs: set[str] = field(default_factory=lambda: {"/"})
     tombstones: set[str] = field(default_factory=set)
-    inputs: dict[str, DeviceInput] = field(default_factory=dict)
+    inputs: dict[str, PipeRow] = field(default_factory=dict)
     next_allocation: int = 0

@@ -2,6 +2,7 @@ import type * as AsyncContext from '../../utils/async_context.ts'
 import { expect, it, vi } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
 import { SessionState } from '../../workspace/session/session.ts'
+import { DevicePipe } from '../../core/dev/pipe.ts'
 import { DevFiles } from './store.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
@@ -30,13 +31,12 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
   const done = new Promise<void>((resolve) => {
     doneResolve = resolve
   })
-  const secret = new TextEncoder().encode('private')
+  const pipe = new DevicePipe(true)
   const owner = runWithSession(new SessionState({ sessionId: 'owner' }), async () => {
-    const [path, allocation] = files.allocateInput()
-    files.set(path.slice(4), secret)
+    const [path, allocation] = files.allocateInput(pipe)
     readyResolve()
     await done
-    expect(files.get(path.slice(4))).toEqual(secret)
+    expect(files.pipeOf(path.slice(4))).toBe(pipe)
     files.releaseInput(path, allocation)
   })
   await ready
@@ -47,7 +47,7 @@ it('refuses descriptor access when fallback contexts overlap', async () => {
       expect([...files.keys()]).not.toContain('/fd/63')
       expect(() => files.set('/fd/63', new Uint8Array())).toThrow()
       expect(files.delete('/fd/63')).toBe(false)
-      expect(() => files.allocateInput()).toThrow()
+      expect(() => files.allocateInput(new DevicePipe(true))).toThrow()
       return Promise.resolve()
     })
   } finally {

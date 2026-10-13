@@ -122,17 +122,22 @@ def test_dev_store_starts_with_synthetic_files_and_root():
     assert store.modified == {}
 
 
-def test_pipe_row_has_no_byte_buffer():
+@pytest.mark.parametrize(
+    "access,code",
+    [
+        (lambda files, key: files[key], errno.EINVAL),
+        (lambda files, key: files.get(key), errno.EINVAL),
+        (lambda files, key: files.__setitem__(key, b"lost"), errno.EINVAL),
+        (lambda files, key: files.__delitem__(key), errno.EPERM),
+        (lambda files, key: files.pop(key), errno.EPERM),
+    ],
+)
+def test_pipe_row_refuses_byte_access_and_stays(access, code):
     files, key = _with_pipe()
-    for access in (
-        lambda: files[key],
-        lambda: files.get(key),
-        lambda: files.__setitem__(key, b"lost"),
-    ):
-        with pytest.raises(OSError) as caught:
-            access()
-        assert caught.value.errno == errno.EINVAL
-    assert files.state.inputs[key].data == b""
+    with pytest.raises(OSError) as caught:
+        access(files, key)
+    assert caught.value.errno == code
+    assert files.pipe_of(key) is not None
 
 
 def test_pipe_row_is_listed_and_counted_empty():
@@ -142,24 +147,6 @@ def test_pipe_row_is_listed_and_counted_empty():
     assert len(files) == 3
     assert files.items()[-1] == (key, b"")
     assert files.values()[-1] == b""
-
-
-def test_removing_a_pipe_row_is_eperm_and_keeps_it():
-    files, key = _with_pipe()
-    for remove in (lambda: files.__delitem__(key), lambda: files.pop(key)):
-        with pytest.raises(PermissionError) as caught:
-            remove()
-        assert caught.value.errno == errno.EPERM
-    assert files.pipe_of(key) is not None
-
-
-def test_descriptor_row_without_a_pipe_keeps_its_bytes():
-    files = DevFiles("owner")
-    path, allocation = files.allocate_input()
-    files.set_input(path, allocation, b"data")
-    assert files[path[4:]] == b"data"
-    del files[path[4:]]
-    assert path[4:] not in files
 
 
 @pytest.mark.asyncio

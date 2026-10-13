@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -33,7 +33,11 @@ from mirage.shell.descriptors import (
     deliver,
     unreadable_stdin,
 )
-from mirage.shell.helpers import get_parts
+from mirage.shell.helpers import (
+    get_negated_command,
+    get_parts,
+    get_redirects,
+)
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse.names import literal_text
 from mirage.shell.types import NodeType as NT
@@ -266,6 +270,56 @@ def _spelled(word: TSNodeLike) -> str | None:
     if word.type == NT.COMMAND_NAME and word.named_children:
         word = word.named_children[0]
     return literal_text(word)
+
+
+def writer_forks(
+    statement: TSNodeLike | None, session: SessionState, io: IOResult
+) -> bool:
+    """Whether what a statement wrote came from a child bash forks for
+    it, so a pipe closing under the write ends that writer alone: a
+    program or a subshell, redirected or negated too, or a pipeline,
+    whose commands are each a child of their own. A command is judged by
+    what its output names as its producer, what its head ran as
+    (``$cmd``), when it names one.
+
+    Args:
+        statement (TSNodeLike | None): the statement that wrote.
+        session (SessionState): whose functions a name may call.
+        io (IOResult): its result, whose producer names the command.
+    """
+    if statement is None:
+        return False
+    if statement.type == NT.REDIRECTED_STATEMENT:
+        return writer_forks(get_redirects(statement)[0], session, io)
+    if statement.type == NT.NEGATED_COMMAND:
+        return writer_forks(get_negated_command(statement), session, io)
+    if statement.type == NT.PIPELINE:
+        return True
+    words = None if io.producer is None else (io.producer.command,)
+    return forks(statement, session, words)
+
+
+async def answer_closed(
+    io: IOResult, emit: Callable[[Channel, bytes], Awaitable[bool | None]]
+) -> bool:
+    """Deliver a writer's own answer to its stdout's reader going away
+    (``tee -p``), if it has one, rather than SIGPIPE: what it says, and
+    the status it ends with.
+
+    Args:
+        io (IOResult): the writer's result, whose status takes the
+            answer's.
+        emit (Callable[[Channel, bytes], Awaitable[bool | None]]): where
+            what it says goes.
+    """
+    closed = io.closed_stdout
+    if closed is None:
+        return False
+    if closed.stderr:
+        await emit(Channel.STDERR, closed.stderr)
+    if closed.exit_code is not None:
+        io.exit_code = closed.exit_code
+    return True
 
 
 async def finish_statement(

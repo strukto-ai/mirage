@@ -56,13 +56,8 @@ export class DevVFS extends RAMVFS {
     return new DevVFS(this.devices.forSession(owner))
   }
 
-  allocateInput(pipe?: DevicePipe): readonly [string, number] {
+  allocateInput(pipe: DevicePipe): readonly [string, number] {
     return (this.store.files as DevFiles).allocateInput(pipe)
-  }
-
-  setInput(path: string, allocation: number, data: Uint8Array): void {
-    const files = this.store.files as DevFiles
-    files.setInput(path, allocation, data)
   }
 
   releaseInput(path: string, allocation: number): void {

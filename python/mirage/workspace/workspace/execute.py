@@ -251,9 +251,9 @@ async def recurse(
         inner = evaluated_from(node, handed, span)
     explicit_context = opts.pop("context", None)
     session = (
-        opts.get("session")
-        or (explicit_context.session if explicit_context is not None else None)
-        or get_current_session_for(ws.sessions)
+        explicit_context.session
+        if explicit_context is not None
+        else get_current_session_for(ws.sessions)
     )
     if session is None:
         session = ws.sessions.get(

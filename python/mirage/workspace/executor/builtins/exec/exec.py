@@ -45,7 +45,7 @@ from mirage.shell.descriptors import (
     unsupported_descriptor,
 )
 from mirage.shell.errors import ExitSignal
-from mirage.shell.helpers import get_negated_command, get_redirects
+from mirage.shell.helpers import get_redirects
 from mirage.shell.join import shell_join
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
@@ -68,8 +68,9 @@ from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.find_action_dispatch import program_head
 from mirage.workspace.executor.statement import (
     Written,
-    forks,
+    answer_closed,
     record_status,
+    writer_forks,
 )
 from mirage.workspace.executor.traps import clear_traps
 from mirage.workspace.mount import MountRegistry
@@ -642,19 +643,14 @@ async def divert_statement(
                     rest.append((later, more, True))
                 else:
                     await _routed(dispatch, session, later, more, rest)
-            closed = io.closed_stdout
-            if channel == Channel.STDOUT and closed is not None:
-                # The writer answers its stdout's closed reader itself
-                # (`tee -p`).
-                if closed.stderr:
-                    await _routed(
-                        dispatch, session, Channel.STDERR, closed.stderr, rest
-                    )
-                if closed.exit_code is not None:
-                    io.exit_code = closed.exit_code
+            if channel == Channel.STDOUT and await answer_closed(
+                io,
+                lambda said, data: _routed(
+                    dispatch, session, said, data, rest
+                ),
+            ):
                 break
-            producer = None if io.producer is None else io.producer.command
-            if not writer_forks(statement, session, producer):
+            if not writer_forks(statement, session, io):
                 raise ExitSignal(141) from None
             io.exit_code = 141
             break
@@ -674,33 +670,6 @@ async def divert_statement(
     if io.exit_code != earned:
         record_status(session, io.exit_code)
     return rest
-
-
-def writer_forks(
-    statement: TSNodeLike | None, session: SessionState, producer: str | None
-) -> bool:
-    """Whether what a statement wrote came from a child bash forks for
-    it, so a pipe closing under the write ends that writer alone: a
-    program or a subshell, redirected or negated too, or a pipeline,
-    whose commands are each a child of their own. A command is judged by
-    the producer its output names, what its head ran as (``$cmd``), when
-    it names one.
-
-    Args:
-        statement (TSNodeLike | None): the statement that wrote.
-        session (SessionState): whose functions a name may call.
-        producer (str | None): the command the output names as its
-            producer, None for none.
-    """
-    if statement is None:
-        return False
-    if statement.type == NT.REDIRECTED_STATEMENT:
-        return writer_forks(get_redirects(statement)[0], session, producer)
-    if statement.type == NT.NEGATED_COMMAND:
-        return writer_forks(get_negated_command(statement), session, producer)
-    if statement.type == NT.PIPELINE:
-        return True
-    return forks(statement, session, None if producer is None else (producer,))
 
 
 async def _routed(

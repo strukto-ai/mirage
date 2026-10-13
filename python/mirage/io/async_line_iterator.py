@@ -71,9 +71,7 @@ class PipeInput:
         try:
             return await anext(stream)
         finally:
-            closer = getattr(stream, "aclose", None)
-            if closer is not None:
-                await closer()
+            await stream.aclose()
 
     async def aclose(self) -> None:
         """Nothing stays open between reads."""
@@ -244,25 +242,24 @@ class AsyncLineIterator:
                 except StopAsyncIteration:
                     self._exhausted = True
         except BaseException as exc:
-            if self._keeps_open(exc):
-                self._buf = b"".join(parts) + self._buf
-                raise
-            await self._source.aclose()
-            self._buf = b""
-            self._exhausted = True
+            await self._failed(exc, b"".join(parts))
             raise
 
-    def _keeps_open(self, exc: BaseException) -> bool:
-        """Whether a read that ended with ``exc`` leaves the source open,
-        what it had taken put back: a reader's own cancellation on a pipe
-        an ``exec`` keeps, which the next reader goes on reading.
+    async def _failed(self, exc: BaseException, taken: bytes = b"") -> None:
+        """Close the source for good after a failed read, unless it was a
+        reader's own cancellation on a pipe an ``exec`` keeps: that leaves
+        it open for the next reader, with what the read had taken put back.
 
         Args:
             exc (BaseException): what ended the read.
+            taken (bytes): what the read had taken from the buffer.
         """
-        return isinstance(self._source, PipeInput) and isinstance(
+        if isinstance(self._source, PipeInput) and isinstance(
             exc, asyncio.CancelledError
-        )
+        ):
+            self._buf = taken + self._buf
+            return
+        await self.discard()
 
     async def read_chunk(self) -> bytes | None:
         """Hand over what is buffered, else the source's next chunk.
@@ -283,8 +280,7 @@ class AsyncLineIterator:
             self._exhausted = True
             return None
         except BaseException as exc:
-            if not self._keeps_open(exc):
-                await self.discard()
+            await self._failed(exc)
             raise
 
     async def discard(self) -> None:
@@ -304,6 +300,9 @@ class AsyncLineIterator:
                 chunk = await self._next_chunk()
             except StopAsyncIteration:
                 self._exhausted = True
+            except BaseException as exc:
+                await self._failed(exc)
+                raise
             else:
                 self._buf += chunk
                 self._view = None
@@ -363,12 +362,7 @@ class AsyncLineIterator:
                 taken += 1
             return bytes(out), True
         except BaseException as exc:
-            if self._keeps_open(exc):
-                self._buf = bytes(out) + self._buf
-                raise
-            await self._source.aclose()
-            self._buf = b""
-            self._exhausted = True
+            await self._failed(exc, bytes(out))
             raise
 
 

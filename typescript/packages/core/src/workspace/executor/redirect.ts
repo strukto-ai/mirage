@@ -86,7 +86,7 @@ class PipeRecorder extends Recorder {
     private readonly streams: Map<Channel, PathSpec>,
     private readonly forward: Map<Channel, Channel>,
     private readonly sink: JobConsole | null,
-    private readonly live = false,
+    private readonly live: boolean,
   ) {
     super()
   }
@@ -330,6 +330,7 @@ export async function handleRedirect(
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
   const readPaths = new Map<number, string>()
   const piped = new Set<number>()
+  const pipeFiles: FileDescription[] = []
   for (const raw of redirects) {
     const r = expand === undefined ? raw : await expand(raw)
     expanded.push(r)
@@ -432,7 +433,9 @@ export async function handleRedirect(
         if (data instanceof PipeStream) piped.add(r.fd)
         inputs.set(
           r.fd,
-          data instanceof Uint8Array && data.byteLength === 0 && (await isDevice(dispatch, scope))
+          data instanceof Uint8Array &&
+            data.byteLength === 0 &&
+            (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
             ? new DeviceInput()
             : r.fd === 0
               ? data
@@ -453,7 +456,9 @@ export async function handleRedirect(
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
-      const file = new FileDescription(scope, r.append || (await isPipe(dispatch, scope, links)))
+      const pipe = await isPipe(dispatch, scope, links)
+      const file = new FileDescription(scope, r.append || pipe)
+      if (pipe) pipeFiles.push(file)
       file.opened = true
       if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
       files.push(file)
@@ -467,27 +472,25 @@ export async function handleRedirect(
   }
   redirects = expanded
   const streams = new Map<Channel, PathSpec>()
+  const forward = new Map<Channel, Channel>()
   for (const [fd, channel] of [
     [1, Channel.STDOUT],
     [2, Channel.STDERR],
   ] as const) {
-    const file = outputs.get(fd)
-    if (file instanceof FileDescription && (await isPipe(dispatch, file.scope, links)))
-      streams.set(channel, file.scope)
+    const target = outputs.get(fd)
+    if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
+    else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
+    else if (target instanceof FileDescription && pipeFiles.includes(target))
+      streams.set(channel, target.scope)
   }
-  const forward = new Map<Channel, Channel>()
   const live = streams.size > 0 || piped.size > 0
-  if (live) {
-    for (const [fd, channel] of [
-      [1, Channel.STDOUT],
-      [2, Channel.STDERR],
-    ] as const) {
-      const target = outputs.get(fd)
-      if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
-      else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
-    }
-  }
-  const recorder = new PipeRecorder(dispatch, streams, forward, sink ?? null, live)
+  const recorder = new PipeRecorder(
+    dispatch,
+    streams,
+    live ? forward : new Map<Channel, Channel>(),
+    sink ?? null,
+    live,
+  )
   for (const file of files) {
     if (file.source !== null) continue
     for (const [fd, channel] of [
@@ -830,7 +833,7 @@ export async function redirectStdin(
         r.fd,
         scope.virtual === '/dev/stdin'
           ? stdin
-          : (await isDevice(dispatch, scope))
+          : (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
             ? new DeviceInput()
             : new Uint8Array(),
       )
@@ -841,10 +844,9 @@ export async function redirectStdin(
 
 /**
  * Whether an output target is a live pipe, whose writes stream. Only a
- * descriptor path, named or behind a link, is asked: the links are the
- * namespace's own table, followed without a backend call, so an ordinary
- * target costs no round trip. A descriptor no longer there is no pipe, nor is
- * a link loop: the open answers for either. Mirrors Python's _is_pipe.
+ * descriptor path, named or behind a link, is asked, so an ordinary target
+ * costs no round trip; a link loop or a descriptor no longer there is no pipe,
+ * and the open answers for either. Mirrors Python's _is_pipe.
  */
 async function isPipe(
   dispatch: DispatchFn,
@@ -859,28 +861,20 @@ async function isPipe(
     logger.debug(`pipe probe met a link loop at ${scope.rawPath}: ${String(err)}`)
     return false
   }
-  if (!followed.startsWith('/dev/fd/')) return false
-  let stat: unknown
-  try {
-    ;[stat] = await dispatch('stat', scope)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    logger.debug(`pipe probe found nothing at ${scope.rawPath}: ${String(err)}`)
-    return false
-  }
-  return stat instanceof FileStat && stat.type === FileType.FIFO
+  return followed.startsWith('/dev/fd/') && (await statType(dispatch, scope)) === FileType.FIFO
 }
 
-/** Whether a redirect target is a character device (`/dev/null`). */
-async function isDevice(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
+/** What a redirect target is, null when nothing answers there. Mirrors Python's _stat_type. */
+async function statType(dispatch: DispatchFn, scope: PathSpec): Promise<FileType | null> {
   let stat: unknown
   try {
     ;[stat] = await dispatch('stat', scope)
   } catch (err) {
     if (!isFsError(err)) throw err
-    return false
+    logger.debug(`redirect probe found nothing at ${scope.rawPath}: ${String(err)}`)
+    return null
   }
-  return stat instanceof FileStat && stat.type === FileType.CHAR_DEVICE
+  return stat instanceof FileStat ? stat.type : null
 }
 
 /**

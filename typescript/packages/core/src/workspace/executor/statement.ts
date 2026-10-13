@@ -32,7 +32,7 @@ import {
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
-import { getParts } from '../../shell/helpers.ts'
+import { getNegatedCommand, getParts, getRedirects } from '../../shell/helpers.ts'
 import { literalText } from '../../shell/parse/names.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
@@ -217,6 +217,45 @@ function spelled(word: TSNodeLike): string | null {
       ? word.namedChildren[0]
       : word
   return literalText(inner)
+}
+
+/**
+ * Whether what a statement wrote came from a child bash forks for it, so a
+ * pipe closing under the write ends that writer alone: a program or a
+ * subshell, redirected or negated too, or a pipeline, whose commands are each
+ * a child of their own. A command is judged by what its output names as its
+ * producer, what its head ran as (`$cmd`), when it names one. Mirrors
+ * Python's writer_forks.
+ */
+export function writerForks(
+  statement: TSNodeLike | null,
+  session: SessionState,
+  io: IOResult,
+): boolean {
+  if (statement === null) return false
+  if (statement.type === NT.REDIRECTED_STATEMENT)
+    return writerForks(getRedirects(statement)[0], session, io)
+  if (statement.type === NT.NEGATED_COMMAND)
+    return writerForks(getNegatedCommand(statement), session, io)
+  if (statement.type === NT.PIPELINE) return true
+  const producer = io.producer?.command ?? null
+  return forks(statement, session, producer === null ? null : [producer])
+}
+
+/**
+ * Deliver a writer's own answer to its stdout's reader going away (`tee -p`),
+ * if it has one, rather than SIGPIPE: what it says, and the status it ends
+ * with. Mirrors Python's answer_closed.
+ */
+export async function answerClosed(
+  io: IOResult,
+  emit: (channel: Channel, data: Uint8Array) => Promise<unknown>,
+): Promise<boolean> {
+  const closed = io.closedStdout
+  if (closed === null) return false
+  if (closed.stderr.byteLength > 0) await emit(Channel.STDERR, closed.stderr)
+  if (closed.exitCode !== null) io.exitCode = closed.exitCode
+  return true
 }
 
 /**

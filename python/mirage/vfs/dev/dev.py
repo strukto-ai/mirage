@@ -93,13 +93,8 @@ class DevVFS(RAMVFS):
     def for_session(self, owner: str) -> "DevVFS":
         return DevVFS(self._store.for_session(owner))
 
-    def allocate_input(
-        self, pipe: DevicePipe | None = None
-    ) -> tuple[str, int]:
+    def allocate_input(self, pipe: DevicePipe) -> tuple[str, int]:
         return self._store.files.allocate_input(pipe)
-
-    def set_input(self, path: str, allocation: int, data: bytes) -> None:
-        self._store.files.set_input(path, allocation, data)
 
     def release_input(self, path: str, allocation: int) -> None:
         if self._store.files.release_input(path, allocation):

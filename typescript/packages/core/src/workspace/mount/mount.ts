@@ -392,23 +392,27 @@ export class MountEntry {
       : this.vfs
   }
 
+  /** The command I/O over `viewFor(access)`. */
+  private ioFor(access?: SessionAccess): CommandIO {
+    const vfs = this.viewFor(access)
+    return vfs === this.vfs ? this.io : commandIo(vfs)
+  }
+
   /**
-   * The live pipe a read of a scope keyed below the mount takes bytes from,
-   * another task still writing it: a pipe endpoint in a store with them,
-   * whose first byte must not be pulled before its reader asks for it.
-   * Mirrors Python's `live_pipe`.
+   * The live pipe a read of `path` takes bytes from, another task still
+   * writing it: a pipe endpoint in a store with them, whose first byte must
+   * not be pulled before its reader asks for it. Mirrors Python's `live_pipe`.
    */
-  livePipe(scope: PathSpec, access?: SessionAccess): DevicePipe | null {
+  livePipe(path: string, access?: SessionAccess): DevicePipe | null {
     const accessor = this.viewFor(access).accessor
-    return accessor instanceof RAMAccessor ? activePipe(accessor, norm(scope.mountPath)) : null
+    if (!(accessor instanceof RAMAccessor)) return null
+    return activePipe(accessor, norm('/' + mountKey(path, rstripSlash(this.prefix))))
   }
 
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
   glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
-    const vfs = this.viewFor(access)
-    const io = vfs === this.vfs ? this.io : commandIo(vfs)
-    return resolveGlobOf({ ...io, ...(access === undefined ? {} : { access }) })(
-      vfs.accessor,
+    return resolveGlobOf({ ...this.ioFor(access), ...(access === undefined ? {} : { access }) })(
+      this.viewFor(access).accessor,
       [path],
       index,
     )
@@ -1070,10 +1074,7 @@ export class MountEntry {
     context: ExecContext,
     probe: WalkProbe | null,
   ): CommandOpts {
-    const io =
-      this.vfs instanceof DevVFS && context.access !== undefined
-        ? commandIo(this.vfs.forSession(context.access.sessionId))
-        : this.io
+    const io = this.ioFor(context.access)
     return {
       ...(context.admission === undefined ? {} : { admission: context.admission }),
       ...(context.access === undefined ? {} : { access: context.access }),
@@ -1205,11 +1206,9 @@ export class MountEntry {
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
         : cmdOpts
-    const vfs =
-      this.vfs instanceof DevVFS && context.access !== undefined
-        ? this.vfs.forSession(context.access.sessionId)
-        : this.vfs
-    const running = Promise.resolve(cmd.fn(vfs.accessor, paths, texts, runOpts))
+    const running = Promise.resolve(
+      cmd.fn(this.viewFor(context.access).accessor, paths, texts, runOpts),
+    )
     try {
       return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
     } catch (err) {

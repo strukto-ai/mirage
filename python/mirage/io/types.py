@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -43,7 +43,7 @@ class PipeEnd(Protocol):
     """The live pipe a ``PipeStream`` reads (a process substitution's
     endpoint), for a descriptor that reads it on after the stream."""
 
-    def stream(self, path: PathSpec) -> AsyncIterator[bytes]: ...
+    def stream(self, path: PathSpec) -> AsyncGenerator[bytes, None]: ...
 
 
 @dataclass(frozen=True, slots=True)

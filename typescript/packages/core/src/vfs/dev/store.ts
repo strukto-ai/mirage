@@ -32,12 +32,11 @@ function strip(key: string): string {
 // name is tombstoned; the next write stores real bytes, which is GNU's
 // rm-then-redirect recreation as a regular file.
 //
-// A descriptor that holds a pipe has no byte buffer: reading or writing its
-// row as bytes is EINVAL, so an op that forgets its pipe branch fails
-// instead of using bytes no reader sees, and removing the row is EPERM
-// (GNU: `rm /dev/fd/63`) because only the scope that opened it releases it.
-// Membership and listing still see the row, and iteration counts it as
-// empty, a FIFO storing nothing.
+// A descriptor row holds a pipe and no bytes: reading or writing it as bytes
+// is EINVAL, so an op that forgets its pipe branch fails instead of using
+// bytes no reader sees, and removing it is EPERM (GNU: `rm /dev/fd/63`),
+// since only the scope that opened it releases it. Membership and listing
+// still see it, and iteration counts it as empty, a FIFO storing nothing.
 export class DevFiles extends PipeFiles {
   constructor(
     private readonly boundOwner?: string,
@@ -58,15 +57,7 @@ export class DevFiles extends PipeFiles {
 
   pipeOf(key: string): DevicePipe | null {
     const row = this.state.inputs.get(key)
-    return row?.owner === this.owner() ? (row.pipe ?? null) : null
-  }
-
-  private refuseBytes(key: string): void {
-    if (this.pipeOf(key) !== null) throw einval(`/dev${key}`)
-  }
-
-  private refuseRemoval(key: string): void {
-    if (this.pipeOf(key) !== null) throw fsError(`/dev${key}`, 'EPERM')
+    return row?.owner === this.owner() ? row.pipe : null
   }
 
   private owner(): string | null {
@@ -79,35 +70,24 @@ export class DevFiles extends PipeFiles {
       : null
   }
 
-  visibleInputs(): Map<string, Uint8Array> {
+  visibleInputs(): Map<string, DevicePipe> {
     const owner = this.owner()
     return new Map(
       [...this.state.inputs]
         .filter(([, row]) => owner !== null && row.owner === owner)
-        .map(([key, row]) => [key, row.data]),
+        .map(([key, row]) => [key, row.pipe]),
     )
   }
 
-  allocateInput(pipe?: DevicePipe): readonly [string, number] {
+  allocateInput(pipe: DevicePipe): readonly [string, number] {
     const owner = this.owner()
     if (owner === null) throw eacces('/dev/fd')
     let fd = 63
     while (this.state.inputs.has(`/fd/${String(fd)}`)) fd -= 1
     const key = `/fd/${String(fd)}`
     const allocation = this.state.nextAllocation++
-    this.state.inputs.set(key, {
-      owner,
-      allocation,
-      data: new Uint8Array(),
-      ...(pipe === undefined ? {} : { pipe }),
-    })
+    this.state.inputs.set(key, { owner, allocation, pipe })
     return [`/dev${key}`, allocation]
-  }
-
-  setInput(path: string, allocation: number, data: Uint8Array): void {
-    const row = this.state.inputs.get(path.slice(4))
-    if (row?.allocation !== allocation) throw enoent(path)
-    this.set(path.slice(4), data)
   }
 
   releaseInput(path: string, allocation: number): boolean {
@@ -140,8 +120,8 @@ export class DevFiles extends PipeFiles {
 
   override get(key: string): Uint8Array | undefined {
     if (key.startsWith('/fd/')) {
-      this.refuseBytes(key)
-      return this.visibleInputs().get(key)
+      if (this.pipeOf(key) !== null) throw einval(`/dev${key}`)
+      return undefined
     }
     if (this.state.files.has(key)) return this.state.files.get(key)
     const name = strip(key)
@@ -151,11 +131,8 @@ export class DevFiles extends PipeFiles {
 
   override set(key: string, value: Uint8Array): this {
     if (key === '/fd' || key.startsWith('/fd/')) {
-      const row = this.state.inputs.get(key)
-      if (row === undefined || !this.visibleInputs().has(key)) throw enoent(`/dev${key}`)
-      this.refuseBytes(key)
-      this.state.inputs.set(key, { ...row, data: value })
-      return this
+      if (this.pipeOf(key) === null) throw enoent(`/dev${key}`)
+      throw einval(`/dev${key}`)
     }
     const name = strip(key)
     if (this.syntheticActive(name)) return this
@@ -166,9 +143,8 @@ export class DevFiles extends PipeFiles {
 
   override delete(key: string): boolean {
     if (key.startsWith('/fd/')) {
-      if (!this.visibleInputs().has(key)) return false
-      this.refuseRemoval(key)
-      return this.state.inputs.delete(key)
+      if (this.pipeOf(key) === null) return false
+      throw fsError(`/dev${key}`, 'EPERM')
     }
     const name = strip(key)
     if (this.state.files.has(key)) {
@@ -208,8 +184,7 @@ export class DevFiles extends PipeFiles {
       if (this.syntheticActive(name)) yield ['/' + name, this.syntheticBytes(name)]
     }
     yield* this.state.files.entries()
-    for (const [key, data] of this.visibleInputs())
-      yield [key, this.pipeOf(key) === null ? data : new Uint8Array()]
+    for (const key of this.visibleInputs().keys()) yield [key, new Uint8Array()]
   }
 
   override [Symbol.iterator](): MapIterator<[string, Uint8Array]> {

@@ -14,17 +14,16 @@
 
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 
-export interface DeviceInput {
+export interface PipeRow {
   owner: string
   allocation: number
-  data: Uint8Array
-  pipe?: DevicePipe
+  pipe: DevicePipe
 }
 
 export interface DevFileState {
   files: Map<string, Uint8Array>
   dirs: Set<string>
   tombstones: Set<string>
-  inputs: Map<string, DeviceInput>
+  inputs: Map<string, PipeRow>
   nextAllocation: number
 }

@@ -27,11 +27,11 @@ import {
   unsupportedDescriptor,
 } from '../../../../shell/descriptors.ts'
 import { Channel } from '../../../../shell/console/index.ts'
-import { forks, recordStatus, type Written } from '../../statement.ts'
+import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { PathSpec } from '../../../../types.ts'
-import { getNegatedCommand, getRedirects } from '../../../../shell/helpers.ts'
+import { getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -478,15 +478,12 @@ export async function divertStatement(
         if (keptLater) rest.push([later, more, true])
         else await routed(dispatch, session, later, more, rest)
       }
-      const closed = io.closedStdout
-      if (channel === Channel.STDOUT && closed !== null) {
-        // The writer answers its stdout's closed reader itself (`tee -p`).
-        if (closed.stderr.byteLength > 0)
-          await routed(dispatch, session, Channel.STDERR, closed.stderr, rest)
-        if (closed.exitCode !== null) io.exitCode = closed.exitCode
+      if (
+        channel === Channel.STDOUT &&
+        (await answerClosed(io, (said, more) => routed(dispatch, session, said, more, rest)))
+      )
         break
-      }
-      if (!writerForks(statement, session, io.producer?.command ?? null)) throw new ExitSignal(141)
+      if (!writerForks(statement, session, io)) throw new ExitSignal(141)
       io.exitCode = 141
       break
     }
@@ -506,28 +503,6 @@ export async function divertStatement(
   }
   if (io.exitCode !== earned) recordStatus(session, io.exitCode)
   return rest
-}
-
-/**
- * Whether what a statement wrote came from a child bash forks for it, so a
- * pipe closing under the write ends that writer alone: a program or a
- * subshell, redirected or negated too, or a pipeline, whose commands are each
- * a child of their own. A command is judged by the producer its output names
- * (`producer`), what its head ran as (`$cmd`), when it names one. Mirrors
- * Python's writer_forks.
- */
-export function writerForks(
-  statement: TSNodeLike | null,
-  session: SessionState,
-  producer: string | null,
-): boolean {
-  if (statement === null) return false
-  if (statement.type === NT.REDIRECTED_STATEMENT)
-    return writerForks(getRedirects(statement)[0], session, producer)
-  if (statement.type === NT.NEGATED_COMMAND)
-    return writerForks(getNegatedCommand(statement), session, producer)
-  if (statement.type === NT.PIPELINE) return true
-  return forks(statement, session, producer === null ? null : [producer])
 }
 
 /** Adjacent chunks of one stream and one kind joined, in order. */

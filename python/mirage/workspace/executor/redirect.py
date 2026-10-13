@@ -133,7 +133,7 @@ class PipeRecorder(Recorder):
         streams: dict[Channel, PathSpec],
         forward: dict[Channel, Channel],
         sink: JobConsole | None,
-        live: bool = False,
+        live: bool,
     ) -> None:
         super().__init__()
         self.dispatch = dispatch
@@ -477,6 +477,7 @@ async def handle_redirect(
     )
     read_paths: dict[int, str] = {}
     piped: set[int] = set()
+    pipe_files: list[FileDescription] = []
     for raw in redirects:
         r = await expand(raw) if expand is not None else raw
         expanded.append(r)
@@ -582,7 +583,9 @@ async def handle_redirect(
                     piped.add(r.fd)
                 inputs[r.fd] = (
                     DeviceInput()
-                    if data == b"" and await _is_device(dispatch, scope)
+                    if data == b""
+                    and await _stat_type(dispatch, scope)
+                    == FileType.CHAR_DEVICE
                     else data
                     if r.fd == 0
                     else SharedInput(data)
@@ -607,11 +610,10 @@ async def handle_redirect(
                 for fd, path in read_paths.items():
                     if path == scope.virtual:
                         inputs[fd] = emptied
-            file = FileDescription(
-                scope,
-                append=r.append or await _is_pipe(dispatch, scope, links),
-                opened=True,
-            )
+            pipe = await _is_pipe(dispatch, scope, links)
+            file = FileDescription(scope, append=r.append or pipe, opened=True)
+            if pipe:
+                pipe_files.append(file)
             if len(expanded) == len(redirects) and _output_only(name, args):
                 complete_output = file
             files.append(file)
@@ -621,22 +623,22 @@ async def handle_redirect(
                 inputs[fd], outputs[fd] = _Unreadable.TOKEN, file
     redirects = expanded
 
-    streams = {
-        channel: pipe_file.scope
-        for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR))
-        if isinstance(pipe_file := outputs[fd], FileDescription)
-        and await _is_pipe(dispatch, pipe_file.scope, links)
-    }
-    forward = {}
+    streams: dict[Channel, PathSpec] = {}
+    forward: dict[Channel, Channel] = {}
+    for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
+        target = outputs[fd]
+        if target is _TO_STDOUT or target is _TO_STDERR:
+            forward[channel] = (
+                Channel.STDOUT if target is _TO_STDOUT else Channel.STDERR
+            )
+        elif isinstance(target, FileDescription) and any(
+            target is file for file in pipe_files
+        ):
+            streams[channel] = target.scope
     live = bool(streams) or bool(piped)
-    if live:
-        for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
-            target = outputs[fd]
-            if target is _TO_STDOUT:
-                forward[channel] = Channel.STDOUT
-            elif target is _TO_STDERR:
-                forward[channel] = Channel.STDERR
-    recorder = PipeRecorder(dispatch, streams, forward, sink, live)
+    recorder = PipeRecorder(
+        dispatch, streams, forward if live else {}, sink, live
+    )
     for file in files:
         if file.source is None:
             for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
@@ -1093,7 +1095,7 @@ async def redirect_stdin(
                 stdin
                 if scope.virtual == "/dev/stdin"
                 else DeviceInput()
-                if await _is_device(dispatch, scope)
+                if await _stat_type(dispatch, scope) == FileType.CHAR_DEVICE
                 else b""
             )
         else:
@@ -1106,10 +1108,9 @@ async def _is_pipe(
 ) -> bool:
     """Whether an output target is a live pipe, whose writes stream.
 
-    Only a descriptor path, named or behind a link, is asked: the links
-    are the namespace's own table, followed without a backend call, so
-    an ordinary target costs no round trip. A descriptor no longer there
-    is no pipe, nor is a link loop: the open answers for either.
+    Only a descriptor path, named or behind a link, is asked, so an
+    ordinary target costs no round trip; a link loop or a descriptor no
+    longer there is no pipe, and the open answers for either.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -1125,18 +1126,14 @@ async def _is_pipe(
             "pipe probe met a link loop at %s: %s", scope.raw_path, exc
         )
         return False
-    if not followed.startswith("/dev/fd/"):
-        return False
-    try:
-        stat, _ = await dispatch("stat", scope)
-    except FS_ERRORS as exc:
-        logger.debug("pipe probe found nothing at %s: %s", scope.raw_path, exc)
-        return False
-    return isinstance(stat, FileStat) and stat.type == FileType.FIFO
+    return (
+        followed.startswith("/dev/fd/")
+        and await _stat_type(dispatch, scope) == FileType.FIFO
+    )
 
 
-async def _is_device(dispatch: DispatchFn, scope: PathSpec) -> bool:
-    """Whether a redirect target is a character device (``/dev/null``).
+async def _stat_type(dispatch: DispatchFn, scope: PathSpec) -> FileType | None:
+    """What a redirect target is, None when nothing answers there.
 
     Args:
         dispatch (DispatchFn): VFS op dispatcher.
@@ -1146,10 +1143,10 @@ async def _is_device(dispatch: DispatchFn, scope: PathSpec) -> bool:
         stat, _ = await dispatch("stat", scope)
     except FS_ERRORS as exc:
         logger.debug(
-            "stdin device probe failed at %s: %s", scope.raw_path, exc
+            "redirect probe found nothing at %s: %s", scope.raw_path, exc
         )
-        return False
-    return isinstance(stat, FileStat) and stat.type == FileType.CHAR_DEVICE
+        return None
+    return stat.type if isinstance(stat, FileStat) else None
 
 
 async def _open_refusal(

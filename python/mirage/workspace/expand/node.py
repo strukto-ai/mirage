@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from asyncio import Event
 from functools import partial
 
 from mirage.io import IOResult
@@ -129,7 +128,6 @@ async def child_line(
     *,
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
-    cancel: Event | None = None,
 ) -> IOResult:
     """Run a substitution's line in a child shell.
 
@@ -152,12 +150,12 @@ async def child_line(
         call_stack (CallStack | None): the caller's frames.
         span (tuple[int, int] | None): the pair's byte span within the
             node, for a backtick region holding several.
+        stdin (ByteSource | None): the line's stdin, a process
+            substitution's pipe for ``>(...)``.
+        sink (JobConsole | None): where the line writes as it runs.
     """
     session = context.session
-    execute = (
-        execute_fn if cancel is None else partial(execute_fn, cancel=cancel)
-    )
-    return await execute(
+    return await execute_fn(
         text,
         session_id=session.session_id,
         context=context,

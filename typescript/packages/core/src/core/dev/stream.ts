@@ -18,25 +18,13 @@ import { readStream as ramStream } from '../ram/stream.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
 import { ZERO_CHUNK_SIZE } from './constants.ts'
-import { activeDevice, activePipe } from './device.ts'
+import { activeDevice } from './device.ts'
 
-/**
- * Stream a /dev path. A live pipe is bound as the read opens, so a
- * descriptor that holds it reads on after the pipe's path is released.
- * Mirrors Python's read_stream.
- */
-export function readStream(
+export async function* readStream(
   accessor: RAMAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,
-  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const pipe = activePipe(accessor, norm(path.mountPath))
-  if (pipe !== null) return pipe.stream(path, signal)
-  return deviceStream(accessor, path)
-}
-
-async function* deviceStream(accessor: RAMAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) {
     yield* ramStream(accessor, path)

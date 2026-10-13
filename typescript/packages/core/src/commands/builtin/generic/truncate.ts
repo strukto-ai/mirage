@@ -1,6 +1,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { eisdir, enoent, enotdir, isEnotdir, isFsError } from '../../../errors/fs.ts'
+import { classify } from '../../../errors/classify.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
@@ -171,7 +172,7 @@ async function truncateOne(
   try {
     await truncate(path, size, flags.noCreate)
   } catch (err) {
-    if ((err as { code?: unknown }).code !== 'EINVAL') throw err
+    if (classify(err) !== 'EINVAL') throw err
     const label = shellQuoteAlways(path.rawPath === '' ? path.virtual : path.rawPath)
     return `truncate: failed to truncate ${label} at ${String(size)} bytes: ${posixPhrase('EINVAL')}\n`
   }

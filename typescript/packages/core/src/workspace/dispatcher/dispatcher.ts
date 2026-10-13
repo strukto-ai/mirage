@@ -343,36 +343,28 @@ async function sized(mount: MountEntry, path: PathSpec, row: unknown): Promise<u
 /**
  * Pull a stream's first chunk now and answer the stream from there, so a read
  * that fails at its start fails at the call, where the dispatcher handles it, rather
- * than in the hands of whoever pulls it later. Mirrors Python's `_primed`.
+ * than in the hands of whoever pulls it later. A live pipe's first byte may wait
+ * on the very reader about to ask for it, so its read is framed unpulled
+ * (`pull` false). Mirrors Python's `_primed`.
  */
 async function primed(
   stream: AsyncIterable<Uint8Array>,
   report: OpReport | undefined,
+  pull = true,
 ): Promise<AsyncIterable<Uint8Array>> {
   const iterator = stream[Symbol.asyncIterator]()
-  let first: IteratorResult<Uint8Array>
-  try {
-    first = await iterator.next()
-  } catch (err) {
-    await iterator.return?.()
-    throw err
+  let head: Uint8Array[] = []
+  if (pull) {
+    let first: IteratorResult<Uint8Array>
+    try {
+      first = await iterator.next()
+    } catch (err) {
+      await iterator.return?.()
+      throw err
+    }
+    if (first.done !== true) head = [first.value]
   }
-  const rest = resumed(first.done === true ? [] : [first.value], iterator, report)
-  await rest.next()
-  return rest
-}
-
-/**
- * Frame a stream the way `primed` does, its first chunk unpulled: for a live
- * pipe, whose first byte may wait on the very reader about to ask for it, so
- * pulling it here would hold the command until the producer wrote, or forever
- * when the producer waits on the command. Mirrors Python's `_opened`.
- */
-async function opened(
-  stream: AsyncIterable<Uint8Array>,
-  report: OpReport | undefined,
-): Promise<AsyncIterable<Uint8Array>> {
-  const rest = resumed([], stream[Symbol.asyncIterator](), report)
+  const rest = resumed(head, iterator, report)
   await rest.next()
   return rest
 }
@@ -1040,9 +1032,9 @@ export class Dispatcher {
     const [source, records] = await commandRecords((mine) =>
       Promise.resolve([mount.readStream(scope, this.access), mine] as const),
     )
-    const pipe = mount.livePipe(scope, this.access)
+    const pipe = mount.livePipe(scope.virtual, this.access)
     if (pipe !== null) {
-      const live = new PipeStream(await opened(source, call.report), call.path, pipe)
+      const live = new PipeStream(await primed(source, call.report, false), call.path, pipe)
       pipe.readers.add(new WeakRef(live))
       return live
     }
@@ -1231,7 +1223,7 @@ export class Dispatcher {
         // >(cat > f)`), and the pipe orders its own bytes.
         const meetsPipe =
           dst !== null &&
-          [scope, keyed(dst) as PathSpec].some((path) => mount.livePipe(path, this.access) !== null)
+          [p.virtual, dst.virtual].some((path) => mount.livePipe(path, this.access) !== null)
         const keys = meetsPipe
           ? []
           : [...new Set([p.virtual, ...(dst !== null ? [dst.virtual] : [])])]

@@ -1,4 +1,3 @@
-import errno
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.errors.posix import posix_phrase
@@ -217,7 +217,7 @@ async def _truncate_one(
     try:
         await truncate_fn(path, size, flags.no_create)
     except OSError as exc:
-        if exc.errno != errno.EINVAL:
+        if classify(exc) is not FsCondition.EINVAL:
             raise
         label = shell_quote_always(path.raw_path or path.virtual)
         return (

@@ -21,6 +21,7 @@ from mirage.cache.index import IndexConfig
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
+from mirage.core.dev.pipe import DevicePipe
 from mirage.io.types import IOResult
 from mirage.vfs.dev.dev import DevVFS
 from mirage.vfs.ram import RAMVFS
@@ -146,21 +147,18 @@ async def test_process_substitution_cleanup_preserves_reused_descriptor():
         await ws.close()
 
 
-def test_stale_allocation_cannot_write_or_release_reused_input():
+def test_stale_allocation_cannot_release_reused_input():
     dev = DevVFS()
     token = set_current_session(SessionState(session_id="owner"))
     try:
-        path, old_allocation = dev.allocate_input()
-        del dev._store.files[path[4:]]
-        new_path, new_allocation = dev.allocate_input()
+        path, old_allocation = dev.allocate_input(DevicePipe(True))
+        dev.release_input(path, old_allocation)
+        new_path, new_allocation = dev.allocate_input(DevicePipe(True))
         assert new_path == path
-        dev.set_input(new_path, new_allocation, b"new")
         dev._store.modified[path[4:]] = "2026-09-23T00:00:00Z"
         dev._store.attrs[path[4:]] = {"mode": 0o600}
-        with pytest.raises(FileNotFoundError):
-            dev.set_input(path, old_allocation, b"stale")
         dev.release_input(path, old_allocation)
-        assert dev._store.files[path[4:]] == b"new"
+        assert path[4:] in dev._store.files
         assert dev._store.modified[path[4:]] == "2026-09-23T00:00:00Z"
         assert dev._store.attrs[path[4:]] == {"mode": 0o600}
         dev.release_input(new_path, new_allocation)
@@ -190,8 +188,7 @@ async def test_alternate_dev_mount_does_not_cache_session_descriptors(
     ws.create_session("peer")
     token = set_current_session(owner)
     try:
-        path, allocation = dev.allocate_input()
-        dev.set_input(path, allocation, b"private")
+        dev.allocate_input(DevicePipe(True))
     finally:
         reset_current_session(token)
     try:

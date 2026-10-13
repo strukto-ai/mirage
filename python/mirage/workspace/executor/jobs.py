@@ -32,7 +32,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
-from mirage.io.types import ByteSource, ClosedPipe
+from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
@@ -64,7 +64,11 @@ from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
-from mirage.workspace.executor.statement import failed_read, statement_stdin
+from mirage.workspace.executor.statement import (
+    answer_closed,
+    failed_read,
+    statement_stdin,
+)
 from mirage.workspace.executor.traps import inherit_traps
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (
@@ -141,33 +145,13 @@ async def drained(
         # writer that answers its stdout's closed reader itself (`tee
         # -p`) says what it says and keeps going.
         await _send_stderr(sink, io)
-        if io.closed_stdout is None:
+        if not await answer_closed(io, sink.emit):
             raise
-        await _answer_closed(sink, io.closed_stdout, io, exec_node)
+        exec_node.exit_code = io.exit_code
     if io.output is not None:
         exec_node.exit_code = io.exit_code
     await _send_stderr(sink, io)
     return None, io, exec_node
-
-
-async def _answer_closed(
-    sink: JobConsole,
-    closed: ClosedPipe,
-    io: IOResult,
-    exec_node: ExecutionNode,
-) -> None:
-    """Deliver a writer's own answer to its stdout's closed reader.
-
-    Args:
-        sink (JobConsole): where the statement writes.
-        closed (ClosedPipe): the answer.
-        io (IOResult): the statement's result, its status amended.
-        exec_node (ExecutionNode): its record.
-    """
-    if closed.stderr:
-        await sink.emit(Channel.STDERR, closed.stderr)
-    if closed.exit_code is not None:
-        io.exit_code = exec_node.exit_code = closed.exit_code
 
 
 async def _send_stderr(sink: JobConsole, io: IOResult) -> None:

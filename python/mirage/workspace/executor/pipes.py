@@ -49,13 +49,11 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.executor.builtins.exec import (
-    divert_statement,
-    writer_forks,
-)
+from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump
 from mirage.workspace.executor.statement import (
+    answer_closed,
     as_written,
     carry_status,
     errexit_acts,
@@ -67,6 +65,7 @@ from mirage.workspace.executor.statement import (
     recording,
     statement_output,
     statement_stdin,
+    writer_forks,
 )
 from mirage.workspace.executor.traps import (
     end_shell,
@@ -538,16 +537,9 @@ async def handle_subshell(
                 # what it says, a child it forked (a program) dies of it
                 # alone, with 141, and the subshell goes on; the
                 # subshell's own write (a builtin's) ends it below.
-                producer = None if io.producer is None else io.producer.command
-                closed = io.closed_stdout
-                if closed is not None:
-                    if closed.stderr and sink is not None:
-                        await sink.emit(Channel.STDERR, closed.stderr)
-                    if closed.exit_code is not None:
-                        io.exit_code = closed.exit_code
-                elif not writer_forks(child, session, producer):
-                    raise
-                else:
+                if sink is None or not await answer_closed(io, sink.emit):
+                    if not writer_forks(child, session, io):
+                        raise
                     io.exit_code = 141
                 record_status(session, io.exit_code)
             merged_io = await merged_io.merge(io)

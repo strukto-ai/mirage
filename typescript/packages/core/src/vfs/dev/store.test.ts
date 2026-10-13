@@ -143,11 +143,15 @@ describe('DevStore', () => {
 })
 
 describe('DevFiles descriptor rows', () => {
-  it('pipe row has no byte buffer', () => {
+  const refusals: [string, (files: DevFiles, key: string) => unknown, string][] = [
+    ['get', (files, key) => files.get(key), 'EINVAL'],
+    ['set', (files, key) => files.set(key, new Uint8Array([1])), 'EINVAL'],
+    ['delete', (files, key) => files.delete(key), 'EPERM'],
+  ]
+  it.each(refusals)('a pipe row refuses %s as bytes and stays', (_op, access, code) => {
     const [files, key] = withPipe()
-    expect(codeOf(() => files.get(key))).toBe('EINVAL')
-    expect(codeOf(() => files.set(key, new Uint8Array([1])))).toBe('EINVAL')
-    expect(files.state.inputs.get(key)?.data.byteLength).toBe(0)
+    expect(codeOf(() => access(files, key))).toBe(code)
+    expect(files.pipeOf(key)).not.toBeNull()
   })
 
   it('pipe row is listed and counted empty', () => {
@@ -157,21 +161,6 @@ describe('DevFiles descriptor rows', () => {
     expect(files.size).toBe(3)
     expect([...files.entries()].at(-1)).toEqual([key, new Uint8Array()])
     expect([...files.values()].at(-1)).toEqual(new Uint8Array())
-  })
-
-  it('removing a pipe row is EPERM and keeps it', () => {
-    const [files, key] = withPipe()
-    expect(codeOf(() => files.delete(key))).toBe('EPERM')
-    expect(files.pipeOf(key)).not.toBeNull()
-  })
-
-  it('descriptor row without a pipe keeps its bytes', () => {
-    const files = new DevFiles('owner')
-    const [path, allocation] = files.allocateInput()
-    files.setInput(path, allocation, new Uint8Array([7]))
-    expect(files.get(path.slice(4))).toEqual(new Uint8Array([7]))
-    expect(files.delete(path.slice(4))).toBe(true)
-    expect(files.has(path.slice(4))).toBe(false)
   })
 
   it.each([

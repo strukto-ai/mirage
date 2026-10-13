@@ -23,8 +23,9 @@ import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/st
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { divertStatement, writerForks } from './builtins/exec/index.ts'
+import { divertStatement } from './builtins/exec/index.ts'
 import {
+  answerClosed,
   asWritten,
   carryStatus,
   errexitActs,
@@ -36,6 +37,7 @@ import {
   recording,
   statementOutput,
   statementStdin,
+  writerForks,
 } from './statement.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
@@ -525,13 +527,13 @@ export async function handleSubshell(
         // forked (a program) dies of it alone, with 141, and the subshell goes
         // on; the subshell's own write (a builtin's) ends it below.
         if (!(err instanceof PipeClosed)) throw err
-        const closed = io.closedStdout
-        if (closed !== null) {
-          if (closed.stderr.byteLength > 0 && sink !== null)
-            await sink.emit(Channel.STDERR, closed.stderr)
-          if (closed.exitCode !== null) io.exitCode = closed.exitCode
-        } else if (!writerForks(child, session, io.producer?.command ?? null)) throw err
-        else io.exitCode = 141
+        if (
+          sink === null ||
+          !(await answerClosed(io, (channel, data) => sink.emit(channel, data)))
+        ) {
+          if (!writerForks(child, session, io)) throw err
+          io.exitCode = 141
+        }
         recordStatus(session, io.exitCode)
       }
       mergedIo = await mergedIo.merge(io)

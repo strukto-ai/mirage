@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from asyncio import Event
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
@@ -19,7 +18,6 @@ class ProcessSubLine(Protocol):
         *,
         stdin: ByteSource | None = None,
         sink: JobConsole | None = None,
-        cancel: Event | None = None,
     ) -> IOResult: ...
 
 

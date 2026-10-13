@@ -82,12 +82,8 @@ export class RAMVFS extends BaseVFS {
     return devAwareStat(this.accessor, path, index)
   }
 
-  override readStream(
-    path: PathSpec,
-    index?: IndexCacheStore,
-    signal?: AbortSignal,
-  ): AsyncIterable<Uint8Array> {
-    return devAwareStream(this.accessor, path, index, signal)
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return devAwareStream(this.accessor, path, index)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

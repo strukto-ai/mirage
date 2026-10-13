@@ -17,32 +17,21 @@ from collections.abc import AsyncIterator
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.constants import ZERO_CHUNK_SIZE
-from mirage.core.dev.device import active_device, active_pipe
+from mirage.core.dev.device import active_device
 from mirage.core.ram.stream import read_stream as ram_read_stream
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-def read_stream(
+async def read_stream(
     accessor: RAMAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
 ) -> AsyncIterator[bytes]:
     """Stream a /dev path.
 
-    A live pipe is bound as the read opens, so a descriptor that holds it
-    reads on after the pipe's path is released. ``/dev/null`` yields
-    nothing. ``/dev/zero`` yields a fixed zero chunk forever and stops the
-    moment the reader stops iterating, so nothing is materialized. A
-    recreated real file streams normally.
+    ``/dev/null`` yields nothing. ``/dev/zero`` yields a fixed zero chunk
+    forever and stops the moment the reader stops iterating, so nothing
+    is materialized. A recreated real file streams normally.
     """
-    pipe = active_pipe(accessor, norm(path.mount_path))
-    if pipe is not None:
-        return pipe.stream(path)
-    return _device_stream(accessor, path, index)
-
-
-async def _device_stream(
-    accessor: RAMAccessor, path: PathSpec, index: IndexCacheStore
-) -> AsyncIterator[bytes]:
     device = active_device(accessor, norm(path.mount_path))
     if device is None:
         async for chunk in ram_read_stream(accessor, path, index):

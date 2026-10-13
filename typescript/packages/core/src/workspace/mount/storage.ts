@@ -14,8 +14,8 @@
 
 import type { BaseVFS } from '../../vfs/base.ts'
 import { enotsup, fsError } from '../../errors/fs.ts'
-import { PathSpec, WritePolicy } from '../../types.ts'
-import { mountKey, stripMount, underPath } from '../../utils/key_prefix.ts'
+import { type PathSpec, WritePolicy } from '../../types.ts'
+import { stripMount, underPath } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { SessionAccess } from '../../view/types.ts'
 import type { MountRegistry } from './registry.ts'
@@ -92,15 +92,7 @@ export function makeCheckUnlink(
 ): (path: PathSpec) => void {
   return (path: PathSpec): void => {
     const owner = registry.tryMountFor(path.virtual)
-    const live = owner?.livePipe(
-      new PathSpec({
-        virtual: path.virtual,
-        directory: path.directory,
-        vfsPath: mountKey(path.virtual, rstripSlash(owner.prefix)),
-      }),
-      access,
-    )
-    if (live != null) throw fsError(path, 'EPERM')
+    if (owner?.livePipe(path.virtual, access) != null) throw fsError(path, 'EPERM')
     for (const entry of registry.allMounts()) {
       if (
         entry.write === WritePolicy.CONDITIONAL &&

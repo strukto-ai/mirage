@@ -57,7 +57,6 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
-    FileType,
     MoveStrategy,
     NativeMove,
     PathSpec,
@@ -66,6 +65,7 @@ from mirage.types import (
     StatFn,
 )
 from mirage.utils.key_prefix import under_path
+from mirage.utils.stat_view import is_fifo
 
 _logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ async def _entry_gone(
     return not children
 
 
-async def _is_fifo(stat: StatFn, target: PathSpec) -> bool:
+async def _target_is_fifo(stat: StatFn, target: PathSpec) -> bool:
     """Whether a move's existing target is a pipe (a process
     substitution's descriptor).
 
@@ -174,7 +174,7 @@ async def _is_fifo(stat: StatFn, target: PathSpec) -> bool:
     except FS_ERRORS as exc:
         _logger.debug("mv: target %s gave no stat: %s", target.virtual, exc)
         return False
-    return info.type == FileType.FIFO
+    return is_fifo(info)
 
 
 async def _remove_entries(
@@ -601,7 +601,7 @@ async def mv_generic(
             and target_exists
             and not target_is_dir
             and not source_link
-            and await _is_fifo(stat, target)
+            and await _target_is_fifo(stat, target)
         ):
             # A move across mounts removes the target before it copies,
             # and a pipe cannot be removed: GNU stops there and the source

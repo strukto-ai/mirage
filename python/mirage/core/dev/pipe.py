@@ -14,7 +14,7 @@
 
 import asyncio
 import weakref
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 from mirage.errors.fs import ebadf
 from mirage.io.pipe import BytePipe
@@ -65,7 +65,7 @@ class DevicePipe:
                 remaining -= len(chunk)
         return b"".join(chunks)
 
-    async def stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+    async def stream(self, path: PathSpec) -> AsyncGenerator[bytes, None]:
         if not self.readable:
             raise ebadf(path)
         while chunk := await self._take(None):

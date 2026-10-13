@@ -190,45 +190,32 @@ async def _sized(mount: MountEntry, path: PathSpec, row: Any) -> Any:
 
 
 async def _primed(
-    stream: AsyncIterator[bytes], report: OpReport | None
+    stream: AsyncIterator[bytes], report: OpReport | None, pull: bool = True
 ) -> AsyncIterator[bytes]:
     """Pull a stream's first chunk now and answer the stream from there.
 
     A read that fails at its start (a missing file, a refused request)
     then fails at the call, where the dispatcher handles it, rather than in
-    the hands of whoever pulls the stream later.
+    the hands of whoever pulls the stream later. A live pipe's first byte
+    may wait on the very reader about to ask for it, so its read is framed
+    unpulled.
 
     Args:
         stream (AsyncIterator[bytes]): the streamed read.
         report (OpReport | None): the caller's report.
+        pull (bool): pull the first chunk now; False for a live pipe.
     """
     iterator = stream.__aiter__()
-    try:
-        head = [await iterator.__anext__()]
-    except StopAsyncIteration:
-        head = []
-    except BaseException:
-        await close_quietly(iterator)
-        raise
+    head: list[bytes] = []
+    if pull:
+        try:
+            head = [await iterator.__anext__()]
+        except StopAsyncIteration:
+            head = []
+        except BaseException:
+            await close_quietly(iterator)
+            raise
     resumed = _resumed(head, iterator, report)
-    await resumed.__anext__()
-    return resumed
-
-
-async def _opened(
-    stream: AsyncIterator[bytes], report: OpReport | None
-) -> AsyncIterator[bytes]:
-    """Frame a stream the way ``_primed`` does, its first chunk unpulled.
-
-    For a live pipe, whose first byte may wait on the very reader about
-    to ask for it: pulling it here would hold the command until the
-    producer wrote, or forever when the producer waits on the command.
-
-    Args:
-        stream (AsyncIterator[bytes]): the streamed read.
-        report (OpReport | None): the caller's report.
-    """
-    resumed = _resumed([], stream.__aiter__(), report)
     await resumed.__anext__()
     return resumed
 
@@ -1387,7 +1374,7 @@ class Dispatcher:
         pipe = mount.live_pipe(call.path.virtual)
         if pipe is not None:
             live = PipeStream(
-                await _opened(stream, call.report), call.path, pipe
+                await _primed(stream, call.report, pull=False), call.path, pipe
             )
             pipe.readers.add(live)
             return live
