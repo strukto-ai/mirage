@@ -20,14 +20,15 @@ export const CHUNK_SIZE = 16 * 1024
 /**
  * Split even a single RAM/cache blob; an abort closes the producer and wins
  * over a stalled pull. Unless `split`, each pull passes through whole, as its
- * producer wrote it.
+ * producer wrote it. `check` runs with the budget (a deadline).
  */
 export async function* chunks(
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,
   split = true,
+  check?: () => void,
 ): AsyncIterableIterator<Uint8Array> {
-  const budget = new YieldBudget(signal)
+  const budget = new YieldBudget(signal, check)
   const piece = split ? CHUNK_SIZE : Number.POSITIVE_INFINITY
   if (source instanceof Uint8Array) {
     for (let offset = 0; offset < source.byteLength; offset += piece) {

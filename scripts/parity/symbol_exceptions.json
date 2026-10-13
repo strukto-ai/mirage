@@ -683,6 +683,11 @@
     "ArgumentAction": "TypeScript names the action string union; Python writes the same Literal union on Argument fields and constructor parameters.",
     "Nargs": "TypeScript names the arity union; Python writes the same integer and Literal union on Argument fields and constructor parameters."
    }
+  },
+  "commands/builtin/utils/limit": {
+   "typescript_only": {
+    "deadlineCheck": "A JavaScript generator cannot be cancelled from outside, so a TypeScript scan inside one pull checks the invocation's deadline itself; Python's with_timeout cancels the pull, and the scan stops at its next await."
+   }
   }
  }
 }

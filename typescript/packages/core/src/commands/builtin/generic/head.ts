@@ -20,8 +20,9 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { asyncChain } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
-import { truncateStream } from '../utils/limit.ts'
+import { deadlineCheck, truncateStream } from '../utils/limit.ts'
 import { splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -63,9 +64,11 @@ function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
  * Bytes (`bytesMode`): positive = first N bytes, negative = all but the last N
  * bytes, 0 = nothing. Lines (`lines`): positive = first N lines, negative = all
  * but the last N lines, 0 = nothing. A final line without a trailing newline is
- * preserved as-is (no newline is appended). head takes its input whole and
- * writes the producer's chunks on, so a line count yields to timers and the
- * abort every 64 lines, and a held line split across chunks is joined once.
+ * preserved as-is (no newline is appended). head takes its input whole, writes
+ * the producer's chunks on and may be called outside the factory's guard, so
+ * each pull races the abort and checks `overdue` (the invocation's deadline),
+ * and a line count checks both and yields to timers every 64 lines. A held
+ * line split across chunks is joined once.
  */
 async function* headStream(
   source: AsyncIterable<Uint8Array>,
@@ -73,12 +76,14 @@ async function* headStream(
   bytesMode: number | null,
   zeroTerminated = false,
   signal?: AbortSignal,
+  overdue?: () => void,
 ): AsyncIterable<Uint8Array> {
+  const pulls = chunks(source, signal, false, overdue)
   if (bytesMode !== null) {
     if (bytesMode === 0) return
     if (bytesMode > 0) {
       let remaining = bytesMode
-      for await (const chunk of source) {
+      for await (const chunk of pulls) {
         if (chunk.byteLength >= remaining) {
           if (remaining > 0) yield chunk.subarray(0, remaining)
           return
@@ -90,7 +95,7 @@ async function* headStream(
     }
     const keep = -bytesMode
     let buf: Uint8Array = new Uint8Array(0)
-    for await (const chunk of source) {
+    for await (const chunk of pulls) {
       buf = concat([buf, chunk])
       if (buf.byteLength > keep) {
         yield buf.subarray(0, buf.byteLength - keep)
@@ -101,11 +106,11 @@ async function* headStream(
   }
 
   const delimiter = zeroTerminated ? 0 : NL
-  const budget = new YieldBudget(signal)
+  const budget = new YieldBudget(signal, overdue)
   if (lines >= 0) {
     if (lines === 0) return
     let emitted = 0
-    for await (const chunk of source) {
+    for await (const chunk of pulls) {
       let start = 0
       while (emitted < lines) {
         const nl = chunk.indexOf(delimiter, start)
@@ -130,7 +135,7 @@ async function* headStream(
   const recent: Uint8Array[] = []
   let scanned = 0
   let pending: Uint8Array[] = []
-  for await (const chunk of source) {
+  for await (const chunk of pulls) {
     let start = 0
     let nl = chunk.indexOf(delimiter)
     while (nl >= 0) {
@@ -171,6 +176,7 @@ async function* headMulti(
   zeroTerminated: boolean,
   unread: ReadonlySet<string>,
   signal?: AbortSignal,
+  overdue?: () => void,
 ): AsyncIterable<Uint8Array> {
   for (let i = 0; i < paths.length; i++) {
     const p = paths[i]
@@ -182,7 +188,7 @@ async function* headMulti(
     // A directory opened: its header prints and its read fails.
     if (unread.has(p.virtual)) continue
     const source = stream(p)
-    yield* headStream(source, lines, bytesMode, zeroTerminated, signal)
+    yield* headStream(source, lines, bytesMode, zeroTerminated, signal, overdue)
   }
 }
 
@@ -225,6 +231,7 @@ export async function headGeneric(
         parsed.zeroTerminated,
         unread,
         opts.signal,
+        deadlineCheck(opts),
       ),
       io,
     ]
@@ -237,6 +244,7 @@ export async function headGeneric(
       parsed.bytesMode,
       parsed.zeroTerminated,
       opts.signal,
+      deadlineCheck(opts),
     )
     // -v heads a stdin nobody named with the name it gives `-`.
     const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)

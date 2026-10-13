@@ -15,6 +15,7 @@
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -27,7 +28,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
-import { truncateStream } from '../utils/limit.ts'
+import { deadlineCheck, truncateStream } from '../utils/limit.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 const NL = 0x0a
@@ -114,24 +115,27 @@ async function* reported(
 
 /**
  * Line-process a stream for GNU cat's display flags (-n -E -T -v -s), one
- * write per line, as Python's. cat takes its input whole, so the scan
- * yields to timers and the abort every 64 lines (-s can squeeze a whole RAM
- * read without writing a line), and a line split across chunks is joined
- * once it ends.
+ * write per line, as Python's. cat takes its input whole and may be called
+ * outside the factory's guard, so each pull races the abort, and every pull
+ * and every 64 lines check `overdue` (the invocation's deadline) and yield to
+ * timers: -s can squeeze a whole RAM read, and a ready input need never end a
+ * line, without writing anything. A line split across chunks is joined once
+ * it ends.
  */
 async function* displayLines(
   source: AsyncIterable<Uint8Array>,
   display: CatFlags,
   signal?: AbortSignal,
+  overdue?: () => void,
 ): AsyncIterable<Uint8Array> {
   let lineNo = 0
   let scanned = 0
   let pending: Uint8Array[] = []
   let prevBlank = false
-  const budget = new YieldBudget(signal)
+  const budget = new YieldBudget(signal, overdue)
   const transform = display.showTabs || display.showNonprinting
   const suffix = encodeText(display.showEnds ? '$\n' : '\n')
-  for await (const chunk of source) {
+  for await (const chunk of chunks(source, signal, false, overdue)) {
     let start = 0
     let nl = chunk.indexOf(NL)
     while (nl >= 0) {
@@ -204,12 +208,16 @@ export async function catGeneric(
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')
-    const out: ByteSource = wantsDisplay ? displayLines(merged, display, opts.signal) : merged
+    const out: ByteSource = wantsDisplay
+      ? displayLines(merged, display, opts.signal, deadlineCheck(opts))
+      : merged
     return [out, io]
   }
   try {
     const source = resolveSource(opts.stdin)
-    const out: ByteSource = wantsDisplay ? displayLines(source, display, opts.signal) : source
+    const out: ByteSource = wantsDisplay
+      ? displayLines(source, display, opts.signal, deadlineCheck(opts))
+      : source
     return [out, new IOResult()]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

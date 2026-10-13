@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from mirage.commands.builtin.generic.cat import (
@@ -42,6 +44,25 @@ async def test_cat_number_lines_chunked_one_byte_at_a_time():
 
     out = await _drain(display_lines(src(), CatFlags(number_lines=True)))
     assert out == b"     1\ta\n     2\tbb\n     3\tccc\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("piece", [b"x", b""], ids=["unended", "empty"])
+async def test_display_lines_lets_a_cancel_into_ready_input(piece):
+    # Every pull is ready and no line ends, so only the scan's own
+    # checkpoint lets the loop run the cancel.
+    async def src():
+        for _ in range(2_000_000):
+            yield piece
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    out = display_lines(src(), CatFlags(number_lines=True))
+    task = asyncio.ensure_future(_drain(out))
+    loop.call_later(0.005, task.cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert loop.time() - start < 1
 
 
 @pytest.mark.asyncio

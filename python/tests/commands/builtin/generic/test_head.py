@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from mirage.commands.builtin.generic.head import head, head_multi
@@ -52,6 +54,25 @@ async def test_head_stops_consuming_stream_after_n_lines():
     chunks = [c async for c in head(src(), n=2)]
     assert b"".join(chunks) == b"a\nb\n"
     assert consumed == [b"a\n", b"b\n"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("piece", [b"x", b""], ids=["unended", "empty"])
+@pytest.mark.parametrize("n", [1, -1])
+async def test_head_lets_a_cancel_into_ready_input(n, piece):
+    # Every pull is ready and no line ends, so only the scan's own
+    # checkpoint lets the loop run the cancel.
+    async def src():
+        for _ in range(2_000_000):
+            yield piece
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    task = asyncio.ensure_future(_drain(head(src(), n=n)))
+    loop.call_later(0.005, task.cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert loop.time() - start < 1
 
 
 class _Tracked:

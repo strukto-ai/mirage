@@ -13,14 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 const YIELD_INTERVAL_MS = 10
 
-/** A per-consumer time budget between opportunities for timers and cancellation. */
+/**
+ * A per-consumer time budget between opportunities for timers and
+ * cancellation. `check` runs beside the signal, for a deadline it does not
+ * carry.
+ */
 export class YieldBudget {
   private nextYield = performance.now() + YIELD_INTERVAL_MS
 
-  constructor(private readonly signal?: AbortSignal) {}
+  constructor(
+    private readonly signal?: AbortSignal,
+    private readonly check?: () => void,
+  ) {}
 
   run(): Promise<void> | undefined {
     this.signal?.throwIfAborted()
+    this.check?.()
     if (performance.now() < this.nextYield) return
     return this.yield()
   }
@@ -30,5 +38,6 @@ export class YieldBudget {
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
     this.nextYield = performance.now() + YIELD_INTERVAL_MS
     this.signal?.throwIfAborted()
+    this.check?.()
   }
 }

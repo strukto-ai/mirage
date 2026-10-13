@@ -224,10 +224,11 @@ async def display_lines(
 ) -> AsyncIterator[bytes]:
     """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
 
-    One write per line. The scan yields to the loop every 64 lines, so a
-    squeeze over a whole RAM read stays cancellable, and a line split
-    across chunks is joined once it ends. Closes ``source`` when it stops,
-    at the end or when its reader stops.
+    One write per line. The scan yields to the loop on every pull and
+    every 64 lines, so a squeeze over a whole RAM read, or a ready input
+    that never ends a line, stays cancellable, and a line split across
+    chunks is joined once it ends. Closes ``source`` when it stops, at the
+    end or when its reader stops.
 
     Args:
         source (ByteSource): the bytes to render.
@@ -243,6 +244,7 @@ async def display_lines(
         pending: list[bytes] = []
         prev_blank = False
         async for chunk in stream:
+            await budget.run()
             start = 0
             end = chunk.find(b"\n")
             while end >= 0:

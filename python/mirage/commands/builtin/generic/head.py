@@ -75,8 +75,9 @@ async def head(
     Closes ``src`` whenever it stops, at its limit, at the end of the
     input, or when its own reader stops, so a read it leaves unfinished
     releases its mount at once rather than when it is collected. It
-    writes the producer's chunks on; a line count yields to the loop every
-    64 lines, and a held line split across chunks is joined once.
+    writes the producer's chunks on; a line count yields to the loop on
+    every pull and every 64 lines, and a held line split across chunks is
+    joined once.
 
     Args:
         src (bytes | AsyncIterator[bytes]): the input.
@@ -118,6 +119,7 @@ async def head(
                 return
             emitted_lines = 0
             async for chunk in stream:
+                await budget.run()
                 start = 0
                 while emitted_lines < target:
                     end = chunk.find(separator, start)
@@ -139,6 +141,7 @@ async def head(
         scanned = 0
         pending: list[bytes] = []
         async for chunk in stream:
+            await budget.run()
             start = 0
             end = chunk.find(separator)
             while end >= 0:

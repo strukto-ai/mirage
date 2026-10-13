@@ -143,6 +143,86 @@ describe('displayLines flags', () => {
     // TextEncoder emits UTF-8, so \u00ff arrives as the two bytes C3 BF.
     expect(await run('\x01\x7f\u00ff\n', { show_nonprinting: true })).toBe('^A^?M-CM-?\n')
   })
+
+  // Every pull is ready and no line ends, so only the scan's own checkpoint
+  // lets the abort timer run.
+  it.each(['x', ''])('lets an abort into a ready input of %j pulls', async (piece) => {
+    const bytes = ENC.encode(piece)
+    async function* ready(): AsyncIterable<Uint8Array> {
+      for (let i = 0; i < 2_000_000; i++) {
+        await Promise.resolve()
+        yield bytes
+      }
+    }
+    const abort = new AbortController()
+    const flags = { number: true }
+    const result = await catGeneric(
+      [],
+      [],
+      { ...opts(), flags, stdin: ready(), signal: abort.signal } as CommandOpts,
+      statFn,
+      () => ready(),
+    )
+    const [stdout] = result ?? [null]
+    const timer = setTimeout(() => {
+      abort.abort()
+    }, 5)
+    try {
+      await expect(materialize(stdout)).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      clearTimeout(timer)
+    }
+  })
+
+  // A lazy output's timeout leaves the signal alone, so a squeeze inside one
+  // whole read checks the invocation's deadline itself.
+  it('stops a squeeze at the command deadline', async () => {
+    const result = await catGeneric(
+      [],
+      [],
+      {
+        ...opts(),
+        flags: { squeeze_blank: true },
+        stdin: ENC.encode('\n'.repeat(20_000_000)),
+        timeoutSeconds: 0.02,
+        command: 'cat',
+      } as CommandOpts,
+      statFn,
+      (p) => fileStream(p.virtual, []),
+    )
+    const [stdout] = result ?? [null]
+    const start = performance.now()
+    await expect(materialize(stdout)).rejects.toMatchObject({ name: 'CommandTimeoutError' })
+    expect(performance.now() - start).toBeLessThan(1000)
+  })
+
+  // A backend cat calls the scan without the factory's guard, so a pull that
+  // stalls must still lose to the abort, and its late line must not print.
+  it('ends a stalled pull at the abort', async () => {
+    async function* stalled(): AsyncIterable<Uint8Array> {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      yield ENC.encode('late\n')
+    }
+    const abort = new AbortController()
+    const result = await catGeneric(
+      [],
+      [],
+      { ...opts(), flags: { number: true }, stdin: stalled(), signal: abort.signal } as CommandOpts,
+      statFn,
+      () => stalled(),
+    )
+    const [stdout] = result ?? [null]
+    const start = performance.now()
+    const timer = setTimeout(() => {
+      abort.abort()
+    }, 5)
+    try {
+      await expect(materialize(stdout)).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      clearTimeout(timer)
+    }
+    expect(performance.now() - start).toBeLessThan(1000)
+  })
 })
 
 it('stats each operand once while retaining its stream', async () => {
