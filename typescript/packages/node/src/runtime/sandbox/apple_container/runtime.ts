@@ -71,7 +71,7 @@ export class AppleContainerRuntime
     stdin: Uint8Array | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, signal)
+    return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, signal !== undefined ? { signal } : {})
   }
 
   /**
@@ -138,7 +138,6 @@ export class AppleContainerRuntime
   }
 
   async runProcess(request: ProcessExecution): Promise<RunResult> {
-    if (request.argv.length === 0) throw new Error('process argv must not be empty')
     return this.execArgv(
       request.argv,
       request.stdin,

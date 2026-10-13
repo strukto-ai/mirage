@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.config import SandboxConfig, require_id
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -31,3 +31,6 @@ class DaytonaConfig(SandboxConfig):
 
     sandbox_id: str
     api_key: str | None = None
+
+    def __post_init__(self) -> None:
+        require_id("daytona", "sandbox_id", self.sandbox_id)

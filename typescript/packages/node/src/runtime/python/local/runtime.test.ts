@@ -293,9 +293,8 @@ describe('LocalRuntime', () => {
     setTimeout(() => {
       ctl.abort()
     }, 100)
-    const result = await pending
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     expect(Date.now() - started).toBeLessThan(5000)
-    expect(result.exitCode).not.toBe(0)
   })
 
   it('stdin larger than the pipe buffer to an early-exiting program is not an error', async () => {

@@ -35,7 +35,6 @@ import './commands/builtin/backends.ts'
 import './commands/builtin/utils/http.ts'
 import './compression_codecs.ts'
 import './mount/sftp.ts'
-import './runtime/sandbox/daytona/runtime.ts'
 import './secrets/constants.ts'
 
 const requireCjs = createRequire(import.meta.url)

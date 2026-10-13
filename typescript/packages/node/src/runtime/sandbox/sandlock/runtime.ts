@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EXTERNAL_COMMANDS } from '@struktoai/mirage-core/runtime/constants'
-import { type ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
@@ -28,6 +28,7 @@ import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_CLI_HINT, SYSTEM_READABLE } from './constants.ts'
+import { closeChildren, runCli } from '../cli.ts'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExecutor {
@@ -69,64 +70,22 @@ export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExe
 
   async runProcess(request: ProcessExecution): Promise<RunResult> {
     request.signal?.throwIfAborted()
-    if (request.argv.length === 0) throw new Error('process argv must not be empty')
     const argv = ['run', ...this.policyArgv(), '--clean-env']
     for (const [key, value] of Object.entries({ ...this.config.env, ...request.env }))
       argv.push('--env', `${key}=${value}`)
     argv.push('--', ...request.argv)
-    return new Promise((resolve, reject) => {
-      // Only host PATH locates the CLI; requested variables go to the confined child.
-      const child = spawn('sandlock', argv, {
-        cwd: request.cwd.virtual,
-        env: { PATH: process.env.PATH },
-        stdio: ['pipe', 'pipe', 'pipe'],
-        signal: request.signal,
-        killSignal: 'SIGKILL',
-      })
-      this.children.add(child)
-      const out: Buffer[] = []
-      const err: Buffer[] = []
-      let failure: Error | undefined
-      child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
-      child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
-      child.on('error', (error: NodeJS.ErrnoException) => {
-        failure = error.code === 'ENOENT' ? new Error(SANDLOCK_CLI_HINT) : error
-      })
-      child.on('close', (code) => {
-        this.children.delete(child)
-        if (failure !== undefined) {
-          reject(failure)
-          return
-        }
-        resolve({
-          stdout: new Uint8Array(Buffer.concat(out)),
-          stderr: err.length ? new Uint8Array(Buffer.concat(err)) : null,
-          exitCode: code ?? 1,
-        })
-      })
-      child.stdin.on('error', (error: NodeJS.ErrnoException) => {
-        // A command may finish without draining stdin, matching communicate().
-        if (error.code !== 'EPIPE') {
-          failure = error
-          child.kill('SIGKILL')
-        }
-      })
-      child.stdin.end(request.stdin)
+    // Only host PATH locates the CLI; requested variables go to the confined child.
+    const { stdout, stderr, code } = await runCli('sandlock', SANDLOCK_CLI_HINT, argv, request.stdin, {
+      cwd: request.cwd.virtual,
+      env: { PATH: process.env.PATH ?? '' },
+      children: this.children,
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
     })
+    return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   }
 
-  override async close(): Promise<void> {
-    await Promise.all(
-      [...this.children].map(
-        (child) =>
-          new Promise<void>((resolve) => {
-            child.once('close', () => {
-              resolve()
-            })
-            child.kill('SIGKILL')
-          }),
-      ),
-    )
+  override close(): Promise<void> {
+    return closeChildren(this.children)
   }
 }
 

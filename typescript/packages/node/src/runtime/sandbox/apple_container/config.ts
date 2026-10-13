@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { nonblank, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 /** How to reach the user's running containers. */
@@ -43,8 +43,4 @@ export function validateAppleContainerConfig(config: AppleContainerConfig): void
       `apple_container containers must map each session to a nonblank id: ${blank.join(', ')}`,
     )
   }
-}
-
-function nonblank(value: unknown): boolean {
-  return typeof value === 'string' && value.trim() !== ''
 }

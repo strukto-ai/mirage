@@ -30,11 +30,14 @@ class DockerRuntime(RemoteSandbox):
     execs lines. The docker CLI is the transport (Docker Desktop,
     colima, or a podman alias all work), so there is no SDK dependency
     and no daemon socket wiring; each line is one `docker exec -i`
-    with the merged environment, the rebased cwd, real stdin, and
+    with the merged environment, the session cwd, real stdin, and
     separated stderr.
 
     Args:
-        options (Any): the RemoteSandbox constructor fields.
+        captures (Sequence[str] | None): commands routed to this runtime.
+        config (DockerConfig | dict[str, Any] | None): how to reach the sandbox.
+        script (Callable[..., Any] | ScriptSource | None): whether the
+            runtime takes a line.
     """
 
     name = "docker"

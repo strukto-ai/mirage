@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass, field
 
-from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.config import SandboxConfig, nonblank
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -48,12 +48,3 @@ class AppleContainerConfig(SandboxConfig):
                 "apple_container containers must map each "
                 "session to a nonblank id: " + ", ".join(blank)
             )
-
-
-def nonblank(value: str) -> bool:
-    """Whether a configured id is a string with something in it.
-
-    Args:
-        value (str): the id as configured.
-    """
-    return isinstance(value, str) and bool(value.strip())

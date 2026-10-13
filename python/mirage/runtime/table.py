@@ -40,7 +40,7 @@ NAMED: dict[str, type[Runtime]] = {
     )
 }
 
-# Sandbox runtimes resolve on first use. Their provider SDKs are heavy
+# Sandbox runtimes resolve on first use. Some provider SDKs are heavy
 # (the daytona client alone pulls in opentelemetry), and importing them
 # eagerly would put that cost on every `import mirage`, so the table
 # holds module paths and imports the class only when the name is built.

@@ -383,22 +383,19 @@ export { HF } from './commands/cli/builtin/hf/index.ts'
 export { HIMALAYA } from './commands/cli/builtin/himalaya/index.ts'
 export { DaytonaRuntime } from './runtime/sandbox/daytona/runtime.ts'
 export { LocalRuntime } from './runtime/python/local/runtime.ts'
-export { DAYTONA_CONFIG_KEYS, type DaytonaConfig } from './runtime/sandbox/daytona/config.ts'
+export type { DaytonaConfig } from './runtime/sandbox/daytona/config.ts'
 export { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
-export { E2B_CONFIG_KEYS, type E2BConfig } from '@struktoai/mirage-core/runtime/sandbox/e2b/config'
+export type { E2BConfig } from '@struktoai/mirage-core/runtime/sandbox/e2b/config'
 export { DockerRuntime } from './runtime/sandbox/docker/runtime.ts'
-export { DOCKER_CONFIG_KEYS, type DockerConfig } from './runtime/sandbox/docker/config.ts'
+export type { DockerConfig } from './runtime/sandbox/docker/config.ts'
 export { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
 export type { SandlockConfig } from './runtime/sandbox/sandlock/config.ts'
 export { SmolvmRuntime } from './runtime/sandbox/smolvm/runtime.ts'
-export { SMOLVM_CONFIG_KEYS, type SmolvmConfig } from './runtime/sandbox/smolvm/config.ts'
+export type { SmolvmConfig } from './runtime/sandbox/smolvm/config.ts'
 export { AppleContainerRuntime } from './runtime/sandbox/apple_container/runtime.ts'
-export {
-  APPLE_CONTAINER_CONFIG_KEYS,
-  type AppleContainerConfig,
-} from './runtime/sandbox/apple_container/config.ts'
+export type { AppleContainerConfig } from './runtime/sandbox/apple_container/config.ts'
 export { SSHRuntime } from './runtime/sandbox/ssh/runtime.ts'
-export { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './runtime/sandbox/ssh/config.ts'
+export type { SSHRuntimeConfig } from './runtime/sandbox/ssh/config.ts'
 export {
   buildVfs,
   knownVfsNames,

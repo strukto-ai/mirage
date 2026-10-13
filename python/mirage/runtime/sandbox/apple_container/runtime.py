@@ -29,7 +29,6 @@ from mirage.runtime.sandbox.apple_container.constants import (
 )
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import run_cli
-from mirage.runtime.sandbox.config import SandboxConfig
 from mirage.runtime.types import ProcessExecution, RunResult
 
 
@@ -55,7 +54,8 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
 
     Args:
         captures (Sequence[str] | None): commands routed to this runtime.
-        config (SandboxConfig | dict[str, Any] | None): container settings.
+        config (AppleContainerConfig | dict[str, Any] | None): container
+            settings.
     """
 
     name = "apple_container"
@@ -65,7 +65,7 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
     def __init__(
         self,
         captures: Sequence[str] | None = None,
-        config: SandboxConfig | dict[str, Any] | None = None,
+        config: AppleContainerConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(captures, config)
         self._running: set[str] = set()
@@ -139,8 +139,6 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
         return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
-        if not request.argv:
-            raise ValueError("process argv must not be empty")
         return await self._exec_argv(
             request.argv,
             request.stdin,

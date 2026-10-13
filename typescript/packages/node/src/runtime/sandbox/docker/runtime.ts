@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
-import { checkMountType } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -31,7 +31,7 @@ import { type CliResult, runCli } from '../cli.ts'
  * execs lines. The docker CLI is the transport (Docker Desktop,
  * colima, or a podman alias all work), so there is no SDK dependency
  * and no daemon socket wiring; each line is one `docker exec -i` with
- * the merged environment, the rebased cwd, real stdin, and separated
+ * the merged environment, the session cwd, real stdin, and separated
  * stderr.
  */
 export class DockerRuntime extends RemoteSandbox<DockerConfig> {
@@ -39,9 +39,7 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
 
   constructor(options: RuntimeOptions<DockerConfig> | Record<string, unknown> = {}) {
     super(options, DOCKER_CONFIG_KEYS)
-    if (!this.config.container) {
-      throw new Error('docker config needs container: the id or name of a running container')
-    }
+    requireId('docker', 'container', this.config.container)
     this.serveMounts(checkMountType('docker', this.config.mountType))
   }
 
@@ -51,7 +49,7 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
     stdin: Uint8Array | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli('docker', DOCKER_CLI_HINT, args, stdin, signal)
+    return runCli('docker', DOCKER_CLI_HINT, args, stdin, signal !== undefined ? { signal } : {})
   }
 
   async connect(): Promise<void> {

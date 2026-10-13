@@ -104,7 +104,10 @@ class E2BRuntime(RemoteSandbox):
     decodes output as text.
 
     Args:
-        options (Any): the RemoteSandbox constructor fields.
+        captures (Sequence[str] | None): commands routed to this runtime.
+        config (E2BConfig | dict[str, Any] | None): how to reach the sandbox.
+        script (Callable[..., Any] | ScriptSource | None): whether the
+            runtime takes a line.
     """
 
     name = "e2b"

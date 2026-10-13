@@ -76,8 +76,11 @@ describe('DockerRuntime', () => {
     await expect(runtime.connect()).rejects.toThrow('not running')
   })
 
-  it('container is required', () => {
+  it('container is required, and not blank', () => {
     expect(() => makeRuntime({ config: {} })).toThrow('container')
+    expect(() => makeRuntime({ config: { container: '  ' } })).toThrow(
+      'docker config needs a nonblank container',
+    )
   })
 
   it('threads cwd, env, stdin, and real stderr through exec', async () => {

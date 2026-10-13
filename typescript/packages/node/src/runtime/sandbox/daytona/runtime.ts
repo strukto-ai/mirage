@@ -14,6 +14,7 @@
 
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { stdinPath, stdinRedirect } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -40,9 +41,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
 
   constructor(options: RuntimeOptions<DaytonaConfig> | Record<string, unknown> = {}) {
     super(options, DAYTONA_CONFIG_KEYS)
-    if (!this.config.sandboxId) {
-      throw new Error('daytona config needs sandboxId: the id of a live sandbox you created')
-    }
+    requireId('daytona', 'sandboxId', this.config.sandboxId)
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.

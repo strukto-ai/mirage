@@ -17,7 +17,7 @@ import { registerRuntime } from '../../table.ts'
 import type { PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { checkMountType } from '../config.ts'
+import { checkMountType, requireId } from '../config.ts'
 import { PTY_MARK, PTY_RAW } from '../constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
@@ -104,9 +104,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
 
   constructor(options: RuntimeOptions<E2BConfig> | Record<string, unknown> = {}) {
     super(options, E2B_CONFIG_KEYS)
-    if (typeof this.config.sandboxId !== 'string' || !this.config.sandboxId.trim()) {
-      throw new Error('e2b config needs a nonblank sandboxId')
-    }
+    requireId('e2b', 'sandboxId', this.config.sandboxId)
     this.serveMounts(checkMountType('e2b', this.config.mountType))
   }
 

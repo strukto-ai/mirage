@@ -14,7 +14,11 @@
 
 from dataclasses import dataclass
 
-from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
+from mirage.runtime.sandbox.config import (
+    SandboxConfig,
+    check_mount_type,
+    require_id,
+)
 from mirage.runtime.types import MountType
 
 
@@ -40,6 +44,5 @@ class E2BConfig(SandboxConfig):
     mount_type: MountType | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.sandbox_id, str) or not self.sandbox_id.strip():
-            raise ValueError("e2b config needs a nonblank sandbox_id")
+        require_id("e2b", "sandbox_id", self.sandbox_id)
         check_mount_type("e2b", self.mount_type)

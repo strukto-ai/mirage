@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
 import shutil
 from collections.abc import Sequence
 from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
+from mirage.runtime.sandbox.cli import Children, close_children, run_cli
 from mirage.runtime.sandbox.sandlock.config import SandlockConfig
 from mirage.runtime.sandbox.sandlock.constants import (
     SANDLOCK_CLI_HINT,
@@ -46,14 +45,10 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
     def __init__(
         self,
         captures: Sequence[str] | None = None,
-        config: RuntimeConfig | dict[str, Any] | None = None,
+        config: SandlockConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(captures, config)
-        # Each running child with the loop it runs on, which alone may
-        # wait for it.
-        self._children: dict[
-            asyncio.subprocess.Process, asyncio.AbstractEventLoop
-        ] = {}
+        self._children: Children = {}
 
     def policy_argv(self) -> list[str]:
         argv: list[str] = []
@@ -81,8 +76,6 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         )
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
-        if not request.argv:
-            raise ValueError("process argv must not be empty")
         cli = shutil.which("sandlock")
         if cli is None:
             raise FileNotFoundError(SANDLOCK_CLI_HINT)
@@ -90,46 +83,17 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         for key, value in {**self.config.env, **request.env}.items():
             argv += ["--env", f"{key}={value}"]
         # Variables belong to the confined child, never the wrapper's loader.
-        proc = await asyncio.create_subprocess_exec(
+        stdout, stderr, code = await run_cli(
             cli,
-            *argv,
-            "--",
-            *request.argv,
+            None,
+            [*argv, "--", *request.argv],
+            request.stdin,
             cwd=request.cwd.virtual,
             env={},
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            children=self._children,
         )
-        self._children[proc] = asyncio.get_running_loop()
-        try:
-            stdout, stderr = await proc.communicate(request.stdin)
-        except asyncio.CancelledError:
-            if proc.returncode is None:
-                proc.kill()
-            await proc.wait()
-            raise
-        finally:
-            self._children.pop(proc, None)
-        return RunResult(
-            stdout=stdout,
-            stderr=stderr or None,
-            exit_code=proc.returncode if proc.returncode is not None else 1,
-        )
+        return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 
     async def close(self) -> None:
-        """Kill every child still running, so none outlives the workspace.
-
-        Only a child on the closing loop is waited for. One a sync
-        ``with`` block left running belongs to the loop that block exits
-        inside, which runs nothing until the close returns; that loop
-        reaps it once the kill lands.
-        """
-        children = list(self._children.items())
-        for child, _ in children:
-            if child.returncode is None:
-                child.kill()
-        loop = asyncio.get_running_loop()
-        await asyncio.gather(
-            *(child.wait() for child, owner in children if owner is loop)
-        )
+        """Kill every child still running, so none outlives the workspace."""
+        await close_children(self._children)

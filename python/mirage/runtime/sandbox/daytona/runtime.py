@@ -36,7 +36,10 @@ class DaytonaRuntime(RemoteSandbox):
     releases the SDK client and never touches the sandbox.
 
     Args:
-        options (Any): the RemoteSandbox constructor fields.
+        captures (Sequence[str] | None): commands routed to this runtime.
+        config (DaytonaConfig | dict[str, Any] | None): how to reach the sandbox.
+        script (Callable[..., Any] | ScriptSource | None): whether the
+            runtime takes a line.
     """
 
     name = "daytona"

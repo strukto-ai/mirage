@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from mirage.runtime.sandbox.cli import run_cli
+from mirage.runtime.sandbox.cli import Children, close_children, run_cli
 
 
 @pytest.mark.asyncio
@@ -52,3 +52,51 @@ async def test_cancelling_a_call_kills_the_child(tmp_path):
     pid = int(pid_file.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
+    # A grandchild holds the output pipes open, so killing the child
+    # alone left the wait running until the grandchild exited.
+    pid_file = tmp_path / "pid"
+    task = asyncio.create_task(
+        run_cli(
+            "sh",
+            None,
+            ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
+            None,
+        )
+    )
+    for _ in range(200):
+        if pid_file.exists() and pid_file.read_text().strip():
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    async with asyncio.timeout(5):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+@pytest.mark.asyncio
+async def test_close_children_kills_every_running_tree(tmp_path):
+    children: Children = {}
+    pid_file = tmp_path / "pid"
+    task = asyncio.create_task(
+        run_cli(
+            "sh",
+            None,
+            ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
+            None,
+            children=children,
+        )
+    )
+    async with asyncio.timeout(5):
+        while not (pid_file.exists() and pid_file.read_text().strip()):
+            await asyncio.sleep(0.01)
+        await close_children(children)
+        _, _, code = await task
+    assert code != 0 and not children
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)

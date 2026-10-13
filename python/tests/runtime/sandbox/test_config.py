@@ -17,6 +17,7 @@ import pytest
 from mirage.runtime.sandbox.config import SandboxConfig
 from mirage.runtime.sandbox.docker import DockerConfig
 from mirage.runtime.sandbox.e2b import E2BConfig
+from mirage.runtime.table import build_runtime
 
 
 def test_coerce_none_gives_defaults():
@@ -44,3 +45,20 @@ def test_coerce_unknown_key_fails_loud():
 def test_coerce_rejects_a_sibling_provider_config():
     with pytest.raises(TypeError, match="container"):
         E2BConfig.coerce(DockerConfig(container="cid-42"))
+
+
+@pytest.mark.parametrize(
+    "runtime, field",
+    [
+        ("docker", "container"),
+        ("smolvm", "machine"),
+        ("ssh", "host"),
+        ("daytona", "sandbox_id"),
+        ("e2b", "sandbox_id"),
+    ],
+)
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_required_id_is_refused(runtime, field, blank):
+    # A blank id would otherwise reach the provider as an empty name.
+    with pytest.raises(ValueError, match=f"{runtime} config needs a nonblank"):
+        build_runtime(runtime, config={field: blank})

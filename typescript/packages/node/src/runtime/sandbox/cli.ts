@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { spawn } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
+import { debuglog } from 'node:util'
+import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 
 export interface CliResult {
   stdout: Uint8Array
@@ -20,35 +22,68 @@ export interface CliResult {
   code: number
 }
 
+/** Where and how `runCli` starts its child. */
+export interface CliOptions {
+  // The working directory; this process's when unset.
+  cwd?: string
+  // The whole environment; this process's when unset.
+  env?: Record<string, string>
+  // Aborting kills the child and everything it started.
+  signal?: AbortSignal
+  // Where the child is kept while it runs, for `closeChildren`.
+  children?: Set<ChildProcess>
+}
+
 /**
- * One sandbox CLI invocation: its output and its exit status. An aborted
- * call kills the child, so a line abandoned to a timeout does not leave the
- * CLI running behind it; a missing CLI rejects with `hint`. EPIPE means the
+ * One process run to its end: its output and its exit status. The child
+ * leads a process group of its own, and an aborted call kills the whole
+ * group: a grandchild left alive holds the output pipes open, so 'close'
+ * would wait until it exited on its own, and the call rejects with an
+ * AbortError once the group is gone. A missing executable rejects with
+ * `hint` when one is given, else with spawn's own error. EPIPE means the
  * command exited without draining its stdin (`head`-like); python's
  * communicate() suppresses the matching BrokenPipeError, so it is not an
  * error here either. Mirrors Python's `run_cli`.
  */
 export function runCli(
   executable: string,
-  hint: string,
+  hint: string | null,
   args: string[],
   stdin: Uint8Array | null,
-  signal?: AbortSignal,
+  options: CliOptions = {},
 ): Promise<CliResult> {
   return new Promise((resolve, reject) => {
+    const { signal, children } = options
     const child = spawn(executable, args, {
+      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
       stdio: ['pipe', 'pipe', 'pipe'],
-      signal,
-      killSignal: 'SIGKILL',
+      detached: process.platform !== 'win32',
     })
+    const abort = (): void => {
+      killTree(child)
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted === true) abort()
+    children?.add(child)
+    const settle = (): void => {
+      signal?.removeEventListener('abort', abort)
+      children?.delete(child)
+    }
     const out: Buffer[] = []
     const err: Buffer[] = []
     child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
     child.on('error', (error: NodeJS.ErrnoException) => {
-      reject(error.code === 'ENOENT' ? new Error(hint) : error)
+      settle()
+      reject(error.code === 'ENOENT' && hint !== null ? new Error(hint) : error)
     })
     child.on('close', (code) => {
+      settle()
+      if (signal?.aborted === true) {
+        reject(makeAbortError(signal))
+        return
+      }
       resolve({
         stdout: new Uint8Array(Buffer.concat(out)),
         stderr: new Uint8Array(Buffer.concat(err)),
@@ -61,4 +96,40 @@ export function runCli(
     if (stdin !== null) child.stdin.write(stdin)
     child.stdin.end()
   })
+}
+
+/**
+ * Kill a child and everything it started: its process group. Windows has
+ * no process group to kill, so only the child goes there. Mirrors Python's
+ * `kill_tree`.
+ */
+export function killTree(child: ChildProcess): void {
+  if (child.pid === undefined || process.platform === 'win32') {
+    child.kill('SIGKILL')
+    return
+  }
+  try {
+    process.kill(-child.pid, 'SIGKILL')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
+    debuglog('mirage')('process group %d has already exited', child.pid)
+  }
+}
+
+/**
+ * Kill every child still running, so none outlives the workspace, and wait
+ * for each to close. Mirrors Python's `close_children`.
+ */
+export async function closeChildren(children: Set<ChildProcess>): Promise<void> {
+  await Promise.all(
+    [...children].map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          child.once('close', () => {
+            resolve()
+          })
+          killTree(child)
+        }),
+    ),
+  )
 }

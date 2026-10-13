@@ -32,7 +32,7 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
     You start the machine yourself; mirage only connects to it and
     execs lines. The smolvm CLI is the transport, so there is no SDK
     dependency and no daemon socket wiring; each line is one `smolvm
-    machine exec` with the merged environment, the rebased cwd, real
+    machine exec` with the merged environment, the session cwd, real
     stdin, and separated stderr.
 
     Unlike a container, the guest runs its own kernel, so the line
@@ -42,7 +42,10 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
     contract every provider in this family carries.
 
     Args:
-        options (Any): the RemoteSandbox constructor fields.
+        captures (Sequence[str] | None): commands routed to this runtime.
+        config (SmolvmConfig | dict[str, Any] | None): how to reach the sandbox.
+        script (Callable[..., Any] | ScriptSource | None): whether the
+            runtime takes a line.
     """
 
     name = "smolvm"
@@ -87,8 +90,6 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
         return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
-        if not request.argv:
-            raise ValueError("process argv must not be empty")
         await self._ensure_connected()
         return await self._exec_argv(
             request.argv,

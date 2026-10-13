@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import errno
 import os
 import shutil
@@ -27,6 +26,7 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.local.config import LocalConfig
+from mirage.runtime.sandbox.cli import Children, close_children, run_cli
 from mirage.runtime.types import (
     ProcessExecution,
     RunArgs,
@@ -116,11 +116,7 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
             self._python = os.path.abspath(resolved)
         else:
             self._python = sys.executable
-        # Each running child with the loop it runs on, which alone may
-        # wait for it.
-        self._children: dict[
-            asyncio.subprocess.Process, asyncio.AbstractEventLoop
-        ] = {}
+        self._children: Children = {}
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
@@ -138,8 +134,6 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         )
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
-        if not request.argv:
-            raise ValueError("process argv must not be empty")
         name = request.argv[0]
         # The session cwd is a workspace path. Running somewhere else
         # instead would point a relative path at the wrong files.
@@ -192,44 +186,17 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         stdin: bytes | None = None,
         cwd: str | None = None,
     ) -> RunResult:
-        proc = await asyncio.create_subprocess_exec(
+        stdout, stderr, code = await run_cli(
             program,
-            *argv,
+            None,
+            argv,
+            stdin,
             cwd=cwd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
             env={**self.config.env, **env},
+            children=self._children,
         )
-        self._children[proc] = asyncio.get_running_loop()
-        try:
-            stdout, stderr = await proc.communicate(input=stdin)
-        except asyncio.CancelledError:
-            if proc.returncode is None:
-                proc.kill()
-            await proc.wait()
-            raise
-        finally:
-            self._children.pop(proc, None)
-        return RunResult(
-            stdout=stdout,
-            stderr=stderr or None,
-            exit_code=proc.returncode if proc.returncode is not None else 1,
-        )
+        return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 
     async def close(self) -> None:
-        """Kill every child still running, so none outlives the workspace.
-
-        Only a child on the closing loop is waited for. One a sync
-        ``with`` block left running belongs to the loop that block exits
-        inside, which runs nothing until the close returns; that loop
-        reaps it once the kill lands.
-        """
-        children = list(self._children.items())
-        for child, _ in children:
-            if child.returncode is None:
-                child.kill()
-        loop = asyncio.get_running_loop()
-        await asyncio.gather(
-            *(child.wait() for child, owner in children if owner is loop)
-        )
+        """Kill every child still running, so none outlives the workspace."""
+        await close_children(self._children)

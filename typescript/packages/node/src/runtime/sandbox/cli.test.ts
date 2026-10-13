@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runCli } from './cli.ts'
+import type { ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { closeChildren, runCli } from './cli.ts'
 
 const DEC = new TextDecoder()
 
@@ -35,11 +39,39 @@ describe('runCli', () => {
   it('kills the child when the call is aborted', async () => {
     const controller = new AbortController()
     const started = Date.now()
-    const run = runCli('sh', 'no sh', ['-c', 'exec sleep 30'], null, controller.signal)
+    const run = runCli('sh', 'no sh', ['-c', 'exec sleep 30'], null, { signal: controller.signal })
     setTimeout(() => {
       controller.abort()
     }, 50)
-    await expect(run).rejects.toThrow()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
     expect(Date.now() - started).toBeLessThan(5000)
+  })
+
+  it('kills what the child started, which holds its pipes open', async () => {
+    const controller = new AbortController()
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const pidFile = join(dir, 'pid')
+    const run = runCli('sh', null, ['-c', `sleep 30 & echo $! > ${pidFile}; wait`], null, {
+      signal: controller.signal,
+    })
+    while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const started = Date.now()
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0)).toThrow()
+  })
+
+  it('closeChildren kills every running tree and waits for it', async () => {
+    const children = new Set<ChildProcess>()
+    const run = runCli('sh', null, ['-c', 'sleep 30 & wait'], null, { children })
+    expect(children.size).toBe(1)
+    const started = Date.now()
+    await closeChildren(children)
+    expect((await run).code).not.toBe(0)
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(children.size).toBe(0)
   })
 })

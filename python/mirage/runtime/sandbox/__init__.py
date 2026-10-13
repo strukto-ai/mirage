@@ -15,7 +15,7 @@
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.config import SandboxConfig
 
-# Providers (daytona, docker, e2b) are not re-exported here: their
-# modules import optional SDKs at load, and the runtime table reaches
-# them by module path. Import a provider from its own package.
+# Providers are not re-exported here: the runtime table reaches them by
+# module path, so none loads until it is built. Import a provider from
+# its own package.
 __all__ = ["RemoteSandbox", "SandboxConfig"]

@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.config import SandboxConfig, require_id
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -32,3 +32,6 @@ class SmolvmConfig(SandboxConfig):
     """
 
     machine: str
+
+    def __post_init__(self) -> None:
+        require_id("smolvm", "machine", self.machine)

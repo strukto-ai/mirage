@@ -16,19 +16,16 @@ import { readFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { resolve } from 'node:path'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
 import { wrapLine } from './constants.ts'
+import type { CliResult } from '../cli.ts'
+import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import type { Client, ClientChannel, ConnectConfig } from 'ssh2'
-
-interface SshResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
-}
 
 function expandHome(p: string): string {
   if (p === '~') return homedir()
@@ -59,9 +56,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
 
   constructor(options: RuntimeOptions<SSHRuntimeConfig> | Record<string, unknown> = {}) {
     super(options, SSH_RUNTIME_CONFIG_KEYS)
-    if (!this.config.host) {
-      throw new Error('ssh config needs host: the machine that runs captured lines')
-    }
+    requireId('ssh', 'host', this.config.host)
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -79,8 +74,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     if (this.config.identityFile !== undefined) {
       opts.privateKey = await readFile(expandHome(this.config.identityFile))
     } else if (process.env.SSH_AUTH_SOCK) {
-      // The asyncssh twin's rule: a named key is used alone; with
-      // none, the ssh-agent authenticates.
+      // A named key is used alone; with none, the ssh-agent
+      // authenticates. The Python twin's asyncssh also tries the agent
+      // beside a named key, and the default key files.
       opts.agent = process.env.SSH_AUTH_SOCK
     }
     return opts
@@ -105,13 +101,23 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<RunResult> {
-    const result = await this.ssh(wrapLine(line, env, cwd), stdin)
+    const result = await this.ssh(wrapLine(line, env, cwd), stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
-  // One exec channel on the shared connection; the seam tests override.
-  protected ssh(command: string, stdin: Uint8Array | null): Promise<SshResult> {
+  /**
+   * One exec channel on the shared connection; the seam tests override. An
+   * abort signals the command and closes its channel, so a line abandoned
+   * to a timeout neither waits for the remote side nor leaves the channel
+   * open, which sshd counts against its sessions per connection.
+   */
+  protected ssh(
+    command: string,
+    stdin: Uint8Array | null,
+    signal?: AbortSignal,
+  ): Promise<CliResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
     return new Promise((resolveFn, rejectFn) => {
@@ -120,6 +126,16 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
           rejectFn(err)
           return
         }
+        const abort = (): void => {
+          stream.signal('KILL')
+          stream.close()
+          rejectFn(makeAbortError(signal))
+        }
+        if (signal?.aborted === true) {
+          abort()
+          return
+        }
+        signal?.addEventListener('abort', abort, { once: true })
         const out: Buffer[] = []
         const errs: Buffer[] = []
         let code: number | null = null
@@ -129,6 +145,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
           code = c
         })
         stream.on('close', () => {
+          signal?.removeEventListener('abort', abort)
           resolveFn({
             stdout: new Uint8Array(Buffer.concat(out)),
             stderr: new Uint8Array(Buffer.concat(errs)),

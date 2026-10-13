@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,10 @@ class SSHRuntime(RemoteSandbox):
     transport never does), so treat the network path as trusted.
 
     Args:
-        options (Any): the RemoteSandbox constructor fields.
+        captures (Sequence[str] | None): commands routed to this runtime.
+        config (SSHRuntimeConfig | dict[str, Any] | None): how to reach the sandbox.
+        script (Callable[..., Any] | ScriptSource | None): whether the
+            runtime takes a line.
     """
 
     name = "ssh"
@@ -80,15 +84,24 @@ class SSHRuntime(RemoteSandbox):
         self, command: str, stdin: bytes | None
     ) -> tuple[bytes, bytes, int]:
         """One exec channel on the connection; the seam tests override."""
-        # asyncssh's run(input=b"") leaves stdin open. Close it explicitly
-        # for every finite command, including empty or absent piped input.
-        async with self._conn.create_process(
-            command, encoding=None
-        ) as process:
+        process = await self._conn.create_process(command, encoding=None)
+        try:
+            # asyncssh's run(input=b"") leaves stdin open. Close it
+            # explicitly for every finite command, including empty or
+            # absent piped input.
             if stdin:
                 process.stdin.write(stdin)
             process.stdin.write_eof()
             result = await process.wait(check=False)
+        except asyncio.CancelledError:
+            # A line abandoned to a timeout returns now: the command is
+            # signalled and its channel closed, with no wait for the
+            # remote side to finish.
+            process.kill()
+            process.close()
+            raise
+        process.close()
+        await process.wait_closed()
         code = result.returncode if result.returncode is not None else 1
         return result.stdout, result.stderr, code
 

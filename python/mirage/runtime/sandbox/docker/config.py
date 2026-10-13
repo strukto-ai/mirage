@@ -14,7 +14,11 @@
 
 from dataclasses import dataclass
 
-from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
+from mirage.runtime.sandbox.config import (
+    SandboxConfig,
+    check_mount_type,
+    require_id,
+)
 from mirage.runtime.types import MountType
 
 
@@ -39,4 +43,5 @@ class DockerConfig(SandboxConfig):
     mount_type: MountType | None = None
 
     def __post_init__(self) -> None:
+        require_id("docker", "container", self.container)
         check_mount_type("docker", self.mount_type)

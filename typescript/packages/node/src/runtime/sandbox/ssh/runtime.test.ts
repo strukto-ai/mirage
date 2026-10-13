@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -155,5 +156,61 @@ describe('SSHRuntime', () => {
     const runtime = buildRuntime('ssh', { config: { host: 'box' } })
     expect(runtime).toBeInstanceOf(SSHRuntime)
     expect(runtime.captures).toEqual(['@external'])
+  })
+})
+
+// One exec channel whose command runs until something kills it.
+class HungChannel extends EventEmitter {
+  readonly stderr = new EventEmitter()
+  readonly signals: string[] = []
+  closed = false
+
+  write(): boolean {
+    return true
+  }
+
+  end(): void {
+    this.emit('eof')
+  }
+
+  signal(name: string): void {
+    this.signals.push(name)
+  }
+
+  close(): void {
+    this.closed = true
+  }
+}
+
+class HungRuntime extends SSHRuntime {
+  readonly channel = new HungChannel()
+
+  constructor() {
+    super({ config: { host: 'box' } })
+    const client = {
+      exec: (_command: string, done: (err: undefined, stream: HungChannel) => void) => {
+        queueMicrotask(() => {
+          done(undefined, this.channel)
+        })
+      },
+    }
+    Object.assign(this, { client })
+  }
+
+  line(command: string, signal: AbortSignal): Promise<unknown> {
+    return this.ssh(command, null, signal)
+  }
+}
+
+describe('SSHRuntime cancellation', () => {
+  it('signals the command and closes its channel when the line is aborted', async () => {
+    const runtime = new HungRuntime()
+    const controller = new AbortController()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('sleep 30', controller.signal)
+    await started
+    controller.abort()
+    await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+    expect([runtime.channel.signals, runtime.channel.closed]).toEqual([['KILL'], true])
   })
 })

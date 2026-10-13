@@ -20,7 +20,7 @@ from mirage.runtime.sandbox.constants import MOUNT_TYPES
 
 @dataclass(frozen=True, slots=True)
 class SandboxConfig(RuntimeConfig):
-    """How the sandbox machine is built: the fields every provider has.
+    """How to reach the sandbox: the fields every provider has.
 
     This base carries only what all providers support; each provider
     extends it with its own fields (DockerConfig, DaytonaConfig,
@@ -49,3 +49,25 @@ def check_mount_type(runtime: str, mount_type: str | None) -> None:
             f"{runtime} mount_type must be one of "
             f"{', '.join(MOUNT_TYPES)}, not {mount_type!r}"
         )
+
+
+def nonblank(value: str) -> bool:
+    """Whether a configured id is a string with something in it.
+
+    Args:
+        value (str): the id as configured.
+    """
+    return isinstance(value, str) and bool(value.strip())
+
+
+def require_id(runtime: str, name: str, value: str) -> None:
+    """Fail loud on a required id that is blank, which would otherwise
+    reach the provider as an empty name.
+
+    Args:
+        runtime (str): the runtime's name, for the message.
+        name (str): the config field.
+        value (str): the id as configured.
+    """
+    if not nonblank(value):
+        raise ValueError(f"{runtime} config needs a nonblank {name}")

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { delimiter, isAbsolute, resolve } from 'node:path'
@@ -27,6 +27,7 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { ProcessExecution, RunArgs, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
+import { closeChildren, runCli } from '../../sandbox/cli.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
 
@@ -211,7 +212,7 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     })
   }
 
-  private spawnProgram(
+  private async spawnProgram(
     program: string,
     argv: string[],
     env: Record<string, string>,
@@ -219,57 +220,22 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     signal?: AbortSignal,
     cwd?: string,
   ): Promise<RunResult> {
-    return new Promise((resolve, reject) => {
-      // The signal aborts when the command's limit timeout trips:
-      // spawn then SIGKILLs the child (matching the python runtime's
-      // proc.kill() on cancellation) and 'close' settles the promise.
-      const child = spawn(program, argv, {
-        ...(cwd !== undefined ? { cwd } : {}),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...(this.config as LocalConfig).env, ...env },
-        ...(signal !== undefined ? { signal, killSignal: 'SIGKILL' } : {}),
-      })
-      this.children.add(child)
-      const out: Buffer[] = []
-      const err: Buffer[] = []
-      child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
-      child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
-      child.on('error', (error: NodeJS.ErrnoException) => {
-        if (error.name === 'AbortError') return
-        this.children.delete(child)
-        reject(
-          error.code === 'ENOENT' && program === this.python
-            ? new Error(
-                `local python interpreter not found: '${this.python}' (set the ` +
-                  `runtime entry's config home or ${LOCAL_HOME_ENV})`,
-              )
-            : error,
-        )
-      })
-      child.on('close', (code) => {
-        this.children.delete(child)
-        const stderr = Buffer.concat(err)
-        resolve({
-          stdout: new Uint8Array(Buffer.concat(out)),
-          stderr: stderr.length > 0 ? new Uint8Array(stderr) : null,
-          exitCode: code ?? 1,
-        })
-      })
-      // EPIPE means the program exited without draining its stdin
-      // (`head`-like); python's communicate() suppresses the matching
-      // BrokenPipeError, so it is not an error here either.
-      child.stdin.on('error', (error: NodeJS.ErrnoException) => {
-        if (error.code !== 'EPIPE') reject(error)
-      })
-      if (stdin !== null) child.stdin.write(stdin)
-      child.stdin.end()
+    const missing =
+      program === this.python
+        ? `local python interpreter not found: '${this.python}' (set the ` +
+          `runtime entry's config home or ${LOCAL_HOME_ENV})`
+        : null
+    const { stdout, stderr, code } = await runCli(program, missing, argv, stdin, {
+      env: { ...(this.config as LocalConfig).env, ...env },
+      children: this.children,
+      ...(cwd !== undefined ? { cwd } : {}),
+      ...(signal !== undefined ? { signal } : {}),
     })
+    return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   }
 
   override close(): Promise<void> {
-    for (const child of this.children) child.kill('SIGKILL')
-    this.children.clear()
-    return Promise.resolve()
+    return closeChildren(this.children)
   }
 }
 

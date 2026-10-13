@@ -156,3 +156,64 @@ async def test_real_ssh_stdin_always_reaches_eof(data):
             assert result.exit_code == 0
         finally:
             await runtime.close()
+
+
+class HungProcess:
+    """A remote command that runs until something kills it."""
+
+    def __init__(self) -> None:
+        self.stdin = self
+        self.calls: list[str] = []
+        self.done = asyncio.Event()
+
+    def write(self, data: bytes) -> None:
+        self.calls.append("write")
+
+    def write_eof(self) -> None:
+        self.calls.append("eof")
+
+    async def wait(self, check: bool = False) -> None:
+        await self.done.wait()
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+    def close(self) -> None:
+        self.calls.append("close")
+
+    async def wait_closed(self) -> None:
+        await self.done.wait()
+
+    async def __aenter__(self) -> "HungProcess":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        self.close()
+        await self.wait_closed()
+
+    def __await__(self):
+        yield from asyncio.sleep(0).__await__()
+        return self
+
+
+class HungConn:
+    def __init__(self, process: HungProcess) -> None:
+        self.process = process
+
+    def create_process(self, command: str, encoding: str | None = None):
+        return self.process
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
+    process = HungProcess()
+    runtime = SSHRuntime(config={"host": "box"})
+    runtime._conn = HungConn(process)
+    task = asyncio.create_task(runtime._ssh("sleep 30", None))
+    while "eof" not in process.calls:
+        await asyncio.sleep(0)
+    task.cancel()
+    async with asyncio.timeout(2):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert process.calls == ["eof", "kill", "close"]

@@ -14,6 +14,7 @@
 
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -27,7 +28,7 @@ import { type CliResult, runCli } from '../cli.ts'
  * You start the machine yourself; mirage only connects to it and
  * execs lines. The smolvm CLI is the transport, so there is no SDK
  * dependency and no daemon socket wiring; each line is one `smolvm
- * machine exec` with the merged environment, the rebased cwd, real
+ * machine exec` with the merged environment, the session cwd, real
  * stdin, and separated stderr.
  *
  * Unlike a container, the guest runs its own kernel, so the line sees
@@ -42,9 +43,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
 
   constructor(options: RuntimeOptions<SmolvmConfig> | Record<string, unknown> = {}) {
     super(options, SMOLVM_CONFIG_KEYS)
-    if (!this.config.machine) {
-      throw new Error('smolvm config needs machine: the name of a running machine')
-    }
+    requireId('smolvm', 'machine', this.config.machine)
   }
 
   // One smolvm CLI invocation; the seam tests override.
@@ -53,7 +52,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
     stdin: Uint8Array | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli('smolvm', SMOLVM_CLI_HINT, args, stdin, signal)
+    return runCli('smolvm', SMOLVM_CLI_HINT, args, stdin, signal !== undefined ? { signal } : {})
   }
 
   /**
@@ -90,7 +89,6 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
   }
 
   async runProcess(request: ProcessExecution): Promise<RunResult> {
-    if (request.argv.length === 0) throw new Error('process argv must not be empty')
     await this.ensureConnected(request.signal)
     return this.execArgv(
       request.argv,

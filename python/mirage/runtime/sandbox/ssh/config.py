@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.config import SandboxConfig, require_id
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -44,3 +44,6 @@ class SSHRuntimeConfig(SandboxConfig):
     username: str | None = None
     identity_file: str | None = None
     timeout: int = 30
+
+    def __post_init__(self) -> None:
+        require_id("ssh", "host", self.host)

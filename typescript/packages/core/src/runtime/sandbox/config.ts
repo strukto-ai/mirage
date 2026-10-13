@@ -17,7 +17,7 @@ import type { MountType } from '../types.ts'
 import { MOUNT_TYPES } from './constants.ts'
 
 /**
- * How the sandbox machine is built: the fields every provider has.
+ * How to reach the sandbox: the fields every provider has.
  *
  * This base carries only what all providers support; each provider
  * extends it with its own fields (DockerConfig, DaytonaConfig,
@@ -45,4 +45,17 @@ export function checkMountType(runtime: string, mountType: unknown): MountType |
     )
   }
   return mountType as MountType
+}
+
+/** Whether a configured id is a string with something in it. Mirrors Python's `nonblank`. */
+export function nonblank(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+/**
+ * Fail loud on a required id that is unset or blank, which would otherwise
+ * reach the provider as an empty name. Mirrors Python's `require_id`.
+ */
+export function requireId(runtime: string, name: string, value: unknown): void {
+  if (!nonblank(value)) throw new Error(`${runtime} config needs a nonblank ${name}`)
 }
