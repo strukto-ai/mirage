@@ -30,6 +30,34 @@
           }
         }
       ]
+    },
+    {
+      "id": "many_file_calls_finish",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "x",
+              "loop.py": "n = 0\nfor i in range(1500):\n    with open('/ram/a.txt') as f:\n        n = n + len(f.read())\nprint(n)\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/loop.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "1500\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

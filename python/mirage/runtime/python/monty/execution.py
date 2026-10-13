@@ -24,6 +24,7 @@ from mirage.runtime.python.execution import main_filename
 from mirage.runtime.python.monty.constants import (
     DEFAULT_PROG,
     INCOMPLETE_MARKERS,
+    LIMITS,
 )
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
@@ -91,9 +92,9 @@ class MontyExecution:
         # A script is Monty's own script_name, which it keeps the last
         # part of for `__file__`, under the directory a feed starts in.
         checkout = (
-            pool.checkout()
+            pool.checkout(limits=LIMITS)
             if args.script_path is None
-            else pool.checkout(script_name=main_filename(args))
+            else pool.checkout(script_name=main_filename(args), limits=LIMITS)
         )
         try:
             async with checkout as session:
@@ -182,7 +183,7 @@ class MontyExecution:
         one_shot = repl is None and session is None
         initial_cwd = cwd.virtual if repl is None and cwd is not None else None
         if repl is None:
-            repl = await pool.checkout().__aenter__()
+            repl = await pool.checkout(limits=LIMITS).__aenter__()
             if session is not None:
                 self._eval_sessions[session] = repl
         worker_pid = repl.worker_pid

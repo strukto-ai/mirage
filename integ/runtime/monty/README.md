@@ -9,6 +9,6 @@ here is Monty's to add upstream; the cases pin the working forms.
 | `argv.json`    | the `argv` global, script argv, typed argv that names no mount, interpreter flags before a script                                                                                  |
 | `stdin.json`   | piped stdin                                                                                                                                                                        |
 | `env.json`     | the session environment                                                                                                                                                            |
-| `limits.json`  | a timeout                                                                                                                                                                          |
+| `limits.json`  | a timeout; a loop of 1500 file reads finishes                                                                                                                                      |
 | `surface.json` | the CPython surface Monty lacks, what it has, `os.urandom`                                                                                                                         |
 | `policy.json`  | relative writes and script operands obey path policy; a script rule reads the operand as typed                                                                                     |

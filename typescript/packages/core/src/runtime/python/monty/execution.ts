@@ -23,7 +23,7 @@ import {
   type MontyPoolLike,
   type MontySessionLike,
 } from './loader.ts'
-import { DEFAULT_PROG, EVAL_INTERRUPT_SECONDS, INCOMPLETE_MARKERS } from './constants.ts'
+import { DEFAULT_PROG, EVAL_INTERRUPT_SECONDS, INCOMPLETE_MARKERS, LIMITS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import type { RuntimeFiles } from '../../files.ts'
@@ -86,7 +86,9 @@ export class MontyExecution {
     // A script is Monty's own scriptName, which it keeps the last part of
     // for `__file__`, under the directory a feed starts in.
     const session = await pool.checkout(
-      args.scriptPath !== undefined ? { scriptName: mainFilename(args) } : undefined,
+      args.scriptPath !== undefined
+        ? { scriptName: mainFilename(args), limits: LIMITS }
+        : { limits: LIMITS },
     )
     // Monty executes on its own worker process, so the event loop stays
     // live to observe the limit deadline and the kill signal; a trip
@@ -170,12 +172,12 @@ export class MontyExecution {
     if (opts.session !== undefined) {
       let existing = this.evalSessions.get(opts.session)
       if (existing === undefined) {
-        existing = await pool.checkout()
+        existing = await pool.checkout({ limits: LIMITS })
         this.evalSessions.set(opts.session, existing)
       }
       session = existing
     } else {
-      session = await pool.checkout()
+      session = await pool.checkout({ limits: LIMITS })
     }
     const out: string[] = []
     const err: string[] = []

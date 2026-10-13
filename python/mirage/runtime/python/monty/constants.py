@@ -23,6 +23,12 @@ MISSING_EXTRA_HINT = (
 DEFAULT_PROG = "main.py"
 MAX_URANDOM_BYTES = 1_048_576
 
+# Monty ends a session past this many host round trips, and every file
+# call is one or two, so its default of 1000 stopped a loop of 500 reads.
+# The count cannot be turned off, so a checkout sets it past what any run
+# reaches; the command limits bound a run instead.
+LIMITS = {"max_suspensions": 2**31 - 1}
+
 # Monty reports an unfinished suite as a syntax error like any other, so
 # a console can only tell "keep typing" from "this is broken" by the
 # traceback text. Coupled to monty's wording on purpose, and the reason

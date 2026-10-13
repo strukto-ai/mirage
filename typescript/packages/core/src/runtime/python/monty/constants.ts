@@ -21,6 +21,12 @@ export const MISSING_PACKAGE_HINT =
 export const DEFAULT_PROG = 'main.py'
 export const MAX_URANDOM_BYTES = 1_048_576
 
+// Monty ends a session past this many host round trips, and every file
+// call is one or two, so its default of 1000 stopped a loop of 500 reads.
+// The count cannot be turned off, so a checkout sets it past what any run
+// reaches; the command limits bound a run instead.
+export const LIMITS = { maxSuspensions: 2 ** 31 - 1 }
+
 // One-shot eval is bounded like quickjs's: nothing above the runtime
 // can stop a hung guest, so the runtime owns its own interrupt.
 export const EVAL_INTERRUPT_SECONDS = 10
