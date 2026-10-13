@@ -18,7 +18,6 @@ from dataclasses import replace
 import pytest
 
 from mirage import Action, CommandContext, Deny, Policy, Workspace
-from mirage.commands.errors import LimitExceededError
 from mirage.policy import (
     Ask,
     CommandResultContext,
@@ -340,19 +339,17 @@ class CachingRAM(RAMVFS):
 
 
 @pytest.mark.asyncio
-async def test_a_capped_read_records_what_the_backend_moved():
-    # A post_vfs Limit truncates what the caller receives; the transfer
-    # already happened, so recording the capped length would under-report
-    # network_bytes by whatever the cap removed.
+async def test_a_post_vfs_limit_is_an_answer_it_cannot_give():
+    # A kernel or protocol mount reads in ranges and must get each one
+    # whole, so nothing cuts a file call's result; a Limit there is a
+    # programming error in the policy, raised at the seam.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("mkdir -p /data/prod")
         await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        ws.vfs.records.clear()
         ws.policies.add(CapProdReads())
-        assert await ws.vfs.read("/data/prod/x.txt") == b"012"
-        reads = [r for r in ws.vfs.records if r.op == "read"]
-        assert [r.bytes for r in reads] == [10]
+        with pytest.raises(PolicyError):
+            await ws.vfs.read("/data/prod/x.txt")
     finally:
         await ws.close()
 
@@ -379,60 +376,12 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
         await ws.close()
 
 
-class HardCapProdReads(Policy):
-    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
-        if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
-            return Limit(max_bytes=3, on_exceed=OnExceed.ERROR)
-        return None
-
-
 class ColdRemote(RAMVFS):
     caches_reads = False
     name = "s3"
 
     def commands(self):
         return [replace(rc, vfs=self.name) for rc in super().commands()]
-
-
-@pytest.mark.asyncio
-async def test_a_hard_capped_read_records_what_the_backend_moved():
-    # An ERROR-mode cap refuses the caller the bytes, but the backend
-    # already moved them; dropping the record loses the whole transfer
-    # rather than just truncating it.
-    ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
-    try:
-        await ws.shell("mkdir -p /data/prod")
-        await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        ws.vfs.records.clear()
-        ws.policies.add(HardCapProdReads())
-        with pytest.raises(LimitExceededError):
-            await ws.vfs.read("/data/prod/x.txt")
-        reads = [r for r in ws.vfs.records if r.op == "read"]
-        assert [(r.source, r.bytes) for r in reads] == [("s3", 10)]
-        assert ws.vfs.network_bytes == 10
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_hard_capped_warm_read_is_not_network_traffic():
-    # Same refusal, but the cache produced the bytes, so the transfer
-    # it stands for never happened.
-    ws = Workspace({"/data/": CachingRAM()}, mode=MountMode.WRITE)
-    try:
-        await ws.shell("mkdir -p /data/prod")
-        await ws.vfs.write("/data/prod/x.txt", b"0123456789")
-        await ws.vfs.read("/data/prod/x.txt")
-        ws.vfs.records.clear()
-        ws.policies.add(HardCapProdReads())
-        with pytest.raises(LimitExceededError):
-            await ws.vfs.read("/data/prod/x.txt")
-        rec = ws.vfs.records[-1]
-        assert rec.source == "ram"
-        assert rec.is_cache is True
-        assert ws.vfs.network_bytes == 0
-    finally:
-        await ws.close()
 
 
 class BrokenPostVfs(Policy):
@@ -654,13 +603,6 @@ class CapLines(Policy):
         return Limit(max_lines=2)
 
 
-class CapReadBytes(Policy):
-    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
-        if ctx.call.name == "read":
-            return Limit(max_bytes=4)
-        return None
-
-
 @pytest.mark.asyncio
 async def test_user_limit_policy_caps_line_output():
     # A user Limit merges with the built-in cap (tightest wins) and
@@ -672,19 +614,6 @@ async def test_user_limit_policy_caps_line_output():
         r = await ws.shell("cat /data/big.txt")
         assert (await r.stdout_str()).count("\n") == 2
         assert "output truncated" in (await r.stderr_str())
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_user_limit_policy_caps_op_reads():
-    # A post_vfs Limit bounds the programmatic entry point too: ws.vfs (and
-    # FUSE behind it) serve capped bytes.
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        ws.policies.add(CapReadBytes())
-        await ws.vfs.write("/data/f.txt", b"hello world")
-        assert await ws.vfs.read("/data/f.txt") == b"hell"
     finally:
         await ws.close()
 
@@ -758,13 +687,6 @@ async def test_stream_exposes_only_post_execute_approved_output(
         await ws.close()
 
 
-class DenyReads(Policy):
-    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
-        if ctx.call.name == "read":
-            return Deny("reads are suppressed")
-        return None
-
-
 class SeeProducer(Policy):
     def __init__(self) -> None:
         self.seen: list[str] = []
@@ -808,22 +730,6 @@ async def test_error_mode_limit_fails_the_line():
         ok = await ws.shell("echo ok")
         assert ok.exit_code == 0  # within the bound: no refusal
         assert await ok.stdout_str() == "ok\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_post_vfs_deny_beats_a_limit():
-    # A refusal suppresses the result; bounding it would be meaningless.
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        ws.policies.add(CapReadBytes())
-        ws.policies.add(DenyReads())
-        await ws.vfs.write("/data/f.txt", b"hello world")
-        with pytest.raises(PermissionError) as excinfo:
-            await ws.vfs.read("/data/f.txt")
-        assert excinfo.value.refusal is not None
-        assert "reads are suppressed" in excinfo.value.refusal.reason
     finally:
         await ws.close()
 

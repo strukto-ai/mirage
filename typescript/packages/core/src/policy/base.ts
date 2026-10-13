@@ -39,8 +39,8 @@ import type {
  * `postExecute`), each command or CLI (`preCommand` / `postCommand`),
  * each `ws.vfs` / `session.vfs` call (`preVfs` / `postVfs`) and each
  * session write (`preSession` / `postSession`). Every method may answer
- * Deny or Ask; a Limit only where a result comes back to cap (`postVfs`,
- * `postExecute`), a Route only at `preExecute`. A post method sees what
+ * Deny or Ask; a Limit only at `postExecute`, where a line's output comes
+ * back to cap, a Route only at `preExecute`. A post method sees what
  * its pre method saw, plus what came back, and never undoes a side effect:
  * it holds back what came back. Hides, mount modes and path rules are
  * not methods: they apply to every caller at the dispatcher. Every method's
@@ -88,7 +88,8 @@ export interface Policy {
   /**
    * Judge one completed `ws.vfs` / `session.vfs` call. A Deny, or an Ask
    * the host has not approved, drops the result with EACCES (the call
-   * itself is not undone); a Limit caps a byte-producing one.
+   * itself is not undone). Nothing cuts a result: a kernel or protocol
+   * mount reads in ranges and must get each whole.
    */
   postVfs?(ctx: VfsResultContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**

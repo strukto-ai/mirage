@@ -1348,7 +1348,7 @@ class Dispatcher:
             and not call.renders_read(mount)
             and (
                 line_running()
-                or not self._namespace.registry.policies.reads_results()
+                or not self._namespace.registry.policies.wants("post_vfs")
             )
         )
 

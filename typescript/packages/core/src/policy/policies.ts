@@ -25,7 +25,6 @@ import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
-import { OutputCapPolicy } from './builtin/output_cap.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { Explained, PolicyDenied, PolicyError } from './errors.ts'
@@ -305,10 +304,9 @@ async function refuseOp(
 
 /**
  * Fire postVfs at the dispatcher; a Deny, or an Ask the host has not
- * approved, drops the result with EACCES. Returns the merged Limit bound
- * (tightest per field across every opining policy) for the entry point to
- * apply to a byte-producing result, or null when no policy bounds this op.
- * Not fired for a running line's own I/O or a method's own read.
+ * approved, drops the result with EACCES. Nothing cuts what a call returns:
+ * a call that asks for a range, as a kernel or protocol mount does, must get
+ * it whole. Not fired for a running line's own I/O or a method's own read.
  */
 export async function postVfsGate(
   policies: Policies,
@@ -321,15 +319,13 @@ export async function postVfsGate(
   access: Pick<VfsContext, 'mode' | 'access'> & {
     decisions?: Decisions | null
   } = {},
-): Promise<Limit | null> {
+): Promise<void> {
   if (!policies.wants('postVfs') || lineRunning() || explaining() === DryRun.DECIDING) {
-    return null
+    return
   }
   const { decisions = null, ...context } = access
   const ctx: VfsResultContext = { call, path, write, prefix, sessionId, ...context, result }
-  const [answer, bound] = await policies.postVfs(ctx)
-  await refuseOp(ctx, answer, decisions)
-  return bound
+  await refuseOp(ctx, await policies.postVfs(ctx), decisions)
 }
 
 /**
@@ -480,20 +476,6 @@ export class Policies {
    */
   wants(method: Method): boolean {
     return this.wanted.has(method)
-  }
-
-  /**
-   * Whether a postVfs policy may read an op's result. The built-in output cap
-   * answers from the op and the mount alone; any other method, a subclass's
-   * override of the cap's included, may read `ctx.result`, so a streamed read
-   * reaches it read whole. Mirrors
-   * Python's `reads_results`.
-   */
-  readsResults(): boolean {
-    return this.policies.some(
-      (policy) =>
-        policy.postVfs !== undefined && policy.postVfs !== OutputCapPolicy.prototype.postVfs,
-    )
   }
 
   /**
@@ -778,10 +760,10 @@ export class Policies {
     return action
   }
 
-  /** Fire postVfs; a Deny or an Ask holds the result back, Limits merge. */
-  async postVfs(ctx: VfsResultContext): Promise<[Deny | Ask | null, Limit | null]> {
-    const [action, limit] = await this.fire('postVfs', ctx)
-    return [action, limit]
+  /** Fire postVfs; a Deny or an Ask holds the result back. */
+  async postVfs(ctx: VfsResultContext): Promise<Deny | Ask | null> {
+    const [action] = await this.fire('postVfs', ctx)
+    return action
   }
 
   /** Fire postExecute; a Deny or an Ask holds the output back, Limits merge to the boundary bound. */

@@ -14,22 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
-import { LimitExceededError } from '../commands/errors.ts'
 import { render } from '../test-utils.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, VfsContext, VfsResultContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { stat as ramStat } from '../core/ram/stat.ts'
-import {
-  DEFAULT_READ_TTL,
-  FileStat,
-  FileType,
-  Limit,
-  MountMode,
-  OnExceed,
-  ReadPolicy,
-} from '../types.ts'
+import { DEFAULT_READ_TTL, FileStat, FileType, Limit, MountMode, ReadPolicy } from '../types.ts'
 import { eacces, enoent, enotdir } from '../errors/fs.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -225,15 +216,6 @@ describe('Files policy entry point', () => {
     }
   }
 
-  class CapReads implements Policy {
-    postVfs(ctx: VfsResultContext): Action | null {
-      if (ctx.call.name === 'read' && ctx.path.virtual.endsWith('.log')) {
-        return new Limit({ maxBytes: 5 })
-      }
-      return null
-    }
-  }
-
   class LockWrites implements Policy {
     preVfs(ctx: VfsContext): Action | null {
       if (ctx.write && ctx.path.virtual.startsWith('/data/locked/')) {
@@ -249,7 +231,7 @@ describe('Files policy entry point', () => {
       { '/data': vfs },
       {
         mode: MountMode.WRITE,
-        policies: [new SealReads(), new RedactReads(), new CapReads(), new LockWrites()],
+        policies: [new SealReads(), new RedactReads(), new LockWrites()],
       },
     )
   }
@@ -266,12 +248,6 @@ describe('Files policy entry point', () => {
     await expect(ws.vfs.read('/data/secret.txt')).rejects.toThrow(PolicyDenied)
     await ws.vfs.write('/data/clean.txt', 'hello\n')
     expect(await ws.vfs.cat('/data/clean.txt')).toBe('hello\n')
-  })
-
-  it('postVfs Limit caps facade read bytes', async () => {
-    const ws = mkGuarded()
-    await ws.vfs.write('/data/big.log', 'abcdefghij\n')
-    expect(DEC.decode(await ws.vfs.read('/data/big.log'))).toBe('abcde')
   })
 
   it('preVfs denies a facade write before the backend runs', async () => {
@@ -571,13 +547,6 @@ describe('Files accounting survives the delegation', () => {
     }
   }
 
-  class HardCapReadsTo3 implements Policy {
-    postVfs(ctx: VfsResultContext): Action | null {
-      if (ctx.call.name === 'read') return new Limit({ maxBytes: 3, onExceed: OnExceed.ERROR })
-      return null
-    }
-  }
-
   class SealReads implements Policy {
     preVfs(ctx: VfsContext): Action | null {
       if (ctx.call.name === 'read') return { kind: 'deny', reason: 'sealed' }
@@ -604,31 +573,13 @@ describe('Files accounting survives the delegation', () => {
     expect(ws.records.map((r) => r.op)).toEqual(['write', 'read'])
   })
 
-  it('records a capped read against what the backend moved', async () => {
-    // A postVfs Limit truncates what the caller receives; the transfer
-    // already happened, so recording the capped length would
-    // under-report networkBytes by whatever the cap removed.
+  it('a postVfs Limit is an answer it cannot give', async () => {
+    // A kernel or protocol mount reads in ranges and must get each one
+    // whole, so nothing cuts a file call's result; a Limit there is a
+    // programming error in the policy. Mirrors Python's test_policies.py.
     const ws = mkWs(new CapReadsTo3())
     await ws.vfs.write('/data/a.txt', '0123456789')
-    expect(DEC.decode(await ws.vfs.read('/data/a.txt'))).toBe('012')
-    expect(ws.records.find((r) => r.op === 'read')?.bytes).toBe(10)
-  })
-
-  it('records a hard-capped read: the backend still moved the bytes', async () => {
-    // An ERROR-mode cap refuses the caller the bytes, but the backend
-    // already moved them; dropping the record loses the whole transfer
-    // rather than just truncating it. Mirrors Python's test_policies.py.
-    const vfs = s3NamedRam()
-    const ws = new Workspace(
-      { '/m': vfs },
-      { mode: MountMode.WRITE, policies: [new HardCapReadsTo3()] },
-    )
-    await ws.vfs.write('/m/a.txt', '0123456789')
-    ws.records.length = 0
-    await expect(ws.vfs.read('/m/a.txt')).rejects.toThrow(LimitExceededError)
-    const read = ws.records.find((r) => r.op === 'read')
-    expect([read?.source, read?.bytes]).toEqual(['s3', 10])
-    expect(ws.networkBytes).toBe(10)
+    await expect(ws.vfs.read('/data/a.txt')).rejects.toThrow(PolicyError)
   })
 
   it('records a committed write when bookkeeping after it fails', async () => {
@@ -649,24 +600,6 @@ describe('Files accounting survives the delegation', () => {
     const write = ws.records.find((r) => r.op === 'write')
     expect([write?.source, write?.bytes]).toEqual(['s3', 6])
     expect(ws.networkBytes).toBeGreaterThanOrEqual(6)
-  })
-
-  it('does not count a hard-capped warm read as network traffic', async () => {
-    // Same refusal, but the cache produced the bytes, so the transfer
-    // it stands for never happened.
-    const vfs = new RAMVFS()
-    Object.assign(vfs, { cachesReads: true, kind: 's3' })
-    const ws = new Workspace(
-      { '/m': vfs },
-      { mode: MountMode.WRITE, policies: [new HardCapReadsTo3()] },
-    )
-    await ws.cache.set('/m/a.txt', new TextEncoder().encode('0123456789'), { ttl: 600 })
-    ws.records.length = 0
-    await expect(ws.vfs.read('/m/a.txt')).rejects.toThrow(LimitExceededError)
-    const read = ws.records.find((r) => r.op === 'read')
-    expect(read?.source).toBe('ram')
-    expect(read?.isCache).toBe(true)
-    expect(ws.networkBytes).toBe(0)
   })
 
   it('does not count a denied warm read as network traffic', async () => {

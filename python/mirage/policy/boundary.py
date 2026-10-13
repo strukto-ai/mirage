@@ -15,7 +15,6 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from mirage.commands.builtin.utils.limit import limit_result
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.types import VfsCall
@@ -68,7 +67,16 @@ class Boundary:
     async def complete(
         self, call: VfsCall, path: PathSpec, write: bool, result: Any
     ) -> Any:
-        bound = await post_vfs_gate(
+        """Fire post_vfs on a finished call and hand its result back
+        whole.
+
+        Args:
+            call (VfsCall): what the mount's VFS declares for the call.
+            path (PathSpec): the path the call named.
+            write (bool): whether the call writes.
+            result (Any): what the call returned.
+        """
+        await post_vfs_gate(
             self.policies,
             call,
             path,
@@ -79,4 +87,4 @@ class Boundary:
             mode=self.mode,
             decisions=self.decisions,
         )
-        return await limit_result(result, bound)
+        return result

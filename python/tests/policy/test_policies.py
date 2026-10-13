@@ -299,11 +299,6 @@ class CapFour(Policy):
         return Limit(max_bytes=4)
 
 
-class CapTwo(Policy):
-    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
-        return Limit(max_bytes=2)
-
-
 class LimitOnPre(Policy):
     async def pre_command(self, ctx: CommandContext) -> Action | None:
         return Limit(max_bytes=1)
@@ -325,25 +320,11 @@ def _ops_result_ctx() -> VfsResultContext:
 
 
 @pytest.mark.asyncio
-async def test_post_vfs_limits_merge_to_the_tightest():
+async def test_a_limit_is_illegal_on_post_vfs():
     policies = Policies()
     policies.add(CapFour())
-    policies.add(CapTwo())
-    deny, bound = await policies.post_vfs(_ops_result_ctx())
-    assert deny is None
-    assert bound is not None
-    assert bound.max_bytes == 2
-
-
-@pytest.mark.asyncio
-async def test_post_vfs_gate_returns_the_merged_bound():
-    policies = Policies()
-    policies.add(CapFour())
-    bound = await post_vfs_gate(
-        policies, CALLS["read"], _path("/data/x"), False, "/data/", b"payload"
-    )
-    assert bound is not None
-    assert bound.max_bytes == 4
+    with pytest.raises(PolicyError, match="CapFour"):
+        await policies.post_vfs(_ops_result_ctx())
 
 
 @pytest.mark.asyncio

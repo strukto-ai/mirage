@@ -29,7 +29,7 @@ export {
   subjects,
   type Subject,
 } from './match/rule.ts'
-export { OutputCapPolicy, resolveProducer, resolveLimit } from './builtin/output_cap.ts'
+export { resolveProducer, resolveLimit } from './builtin/output_cap.ts'
 export { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, POLICY_DENIED_EXIT } from './constants.ts'
 export {
   Policies,

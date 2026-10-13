@@ -1013,7 +1013,7 @@ export class Dispatcher {
       size === null &&
       vfs.supports('readStream') &&
       !this.rendersRead(call, mount) &&
-      (lineRunning() || !this.policies.readsResults())
+      (lineRunning() || !this.policies.wants('postVfs'))
     )
   }
 

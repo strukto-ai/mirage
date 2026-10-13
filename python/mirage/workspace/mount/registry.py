@@ -33,7 +33,7 @@ from mirage.context import (
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
-from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
+from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.workspace import WorkspaceRuntime
@@ -134,14 +134,11 @@ class MountRegistry:
         self.runtime_unavailable: dict[str, str] = {}
         # Command admission policies. Policies itself is a bare
         # mechanism; the registry seeds the POSIX mount-root rule
-        # (mount-root semantics are mount semantics) and the built-in
-        # output cap (fed the per-mount overrides), and user policies
-        # follow them (the document's deny rules, then Workspace policies=).
+        # (mount-root semantics are mount semantics), and user policies
+        # follow it (the document's deny rules, then Workspace policies=).
         # Registry-hosted like runtime_bindings so the executor reaches
         # them without new parameter threading.
-        self.policies = Policies(
-            [MountRootPolicy(self), OutputCapPolicy(self.limit_override)]
-        )
+        self.policies = Policies([MountRootPolicy(self)])
 
         # Installed CLIs. Not mount state: CLIs are fully separate from
         # mounts (a CLI exists because it was installed, never because
@@ -422,7 +419,7 @@ class MountRegistry:
     def limit_override(self, prefix: str, name: str) -> Limit | None:
         """One mount's configured cap for a command or op name.
 
-        The lookup OutputCapPolicy is seeded with; tolerant of a
+        The lookup a command's output guard resolves with; tolerant of a
         prefix that matches no mount (unmounted between stamp and
         boundary) by answering None.
 

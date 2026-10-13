@@ -502,12 +502,6 @@ class CapFour implements Policy {
   }
 }
 
-class CapTwo implements Policy {
-  postVfs(_ctx: VfsResultContext): Action | null {
-    return new Limit({ maxBytes: 2 })
-  }
-}
-
 class LimitOnPre implements Policy {
   preCommand(_ctx: CommandContext): Action | null {
     return new Limit({ maxBytes: 1 })
@@ -529,27 +523,10 @@ describe('Limit', () => {
     result: new TextEncoder().encode('payload'),
   })
 
-  it('postVfs limits merge to the tightest', async () => {
+  it('a limit is illegal on postVfs', async () => {
     const policies = new Policies()
     policies.add(new CapFour())
-    policies.add(new CapTwo())
-    const [deny, bound] = await policies.postVfs(opsCtx())
-    expect(deny).toBeNull()
-    expect(bound?.maxBytes).toBe(2)
-  })
-
-  it('postVfsGate returns the merged bound', async () => {
-    const policies = new Policies()
-    policies.add(new CapFour())
-    const bound = await postVfsGate(
-      policies,
-      callOf('read'),
-      path('/data/x'),
-      false,
-      '/data/',
-      null,
-    )
-    expect(bound?.maxBytes).toBe(4)
+    await expect(policies.postVfs(opsCtx())).rejects.toThrow(/CapFour/)
   })
 
   it('a limit is illegal on preCommand', async () => {
@@ -588,13 +565,12 @@ describe('Limit', () => {
     }
   })
 
-  it('a postVfs limit caps the dispatcher', async () => {
+  it('a postVfs limit fails the call: a file call is never cut', async () => {
     const ws = executableWorkspace()
     try {
-      ws.policies.add(new CapFour())
       await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world')])
-      const served = await ws.dispatch('read', '/data/f.txt')
-      expect(new TextDecoder().decode(served as Uint8Array)).toBe('hell')
+      ws.policies.add(new CapFour())
+      await expect(ws.dispatch('read', '/data/f.txt')).rejects.toThrow(/CapFour/)
     } finally {
       await ws.close()
     }
@@ -616,12 +592,6 @@ class CapBytesHard implements Policy {
 class Boom implements Policy {
   postExecute(_ctx: ExecuteResultContext): Action | null {
     throw new Error('boom')
-  }
-}
-
-class DenyReads implements Policy {
-  postVfs(ctx: VfsResultContext): Action | null {
-    return ctx.call.name === 'read' ? { kind: 'deny', reason: 'reads are suppressed' } : null
   }
 }
 
@@ -718,20 +688,6 @@ describe('Limit end to end', () => {
       const ok = await ws.shell('echo ok')
       expect(ok.exitCode).toBe(0)
       expect(new TextDecoder().decode(ok.stdout)).toBe('ok\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('a postVfs deny beats a limit', async () => {
-    const ws = executableWorkspace()
-    try {
-      ws.policies.add(new CapFour())
-      ws.policies.add(new DenyReads())
-      await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world')])
-      await expect(ws.dispatch('read', '/data/f.txt')).rejects.toMatchObject({
-        refusal: { reason: 'reads are suppressed' },
-      })
     } finally {
       await ws.close()
     }

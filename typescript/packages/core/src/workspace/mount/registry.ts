@@ -29,7 +29,7 @@ import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts
 import type { BaseVFS } from '../../vfs/base.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
-import { type Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
+import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
 import {
   type Limit,
   type ReadSpec,
@@ -131,10 +131,7 @@ export class MountRegistry {
   // policies (Workspace policies option), follow it. Registry-hosted
   // like workspaceRuntime so the
   // executor reaches them without new threading.
-  readonly policies = new Policies([
-    new MountRootPolicy(this),
-    new OutputCapPolicy((prefix, name) => this.limitOverride(prefix, name)),
-  ])
+  readonly policies = new Policies([new MountRootPolicy(this)])
   /** The approval ledger an Ask is taken to, which the policies hold
    * (`Policies.decisions`) so a session write reaches it too. */
   get decisions(): Decisions {
@@ -430,8 +427,8 @@ export class MountRegistry {
   }
 
   /**
-   * One mount's configured cap for a command or op name. The lookup
-   * OutputCapPolicy is seeded with; tolerant of a prefix that matches
+   * One mount's configured cap for a command or op name. The lookup a
+   * command's output guard resolves with; tolerant of a prefix that matches
    * no mount (unmounted between stamp and boundary) by answering null.
    */
   limitOverride(prefix: string, name: string): Limit | null {

@@ -17,7 +17,6 @@ import logging
 import time
 from collections.abc import AsyncIterator
 
-from mirage.commands.errors import LimitExceededError
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -344,66 +343,3 @@ async def guard_output(
     guarded = guard_io(stdout, io, limit)
     data = await materialize(guarded) if guarded is not None else None
     return data, io.stderr, io.exit_code
-
-
-async def _capped(src: ByteSource, limit: Limit) -> AsyncIterator[bytes]:
-    """A streamed op result cut at its cap as it is pulled.
-
-    Nothing past the cap is pulled from ``src``. TRUNCATE ends the
-    stream there; ERROR raises LimitExceededError at the pull that
-    crossed it. ``limit_result`` runs it to its empty first step,
-    inside the ``try``, so a caller that closes it before pulling still
-    closes ``src``.
-
-    Args:
-        src (ByteSource): the op's stream.
-        limit (Limit): resolved op limit.
-    """
-    io = IOResult()
-    try:
-        yield b""
-        async for chunk in _bounded_stream(src, io, limit):
-            yield chunk
-    finally:
-        await close_quietly(src)
-    if io.stderr:
-        message = (await io.stderr_str()).strip()
-        if io.exit_code != 0:
-            raise LimitExceededError(message)
-        logger.debug("vfs op output truncated: %s", message)
-
-
-async def limit_result(result, limit: Limit | None):
-    """Apply byte/line caps to a byte-producing VFS op result.
-
-    VFS ops have no stderr/exit envelope, so on TRUNCATE the capped bytes
-    are returned (and the notice logged) and on ERROR a
-    LimitExceededError is raised. A stream is capped as it is pulled.
-    Non-byte results (stat, listings) and unconfigured guards pass
-    through untouched.
-
-    Args:
-        result: the op result (capped only when bytes or a byte stream).
-        limit (Limit | None): resolved op limit.
-    """
-    if limit is None:
-        return result
-    if limit.max_bytes is None and limit.max_lines is None:
-        return result
-    if hasattr(result, "__aiter__"):
-        capped = _capped(result, limit)
-        await capped.__anext__()
-        return capped
-    if not isinstance(result, (bytes, bytearray)):
-        return result
-    data, sg_io = await apply_limit(bytes(result), limit)
-    if sg_io.exit_code != 0:
-        message = (
-            await sg_io.stderr_str() if sg_io.stderr else "limit exceeded"
-        )
-        raise LimitExceededError(message.strip())
-    if sg_io.stderr:
-        logger.debug(
-            "vfs op output truncated: %s", (await sg_io.stderr_str()).strip()
-        )
-    return data

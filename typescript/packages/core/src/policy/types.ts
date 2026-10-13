@@ -743,7 +743,7 @@ export const VALIDITY: Readonly<
   postCommand: new Set(['deny', 'ask']),
   preExecute: new Set(['deny', 'ask', 'route']),
   preVfs: new Set(['deny', 'ask']),
-  postVfs: new Set(['deny', 'ask', 'limit']),
+  postVfs: new Set(['deny', 'ask']),
   postExecute: new Set(['deny', 'ask', 'limit']),
   preSession: new Set(['deny', 'ask']),
   postSession: new Set(['deny', 'ask']),

@@ -13,22 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Limit, OnExceed, PathSpec } from '../../types.ts'
+import { Limit, OnExceed } from '../../types.ts'
 import {
   DEFAULT_COMMAND_LIMITS,
   FALLBACK_LIMIT,
-  OutputCapPolicy,
   resolveProducer,
   resolveLimit,
 } from './output_cap.ts'
-import { CALLS } from '../../workspace/dispatcher/constants.ts'
-import type { VfsCall } from '../../vfs/types.ts'
-
-function callOf(name: string): VfsCall {
-  const call = CALLS.get(name)
-  if (call === undefined) throw new Error(`no call ${name}`)
-  return call
-}
 
 describe('Limit', () => {
   it('defaults to no limit + truncate', () => {
@@ -175,29 +166,5 @@ describe('resolveProducer', () => {
 
   it('an empty command has no bound', () => {
     expect(resolveProducer({ command: '', prefixes: [], declared: null }, table({}))).toBeNull()
-  })
-})
-
-describe('OutputCapPolicy', () => {
-  it('answers postVfs from the op table', () => {
-    const policy = new OutputCapPolicy((prefix, name) =>
-      prefix === '/a/' && name === 'read' ? new Limit({ maxBytes: 4 }) : null,
-    )
-    const capped = policy.postVfs({
-      call: callOf('read'),
-      path: new PathSpec({ virtual: '/a/x', directory: '/a', vfsPath: '' }),
-      write: false,
-      prefix: '/a/',
-      result: null,
-    })
-    expect(capped).toEqual(new Limit({ maxBytes: 4 }))
-    const silent = policy.postVfs({
-      call: callOf('write'),
-      path: new PathSpec({ virtual: '/a/x', directory: '/a', vfsPath: '' }),
-      write: true,
-      prefix: '/a/',
-      result: null,
-    })
-    expect(silent).toBeNull()
   })
 })

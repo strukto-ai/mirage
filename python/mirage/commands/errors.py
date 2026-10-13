@@ -46,13 +46,3 @@ class PartialOutputError(Exception):
     def __init__(self, message: str, stdout: bytes) -> None:
         super().__init__(message)
         self.stdout = stdout
-
-
-class LimitExceededError(Exception):
-    """A hard cap refused output the producer had already made.
-
-    The cap is applied to a result that exists: at a dispatcher the
-    backend has already moved those bytes, and the dispatcher reports that
-    through the caller's ``OpReport`` before the cap runs, so this
-    error carries no accounting of its own.
-    """

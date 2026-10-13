@@ -16,7 +16,7 @@ import { constants as fsConstants } from 'node:fs'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
+import { ContentType, FileStat, FileType, Limit, MountMode } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { Action, Policy, VfsContext } from '@struktoai/mirage-core/policy/index'
 import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
@@ -74,6 +74,39 @@ describe('MountCore', () => {
     await expect(new MountCore(ws.vfs).truncate('/data/f.txt', 2)).rejects.toBe(refused)
     expect(new TextDecoder().decode(await ws.vfs.read('/data/f.txt'))).toBe('hello\n')
   })
+
+  it.each([[false], [true]])(
+    'reads a file whole when its mount caps read (warm %s)',
+    async (warm) => {
+      // FUSE and SFTP read a small file whole and slice each chunk from it,
+      // so a mount `read:` entry must not cut that read. Mirrors Python's
+      // test_op_limit.py.
+      const text = Array.from({ length: 200 }, (_, i) => `line ${String(i + 1)}\n`).join('')
+      const data = new TextEncoder().encode(text)
+      const ram = new RAMVFS()
+      Object.assign(ram, { cachesReads: warm })
+      const ws = new Workspace(
+        { '/data/': [ram, MountMode.WRITE, { read: new Limit({ maxLines: 3 }) }] },
+        { mode: MountMode.WRITE },
+      )
+      try {
+        await ws.vfs.write('/data/f.txt', data)
+        if (warm) await ws.cache.set('/data/f.txt', data, { ttl: 600 })
+        const core = new MountCore(ws.vfs)
+        const fd = await core.open('/data/f.txt')
+        let got = ''
+        for (;;) {
+          const piece = await core.read('/data/f.txt', fd, got.length, 64)
+          if (piece.byteLength === 0) break
+          got += new TextDecoder().decode(piece)
+        }
+        await core.release(fd)
+        expect(got).toBe(text)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 
   it('runs every op under its session with no adapter binding it', async () => {
     // The SFTP entry point drives MountCore directly, with no FUSE adapter to

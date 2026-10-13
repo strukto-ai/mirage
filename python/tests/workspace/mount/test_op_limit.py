@@ -15,86 +15,64 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.errors import LimitExceededError
-from mirage.types import Limit, OnExceed, PathSpec
+from mirage.mount.core import MountCore
+from mirage.types import Limit, OnExceed
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.vfs_io import override
+
+DATA = b"".join(b"line %d\n" % i for i in range(1, 201))
 
 
-async def _read_long(accessor, scope, *args, **kwargs):
-    return b"hello world"
-
-
-async def _read_lines(accessor, scope, *args, **kwargs):
-    return b"a\nb\nc\nd\n"
-
-
-async def _read_short(accessor, scope, *args, **kwargs):
-    return b"hi"
-
-
-async def _ws_mount():
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("echo hi > /data/f.txt")
-    mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
-    return ws, mount
-
-
-async def _dispatch_read(ws):
-    # Op caps are policy and fire at the dispatcher, not inside
-    # Mount.call; route through the dispatcher.
-    result, _ = await ws._dispatcher.dispatch(
-        "read", PathSpec.from_str_path("/data/f.txt")
+async def _capped_ws(warm: bool, on_exceed: OnExceed) -> Workspace:
+    resource = RAMVFS()
+    resource.caches_reads = warm
+    resource._store.files["/f.txt"] = DATA
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    await ws.namespace.ensure_loaded()
+    if warm:
+        await ws.cache.set("/data/f.txt", DATA, ttl=600)
+    mount = ws.namespace.mount_for("/data/f.txt")
+    mount.command_limits["read"] = Limit(
+        max_lines=3, max_bytes=5, on_exceed=on_exceed
     )
-    return result
+    return ws
 
 
 @pytest.mark.asyncio
-async def test_vfs_read_truncates_to_max_bytes(monkeypatch):
-    ws, mount = await _ws_mount()
-    mount.command_limits["read"] = Limit(max_bytes=5)
-    override(mount.vfs, "read", _read_long)
-    assert await _dispatch_read(ws) == b"hello"
+@pytest.mark.parametrize("warm", [False, True])
+@pytest.mark.parametrize("on_exceed", [OnExceed.TRUNCATE, OnExceed.ERROR])
+async def test_a_mount_read_entry_never_cuts_a_file_call(warm, on_exceed):
+    ws = await _capped_ws(warm, on_exceed)
+    try:
+        assert await ws.vfs.read("/data/f.txt") == DATA
+        assert await ws.vfs.read("/data/f.txt", 100, 200) == DATA[100:300]
+        assert await ws.vfs.read("/data/f.txt", 100) == DATA[100:]
+        streamed = [c async for c in await ws.vfs.read_stream("/data/f.txt")]
+        assert b"".join(streamed) == DATA
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_vfs_read_truncates_to_max_lines(monkeypatch):
-    ws, mount = await _ws_mount()
-    mount.command_limits["read"] = Limit(max_lines=2)
-    override(mount.vfs, "read", _read_lines)
-    assert await _dispatch_read(ws) == b"a\nb\n"
+@pytest.mark.parametrize("warm", [False, True])
+async def test_a_kernel_mount_reads_a_capped_file_whole(warm):
+    ws = await _capped_ws(warm, OnExceed.TRUNCATE)
+    core = MountCore(ws.vfs)
+    try:
+        fh = await core.open("/data/f.txt")
+        got = b""
+        while piece := await core.read("/data/f.txt", 64, len(got), fh):
+            got += piece
+        await core.release(fh)
+        assert got == DATA
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_vfs_read_on_exceed_error_raises(monkeypatch):
-    ws, mount = await _ws_mount()
-    mount.command_limits["read"] = Limit(max_bytes=5, on_exceed=OnExceed.ERROR)
-    override(mount.vfs, "read", _read_long)
-    with pytest.raises(LimitExceededError):
-        await _dispatch_read(ws)
-
-
-@pytest.mark.asyncio
-async def test_vfs_read_within_limit_untouched(monkeypatch):
-    ws, mount = await _ws_mount()
-    mount.command_limits["read"] = Limit(max_bytes=100)
-    override(mount.vfs, "read", _read_short)
-    assert await _dispatch_read(ws) == b"hi"
-
-
-@pytest.mark.asyncio
-async def test_vfs_unconfigured_read_untouched(monkeypatch):
-    ws, mount = await _ws_mount()
-    override(mount.vfs, "read", _read_long)
-    assert await _dispatch_read(ws) == b"hello world"
-
-
-@pytest.mark.asyncio
-async def test_vfs_stat_not_capped_by_byte_limit(monkeypatch):
-    ws, mount = await _ws_mount()
-    mount.command_limits["stat"] = Limit(max_bytes=1)
-    result, _ = await ws._dispatcher.dispatch(
-        "stat", PathSpec.from_str_path("/data/f.txt")
-    )
-    assert result is not None
-    assert not isinstance(result, (bytes, bytearray))
+async def test_a_lines_own_reads_ignore_the_mount_read_entry():
+    ws = await _capped_ws(False, OnExceed.TRUNCATE)
+    try:
+        io = await ws.shell("cat /data/f.txt | wc -l")
+        assert (await io.stdout_str()).strip() == "200"
+    finally:
+        await ws.close()

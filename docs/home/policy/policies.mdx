@@ -89,7 +89,7 @@ flowchart LR
 | `post_command` | `postCommand` | after each command, once its output drained | Deny, Ask |
 | `post_execute` | `postExecute` | once per line, after it ends | Deny, Ask, Limit |
 | `pre_vfs` | `preVfs` | before each VFS call, not a command's own reads and writes | Deny, Ask |
-| `post_vfs` | `postVfs` | after each VFS call | Deny, Ask, Limit |
+| `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
 | `pre_session` | `preSession` | before each variable write | Deny, Ask |
 | `post_session` | `postSession` | after the write lands | Deny, Ask |
 
@@ -296,28 +296,29 @@ command's own write (`echo x > /reports/q3.md`) does not reach `pre_vfs`.
 <CodeGroup>
 
 ```python Python
-from mirage import Limit
-from mirage.policy import Policy, VfsResultContext
+from mirage.policy import Deny, Policy, VfsResultContext
 
-class SmallReads(Policy):
-    async def post_vfs(self, ctx: VfsResultContext) -> Limit | None:
-        if ctx.call.name == "read":
-            return Limit(max_bytes=1_000_000)
+class NoKeysOut(Policy):
+    async def post_vfs(self, ctx: VfsResultContext) -> Deny | None:
+        if isinstance(ctx.result, bytes) and b"PRIVATE KEY" in ctx.result:
+            return Deny("holds a private key")
         return None
 ```
 
 ```typescript TypeScript
-const smallReads: Policy = {
+const noKeysOut: Policy = {
   postVfs(ctx) {
-    return ctx.call.name === 'read' ? new Limit({ maxBytes: 1_000_000 }) : null
+    const text = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : ''
+    return text.includes('PRIVATE KEY') ? { kind: 'deny', reason: 'holds a private key' } : null
   },
 }
 ```
 
 </CodeGroup>
 
-`session.vfs.read` returns at most the first 1 MB. `cat` is not cut;
-bound a line with `post_execute`.
+`session.vfs.read` of a file holding a private key raises `EACCES`. A
+result is never cut, since a FUSE or SFTP mount reads a file in pieces; to
+bound what a line prints, use `post_execute`.
 
 ### pre_session
 

@@ -24,7 +24,6 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { enoent, erofs } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { LimitExceededError } from '../../commands/errors.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
@@ -38,7 +37,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 describe('dispatch applies limits on the executing mount', () => {
-  it('a symlink into a limited mount gets the target mount limit', async () => {
+  it('a mount read entry cuts nothing, through a link either', async () => {
     const parser = await getTestParser()
     const data = new RAMVFS()
     const plain = new RAMVFS()
@@ -54,14 +53,48 @@ describe('dispatch applies limits on the executing mount', () => {
       await ws.shell('ln -s /data/big.txt /r/link')
       const direct = (await ws.dispatch('read', '/data/big.txt')) as Uint8Array
       const viaLink = (await ws.dispatch('read', '/r/link')) as Uint8Array
-      // The link lives on the unlimited mount, but the read executes
-      // on /data: its maxBytes cap must apply either way.
+      expect(DEC.decode(direct)).toBe('0123456789abcdef\n')
       expect(DEC.decode(viaLink)).toBe(DEC.decode(direct))
-      expect(direct.byteLength).toBeLessThan(ENC.encode('0123456789abcdef\n').byteLength)
     } finally {
       await ws.close()
     }
   }, 30_000)
+
+  it.each([
+    [false, OnExceed.TRUNCATE],
+    [true, OnExceed.TRUNCATE],
+    [false, OnExceed.ERROR],
+    [true, OnExceed.ERROR],
+  ])('a mount read entry never cuts a file call (warm %s, %s)', async (warm, onExceed) => {
+    const data = ENC.encode(
+      Array.from({ length: 200 }, (_, i) => `line ${String(i + 1)}\n`).join(''),
+    )
+    const ram = new RAMVFS()
+    Object.assign(ram, { cachesReads: warm })
+    const ws = new Workspace(
+      {
+        '/data': [
+          ram,
+          MountMode.WRITE,
+          { read: new Limit({ maxLines: 3, maxBytes: 5, onExceed }) },
+        ],
+      },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      await ws.vfs.write('/data/f.txt', data)
+      if (warm) await ws.cache.set('/data/f.txt', data, { ttl: 600 })
+      expect(DEC.decode(await ws.vfs.read('/data/f.txt'))).toBe(DEC.decode(data))
+      const window = await ws.vfs.read('/data/f.txt', { offset: 100, size: 200 })
+      expect(DEC.decode(window)).toBe(DEC.decode(data.subarray(100, 300)))
+      const tail = await ws.vfs.read('/data/f.txt', { offset: 100 })
+      expect(DEC.decode(tail)).toBe(DEC.decode(data.subarray(100)))
+      const streamed = await pullAll(await ws.vfs.readStream('/data/f.txt'))
+      expect(streamed.join('')).toBe(DEC.decode(data))
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 describe('dispatch rename across mounts', () => {
@@ -1811,49 +1844,39 @@ describe('a streamed read', () => {
     }
   })
 
-  it.each([OnExceed.TRUNCATE, OnExceed.ERROR])('stops at the cap (%s)', async (onExceed) => {
-    const tape = new Tape()
-    const ws = new Workspace(
-      { '/tape': [tape, MountMode.WRITE, { read: new Limit({ maxBytes: 15, onExceed }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      const stream = await ws.dispatch('read', TAPE, [], { stream: true, filetype: null })
-      let got = ''
-      const pull = async (): Promise<void> => {
-        for await (const chunk of stream as AsyncIterable<Uint8Array>) got += DEC.decode(chunk)
-      }
-      if (onExceed === OnExceed.ERROR)
-        await expect(pull()).rejects.toBeInstanceOf(LimitExceededError)
-      else await pull()
-      expect(got).toBe('012345678901234')
-      expect(tape.pulled).toBe(2)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it.each([[null], [new Limit({ maxBytes: 15 })]])(
-    'closes and keeps nothing when closed before its first pull (cap %o)',
-    async (cap) => {
+  it.each([OnExceed.TRUNCATE, OnExceed.ERROR])(
+    'is never cut by a mount read entry (%s)',
+    async (onExceed) => {
       const tape = new Tape()
       const ws = new Workspace(
-        { '/tape': cap === null ? tape : [tape, MountMode.WRITE, { read: cap }] },
+        { '/tape': [tape, MountMode.WRITE, { read: new Limit({ maxBytes: 15, onExceed }) }] },
         { mode: MountMode.WRITE },
       )
       try {
-        const stream = (await ws.dispatch('read', TAPE, [], {
-          stream: true,
-        })) as AsyncGenerator<Uint8Array>
-        await stream.return(undefined)
-        expect([tape.pulled, tape.closed]).toEqual([1, true])
-        await ws.dispatch('read', TAPE)
-        expect(tape.reads).toBe(1)
+        const stream = await ws.dispatch('read', TAPE, [], { stream: true, filetype: null })
+        expect((await pullAll(stream)).join('')).toBe('0123456789'.repeat(5))
+        expect(tape.pulled).toBe(5)
       } finally {
         await ws.close()
       }
     },
   )
+
+  it('closes and keeps nothing when closed before its first pull', async () => {
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      const stream = (await ws.dispatch('read', TAPE, [], {
+        stream: true,
+      })) as AsyncGenerator<Uint8Array>
+      await stream.return(undefined)
+      expect([tape.pulled, tape.closed]).toEqual([1, true])
+      await ws.dispatch('read', TAPE)
+      expect(tape.reads).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
 
   it('keeps none of itself when a write lands during it', async () => {
     const tape = new Tape()

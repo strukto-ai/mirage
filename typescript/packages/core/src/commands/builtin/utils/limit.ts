@@ -17,12 +17,10 @@ import { chunks } from '../../../io/cooperative.ts'
 import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
-import { LimitExceededError } from '../../errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 
 const NEWLINE = 0x0a
 const ENC = new TextEncoder()
-const DEC = new TextDecoder()
 
 const TIMED_OUT = Symbol('timed-out')
 
@@ -312,44 +310,6 @@ export async function guardOutput(
   const guarded = guardIO(stdout, io, limit)
   const data = guarded === null ? null : await materialize(guarded)
   return [data, io.stderr, io.exitCode]
-}
-
-/**
- * A streamed op result cut at its cap as it is pulled. Nothing past the cap is
- * pulled from `src`: TRUNCATE ends the stream there, ERROR throws
- * LimitExceededError at the pull that crossed it. `limitResult` runs it to its
- * empty first step, inside the `try`, so a caller that closes it before
- * pulling still closes `src`. Mirrors Python's `_capped`.
- */
-async function* capped(src: ByteSource, limit: Limit): AsyncGenerator<Uint8Array> {
-  const io = new IOResult()
-  try {
-    yield new Uint8Array()
-    yield* boundedStream(src, io, limit)
-  } finally {
-    await closeQuietly(src)
-  }
-  if (io.exitCode !== 0) {
-    throw new LimitExceededError(DEC.decode(await materialize(io.stderr)).trim())
-  }
-}
-
-export async function limitResult(result: unknown, limit: Limit | null): Promise<unknown> {
-  if (limit === null) return result
-  if (limit.maxBytes === null && limit.maxLines === null) return result
-  const isStream = result !== null && typeof result === 'object' && Symbol.asyncIterator in result
-  if (isStream) {
-    const stream = capped(result as ByteSource, limit)
-    await stream.next()
-    return stream
-  }
-  if (!(result instanceof Uint8Array)) return result
-  const [data, sgIo] = await applyLimit(result, limit)
-  if (sgIo.exitCode !== 0) {
-    const message = sgIo.stderr instanceof Uint8Array ? DEC.decode(sgIo.stderr) : 'limit exceeded'
-    throw new LimitExceededError(message.trim())
-  }
-  return data
 }
 
 /** Capture an invocation's deadline before a lazy producer starts running. */

@@ -939,7 +939,7 @@ VALIDITY: dict[str, frozenset[str]] = {
     "post_command": frozenset({Deny.kind, Ask.kind}),
     "pre_execute": frozenset({Deny.kind, Ask.kind, Route.kind}),
     "pre_vfs": frozenset({Deny.kind, Ask.kind}),
-    "post_vfs": frozenset({Deny.kind, Ask.kind, Limit.kind}),
+    "post_vfs": frozenset({Deny.kind, Ask.kind}),
     "post_execute": frozenset({Deny.kind, Ask.kind, Limit.kind}),
     "pre_session": frozenset({Deny.kind, Ask.kind}),
     "post_session": frozenset({Deny.kind, Ask.kind}),

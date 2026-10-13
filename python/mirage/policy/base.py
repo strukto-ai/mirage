@@ -40,8 +40,8 @@ class Policy:
     (``pre_command`` / ``post_command``), each ``ws.vfs`` /
     ``session.vfs`` call (``pre_vfs`` / ``post_vfs``) and each session
     write (``pre_session`` / ``post_session``). Every method may answer
-    Deny or Ask; a Limit only where a result comes back to cap
-    (``post_vfs``, ``post_execute``), a Route only at ``pre_execute``.
+    Deny or Ask; a Limit only at ``post_execute``, where a line's output
+    comes back to cap, a Route only at ``pre_execute``.
     A post method sees what its pre method saw, plus what came back, and
     never undoes a side effect: it holds back what came back. Hides,
     mount modes and path rules are not methods: they apply to every
@@ -120,8 +120,9 @@ class Policy:
         """Judge one completed ``ws.vfs`` / ``session.vfs`` call.
 
         A Deny, or an Ask the host has not approved, drops the result
-        with EACCES (the call itself is not undone); a Limit caps a
-        byte-producing one.
+        with EACCES (the call itself is not undone). Nothing cuts a
+        result: a kernel or protocol mount reads in ranges and must get
+        each whole.
 
         Args:
             ctx (VfsResultContext): what ``pre_vfs`` saw, plus the result.

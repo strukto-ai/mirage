@@ -41,19 +41,3 @@ export class PartialOutputError extends Error {
     this.stdout = stdout
   }
 }
-
-/**
- * A hard cap refused output the producer had already made.
- *
- * The cap is applied to a result that exists: at a dispatcher the
- * backend has already moved those bytes, and the dispatcher reports that
- * through the caller's `OpReport` before the cap runs, so this error
- * carries no accounting of its own.
- * Mirrors Python's mirage.commands.errors.LimitExceededError.
- */
-export class LimitExceededError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'LimitExceededError'
-  }
-}

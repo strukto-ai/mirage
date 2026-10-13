@@ -17,7 +17,14 @@ import errno
 import pytest
 
 from mirage.errors.types import ReadOnlyError
-from mirage.policy import Deny, Limit, Policies, Policy, PolicyDenied
+from mirage.policy import (
+    Deny,
+    Limit,
+    Policies,
+    Policy,
+    PolicyDenied,
+    PolicyError,
+)
 from mirage.policy.boundary import Boundary
 from mirage.policy.types import VfsContext, VfsResultContext
 from mirage.types import MountMode, PathSpec
@@ -59,11 +66,10 @@ async def test_admit_holds_the_mount_mode():
 
 
 @pytest.mark.asyncio
-async def test_complete_applies_the_post_vfs_limit():
+async def test_complete_hands_the_result_back_whole():
     capped = Boundary(Policies([_Capped()]), "/d/")
-    assert await capped.complete(
-        CALLS["read"], _path("/d/f"), False, b"abcdef"
-    ) == (b"abc")
+    with pytest.raises(PolicyError):
+        await capped.complete(CALLS["read"], _path("/d/f"), False, b"abcdef")
     bare = Boundary(Policies(), "/d/")
     assert await bare.complete(
         CALLS["read"], _path("/d/f"), False, b"abcdef"

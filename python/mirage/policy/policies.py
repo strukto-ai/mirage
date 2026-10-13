@@ -36,7 +36,6 @@ from mirage.errors.types import FsCondition
 from mirage.policy.base import Policy
 from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
-from mirage.policy.builtin.output_cap import OutputCapPolicy
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.decisions import Decisions, ask_rule, op_question
@@ -349,14 +348,13 @@ async def post_vfs_gate(
     *,
     mode: MountMode | None = None,
     decisions: Decisions | None = None,
-) -> Limit | None:
+) -> None:
     """Fire post_vfs at a dispatcher; a Deny, or an Ask the host has not
     approved, drops the result with EACCES.
 
-    Returns the merged Limit bound (tightest per field across every
-    opining policy) for the entry point to apply to a byte-producing result,
-    or None when no policy bounds this op. Not fired for a running
-    line's own I/O or a method's own read.
+    Nothing cuts what a call returns: a call that asks for a range, as
+    a kernel or protocol mount does, must get it whole. Not fired for a
+    running line's own I/O or a method's own read.
 
     Args:
         policies (Policies): the workspace's admission policies.
@@ -386,9 +384,7 @@ async def post_vfs_gate(
         mode=mode,
         result=result,
     )
-    answer, bound = await policies.post_vfs(ctx)
-    await _refuse_op(ctx, answer, decisions)
-    return bound
+    await _refuse_op(ctx, await policies.post_vfs(ctx), decisions)
 
 
 async def pre_session_gate(
@@ -664,18 +660,6 @@ class Policies:
             method (str): method name (pre_command, pre_vfs, post_vfs).
         """
         return method in self._wanted
-
-    def reads_results(self) -> bool:
-        """Whether a post_vfs policy may read an op's result.
-
-        The built-in output cap answers from the op and the mount alone;
-        any other method, a subclass's override of the cap's included, may
-        read ``ctx.result``, so a streamed read reaches it read whole.
-        """
-        blind = (Policy.post_vfs, OutputCapPolicy.post_vfs)
-        return any(
-            type(policy).post_vfs not in blind for policy in self._policies
-        )
 
     async def wants_for(
         self, method: str, session_id: str, rules_only: bool = False
@@ -1020,17 +1004,14 @@ class Policies:
         action, _, _ = await self._fire("post_session", ctx)
         return action
 
-    async def post_vfs(
-        self, ctx: VfsResultContext
-    ) -> tuple[Deny | Ask | None, Limit | None]:
-        """Fire post_vfs; a Deny or an Ask holds the result back, Limits
-        merge.
+    async def post_vfs(self, ctx: VfsResultContext) -> Deny | Ask | None:
+        """Fire post_vfs; a Deny or an Ask holds the result back.
 
         Args:
             ctx (VfsResultContext): the op and its raw result.
         """
-        action, limit, _ = await self._fire("post_vfs", ctx)
-        return action, limit
+        action, _, _ = await self._fire("post_vfs", ctx)
+        return action
 
     async def post_execute(
         self, ctx: ExecuteResultContext

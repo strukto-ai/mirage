@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SessionAccess } from '../view/types.ts'
-import { limitResult } from '../commands/builtin/utils/limit.ts'
 import type { Decisions } from './decisions.ts'
 import type { EntryGate } from './types.ts'
 import type { Policies } from './policies.ts'
@@ -51,14 +50,13 @@ export class Boundary {
     })
   }
 
+  /** Fire postVfs on a finished call and hand its result back whole. */
   async complete(call: VfsCall, path: PathSpec, write: boolean, result: unknown): Promise<unknown> {
-    return limitResult(
-      result,
-      await postVfsGate(this.policies, call, path, write, this.prefix, result, this.sessionId, {
-        ...(this.mode === undefined ? {} : { mode: this.mode }),
-        decisions: this.decisions,
-        ...(this.access === undefined ? {} : { access: this.access }),
-      }),
-    )
+    await postVfsGate(this.policies, call, path, write, this.prefix, result, this.sessionId, {
+      ...(this.mode === undefined ? {} : { mode: this.mode }),
+      decisions: this.decisions,
+      ...(this.access === undefined ? {} : { access: this.access }),
+    })
+    return result
   }
 }

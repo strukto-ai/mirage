@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Limit, OnExceed, type Producer } from '../../types.ts'
-import type { Policy } from '../base.ts'
-import type { Action, VfsResultContext } from '../types.ts'
 
 const DEFAULT_MAX_LINES = 2000
 const DEFAULT_TIMEOUT_SECONDS = 600
@@ -117,23 +115,6 @@ export function resolveProducer(
     ),
   )
   return Limit.aggr(perMount)
-}
-
-/**
- * Per-op output bounds, seeded by the registry. Command output uses
- * resolveProducer at its terminal destination; postExecute is reserved
- * for explicit whole-invocation policies.
- */
-export class OutputCapPolicy implements Policy {
-  private readonly overrideFor: OverrideLookup
-
-  constructor(overrideFor: OverrideLookup) {
-    this.overrideFor = overrideFor
-  }
-
-  postVfs(ctx: VfsResultContext): Action | null {
-    return this.overrideFor(ctx.prefix, ctx.call.name)
-  }
 }
 
 /** The canonical snake_case command-limit mapping used by config and stored sessions. */

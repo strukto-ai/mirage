@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.errors import LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
@@ -1938,7 +1937,7 @@ async def test_a_streamed_read_fails_at_the_call():
     "policies,kwargs",
     [([], {"offset": 5}), ([], {"size": 4}), ([ReadsResults()], {})],
 )
-async def test_a_window_or_a_policy_that_reads_results_gets_whole_bytes(
+async def test_a_window_or_a_post_vfs_policy_gets_whole_bytes(
     policies, kwargs
 ):
     tape = Tape()
@@ -1976,34 +1975,22 @@ async def test_each_pull_gets_the_whole_timeout():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("on_exceed", [OnExceed.TRUNCATE, OnExceed.ERROR])
-async def test_a_capped_stream_stops_at_the_cap(on_exceed):
+async def test_a_mount_read_entry_never_cuts_a_stream(on_exceed):
     tape = Tape()
     with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
         ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = Limit(
             max_bytes=15, on_exceed=on_exceed
         )
         stream, _ = await ws.dispatch("read", TAPE, stream=True, filetype=None)
-        got = b""
-        if on_exceed is OnExceed.ERROR:
-            with pytest.raises(LimitExceededError):
-                async for chunk in stream:
-                    got += chunk
-        else:
-            async for chunk in stream:
-                got += chunk
-        assert got == b"012345678901234"
-        assert tape.pulled == 2
+        got = b"".join([chunk async for chunk in stream])
+        assert got == tape.files["a.txt"]
+        assert tape.pulled == 5
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cap", [None, Limit(max_bytes=15)])
-async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing(
-    cap,
-):
+async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing():
     tape = Tape()
     with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
-        if cap is not None:
-            ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = cap
         stream, _ = await ws.dispatch("read", TAPE, stream=True)
         await stream.aclose()
         assert (tape.pulled, tape.closed) == (1, True)

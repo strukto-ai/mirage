@@ -17,13 +17,10 @@ from pydantic import ValidationError
 
 from mirage.policy.builtin.output_cap import (
     DEFAULT_COMMAND_LIMITS,
-    OutputCapPolicy,
     resolve_limit,
     resolve_producer,
 )
-from mirage.policy.types import VfsResultContext
-from mirage.types import Limit, OnExceed, PathSpec, Producer
-from mirage.workspace.dispatcher.constants import CALLS
+from mirage.types import Limit, OnExceed, Producer
 
 
 def test_defaults():
@@ -150,31 +147,3 @@ def test_resolve_producer_aggregates_tightest_across_prefixes():
 
 def test_resolve_producer_empty_command_has_no_bound():
     assert resolve_producer(Producer(command=""), _override_table({})) is None
-
-
-@pytest.mark.asyncio
-async def test_output_cap_policy_answers_post_vfs_from_the_op_table():
-    policy = OutputCapPolicy(
-        _override_table({("/a/", "read"): Limit(max_bytes=4)})
-    )
-    capped = await policy.post_vfs(
-        VfsResultContext(
-            call=CALLS["read"],
-            path=PathSpec.from_str_path("/a/x"),
-            write=False,
-            prefix="/a/",
-            result=b"payload",
-        )
-    )
-    assert isinstance(capped, Limit)
-    assert capped.max_bytes == 4
-    silent = await policy.post_vfs(
-        VfsResultContext(
-            call=CALLS["write"],
-            path=PathSpec.from_str_path("/a/x"),
-            write=True,
-            prefix="/a/",
-            result=None,
-        )
-    )
-    assert silent is None

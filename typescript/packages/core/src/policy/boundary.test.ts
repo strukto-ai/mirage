@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PolicyDenied } from './errors.ts'
+import { PolicyDenied, PolicyError } from './errors.ts'
 import { Policies } from './policies.ts'
 import type { Policy } from './base.ts'
 import type { VfsContext } from './types.ts'
@@ -54,11 +54,11 @@ describe('Boundary', () => {
     await expect(boundary.admit(callOf('write'), path('/ro/f'), true)).rejects.toThrow(/read-only/)
   })
 
-  it('complete applies the postVfs limit', async () => {
+  it('complete hands the result back whole', async () => {
     const data = new TextEncoder().encode('abcdef')
     const capped3 = new Boundary(new Policies([capped]), '/d/')
-    expect(await capped3.complete(callOf('read'), path('/d/f'), false, data)).toEqual(
-      new TextEncoder().encode('abc'),
+    await expect(capped3.complete(callOf('read'), path('/d/f'), false, data)).rejects.toThrow(
+      PolicyError,
     )
     const bare = new Boundary(new Policies(), '/d/')
     expect(await bare.complete(callOf('read'), path('/d/f'), false, data)).toEqual(data)
