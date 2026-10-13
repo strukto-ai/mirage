@@ -1,0 +1,107 @@
+{
+  "cases": [
+    {
+      "id": "pipe_writer_cut_short_by_its_reader_dies_of_sigpipe",
+      "seq": 1400001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -c 200000 /dev/zero | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\"; head -c 40000 /dev/zero | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\"; cat /dev/zero | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "141 0\n0 0\n141 0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pipe_sigpipe_overrides_the_writers_own_status",
+      "seq": 1400002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( cat /missing /dev/zero | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\"; { cat /missing /dev/zero; echo \"st=$?\" >&2; } | head -c 1 >/dev/null; f() { cat /dev/zero; }; f | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "141 0\n141 0\n",
+        "stderr": "cat: /missing: No such file or directory\ncat: /missing: No such file or directory\nst=141\n"
+      }
+    },
+    {
+      "id": "pipe_writer_stopped_between_writes_keeps_its_status",
+      "seq": 1400003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq 100000 | head -1 >/dev/null; echo \"${PIPESTATUS[*]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 0\n",
+        "stderr": ""
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"141 0\\n\": seq keeps writing past the 64 KiB pipe buffer after head exits and dies of SIGPIPE. Mirage pulls a writer's next chunk only once the reader took the last, so a lazy source never fetches another page for a reader that is gone; a writer stopped between its writes keeps its own status, and only a write the closed pipe cuts short is SIGPIPE."
+    }
+  ]
+}

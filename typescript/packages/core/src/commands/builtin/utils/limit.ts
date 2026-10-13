@@ -312,15 +312,16 @@ export async function guardOutput(
   return [data, io.stderr, io.exitCode]
 }
 
-/** Capture an invocation's deadline before a lazy producer starts running. */
+/** Capture an invocation's deadline before a lazy producer starts running; `split` as in chunks. */
 export function guardInput(
   source: ByteSource,
   opts: { signal?: AbortSignal; timeoutSeconds?: number; command?: string },
+  split = true,
 ): AsyncIterable<Uint8Array> {
   const seconds = opts.timeoutSeconds
   const deadline = seconds !== undefined && seconds > 0 ? performance.now() + seconds * 1000 : null
   return (async function* () {
-    for await (const chunk of chunks(source, opts.signal)) {
+    for await (const chunk of chunks(source, opts.signal, split)) {
       if (deadline !== null && performance.now() >= deadline) {
         throw new CommandTimeoutError(opts.command ?? '?', seconds ?? 0)
       }

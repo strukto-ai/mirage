@@ -17,17 +17,23 @@ import { YieldBudget } from './yield_budget.ts'
 
 export const CHUNK_SIZE = 16 * 1024
 
-/** Split even a single RAM/cache blob; an abort closes the producer and wins over a stalled pull. */
+/**
+ * Split even a single RAM/cache blob; an abort closes the producer and wins
+ * over a stalled pull. Unless `split`, each pull passes through whole, as its
+ * producer wrote it.
+ */
 export async function* chunks(
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,
+  split = true,
 ): AsyncIterableIterator<Uint8Array> {
   const budget = new YieldBudget(signal)
+  const piece = split ? CHUNK_SIZE : Number.POSITIVE_INFINITY
   if (source instanceof Uint8Array) {
-    for (let offset = 0; offset < source.byteLength; offset += CHUNK_SIZE) {
+    for (let offset = 0; offset < source.byteLength; offset += piece) {
       const pending = budget.run()
       if (pending !== undefined) await pending
-      yield source.subarray(offset, offset + CHUNK_SIZE)
+      yield source.subarray(offset, offset + piece)
     }
     return
   }
@@ -52,10 +58,10 @@ export async function* chunks(
       // microtask chain with no yield starves the timer an abort rides.
       const pulled = budget.run()
       if (pulled !== undefined) await pulled
-      for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
+      for (let offset = 0; offset < data.byteLength; offset += piece) {
         const pending = budget.run()
         if (pending !== undefined) await pending
-        yield data.subarray(offset, offset + CHUNK_SIZE)
+        yield data.subarray(offset, offset + piece)
       }
     }
   } finally {
