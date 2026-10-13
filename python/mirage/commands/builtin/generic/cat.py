@@ -19,9 +19,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
@@ -224,26 +224,37 @@ async def display_lines(
 ) -> AsyncIterator[bytes]:
     """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
 
-    Reads ``source`` in pieces, so a squeeze over a whole RAM read stays
-    linear and cancellable. Closes it when it stops, at the end or when its
-    reader stops.
+    One write per line. The scan yields to the loop every 64 lines, so a
+    squeeze over a whole RAM read stays cancellable, and a line split
+    across chunks is joined once it ends. Closes ``source`` when it stops,
+    at the end or when its reader stops.
 
     Args:
         source (ByteSource): the bytes to render.
         parsed (CatFlags): the display flags.
     """
     stream = ensure_stream(source)
-    pieces = chunks(stream)
+    budget = YieldBudget()
     try:
         number_lines = parsed.number_lines and not parsed.number_nonblank
         transform = parsed.show_tabs or parsed.show_nonprinting
         line_no = 0
-        buf = b""
+        scanned = 0
+        pending: list[bytes] = []
         prev_blank = False
-        async for chunk in pieces:
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
+        async for chunk in stream:
+            start = 0
+            end = chunk.find(b"\n")
+            while end >= 0:
+                line = chunk[start:end]
+                if pending:
+                    line = b"".join([*pending, line])
+                    pending = []
+                start = end + 1
+                end = chunk.find(b"\n", start)
+                scanned += 1
+                if scanned % 64 == 0:
+                    await budget.run()
                 if parsed.squeeze_blank and not line and prev_blank:
                     prev_blank = True
                     continue
@@ -262,7 +273,10 @@ async def display_lines(
                     )
                 yield prefix + line + suffix
                 prev_blank = not line
-        if buf:
+            if start < len(chunk):
+                pending.append(chunk[start:])
+        if pending:
+            buf = b"".join(pending)
             should_number = parsed.number_lines or parsed.number_nonblank
             if should_number:
                 line_no += 1
@@ -271,5 +285,4 @@ async def display_lines(
                 buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
             yield prefix + buf
     finally:
-        await close_quietly(pieces)
         await close_quietly(stream)

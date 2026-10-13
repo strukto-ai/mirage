@@ -28,9 +28,9 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
+from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
 
@@ -74,9 +74,9 @@ async def head(
 
     Closes ``src`` whenever it stops, at its limit, at the end of the
     input, or when its own reader stops, so a read it leaves unfinished
-    releases its mount at once rather than when it is collected. A byte
-    count passes its chunks on whole; a line count reads it in pieces, so
-    a whole RAM read stays linear and cancellable.
+    releases its mount at once rather than when it is collected. It
+    writes the producer's chunks on; a line count yields to the loop every
+    64 lines, and a held line split across chunks is joined once.
 
     Args:
         src (bytes | AsyncIterator[bytes]): the input.
@@ -85,7 +85,7 @@ async def head(
         zero_terminated (bool): ``-z``, NUL ends a line.
     """
     stream = ensure_stream(src)
-    pieces = chunks(stream)
+    budget = YieldBudget()
     try:
         if c is not None:
             if c == 0:
@@ -117,7 +117,7 @@ async def head(
             if target == 0:
                 return
             emitted_lines = 0
-            async for chunk in pieces:
+            async for chunk in stream:
                 start = 0
                 while emitted_lines < target:
                     end = chunk.find(separator, start)
@@ -130,25 +130,38 @@ async def head(
                     if emitted_lines >= target:
                         return
                     start = end + 1
+                    if emitted_lines % 64 == 0:
+                        await budget.run()
             return
 
         keep = -target
         recent: deque[bytes] = deque(maxlen=keep)
-        buf = b""
-        async for chunk in pieces:
-            buf += chunk
-            while separator in buf:
-                line, buf = buf.split(separator, 1)
+        scanned = 0
+        pending: list[bytes] = []
+        async for chunk in stream:
+            start = 0
+            end = chunk.find(separator)
+            while end >= 0:
+                line = chunk[start:end]
+                if pending:
+                    line = b"".join([*pending, line])
+                    pending = []
                 if len(recent) == keep:
                     yield recent[0] + separator
                 recent.append(line)
-        if buf:
+                start = end + 1
+                end = chunk.find(separator, start)
+                scanned += 1
+                if scanned % 64 == 0:
+                    await budget.run()
+            if start < len(chunk):
+                pending.append(chunk[start:])
+        if pending:
             if len(recent) == keep:
                 yield recent[0] + separator
-            recent.append(buf)
+            recent.append(b"".join(pending))
 
     finally:
-        await close_quietly(pieces)
         await close_quietly(stream)
 
 

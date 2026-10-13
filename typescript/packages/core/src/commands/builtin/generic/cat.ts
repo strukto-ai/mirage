@@ -15,7 +15,7 @@
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -113,9 +113,11 @@ async function* reported(
 }
 
 /**
- * Line-process a stream for GNU cat's display flags (-n -E -T -v -s), in
- * pieces: cat takes its input whole, and -s can squeeze a whole RAM read
- * without yielding a line.
+ * Line-process a stream for GNU cat's display flags (-n -E -T -v -s), one
+ * write per line, as Python's. cat takes its input whole, so the scan
+ * yields to timers and the abort every 64 lines (-s can squeeze a whole RAM
+ * read without writing a line), and a line split across chunks is joined
+ * once it ends.
  */
 async function* displayLines(
   source: AsyncIterable<Uint8Array>,
@@ -123,20 +125,25 @@ async function* displayLines(
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   let lineNo = 0
-  let buf = new Uint8Array(0)
+  let scanned = 0
+  let pending: Uint8Array[] = []
   let prevBlank = false
+  const budget = new YieldBudget(signal)
   const transform = display.showTabs || display.showNonprinting
-  for await (const chunk of chunks(source, signal)) {
-    if (chunk.byteLength === 0) continue
-    const mergedBuf = new Uint8Array(buf.byteLength + chunk.byteLength)
-    mergedBuf.set(buf, 0)
-    mergedBuf.set(chunk, buf.byteLength)
-    buf = mergedBuf
-    let nl = buf.indexOf(NL)
+  const suffix = encodeText(display.showEnds ? '$\n' : '\n')
+  for await (const chunk of source) {
+    let start = 0
+    let nl = chunk.indexOf(NL)
     while (nl >= 0) {
-      let line = buf.subarray(0, nl)
-      buf = buf.subarray(nl + 1)
-      nl = buf.indexOf(NL)
+      const tail = chunk.subarray(start, nl)
+      let line = pending.length === 0 ? tail : concat([...pending, tail])
+      pending = []
+      start = nl + 1
+      nl = chunk.indexOf(NL, start)
+      if (++scanned % 64 === 0) {
+        const paused = budget.run()
+        if (paused !== undefined) await paused
+      }
       if (display.squeezeBlank && line.byteLength === 0 && prevBlank) {
         prevBlank = true
         continue
@@ -146,17 +153,19 @@ async function* displayLines(
         (!display.numberNonblank && display.numberLines) ||
         (display.numberNonblank && line.byteLength > 0)
       if (shouldNumber) lineNo += 1
-      if (shouldNumber) yield encodeText(`${formatLineNo(lineNo)}\t`)
       if (transform) line = visible(line, display.showTabs, display.showNonprinting)
-      yield line
-      yield encodeText(display.showEnds ? '$\n' : '\n')
+      yield concat(
+        shouldNumber ? [encodeText(`${formatLineNo(lineNo)}\t`), line, suffix] : [line, suffix],
+      )
     }
+    if (start < chunk.byteLength) pending.push(chunk.subarray(start))
   }
-  if (buf.byteLength > 0) {
+  if (pending.length > 0) {
+    const buf = concat(pending)
     const shouldNumber = display.numberLines || display.numberNonblank
     if (shouldNumber) lineNo += 1
-    if (shouldNumber) yield encodeText(`${formatLineNo(lineNo)}\t`)
-    yield transform ? visible(buf, display.showTabs, display.showNonprinting) : buf
+    const last = transform ? visible(buf, display.showTabs, display.showNonprinting) : buf
+    yield shouldNumber ? concat([encodeText(`${formatLineNo(lineNo)}\t`), last]) : last
   }
 }
 

@@ -20,7 +20,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { asyncChain } from '../../../io/stream.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { truncateStream } from '../utils/limit.ts'
 import { splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -63,8 +63,9 @@ function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
  * Bytes (`bytesMode`): positive = first N bytes, negative = all but the last N
  * bytes, 0 = nothing. Lines (`lines`): positive = first N lines, negative = all
  * but the last N lines, 0 = nothing. A final line without a trailing newline is
- * preserved as-is (no newline is appended). head takes its input whole, so a
- * byte count hands on the producer's chunks and a line count scans it in pieces.
+ * preserved as-is (no newline is appended). head takes its input whole and
+ * writes the producer's chunks on, so a line count yields to timers and the
+ * abort every 64 lines, and a held line split across chunks is joined once.
  */
 async function* headStream(
   source: AsyncIterable<Uint8Array>,
@@ -100,11 +101,11 @@ async function* headStream(
   }
 
   const delimiter = zeroTerminated ? 0 : NL
-  const pieces = chunks(source, signal)
+  const budget = new YieldBudget(signal)
   if (lines >= 0) {
     if (lines === 0) return
     let emitted = 0
-    for await (const chunk of pieces) {
+    for await (const chunk of source) {
       let start = 0
       while (emitted < lines) {
         const nl = chunk.indexOf(delimiter, start)
@@ -116,6 +117,10 @@ async function* headStream(
         emitted += 1
         if (emitted >= lines) return
         start = nl + 1
+        if (emitted % 64 === 0) {
+          const paused = budget.run()
+          if (paused !== undefined) await paused
+        }
       }
     }
     return
@@ -123,22 +128,30 @@ async function* headStream(
 
   const keep = -lines
   const recent: Uint8Array[] = []
-  let buf: Uint8Array = new Uint8Array(0)
-  for await (const chunk of pieces) {
-    buf = concat([buf, chunk])
-    let nl = buf.indexOf(delimiter)
+  let scanned = 0
+  let pending: Uint8Array[] = []
+  for await (const chunk of source) {
+    let start = 0
+    let nl = chunk.indexOf(delimiter)
     while (nl >= 0) {
-      recent.push(buf.subarray(0, nl + 1))
-      buf = buf.subarray(nl + 1)
+      const tail = chunk.subarray(start, nl + 1)
+      recent.push(pending.length === 0 ? tail : concat([...pending, tail]))
+      pending = []
+      start = nl + 1
+      nl = chunk.indexOf(delimiter, start)
       if (recent.length > keep) {
         const out = recent.shift()
         if (out !== undefined) yield out
       }
-      nl = buf.indexOf(delimiter)
+      if (++scanned % 64 === 0) {
+        const paused = budget.run()
+        if (paused !== undefined) await paused
+      }
     }
+    if (start < chunk.byteLength) pending.push(chunk.subarray(start))
   }
-  if (buf.byteLength > 0) {
-    recent.push(buf)
+  if (pending.length > 0) {
+    recent.push(concat(pending))
     if (recent.length > keep) {
       const out = recent.shift()
       if (out !== undefined) yield out

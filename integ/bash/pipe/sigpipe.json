@@ -102,6 +102,40 @@
         "stderr": ""
       },
       "note": "Divergence: GNU bash 5.2.37 prints \"141 0\\n\": seq keeps writing past the 64 KiB pipe buffer after head exits and dies of SIGPIPE. Mirage pulls a writer's next chunk only once the reader took the last, so a lazy source never fetches another page for a reader that is gone; a writer stopped between its writes keeps its own status, and only a write the closed pipe cuts short is SIGPIPE."
+    },
+    {
+      "id": "pipe_line_writer_cut_short_dies_of_sigpipe",
+      "seq": 1400004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "head -n 1 /dev/zero | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\"; head -c 200000 /dev/zero | cat -n | head -c 1 >/dev/null; echo \"${PIPESTATUS[1]} ${PIPESTATUS[2]}\"; head -c 40000 /dev/zero | cat -n | head -c 1 >/dev/null; echo \"${PIPESTATUS[1]} ${PIPESTATUS[2]}\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "141 0\n141 0\n0 0\n",
+        "stderr": ""
+      }
     }
   ]
 }
