@@ -139,20 +139,43 @@ async def count_documents(
     return await col.count_documents(filter or {})
 
 
-async def operation_time(
-    client: AsyncMongoClient[Any], database: str
-) -> Timestamp | None:
-    """The cluster's operation time now, from a ``ping``: a change stream
-    started after it misses nothing written once this returns. None from
-    a server that reports none.
+async def find_snapshot(
+    client: AsyncMongoClient[Any],
+    database: str,
+    collection: str,
+    sort: list[tuple[str, int]],
+    limit: int,
+) -> tuple[list[dict[str, Any]], Timestamp]:
+    """Documents read at one snapshot, and that snapshot's cluster time:
+    a change stream started after it holds each insert the read does
+    not, and none it does.
 
     Args:
         client (AsyncMongoClient[Any]): the client.
-        database (str): the database to ping.
+        database (str): the database.
+        collection (str): the collection.
+        sort (list[tuple[str, int]]): the order to read in.
+        limit (int): how many documents, at least 1.
     """
-    reply = await client[database].command("ping")
-    found = reply.get("operationTime")
-    return found if isinstance(found, Timestamp) else None
+    db = client[database]
+    reply = await db.command(
+        "find",
+        collection,
+        sort=dict(sort),
+        limit=limit,
+        batchSize=limit,
+        readConcern={"level": "snapshot"},
+    )
+    cursor = reply["cursor"]
+    at = cursor["atClusterTime"]
+    docs = list(cursor["firstBatch"])
+    while cursor["id"]:
+        reply = await db.command(
+            "getMore", cursor["id"], collection=collection
+        )
+        cursor = reply["cursor"]
+        docs.extend(cursor["nextBatch"])
+    return docs, at
 
 
 async def iter_inserts(
@@ -160,8 +183,6 @@ async def iter_inserts(
     database: str,
     collection: str,
     after: Timestamp | None = None,
-    printed: list[Any] | None = None,
-    until: Timestamp | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Each document inserted into a collection, from a change stream.
 
@@ -172,10 +193,6 @@ async def iter_inserts(
         after (Timestamp | None): the operation time the inserts come
             after, however late the stream opens; None for those after
             it opens.
-        printed (list[Any] | None): ``_id`` values of documents already
-            printed: an insert of one by ``until`` is left out.
-        until (Timestamp | None): the operation time from after those
-            documents were read.
     """
     col = client[database][collection]
     match: dict[str, Any] = {"operationType": "insert"}
@@ -183,13 +200,6 @@ async def iter_inserts(
     if after is not None:
         match["clusterTime"] = {"$gt": after}
         options["start_at_operation_time"] = after
-    if printed and until is not None:
-        match["$nor"] = [
-            {
-                "clusterTime": {"$lte": until},
-                "documentKey._id": {"$in": printed},
-            }
-        ]
     async with await col.watch([{"$match": match}], **options) as stream:
         async for change in stream:
             doc = change.get("fullDocument")

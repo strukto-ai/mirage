@@ -18,13 +18,13 @@ import pytest
 from bson import Timestamp
 
 from mirage.core.mongodb.client import (
+    find_snapshot,
     get_indexes,
     get_validator,
     is_view,
     iter_documents,
     iter_inserts,
     list_collections,
-    operation_time,
 )
 from mirage.core.mongodb.types import EntityKind
 
@@ -281,47 +281,37 @@ async def test_iter_inserts_after_a_time_starts_there_and_drops_it():
 
 
 @pytest.mark.asyncio
-async def test_iter_inserts_leaves_out_the_printed_documents_until_a_time():
-    client, col = _build_watch_client([])
-    after, until = Timestamp(100, 3), Timestamp(101, 1)
-    async for _doc in iter_inserts(
-        client, "db1", "coll1", after, [6, 7], until
-    ):
-        pass
-    col.watch.assert_awaited_once_with(
-        [
-            {
-                "$match": {
-                    "operationType": "insert",
-                    "clusterTime": {"$gt": after},
-                    "$nor": [
-                        {
-                            "clusterTime": {"$lte": until},
-                            "documentKey._id": {"$in": [6, 7]},
-                        }
-                    ],
-                }
-            }
-        ],
-        start_at_operation_time=after,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "reply, expected",
-    [
-        ({"ok": 1, "operationTime": Timestamp(7, 1)}, Timestamp(7, 1)),
-        ({"ok": 1}, None),
-    ],
-)
-async def test_operation_time_reads_the_ping_reply(reply, expected):
+async def test_find_snapshot_reads_every_batch_at_one_snapshot():
+    at = Timestamp(9, 2)
     db = MagicMock()
-    db.command = AsyncMock(return_value=reply)
+    db.command = AsyncMock(
+        side_effect=[
+            {
+                "cursor": {
+                    "id": 7,
+                    "atClusterTime": at,
+                    "firstBatch": [{"_id": 3}],
+                }
+            },
+            {"cursor": {"id": 0, "nextBatch": [{"_id": 2}]}},
+        ]
+    )
     client = MagicMock()
     client.__getitem__.return_value = db
-    assert await operation_time(client, "db1") == expected
-    db.command.assert_awaited_once_with("ping")
+    docs, found = await find_snapshot(
+        client, "db1", "coll1", sort=[("_id", -1)], limit=2
+    )
+    assert docs == [{"_id": 3}, {"_id": 2}]
+    assert found == at
+    assert db.command.await_args_list[0].args == ("find", "coll1")
+    assert db.command.await_args_list[0].kwargs == {
+        "sort": {"_id": -1},
+        "limit": 2,
+        "batchSize": 2,
+        "readConcern": {"level": "snapshot"},
+    }
+    assert db.command.await_args_list[1].args == ("getMore", 7)
+    assert db.command.await_args_list[1].kwargs == {"collection": "coll1"}
 
 
 @pytest.mark.asyncio

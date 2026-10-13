@@ -133,31 +133,55 @@ describe('mongodb read stand-ins', () => {
     if (added !== null) expect(await drain(added)).toBe('{"_id": 7, "name": "gus"}\n')
   })
 
-  // Mirrors test_follow_prints_the_last_documents_then_leaves_them_out.
-  it('follows from the last documents, then leaves them out', async () => {
-    const times = ['t1', 't2']
-    const asked: unknown[][] = []
+  // Mirrors test_follow_reads_the_last_documents_at_the_time_it_follows_from.
+  it('reads the last documents at the time it follows from', async () => {
+    const asked: unknown[] = []
+    const seen: unknown[] = []
     const driver = stubMongoDriver({
       listDatabases: () => Promise.resolve(['app']),
       listCollections: () => Promise.resolve(['users']),
-      findDocuments: <T>() =>
-        Promise.resolve([
+      findSnapshot: <T>(_database: string, _collection: string, options: unknown) => {
+        asked.push(options)
+        const found = [
+          { _id: 8, name: 'hal' },
           { _id: 7, name: 'gus' },
           { _id: 6, name: 'fay' },
-        ] as T[]),
-      operationTime: () => Promise.resolve(times.shift()),
-      iterInserts: <T>(_database: string, _collection: string, ...rest: unknown[]) => {
-        asked.push(rest)
-        return arrayIter([{ _id: 8, name: 'hal' }])<T>()
+        ]
+        return Promise.resolve<[T[], unknown]>([found as T[], 't42'])
+      },
+      iterInserts: <T>(_database: string, _collection: string, after?: unknown) => {
+        seen.push(after)
+        return arrayIter([{ _id: 9, name: 'ida' }])<T>()
       },
     })
     const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
     const added = await follow(accessor, docs('app'), 2)
     if (added === null) throw new Error('expected a follow')
+    expect(seen).toEqual([])
     expect(await drain(added)).toBe(
-      '{"_id": 6, "name": "fay"}\n{"_id": 7, "name": "gus"}\n{"_id": 8, "name": "hal"}\n',
+      '{"_id": 7, "name": "gus"}\n{"_id": 8, "name": "hal"}\n{"_id": 9, "name": "ida"}\n',
     )
-    expect(asked).toEqual([['t1', [6, 7], 't2']])
+    expect(seen).toEqual(['t42'])
+    expect(asked).toEqual([{ limit: 2, sort: { _id: -1 } }])
+  })
+
+  // Mirrors test_follow_without_last_lines_still_starts_at_a_snapshot.
+  it('still starts at a snapshot without last lines', async () => {
+    const asked: unknown[] = []
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
+      findSnapshot: <T>(_database: string, _collection: string, options: unknown) => {
+        asked.push(options)
+        return Promise.resolve<[T[], unknown]>([[{ _id: 8 }] as T[], 't5'])
+      },
+      iterInserts: <T>() => arrayIter([{ _id: 9 }])<T>(),
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const added = await follow(accessor, docs('app'), 0)
+    if (added === null) throw new Error('expected a follow')
+    expect(await drain(added)).toBe('{"_id": 9}\n')
+    expect(asked).toEqual([{ limit: 1, sort: { _id: -1 } }])
   })
 
   // Mirrors test_follow_prints_an_insert_that_renders_like_a_printed_one.
@@ -165,7 +189,8 @@ describe('mongodb read stand-ins', () => {
     const driver = stubMongoDriver({
       listDatabases: () => Promise.resolve(['app']),
       listCollections: () => Promise.resolve(['users']),
-      findDocuments: <T>() => Promise.resolve([{ _id: 1, name: 'gus' }] as T[]),
+      findSnapshot: <T>() =>
+        Promise.resolve<[T[], unknown]>([[{ _id: 1, name: 'gus' }] as T[], 't1']),
       iterInserts: <T>() => arrayIter([{ _id: 2, name: 'gus' }])<T>(),
     })
     const accessor = new MongoDBAccessor(
@@ -205,31 +230,6 @@ describe('mongodb read stand-ins', () => {
     await Promise.resolve()
     await added.return?.()
     expect((await pulling).done).toBe(true)
-  })
-
-  it('follows from the operation time it was asked at', async () => {
-    const calls: string[] = []
-    const seen: unknown[] = []
-    const driver = stubMongoDriver({
-      listDatabases: () => Promise.resolve(['app']),
-      listCollections: () => Promise.resolve(['users']),
-      operationTime: () => {
-        calls.push('ping')
-        return Promise.resolve('t42')
-      },
-      iterInserts: <T>(_database: string, _collection: string, after?: unknown) => {
-        calls.push('watch')
-        seen.push(after)
-        return arrayIter([{ _id: 1 }])<T>()
-      },
-    })
-    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
-    const added = await follow(accessor, docs('app'), 0)
-    expect(calls).toEqual(['ping'])
-    expect(added).not.toBeNull()
-    if (added !== null) expect(await drain(added)).toBe('{"_id": 1}\n')
-    expect(calls).toEqual(['ping', 'watch'])
-    expect(seen).toEqual(['t42'])
   })
 
   it('leaves another file to the read and a view to the polls', async () => {

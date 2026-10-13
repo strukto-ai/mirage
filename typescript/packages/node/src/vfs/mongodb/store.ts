@@ -64,6 +64,13 @@ interface MongoDbLike {
   admin: () => { listDatabases: () => Promise<{ databases: { name: string }[] }> }
 }
 
+interface SnapshotCursor<T> {
+  id: unknown
+  atClusterTime?: unknown
+  firstBatch?: T[]
+  nextBatch?: T[]
+}
+
 interface MongoClientLike {
   connect: () => Promise<MongoClientLike>
   db: (name?: string) => MongoDbLike
@@ -160,10 +167,31 @@ export class MongoDBStore implements MongoDriver {
     }
   }
 
-  async operationTime(database: string): Promise<unknown> {
-    const c = await this._client()
-    const reply = await c.db(database).command({ ping: 1 })
-    return reply.operationTime ?? null
+  async findSnapshot<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+    options: MongoFindOptions,
+  ): Promise<[T[], unknown]> {
+    const db = (await this._client()).db(database)
+    const reply = await db.command({
+      find: collection,
+      sort: options.sort ?? {},
+      limit: options.limit ?? 0,
+      batchSize: options.limit ?? 0,
+      readConcern: { level: 'snapshot' },
+    })
+    let cursor = reply.cursor as SnapshotCursor<T>
+    const at = cursor.atClusterTime
+    const docs = [...(cursor.firstBatch ?? [])]
+    // A cursor id past 2^53 arrives as a Long and goes back as one; a smaller
+    // one arrives as a number, which goes back as an int64 only as a bigint.
+    while (String(cursor.id) !== '0') {
+      const id = typeof cursor.id === 'number' ? BigInt(cursor.id) : cursor.id
+      const more = await db.command({ getMore: id, collection })
+      cursor = more.cursor as SnapshotCursor<T>
+      docs.push(...(cursor.nextBatch ?? []))
+    }
+    return [docs, at]
   }
 
   /**
@@ -175,8 +203,6 @@ export class MongoDBStore implements MongoDriver {
     database: string,
     collection: string,
     after: unknown = null,
-    printed: unknown[] = [],
-    until: unknown = null,
   ): AsyncIterableIterator<T> {
     type Stream = ReturnType<MongoCollectionLike['watch']>
     let stream: Stream | null = null
@@ -188,9 +214,6 @@ export class MongoDBStore implements MongoDriver {
       const c = await this._client()
       const match: Record<string, unknown> = { operationType: 'insert' }
       if (after !== null) match.clusterTime = { $gt: after }
-      if (printed.length > 0 && until !== null) {
-        match.$nor = [{ clusterTime: { $lte: until }, 'documentKey._id': { $in: printed } }]
-      }
       const opened = c
         .db(database)
         .collection(collection)

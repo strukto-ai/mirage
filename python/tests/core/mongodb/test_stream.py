@@ -73,15 +73,15 @@ def _patched_iter(docs):
 
 
 @contextmanager
-def _patched_watch(docs, after=None):
+def _patched_watch(docs, last=(), after=Timestamp(1, 1)):
     with (
         patch(
             "mirage.core.mongodb.stream.iter_inserts",
             new=lambda *args, **kwargs: _gen(docs),
         ),
         patch(
-            "mirage.core.mongodb.stream.operation_time",
-            new=AsyncMock(return_value=after),
+            "mirage.core.mongodb.stream.find_snapshot",
+            new=AsyncMock(return_value=(list(last), after)),
         ),
     ):
         yield
@@ -302,8 +302,8 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
     with (
         patch("mirage.core.mongodb.stream.iter_inserts", new=_instrumented),
         patch(
-            "mirage.core.mongodb.stream.operation_time",
-            new=AsyncMock(return_value=None),
+            "mirage.core.mongodb.stream.find_snapshot",
+            new=AsyncMock(return_value=([], Timestamp(1, 1))),
         ),
     ):
         gen = await _followed(accessor, DOCS_PATH, index)
@@ -313,35 +313,56 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_follow_prints_the_last_documents_then_leaves_them_out(
+async def test_follow_reads_the_last_documents_at_the_time_it_follows_from(
     accessor, index
 ):
-    last = [{"_id": 7, "name": "gus"}, {"_id": 6, "name": "fay"}]
-    times = iter([Timestamp(1, 1), Timestamp(2, 1)])
-    asked: list[tuple] = []
+    at = Timestamp(42, 1)
+    snapshot = AsyncMock(
+        return_value=(
+            [
+                {"_id": 8, "name": "hal"},
+                {"_id": 7, "name": "gus"},
+                {"_id": 6, "name": "fay"},
+            ],
+            at,
+        )
+    )
+    seen: list[Timestamp] = []
 
-    async def _timed(*_args):
-        return next(times)
-
-    async def _inserts(_client, _database, _name, *args):
-        asked.append(args)
-        yield {"_id": 8, "name": "hal"}
+    async def _inserts(_client, _database, _name, after):
+        seen.append(after)
+        yield {"_id": 9, "name": "ida"}
 
     with (
         patch("mirage.core.mongodb.stream.iter_inserts", new=_inserts),
-        patch("mirage.core.mongodb.stream.operation_time", new=_timed),
-        patch(
-            "mirage.core.mongodb.stream.find_documents",
-            new=AsyncMock(return_value=last),
-        ),
+        patch("mirage.core.mongodb.stream.find_snapshot", new=snapshot),
     ):
-        data = await _collect(await _followed(accessor, DOCS_PATH, index, n=2))
+        gen = await _followed(accessor, DOCS_PATH, index, n=2)
+        assert seen == []
+        data = await _collect(gen)
     assert data.decode().splitlines() == [
-        '{"_id": 6, "name": "fay"}',
         '{"_id": 7, "name": "gus"}',
         '{"_id": 8, "name": "hal"}',
+        '{"_id": 9, "name": "ida"}',
     ]
-    assert asked == [(Timestamp(1, 1), [6, 7], Timestamp(2, 1))]
+    assert seen == [at]
+    snapshot.assert_awaited_once_with(
+        accessor.client, "db1", "coll1", sort=[("_id", -1)], limit=2
+    )
+
+
+@pytest.mark.asyncio
+async def test_follow_without_last_lines_still_starts_at_a_snapshot(
+    accessor, index
+):
+    snapshot = AsyncMock(return_value=([{"_id": 8}], Timestamp(5, 1)))
+    with (
+        _patched_watch([{"_id": 9}]),
+        patch("mirage.core.mongodb.stream.find_snapshot", new=snapshot),
+    ):
+        data = await _collect(await _followed(accessor, DOCS_PATH, index))
+    assert data == b'{"_id": 9}\n'
+    assert snapshot.await_args.kwargs["limit"] == 1
 
 
 @pytest.mark.asyncio
@@ -352,42 +373,11 @@ async def test_follow_prints_an_insert_that_renders_like_a_printed_one(index):
             elide_fields={"db1.coll1": ["_id"]},
         )
     )
-    with (
-        _patched_watch([{"_id": 2, "name": "gus"}]),
-        patch(
-            "mirage.core.mongodb.stream.find_documents",
-            new=AsyncMock(return_value=[{"_id": 1, "name": "gus"}]),
-        ),
+    with _patched_watch(
+        [{"_id": 2, "name": "gus"}], last=[{"_id": 1, "name": "gus"}]
     ):
         data = await _collect(await _followed(acc, DOCS_PATH, index, n=1))
     assert data == b'{"name": "gus"}\n{"name": "gus"}\n'
-
-
-@pytest.mark.asyncio
-async def test_follow_starts_at_the_time_it_was_asked(accessor, index):
-    after = Timestamp(42, 1)
-    calls: list[str] = []
-    seen: list[Timestamp | None] = []
-
-    async def _timed(*_args):
-        calls.append("ping")
-        return after
-
-    async def _inserts(_client, _database, _name, since, printed, until):
-        calls.append("watch")
-        seen.append((since, printed, until))
-        yield {"_id": 1}
-
-    with (
-        patch("mirage.core.mongodb.stream.iter_inserts", new=_inserts),
-        patch("mirage.core.mongodb.stream.operation_time", new=_timed),
-    ):
-        gen = await _followed(accessor, DOCS_PATH, index)
-        assert calls == ["ping"]
-        assert await gen.__anext__() == b'{"_id": 1}\n'
-        await close_quietly(gen)
-    assert calls == ["ping", "watch"]
-    assert seen == [(after, [], None)]
 
 
 @pytest.mark.asyncio
@@ -533,7 +523,7 @@ async def test_a_collection_outside_the_scope_is_enoent_to_every_stream(
     with (
         patch("mirage.core.mongodb.stream.iter_documents", new=fetched),
         patch("mirage.core.mongodb.stream.iter_inserts", new=fetched),
-        patch("mirage.core.mongodb.stream.operation_time", new=fetched),
+        patch("mirage.core.mongodb.stream.find_snapshot", new=fetched),
         patch("mirage.core.mongodb.stream.find_documents", new=fetched),
         patch("mirage.core.mongodb.stream.count_documents", new=fetched),
     ):

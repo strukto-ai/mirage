@@ -24,9 +24,9 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb.client import (
     count_documents,
     find_documents,
+    find_snapshot,
     iter_documents,
     iter_inserts,
-    operation_time,
 )
 from mirage.core.mongodb.readdir import entity_guard
 from mirage.core.mongodb.scope import detect_scope, entity_kind
@@ -90,18 +90,27 @@ async def last_lines(
         return None
     await entity_guard(accessor, scope, path.virtual)
     database, name = scope.slots["database"], scope.slots["name"]
-    docs = await _last_docs(accessor, path, database, name, n)
+    docs = await find_documents(
+        accessor.client,
+        database,
+        name,
+        sort=[(PRIMARY_KEY, -1)],
+        limit=await _doc_limit(accessor, path, database, name, n),
+    )
+    docs.reverse()
     return _render_lines(accessor, database, name, docs)
 
 
-async def _last_docs(
+async def _doc_limit(
     accessor: MongoDBAccessor,
     path: PathSpec,
     database: str,
     name: str,
     n: int,
-) -> list[dict[str, Any]]:
-    """The last ``n`` documents, oldest first, past the guard.
+) -> int:
+    """How many of the last ``n`` documents one read returns: ``n`` up
+    to ``max_doc_limit``, and EFBIG for a count past it that the
+    collection fills.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
@@ -116,15 +125,7 @@ async def _last_docs(
         and await count_documents(accessor.client, database, name) > cap
     ):
         raise efbig(path)
-    docs = await find_documents(
-        accessor.client,
-        database,
-        name,
-        sort=[(PRIMARY_KEY, -1)],
-        limit=min(n, cap),
-    )
-    docs.reverse()
-    return docs
+    return min(n, cap)
 
 
 def _render_lines(
@@ -215,10 +216,9 @@ async def follow(
     after them, one documents.jsonl line each. None for a view, which has
     no change stream, and for any other file.
 
-    The change stream starts at the cluster's operation time from before
-    the last documents are read, so nothing inserted in between is lost,
-    and leaves out an insert, up to the operation time from after the
-    read, of a document the read already printed.
+    The last documents are read at one snapshot and the change stream
+    holds each insert after it, so the two meet at one point: no insert
+    is lost or printed twice.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
@@ -234,37 +234,39 @@ async def follow(
         return None
     await entity_guard(accessor, scope, path.virtual)
     database, name = scope.slots["database"], scope.slots["name"]
-    after = await operation_time(accessor.client, database)
-    docs = await _last_docs(accessor, path, database, name, n) if n > 0 else []
-    until = await operation_time(accessor.client, database) if docs else None
-    return _followed(accessor, database, name, after, docs, until)
+    docs, after = await find_snapshot(
+        accessor.client,
+        database,
+        name,
+        sort=[(PRIMARY_KEY, -1)],
+        limit=await _doc_limit(accessor, path, database, name, n)
+        if n > 0
+        else 1,
+    )
+    docs = docs[:n]
+    docs.reverse()
+    return _followed(accessor, database, name, after, docs)
 
 
 async def _followed(
     accessor: MongoDBAccessor,
     database: str,
     name: str,
-    after: Timestamp | None,
+    after: Timestamp,
     docs: list[dict[str, Any]],
-    until: Timestamp | None,
 ) -> AsyncIterator[bytes]:
-    """``docs``, then each document inserted after ``after`` that is
-    not one of them, rendered as lines.
+    """``docs``, then each document inserted after ``after``, rendered
+    as lines.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
         database (str): the database.
         name (str): the collection.
-        after (Timestamp | None): the operation time they come after.
+        after (Timestamp): the cluster time ``docs`` were read at.
         docs (list[dict[str, Any]]): the last documents.
-        until (Timestamp | None): the operation time from after ``docs``
-            were read.
     """
     first = _render_lines(accessor, database, name, docs)
     if first:
         yield first
-    printed = [doc[PRIMARY_KEY] for doc in docs]
-    async for doc in iter_inserts(
-        accessor.client, database, name, after, printed, until
-    ):
+    async for doc in iter_inserts(accessor.client, database, name, after):
         yield _render_lines(accessor, database, name, [doc])

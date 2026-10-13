@@ -192,9 +192,10 @@ grep -r "Godfather" "/mongodb/sample_mflix/"
 `tail` uses server-side `sort` + `limit`. A count past `max_doc_limit` on
 a collection that long is refused with `File too large` rather than
 printing fewer lines than asked. `head` streams in `_id` order and stops
-after the count. `tail -f` on a collection prints the last lines, then
-opens a Mongo change stream filtered to insert events and yields each new
-document as a JSONL line in the same format as `cat`; on a view it polls.
+after the count. `tail -f` on a collection reads the last lines at one
+snapshot, then opens a Mongo change stream of the inserts after it and
+yields each new document as a JSONL line in the same format as `cat`; on a
+view it polls.
 See [Lines](/home/integration/lines):
 
 ```bash
@@ -208,8 +209,8 @@ tail -n 10 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 tail -f "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 ```
 
-`tail -f` requires the cluster to be a replica set; Atlas already
-satisfies this. Views fall through to the non-streaming path because
+`tail -f` requires a replica set on MongoDB 5.0 or later, for the
+snapshot read and the change stream; Atlas already satisfies this. Views fall through to the non-streaming path because
 change streams aren't defined on views.
 
 ## Cache

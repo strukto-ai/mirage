@@ -115,8 +115,12 @@ export class HttpMongoDriver implements MongoDriver {
     for (const d of docs) yield d
   }
 
-  operationTime(_database: string): Promise<unknown> {
-    return Promise.resolve(null)
+  findSnapshot<T = Record<string, unknown>>(
+    _database: string,
+    _collection: string,
+    _options: MongoFindOptions,
+  ): Promise<[T[], unknown]> {
+    return Promise.reject(new Error('findSnapshot (tail -f) is not supported by HttpMongoDriver'))
   }
 
   iterInserts<T = Record<string, unknown>>(

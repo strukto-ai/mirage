@@ -51,6 +51,7 @@ const ClientCtor = vi.fn(function (_uri: string) {
       toArray: () => Promise.resolve([{ name: 'profiles' }, { name: 'sessions' }]),
     })),
     collection: vi.fn(() => collection),
+    command: vi.fn(),
     admin: vi.fn(() => ({
       listDatabases: vi.fn(() =>
         Promise.resolve({
@@ -102,24 +103,46 @@ describe('MongoDBStore', () => {
     expect(clients[0]?.connect).toHaveBeenCalledTimes(1)
   })
 
-  // Mirrors test_iter_inserts_leaves_out_the_printed_documents_until_a_time.
-  it('iterInserts leaves out the printed documents until a time', async () => {
+  it('iterInserts starts after the time it is given', async () => {
     const store = new MongoDBStore('mongodb://h')
-    const inserts = store.iterInserts('app', 'profiles', 't1', [6, 7], 't2')
+    const inserts = store.iterInserts('app', 'profiles', 't1')
     expect((await inserts.next()).done).toBe(true)
     expect(watched).toEqual([
       [
-        [
-          {
-            $match: {
-              operationType: 'insert',
-              clusterTime: { $gt: 't1' },
-              $nor: [{ clusterTime: { $lte: 't2' }, 'documentKey._id': { $in: [6, 7] } }],
-            },
-          },
-        ],
+        [{ $match: { operationType: 'insert', clusterTime: { $gt: 't1' } } }],
         { startAtOperationTime: 't1' },
       ],
+    ])
+  })
+
+  // Mirrors test_find_snapshot_reads_every_batch_at_one_snapshot.
+  it('findSnapshot reads every batch at one snapshot', async () => {
+    const store = new MongoDBStore('mongodb://h')
+    await store.listDatabases()
+    const db = clients[0]?.db() as { command: AnyMock }
+    const big = { toString: () => '9007199254740993' }
+    db.command
+      .mockResolvedValueOnce({ cursor: { id: 7, atClusterTime: 't9', firstBatch: [{ _id: 3 }] } })
+      .mockResolvedValueOnce({ cursor: { id: big, nextBatch: [{ _id: 2 }] } })
+      .mockResolvedValueOnce({ cursor: { id: 0, nextBatch: [{ _id: 1 }] } })
+    const [found, at] = await store.findSnapshot('app', 'profiles', {
+      limit: 3,
+      sort: { _id: -1 },
+    })
+    expect(found).toEqual([{ _id: 3 }, { _id: 2 }, { _id: 1 }])
+    expect(at).toBe('t9')
+    expect(db.command.mock.calls).toEqual([
+      [
+        {
+          find: 'profiles',
+          sort: { _id: -1 },
+          limit: 3,
+          batchSize: 3,
+          readConcern: { level: 'snapshot' },
+        },
+      ],
+      [{ getMore: 7n, collection: 'profiles' }],
+      [{ getMore: big, collection: 'profiles' }],
     ])
   })
 

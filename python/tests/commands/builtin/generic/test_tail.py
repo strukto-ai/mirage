@@ -224,6 +224,23 @@ async def test_tail_multi(read, n, headers, expected):
 
 
 @pytest.mark.asyncio
+async def test_tail_multi_heads_an_operand_before_reading_it():
+    release = asyncio.Event()
+
+    async def slow():
+        await release.wait()
+        yield b"x\n"
+
+    out = tail_multi(
+        _paths("/a"), read=lambda p: slow(), from_line=1, show_headers=True
+    )
+    assert await asyncio.wait_for(out.__anext__(), 1) == b"==> /a <==\n"
+    release.set()
+    assert await out.__anext__() == b"x\n"
+    await out.aclose()
+
+
+@pytest.mark.asyncio
 async def test_tail_reports_a_failed_operand_and_prints_the_next():
     async def last_lines(p: PathSpec, n: int) -> bytes:
         if p.virtual == "/big":

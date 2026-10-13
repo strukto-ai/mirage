@@ -53,21 +53,20 @@ export interface MongoDriver {
     options?: MongoIterOptions,
   ): AsyncIterableIterator<T>
   /**
-   * The cluster's operation time now, from a `ping`, as the server's own
-   * timestamp; null from a server that reports none.
+   * Documents read at one snapshot, and that snapshot's cluster time: a change
+   * stream started after it holds each insert the read does not, and none it
+   * does.
    */
-  operationTime(database: string): Promise<unknown>
-  /**
-   * Each inserted document, after the operation time `after` when given.
-   * An insert of a document whose `_id` is in `printed`, by the operation time
-   * `until`, is left out.
-   */
+  findSnapshot<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+    options: MongoFindOptions,
+  ): Promise<[T[], unknown]>
+  /** Each inserted document, after the cluster time `after` when given. */
   iterInserts<T = Record<string, unknown>>(
     database: string,
     collection: string,
     after?: unknown,
-    printed?: unknown[],
-    until?: unknown,
   ): AsyncIterableIterator<T>
   countDocuments(
     database: string,

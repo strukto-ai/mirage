@@ -96,7 +96,7 @@ files' total size.
 | Backend | `first_lines` | `last_lines` | `line_count` | `follow` | Ceiling |
 | --- | --- | --- | --- | --- | --- |
 | PostgreSQL | `LIMIT` on `rows.jsonl` | `COUNT(*)`, then `LIMIT` and `OFFSET` | `COUNT(*)` | | `max_read_rows` |
-| MongoDB | | sort by `_id` descending with a limit, on `documents.jsonl` | `count_documents` | the last documents, then a change stream of inserts, on a collection's `documents.jsonl` | `max_doc_limit` |
+| MongoDB | | sort by `_id` descending with a limit, on `documents.jsonl` | `count_documents` | the last documents at one snapshot, then a change stream of the inserts after it, on a collection's `documents.jsonl` | `max_doc_limit` |
 | Airtable | `maxRecords` on `records.jsonl` and view files | | | | `max_read_records` |
 
 A count past the ceiling that the table fills is `File too large`, the same
