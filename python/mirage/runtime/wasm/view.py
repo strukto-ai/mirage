@@ -321,6 +321,18 @@ class WasmView:
         self._deny_build(path)
         self._core_call("symlink", path, target=target)
 
+    def walked(self, path: str, *, follow: bool = True) -> str:
+        """Where the namespace's links lead ``path`` (``RuntimeFiles.walked``);
+        the path itself when no workspace is attached.
+
+        Args:
+            path (str): guest-absolute path.
+            follow (bool): follow a link at the final name too.
+        """
+        if self._files is None:
+            return path
+        return self._files.walked(path, follow=follow)
+
     def readlink(self, path: str) -> str:
         """The target of the symlink at `path`.
 

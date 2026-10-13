@@ -23,7 +23,7 @@ from mirage.commands.builtin.utils.paths import walk_spelling
 from mirage.errors.fs import fs_error
 from mirage.errors.types import FsCondition
 from mirage.runtime.files import RuntimeFiles
-from mirage.runtime.handles import FileHandle
+from mirage.runtime.handles import FileHandle, Kept
 from mirage.runtime.handles.mode import OpenMode, parse_mode
 from mirage.runtime.open import apply_open
 from mirage.runtime.python.host.file import (
@@ -94,15 +94,22 @@ class Descriptor:
         facts (OpenMode): what its flags or mode asked for.
         handle (FileHandle | None): the file it reads and writes; None
             for a directory, which a descriptor may name but not read.
-        kept (bytes | None): the bytes its file had when its name was
-            removed or replaced, which it reads from then on and never
-            lands on; None while it has a name.
+        kept (Kept | None): its file once the name was removed or
+            replaced, which it reads and lands on from then on; None
+            while it has a name.
+        opened (str): the path it was opened at, which its inode number
+            comes from however the file is renamed since.
     """
 
     path: str
     facts: OpenMode
     handle: FileHandle | None = None
-    kept: bytes | None = None
+    kept: Kept | None = None
+    opened: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.opened:
+            self.opened = self.path
 
 
 class Descriptors:
@@ -200,8 +207,10 @@ class Descriptors:
             size (int | None): how many bytes; None reads to the end.
         """
         if desc.kept is not None:
+            if desc.kept.error is not None:
+                raise desc.kept.error
             end = None if size is None else offset + size
-            return desc.kept[offset:end]
+            return desc.kept.data[offset:end]
         return syscall(self._adapter.read)(
             desc.path, offset=offset, size=size, raw=raw
         )
@@ -308,13 +317,19 @@ class Descriptors:
 
     def land(self, desc: Descriptor) -> None:
         """Land a descriptor's writes on the mount; one whose name went
-        keeps them, as writes to an unlinked file stay with it.
+        lands them on what its file kept, which every other descriptor on
+        it reads, as writes to an unlinked file stay with it.
 
         Args:
             desc (Descriptor): the descriptor.
         """
         handle = desc.handle
-        if handle is None or desc.kept is not None:
+        if handle is None:
+            return
+        if desc.kept is not None:
+            if handle.dirty:
+                desc.kept.data = handle.pread(0, handle.size)
+                handle.settle(functools.partial(self._fetch, desc, True))
             return
         steps = handle.flush_plan()
         if not steps:
@@ -351,42 +366,45 @@ class Descriptors:
             ):
                 desc.path = new + desc.path[len(old) :]
 
-    def hold(self, path: str) -> list[tuple[Descriptor, bytes]]:
+    def hold(self, path: str) -> list[tuple[Descriptor, Kept]]:
         """Read what the files open on ``path`` need before its name is
-        removed or replaced; ``keep`` them once it has gone.
+        removed or replaced; ``keep`` them once it has gone. They share one
+        read, and a read that fails (a policy refusing it, say) is kept as
+        the error later reads report, so the removal it allows goes ahead.
 
         Args:
             path (str): the path about to go.
         """
         path = self.walked(path, False)
-        held: list[tuple[Descriptor, bytes]] = []
-        for desc in self._every():
-            if desc.path != path or desc.kept is not None:
-                continue
-            if desc.handle is None:
-                continue
-            # A descriptor that cannot read needs nothing kept, and a read
-            # a policy refuses must not refuse the removal it allows.
-            data = b""
-            if desc.facts.readable:
-                try:
-                    data = self._fetch(desc, desc.facts.writable, 0, None)
-                except OSError as err:
-                    logger.warning(
-                        "host: keeping %s before it goes failed: %r", path, err
-                    )
-            held.append((desc, data))
-        return held
+        held = [
+            desc
+            for desc in self._every()
+            if desc.path == path
+            and desc.kept is None
+            and desc.handle is not None
+        ]
+        kept = Kept()
+        # A file no descriptor can read needs nothing kept.
+        if any(desc.facts.readable for desc in held):
+            raw = any(desc.facts.writable for desc in held)
+            try:
+                kept.data = syscall(self._adapter.read)(path, raw=raw)
+            except OSError as err:
+                logger.warning(
+                    "host: keeping %s before it goes failed: %r", path, err
+                )
+                kept.error = err
+        return [(desc, kept) for desc in held]
 
     @staticmethod
-    def keep(held: list[tuple[Descriptor, bytes]]) -> None:
+    def keep(held: list[tuple[Descriptor, Kept]]) -> None:
         """Detach the descriptors ``hold`` read for, now their name went.
 
         Args:
-            held (list[tuple[Descriptor, bytes]]): what ``hold`` returned.
+            held (list[tuple[Descriptor, Kept]]): what ``hold`` returned.
         """
-        for desc, data in held:
-            desc.kept = data
+        for desc, kept in held:
+            desc.kept = kept
 
     def close(self, fd: int) -> None:
         """Land a descriptor's writes and give its number back.

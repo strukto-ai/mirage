@@ -788,7 +788,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       case 'fstat': {
         const st = await this.files.stat(desc.path)
         const size = desc.handle?.size ?? st.size
-        return [this.statsOf(desc.path, { ...st, size }, rest[0] as Options)]
+        return [this.statsOf(desc.opened, { ...st, size }, rest[0] as Options)]
       }
       case 'ftruncate':
         await this.descriptors.serial(fd, () => {

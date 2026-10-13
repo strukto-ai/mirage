@@ -24,3 +24,15 @@ export interface FlushStep {
 
 /** The file adapter's read of `(offset, size)`; a null size reads to the end. */
 export type FileFetch = (offset: number, size: number | null) => Promise<Uint8Array>
+
+/**
+ * What a file still holds once its name was removed or replaced, shared by
+ * every handle open on it as POSIX keeps one inode for them: its bytes with
+ * what those handles landed since, or why its bytes could not be read
+ * before the name went, which every later read reports. Mirrors Python's
+ * `Kept`.
+ */
+export interface Kept {
+  data: Uint8Array
+  error: Error | null
+}

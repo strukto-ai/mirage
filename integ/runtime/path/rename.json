@@ -324,6 +324,140 @@
           }
         }
       ]
+    },
+    {
+      "id": "an_open_file_is_the_file_its_link_leads_to",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "target": "hello",
+              "target2": "other"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/target /data/link && ln -s /data/target2 /data/link2",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nf = open('/data/link', 'r+')\nos.remove('/data/link')\nf.write('X')\nf.close()\nprint(open('/data/target').read())\ng = open('/data/link2', 'r+')\nos.remove('/data/target2')\ng.write('Y')\ng.close()\nprint(os.path.exists('/data/target2'))",
+            "js": "const f = std.open('/data/link', 'r+')\nos.remove('/data/link')\nf.puts('X')\nf.close()\nconsole.log(std.open('/data/target', 'r').readAsString())\nconst g = std.open('/data/link2', 'r+')\nos.remove('/data/target2')\ng.puts('Y')\ng.close()\nconsole.log(os.stat('/data/target2')[1])",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/link', 'r+')\nawait fs.unlink('/data/link')\nawait f.write('X', 0)\nawait f.close()\nconsole.log(await fs.readFile('/data/target', 'utf8'))\nconst g = await fs.open('/data/link2', 'r+')\nawait fs.unlink('/data/target2')\nawait g.write('Y', 0)\nawait g.close()\nconsole.log(await fs.access('/data/target2').then(() => true, () => false))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "Xello\nFalse\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "Xello\n44\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "Xello\nfalse\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "the_files_open_on_a_removed_name_share_it",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "s.txt": "hello"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nf = os.open('/data/s.txt', os.O_RDWR)\ng = os.open('/data/s.txt', os.O_RDONLY)\nos.unlink('/data/s.txt')\nos.write(f, b'X')\nos.fsync(f)\nprint(os.read(g, 10).decode())\nos.close(f)\nos.close(g)",
+            "js": "const f = std.open('/data/s.txt', 'r+')\nconst g = std.open('/data/s.txt', 'r')\nos.remove('/data/s.txt')\nf.puts('X')\nf.close()\nconsole.log(g.readAsString())\ng.close()",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/s.txt', 'r+')\nconst g = await fs.open('/data/s.txt', 'r')\nawait fs.unlink('/data/s.txt')\nawait f.write('X', 0)\nawait f.sync()\nconst { bytesRead, buffer } = await g.read(Buffer.alloc(10), 0, 10, 0)\nconsole.log(buffer.toString('utf8', 0, bytesRead))\nawait f.close()\nawait g.close()"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "Xello\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "an_open_file_keeps_its_inode_through_a_rename",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "i.txt": "i"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nf = os.open('/data/i.txt', os.O_RDONLY)\nbefore = os.fstat(f).st_ino\nos.rename('/data/i.txt', '/data/j.txt')\nprint(before == os.fstat(f).st_ino)\nos.close(f)",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/i.txt', 'r')\nconst before = (await f.stat()).ino\nawait fs.rename('/data/i.txt', '/data/j.txt')\nconsole.log(before === (await f.stat()).ino)\nawait f.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "True\n"
+          },
+          "expect_on": {
+            "host@typescript": {
+              "stdout": "true\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

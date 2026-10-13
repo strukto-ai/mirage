@@ -19,7 +19,7 @@ import { ebadf, eisdir, eloop, enoent, enotdir } from '@struktoai/mirage-core/er
 import type { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 import { FileHandle } from '@struktoai/mirage-core/runtime/handles/file_handle'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/mode'
-import type { FileFetch } from '@struktoai/mirage-core/runtime/handles/types'
+import type { FileFetch, Kept } from '@struktoai/mirage-core/runtime/handles/types'
 import { applyOpen } from '@struktoai/mirage-core/runtime/open'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { CycleError, resolvePath } from '@struktoai/mirage-core/utils/path'
@@ -89,15 +89,17 @@ export function openMode(flags: number): OpenMode {
 /**
  * One descriptor `open` handed out for a mounted path. `path` is the path
  * it names now (a rename through the patch moves it); `handle` is null for
- * a directory, which a descriptor may name but not read; `kept` holds the
- * bytes its file had once its name was removed or replaced, which it reads
- * from then on and never lands on.
+ * a directory, which a descriptor may name but not read; `kept` is its file
+ * once its name was removed or replaced, which it reads and lands on from
+ * then on; `opened` is the path it was opened at, which its inode number
+ * comes from however the file is renamed since.
  */
 export interface Descriptor {
   path: string
   readonly mode: OpenMode
   handle: FileHandle | null
-  kept: Uint8Array | null
+  kept: Kept | null
+  opened: string
 }
 
 /** Read `size` bytes at `offset` without moving the handle's position,
@@ -203,7 +205,7 @@ export class Descriptors {
     if ((flags & O_DIRECTORY) !== 0 && row?.isDir !== true) {
       throw row === null ? enoent(path) : enotdir(path)
     }
-    const desc: Descriptor = { path, mode, handle: null, kept: null }
+    const desc: Descriptor = { path, mode, handle: null, kept: null, opened: path }
     // What other descriptors on the file still owe lands first, so their
     // older writes never land over what this one writes.
     if (mode.writable) await this.landPath(path)
@@ -216,6 +218,7 @@ export class Descriptors {
       )
     }
     desc.path = this.walked(path)
+    desc.opened = desc.path
     const fd = (this.native.openSync as (p: string, f: string) => number)(devNull, 'r')
     this.table.set(fd, desc)
     return fd
@@ -225,18 +228,28 @@ export class Descriptors {
    * what is at its path now. */
   private fetch(desc: Descriptor, raw: boolean): FileFetch {
     return (offset, size) => {
-      if (desc.kept !== null) {
-        return Promise.resolve(desc.kept.slice(offset, size === null ? undefined : offset + size))
+      const kept = desc.kept
+      if (kept !== null) {
+        if (kept.error !== null) return Promise.reject(kept.error)
+        return Promise.resolve(kept.data.slice(offset, size === null ? undefined : offset + size))
       }
       return this.files.read(desc.path, size === null ? { raw } : { offset, size, raw })
     }
   }
 
-  /** Land a descriptor's writes on the mount; one whose name went keeps
-   * them, as writes to an unlinked file stay with it. */
+  /** Land a descriptor's writes on the mount; one whose name went lands
+   * them on what its file kept, which every other descriptor on it reads,
+   * as writes to an unlinked file stay with it. */
   async land(desc: Descriptor): Promise<void> {
     const handle = desc.handle
-    if (handle === null || desc.kept !== null) return
+    if (handle === null) return
+    if (desc.kept !== null) {
+      if (handle.dirty) {
+        desc.kept.data = await readAt(handle, 0, handle.size)
+        handle.settle(this.fetch(desc, true))
+      }
+      return
+    }
     const steps = handle.flushPlan()
     if (steps.length === 0) return
     await this.files.flush(desc.path, steps)
@@ -266,30 +279,32 @@ export class Descriptors {
   }
 
   /** Read what the descriptors open on `path` need before its name is
-   * removed or replaced; `keep` them once it has gone. */
-  async hold(path: string): Promise<[Descriptor, Uint8Array][]> {
+   * removed or replaced; `keep` them once it has gone. They share one read,
+   * and a read that fails (a policy refusing it, say) is kept as the error
+   * later reads report, so the removal it allows goes ahead. */
+  async hold(path: string): Promise<[Descriptor, Kept][]> {
     const named = this.walked(path, false)
-    const held: [Descriptor, Uint8Array][] = []
-    for (const desc of this.table.values()) {
-      if (desc.path !== named || desc.kept !== null || desc.handle === null) continue
-      // A descriptor that cannot read needs nothing kept, and a read a
-      // policy refuses must not refuse the removal it allows.
-      let data: Uint8Array = new Uint8Array()
-      if (desc.mode.readable) {
-        try {
-          data = await this.files.read(desc.path, { raw: desc.mode.writable })
-        } catch (err) {
-          console.warn(`host: keeping ${desc.path} before it goes failed`, err)
-        }
+    const held = [...this.table.values()].filter(
+      (desc) => desc.path === named && desc.kept === null && desc.handle !== null,
+    )
+    const kept: Kept = { data: new Uint8Array(), error: null }
+    // A file no descriptor can read needs nothing kept.
+    if (held.some((desc) => desc.mode.readable)) {
+      try {
+        kept.data = await this.files.read(named, {
+          raw: held.some((desc) => desc.mode.writable),
+        })
+      } catch (err) {
+        console.warn(`host: keeping ${named} before it goes failed`, err)
+        kept.error = err instanceof Error ? err : new Error(String(err))
       }
-      held.push([desc, data])
     }
-    return held
+    return held.map((desc) => [desc, kept])
   }
 
   /** Detach the descriptors `hold` read for, now their name went. */
-  keep(held: [Descriptor, Uint8Array][]): void {
-    for (const [desc, data] of held) desc.kept = data
+  keep(held: [Descriptor, Kept][]): void {
+    for (const [desc, kept] of held) desc.kept = kept
   }
 
   /** Land a descriptor's writes and give its number back. */

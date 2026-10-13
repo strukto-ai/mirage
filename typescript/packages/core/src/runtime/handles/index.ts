@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { planFlush } from './flush.ts'
-export type { FlushKind, FlushStep } from './types.ts'
+export type { FlushKind, FlushStep, Kept } from './types.ts'
 export { parseMode, type OpenMode } from './mode.ts'
 export { FileHandle, overlaid, writeRuns } from './file_handle.ts'
 export { FileTable } from './file_table.ts'

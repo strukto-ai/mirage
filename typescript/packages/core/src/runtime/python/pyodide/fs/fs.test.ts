@@ -569,6 +569,38 @@ _held.close()
     expect(dec.decode(store.get(`${p}held.txt`))).toBe('HELLO world')
   })
 
+  it('keeps landing writes through a handle whose removal the mount refused', async () => {
+    // An open file is marked gone only once the mount took the removal, so
+    // a refused unlink leaves the handle writing to the file it still is.
+    const p = prefix()
+    store.set(`${p}kept.txt`, enc.encode('hello'))
+    const sync = storeSync()
+    mountOver(p, {
+      ...sync,
+      // A copy, so only what reaches the mount changes the stored bytes.
+      read: (path, raw) => sync.read(path, raw).slice(),
+      flush: (mutations) => {
+        const at = mutations.findIndex((m) => m.kind === 'unlink')
+        if (at < 0) return sync.flush(mutations)
+        sync.flush(mutations.slice(0, at))
+        return { message: 'refused', skipped: mutations.length - at - 1, code: 'EACCES' }
+      },
+    })
+    await py.runPythonAsync(`
+import os
+_kept = open('${p}kept.txt', 'r+b', buffering=0)
+try:
+    os.unlink('${p}kept.txt')
+    _refused = None
+except OSError as e:
+    _refused = type(e).__name__
+_kept.write(b'X')
+_kept.close()
+`)
+    expect(py.globals.get('_refused')).toBe('PermissionError')
+    expect(dec.decode(store.get(`${p}kept.txt`))).toBe('Xello')
+  })
+
   // Filenames are the mount's to choose, so the child table is keyed by a
   // Map. On a plain object these names reach Object.prototype instead of
   // an own property, and the file either vanishes or resolves to junk.

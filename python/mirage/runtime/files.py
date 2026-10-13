@@ -19,7 +19,7 @@ from typing import Any, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.concurrency.limiter import ConcurrencyLimiter
-from mirage.errors.fs import numbered
+from mirage.errors.fs import eloop, numbered
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
@@ -28,7 +28,7 @@ from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
-from mirage.utils.path import norm
+from mirage.utils.path import CycleError, norm, resolve_path
 from mirage.utils.stat_view import (
     DIR_MODE,
     atime_ns,
@@ -39,6 +39,7 @@ from mirage.utils.stat_view import (
     mtime_ns,
     posix_mode,
 )
+from mirage.view.types import LinkResolve
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,8 @@ class RuntimeFiles:
             belongs to; None runs each call on a throwaway loop.
         resolver (MountResolver | None): the workspace mount routing
             table; None means routing questions answer None.
+        resolve (LinkResolve | None): where the namespace's links lead a
+            path; None while the workspace keeps no links.
     """
 
     def __init__(
@@ -117,10 +120,12 @@ class RuntimeFiles:
         dispatch: DispatchFn,
         loop: asyncio.AbstractEventLoop | None,
         resolver: MountResolver | None = None,
+        resolve: LinkResolve | None = None,
     ) -> None:
         self._dispatch = dispatch
         self._loop = loop
         self._resolver = resolver
+        self._resolve = resolve
         self._no_append: set[str] = set()
         self._pending: set[asyncio.Task[Any]] = set()
         self._aborted = False
@@ -133,9 +138,35 @@ class RuntimeFiles:
         Args:
             context (RuntimeContext): the execution's captured entry points.
         """
+        links = context.ns.links
         return cls(
-            context.dispatch, asyncio.get_running_loop(), context.resolver
+            context.dispatch,
+            asyncio.get_running_loop(),
+            context.resolver,
+            None if links is None else links.resolve,
         )
+
+    def walked(self, path: str, *, follow: bool = True) -> str:
+        """The path an op on ``path`` lands on once the namespace's links
+        are followed: the final name too when ``follow``, else only the
+        directories above it, since a rename or a removal acts on the
+        name itself. One file reads as one path whichever spelling
+        reached it, which is how a removal finds the files open on it.
+
+        Args:
+            path (str): guest-absolute path, its dots resolved.
+            follow (bool): follow a link at the final name too.
+        """
+        if self._resolve is None:
+            return path
+        try:
+            if follow:
+                return resolve_path(self._resolve(path), "/")
+            head, _, name = path.rpartition("/")
+            above = resolve_path(self._resolve(head or "/"), "/")
+        except CycleError:
+            raise eloop(path) from None
+        return above.rstrip("/") + "/" + name
 
     async def _call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         async with self._limiter.acquire():

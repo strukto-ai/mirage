@@ -23,7 +23,7 @@ from typing import Any, Callable, Literal
 
 from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.handles import FileHandle, FileTable
+from mirage.runtime.handles import FileHandle, FileTable, Kept
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
 from mirage.runtime.stat import posix_stat
@@ -175,9 +175,11 @@ class FdEntry:
         dirents (list[tuple[str, int]] | None): a dir fd's cached
             listing, filled on the first fd_readdir.
         stat (VFSStat | None): a file's stat at open, for mtime.
-        kept (bytes | None): the bytes its file had when its name was
-            removed or replaced, which it reads from then on and never
-            lands on; None while it has a name.
+        kept (Kept | None): its file once the name was removed or
+            replaced, which it reads and lands on from then on; None
+            while it has a name.
+        opened (str): the path it was opened at, which its inode number
+            comes from however the file is renamed since.
     """
 
     kind: FdKind
@@ -186,7 +188,8 @@ class FdEntry:
     preopen: bool = False
     dirents: list[tuple[str, int]] | None = None
     stat: VFSStat | None = None
-    kept: bytes | None = None
+    kept: Kept | None = None
+    opened: str = ""
 
 
 class WasiFs:
@@ -325,10 +328,13 @@ class WasiFs:
             return self._open_dir(caller, path, out)
         # A file the open created or emptied has no row from before it,
         # so fd_filestat_get answers from the row the open left behind.
+        # The file is named by where its links lead, so a removal or a
+        # rename of any spelling of it finds the fd.
         entry = FdEntry(
             kind="file",
-            path=path,
+            path=self._fs.walked(path),
             stat=self._fs.stat_or_none(path) if row is None else row,
+            opened=path,
         )
         # Nothing is read at open: the handle fetches what a read lands
         # in. A handle that writes reads the stored bytes, since its
@@ -360,6 +366,8 @@ class WasiFs:
         if entry.kind == "file" and h is not None and h.dirty:
             if entry.kept is None:
                 self._fs.flush(entry.path, h.flush_plan())
+            else:
+                entry.kept.data = h.pread(0, h.size)
         return OK
 
     def close_all(self) -> list[str]:
@@ -545,7 +553,7 @@ class WasiFs:
             packed = pack_filestat(
                 posix_stat(
                     dataclasses.replace(row, size=entry.handle.size),
-                    entry.path,
+                    entry.opened,
                     "/",
                 ),
                 FT_REG,
@@ -697,45 +705,50 @@ class WasiFs:
             size (int | None): how many bytes; None reads to the end.
         """
         if entry.kept is not None:
+            if entry.kept.error is not None:
+                raise entry.kept.error
             end = None if size is None else offset + size
-            return entry.kept[offset:end]
+            return entry.kept.data[offset:end]
         return self._fs.read(entry.path, offset=offset, size=size, raw=raw)
 
-    def _hold(self, path: str) -> list[tuple[FdEntry, bytes]]:
+    def _hold(self, path: str) -> list[tuple[FdEntry, Kept]]:
         """Read what the file fds open on ``path`` need before its name is
-        removed or replaced; ``_keep`` them once it has gone, as POSIX
-        keeps an open file on its inode.
+        removed or replaced; ``_keep`` them once it has gone. The fds share
+        one read, and a read that fails is kept as the error later reads
+        report, so the removal itself still goes ahead.
 
         Args:
             path (str): the guest path about to go.
         """
-        held: list[tuple[FdEntry, bytes]] = []
+        named = self._fs.walked(path, follow=False)
+        entries: list[tuple[FdEntry, FileHandle]] = []
         for entry in self._fds.values():
             h = entry.handle
-            if entry.kind != "file" or h is None or entry.path != path:
+            if entry.kind != "file" or h is None or entry.kept is not None:
                 continue
-            if entry.kept is not None:
-                continue
-            data = b""
-            if h.base is not None:
-                try:
-                    data = self._fetch(entry, h.writable, 0, None)
-                except OSError as err:
-                    logger.warning(
-                        "wasi: keeping %s before it goes failed: %r", path, err
-                    )
-            held.append((entry, data))
-        return held
+            if entry.path == named:
+                entries.append((entry, h))
+        kept = Kept()
+        if any(h.base is not None for _, h in entries):
+            raw = any(h.writable for _, h in entries)
+            try:
+                kept.data = self._fs.read(named, raw=raw)
+            except OSError as err:
+                logger.warning(
+                    "wasi: keeping %s before it goes failed: %r", named, err
+                )
+                kept.error = err
+        return [(entry, kept) for entry, _ in entries]
 
     @staticmethod
-    def _keep(held: list[tuple[FdEntry, bytes]]) -> None:
+    def _keep(held: list[tuple[FdEntry, Kept]]) -> None:
         """Detach the fds ``_hold`` read for, now their name went.
 
         Args:
-            held (list[tuple[FdEntry, bytes]]): what ``_hold`` returned.
+            held (list[tuple[FdEntry, Kept]]): what ``_hold`` returned.
         """
-        for entry, data in held:
-            entry.kept = data
+        for entry, kept in held:
+            entry.kept = kept
 
     def _moved(self, old: str, new: str) -> None:
         """Follow a rename: an fd open on ``old`` or under it is at ``new``
@@ -745,6 +758,8 @@ class WasiFs:
             old (str): the guest path the rename took.
             new (str): the guest path it gave.
         """
+        old = self._fs.walked(old, follow=False)
+        new = self._fs.walked(new, follow=False)
         under = old.rstrip("/") + "/"
         for entry in self._fds.values():
             if entry.preopen or entry.kept is not None:
@@ -764,6 +779,8 @@ class WasiFs:
         if entry.kind != "file" or h is None or not h.dirty:
             return
         if entry.kept is not None:
+            entry.kept.data = h.pread(0, h.size)
+            h.settle(functools.partial(self._fetch, entry, True))
             return
         self._fs.flush(entry.path, h.flush_plan())
         h.settle(functools.partial(self._fetch, entry, True))
@@ -776,6 +793,7 @@ class WasiFs:
         Args:
             path (str): guest-absolute path.
         """
+        path = self._fs.walked(path)
         for entry in list(self._fds.values()):
             if entry.path == path:
                 self._land(entry)

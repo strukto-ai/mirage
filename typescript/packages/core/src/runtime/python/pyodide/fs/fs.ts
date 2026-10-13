@@ -349,34 +349,46 @@ export class PyodideFs {
     if (this.mountOf(from) !== this.mountOf(to)) {
       throw errnoError(this.host, this.errno, 'EXDEV')
     }
-    const replaced = this.nodes.childOf(newDir, newName)
-    if (replaced !== undefined && replaced !== node) this.orphan(replaced)
+    const found = this.nodes.childOf(newDir, newName)
+    const replaced = found !== node ? found : undefined
+    if (replaced !== undefined) this.keepContents(replaced)
     this.journal.markRename(from, to)
     this.settle(from, to)
+    if (replaced !== undefined) this.orphan(replaced)
     this.nodes.move(node, newDir, newName)
   }
 
   private unlink(parent: FSNode, name: string): void {
     const path = this.nodes.pathOf(parent) + '/' + name
     const node = this.nodes.childOf(parent, name)
-    if (node !== undefined) this.orphan(node)
+    if (node !== undefined) this.keepContents(node)
     this.journal.markUnlink(path)
     this.settle(path)
+    if (node !== undefined) this.orphan(node)
     this.nodes.detach(parent, name)
   }
 
   /**
-   * A file whose name is about to be removed or replaced. One a stream
-   * has open reads its bytes now, while its path still names it, and from
-   * then on writes nothing to the mount.
+   * Load a file a stream has open while its path still names it: its name
+   * is about to be removed or replaced, and the stream reads on.
    *
    * Args:
-   *   node: the file losing its name.
+   *   node: the file about to lose its name.
+   */
+  private keepContents(node: FSNode): void {
+    if ((node.opens ?? 0) > 0) this.loadContents(node, node.raw === true)
+  }
+
+  /**
+   * A file whose name the mount removed or replaced. One a stream has open
+   * writes nothing to the mount from then on; marked only once the mount
+   * took the change, so a refused removal leaves its writes landing.
+   *
+   * Args:
+   *   node: the file that lost its name.
    */
   private orphan(node: FSNode): void {
-    if ((node.opens ?? 0) === 0) return
-    this.loadContents(node, node.raw === true)
-    node.unlinked = true
+    if ((node.opens ?? 0) > 0) node.unlinked = true
   }
 
   private rmdir(parent: FSNode, name: string): void {

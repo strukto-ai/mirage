@@ -21,7 +21,7 @@ from mirage.runtime.handles.file_handle import (
 from mirage.runtime.handles.file_table import FileTable
 from mirage.runtime.handles.flush import plan_flush
 from mirage.runtime.handles.mode import parse_mode
-from mirage.runtime.handles.types import FlushKind, FlushStep
+from mirage.runtime.handles.types import FlushKind, FlushStep, Kept
 
 __all__ = [
     "ChunkedHandle",
@@ -29,6 +29,7 @@ __all__ = [
     "FileTable",
     "FlushKind",
     "FlushStep",
+    "Kept",
     "overlaid",
     "parse_mode",
     "plan_flush",

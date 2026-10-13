@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { isMissingOp, isMissingPath } from '../errors/fs.ts'
+import { eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
   contentSize,
@@ -29,6 +29,7 @@ import {
 import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
+import { CycleError, resolvePath } from '../utils/path.ts'
 import type { FlushStep } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
@@ -114,13 +115,19 @@ function baseName(entry: string): string {
  *   dispatch: the workspace op dispatch this runtime was attached to.
  *   resolver: the workspace mount routing table; the default answers
  *     no mounts, so routing questions answer null.
+ *   resolve: where the namespace's links lead a path; null while the
+ *     workspace keeps no links.
  */
 export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
 
-  constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
+  constructor(
+    dispatch: BridgeDispatchFn,
+    resolver: MountResolver = new PrefixResolver(() => []),
+    private readonly resolve: ((path: string) => string) | null = null,
+  ) {
     // One cap on every request the file adapter sends, held for that request
     // alone, so the stats of listings that run together (a guest
     // walking a tree) share it with the walk's own reads.
@@ -138,7 +145,33 @@ export class RuntimeFiles {
 
   /** The file adapter every engine builds from its execution context. */
   static of(context: RuntimeContext): RuntimeFiles {
-    return new RuntimeFiles(context.dispatch, context.resolver)
+    const links = context.ns.links
+    return new RuntimeFiles(
+      context.dispatch,
+      context.resolver,
+      links === undefined ? null : links.resolve.bind(links),
+    )
+  }
+
+  /**
+   * The path an op on `path` lands on once the namespace's links are
+   * followed: the final name too when `follow`, else only the directories
+   * above it, since a rename or a removal acts on the name itself. One file
+   * reads as one path whichever spelling reached it, which is how a removal
+   * finds the files open on it. Mirrors Python's RuntimeFiles.walked.
+   */
+  walked(path: string, follow = true): string {
+    const resolve = this.resolve
+    if (resolve === null) return path
+    try {
+      if (follow) return resolvePath(resolve(path), '/')
+      const cut = path.lastIndexOf('/')
+      const above = resolvePath(resolve(path.slice(0, cut) || '/'), '/')
+      return `${rstripSlash(above)}/${path.slice(cut + 1)}`
+    } catch (err) {
+      if (err instanceof CycleError) throw eloop(path)
+      throw err
+    }
   }
 
   /**

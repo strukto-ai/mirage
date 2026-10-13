@@ -21,7 +21,7 @@ import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
-import { FileHandle, FileTable, type OpenMode } from '../../handles/index.ts'
+import { FileHandle, FileTable, type Kept, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { VFSStat } from '../../types.ts'
@@ -37,13 +37,13 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 const ENOENT = WASI.ENOENT
 
 /**
- * Where an open file is now. A rename made through this engine moves it,
- * and once its name is removed or replaced it reads the bytes it `kept`
- * and never lands, as POSIX keeps an open file on its inode.
+ * Where an open file is now: the path its links lead to, which a rename
+ * made through this engine moves. Once its name is removed or replaced it
+ * reads and lands on what it `kept`.
  */
 interface Place {
   path: string
-  kept: Uint8Array | null
+  kept: Kept | null
   readable: boolean
   raw: boolean
 }
@@ -125,29 +125,40 @@ export function installQuickJsFs(
   }
 
   // Read what the files open on `path` need before its name is removed or
-  // replaced; `keep` them once it has gone. A file that cannot read needs
-  // nothing kept, and a read a policy refuses must not refuse the removal.
-  const hold = async (bound: RuntimeFiles, path: string): Promise<[Place, Uint8Array][]> => {
-    const held: [Place, Uint8Array][] = []
-    for (const place of places.values()) {
-      if (place.path !== path || place.kept !== null) continue
-      let data: Uint8Array = new Uint8Array()
-      if (place.readable) {
-        try {
-          data = await bound.read(path, { raw: place.raw })
-        } catch (err) {
-          console.warn(`quickjs: keeping ${path} before it goes failed`, err)
-        }
+  // replaced; `keep` them once it has gone. They share one read, and a read
+  // that fails is kept as the error later reads report, so the removal
+  // still goes ahead. A file no stream can read needs nothing kept.
+  const hold = async (bound: RuntimeFiles, path: string): Promise<[Place, Kept][]> => {
+    const named = bound.walked(path, false)
+    const open = [...places.values()].filter((p) => p.path === named && p.kept === null)
+    const kept: Kept = { data: new Uint8Array(), error: null }
+    if (open.some((p) => p.readable)) {
+      try {
+        kept.data = await bound.read(named, { raw: open.some((p) => p.raw) })
+      } catch (err) {
+        console.warn(`quickjs: keeping ${named} before it goes failed`, err)
+        kept.error = err instanceof Error ? err : new Error(String(err))
       }
-      held.push([place, data])
     }
-    return held
+    return open.map((place) => [place, kept])
   }
-  const keep = (held: [Place, Uint8Array][]): void => {
-    for (const [place, data] of held) place.kept = data
+  // The whole of what a stream holds, its writes over the stored bytes,
+  // which a read answers only once the bytes are in hand.
+  const whole = async (file: FileHandle): Promise<Uint8Array> => {
+    const pos = file.pos
+    file.pos = 0
+    while (file.lacks(-1)) await file.fill(-1)
+    const data = file.pread(0, file.size)
+    file.pos = pos
+    return data
+  }
+  const keep = (held: [Place, Kept][]): void => {
+    for (const [place, kept] of held) place.kept = kept
   }
   // Follow a rename: a file open on `old` or under it is at `next` now.
-  const moved = (old: string, next: string): void => {
+  const moved = (bound: RuntimeFiles, from: string, to: string): void => {
+    const old = bound.walked(from, false)
+    const next = bound.walked(to, false)
     const under = `${rstripSlash(old)}/`
     for (const place of places.values()) {
       if (place.kept === null && (place.path === old || place.path.startsWith(under)))
@@ -233,6 +244,9 @@ export function installQuickJsFs(
     let directory = false
     const place: Place = { path, kept: null, readable: mode.readable, raw: mode.writable }
     try {
+      // The file is named by where its links lead, so a removal or a
+      // rename of any spelling of it finds the stream.
+      place.path = files.walked(path)
       let row: VFSStat | null
       try {
         row = await applyOpen(files, path, mode)
@@ -249,15 +263,19 @@ export function installQuickJsFs(
         path,
         row === null
           ? null
-          : (offset, size) =>
-              place.kept !== null
-                ? Promise.resolve(
-                    place.kept.slice(offset, size === null ? undefined : offset + size),
-                  )
-                : bound.read(
-                    place.path,
-                    size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
-                  ),
+          : (offset, size) => {
+              const kept = place.kept
+              if (kept === null) {
+                return bound.read(
+                  place.path,
+                  size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
+                )
+              }
+              if (kept.error !== null) return Promise.reject(kept.error)
+              return Promise.resolve(
+                kept.data.slice(offset, size === null ? undefined : offset + size),
+              )
+            },
         { size: row?.size ?? 0, writable: mode.writable, append: mode.append },
       )
     } catch (err) {
@@ -280,8 +298,9 @@ export function installQuickJsFs(
     places.delete(fd)
     const file = table.pop(fd)
     if (file === undefined || place === undefined) return ctx.undefined
-    if (file.dirty && files !== null && place.kept === null)
-      await files.flush(place.path, file.flushPlan())
+    if (!file.dirty || files === null) return ctx.undefined
+    if (place.kept === null) await files.flush(place.path, file.flushPlan())
+    else place.kept.data = await whole(file)
     return ctx.undefined
   })
 
@@ -445,7 +464,7 @@ export function installQuickJsFs(
       const held = await hold(files, dst)
       await files.rename(src, dst)
       keep(held)
-      moved(src, dst)
+      moved(files, src, dst)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))

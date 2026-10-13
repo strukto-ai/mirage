@@ -29,3 +29,18 @@ class FlushStep:
     data: bytes = b""
     offset: int = 0
     length: int = 0
+
+
+@dataclass(slots=True)
+class Kept:
+    """What a file still holds once its name was removed or replaced,
+    shared by every handle open on it, as POSIX keeps one inode for them.
+
+    Args:
+        data (bytes): the file's bytes, with what its handles landed since.
+        error (OSError | None): why its bytes could not be read before
+            the name went, which every later read reports.
+    """
+
+    data: bytes = b""
+    error: OSError | None = None

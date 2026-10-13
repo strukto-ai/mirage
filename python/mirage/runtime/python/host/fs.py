@@ -1214,7 +1214,7 @@ class HostFs:
         st = self._adapter.stat(desc.path)
         if desc.handle is not None:
             st = dataclasses.replace(st, size=desc.handle.size)
-        return self._stat_of(desc.path, st)
+        return self._stat_of(desc.opened, st)
 
     def fsync(self, fd: int) -> None:
         self._descriptors.land(self._descriptors[fd])

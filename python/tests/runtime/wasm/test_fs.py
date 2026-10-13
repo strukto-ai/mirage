@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
+import functools
 import inspect
 import struct
 
@@ -170,6 +172,32 @@ def _wasi_over_ram() -> tuple[Workspace, WasiFs, int, FileHandle]:
         FdEntry(kind="file", handle=handle, path="/data/f.txt")
     )
     return ws, wasi_fs, fd, handle
+
+
+def _refuse_read(*args, **kwargs):
+    raise PermissionError(errno.EACCES, "no read")
+
+
+def test_a_read_that_fails_as_a_name_goes_fails_the_reads_after(monkeypatch):
+    # The removal goes ahead, but the bytes it could not keep are not an
+    # empty file: every read after it reports why.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.vfs.write("/data/f.txt", b"body"))
+    view = WasmView(files=RuntimeFiles(ws.vfs.dispatch, None))
+    wasi_fs = WasiFs(view, b"")
+    entry = FdEntry(kind="file", path="/data/f.txt")
+    entry.handle = FileHandle.opened(
+        "/data/f.txt",
+        functools.partial(wasi_fs._fetch, entry, False),
+        size=4,
+        writable=False,
+        append=False,
+    )
+    wasi_fs._fds.add(entry)
+    monkeypatch.setattr(view, "read", _refuse_read)
+    wasi_fs._keep(wasi_fs._hold("/data/f.txt"))
+    with pytest.raises(PermissionError):
+        entry.handle.read(4)
 
 
 def test_fd_sync_lands_what_a_file_owes_before_its_close():

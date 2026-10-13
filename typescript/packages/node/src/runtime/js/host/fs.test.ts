@@ -335,6 +335,24 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
+  it('fails the reads of an open file whose bytes a policy refused as its name went', async () => {
+    // The removal goes ahead, but the bytes it could not keep are not an
+    // empty file: the reads after it report the refusal.
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f.txt', 'body')
+    const handle = await fs.promises.open('/data/f.txt', 'r')
+    ws.policies.add({
+      preVfs: (ctx) => (ctx.call.name === 'read' ? { kind: 'deny', reason: 'no reads' } : null),
+    })
+    await fs.promises.unlink('/data/f.txt')
+    await expect(handle.read(Buffer.alloc(4), 0, 4, 0)).rejects.toThrow()
+    await handle.close()
+    expect(await ws.vfs.exists('/data/f.txt')).toBe(false)
+    await ws.close()
+  })
+
   it('keeps a handle through a rename onto its own name', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

@@ -611,6 +611,20 @@ class TestDescriptors:
         patched.close(fd)
         assert not patched.path.exists("/data/f.txt")
 
+    def test_a_read_refused_as_its_name_goes_fails_the_reads_after(self):
+        # The removal goes ahead, but the bytes it could not keep are not
+        # an empty file: the reads after it report the refusal.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.vfs.write("/data/f.txt", b"body"))
+        patched = make_os_module(ws.vfs)
+        fd = patched.open("/data/f.txt", os.O_RDONLY)
+        ws.policies.add(_NoReads())
+        patched.unlink("/data/f.txt")
+        with pytest.raises(PermissionError):
+            patched.read(fd, 4)
+        patched.close(fd)
+        assert not patched.path.exists("/data/f.txt")
+
     def test_a_rename_onto_its_own_name_keeps_the_descriptor(self):
         ops, patched = seeded()
         fd = patched.open("/data/dir/a.txt", os.O_RDWR)
