@@ -20,6 +20,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { asyncChain } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { truncateStream } from '../utils/limit.ts'
 import { splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -62,13 +63,15 @@ function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
  * Bytes (`bytesMode`): positive = first N bytes, negative = all but the last N
  * bytes, 0 = nothing. Lines (`lines`): positive = first N lines, negative = all
  * but the last N lines, 0 = nothing. A final line without a trailing newline is
- * preserved as-is (no newline is appended).
+ * preserved as-is (no newline is appended). head takes its input whole, so a
+ * byte count hands on the producer's chunks and a line count scans it in pieces.
  */
 async function* headStream(
   source: AsyncIterable<Uint8Array>,
   lines: number,
   bytesMode: number | null,
   zeroTerminated = false,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   if (bytesMode !== null) {
     if (bytesMode === 0) return
@@ -97,10 +100,11 @@ async function* headStream(
   }
 
   const delimiter = zeroTerminated ? 0 : NL
+  const pieces = chunks(source, signal)
   if (lines >= 0) {
     if (lines === 0) return
     let emitted = 0
-    for await (const chunk of source) {
+    for await (const chunk of pieces) {
       let start = 0
       while (emitted < lines) {
         const nl = chunk.indexOf(delimiter, start)
@@ -120,7 +124,7 @@ async function* headStream(
   const keep = -lines
   const recent: Uint8Array[] = []
   let buf: Uint8Array = new Uint8Array(0)
-  for await (const chunk of source) {
+  for await (const chunk of pieces) {
     buf = concat([buf, chunk])
     let nl = buf.indexOf(delimiter)
     while (nl >= 0) {
@@ -153,6 +157,7 @@ async function* headMulti(
   showHeaders: boolean,
   zeroTerminated: boolean,
   unread: ReadonlySet<string>,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   for (let i = 0; i < paths.length; i++) {
     const p = paths[i]
@@ -164,7 +169,7 @@ async function* headMulti(
     // A directory opened: its header prints and its read fails.
     if (unread.has(p.virtual)) continue
     const source = stream(p)
-    for await (const chunk of headStream(source, lines, bytesMode, zeroTerminated)) yield chunk
+    yield* headStream(source, lines, bytesMode, zeroTerminated, signal)
   }
 }
 
@@ -206,13 +211,20 @@ export async function headGeneric(
         showHeaders,
         parsed.zeroTerminated,
         unread,
+        opts.signal,
       ),
       io,
     ]
   }
   try {
     const source = resolveSource(opts.stdin)
-    const body = headStream(source, parsed.lines, parsed.bytesMode, parsed.zeroTerminated)
+    const body = headStream(
+      source,
+      parsed.lines,
+      parsed.bytesMode,
+      parsed.zeroTerminated,
+      opts.signal,
+    )
     // -v heads a stdin nobody named with the name it gives `-`.
     const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)
     return [parsed.verbose && !parsed.quiet ? asyncChain([header, body]) : body, new IOResult()]

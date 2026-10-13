@@ -804,6 +804,14 @@ export interface GenericCommand<A extends Accessor = Accessor> {
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean
+  /**
+   * The command hands on what it reads (`cat`, `head -c`), so its input keeps
+   * the producer's chunks instead of the 16 KiB pieces a scan reads. It then
+   * writes a pipe in the writes the producer made, and a write the reader's
+   * close cuts short is its SIGPIPE, as in Python, which passes every chunk
+   * through. A scan inside such a command splits its own input.
+   */
+  passThrough?: boolean
 }
 
 /** Refuse a hidden path the way nonexistence would: ENOENT for anything

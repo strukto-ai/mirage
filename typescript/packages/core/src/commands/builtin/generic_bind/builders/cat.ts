@@ -32,6 +32,7 @@ const cat: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'cat',
   read: true,
+  passThrough: true,
   aggregate: concatAggregate,
   fn: cat,
 }

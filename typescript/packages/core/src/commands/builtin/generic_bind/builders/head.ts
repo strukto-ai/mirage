@@ -32,6 +32,7 @@ const head: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'head',
   read: true,
+  passThrough: true,
   aggregate: headerAggregate,
   fn: head,
 }

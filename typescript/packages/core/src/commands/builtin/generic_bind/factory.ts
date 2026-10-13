@@ -227,21 +227,19 @@ function bind(
       ),
       opts.signal,
     )
-    // Input keeps its producer's chunks, as Python's does, so what a command
-    // passes on reaches a pipe in the writes the producer made, and a write the
-    // reader's close cuts short is the writer's SIGPIPE. Scans split their own.
+    const split = b.passThrough !== true
     return b.fn(
       {
         ...guarded,
         readStream: (acc, path, index) =>
-          guardInput(guarded.readStream(acc, path, index), opts, false),
+          guardInput(guarded.readStream(acc, path, index), opts, split),
       },
       accessor,
       paths,
       texts,
       {
         ...opts,
-        stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts, false),
+        stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts, split),
       },
     )
   }

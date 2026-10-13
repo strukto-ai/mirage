@@ -520,18 +520,35 @@ async def test_python3_mount_limit_follows_script_path(restore_defaults):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "command", ["wc /big", "grep -c line /big", "cat /big | wc"]
+    "command",
+    [
+        "wc /big",
+        "grep -c line /big",
+        "cat /big | wc",
+        "cat -s /blank",
+        "head -n -1000000 /blank",
+    ],
 )
 async def test_large_ram_command_honors_caller_cancel(command):
     from mirage.utils.abort import MirageAbortError
 
     ram = RAMVFS()
     ram.accessor.store.files["/big"] = b"line\n" * 200_000
+    ram.accessor.store.files["/blank"] = b"\n" * 1_000_000
     ws = Workspace({"/": ram})
     cancel = asyncio.Event()
-    timer = asyncio.get_running_loop().call_later(0.005, cancel.set)
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    fired: list[float] = []
+
+    def stop() -> None:
+        fired.append(loop.time() - start)
+        cancel.set()
+
+    timer = loop.call_later(0.005, stop)
     try:
         with pytest.raises(MirageAbortError):
             await ws.shell(command, cancel=cancel)
     finally:
         timer.cancel()
+    assert fired[0] < 1

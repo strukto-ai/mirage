@@ -15,6 +15,7 @@
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -111,16 +112,21 @@ async function* reported(
   }
 }
 
-/** Line-process a stream for GNU cat's display flags (-n -E -T -v -s). */
+/**
+ * Line-process a stream for GNU cat's display flags (-n -E -T -v -s), in
+ * pieces: cat takes its input whole, and -s can squeeze a whole RAM read
+ * without yielding a line.
+ */
 async function* displayLines(
   source: AsyncIterable<Uint8Array>,
   display: CatFlags,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   let lineNo = 0
   let buf = new Uint8Array(0)
   let prevBlank = false
   const transform = display.showTabs || display.showNonprinting
-  for await (const chunk of source) {
+  for await (const chunk of chunks(source, signal)) {
     if (chunk.byteLength === 0) continue
     const mergedBuf = new Uint8Array(buf.byteLength + chunk.byteLength)
     mergedBuf.set(buf, 0)
@@ -189,12 +195,12 @@ export async function catGeneric(
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')
-    const out: ByteSource = wantsDisplay ? displayLines(merged, display) : merged
+    const out: ByteSource = wantsDisplay ? displayLines(merged, display, opts.signal) : merged
     return [out, io]
   }
   try {
     const source = resolveSource(opts.stdin)
-    const out: ByteSource = wantsDisplay ? displayLines(source, display) : source
+    const out: ByteSource = wantsDisplay ? displayLines(source, display, opts.signal) : source
     return [out, new IOResult()]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

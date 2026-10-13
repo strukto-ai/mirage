@@ -19,6 +19,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
+from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
@@ -223,20 +224,23 @@ async def display_lines(
 ) -> AsyncIterator[bytes]:
     """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
 
-    Closes ``source`` when it stops, at the end or when its reader stops.
+    Reads ``source`` in pieces, so a squeeze over a whole RAM read stays
+    linear and cancellable. Closes it when it stops, at the end or when its
+    reader stops.
 
     Args:
         source (ByteSource): the bytes to render.
         parsed (CatFlags): the display flags.
     """
     stream = ensure_stream(source)
+    pieces = chunks(stream)
     try:
         number_lines = parsed.number_lines and not parsed.number_nonblank
         transform = parsed.show_tabs or parsed.show_nonprinting
         line_no = 0
         buf = b""
         prev_blank = False
-        async for chunk in stream:
+        async for chunk in pieces:
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
@@ -267,4 +271,5 @@ async def display_lines(
                 buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
             yield prefix + buf
     finally:
+        await close_quietly(pieces)
         await close_quietly(stream)

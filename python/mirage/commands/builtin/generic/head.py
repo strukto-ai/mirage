@@ -28,6 +28,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
@@ -73,7 +74,9 @@ async def head(
 
     Closes ``src`` whenever it stops, at its limit, at the end of the
     input, or when its own reader stops, so a read it leaves unfinished
-    releases its mount at once rather than when it is collected.
+    releases its mount at once rather than when it is collected. A byte
+    count passes its chunks on whole; a line count reads it in pieces, so
+    a whole RAM read stays linear and cancellable.
 
     Args:
         src (bytes | AsyncIterator[bytes]): the input.
@@ -82,6 +85,7 @@ async def head(
         zero_terminated (bool): ``-z``, NUL ends a line.
     """
     stream = ensure_stream(src)
+    pieces = chunks(stream)
     try:
         if c is not None:
             if c == 0:
@@ -113,7 +117,7 @@ async def head(
             if target == 0:
                 return
             emitted_lines = 0
-            async for chunk in stream:
+            async for chunk in pieces:
                 start = 0
                 while emitted_lines < target:
                     end = chunk.find(separator, start)
@@ -131,7 +135,7 @@ async def head(
         keep = -target
         recent: deque[bytes] = deque(maxlen=keep)
         buf = b""
-        async for chunk in stream:
+        async for chunk in pieces:
             buf += chunk
             while separator in buf:
                 line, buf = buf.split(separator, 1)
@@ -144,6 +148,7 @@ async def head(
             recent.append(buf)
 
     finally:
+        await close_quietly(pieces)
         await close_quietly(stream)
 
 
