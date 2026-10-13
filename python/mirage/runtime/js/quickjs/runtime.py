@@ -143,10 +143,15 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
     ) -> RunResult:
         context = context or self._capture_context()
         # --std exposes the std/os globals (stdin via std.in); -m selects
-        # ES-module mode for .mjs sources. Trailing args become scriptArgs.
-        argv = ["qjs", "--std"]
-        if args.flags.get("module"):
-            argv.append("-m")
+        # ES-module mode for .mjs sources, and --script names classic mode
+        # for the rest, since qjs takes -e source for a module unless told
+        # (a sloppy `x = 5` then fails strict). Trailing args become
+        # scriptArgs.
+        argv = [
+            "qjs",
+            "--std",
+            "-m" if args.flags.get("module") else "--script",
+        ]
         # A named program takes scriptArgs[0], the slot qjs fills with a
         # script's path when it runs a file; unnamed -e leaves the args
         # alone, so the js command keeps its spelling.

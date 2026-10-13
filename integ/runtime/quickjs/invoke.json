@@ -155,6 +155,49 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_classic_script_is_sloppy_in_any_directory",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "s.js": "y = 7\nconsole.log(y, typeof this)\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'x = 5; var a = 1; console.log(x, globalThis.a, typeof this)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "5 1 object\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /ram/s.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "7 object\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /ram && node -e 'x = 5; console.log(x)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "5\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

@@ -84,6 +84,7 @@ async def test_program_args_ride_behind_the_end_of_options_marker():
     assert rt._execution.argv == [
         "qjs",
         "--std",
+        "--script",
         "-e",
         "CODE",
         "--",
@@ -100,6 +101,7 @@ async def test_named_program_still_takes_the_first_arg_slot():
     assert rt._execution.argv == [
         "qjs",
         "--std",
+        "--script",
         "-e",
         "CODE",
         "--",
