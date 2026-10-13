@@ -51,7 +51,7 @@ PostgresConfig(dsn=os.environ["DATABASE_URL"], schemas=["public", "analytics"])
 The VFS has built-in safety limits to keep an agent from accidentally pulling a whole table:
 
 - `default_row_limit` (1,000): rows a windowed read returns when it passes an offset but no limit.
-- `max_read_rows` (10,000): hard ceiling per read. A whole read past it is refused (on the rows the table really has, not only on the planner's estimate); `head -n` / `tail -n` past it print that many rows, then a notice on stderr, and exit 1.
+- `max_read_rows` (10,000): hard ceiling per read. A whole read past it is refused (on the rows the table really has, not only on the planner's estimate); a `head -n` / `tail -n` count past it on a table that long is refused too (`File too large`); `wc -l` counts past it.
 - `max_read_bytes` (10 MiB): hard ceiling per read.
 
 Override in the config if you need bigger reads.

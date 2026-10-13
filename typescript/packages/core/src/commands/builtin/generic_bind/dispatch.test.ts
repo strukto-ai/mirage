@@ -20,6 +20,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
 import { MountMode, type PathSpec } from '../../../types.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -144,6 +145,93 @@ it('du -x never lists a mount below the operand', async () => {
     expect(new TextDecoder().decode(result.stdout)).toBe('3\t/a\n2\t/c\n')
     expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})
+
+// A RAM mount that answers the read stand-ins on its own. Mirrors `_Lines`
+// in test_dispatch.py.
+class Lines extends RAMVFS {
+  readonly asked: string[] = []
+
+  override firstLines(_path: PathSpec, n: number, _index?: IndexCacheStore): Promise<Uint8Array> {
+    this.asked.push(`firstLines ${String(n)}`)
+    return Promise.resolve(new TextEncoder().encode('first\n'.repeat(n)))
+  }
+
+  override lastLines(_path: PathSpec, n: number, _index?: IndexCacheStore): Promise<Uint8Array> {
+    this.asked.push(`lastLines ${String(n)}`)
+    return Promise.resolve(new TextEncoder().encode('last\n'.repeat(n)))
+  }
+
+  override lineCount(_path: PathSpec, _index?: IndexCacheStore): Promise<number> {
+    this.asked.push('lineCount')
+    return Promise.resolve(42)
+  }
+}
+
+class CachedLines extends Lines {
+  override readonly cachesReads = true
+}
+
+function lines<T extends Lines>(vfs: T): T {
+  vfs.loadState({ type: 'ram', files: { '/f': new TextEncoder().encode('a\nb\nc\n') } })
+  return vfs
+}
+
+it('asks the mount for head, tail and wc through the dispatcher', async () => {
+  const vfs = lines(new Lines())
+  const ws = new Workspace({ '/m': vfs }, { shellParser: await getTestParser() })
+  const dec = new TextDecoder()
+  try {
+    const out = [
+      dec.decode((await ws.shell('head -n 2 /m/f')).stdout),
+      dec.decode((await ws.shell('tail -n 1 /m/f')).stdout),
+      dec.decode((await ws.shell('wc -l /m/f')).stdout),
+    ]
+    expect(out).toEqual(['first\nfirst\n', 'last\n', '42 /m/f\n'])
+    expect(vfs.asked).toEqual(['firstLines 2', 'lastLines 1', 'lineCount'])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('refuses the stand-ins through a link to a sealed file', async () => {
+  const vfs = lines(new Lines())
+  const ws = new Workspace(
+    { '/m': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    expect((await ws.shell('ln -s /m/f /m/l')).exitCode).toBe(0)
+    await ws.setSessionProfile(ws.defaultSessionId, {
+      commands: { deny: [{ paths: ['/m/f'], reason: 'sealed' }] },
+    })
+    for (const line of ['head -n 2 /m/l', 'tail -n 1 /m/l', 'wc -l /m/l']) {
+      const refused = await ws.shell(line)
+      expect(refused.exitCode).toBe(1)
+      expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
+    }
+    expect(vfs.asked).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})
+
+it('reads a cached file from the cache instead', async () => {
+  const vfs = lines(new CachedLines())
+  const ws = new Workspace({ '/m': vfs }, { shellParser: await getTestParser() })
+  const dec = new TextDecoder()
+  try {
+    await ws.shell('cat /m/f')
+    const out = [
+      dec.decode((await ws.shell('head -n 2 /m/f')).stdout),
+      dec.decode((await ws.shell('tail -n 1 /m/f')).stdout),
+      dec.decode((await ws.shell('wc -l /m/f')).stdout),
+    ]
+    expect(out).toEqual(['a\nb\n', 'c\n', '3 /m/f\n'])
+    expect(vfs.asked).toEqual([])
   } finally {
     await ws.close()
   }

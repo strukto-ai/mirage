@@ -71,32 +71,6 @@ async def entity_guard(
         raise enoent(virtual)
 
 
-async def documents_exist(
-    accessor: MongoDBAccessor, match: ScopeMatch, virtual: str
-) -> bool:
-    """Whether ``entity_guard`` admits the collection a match names.
-
-    For the bespoke fast paths (``tail`` and ``wc -l`` on
-    ``documents.jsonl``), which query the collection by the names in the
-    path: they take the fast path only for a collection the mount can
-    see, and otherwise hand the operand to the generic, which stats it
-    through the same guard and reports it the way GNU names a missing
-    file. ``count_documents`` answers 0 for a collection that does not
-    exist, so without it ``wc -l`` printed a count for a missing file.
-
-    Args:
-        accessor (MongoDBAccessor): backend handle.
-        match (ScopeMatch): a match whose slots hold ``database``,
-            ``kind`` and ``name``.
-        virtual (str): the operand's virtual path.
-    """
-    try:
-        await entity_guard(accessor, match, virtual)
-    except FileNotFoundError:
-        return False
-    return True
-
-
 async def _list_root(
     accessor: MongoDBAccessor, match: ScopeMatch
 ) -> list[tuple[str, IndexEntry]]:

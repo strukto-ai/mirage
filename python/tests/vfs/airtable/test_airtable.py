@@ -90,3 +90,22 @@ async def test_a_workspace_browses_bases_tables_and_records(airtable_api):
         )
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_head_pushes_its_line_count_into_max_records(airtable_api):
+    ws = Workspace({"/at/": _vfs(max_read_records=5)})
+    try:
+        result = await ws.shell(f"head -n 2 {TABLE}/records.jsonl")
+        assert result.exit_code == 0
+        assert len((await result.stdout_str()).splitlines()) == 2
+        past = await ws.shell(f"head -n 6 {TABLE}/records.jsonl")
+        assert past.exit_code == 1
+        assert await past.stderr_str() == (
+            f"head: error reading '{TABLE}/records.jsonl': File too large\n"
+        )
+    finally:
+        await ws.close()
+    calls = airtable_api.record_calls()
+    assert [c["maxRecords"] for c in calls] == ["2", "6", "6"]
+    assert "offset" in calls[2]

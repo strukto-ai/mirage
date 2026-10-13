@@ -25,7 +25,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
-import { read as airtableRead } from '../../core/airtable/read.ts'
+import { firstLines as airtableFirstLines, read as airtableRead } from '../../core/airtable/read.ts'
 import { stat as airtableStat } from '../../core/airtable/stat.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -85,6 +85,14 @@ export class AirtableVFS extends BaseVFS {
     index?: IndexCacheStore,
   ): Promise<ByteSource | null> {
     return airtableLinesContaining(this.accessor, path, text, index)
+  }
+
+  override firstLines(
+    path: PathSpec,
+    n: number,
+    index?: IndexCacheStore,
+  ): Promise<Uint8Array | null> {
+    return airtableFirstLines(this.accessor, path, n, index)
   }
 
   override getState(): AirtableVFSState {

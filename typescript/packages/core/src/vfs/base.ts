@@ -362,6 +362,66 @@ export class BaseVFS<A extends Accessor = Accessor> {
     return Promise.reject(enotsup(this.name, 'exists', path))
   }
 
+  /**
+   * The first `n` lines of a file, without reading the rest.
+   *
+   * `head -n N` asks this before it reads, so a backend that can fetch the
+   * start of a file on its own (a `LIMIT` on a table) does not send the whole
+   * file. The answer stands in for the file: exactly the first `n` lines a
+   * read gives, each with its newline, and the whole file when it has fewer.
+   * A file the read cache holds is read instead. Resolves null to have the
+   * file read the usual way; rejects with the file's read error otherwise
+   * (`EFBIG` when the answer passes a ceiling on one read, such as
+   * `max_read_rows`).
+   */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
+  firstLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
+    return Promise.reject(enotsup(this.name, 'firstLines', path))
+  }
+
+  /**
+   * The last `n` lines of a file, without reading the rest.
+   *
+   * `tail -n N` asks this before it reads, and `tail -f` for its first print.
+   * The answer stands in for the file: exactly the last `n` lines a read
+   * gives, each with its newline, and the whole file when it has fewer. A
+   * file the read cache holds is read instead. Resolves null to have the file
+   * read the usual way; rejects with the file's read error otherwise (`EFBIG`
+   * when the answer passes a ceiling on one read).
+   */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
+  lastLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
+    return Promise.reject(enotsup(this.name, 'lastLines', path))
+  }
+
+  /**
+   * How many newlines a read of the file gives, without reading it.
+   *
+   * `wc -l` asks this before it reads (a `COUNT(*)` on a table), and only
+   * when it counts lines alone. A file the read cache holds is read instead.
+   * Resolves null to have the file read the usual way; rejects with the
+   * file's read error otherwise.
+   */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
+  lineCount(path: PathSpec, _index?: IndexCacheStore): Promise<number | null> {
+    return Promise.reject(enotsup(this.name, 'lineCount', path))
+  }
+
+  /**
+   * What is added to the end of a file from now on, as it lands.
+   *
+   * `tail -f` on one file asks this after its first print, so a backend that
+   * can be told about new data (a change stream) does not have to be polled.
+   * The stream yields whole lines, each with its newline, in the order a read
+   * would show them, and ends only when the caller closes it. Resolves null
+   * to have `tail` poll the file every `-s` seconds; rejects with the file's
+   * read error otherwise.
+   */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
+  follow(path: PathSpec, _index?: IndexCacheStore): Promise<AsyncIterable<Uint8Array> | null> {
+    return Promise.reject(enotsup(this.name, 'follow', path))
+  }
+
   /** Answer `find` natively instead of walking `readdir`. */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   find(path: PathSpec, _options: FindOptions, _index?: IndexCacheStore): Promise<string[]> {

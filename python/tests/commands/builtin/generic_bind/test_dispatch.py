@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope, command_started
 from mirage.commands.builtin.generic.du import TRUNCATED_NOTE
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
@@ -22,7 +23,7 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import install, replaces
@@ -131,5 +132,91 @@ async def test_du_x_never_lists_a_mount_below_the_operand():
         assert await result.materialize_stdout() == b"3\t/a\n2\t/c\n"
         assert not result.stderr
         assert result.exit_code == 0
+    finally:
+        await ws.close()
+
+
+class _Lines(RAMVFS):
+    """A RAM mount that answers the read stand-ins on its own."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[str] = []
+
+    async def first_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        self.asked.append(f"first_lines {n}")
+        return b"first\n" * n
+
+    async def last_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        self.asked.append(f"last_lines {n}")
+        return b"last\n" * n
+
+    async def line_count(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int | None:
+        self.asked.append("line_count")
+        return 42
+
+
+@pytest.mark.asyncio
+async def test_head_tail_and_wc_ask_the_mount_through_the_dispatcher():
+    vfs = _Lines()
+    vfs.load_state({"files": {"/f": b"a\nb\nc\n"}})
+    ws = Workspace({"/m/": vfs})
+    try:
+        head = await ws.shell("head -n 2 /m/f")
+        tail = await ws.shell("tail -n 1 /m/f")
+        count = await ws.shell("wc -l /m/f")
+        assert (head.stdout, tail.stdout, count.stdout) == (
+            b"first\nfirst\n",
+            b"last\n",
+            b"42 /m/f\n",
+        )
+        assert vfs.asked == ["first_lines 2", "last_lines 1", "line_count"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_rule_refuses_the_stand_ins_through_a_link():
+    vfs = _Lines()
+    vfs.load_state({"files": {"/f": b"a\nb\nc\n"}})
+    ws = Workspace({"/m/": vfs}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.shell("ln -s /m/f /m/l")).exit_code == 0
+        await ws.set_session_profile(
+            ws.default_session_id,
+            {"commands": {"deny": [{"paths": ["/m/f"], "reason": "sealed"}]}},
+        )
+        for line in ("head -n 2 /m/l", "tail -n 1 /m/l", "wc -l /m/l"):
+            refused = await ws.shell(line)
+            assert refused.exit_code == 1
+            assert b"Permission denied" in (refused.stderr or b"")
+        assert vfs.asked == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cached_file_is_read_from_the_cache_instead():
+    vfs = _Lines()
+    vfs.caches_reads = True
+    vfs.load_state({"files": {"/f": b"a\nb\nc\n"}})
+    ws = Workspace({"/m/": vfs})
+    try:
+        await ws.shell("cat /m/f")
+        head = await ws.shell("head -n 2 /m/f")
+        tail = await ws.shell("tail -n 1 /m/f")
+        count = await ws.shell("wc -l /m/f")
+        assert (head.stdout, tail.stdout, count.stdout) == (
+            b"a\nb\n",
+            b"c\n",
+            b"3 /m/f\n",
+        )
+        assert vfs.asked == []
     finally:
         await ws.close()

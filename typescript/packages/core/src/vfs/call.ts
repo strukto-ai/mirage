@@ -25,6 +25,9 @@ const DISPATCH_NAMES: ReadonlyMap<string, string> = new Map([
   ['dirCopy', 'dir_copy'],
   ['duSize', 'du_size'],
   ['duEntries', 'du_entries'],
+  ['firstLines', 'first_lines'],
+  ['lastLines', 'last_lines'],
+  ['lineCount', 'line_count'],
 ])
 const METHOD_NAMES: ReadonlyMap<string, string> = new Map(
   [...DISPATCH_NAMES].map(([method, name]) => [name, method]),

@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { headGeneric } from './head.ts'
@@ -111,4 +112,65 @@ describe('headGeneric line counts', () => {
       expect(performance.now() - start).toBeLessThan(1000)
     },
   )
+})
+
+const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
+function opts(flags: Record<string, string | boolean>): CommandOpts {
+  return { stdin: null, flags, cwd: '/', vfs: null } as unknown as CommandOpts
+}
+
+const fileStat = (p: PathSpec): Promise<FileStat> =>
+  Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
+
+// Mirrors the head_generic cases in test_head.py.
+describe('head asks the mount for the first lines', () => {
+  it.each([
+    [{}, 10],
+    [{ lines: '2' }, 2],
+    [{ lines: '0' }, null],
+    [{ lines: '-1' }, null],
+    [{ bytes: '3' }, null],
+    [{ lines: '2', zero_terminated: true }, null],
+  ] as const)('with %j asks for %s', async (flags, asked) => {
+    const reads: string[] = []
+    const calls: number[] = []
+    const result = await headGeneric(
+      [PathSpec.fromStrPath('/t')],
+      [],
+      opts(flags),
+      fileStat,
+      async function* (p) {
+        reads.push(p.virtual)
+        await Promise.resolve()
+        yield ENC.encode('x\ny\nz\n')
+      },
+      (_p, n) => {
+        calls.push(n)
+        return Promise.resolve(ENC.encode('a\nb\n'))
+      },
+    )
+    const data = DEC.decode(await materialize(result?.[0] ?? null))
+    expect(calls).toEqual(asked === null ? [] : [asked])
+    if (asked !== null) expect([data, reads]).toEqual(['a\nb\n', []])
+  })
+
+  it('reads a file the mount leaves to the read', async () => {
+    const reads: string[] = []
+    const result = await headGeneric(
+      [PathSpec.fromStrPath('/t')],
+      [],
+      opts({ lines: '2' }),
+      fileStat,
+      async function* (p) {
+        reads.push(p.virtual)
+        await Promise.resolve()
+        yield ENC.encode('x\ny\nz\n')
+      },
+      () => Promise.resolve(null),
+    )
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('x\ny\n')
+    expect(reads).toEqual(['/t'])
+  })
 })

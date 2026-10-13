@@ -20,6 +20,7 @@ from enum import StrEnum
 from typing import Any, NoReturn, Protocol, overload
 
 from mirage.accessor.base import Accessor
+from mirage.cache.context import active_cache_manager
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.paths import dot_refusal
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
@@ -141,6 +142,35 @@ def bound_op(
     if fn is None:
         return None
     return functools.partial(fn, accessor, index=index)
+
+
+def bound_uncached(
+    fn: OperationFn | None, accessor: Accessor, index: IndexCacheStore
+) -> OperationFn | None:
+    """Bind ``fn`` as ``bound_op`` does, answering None for a file the read
+    cache holds.
+
+    For the calls that stand in for a read (``first_lines``,
+    ``last_lines``, ``line_count``): a file the cache holds is read from
+    there instead, so a warm run sends nothing and prints what the cached
+    copy holds, as the read it replaces would.
+
+    Args:
+        fn (OperationFn | None): backend op ``(accessor, path, *args,
+            *, index)``, or None when the mount does not define it.
+        accessor (Accessor): backend handle bound into the op.
+        index (IndexCacheStore): the per-call cache index.
+    """
+    if fn is None:
+        return None
+
+    async def call(path: PathSpec, *args: Any) -> Any:
+        manager = active_cache_manager()
+        if manager is not None and await manager.is_cached(path):
+            return None
+        return await fn(accessor, path, *args, index=index)
+
+    return call
 
 
 class Operation(StrEnum):
@@ -367,6 +397,10 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         searchable=vfs.searchable,
         lines_containing=slot("lines_containing"),
         before_full_scan=slot("before_full_scan"),
+        first_lines=slot("first_lines"),
+        last_lines=slot("last_lines"),
+        line_count=slot("line_count"),
+        follow=slot("follow"),
     )
 
 
@@ -456,11 +490,21 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "truncate": ("truncate", ("length", "no_create")),
     "set_attrs": ("setattr", ()),
     "find": ("find", ("index",)),
+    "first_lines": ("first_lines", ("n", "index")),
+    "last_lines": ("last_lines", ("n", "index")),
+    "line_count": ("line_count", ("index",)),
+    "follow": ("follow", ("index",)),
 }
 
 # The slots that change the mount: with no dispatcher there is nowhere to
 # judge and settle them.
-_DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {"find"}
+_DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {
+    "find",
+    "first_lines",
+    "last_lines",
+    "line_count",
+    "follow",
+}
 
 
 async def _slot_call(

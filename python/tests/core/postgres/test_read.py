@@ -20,7 +20,13 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.postgres.read import read, row_line
+from mirage.core.postgres.read import (
+    first_lines,
+    last_lines,
+    line_count,
+    read,
+    row_line,
+)
 from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
 from mirage.vfs.postgres.config import PostgresConfig
@@ -419,3 +425,99 @@ def test_a_row_line_spells_numbers_as_typescript_does():
         '{"a":10000000000000000000,"b":0.00001,"c":3.4e+38,'
         '"d":{"n":[1.5e-7,2]}}'
     )
+
+
+ROWS = PathSpec.from_str_path("/public/tables/users/rows.jsonl")
+
+
+def _windowed(n: int):
+    rows = [{"id": i} for i in range(n)]
+
+    async def fetch_rows(conn, schema, entity, *, limit, offset):
+        return rows[offset : offset + limit]
+
+    return fetch_rows
+
+
+@pytest.mark.asyncio
+async def test_first_lines_prints_every_row_asked_for_past_the_default():
+    """``default_row_limit`` clamped the pushed-down count, so ``head -n
+    1200`` of a 1500-row table printed 1000 lines."""
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.fetch_rows = AsyncMock(side_effect=_windowed(1500))
+        out = await first_lines(_accessor(), ROWS, 1200)
+    assert out is not None
+    assert len(out.splitlines()) == 1200
+
+
+@pytest.mark.asyncio
+async def test_first_lines_past_the_ceiling_of_a_short_table_is_the_table():
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.fetch_rows = AsyncMock(side_effect=_windowed(15))
+        out = await first_lines(_accessor(max_read_rows=20), ROWS, 25)
+    assert out is not None
+    assert len(out.splitlines()) == 15
+    assert mc.fetch_rows.await_args.kwargs["limit"] == 21
+
+
+@pytest.mark.asyncio
+async def test_first_lines_past_the_ceiling_of_a_long_table_is_efbig():
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.fetch_rows = AsyncMock(side_effect=_windowed(30))
+        with pytest.raises(FileTooLargeError, match="rows.jsonl"):
+            await first_lines(_accessor(max_read_rows=20), ROWS, 25)
+
+
+@pytest.mark.asyncio
+async def test_last_lines_takes_the_suffix_by_offset():
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.count_rows = AsyncMock(return_value=1500)
+        mc.fetch_rows = AsyncMock(side_effect=_windowed(1500))
+        out = await last_lines(_accessor(), ROWS, 1200)
+    assert out is not None
+    lines = out.splitlines()
+    assert len(lines) == 1200
+    assert lines[-1] == b'{"id":1499}'
+
+
+@pytest.mark.asyncio
+async def test_last_lines_past_the_ceiling_is_efbig():
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.count_rows = AsyncMock(return_value=30)
+        mc.fetch_rows = AsyncMock(side_effect=_windowed(30))
+        with pytest.raises(FileTooLargeError, match="rows.jsonl"):
+            await last_lines(_accessor(max_read_rows=20), ROWS, 25)
+        mc.fetch_rows.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_line_count_counts_rows_past_the_ceiling():
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.count_rows = AsyncMock(return_value=30)
+        assert await line_count(_accessor(max_read_rows=20), ROWS) == 30
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_is_not_rows_is_left_to_the_read():
+    path = PathSpec.from_str_path("/public/tables/users/schema.json")
+    with patch("mirage.core.postgres.read.client") as mc:
+        assert await first_lines(_accessor(), path, 3) is None
+        assert await last_lines(_accessor(), path, 3) is None
+        assert await line_count(_accessor(), path) is None
+        mc.fetch_rows.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rows_of_a_hidden_schema_are_enoent():
+    path = PathSpec.from_str_path("/secret/tables/users/rows.jsonl")
+    accessor = _accessor(schemas=["public"])
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.count_rows = AsyncMock(return_value=3)
+        for call in (
+            first_lines(accessor, path, 3),
+            last_lines(accessor, path, 3),
+            line_count(accessor, path),
+        ):
+            with pytest.raises(FileNotFoundError):
+                await call
+        mc.count_rows.assert_not_awaited()

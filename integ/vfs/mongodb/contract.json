@@ -74,8 +74,8 @@
       "command": "set -o pipefail; tail -n 4 /mongo-limited/mirage_integ/collections/books/documents.jsonl | jq -r ._id",
       "expect": {
         "exit": 1,
-        "stdout": "3\n4\n5\n",
-        "stderr": "tail: /mongo-limited/mirage_integ/collections/books/documents.jsonl: stopped at 3 documents (max_doc_limit); the output is incomplete\n"
+        "stdout": "",
+        "stderr": "tail: error reading '/mongo-limited/mirage_integ/collections/books/documents.jsonl': File too large\n"
       }
     },
     {
@@ -100,8 +100,8 @@
       "command": "mkdir -p /tmp; tail -n 4 /mongo-limited/mirage_integ/collections/books/documents.jsonl > /tmp/capped; echo $?; cat /tmp/capped | jq -r ._id",
       "expect": {
         "exit": 0,
-        "stdout": "1\n3\n4\n5\n",
-        "stderr": "tail: /mongo-limited/mirage_integ/collections/books/documents.jsonl: stopped at 3 documents (max_doc_limit); the output is incomplete\n"
+        "stdout": "1\n",
+        "stderr": "tail: error reading '/mongo-limited/mirage_integ/collections/books/documents.jsonl': File too large\n"
       }
     },
     {
@@ -427,6 +427,19 @@
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
         "stderr": "tail: cannot open '/mongodb/mirage_integ/collections/missing/documents.jsonl' for reading: No such file or directory\ntail: no files remaining\ntail: cannot open '/mongo-denied/mirage_integ/collections/books/documents.jsonl' for reading: No such file or directory\ntail: no files remaining\n"
+      }
+    },
+    {
+      "id": "mongodb_tail_follow_prints_the_last_lines_first",
+      "seq": 621014,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; tail -n 2 -f /mongodb/mirage_integ/collections/books/documents.jsonl | head -n 2 | jq -r ._id; tail -n 1 -f /mongodb/mirage_integ/views/recent_books/documents.jsonl | head -n 1 | jq -r ._id",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n5\n5\n",
+        "stderr": ""
       }
     }
   ]

@@ -37,6 +37,10 @@ import type {
   ExistsOp,
   FilesContainingOp,
   FindOp,
+  FirstLinesOp,
+  FollowOp,
+  LastLinesOp,
+  LineCountOp,
   LinesContainingOp,
   MkdirOp,
   PathOp,
@@ -139,6 +143,10 @@ export interface CommandIO<A extends Accessor = Accessor> {
   searchable?: readonly string[] | null
   linesContaining?: LinesContainingOp<A>
   beforeFullScan?: BeforeFullScanOp<A>
+  firstLines?: FirstLinesOp<A>
+  lastLines?: LastLinesOp<A>
+  lineCount?: LineCountOp<A>
+  follow?: FollowOp<A>
   // Child names the namespace owes a directory (nested mount roots and
   // symlinks). Stamped per invocation from opts.childMounts by the
   // factory, because it is session-scoped state while the adapter itself

@@ -192,12 +192,20 @@ async function* headMulti(
   }
 }
 
+/**
+ * Run head over resolved operands, GNU semantics. A line count (`-n N`, or
+ * the default 10) is asked of `firstLines` first, so a mount that can fetch
+ * the start of a file on its own (a `LIMIT` on a table) does not send the
+ * rest; null, or no `firstLines`, reads the file. Mirrors Python's
+ * `head_generic`.
+ */
 export async function headGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   stat: Stat,
   stream: Stream,
+  firstLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   stream = stdinStream(stream, opts.stdin)
@@ -213,11 +221,19 @@ export async function headGeneric(
       stderr: err === '' ? null : encodeText(err),
     })
     if (opened.length === 0) return [null, io]
+    const pushed = parsed.bytesMode === null && !parsed.zeroTerminated && parsed.lines > 0
     const sourceFor = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
       const source = stream(p)
       if ((await stat(p)).type === FileType.CHAR_DEVICE && parsed.bytesMode === null) {
         yield* truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
         return
+      }
+      if (pushed && firstLines !== undefined) {
+        const lines = await firstLines(p, parsed.lines)
+        if (lines !== null) {
+          yield lines
+          return
+        }
       }
       yield* source
     }

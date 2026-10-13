@@ -402,6 +402,59 @@ class BeforeFullScanOp(Protocol):
     ) -> Awaitable[None]: ...
 
 
+class FirstLinesOp(Protocol):
+    """The first ``n`` lines of ``path``; None when the file is to be
+    read."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        n: int,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[bytes | None]: ...
+
+
+class LastLinesOp(Protocol):
+    """The last ``n`` lines of ``path``; None when the file is to be
+    read."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        n: int,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[bytes | None]: ...
+
+
+class LineCountOp(Protocol):
+    """How many lines ``path`` holds; None when the file is to be read."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[int | None]: ...
+
+
+class FollowOp(Protocol):
+    """The lines added to ``path`` from now on; None when the file is to
+    be polled."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[AsyncIterator[bytes] | None]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class SearchQuery:
     """A resource query and its backend-specific arguments.

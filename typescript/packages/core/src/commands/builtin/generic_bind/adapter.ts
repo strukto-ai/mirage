@@ -21,6 +21,7 @@ import {
   type ScanReason,
   type SearchQuery,
 } from '../../../vfs/types.ts'
+import { activeCacheManager } from '../../../cache/context.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { declared } from '../../../vfs/call.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
@@ -294,6 +295,53 @@ export function commandIo(vfs: BaseVFS): CommandIO {
           ),
         }
       : {}),
+    ...(has('firstLines')
+      ? {
+          firstLines: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
+            vfs.firstLines(path, n, index),
+          ),
+        }
+      : {}),
+    ...(has('lastLines')
+      ? {
+          lastLines: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
+            vfs.lastLines(path, n, index),
+          ),
+        }
+      : {}),
+    ...(has('lineCount')
+      ? {
+          lineCount: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+            vfs.lineCount(path, index),
+          ),
+        }
+      : {}),
+    ...(has('follow')
+      ? {
+          follow: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+            vfs.follow(path, index),
+          ),
+        }
+      : {}),
+  }
+}
+
+/**
+ * `op`, answering null for a file the read cache holds.
+ *
+ * For the calls that stand in for a read (`firstLines`, `lastLines`,
+ * `lineCount`): a file the cache holds is read from there instead, so a warm
+ * run sends nothing and prints what the cached copy holds, as the read it
+ * replaces would. Mirrors Python's `bound_uncached`.
+ */
+export function boundUncached<T extends unknown[], R>(
+  op: ((path: PathSpec, ...args: T) => Promise<R | null>) | undefined,
+): ((path: PathSpec, ...args: T) => Promise<R | null>) | undefined {
+  if (op === undefined) return undefined
+  return async (path, ...args) => {
+    const manager = activeCacheManager()
+    if (manager !== null && (await manager.isCached(path))) return null
+    return op(path, ...args)
   }
 }
 
@@ -405,13 +453,29 @@ const DISPATCHED_SLOTS = {
     (dispatch: DispatchFn): CommandIO['find'] =>
     async (_accessor, path, options) =>
       (await dispatchedCall(dispatch, 'find', path, [options])) as string[],
+  firstLines:
+    (dispatch: DispatchFn): CommandIO['firstLines'] =>
+    async (_accessor, path, n) =>
+      (await dispatchedCall(dispatch, 'first_lines', path, [n])) as Uint8Array | null,
+  lastLines:
+    (dispatch: DispatchFn): CommandIO['lastLines'] =>
+    async (_accessor, path, n) =>
+      (await dispatchedCall(dispatch, 'last_lines', path, [n])) as Uint8Array | null,
+  lineCount:
+    (dispatch: DispatchFn): CommandIO['lineCount'] =>
+    async (_accessor, path) =>
+      (await dispatchedCall(dispatch, 'line_count', path)) as number | null,
+  follow:
+    (dispatch: DispatchFn): CommandIO['follow'] =>
+    async (_accessor, path) =>
+      (await dispatchedCall(dispatch, 'follow', path)) as AsyncIterable<Uint8Array> | null,
 } satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
 
 // The slots that change the mount: with no dispatcher there is nowhere to
 // judge and settle them.
 const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
   (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
-    (slot) => slot !== 'find',
+    (slot) => !['find', 'firstLines', 'lastLines', 'lineCount', 'follow'].includes(slot),
   ),
 )
 

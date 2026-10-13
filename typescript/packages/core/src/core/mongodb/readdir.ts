@@ -14,7 +14,7 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
-import { enoent, isEnoent } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { databaseExists, entityExists, listCollections, listDatabases } from './client.ts'
@@ -47,30 +47,6 @@ export async function entityGuard(
     entityKind(match),
   )
   if (!exists) throw enoent(virtual)
-}
-
-/**
- * Whether `entityGuard` admits the collection a match names. For the bespoke
- * fast paths (`tail -f` and `wc -l` on `documents.jsonl`), which query the
- * collection by the names in the path: they take the fast path only for a
- * collection the mount can see, and otherwise hand the operand to the
- * generic, which stats it through the same guard and reports it the way GNU
- * names a missing file. `countDocuments` answers 0 for a collection that does
- * not exist, so without it `wc -l` printed a count for a missing file.
- * Mirrors `documents_exist` in `mirage/core/mongodb/readdir.py`.
- */
-export async function documentsExist(
-  accessor: MongoDBAccessor,
-  match: ScopeMatch,
-  virtual: string,
-): Promise<boolean> {
-  try {
-    await entityGuard(accessor, match, virtual)
-  } catch (err) {
-    if (isEnoent(err)) return false
-    throw err
-  }
-  return true
 }
 
 async function listRoot(

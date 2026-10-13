@@ -35,8 +35,8 @@
       "command": "set -o pipefail; head -n 4 /pg-limited/public/tables/books/rows.jsonl | jq -r .id",
       "expect": {
         "exit": 1,
-        "stdout": "1\n2\n3\n",
-        "stderr": "head: /pg-limited/public/tables/books/rows.jsonl: stopped at 3 rows (max_read_rows); the output is incomplete\n"
+        "stdout": "",
+        "stderr": "head: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\n"
       }
     },
     {
@@ -74,8 +74,8 @@
       "command": "set -o pipefail; tail -n 4 /pg-limited/public/tables/books/rows.jsonl | jq -r .id",
       "expect": {
         "exit": 1,
-        "stdout": "3\n4\n5\n",
-        "stderr": "tail: /pg-limited/public/tables/books/rows.jsonl: stopped at 3 rows (max_read_rows); the output is incomplete\n"
+        "stdout": "",
+        "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\n"
       }
     },
     {
@@ -100,8 +100,8 @@
       "command": "mkdir -p /tmp; tail -n 4 /pg-limited/public/tables/books/rows.jsonl > /tmp/capped; echo $?; cat /tmp/capped | jq -r .id",
       "expect": {
         "exit": 0,
-        "stdout": "1\n3\n4\n5\n",
-        "stderr": "tail: /pg-limited/public/tables/books/rows.jsonl: stopped at 3 rows (max_read_rows); the output is incomplete\n"
+        "stdout": "1\n",
+        "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\n"
       }
     },
     {
@@ -479,6 +479,103 @@
         "exit": 0,
         "stdout": "{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
         "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\ntail: no files remaining\n"
+      }
+    },
+    {
+      "id": "postgres_link_to_a_table",
+      "seq": 611015,
+      "targets": [
+        "postgres"
+      ],
+      "command": "mkdir -p /tmp; ln -s /pg/public/tables/books/rows.jsonl /tmp/books; head -n 1 /tmp/books | jq -r .id",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_head_refuses_a_denied_table_through_a_link",
+      "seq": 611016,
+      "targets": [
+        "postgres"
+      ],
+      "command": "head -n 1 /tmp/books",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: cannot open '/tmp/books' for reading: Permission denied\n"
+      },
+      "session": "pg-deny-books",
+      "session_profiles": {
+        "pg-deny-books": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/pg/public/tables/books/rows.jsonl"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "postgres_tail_refuses_a_denied_table_through_a_link",
+      "seq": 611017,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 1 /tmp/books",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: cannot open '/tmp/books' for reading: Permission denied\n"
+      },
+      "session": "pg-deny-books",
+      "session_profiles": {
+        "pg-deny-books": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/pg/public/tables/books/rows.jsonl"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "postgres_wc_refuses_a_denied_table_through_a_link",
+      "seq": 611018,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc -l /tmp/books",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: /tmp/books: Permission denied\n"
+      },
+      "session": "pg-deny-books",
+      "session_profiles": {
+        "pg-deny-books": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "sealed",
+                "paths": [
+                  "/pg/public/tables/books/rows.jsonl"
+                ]
+              }
+            ]
+          }
+        }
       }
     },
     {

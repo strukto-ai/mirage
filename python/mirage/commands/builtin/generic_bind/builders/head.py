@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic.head import head_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
+    bound_uncached,
     dir_aware_stat,
     resolve_or_empty,
 )
@@ -40,6 +41,7 @@ async def head(
         opts,
         dir_aware_stat(ops, accessor, opts),
         bound_op(ops.read_stream, accessor, opts.index),
+        bound_uncached(ops.first_lines, accessor, opts.index),
     )
 
 

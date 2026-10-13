@@ -16,16 +16,24 @@ import { headerAggregate } from '../../aggregators.ts'
 import { headGeneric } from '../../generic/head.ts'
 import {
   type GenericCommand,
+  boundUncached,
   dirAwareStat,
   resolveGlobOf,
   type GenericCommandFn,
 } from '../adapter.ts'
+import type { PathSpec } from '../../../../types.ts'
 
 const head: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return headGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, opts), (p) =>
-    ops.readStream(accessor, p, idx),
+  const firstLines = ops.firstLines
+  return headGeneric(
+    resolved,
+    texts,
+    opts,
+    dirAwareStat(ops, accessor, opts),
+    (p) => ops.readStream(accessor, p, idx),
+    boundUncached(firstLines && ((p: PathSpec, n: number) => firstLines(accessor, p, n, idx))),
   )
 }
 

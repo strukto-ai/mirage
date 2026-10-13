@@ -197,3 +197,26 @@ def test_number_width_follows_the_operands(sizes, operands, counts, width):
     # coreutils 9.7: one operand with one count is unpadded; otherwise the
     # regular files' total size, at least 7 beside a stream or directory.
     assert number_width(sizes, operands, counts) == width
+
+
+@pytest.mark.asyncio
+async def test_format_multi_asks_line_count_for_lines_alone():
+    paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/bb")]
+    read_paths: list[str] = []
+
+    async def read(path):
+        read_paths.append(path.virtual)
+        return b"x y\n" * 12345
+
+    async def line_count(path):
+        return 5 if path.virtual == "/a" else None
+
+    out, err, _ = await format_multi(
+        paths, read=read, lines=True, line_count=line_count
+    )
+    assert read_paths == ["/bb"]
+    assert (out, err) == (b"    5 /a\n12345 /bb\n12350 total\n", b"")
+    out, _, _ = await format_multi(
+        paths, read=read, lines=True, words=True, line_count=line_count
+    )
+    assert read_paths == ["/bb", "/a", "/bb"]

@@ -24,6 +24,9 @@ from mirage.core.mongodb.search import (
     lines_containing as _lines_containing,
 )
 from mirage.core.mongodb.stat import stat as _stat
+from mirage.core.mongodb.stream import follow as _follow
+from mirage.core.mongodb.stream import last_lines as _last_lines
+from mirage.core.mongodb.stream import line_count as _line_count
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
@@ -80,6 +83,21 @@ class MongoDBVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> ByteSource | None:
         return await _lines_containing(self.accessor, path, text)
+
+    async def last_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        return await _last_lines(self.accessor, path, n, index)
+
+    async def line_count(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int | None:
+        return await _line_count(self.accessor, path, index)
+
+    async def follow(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes] | None:
+        return await _follow(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

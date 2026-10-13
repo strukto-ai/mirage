@@ -1,6 +1,6 @@
 import codecs
 import inspect
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -366,6 +366,7 @@ async def format_multi(
     chars: bool = False,
     max_line_length: bool = False,
     total: str = "auto",
+    line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[bytes, bytes, list[CountedRun]]:
     """Format wc output for multiple already-resolved paths.
 
@@ -375,12 +376,19 @@ async def format_multi(
     one path is given; every record ends with a newline per POSIX wc. A
     failed operand is skipped and reported as one GNU stderr line, and the
     ``total`` row still prints (GNU wc totals the operands that resolved,
-    ``0 total`` when none did).
+    ``0 total`` when none did). Lines counted alone are asked of
+    ``line_count`` first, so a mount that can count a file's lines on
+    its own (a ``COUNT(*)`` on a table) does not send it; a row counted
+    that way has no byte size, so the columns are as wide as the
+    printed numbers.
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
         read (Callable[..., Any]): Reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
+        line_count (Callable[[PathSpec], Awaitable[int | None]] | None):
+            the mount's ``line_count`` called as ``line_count(path)``;
+            None, or an answer of None, reads the file.
 
     Returns:
         tuple[bytes, bytes, list[CountedRun]]: Encoded wc output (``b""``
@@ -399,12 +407,29 @@ async def format_multi(
     sizes: list[int | None] = []
     totals = WCCounts()
     err = b""
+    counted = (
+        line_count
+        if lines
+        and not (words or bytes_ or chars or max_line_length)
+        and line_count is not None
+        else None
+    )
+    pushed = False
     for path in paths:
         try:
-            source = read(path)
-            if inspect.isawaitable(source):
-                source = await source
-            counts = await wc(source, flags=flags)
+            found = (
+                await counted(path)
+                if counted is not None and not is_stdin(path)
+                else None
+            )
+            if found is not None:
+                counts = WCCounts(lines=found)
+                pushed = True
+            else:
+                source = read(path)
+                if inspect.isawaitable(source):
+                    source = await source
+                counts = await wc(source, flags=flags)
         except IsADirectoryError as exc:
             # GNU opens a directory and fails only to read it, so it prints
             # a row of zeros beside the error and pads as for a stream.
@@ -418,7 +443,11 @@ async def format_multi(
         rows.append((counts, path.raw_path))
         sizes.append(None if is_stdin(path) else counts.bytes_)
         totals.merge(counts)
-    width = number_width(sizes, len(paths), shown_counts(flags))
+    width = (
+        None
+        if pushed
+        else number_width(sizes, len(paths), shown_counts(flags))
+    )
     runs = [
         CountedRun(
             tuple(
@@ -444,6 +473,7 @@ async def wc_generic(
     texts: list[str],
     opts: CommandOpts,
     stream: PolymorphicReadFn,
+    line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run wc over resolved operands, GNU semantics; mirrors wcGeneric.
 
@@ -460,6 +490,9 @@ async def wc_generic(
         opts (CommandOpts): Flags and stdin from the dispatcher.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
+        line_count (Callable[[PathSpec], Awaitable[int | None]] | None):
+            the mount's ``line_count``, asked for ``-l`` alone (see
+            ``format_multi``).
     """
     try:
         parsed = parse_flags(opts.flags)
@@ -480,6 +513,7 @@ async def wc_generic(
             chars=parsed.chars,
             max_line_length=parsed.max_line_length,
             total=parsed.total,
+            line_count=line_count,
         )
         io = operands_io(err)
         io.counted_runs = runs

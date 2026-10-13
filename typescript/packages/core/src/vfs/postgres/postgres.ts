@@ -14,7 +14,12 @@
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { read as postgresRead } from '../../core/postgres/read.ts'
+import {
+  firstLines as postgresFirstLines,
+  lastLines as postgresLastLines,
+  lineCount as postgresLineCount,
+  read as postgresRead,
+} from '../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../core/postgres/readdir.ts'
 import { linesContaining as postgresLinesContaining } from '../../core/postgres/search.ts'
 import { stat as postgresStat } from '../../core/postgres/stat.ts'
@@ -53,5 +58,25 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
     _index?: IndexCacheStore,
   ): Promise<ByteSource | null> {
     return postgresLinesContaining(this.accessor, path, text, opts.ignoreCase)
+  }
+
+  override firstLines(
+    path: PathSpec,
+    n: number,
+    index?: IndexCacheStore,
+  ): Promise<Uint8Array | null> {
+    return postgresFirstLines(this.accessor, path, n, index)
+  }
+
+  override lastLines(
+    path: PathSpec,
+    n: number,
+    index?: IndexCacheStore,
+  ): Promise<Uint8Array | null> {
+    return postgresLastLines(this.accessor, path, n, index)
+  }
+
+  override lineCount(path: PathSpec, index?: IndexCacheStore): Promise<number | null> {
+    return postgresLineCount(this.accessor, path, index)
   }
 }

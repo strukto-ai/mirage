@@ -16,6 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./client.ts', () => ({
+  countRows: vi.fn(),
   estimateSize: vi.fn(),
   fetchRows: vi.fn(),
   fetchBoundedRows: vi.fn(),
@@ -38,7 +39,7 @@ import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import * as _schema from './_schema_json.ts'
-import { read, rowLine } from './read.ts'
+import { firstLines, lastLines, lineCount, read, rowLine } from './read.ts'
 
 const STUB_DRIVER: PgDriver = {
   query: () => Promise.resolve({ rows: [], rowCount: 0 }),
@@ -294,4 +295,88 @@ it('spells a row line number as JSON.stringify does', () => {
   expect(rowLine(row)).toBe(
     '{"a":10000000000000000000,"b":0.00001,"c":3.4e+38,"d":{"n":[1.5e-7,2]}}',
   )
+})
+
+describe('read stand-ins', () => {
+  const ROWS = new PathSpec({
+    virtual: '/public/tables/users/rows.jsonl',
+    directory: '/public/tables/users/',
+    vfsPath: 'public/tables/users/rows.jsonl',
+  })
+
+  function table(n: number): void {
+    const rows = Array.from({ length: n }, (_, id) => ({ id }))
+    vi.mocked(client.countRows).mockResolvedValue(n)
+    vi.mocked(client.fetchRows).mockImplementation((_a, _s, _e, { limit, offset }) =>
+      Promise.resolve(rows.slice(offset, offset + limit)),
+    )
+  }
+
+  beforeEach(() => {
+    vi.mocked(client.countRows).mockReset()
+    vi.mocked(client.fetchRows).mockReset()
+    vi.mocked(client.listSchemas).mockImplementation((_accessor, allow) =>
+      Promise.resolve(['public', 'secret'].filter((s) => allow == null || allow.includes(s))),
+    )
+    vi.mocked(client.listTables).mockResolvedValue(['users'])
+    vi.mocked(client.listViews).mockResolvedValue([])
+    vi.mocked(client.listMatviews).mockResolvedValue([])
+  })
+
+  // `defaultRowLimit` clamped the pushed-down count, so `head -n 1200` of a
+  // 1500-row table printed 1000 lines.
+  it('takes every first row asked for past the default', async () => {
+    table(1500)
+    const out = decode((await firstLines(makeAccessor(), ROWS, 1200)) ?? new Uint8Array())
+    expect(out.split('\n').filter((l) => l !== '')).toHaveLength(1200)
+  })
+
+  it('takes a short table whole past the ceiling and refuses a long one', async () => {
+    const accessor = makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 20 })
+    table(15)
+    const out = decode((await firstLines(accessor, ROWS, 25)) ?? new Uint8Array())
+    expect(out.split('\n').filter((l) => l !== '')).toHaveLength(15)
+    expect(vi.mocked(client.fetchRows).mock.calls[0]?.[3]).toEqual({ limit: 21, offset: 0 })
+    table(30)
+    await expect(firstLines(accessor, ROWS, 25)).rejects.toMatchObject({ code: 'EFBIG' })
+  })
+
+  it('takes the last rows by offset and refuses a suffix past the ceiling', async () => {
+    table(1500)
+    const out = decode((await lastLines(makeAccessor(), ROWS, 1200)) ?? new Uint8Array())
+    const lines = out.split('\n').filter((l) => l !== '')
+    expect(lines).toHaveLength(1200)
+    expect(lines.at(-1)).toBe('{"id":1499}')
+    table(30)
+    const capped = makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 20 })
+    await expect(lastLines(capped, ROWS, 25)).rejects.toMatchObject({ code: 'EFBIG' })
+  })
+
+  it('counts rows past the ceiling', async () => {
+    table(30)
+    expect(await lineCount(makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 20 }), ROWS)).toBe(
+      30,
+    )
+  })
+
+  it('leaves another file to the read and refuses a hidden schema', async () => {
+    const schema = new PathSpec({
+      virtual: '/public/tables/users/schema.json',
+      directory: '/public/tables/users/',
+      vfsPath: 'public/tables/users/schema.json',
+    })
+    expect(await firstLines(makeAccessor(), schema, 3)).toBeNull()
+    expect(await lastLines(makeAccessor(), schema, 3)).toBeNull()
+    expect(await lineCount(makeAccessor(), schema)).toBeNull()
+    const hidden = new PathSpec({
+      virtual: '/secret/tables/users/rows.jsonl',
+      directory: '/secret/tables/users/',
+      vfsPath: 'secret/tables/users/rows.jsonl',
+    })
+    const accessor = makeAccessor({ dsn: 'postgres://h/db', schemas: ['public'] })
+    await expect(firstLines(accessor, hidden, 3)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lastLines(accessor, hidden, 3)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lineCount(accessor, hidden)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(client.countRows).not.toHaveBeenCalled()
+  })
 })

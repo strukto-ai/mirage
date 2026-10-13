@@ -24,55 +24,6 @@ const ENC = new TextEncoder()
 
 const TIMED_OUT = Symbol('timed-out')
 
-/**
- * What a row-pushing command says when a mount's ceiling cut it short.
- *
- * `head -n` / `tail -n` on a database mount push the count into the query,
- * and the mount caps how many rows one read may return. A count past the
- * ceiling used to be clamped to it in silence, printing fewer lines than GNU
- * would with exit 0; the rows up to the ceiling are still printed, but this
- * notice goes to stderr and the command exits 1, as `du` does when its walk
- * stops early. Mirrors `row_cap_notice` in `utils/limit.py`.
- */
-export function rowCapNotice(
-  command: string,
-  operand: string,
-  count: number,
-  unit: string,
-  knob: string,
-): Uint8Array {
-  return ENC.encode(
-    `${command}: ${operand}: stopped at ${String(count)} ${unit} (${knob}); the output is incomplete\n`,
-  )
-}
-
-/**
- * Stream `src`, then append whatever `notices` gathered to `io`. The rows a
- * pushed-down read returns are only counted once the read has run, which is
- * while the command's output streams, so the notice and the failing status
- * land on `io` after the stream drains, the way `truncateStream` settles an
- * output cap. Mirrors `note_after` in `utils/limit.py`.
- */
-export async function* noteAfter(
-  src: ByteSource,
-  io: IOResult,
-  notices: readonly Uint8Array[],
-): AsyncIterable<Uint8Array> {
-  yield* ensureStream(src)
-  if (notices.length === 0) return
-  const existing = io.stderr !== null ? await materialize(io.stderr) : new Uint8Array()
-  const total = notices.reduce((n, notice) => n + notice.byteLength, existing.byteLength)
-  const merged = new Uint8Array(total)
-  merged.set(existing, 0)
-  let at = existing.byteLength
-  for (const notice of notices) {
-    merged.set(notice, at)
-    at += notice.byteLength
-  }
-  io.stderr = merged
-  io.exitCode = 1
-}
-
 function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
   return new Promise<T | typeof TIMED_OUT>((resolve, reject) => {
     const timer = setTimeout(() => {

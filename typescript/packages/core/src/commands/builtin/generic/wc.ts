@@ -242,11 +242,20 @@ export function shownCounts(flags: WcFlags): number {
   return selectedValues({ lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }, flags).length
 }
 
+/**
+ * Run wc over resolved operands, GNU semantics. Lines counted alone are asked
+ * of `lineCount` first, so a mount that can count a file's lines on its own
+ * (a `COUNT(*)` on a table) does not send it; null, or no `lineCount`, reads
+ * the file. A row counted that way has no byte size, so the columns are as
+ * wide as the printed numbers. Mirrors Python's `wc_generic` and
+ * `format_multi`.
+ */
 export async function wcGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   stream: Stream,
+  lineCount?: (p: PathSpec) => Promise<number | null>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
@@ -258,10 +267,23 @@ export async function wcGeneric(
     const sizes: (number | null)[] = []
     const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
     let err = ''
+    const counted =
+      parsed.lines &&
+      !(parsed.words || parsed.bytes || parsed.chars || parsed.maxLineLength) &&
+      lineCount !== undefined
+        ? lineCount
+        : null
+    let pushed = false
     for (const p of paths) {
       let counts: WcCounts
       try {
-        counts = await countsOf(stream(p), opts, parsed)
+        const found = counted === null || isStdin(p) ? null : await counted(p)
+        if (found !== null) {
+          counts = { lines: found, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
+          pushed = true
+        } else {
+          counts = await countsOf(stream(p), opts, parsed)
+        }
       } catch (e) {
         if (!isFsError(e)) throw e
         err += fsErrorLine('wc', p, e)
@@ -278,7 +300,7 @@ export async function wcGeneric(
       sizes.push(isStdin(p) ? null : counts.bytes)
       addCounts(total, counts)
     }
-    const width = numberWidth(sizes, paths.length, shownCounts(parsed))
+    const width = pushed ? null : numberWidth(sizes, paths.length, shownCounts(parsed))
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
       stderr: err === '' ? null : encodeText(err),

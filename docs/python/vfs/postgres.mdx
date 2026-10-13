@@ -25,7 +25,7 @@ vfs = PostgresVFS(PostgresConfig(
 | `dsn` | required | Postgres connection string. Redacted in snapshots. |
 | `schemas` | `None` | Optional list to limit which schemas appear in the tree. |
 | `default_row_limit` | `1000` | Rows a windowed read returns when it passes an offset but no limit. |
-| `max_read_rows` | `10_000` | Hard ceiling per read. A whole read past it is refused; `head -n` / `tail -n` past it print that many rows, then a notice on stderr, and exit 1. |
+| `max_read_rows` | `10_000` | Hard ceiling per read. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
 | `max_read_bytes` | `10 MiB` | Hard ceiling per read. |
 
 For DSN format and permissions, see [Postgres Setup](/home/setup/postgres).

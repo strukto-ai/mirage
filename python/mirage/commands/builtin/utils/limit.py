@@ -126,59 +126,6 @@ async def run_with_timeout(coro, seconds: float | None, name: str):
         raise CommandTimeoutError(name or "?", seconds) from exc
 
 
-def row_cap_notice(
-    command: str, operand: str, count: int, unit: str, knob: str
-) -> bytes:
-    """What a row-pushing command says when a mount's ceiling cut it short.
-
-    ``head -n`` / ``tail -n`` on a database mount push the count into
-    the query, and the mount caps how many rows one read may return. A
-    count past the ceiling used to be clamped to it in silence, printing
-    fewer lines than GNU would with exit 0; the rows up to the ceiling
-    are still printed, but this notice goes to stderr and the command
-    exits 1, as ``du`` does when its walk stops early.
-
-    Args:
-        command (str): the command name, which leads the line.
-        operand (str): the operand as the line spelled it.
-        count (int): how many were printed.
-        unit (str): what was counted (``rows``, ``documents``).
-        knob (str): the config field that set the ceiling.
-
-    Returns:
-        bytes: one newline-terminated line.
-    """
-    return (
-        f"{command}: {operand}: stopped at {count} {unit} ({knob}); "
-        "the output is incomplete\n"
-    ).encode()
-
-
-async def note_after(
-    src: ByteSource, io: IOResult, notices: list[bytes]
-) -> AsyncIterator[bytes]:
-    """Stream ``src``, then append whatever ``notices`` gathered to ``io``.
-
-    The rows a pushed-down read returns are only counted once the read
-    has run, which is while the command's output streams, so the notice
-    and the failing status land on ``io`` after the stream drains, the
-    way ``truncate_stream`` settles an output cap.
-
-    Args:
-        src (ByteSource): the command's output.
-        io (IOResult): the command's result, updated in place.
-        notices (list[bytes]): filled by the reads while ``src`` drains.
-    """
-    async for chunk in ensure_stream(src):
-        yield chunk
-    if notices:
-        existing = (
-            await materialize(io.stderr) if io.stderr is not None else b""
-        )
-        io.stderr = existing + b"".join(notices)
-        io.exit_code = 1
-
-
 def _build_notice(limit: Limit) -> bytes:
     parts: list[str] = []
     if limit.max_lines is not None:

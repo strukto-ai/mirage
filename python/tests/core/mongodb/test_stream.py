@@ -21,7 +21,14 @@ from bson import Decimal128, ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.mongodb.stream import read_stream, read_tail, watch_stream
+from mirage.core.mongodb.stream import (
+    follow,
+    last_lines,
+    line_count,
+    read_stream,
+)
+from mirage.errors.types import FileTooLargeError
+from mirage.io.stream import close_quietly
 from mirage.types import PathSpec
 from mirage.vfs.mongodb.config import MongoDBConfig
 
@@ -73,6 +80,12 @@ def _patched_watch(docs):
 
 def _path(s: str) -> PathSpec:
     return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
+
+
+async def _followed(acc, path, index=None):
+    stream = await follow(acc, _path(path), index)
+    assert stream is not None
+    return stream
 
 
 async def _collect(gen):
@@ -229,11 +242,11 @@ async def test_read_stream_elision_isolated_to_configured_collection(index):
 
 
 @pytest.mark.asyncio
-async def test_watch_stream_yields_one_jsonl_line_per_insert(accessor, index):
+async def test_follow_yields_one_jsonl_line_per_insert(accessor, index):
     oid_a, oid_b = ObjectId(), ObjectId()
     docs = [{"_id": oid_a, "title": "A"}, {"_id": oid_b, "title": "B"}]
     with _patched_watch(docs):
-        data = await _collect(watch_stream(accessor, _path(DOCS_PATH), index))
+        data = await _collect(await _followed(accessor, DOCS_PATH, index))
     lines = [line for line in data.decode().split("\n") if line]
     assert len(lines) == 2
     assert json.loads(lines[0])["_id"] == {"$oid": str(oid_a)}
@@ -241,7 +254,7 @@ async def test_watch_stream_yields_one_jsonl_line_per_insert(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_watch_stream_preserves_bson_types(accessor, index):
+async def test_follow_preserves_bson_types(accessor, index):
     docs = [
         {
             "_id": ObjectId("65f0000000000000000000a1"),
@@ -252,7 +265,7 @@ async def test_watch_stream_preserves_bson_types(accessor, index):
         }
     ]
     with _patched_watch(docs):
-        data = await _collect(watch_stream(accessor, _path(DOCS_PATH), index))
+        data = await _collect(await _followed(accessor, DOCS_PATH, index))
     parsed = json.loads(data.decode().strip())
     assert parsed["_id"] == {"$oid": "65f0000000000000000000a1"}
     assert "$date" in parsed["date"]
@@ -260,18 +273,16 @@ async def test_watch_stream_preserves_bson_types(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_watch_stream_empty_yields_nothing(accessor, index):
+async def test_follow_empty_yields_nothing(accessor, index):
     with _patched_watch([]):
         chunks = []
-        async for chunk in watch_stream(accessor, _path(DOCS_PATH), index):
+        async for chunk in await _followed(accessor, DOCS_PATH, index):
             chunks.append(chunk)
     assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_watch_stream_short_circuits_when_consumer_closes(
-    accessor, index
-):
+async def test_follow_short_circuits_when_consumer_closes(accessor, index):
     consumed: list[int] = []
 
     async def _instrumented(*_args, **_kwargs):
@@ -280,30 +291,31 @@ async def test_watch_stream_short_circuits_when_consumer_closes(
             yield {"_id": ObjectId(), "i": i}
 
     with patch("mirage.core.mongodb.stream.iter_inserts", new=_instrumented):
-        gen = watch_stream(accessor, _path(DOCS_PATH), index)
+        gen = await _followed(accessor, DOCS_PATH, index)
         await gen.__anext__()
-        await gen.aclose()
+        await close_quietly(gen)
     assert len(consumed) <= 2
 
 
 @pytest.mark.asyncio
-async def test_watch_stream_directory_path_raises(accessor, index):
+async def test_follow_leaves_a_view_or_a_directory_to_the_polls(
+    accessor, index
+):
     with _patched_watch([]):
-        with pytest.raises(FileNotFoundError):
-            async for _ in watch_stream(accessor, _path("/db1"), index):
-                pass
+        for path in ("/db1", VIEW_DOCS_PATH):
+            assert await follow(accessor, _path(path), index) is None
 
 
 @pytest.mark.asyncio
-async def test_read_tail_returns_docs_in_ascending_order(accessor):
+async def test_last_lines_returns_docs_in_ascending_order(accessor):
     docs = [{"_id": 5, "name": "e"}, {"_id": 4, "name": "d"}]
     with patch(
         "mirage.core.mongodb.stream.find_documents",
         new_callable=AsyncMock,
         return_value=list(docs),
     ) as fake:
-        data, stopped = await read_tail(accessor, _path(DOCS_PATH), 2)
-    assert not stopped
+        data = await last_lines(accessor, _path(DOCS_PATH), 2)
+    assert data is not None
     lines = data.decode().splitlines()
     assert '"_id": 4' in lines[0]
     assert '"_id": 5' in lines[1]
@@ -313,7 +325,7 @@ async def test_read_tail_returns_docs_in_ascending_order(accessor):
 
 
 @pytest.mark.asyncio
-async def test_read_tail_caps_limit_at_max_doc_limit(accessor):
+async def test_last_lines_caps_limit_at_max_doc_limit(accessor):
     # A count past the ceiling fetches the ceiling; whether that stopped
     # the read short depends on how many documents there are.
     with (
@@ -327,13 +339,13 @@ async def test_read_tail_caps_limit_at_max_doc_limit(accessor):
             new=AsyncMock(return_value=3),
         ),
     ):
-        data, stopped = await read_tail(accessor, _path(DOCS_PATH), 10**9)
-    assert (data, stopped) == (b"", False)
+        data = await last_lines(accessor, _path(DOCS_PATH), 10**9)
+    assert data == b""
     assert fake.await_args.kwargs["limit"] == accessor.config.max_doc_limit
 
 
 @pytest.mark.asyncio
-async def test_read_tail_says_when_the_ceiling_stopped_it():
+async def test_last_lines_past_the_ceiling_is_efbig():
     """``min(n, max_doc_limit)`` stood in for the count with nothing to
     say so: ``tail -n 6000`` of a larger collection printed 5000 lines
     and exited 0."""
@@ -351,13 +363,12 @@ async def test_read_tail_says_when_the_ceiling_stopped_it():
             new=AsyncMock(return_value=10),
         ),
     ):
-        data, stopped = await read_tail(acc, _path(DOCS_PATH), 5)
-    assert stopped
-    assert len(data.decode().splitlines()) == 2
+        with pytest.raises(FileTooLargeError, match="documents.jsonl"):
+            await last_lines(acc, _path(DOCS_PATH), 5)
 
 
 @pytest.mark.asyncio
-async def test_read_tail_applies_elision(index):
+async def test_last_lines_applies_elision(index):
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.coll1": ["vector"]},
@@ -369,22 +380,31 @@ async def test_read_tail_applies_elision(index):
         new_callable=AsyncMock,
         return_value=docs,
     ):
-        data, _ = await read_tail(acc, _path(DOCS_PATH), 1)
+        data = await last_lines(acc, _path(DOCS_PATH), 1)
+    assert data is not None
     parsed = json.loads(data.decode().strip())
     assert parsed["title"] == "hi"
     assert "vector" not in parsed
 
 
 @pytest.mark.asyncio
-async def test_read_tail_rejects_non_documents_path(accessor):
-    with pytest.raises(FileNotFoundError):
-        await read_tail(
-            accessor, _path("/db1/collections/coll1/schema.json"), 5
-        )
+async def test_a_file_that_is_not_documents_is_left_to_the_read(accessor):
+    path = _path("/db1/collections/coll1/schema.json")
+    assert await last_lines(accessor, path, 5) is None
+    assert await line_count(accessor, path) is None
 
 
 @pytest.mark.asyncio
-async def test_watch_stream_applies_elision(index):
+async def test_line_count_counts_the_documents(accessor):
+    with patch(
+        "mirage.core.mongodb.stream.count_documents",
+        new=AsyncMock(return_value=7),
+    ):
+        assert await line_count(accessor, _path(VIEW_DOCS_PATH)) == 7
+
+
+@pytest.mark.asyncio
+async def test_follow_applies_elision(index):
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.coll1": ["vector"]},
@@ -393,7 +413,7 @@ async def test_watch_stream_applies_elision(index):
     oid = ObjectId()
     docs = [{"_id": oid, "title": "live", "vector": [0.1, 0.2, 0.3]}]
     with _patched_watch(docs):
-        data = await _collect(watch_stream(acc, _path(DOCS_PATH), index))
+        data = await _collect(await _followed(acc, DOCS_PATH, index))
     parsed = json.loads(data.decode().strip())
     assert parsed["title"] == "live"
     assert "vector" not in parsed
@@ -401,7 +421,7 @@ async def test_watch_stream_applies_elision(index):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("opener", ["read", "watch", "tail"])
+@pytest.mark.parametrize("opener", ["read", "follow", "last", "count"])
 async def test_a_collection_outside_the_scope_is_enoent_to_every_stream(
     monkeypatch, opener
 ):
@@ -421,11 +441,15 @@ async def test_a_collection_outside_the_scope_is_enoent_to_every_stream(
         patch("mirage.core.mongodb.stream.iter_documents", new=fetched),
         patch("mirage.core.mongodb.stream.iter_inserts", new=fetched),
         patch("mirage.core.mongodb.stream.find_documents", new=fetched),
+        patch("mirage.core.mongodb.stream.count_documents", new=fetched),
     ):
         with pytest.raises(FileNotFoundError):
-            if opener == "tail":
-                await read_tail(accessor, path, 5)
+            if opener == "last":
+                await last_lines(accessor, path, 5)
+            elif opener == "count":
+                await line_count(accessor, path)
+            elif opener == "follow":
+                await follow(accessor, path)
             else:
-                stream = read_stream if opener == "read" else watch_stream
-                await _collect(stream(accessor, path))
+                await _collect(read_stream(accessor, path))
     exists.assert_awaited_once()

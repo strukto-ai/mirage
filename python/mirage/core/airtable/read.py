@@ -152,3 +152,26 @@ read = make_read(
     },
     stat=stat,
 )
+
+
+async def first_lines(
+    accessor: AirtableAccessor,
+    path: PathSpec,
+    n: int,
+    index: IndexCacheStore = NULL_INDEX,
+) -> bytes | None:
+    """The first ``n`` records of a records or view file, by
+    ``maxRecords``, each on its own line.
+
+    A count past ``max_read_records`` that the table fills raises EFBIG,
+    as a whole read of that table does. None for any other file.
+
+    Args:
+        accessor (AirtableAccessor): the account and its scope.
+        path (PathSpec): the file.
+        n (int): how many records, at least 1.
+        index (IndexCacheStore): where the parent listing lands.
+    """
+    if detect_scope(path).kind not in ("records", "view"):
+        return None
+    return await read(accessor, path, index, limit=n)

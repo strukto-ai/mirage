@@ -40,7 +40,11 @@ from mirage.vfs.types import (
     ExistsOp,
     FilesContainingOp,
     FindOp,
+    FirstLinesOp,
+    FollowOp,
     IsMountedOp,
+    LastLinesOp,
+    LineCountOp,
     LinesContainingOp,
     MkdirOp,
     PairOp,
@@ -158,6 +162,10 @@ class CommandIO:
     searchable: tuple[str, ...] | None = None
     lines_containing: LinesContainingOp | None = None
     before_full_scan: BeforeFullScanOp | None = None
+    first_lines: FirstLinesOp | None = None
+    last_lines: LastLinesOp | None = None
+    line_count: LineCountOp | None = None
+    follow: FollowOp | None = None
     glob_children: ChildMounts | None = None
     glob_target_stat: LinkTargetStat | None = None
 

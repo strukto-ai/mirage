@@ -16,15 +16,17 @@ import { headerAggregate } from '../../aggregators.ts'
 import { tailGeneric } from '../../generic/tail.ts'
 import {
   type GenericCommand,
+  boundUncached,
   dirAwareStream,
   resolveGlobOf,
   type GenericCommandFn,
 } from '../adapter.ts'
+import type { PathSpec } from '../../../../types.ts'
 
 const tail: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const readRange = ops.readRange
+  const { readRange, lastLines, follow } = ops
   return tailGeneric(
     resolved,
     texts,
@@ -32,6 +34,8 @@ const tail: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     dirAwareStream(ops, accessor, opts),
     (p) => ops.stat(accessor, p, idx),
     readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
+    boundUncached(lastLines && ((p: PathSpec, n: number) => lastLines(accessor, p, n, idx))),
+    follow && ((p: PathSpec) => follow(accessor, p, idx)),
   )
 }
 

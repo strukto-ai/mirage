@@ -16,6 +16,9 @@ from typing import Any
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.postgres.read import first_lines as _first_lines
+from mirage.core.postgres.read import last_lines as _last_lines
+from mirage.core.postgres.read import line_count as _line_count
 from mirage.core.postgres.read import read as _read
 from mirage.core.postgres.readdir import readdir as _readdir
 from mirage.core.postgres.search import (
@@ -73,6 +76,21 @@ class PostgresVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> ByteSource | None:
         return await _lines_containing(self.accessor, path, text, ignore_case)
+
+    async def first_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        return await _first_lines(self.accessor, path, n, index)
+
+    async def last_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        return await _last_lines(self.accessor, path, n, index)
+
+    async def line_count(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int | None:
+        return await _line_count(self.accessor, path, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -742,6 +742,14 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.duSize(scope, kw.index)]
       case 'du_entries':
         return [(scope, _args, kw) => vfs.duEntries(scope, kw.index)]
+      case 'first_lines':
+        return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, kw.index)]
+      case 'last_lines':
+        return [(scope, args, kw) => vfs.lastLines(scope, args[0] as number, kw.index)]
+      case 'line_count':
+        return [(scope, _args, kw) => vfs.lineCount(scope, kw.index)]
+      case 'follow':
+        return [(scope, _args, kw) => vfs.follow(scope, kw.index)]
       case 'search':
         return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, kw.index)]
       case 'truncate':

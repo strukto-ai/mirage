@@ -253,6 +253,36 @@ export type BeforeFullScanOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<void>
 
+/** The first `n` lines of `path`; null when the file is to be read. */
+export type FirstLinesOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  n: number,
+  index?: IndexCacheStore,
+) => Promise<Uint8Array | null>
+
+/** The last `n` lines of `path`; null when the file is to be read. */
+export type LastLinesOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  n: number,
+  index?: IndexCacheStore,
+) => Promise<Uint8Array | null>
+
+/** How many lines `path` holds; null when the file is to be read. */
+export type LineCountOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+) => Promise<number | null>
+
+/** The lines added to `path` from now on; null when the file is to be polled. */
+export type FollowOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+) => Promise<AsyncIterable<Uint8Array> | null>
+
 /** Optional resource search, what the `search` command asks. */
 export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>

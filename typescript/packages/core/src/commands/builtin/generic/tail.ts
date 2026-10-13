@@ -18,6 +18,8 @@ import { STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { closeQuietly } from '../../../io/stream.ts'
+import { abortable } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import { argmatchError } from '../../spec/usage.ts'
@@ -193,6 +195,19 @@ async function polledWindow(
 }
 
 /** A follow poll's whole-file read, for a stat that carries no size. */
+// `stream`, answered by the mount's `lastLines(p, n)` where it can: the last
+// `n` lines without the rest of the file. Mirrors Python's `_read_last`.
+function readLast(
+  stream: Stream,
+  lastLines: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
+  n: number,
+): (p: PathSpec) => Promise<Uint8Array> {
+  return async (p) => {
+    if (isStdin(p)) return materialize(stream(p))
+    return (await lastLines(p, n)) ?? (await materialize(stream(p)))
+  }
+}
+
 async function* polledFile(dispatch: DispatchFn, p: PathSpec): AsyncIterable<Uint8Array> {
   yield await polledWindow(dispatch, p)
 }
@@ -232,6 +247,10 @@ async function window(
 // GNU extends that to every `-` operand; a line that named nothing else has
 // nothing left to wait for, so it ends there, without `no files remaining`.
 // An unread operand (a directory) prints its header and is not followed.
+// One file followed by descriptor is asked of the mount's `follow` first: a
+// mount that is told about new lines (a change stream) hands them over as
+// they land, so nothing is polled, and its first print can take the last
+// lines alone since no position is kept.
 async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
@@ -246,8 +265,11 @@ async function* follow(
   signal: AbortSignal | undefined,
   unread: ReadonlySet<string>,
   onlyStdin: boolean,
+  readFirst: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
+  followOp?: (p: PathSpec) => Promise<AsyncIterable<Uint8Array> | null>,
 ): AsyncGenerator<Uint8Array> {
   const positions = new Map<number, number>()
+  let added: AsyncIterable<Uint8Array> | null = null
   const active: [number, PathSpec][] = paths.map((p, i) => [i, p])
   const waiting: [number, PathSpec, string][] = pending.map(([p, how], i) => [
     paths.length + i,
@@ -269,8 +291,19 @@ async function* follow(
     }
     let raw: Uint8Array
     try {
-      raw = await materialize(stream(p))
+      if (
+        followOp !== undefined &&
+        paths.length === 1 &&
+        pending.length === 0 &&
+        !flags.byName &&
+        !isStdin(p)
+      ) {
+        added = await followOp(p)
+      }
+      raw = added !== null && readFirst !== null ? await readFirst(p) : await materialize(stream(p))
     } catch (err) {
+      await closeQuietly(added)
+      added = null
       if (!isFsError(err)) throw err
       // There is no handle to hold, so this first read is the open: one
       // that fails after the operand's stat passed is GNU's failed open,
@@ -291,6 +324,26 @@ async function* follow(
     last = slot
     yield tailBytes(raw, counts)
     positions.set(slot, raw.byteLength)
+  }
+  if (added !== null) {
+    // A stream waits for the next line, so an abort ends the wait rather
+    // than the next line; the stream is closed without waiting on it.
+    const lines = added[Symbol.asyncIterator]()
+    try {
+      for (;;) {
+        const next = await abortable(lines.next(), signal)
+        if (next.done === true) break
+        yield next.value
+      }
+    } catch (err) {
+      if (aborted(signal)) return
+      throw err
+    } finally {
+      void closeQuietly(lines as AsyncIterableIterator<Uint8Array>)
+    }
+    note(io, 'tail: no files remaining\n')
+    io.exitCode = 1
+    return
   }
   for (const entry of active.filter(([, p]) => isStdin(p))) active.splice(active.indexOf(entry), 1)
   if (onlyStdin) return
@@ -448,6 +501,13 @@ function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
   }
 }
 
+/**
+ * Run tail over resolved operands, GNU semantics. A line count from the end
+ * (`-n N`, or the default 10) is asked of `lastLines` first, so a mount that
+ * can fetch the end of a file on its own does not send the rest; `-f` on one
+ * file asks `followOp` (see `follow`). Null, or no such op, reads or polls
+ * the file. Mirrors Python's `tail_generic`.
+ */
 export async function tailGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -455,6 +515,8 @@ export async function tailGeneric(
   stream: Stream,
   stat: Stat,
   readRange: ReadRange | null = null,
+  lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
+  followOp?: (p: PathSpec) => Promise<AsyncIterable<Uint8Array> | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   const parsed = parseFlags(opts.flags)
@@ -463,6 +525,15 @@ export async function tailGeneric(
   if (typeof parsed === 'string')
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
+  const n = counts.lines ?? 10
+  const lastOf = (s: Stream): ((p: PathSpec) => Promise<Uint8Array>) | null =>
+    lastLines !== undefined &&
+    counts.byteCount === null &&
+    counts.fromLine === null &&
+    counts.fromByte === null &&
+    n > 0
+      ? readLast(s, lastLines, n)
+      : null
   if (
     following.follow &&
     following.byName &&
@@ -528,6 +599,8 @@ export async function tailGeneric(
         opts.signal,
         unread,
         paths.every((p) => isStdin(p)),
+        lastOf(first),
+        followOp,
       ),
       io,
     ]
@@ -536,12 +609,13 @@ export async function tailGeneric(
   if (paths.length > 0) {
     const chunks: Uint8Array[] = []
     const showHeaders = (vFlag || paths.length > 1) && !qFlag
+    const read = lastOf(stream) ?? ((p: PathSpec) => materialize(stream(p)))
     let err = ''
     let printed = 0
     for (const p of paths) {
       let raw: Uint8Array
       try {
-        raw = await materialize(stream(p))
+        raw = await read(p)
       } catch (e) {
         if (!isFsError(e)) throw e
         err += fsErrorLine('tail', p, e)

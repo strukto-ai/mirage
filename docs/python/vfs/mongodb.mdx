@@ -29,7 +29,7 @@ ws = Workspace({"/mongodb": vfs}, mode=MountMode.READ)
 | ---------------------- | -------- | ------- | -------------------------------------------------------------------------- |
 | `uri`                  | yes      |         | MongoDB connection URI                                                     |
 | `databases`            | no       |         | List of database names to mount (omit for all)                             |
-| `max_doc_limit`        | no       | 5000    | Most documents one `tail -n K` returns; past it, a notice and exit 1      |
+| `max_doc_limit`        | no       | 5000    | Most documents one `tail -n K` fetches; past it, `File too large`         |
 | `elide_fields`         | no       | `{}`    | `{"<db>.<coll>": ["field", "nested.path"]}`; listed fields are dropped from `documents.jsonl` |
 
 ## Filesystem Layout
@@ -158,12 +158,12 @@ memory ahead of the consumer.
 | ---------------------------- | ----------------------------------------------------------------- |
 | `cat`                        | Streams the whole collection sorted by `_id`; pipe to `head` to cap |
 | `head -n K`                  | Streams from `_id` order and stops after K documents              |
-| `tail -n K`                  | Server-side sort + limit; a K past `max_doc_limit` stops there, notes it on stderr, exits 1 |
-| `tail -f`                    | Opens a change stream; yields each new insert as a JSONL line     |
+| `tail -n K`                  | Server-side sort + limit; a K past `max_doc_limit` on a collection that long is `File too large` |
+| `tail -f`                    | Prints the last lines, then opens a change stream and yields each new insert as a JSONL line |
 | `grep` (file level)          | Streams from `documents.jsonl`; supports `-m` for short-circuit   |
 | `grep -r` (collection/db level) | Every file under the directory; MongoDB sends only the documents that may match |
 | `jq`                         | Inherits the streaming `cat` source                               |
-| `wc`                         | Uses `countDocuments()` server-side; zero download                |
+| `wc -l`                      | Uses `countDocuments()` server-side; zero download                |
 | `stat`                       | Existence and type only; no counts or index queries   |
 
 ## Smart Commands
@@ -189,13 +189,13 @@ grep -r "Godfather" "/mongodb/sample_mflix/"
 
 ### head / tail / tail -f
 
-`tail` uses server-side `sort` + `limit`. A count past `max_doc_limit`
-prints the last `max_doc_limit` documents, then says on stderr that the
-output is incomplete and exits 1, rather than printing fewer lines than
-asked in silence. `head` streams in `_id` order and stops after the
-count. `tail -f` opens a Mongo change stream
-filtered to insert events and yields each new document as a JSONL line
-in the same format as `cat`:
+`tail` uses server-side `sort` + `limit`. A count past `max_doc_limit` on
+a collection that long is refused with `File too large` rather than
+printing fewer lines than asked. `head` streams in `_id` order and stops
+after the count. `tail -f` on a collection prints the last lines, then
+opens a Mongo change stream filtered to insert events and yields each new
+document as a JSONL line in the same format as `cat`; on a view it polls.
+See [Lines](/home/integration/lines):
 
 ```bash
 # First 10 docs (sorted by _id ascending)
@@ -355,11 +355,11 @@ Standard commands available on the mounted MongoDB tree:
 | --------------- | ----------------------------------------------------------------------- |
 | `ls`            | List databases, collections, views, and per-entity files                |
 | `cat`           | Stream `documents.jsonl` (or read `schema.json` / `database.json`)      |
-| `head` / `tail` | `head` streams and stops early; `tail` sorts and limits server-side, stopping loudly at `max_doc_limit` |
+| `head` / `tail` | `head` streams and stops early; `tail` sorts and limits server-side, up to `max_doc_limit` |
 | `tail -f`       | Live-follow new inserts via Mongo change stream                         |
 | `grep` / `rg`   | A directory operand searches every file under it (documents, schema.json, database.json, views); a file streams |
 | `jq`            | Query JSON; runs once per line of a JSONL file (`-s` for all)            |
-| `wc`            | Smart: uses `countDocuments()` server-side                              |
+| `wc`            | Smart: `-l` uses `countDocuments()` server-side                         |
 | `stat`          | Existence and type only; no counts or index queries              |
 | `find`          | List databases/collections/views with `-name`, `-maxdepth`              |
 | `tree`          | Directory tree view                                                     |

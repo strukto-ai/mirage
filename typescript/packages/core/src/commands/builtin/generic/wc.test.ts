@@ -13,7 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import { formatWcLines, numberWidth, parseFlags } from './wc.ts'
+import { materialize } from '../../../io/types.ts'
+import { PathSpec } from '../../../types.ts'
+import type { CommandOpts } from '../../config.ts'
+import { formatWcLines, numberWidth, parseFlags, wcGeneric } from './wc.ts'
 
 // GNU's ARGMATCH refusal names the refused word through gnulib's quote(),
 // so a byte outside 0x20-0x7e comes back escaped rather than interpolated
@@ -70,5 +73,29 @@ describe('numberWidth', () => {
     [[123456789], 2, 1, 9],
   ] as const)('sizes %j over %i operands and %i counts as %i', (sizes, operands, counts, width) => {
     expect(numberWidth(sizes, operands, counts)).toBe(width)
+  })
+})
+
+// Mirrors test_format_multi_asks_line_count_for_lines_alone in test_wc.py.
+describe('wc asks the mount for a line count', () => {
+  it('asks for lines alone and sizes the columns by the numbers', async () => {
+    const reads: string[] = []
+    const stream = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      reads.push(p.virtual)
+      await Promise.resolve()
+      yield new TextEncoder().encode('x y\n'.repeat(12345))
+    }
+    const lineCount = (p: PathSpec): Promise<number | null> =>
+      Promise.resolve(p.virtual === '/a' ? 5 : null)
+    const paths = [PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/bb')]
+    const run = async (flags: Record<string, boolean>): Promise<string> => {
+      const opts = { stdin: null, flags, cwd: '/', vfs: null } as unknown as CommandOpts
+      const result = await wcGeneric(paths, [], opts, stream, lineCount)
+      return new TextDecoder().decode(await materialize(result?.[0] ?? null))
+    }
+    expect(await run({ lines: true })).toBe('    5 /a\n12345 /bb\n12350 total\n')
+    expect(reads).toEqual(['/bb'])
+    await run({ lines: true, words: true })
+    expect(reads).toEqual(['/bb', '/a', '/bb'])
   })
 })

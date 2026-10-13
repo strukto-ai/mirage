@@ -43,11 +43,15 @@ export const CALLS: ReadonlyMap<string, VfsCall> = new Map([...VFS_CALLS, ...NAM
 
 // The content reads the warm file cache may answer: a cached whole-file
 // value can serve them (sliced for ranged reads) without touching the
-// backend, subject to the reconciler's consistency check.
-export const DISPATCH_READ_OPS = callNames(VFS_CALLS, {
-  effects: [Effect.READ],
-  targets: [Target.FILE],
-})
+// backend, subject to the reconciler's consistency check. A call that
+// answers for part of a file (first_lines, last_lines, line_count,
+// follow) is neither served from the cache nor kept in it; its caller
+// reads a cached file instead.
+export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(
+  [...callNames(VFS_CALLS, { effects: [Effect.READ], targets: [Target.FILE] })].filter(
+    (name) => !['first_lines', 'last_lines', 'line_count', 'follow'].includes(name),
+  ),
+)
 
 // Backend mutations that run the dispatcher's post-write bookkeeping:
 // file-cache eviction, parent index invalidation, and overlay time

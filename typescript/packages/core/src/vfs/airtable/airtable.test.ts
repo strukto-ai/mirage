@@ -81,4 +81,31 @@ describe('AirtableVFS', () => {
       await ws.close()
     }
   })
+
+  it('pushes the head line count into maxRecords', async () => {
+    const fake = new FakeAirtable()
+    const ws = new Workspace(
+      { '/at/': vfs(fake, { maxReadRecords: 5 }) },
+      { shellParser: await getTestParser() },
+    )
+    try {
+      const result = await ws.shell(`head -n 2 ${TABLE}/records.jsonl`)
+      expect(result.exitCode).toBe(0)
+      expect(
+        DEC.decode(result.stdout)
+          .split('\n')
+          .filter((l) => l !== ''),
+      ).toHaveLength(2)
+      const past = await ws.shell(`head -n 6 ${TABLE}/records.jsonl`)
+      expect(past.exitCode).toBe(1)
+      expect(DEC.decode(past.stderr)).toBe(
+        `head: error reading '${TABLE}/records.jsonl': File too large\n`,
+      )
+    } finally {
+      await ws.close()
+    }
+    const calls = fake.recordCalls()
+    expect(calls.map((c) => c.maxRecords)).toEqual(['2', '6', '6'])
+    expect(calls[2]?.offset).toBeDefined()
+  })
 })

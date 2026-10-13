@@ -33,7 +33,7 @@ from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
-from mirage.io.stream import async_chain, ensure_stream
+from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -370,6 +370,31 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
     return b"".join([chunk async for chunk in _counted(read(path), [0])])
 
 
+def _read_last(
+    read: Callable[..., Any],
+    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]],
+    n: int,
+) -> Callable[[PathSpec], Awaitable[Any]]:
+    """``read``, answered by the mount's ``last_lines(path, n)`` where it
+    can: the last ``n`` lines without the rest of the file.
+
+    Args:
+        read (Callable[..., Any]): bound whole-file reader, for a file
+            the mount does not answer and for standard input.
+        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]):
+            the mount's ``last_lines``.
+        n (int): the line count, at least 1.
+    """
+
+    async def read_last(path: PathSpec) -> Any:
+        if is_stdin(path):
+            return read(path)
+        data = await last_lines(path, n)
+        return read(path) if data is None else data
+
+    return read_last
+
+
 async def _polled_window(
     dispatch: DispatchFn,
     path: PathSpec,
@@ -458,6 +483,9 @@ async def _follow(
     io: IOResult,
     unread: frozenset[str] = frozenset(),
     only_stdin: bool = False,
+    read_last: Callable[..., Any] | None = None,
+    follow: Callable[[PathSpec], Awaitable[AsyncIterator[bytes] | None]]
+    | None = None,
 ) -> AsyncIterator[bytes]:
     """Print each operand's tail, then keep printing what it gains.
 
@@ -496,6 +524,11 @@ async def _follow(
     reading it whole every interval and measuring that: one read per
     poll, rather than a follow that never prints.
 
+    One file followed by descriptor is asked of the mount's ``follow``
+    first: a mount that is told about new lines (a change stream) hands
+    them over as they land, so nothing is polled, and its first print
+    can take the last lines alone since no position is kept.
+
     State is per operand, not per path: ``tail -f f f`` prints what
     ``f`` gains twice, under a header each time, as GNU does.
 
@@ -520,8 +553,15 @@ async def _follow(
         unread (frozenset[str]): operands that opened but do not read (a
             directory): each prints its header, and none is followed.
         only_stdin (bool): every operand is standard input.
+        read_last (Callable[..., Any] | None): ``read`` answered by the
+            mount's ``last_lines``, for a first print that keeps no
+            position; None reads whole.
+        follow (Callable[[PathSpec], Awaitable[AsyncIterator[bytes] |
+            None]] | None): the mount's ``follow``; None, or an answer
+            of None, polls.
     """
     positions: dict[int, int] = {}
+    added: AsyncIterator[bytes] | None = None
     active = list(enumerate(paths))
     waiting = [(len(paths) + i, p, how) for i, (p, how) in enumerate(pending)]
     last: int | None = None
@@ -535,10 +575,19 @@ async def _follow(
             continue
         box = [0]
         try:
+            if (
+                follow is not None
+                and len(paths) == 1
+                and not pending
+                and not flags.follow_name
+                and not is_stdin(p)
+            ):
+                added = await follow(p)
+            first = read if added is None or read_last is None else read_last
             chunks = [
                 chunk
                 async for chunk in tail(
-                    _counted(read(p), box),
+                    _counted(first(p), box),
                     n=counts.lines,
                     c=counts.byte_count,
                     from_line=counts.from_line,
@@ -546,6 +595,9 @@ async def _follow(
                 )
             ]
         except FS_ERRORS as exc:
+            if added is not None:
+                await close_quietly(added)
+                added = None
             # There is no handle to hold, so this first read is the
             # open: one that fails after the operand's stat passed is
             # GNU's failed open, reported the way the stat's failure
@@ -565,6 +617,15 @@ async def _follow(
         for chunk in chunks:
             yield chunk
         positions[slot] = box[0]
+    if added is not None:
+        try:
+            async for chunk in added:
+                yield chunk
+        finally:
+            await close_quietly(added)
+        _note(io, "tail: no files remaining\n")
+        io.exit_code = 1
+        return
     active = [(slot, p) for slot, p in active if not is_stdin(p)]
     if only_stdin:
         return
@@ -708,13 +769,20 @@ async def tail_generic(
     stat: StatFn,
     stream: PolymorphicReadFn,
     read_range: ReadRange | None = None,
+    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
+    | None = None,
+    follow: Callable[[PathSpec], Awaitable[AsyncIterator[bytes] | None]]
+    | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tail over resolved operands, GNU semantics; mirrors tailGeneric.
 
-    The wiring resolves globs and binds the backend ops (including any
-    push-down, like mongodb serving the last N documents server-side);
-    everything else lives here: flag parsing, the header rule, the
-    per-operand report-and-continue split, and the stdin fallback.
+    The wiring resolves globs and binds the backend ops; everything else
+    lives here: flag parsing, the header rule, the per-operand
+    report-and-continue split, and the stdin fallback. A line count
+    from the end (``-n N``, or the default 10) is asked of
+    ``last_lines`` first, so a mount that can fetch the end of a file on
+    its own does not send the rest; ``-f`` on one file asks ``follow``
+    (see ``_follow``).
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -726,6 +794,13 @@ async def tail_generic(
         read_range (ReadRange | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
+        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
+            | None): the mount's ``last_lines`` called as
+            ``last_lines(path, n)``; None, or an answer of None, reads
+            the file.
+        follow (Callable[[PathSpec], Awaitable[AsyncIterator[bytes] |
+            None]] | None): the mount's ``follow`` called as
+            ``follow(path)``; None, or an answer of None, polls.
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)
@@ -738,6 +813,16 @@ async def tail_generic(
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     counts = parsed.counts
+    n = counts.lines if counts.lines is not None else 10
+    read_last = (
+        _read_last(stream, last_lines, n)
+        if last_lines is not None
+        and counts.byte_count is None
+        and counts.from_line is None
+        and counts.from_byte is None
+        and n > 0
+        else None
+    )
     if (
         parsed.follow
         and parsed.follow_name
@@ -790,12 +875,14 @@ async def tail_generic(
                 io=io,
                 unread=unread,
                 only_stdin=all(is_stdin(p) for p in paths),
+                read_last=read_last,
+                follow=follow,
             ), io
         if not opened:
             return None, io
         return tail_multi(
             opened,
-            read=stream,
+            read=read_last or stream,
             n=counts.lines,
             c=counts.byte_count,
             from_line=counts.from_line,

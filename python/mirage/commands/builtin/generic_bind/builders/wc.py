@@ -16,6 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.wc import wc_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
+    bound_uncached,
     dir_aware_stream,
     resolve_or_empty,
 )
@@ -33,7 +34,11 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await wc_generic(
-        resolved, list(texts), opts, dir_aware_stream(ops, accessor, opts)
+        resolved,
+        list(texts),
+        opts,
+        dir_aware_stream(ops, accessor, opts),
+        bound_uncached(ops.line_count, accessor, opts.index),
     )
 
 

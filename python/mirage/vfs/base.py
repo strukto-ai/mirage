@@ -342,6 +342,85 @@ class BaseVFS:
         """
         raise enotsup(self.name, "exists", path)
 
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
+    async def first_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        """The first ``n`` lines of a file, without reading the rest.
+
+        ``head -n N`` asks this before it reads, so a backend that can
+        fetch the start of a file on its own (a ``LIMIT`` on a table)
+        does not send the whole file. The answer stands in for the file:
+        exactly the first ``n`` lines a read gives, each with its newline,
+        and the whole file when it has fewer. A file the read cache holds
+        is read instead. Return None to have the file read the usual way;
+        raise the file's read error otherwise (``EFBIG`` when the answer
+        passes a ceiling on one read, such as ``max_read_rows``).
+
+        Args:
+            path (PathSpec): the file.
+            n (int): how many lines, at least 1.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "first_lines", path)
+
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
+    async def last_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        """The last ``n`` lines of a file, without reading the rest.
+
+        ``tail -n N`` asks this before it reads, and ``tail -f`` for its
+        first print. The answer stands in for the file: exactly the last
+        ``n`` lines a read gives, each with its newline, and the whole
+        file when it has fewer. A file the read cache holds is read
+        instead. Return None to have the file read the usual way; raise
+        the file's read error otherwise (``EFBIG`` when the answer passes
+        a ceiling on one read).
+
+        Args:
+            path (PathSpec): the file.
+            n (int): how many lines, at least 1.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "last_lines", path)
+
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
+    async def line_count(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int | None:
+        """How many newlines a read of the file gives, without reading it.
+
+        ``wc -l`` asks this before it reads (a ``COUNT(*)`` on a table),
+        and only when it counts lines alone. A file the read cache holds
+        is read instead. Return None to have the file read the usual way;
+        raise the file's read error otherwise.
+
+        Args:
+            path (PathSpec): the file.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "line_count", path)
+
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
+    async def follow(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes] | None:
+        """What is added to the end of a file from now on, as it lands.
+
+        ``tail -f`` on one file asks this after its first print, so a
+        backend that can be told about new data (a change stream) does
+        not have to be polled. The stream yields whole lines, each with
+        its newline, in the order a read would show them, and ends only
+        when the caller closes it. Return None to have ``tail`` poll the
+        file every ``-s`` seconds; raise the file's read error otherwise.
+
+        Args:
+            path (PathSpec): the file.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "follow", path)
+
     @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
     async def find(
         self,

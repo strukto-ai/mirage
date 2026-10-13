@@ -27,9 +27,9 @@ from mirage.core.mongodb.client import (
     iter_inserts,
 )
 from mirage.core.mongodb.readdir import entity_guard
-from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.types import PRIMARY_KEY
-from mirage.errors.fs import enoent
+from mirage.core.mongodb.scope import detect_scope, entity_kind
+from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
+from mirage.errors.fs import efbig, enoent
 from mirage.types import PathSpec
 from mirage.utils.json_canonical import canonicalize_value
 
@@ -63,63 +63,76 @@ def _elision_paths(config, database: str, name: str) -> set[str]:
     return set(config.elide_fields.get(key, []))
 
 
-async def read_tail(
+async def last_lines(
     accessor: MongoDBAccessor,
     path: PathSpec,
     n: int,
     index: IndexCacheStore = NULL_INDEX,
-) -> tuple[bytes, bool]:
-    """Read only the last ``n`` documents of a collection.
+) -> bytes | None:
+    """The last ``n`` documents of a collection or view, as its
+    documents.jsonl renders them.
 
-    Pushes the tail into MongoDB (sort by primary key descending + limit)
-    instead of streaming the whole collection. ``max_doc_limit`` is the
-    most documents one read may return; a count past it that the
-    collection could fill returns the last ``max_doc_limit`` and says
-    it stopped, where the ceiling used to stand in for the count in
-    silence.
+    Sorts by primary key descending with a limit instead of streaming
+    the whole collection. ``max_doc_limit`` is the most documents one
+    such read returns: a count past it that the collection could fill
+    raises EFBIG. None for any other file.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
-        path (PathSpec): A documents.jsonl path; other scopes raise.
-        n (int): Number of trailing documents to fetch.
+        path (PathSpec): the file.
+        n (int): Number of trailing documents, at least 1.
         index (IndexCacheStore): Unused; kept for reader-signature parity.
-
-    Returns:
-        tuple[bytes, bool]: the rendered documents, and whether the
-            ceiling cut the count short.
     """
     scope = detect_scope(path)
     if scope.kind != "documents":
-        raise enoent(path)
+        return None
     await entity_guard(accessor, scope, path.virtual)
+    database, name = scope.slots["database"], scope.slots["name"]
     cap = accessor.config.max_doc_limit
-    limit = min(n, cap)
-    stopped = (
+    if (
         n > cap
-        and await count_documents(
-            accessor.client, scope.slots["database"], scope.slots["name"]
-        )
-        > cap
-    )
+        and await count_documents(accessor.client, database, name) > cap
+    ):
+        raise efbig(path)
     docs = await find_documents(
         accessor.client,
-        scope.slots["database"],
-        scope.slots["name"],
+        database,
+        name,
         sort=[(PRIMARY_KEY, -1)],
-        limit=limit,
+        limit=min(n, cap),
     )
     docs.reverse()
     if not docs:
-        return b"", stopped
-    elide = _elision_paths(
-        accessor.config, scope.slots["database"], scope.slots["name"]
-    )
+        return b""
+    elide = _elision_paths(accessor.config, database, name)
     lines = []
     for doc in docs:
         if elide:
             doc = _apply_elision(doc, elide)
         lines.append(render_doc(doc))
-    return ("\n".join(lines) + "\n").encode(), stopped
+    return ("\n".join(lines) + "\n").encode()
+
+
+async def line_count(
+    accessor: MongoDBAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> int | None:
+    """How many documents a collection or view holds, one line each in
+    its documents.jsonl, by ``count_documents``. None for any other file.
+
+    Args:
+        accessor (MongoDBAccessor): Backend accessor.
+        path (PathSpec): the file.
+        index (IndexCacheStore): Unused; kept for reader-signature parity.
+    """
+    scope = detect_scope(path)
+    if scope.kind != "documents":
+        return None
+    await entity_guard(accessor, scope, path.virtual)
+    return await count_documents(
+        accessor.client, scope.slots["database"], scope.slots["name"]
+    )
 
 
 async def read_stream(
@@ -154,21 +167,42 @@ async def read_stream(
             yield (render_doc(doc) + "\n").encode()
 
 
-async def watch_stream(
+async def follow(
     accessor: MongoDBAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
-) -> AsyncIterator[bytes]:
+) -> AsyncIterator[bytes] | None:
+    """The documents inserted into a collection from now on, one
+    documents.jsonl line each, from a change stream. None for a view,
+    which has no change stream, and for any other file.
+
+    Args:
+        accessor (MongoDBAccessor): Backend accessor.
+        path (PathSpec): the file.
+        index (IndexCacheStore): Unused; kept for reader-signature parity.
+    """
     scope = detect_scope(path)
-    if scope.kind != "documents":
-        raise enoent(path)
-    await entity_guard(accessor, scope, path.virtual)
-    elide = _elision_paths(
-        accessor.config, scope.slots["database"], scope.slots["name"]
-    )
-    async for doc in iter_inserts(
-        accessor.client, scope.slots["database"], scope.slots["name"]
+    if (
+        scope.kind != "documents"
+        or entity_kind(scope) is not EntityKind.COLLECTION
     ):
+        return None
+    await entity_guard(accessor, scope, path.virtual)
+    return _inserted(accessor, scope.slots["database"], scope.slots["name"])
+
+
+async def _inserted(
+    accessor: MongoDBAccessor, database: str, name: str
+) -> AsyncIterator[bytes]:
+    """Each document inserted into the collection, rendered as a line.
+
+    Args:
+        accessor (MongoDBAccessor): Backend accessor.
+        database (str): the database.
+        name (str): the collection.
+    """
+    elide = _elision_paths(accessor.config, database, name)
+    async for doc in iter_inserts(accessor.client, database, name):
         if elide:
             doc = _apply_elision(doc, elide)
         yield (render_doc(doc) + "\n").encode()

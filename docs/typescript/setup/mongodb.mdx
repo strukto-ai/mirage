@@ -49,7 +49,7 @@ const mongo = new MongoDBVFS({
 | --- | --- | --- |
 | `uri` | required | Mongo connection URI. Redacted in snapshots. |
 | `databases` | none | Optional allowlist of database names. |
-| `maxDocLimit` | `5000` | Most documents one `tail -n` returns; past it, a notice on stderr and exit 1. |
+| `maxDocLimit` | `5000` | Most documents one `tail -n` fetches; a count past it on a collection that long is refused (`File too large`). |
 
 ## Mount mode
 

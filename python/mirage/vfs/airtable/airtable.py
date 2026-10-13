@@ -17,6 +17,7 @@ from typing import Any
 from mirage.accessor.airtable import AirtableAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.airtable.config import AirtableConfig
+from mirage.core.airtable.read import first_lines as _first_lines
 from mirage.core.airtable.read import read as _read
 from mirage.core.airtable.readdir import readdir as _readdir
 from mirage.core.airtable.search import (
@@ -81,6 +82,11 @@ class AirtableVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> ByteSource | None:
         return await _lines_containing(self.accessor, path, text, index)
+
+    async def first_lines(
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+    ) -> bytes | None:
+        return await _first_lines(self.accessor, path, n, index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

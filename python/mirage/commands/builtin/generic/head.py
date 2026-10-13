@@ -1,6 +1,6 @@
 import inspect
 from collections import deque
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -240,16 +240,20 @@ async def head_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
+    first_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
+    | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run head over resolved operands, GNU semantics; mirrors headGeneric.
 
-    The wiring resolves globs and binds the backend ops (including any
-    push-down, like postgres routing row reads through a LIMIT query);
-    everything else lives here so factory builders and bespoke backend
-    commands agree: flag parsing, the header rule, the per-operand
-    report-and-continue split, and the stdin fallback. Headers count the
-    operands as given (GNU heads on operand count, so a failed operand
-    still forces headers on the survivors).
+    The wiring resolves globs and binds the backend ops; everything else
+    lives here so factory builders and bespoke backend commands agree:
+    flag parsing, the header rule, the per-operand report-and-continue
+    split, and the stdin fallback. Headers count the operands as given
+    (GNU heads on operand count, so a failed operand still forces
+    headers on the survivors). A line count (``-n N``, or the default
+    10) is asked of ``first_lines`` first, so a mount that can fetch the
+    start of a file on its own (a ``LIMIT`` on a table) does not send
+    the rest.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -258,6 +262,10 @@ async def head_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
+        first_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
+            | None): the mount's ``first_lines`` called as
+            ``first_lines(path, n)``; None, or an answer of None, reads
+            the file.
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)
@@ -272,6 +280,13 @@ async def head_generic(
         if not opened:
             return None, io
         read = normalized_read(stream)
+        n = parsed.lines if parsed.lines is not None else 10
+        pushed = (
+            first_lines is not None
+            and parsed.bytes_ is None
+            and not parsed.zero_terminated
+            and n > 0
+        )
 
         def source_for(p: PathSpec) -> AsyncIterator[bytes]:
             source = read(p)
@@ -288,6 +303,11 @@ async def head_generic(
                         ):
                             yield chunk
                         return
+                    if pushed and first_lines is not None:
+                        lines = await first_lines(p, n)
+                        if lines is not None:
+                            yield lines
+                            return
                     async for chunk in source:
                         yield chunk
                 finally:

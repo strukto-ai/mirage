@@ -140,3 +140,20 @@ export const read = makeRead<AirtableAccessor>(
     stat,
   },
 )
+
+/**
+ * The first `n` records of a records or view file, by `maxRecords`, each on
+ * its own line. A count past `maxReadRecords` that the table fills throws
+ * EFBIG, as a whole read of that table does. Null for any other file. Mirrors
+ * `first_lines` in `mirage/core/airtable/read.py`.
+ */
+export async function firstLines(
+  accessor: AirtableAccessor,
+  path: PathSpec,
+  n: number,
+  index?: IndexCacheStore,
+): Promise<Uint8Array | null> {
+  const kind = detectScope(path).kind
+  if (kind !== 'records' && kind !== 'view') return null
+  return read(accessor, path, index, { limit: n })
+}

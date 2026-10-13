@@ -18,6 +18,11 @@ import { read as mongodbRead, streamAny as mongodbStream } from '../../core/mong
 import { readdir as mongodbReaddir } from '../../core/mongodb/readdir.ts'
 import { linesContaining as mongodbLinesContaining } from '../../core/mongodb/search.ts'
 import { stat as mongodbStat } from '../../core/mongodb/stat.ts'
+import {
+  follow as mongodbFollow,
+  lastLines as mongodbLastLines,
+  lineCount as mongodbLineCount,
+} from '../../core/mongodb/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
@@ -52,5 +57,24 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
 
   override linesContaining(path: PathSpec, text: string): Promise<ByteSource | null> {
     return mongodbLinesContaining(this.accessor, path, text)
+  }
+
+  override lastLines(
+    path: PathSpec,
+    n: number,
+    index?: IndexCacheStore,
+  ): Promise<Uint8Array | null> {
+    return mongodbLastLines(this.accessor, path, n, index)
+  }
+
+  override lineCount(path: PathSpec, index?: IndexCacheStore): Promise<number | null> {
+    return mongodbLineCount(this.accessor, path, index)
+  }
+
+  override follow(
+    path: PathSpec,
+    index?: IndexCacheStore,
+  ): Promise<AsyncIterable<Uint8Array> | null> {
+    return mongodbFollow(this.accessor, path, index)
   }
 }

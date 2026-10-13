@@ -2,8 +2,10 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.head import head, head_multi
-from mirage.types import PathSpec
+from mirage.commands.builtin.generic.head import head, head_generic, head_multi
+from mirage.commands.config import CommandOpts
+from mirage.io.types import materialize
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def _drain(gen):
@@ -115,3 +117,68 @@ async def test_head_multi_closes_the_operand_its_reader_stopped_on():
     await out.aclose()
     assert sources["/d/a"].closed
     assert not sources["/d/b"].closed
+
+
+async def _file_stat(p: PathSpec) -> FileStat:
+    return FileStat(name=p.virtual, type=FileType.FILE)
+
+
+def _counted_reads(body: bytes, reads: list[str]):
+    async def stream(p: PathSpec):
+        reads.append(p.virtual)
+        yield body
+
+    return stream
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags, asked",
+    [
+        ({}, 10),
+        ({"lines": "2"}, 2),
+        ({"lines": "0"}, None),
+        ({"lines": "-1"}, None),
+        ({"bytes": "3"}, None),
+        ({"lines": "2", "zero_terminated": True}, None),
+    ],
+)
+async def test_head_asks_first_lines_for_a_line_count(flags, asked):
+    reads: list[str] = []
+    calls: list[int] = []
+
+    async def first_lines(p: PathSpec, n: int) -> bytes:
+        calls.append(n)
+        return b"a\nb\n"
+
+    out, io = await head_generic(
+        [PathSpec.from_str_path("/t")],
+        [],
+        CommandOpts(flags=flags),
+        _file_stat,
+        _counted_reads(b"x\ny\nz\n", reads),
+        first_lines,
+    )
+    data = await materialize(out)
+    assert calls == ([] if asked is None else [asked])
+    if asked is not None:
+        assert (data, reads) == (b"a\nb\n", [])
+
+
+@pytest.mark.asyncio
+async def test_head_reads_a_file_first_lines_leaves_to_the_read():
+    reads: list[str] = []
+
+    async def first_lines(p: PathSpec, n: int) -> None:
+        return None
+
+    out, _ = await head_generic(
+        [PathSpec.from_str_path("/t")],
+        [],
+        CommandOpts(flags={"lines": "2"}),
+        _file_stat,
+        _counted_reads(b"x\ny\nz\n", reads),
+        first_lines,
+    )
+    assert await materialize(out) == b"x\ny\n"
+    assert reads == ["/t"]

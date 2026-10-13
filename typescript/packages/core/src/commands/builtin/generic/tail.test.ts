@@ -768,3 +768,80 @@ describe('a follow prints each append past the file cache', () => {
     }
   })
 })
+
+// Mirrors the last_lines and follow cases in test_tail.py.
+describe('tail asks the mount for the last lines', () => {
+  it.each([
+    [{}, 10],
+    [{ n: '2' }, 2],
+    [{ n: '+2' }, null],
+    [{ c: '2' }, null],
+  ] as const)('with %j asks for %s', async (flags, asked) => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'a\nb\nc\n')
+    const calls: number[] = []
+    const result = await tailGeneric(
+      [spec('/d/log')],
+      [],
+      opts(flags),
+      fs.stream,
+      fs.stat,
+      null,
+      (_p, n) => {
+        calls.push(n)
+        return Promise.resolve(ENC.encode('c\n'))
+      },
+    )
+    const [out] = result as [ByteSource, IOResult]
+    const data = DEC.decode(out as Uint8Array)
+    expect(calls).toEqual(asked === null ? [] : [asked])
+    if (asked !== null) expect(data).toBe('c\n')
+  })
+
+  it('streams what the mount hands over under -f', async () => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'a\nb\nc\n')
+    const abort = new AbortController()
+    const added = async function* (): AsyncIterable<Uint8Array> {
+      await sleep(40)
+      yield ENC.encode('d\n')
+      await new Promise((resolve) => setTimeout(resolve, 10_000))
+    }
+    const result = await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort, { n: '1' }),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+      () => Promise.resolve(ENC.encode('c\n')),
+      () => Promise.resolve(added()),
+    )
+    const [stream] = result as [AsyncIterable<Uint8Array>, IOResult]
+    expect(await drainFor(stream, 120, abort)).toBe('c\nd\n')
+  })
+
+  it('reads the first print whole when the follow polls', async () => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'a\nb\n')
+    const abort = new AbortController()
+    const result = await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort, { n: '1' }),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+      () => Promise.reject(new Error('a polled follow asked for the last lines')),
+      () => Promise.resolve(null),
+    )
+    const [stream] = result as [AsyncIterable<Uint8Array>, IOResult]
+    const grower = (async () => {
+      await sleep(50)
+      fs.append('/d/log', 'c\n')
+    })()
+    const text = await drainFor(stream, 150, abort)
+    await grower
+    expect(text).toBe('b\nc\n')
+  })
+})

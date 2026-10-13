@@ -20,7 +20,8 @@ import { jsonBytes } from '../render/json.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { makeRead, type Reader, type ReadWindow, type WindowedReader } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { estimateSize, fetchBoundedRows, fetchRows } from './client.ts'
+import { countRows, estimateSize, fetchBoundedRows, fetchRows } from './client.ts'
+import { entityGuard } from './readdir.ts'
 import { buildDatabaseJson, buildEntitySchemaJson } from './_schema_json.ts'
 import { buildEntitySemanticJson } from './semantic.ts'
 import { detectScope } from './scope.ts'
@@ -155,6 +156,73 @@ export async function readRows(
     position += chunk.byteLength
   }
   return body
+}
+
+/**
+ * The first `n` rows of a relation's rows.jsonl, by a `LIMIT`. `maxReadRows`
+ * is the most rows one read may return, so a count past it fetches one row
+ * more than the ceiling and throws EFBIG when that row exists, as a whole read
+ * of a relation that long does; a relation shorter than the ceiling comes back
+ * whole. Null for any other file. Mirrors `first_lines` in
+ * `mirage/core/postgres/read.py`.
+ */
+export async function firstLines(
+  accessor: PostgresAccessor,
+  path: PathSpec,
+  n: number,
+  _index?: IndexCacheStore,
+): Promise<Uint8Array | null> {
+  const match = detectScope(path)
+  if (match.kind !== 'entity_rows') return null
+  await entityGuard(accessor, match, path.virtual)
+  const cap = accessor.config.maxReadRows
+  const data = await readRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '', path, {
+    limit: Math.min(n, cap + 1),
+  })
+  let lines = 0
+  for (const byte of data) if (byte === 0x0a) lines += 1
+  if (lines > cap) throw efbig(path)
+  return data
+}
+
+/**
+ * The last `n` rows of a relation's rows.jsonl, by a `COUNT(*)` and an
+ * `OFFSET`. A suffix longer than `maxReadRows` throws EFBIG, as a whole read
+ * of a relation that long does. Null for any other file. Mirrors
+ * `last_lines` in `mirage/core/postgres/read.py`.
+ */
+export async function lastLines(
+  accessor: PostgresAccessor,
+  path: PathSpec,
+  n: number,
+  _index?: IndexCacheStore,
+): Promise<Uint8Array | null> {
+  const match = detectScope(path)
+  if (match.kind !== 'entity_rows') return null
+  await entityGuard(accessor, match, path.virtual)
+  const schema = match.slots.schema ?? ''
+  const entity = match.slots.entity ?? ''
+  const total = await countRows(accessor, schema, entity)
+  const limit = Math.min(n, total)
+  if (limit > accessor.config.maxReadRows) throw efbig(path)
+  if (limit === 0) return new Uint8Array()
+  return readRows(accessor, schema, entity, path, { limit, offset: total - limit })
+}
+
+/**
+ * How many rows a relation holds, one line each in its rows.jsonl, by a
+ * `COUNT(*)`. Null for any other file. Mirrors `line_count` in
+ * `mirage/core/postgres/read.py`.
+ */
+export async function lineCount(
+  accessor: PostgresAccessor,
+  path: PathSpec,
+  _index?: IndexCacheStore,
+): Promise<number | null> {
+  const match = detectScope(path)
+  if (match.kind !== 'entity_rows') return null
+  await entityGuard(accessor, match, path.virtual)
+  return countRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '')
 }
 
 /** One row as rows.jsonl spells it. Mirrors `row_line` in `core/postgres/read.py`. */

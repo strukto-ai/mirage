@@ -891,3 +891,100 @@ async def test_follow_infinite_interval_never_polls():
     await grower
     assert b"".join(chunks) == b"l1\nl2\n"
     assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags, asked",
+    [({}, 10), ({"n": "2"}, 2), ({"n": "+2"}, None), ({"c": "2"}, None)],
+)
+async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
+    fs = _Growing({"/d/log": b"a\nb\nc\n"})
+    calls: list[int] = []
+
+    async def last_lines(p: PathSpec, n: int) -> bytes:
+        calls.append(n)
+        return b"c\n"
+
+    stream, _ = await tail_generic(
+        _paths("/d/log"),
+        [],
+        CommandOpts(flags=flags),
+        fs.stat,
+        fs.read,
+        None,
+        last_lines,
+    )
+    data = await _drain(stream)
+    assert calls == ([] if asked is None else [asked])
+    if asked is not None:
+        assert data == b"c\n"
+
+
+@pytest.mark.asyncio
+async def test_follow_streams_what_the_mount_hands_over():
+    fs = _Growing({"/d/log": b"a\nb\nc\n"})
+    landed = asyncio.Queue[bytes]()
+
+    async def last_lines(p: PathSpec, n: int) -> bytes:
+        return b"c\n"
+
+    async def added():
+        while True:
+            yield await landed.get()
+
+    async def follow(p: PathSpec):
+        return added()
+
+    stream, _ = await tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(n="1"),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+        last_lines,
+        follow,
+    )
+
+    async def land() -> None:
+        await asyncio.sleep(0.05)
+        await landed.put(b"d\n")
+
+    lander = asyncio.create_task(land())
+    chunks = await _drain_for(stream, 0.15)
+    await lander
+    assert b"".join(chunks) == b"c\nd\n"
+
+
+@pytest.mark.asyncio
+async def test_a_polled_follow_reads_its_first_print_whole():
+    # The polls go on from where the first print ended, so it is the
+    # whole file's length, never the last lines' alone.
+    fs = _Growing({"/d/log": b"a\nb\n"})
+
+    async def last_lines(p: PathSpec, n: int) -> bytes:
+        raise AssertionError("a polled follow asked for the last lines")
+
+    async def follow(p: PathSpec) -> None:
+        return None
+
+    stream, _ = await tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(n="1"),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+        last_lines,
+        follow,
+    )
+
+    async def grow() -> None:
+        await asyncio.sleep(0.05)
+        fs.data["/d/log"] += b"c\n"
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.15)
+    await grower
+    assert b"".join(chunks) == b"b\nc\n"

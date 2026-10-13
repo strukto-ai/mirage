@@ -17,7 +17,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { enoent, isEnoent } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
 import { listMatviews, listSchemas, listTables, listViews } from './client.ts'
 import { detectScope, ENTITY_FILES, KIND_DIRS } from './scope.ts'
 
@@ -53,28 +53,6 @@ export async function entityGuard(
     names = [...new Set([...views, ...mviews])]
   }
   if (!names.includes(match.slots.entity ?? '')) throw enoent(virtual)
-}
-
-/**
- * Whether `entityGuard` admits the entity a match names. For the bespoke
- * `wc -l` fast path on `rows.jsonl`, which counts the relation by the names in
- * the path: it takes the fast path only for an entity the mount can see, and
- * otherwise hands the operand to the generic, which stats it through the same
- * guard and reports it the way GNU names a missing file. Mirrors
- * `entity_exists` in `mirage/core/postgres/readdir.py`.
- */
-export async function entityExists(
-  accessor: PostgresAccessor,
-  match: ScopeMatch,
-  virtual: string,
-): Promise<boolean> {
-  try {
-    await entityGuard(accessor, match, virtual)
-  } catch (err) {
-    if (isEnoent(err)) return false
-    throw err
-  }
-  return true
 }
 
 async function listRoot(
