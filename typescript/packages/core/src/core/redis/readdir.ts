@@ -84,8 +84,9 @@ export async function readdir(
 
 /**
  * Every key under a directory from one scan, each as `stat` answers it,
- * fetched in one pipeline; null when `path` is no directory, so the walk's
- * readdir reports it. Mirrors Python's `tree`.
+ * fetched in one pipeline; null when `path` is no directory, or when a key's
+ * parent is none (a file another client left without its folder), so the
+ * walk's readdir and stat report what is there. Mirrors Python's `tree`.
  */
 export async function tree(
   accessor: RedisAccessor,
@@ -101,6 +102,8 @@ export async function tree(
     ...(await store.listFiles(base)).map((key): [string, boolean] => [key, false]),
     ...dirs.filter((key) => key.startsWith(base)).map((key): [string, boolean] => [key, true]),
   ].filter(([key]) => key !== p)
+  const known = new Set(dirs)
+  if (keys.some(([key]) => !known.has(key.slice(0, key.lastIndexOf('/')) || '/'))) return null
   const stats = await keyStats(store, keys)
   const found = new Map<string, FileStat>()
   stats.forEach((st, i) => {

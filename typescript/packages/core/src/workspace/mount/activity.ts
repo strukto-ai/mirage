@@ -50,9 +50,16 @@ class ActivityStream implements AsyncIterableIterator<Uint8Array> {
     })
   }
   return(): Promise<IteratorResult<Uint8Array>> {
+    // A pull can wait on a source that only yields when something lands (a
+    // follow), so the source is told to close before the pull ends, not
+    // after: its own close is what ends that wait.
+    const closing = this.source.return?.()
+    // Handled here so a failed close is not unhandled while the pull ends;
+    // awaiting it below still hands the failure to the caller.
+    void closing?.catch(() => undefined)
     return this.pullLock.withLock('', async () => {
       try {
-        await this.source.return?.()
+        await closing
         return { done: true, value: undefined }
       } finally {
         this.release()

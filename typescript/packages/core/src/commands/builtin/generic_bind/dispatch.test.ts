@@ -311,5 +311,6 @@ it('reads a walked tree in one call and prints the same', async () => {
   const counted = new Counted()
   expect(await walks(counted)).toEqual(await walks(new Untreed()))
   expect(counted.trees).toBeGreaterThan(0)
-  expect(counted.listings).toBe(0)
+  // find -maxdepth 1 and tree -L 1 each list their one level.
+  expect(counted.listings).toBe(2)
 })

@@ -483,7 +483,7 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "first_lines": ("first_lines", ("n", "index")),
     "last_lines": ("last_lines", ("n", "index")),
     "line_count": ("line_count", ("index",)),
-    "follow": ("follow", ("index",)),
+    "follow": ("follow", ("n", "index")),
 }
 
 # The slots that change the mount: with no dispatcher there is nowhere to

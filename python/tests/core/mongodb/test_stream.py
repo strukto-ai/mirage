@@ -91,8 +91,8 @@ def _path(s: str) -> PathSpec:
     return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
-async def _followed(acc, path, index=None):
-    stream = await follow(acc, _path(path), index)
+async def _followed(acc, path, index=None, n=0):
+    stream = await follow(acc, _path(path), n, index)
     assert stream is not None
     return stream
 
@@ -313,6 +313,26 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_follow_prints_the_last_documents_then_each_insert_once(
+    accessor, index
+):
+    last = [{"_id": 7, "name": "gus"}, {"_id": 6, "name": "fay"}]
+    with (
+        _patched_watch([{"_id": 7, "name": "gus"}, {"_id": 8, "name": "hal"}]),
+        patch(
+            "mirage.core.mongodb.stream.find_documents",
+            new=AsyncMock(return_value=last),
+        ),
+    ):
+        data = await _collect(await _followed(accessor, DOCS_PATH, index, n=2))
+    assert data.decode().splitlines() == [
+        '{"_id": 6, "name": "fay"}',
+        '{"_id": 7, "name": "gus"}',
+        '{"_id": 8, "name": "hal"}',
+    ]
+
+
+@pytest.mark.asyncio
 async def test_follow_starts_at_the_time_it_was_asked(accessor, index):
     after = Timestamp(42, 1)
     calls: list[str] = []
@@ -345,7 +365,7 @@ async def test_follow_leaves_a_view_or_a_directory_to_the_polls(
 ):
     with _patched_watch([]):
         for path in ("/db1", VIEW_DOCS_PATH):
-            assert await follow(accessor, _path(path), index) is None
+            assert await follow(accessor, _path(path), 5, index) is None
 
 
 @pytest.mark.asyncio
@@ -492,7 +512,7 @@ async def test_a_collection_outside_the_scope_is_enoent_to_every_stream(
             elif opener == "count":
                 await line_count(accessor, path)
             elif opener == "follow":
-                await follow(accessor, path)
+                await follow(accessor, path, 5)
             else:
                 await _collect(read_stream(accessor, path))
     exists.assert_awaited_once()

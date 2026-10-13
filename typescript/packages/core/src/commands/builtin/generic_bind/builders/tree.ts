@@ -21,12 +21,19 @@ const tree: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { readTree } = ops
-  const [readdir, stat] = treeWalk<string[], FileStat>(
-    readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
-    (p: PathSpec) => ops.readdir(accessor, p, idx),
-    (p: PathSpec) => ops.stat(accessor, p, idx),
+  const readdir = (p: PathSpec): Promise<string[]> => ops.readdir(accessor, p, idx)
+  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
+  return treeGeneric(
+    resolved,
+    opts,
+    readdir,
+    stat,
+    treeWalk<string[], FileStat>(
+      readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
+      readdir,
+      stat,
+    ),
   )
-  return treeGeneric(resolved, opts, readdir, stat)
 }
 
 export const BUILDER: GenericCommand = {

@@ -145,8 +145,12 @@ def _tree():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("texts", [[], ["-maxdepth", "1"]])
-async def test_find_reads_the_tree_in_one_call(texts):
+@pytest.mark.parametrize(
+    "texts, trees",
+    [([], ["/mnt"]), (["-maxdepth", "1"], [])],
+    ids=["unbounded", "maxdepth-lists-its-levels"],
+)
+async def test_find_reads_the_tree_in_one_call(texts, trees):
     asked: list[str] = []
 
     async def read_tree(_accessor, path, index=None):
@@ -158,4 +162,4 @@ async def test_find_reads_the_tree_in_one_call(texts):
         return (await materialize(stdout)).decode().splitlines()
 
     assert await run(_ops([], read_tree)) == await run(_ops([]))
-    assert asked == ["/mnt"]
+    assert asked == trees

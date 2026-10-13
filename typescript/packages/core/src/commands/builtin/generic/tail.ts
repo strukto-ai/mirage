@@ -247,10 +247,10 @@ async function window(
 // GNU extends that to every `-` operand; a line that named nothing else has
 // nothing left to wait for, so it ends there, without `no files remaining`.
 // An unread operand (a directory) prints its header and is not followed.
-// One file followed by descriptor is asked of the mount's `follow` first: a
-// mount that is told about new lines (a change stream) hands them over as
-// they land, so nothing is polled, and its first print can take the last
-// lines alone since no position is kept.
+// One file followed by descriptor, under a count of lines from the end, is
+// asked of the mount's `follow` first: a mount that is told about new lines
+// (a change stream) hands over the last lines and then each new one as it
+// lands, so nothing is polled and the two meet at one point.
 async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
@@ -265,8 +265,8 @@ async function* follow(
   signal: AbortSignal | undefined,
   unread: ReadonlySet<string>,
   onlyStdin: boolean,
-  readFirst: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
-  followOp?: (p: PathSpec) => Promise<AsyncIterable<Uint8Array> | null>,
+  followLines: number | null = null,
+  followOp?: (p: PathSpec, n: number) => Promise<AsyncIterable<Uint8Array> | null>,
 ): AsyncGenerator<Uint8Array> {
   const positions = new Map<number, number>()
   let added: AsyncIterable<Uint8Array> | null = null
@@ -290,19 +290,20 @@ async function* follow(
         active.splice(active.indexOf(entry), 1)
         continue
       }
-      let raw: Uint8Array
+      let raw: Uint8Array | null = null
       try {
         if (
           followOp !== undefined &&
+          followLines !== null &&
           paths.length === 1 &&
           pending.length === 0 &&
           !flags.byName &&
           !isStdin(p)
         ) {
-          added = await followOp(p)
+          added = await followOp(p, followLines)
         }
-        raw =
-          added !== null && readFirst !== null ? await readFirst(p) : await materialize(stream(p))
+        // A follow's stream holds the first print too.
+        if (added === null) raw = await materialize(stream(p))
       } catch (err) {
         await closeQuietly(added)
         added = null
@@ -324,8 +325,10 @@ async function* follow(
         )
       }
       last = slot
-      yield tailBytes(raw, counts)
-      positions.set(slot, raw.byteLength)
+      if (raw !== null) {
+        yield tailBytes(raw, counts)
+        positions.set(slot, raw.byteLength)
+      }
     }
     if (added !== null) {
       // A stream waits for the next line, so an abort ends the wait rather
@@ -511,7 +514,7 @@ function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
  * Run tail over resolved operands, GNU semantics. A line count from the end
  * (`-n N`, or the default 10) is asked of `lastLines` first, so a mount that
  * can fetch the end of a file on its own does not send the rest; `-f` on one
- * file asks `followOp` (see `follow`). Null, or no such op, reads or polls
+ * file asks `followOp(p, n)` (see `follow`). Null, or no such op, reads or polls
  * the file. Mirrors Python's `tail_generic`.
  */
 export async function tailGeneric(
@@ -522,7 +525,7 @@ export async function tailGeneric(
   stat: Stat,
   readRange: ReadRange | null = null,
   lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
-  followOp?: (p: PathSpec) => Promise<AsyncIterable<Uint8Array> | null>,
+  followOp?: (p: PathSpec, n: number) => Promise<AsyncIterable<Uint8Array> | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   const parsed = parseFlags(opts.flags)
@@ -532,14 +535,9 @@ export async function tailGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   const n = counts.lines ?? 10
+  const fromEnd = counts.byteCount === null && counts.fromLine === null && counts.fromByte === null
   const lastOf = (s: Stream): ((p: PathSpec) => Promise<Uint8Array>) | null =>
-    lastLines !== undefined &&
-    counts.byteCount === null &&
-    counts.fromLine === null &&
-    counts.fromByte === null &&
-    n > 0
-      ? readLast(s, lastLines, n)
-      : null
+    lastLines !== undefined && fromEnd && n > 0 ? readLast(s, lastLines, n) : null
   if (
     following.follow &&
     following.byName &&
@@ -605,7 +603,7 @@ export async function tailGeneric(
         opts.signal,
         unread,
         paths.every((p) => isStdin(p)),
-        lastOf(first),
+        fromEnd ? n : null,
         followOp,
       ),
       io,

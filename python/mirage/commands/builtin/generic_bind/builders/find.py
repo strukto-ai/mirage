@@ -38,23 +38,24 @@ async def find(
     if not ops.is_mounted(accessor):
         raise ValueError("find: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, opts.index),
-        partial(ops.readdir, accessor),
-        partial(ops.stat, accessor),
+    readdir = partial(ops.readdir, accessor)
+    stat: Callable[..., Awaitable[FileStat]] = partial(ops.stat, accessor)
+    whole_readdir, whole_stat = tree_walk(
+        bound_op(ops.read_tree, accessor, opts.index), readdir, stat
     )
     # -mtime must see namespace times (touch results, observed writes on
     # mtime-less backends), same as ls.
-    walk_stat: Callable[..., Awaitable[FileStat]] = stat
     overlay = opts.ns.stat_overlay if opts.ns is not None else None
     if overlay is not None:
-        walk_stat = partial(overlaid_stat, walk_stat, overlay)
+        stat = partial(overlaid_stat, stat, overlay)
+        whole_stat = partial(overlaid_stat, whole_stat, overlay)
     return await find_walk_generic(
         resolved,
         list(texts),
         opts,
         readdir=readdir,
-        stat=walk_stat,
+        stat=stat,
+        unbounded=(whole_readdir, whole_stat),
     )
 
 

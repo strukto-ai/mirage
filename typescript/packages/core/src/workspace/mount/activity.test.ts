@@ -88,3 +88,31 @@ it('close waits for a pending pull before releasing usage', async () => {
   expect((await pulling).value).toEqual(new Uint8Array([1]))
   await Promise.all([closing, waiting])
 })
+
+it('close ends a pull waiting on a source that only its close ends', async () => {
+  const activity = new VFSActivity()
+  let wake = (): void => undefined
+  const idle: AsyncIterableIterator<Uint8Array> = {
+    next: () =>
+      new Promise((resolve) => {
+        wake = () => {
+          resolve({ value: undefined, done: true })
+        }
+      }),
+    return: () => {
+      wake()
+      return Promise.resolve({ value: undefined, done: true })
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
+  const source = activity.hold(idle)
+  if (source instanceof Uint8Array) throw new Error('expected stream')
+  const iterator = source[Symbol.asyncIterator]()
+  const pulling = iterator.next()
+  await Promise.resolve()
+  await iterator.return?.()
+  expect((await pulling).done).toBe(true)
+  await activity.wait()
+})

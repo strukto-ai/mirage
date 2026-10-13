@@ -211,13 +211,20 @@ function notCrossed(): Promise<string[]> {
   return Promise.resolve([])
 }
 
+/**
+ * Run tree over resolved operands. `unbounded` is the walk to take when no
+ * `-L` bounds it (one the mount answers whole), else `readdir` and `stat`.
+ * Mirrors Python's `tree_generic`.
+ */
 export async function treeGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   readdir: (p: PathSpec) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
+  unbounded?: [(p: PathSpec) => Promise<string[]>, (p: PathSpec) => Promise<FileStat>],
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(opts.flags)
+  if (unbounded !== undefined && parsed.maxDepth === null) [readdir, stat] = unbounded
   const targets =
     paths.length > 0
       ? paths

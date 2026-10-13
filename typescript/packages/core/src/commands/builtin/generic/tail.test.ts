@@ -798,11 +798,13 @@ describe('tail asks the mount for the last lines', () => {
     if (asked !== null) expect(data).toBe('c\n')
   })
 
-  it('streams what the mount hands over under -f', async () => {
+  it('streams what the mount hands over under -f, first print included', async () => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'a\nb\nc\n')
     const abort = new AbortController()
+    const asked: number[] = []
     const added = async function* (): AsyncIterable<Uint8Array> {
+      yield ENC.encode('c\n')
       await sleep(40)
       yield ENC.encode('d\n')
       await new Promise((resolve) => setTimeout(resolve, 10_000))
@@ -814,14 +816,18 @@ describe('tail asks the mount for the last lines', () => {
       fs.stream,
       fs.stat,
       fs.readRange,
-      () => Promise.resolve(ENC.encode('c\n')),
-      () => Promise.resolve(added()),
+      () => Promise.reject(new Error('a follow asked for the last lines')),
+      (_p, n) => {
+        asked.push(n)
+        return Promise.resolve(added())
+      },
     )
     const [stream] = result as [AsyncIterable<Uint8Array>, IOResult]
     expect(await drainFor(stream, 120, abort)).toBe('c\nd\n')
+    expect(asked).toEqual([1])
   })
 
-  it('closes the follow when the reader stops in the first print', async () => {
+  it('closes the follow when the reader stops at its header', async () => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'a\nb\nc\n')
     const abort = new AbortController()
@@ -839,7 +845,7 @@ describe('tail asks the mount for the last lines', () => {
     const result = await tailGeneric(
       [spec('/d/log')],
       [],
-      followOpts(abort, { n: '1' }),
+      followOpts(abort, { n: '1', v: true }),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -848,7 +854,7 @@ describe('tail asks the mount for the last lines', () => {
     )
     const [stream] = result as [AsyncIterable<Uint8Array>, IOResult]
     const lines = stream[Symbol.asyncIterator]()
-    expect(DEC.decode((await lines.next()).value as Uint8Array)).toBe('c\n')
+    expect(DEC.decode((await lines.next()).value as Uint8Array)).toBe('==> /d/log <==\n')
     await lines.return?.()
     expect(closed).toEqual([true])
   })

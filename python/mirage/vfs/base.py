@@ -402,19 +402,23 @@ class BaseVFS:
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def follow(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes] | None:
-        """What is added to the end of a file from now on, as it lands.
+        """The last ``n`` lines of a file, then each line added to it, as
+        it lands.
 
-        ``tail -f`` on one file asks this after its first print, so a
-        backend that can be told about new data (a change stream) does
-        not have to be polled. The stream yields whole lines, each with
-        its newline, in the order a read would show them, and ends only
-        when the caller closes it. Return None to have ``tail`` poll the
-        file every ``-s`` seconds; raise the file's read error otherwise.
+        ``tail -f`` on one file asks this for all it prints, so a backend
+        that can be told about new data (a change stream) does not have
+        to be polled, and the lines it prints first and the ones it
+        follows meet at one point: none is lost or printed twice. The
+        stream yields whole lines, each with its newline, in the order a
+        read would show them, and ends only when the caller closes it.
+        Return None to have ``tail`` read the file and poll it every
+        ``-s`` seconds; raise the file's read error otherwise.
 
         Args:
             path (PathSpec): the file.
+            n (int): how many of its last lines come first, 0 for none.
             index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "follow", path)

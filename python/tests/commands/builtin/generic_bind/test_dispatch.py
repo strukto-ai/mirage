@@ -291,4 +291,5 @@ async def test_a_walk_reads_the_tree_in_one_call_and_prints_the_same():
     counted = _Counted()
     assert await _walks(counted) == await _walks(_Untreed())
     assert counted.trees > 0
-    assert counted.listings == 0
+    # find -maxdepth 1 and tree -L 1 each list their one level.
+    assert counted.listings == 2

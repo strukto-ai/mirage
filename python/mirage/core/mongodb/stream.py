@@ -89,7 +89,27 @@ async def last_lines(
     if scope.kind != "documents":
         return None
     await entity_guard(accessor, scope, path.virtual)
-    database, name = scope.slots["database"], scope.slots["name"]
+    return await _last_lines_of(
+        accessor, path, scope.slots["database"], scope.slots["name"], n
+    )
+
+
+async def _last_lines_of(
+    accessor: MongoDBAccessor,
+    path: PathSpec,
+    database: str,
+    name: str,
+    n: int,
+) -> bytes:
+    """The last ``n`` documents rendered as lines, past the guard.
+
+    Args:
+        accessor (MongoDBAccessor): Backend accessor.
+        path (PathSpec): the file, for its EFBIG.
+        database (str): the database.
+        name (str): the collection or view.
+        n (int): Number of trailing documents, at least 1.
+    """
     cap = accessor.config.max_doc_limit
     if (
         n > cap
@@ -172,19 +192,21 @@ async def read_stream(
 async def follow(
     accessor: MongoDBAccessor,
     path: PathSpec,
+    n: int,
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes] | None:
-    """The documents inserted into a collection from now on, one
-    documents.jsonl line each, from a change stream. None for a view,
-    which has no change stream, and for any other file.
+    """The last ``n`` documents of a collection, then each one inserted
+    after them, one documents.jsonl line each. None for a view, which has
+    no change stream, and for any other file.
 
-    "Now" is the cluster's operation time when this returns: the stream
-    opens when first read, after ``tail`` prints the last lines, and
-    starts from that time, so nothing inserted in between is lost.
+    The change stream starts at the cluster's operation time from before
+    the last documents are read, so nothing inserted in between is lost,
+    and a document that both print is skipped the second time.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
         path (PathSpec): the file.
+        n (int): Number of trailing documents first, 0 for none.
         index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
     scope = detect_scope(path)
@@ -194,27 +216,42 @@ async def follow(
     ):
         return None
     await entity_guard(accessor, scope, path.virtual)
-    database = scope.slots["database"]
+    database, name = scope.slots["database"], scope.slots["name"]
     after = await operation_time(accessor.client, database)
-    return _inserted(accessor, database, scope.slots["name"], after)
+    first = (
+        await _last_lines_of(accessor, path, database, name, n)
+        if n > 0
+        else b""
+    )
+    return _followed(accessor, database, name, after, first)
 
 
-async def _inserted(
+async def _followed(
     accessor: MongoDBAccessor,
     database: str,
     name: str,
     after: Timestamp | None,
+    first: bytes,
 ) -> AsyncIterator[bytes]:
-    """Each document inserted into the collection, rendered as a line.
+    """``first``, then each document inserted after ``after`` that it
+    does not already hold, rendered as a line.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
         database (str): the database.
         name (str): the collection.
         after (Timestamp | None): the operation time they come after.
+        first (bytes): the last documents' lines.
     """
+    if first:
+        yield first
+    printed = set(first.splitlines(keepends=True))
     elide = _elision_paths(accessor.config, database, name)
     async for doc in iter_inserts(accessor.client, database, name, after):
         if elide:
             doc = _apply_elision(doc, elide)
-        yield (render_doc(doc) + "\n").encode()
+        line = (render_doc(doc) + "\n").encode()
+        if line in printed:
+            printed.discard(line)
+            continue
+        yield line

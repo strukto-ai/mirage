@@ -89,7 +89,9 @@ async def tree(
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, FileStat] | None:
     """Every key under a directory, each as ``stat`` answers it; None
-    when ``path`` is no directory, so the walk's readdir reports it.
+    when ``path`` is no directory, or when a key's parent is none (a
+    file restored without its folder), so the walk's readdir and stat
+    report what is there.
 
     Args:
         accessor (RAMAccessor): the mount's store.
@@ -101,10 +103,15 @@ async def tree(
     if p not in store.dirs:
         return None
     base = p.rstrip("/") + "/"
+    keys = [
+        key
+        for key in [*store.files, *store.dirs]
+        if key.startswith(base) and key != p
+    ]
+    if any((key.rsplit("/", 1)[0] or "/") not in store.dirs for key in keys):
+        return None
     found: dict[str, FileStat] = {}
-    for key in [*store.files, *store.dirs]:
-        if not key.startswith(base) or key == p:
-            continue
+    for key in keys:
         entry = key_stat(store, key)
         if entry is not None:
             found[key[len(base) :]] = entry

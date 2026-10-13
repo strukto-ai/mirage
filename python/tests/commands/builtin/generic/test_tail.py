@@ -923,18 +923,21 @@ async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
 
 
 @pytest.mark.asyncio
-async def test_follow_streams_what_the_mount_hands_over():
+async def test_follow_streams_what_the_mount_hands_over_first_print_included():
     fs = _Growing({"/d/log": b"a\nb\nc\n"})
     landed = asyncio.Queue[bytes]()
+    asked: list[int] = []
 
     async def last_lines(p: PathSpec, n: int) -> bytes:
-        return b"c\n"
+        raise AssertionError("a follow asked for the last lines")
 
     async def added():
+        yield b"c\n"
         while True:
             yield await landed.get()
 
-    async def follow(p: PathSpec):
+    async def follow(p: PathSpec, n: int):
+        asked.append(n)
         return added()
 
     stream, _ = await tail_generic(
@@ -956,10 +959,11 @@ async def test_follow_streams_what_the_mount_hands_over():
     chunks = await _drain_for(stream, 0.15)
     await lander
     assert b"".join(chunks) == b"c\nd\n"
+    assert asked == [1]
 
 
 @pytest.mark.asyncio
-async def test_a_reader_that_stops_in_the_first_print_closes_the_follow():
+async def test_a_reader_that_stops_at_the_header_closes_the_follow():
     fs = _Growing({"/d/log": b"a\nb\nc\n"})
     closed: list[bool] = []
 
@@ -976,20 +980,20 @@ async def test_a_reader_that_stops_in_the_first_print_closes_the_follow():
     async def last_lines(p: PathSpec, n: int) -> bytes:
         return b"c\n"
 
-    async def follow(p: PathSpec):
+    async def follow(p: PathSpec, n: int):
         return _Added()
 
     stream, _ = await tail_generic(
         _paths("/d/log"),
         [],
-        _follow_opts(n="1"),
+        _follow_opts(n="1", v=True),
         fs.stat,
         fs.read,
         fs.read_range,
         last_lines,
         follow,
     )
-    assert await anext(stream) == b"c\n"
+    assert await anext(stream) == b"==> /d/log <==\n"
     await close_quietly(stream)
     assert closed == [True]
 
@@ -1003,7 +1007,7 @@ async def test_a_polled_follow_reads_its_first_print_whole():
     async def last_lines(p: PathSpec, n: int) -> bytes:
         raise AssertionError("a polled follow asked for the last lines")
 
-    async def follow(p: PathSpec) -> None:
+    async def follow(p: PathSpec, n: int) -> None:
         return None
 
     stream, _ = await tail_generic(

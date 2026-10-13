@@ -149,8 +149,18 @@ export async function lastLines(
   const scope = detectScope(path)
   if (scope.kind !== 'documents') return null
   await entityGuard(accessor, scope, path.virtual)
-  const database = scope.slots.database ?? ''
-  const name = scope.slots.name ?? ''
+  return lastLinesOf(accessor, path, scope.slots.database ?? '', scope.slots.name ?? '', n)
+}
+
+// The last `n` documents rendered as lines, past the guard. Mirrors Python's
+// `_last_lines_of`.
+async function lastLinesOf(
+  accessor: MongoDBAccessor,
+  path: PathSpec,
+  database: string,
+  name: string,
+  n: number,
+): Promise<Uint8Array> {
   const cap = accessor.config.maxDocLimit
   if (n > cap && (await countDocuments(accessor, database, name)) > cap) throw efbig(path)
   const docs = await findDocuments(
@@ -184,36 +194,79 @@ export async function lineCount(
 }
 
 /**
- * The documents inserted into a collection from now on, one documents.jsonl
- * line each, from a change stream. Null for a view, which has no change
- * stream, and for any other file. "Now" is the cluster's operation time
- * when this returns: the stream opens when first read, after tail prints the
- * last lines, and starts from that time, so nothing inserted in between is
- * lost. Mirrors `follow` in `mirage/core/mongodb/stream.py`.
+ * The last `n` documents of a collection, then each one inserted after them,
+ * one documents.jsonl line each. Null for a view, which has no change stream,
+ * and for any other file. The change stream starts at the cluster's operation
+ * time from before the last documents are read, so nothing inserted in
+ * between is lost, and a document that both print is skipped the second time.
+ * Mirrors `follow` in `mirage/core/mongodb/stream.py`.
  */
 export async function follow(
   accessor: MongoDBAccessor,
   path: PathSpec,
+  n: number,
   _index?: IndexCacheStore,
-): Promise<AsyncIterable<Uint8Array> | null> {
+): Promise<AsyncIterableIterator<Uint8Array> | null> {
   const scope = detectScope(path)
   if (scope.kind !== 'documents' || entityKind(scope) !== EntityKind.COLLECTION) return null
   await entityGuard(accessor, scope, path.virtual)
   const database = scope.slots.database ?? ''
+  const name = scope.slots.name ?? ''
   const after = await operationTime(accessor, database)
-  return inserted(accessor, database, scope.slots.name ?? '', after)
+  const first = n > 0 ? await lastLinesOf(accessor, path, database, name, n) : new Uint8Array()
+  return followed(accessor, database, name, after, first)
 }
 
-// Each document inserted into the collection, rendered as a line. Mirrors
-// `_inserted` in `mirage/core/mongodb/stream.py`.
-async function* inserted(
+// `first`, then each document inserted after `after` that it does not already
+// hold, rendered as a line. An iterator rather than a generator: a generator
+// queues `return` behind a pull waiting for the next insert, so an idle
+// `tail -f` could never close its change stream. Mirrors `_followed` in
+// `mirage/core/mongodb/stream.py`.
+function followed(
   accessor: MongoDBAccessor,
   database: string,
   name: string,
   after: unknown,
+  first: Uint8Array,
 ): AsyncIterableIterator<Uint8Array> {
   const elide = elisionPaths(accessor, database, name)
-  for await (const doc of iterInserts(accessor, database, name, after)) {
-    yield encodeLine(elide.size > 0 ? applyElision(doc, elide) : doc)
+  const printed = new Set(
+    new TextDecoder()
+      .decode(first)
+      .split('\n')
+      .slice(0, -1)
+      .map((line) => `${line}\n`),
+  )
+  let pending: Uint8Array | null = first.byteLength > 0 ? first : null
+  let inserts: AsyncIterableIterator<Record<string, unknown>> | null = null
+  let closed = false
+  const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
+  return {
+    async next(): Promise<IteratorResult<Uint8Array>> {
+      if (pending !== null) {
+        const value = pending
+        pending = null
+        return { value, done: false }
+      }
+      if (closed) return done
+      inserts ??= iterInserts(accessor, database, name, after)
+      for (;;) {
+        const step = await inserts.next()
+        if (step.done === true) return done
+        const doc = elide.size > 0 ? applyElision(step.value, elide) : step.value
+        const line = `${stringifyDoc(doc)}\n`
+        if (printed.delete(line)) continue
+        return { value: new TextEncoder().encode(line), done: false }
+      }
+    },
+    async return(): Promise<IteratorResult<Uint8Array>> {
+      closed = true
+      pending = null
+      await inserts?.return?.()
+      return done
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
   }
 }

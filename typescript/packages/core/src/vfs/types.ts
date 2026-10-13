@@ -252,10 +252,11 @@ export type ReadTreeOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<Map<string, FileStat> | null>
 
-/** The lines added to `path` from now on; null when the file is to be polled. */
+/** The last `n` lines of `path`, then the lines added to it; null when the file is to be polled. */
 export type FollowOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
+  n: number,
   index?: IndexCacheStore,
 ) => Promise<AsyncIterable<Uint8Array> | null>
 

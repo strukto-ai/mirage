@@ -166,25 +166,63 @@ export class MongoDBStore implements MongoDriver {
     return reply.operationTime ?? null
   }
 
-  async *iterInserts<T = Record<string, unknown>>(
+  /**
+   * Each inserted document, from a change stream. An iterator rather than a
+   * generator, so `return` closes the stream at once, ending a pull that waits
+   * for the next insert, where a generator would queue behind that pull.
+   */
+  iterInserts<T = Record<string, unknown>>(
     database: string,
     collection: string,
     after: unknown = null,
   ): AsyncIterableIterator<T> {
-    const c = await this._client()
-    const match: Record<string, unknown> = { operationType: 'insert' }
-    if (after !== null) match.clusterTime = { $gt: after }
-    const stream = c
-      .db(database)
-      .collection(collection)
-      .watch([{ $match: match }], after === null ? {} : { startAtOperationTime: after })
-    try {
-      for await (const change of stream as AsyncIterableIterator<Record<string, unknown>>) {
-        const doc = change.fullDocument
-        if (doc !== undefined && doc !== null) yield doc as T
+    type Stream = ReturnType<MongoCollectionLike['watch']>
+    let stream: Stream | null = null
+    let closed = false
+    // `return` can close the stream while a pull awaits it.
+    const isClosed = (): boolean => closed
+    const done: IteratorResult<T> = { value: undefined, done: true }
+    const open = async (): Promise<Stream | null> => {
+      const c = await this._client()
+      const match: Record<string, unknown> = { operationType: 'insert' }
+      if (after !== null) match.clusterTime = { $gt: after }
+      const opened = c
+        .db(database)
+        .collection(collection)
+        .watch([{ $match: match }], after === null ? {} : { startAtOperationTime: after })
+      if (closed) {
+        await opened.close()
+        return null
       }
-    } finally {
-      await stream.close()
+      stream = opened
+      return opened
+    }
+    return {
+      async next(): Promise<IteratorResult<T>> {
+        if (closed) return done
+        const current = stream ?? (await open())
+        if (current === null) return done
+        for (;;) {
+          let change: IteratorResult<Record<string, unknown>>
+          try {
+            change = await current.next()
+          } catch (err) {
+            if (isClosed()) return done
+            throw err
+          }
+          if (change.done === true) return done
+          const doc = change.value.fullDocument
+          if (doc !== undefined && doc !== null) return { value: doc as T, done: false }
+        }
+      },
+      async return(): Promise<IteratorResult<T>> {
+        closed = true
+        await stream?.close()
+        return done
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
     }
   }
 

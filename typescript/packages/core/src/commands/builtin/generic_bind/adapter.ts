@@ -297,8 +297,8 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       : {}),
     ...(has('follow')
       ? {
-          follow: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-            vfs.follow(path, index),
+          follow: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
+            vfs.follow(path, n, index),
           ),
         }
       : {}),
@@ -449,8 +449,8 @@ const DISPATCHED_SLOTS = {
       (await dispatchedCall(dispatch, 'line_count', path)) as number | null,
   follow:
     (dispatch: DispatchFn): CommandIO['follow'] =>
-    async (_accessor, path) =>
-      (await dispatchedCall(dispatch, 'follow', path)) as AsyncIterable<Uint8Array> | null,
+    async (_accessor, path, n) =>
+      (await dispatchedCall(dispatch, 'follow', path, [n])) as AsyncIterable<Uint8Array> | null,
   readTree:
     (dispatch: DispatchFn): CommandIO['readTree'] =>
     async (_accessor, path) =>

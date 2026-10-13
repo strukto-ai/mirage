@@ -206,6 +206,8 @@ describe.skipIf(skip)('core/redis ops', () => {
     ])
     for (const [rel, st] of found ?? []) expect(st).toEqual(await stat(acc, spec(`/d/${rel}`)))
     expect(await tree(acc, spec('/d/a'))).toBeNull()
+    await store.setFile('/d/missing/b', ENC.encode('b'))
+    expect(await tree(acc, spec('/d'))).toBeNull()
   })
 
   it('readdir returns mount-prefixed entries', async () => {

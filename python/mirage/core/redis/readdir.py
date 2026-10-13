@@ -89,7 +89,9 @@ async def tree(
 ) -> dict[str, FileStat] | None:
     """Every key under a directory from one scan, each as ``stat``
     answers it, fetched in one pipeline; None when ``path`` is no
-    directory, so the walk's readdir reports it.
+    directory, or when a key's parent is none (a file another client
+    left without its folder), so the walk's readdir and stat report
+    what is there.
 
     Args:
         accessor (RedisAccessor): the mount's store.
@@ -105,6 +107,8 @@ async def tree(
     keys = [(key, False) for key in await store.list_files(base)]
     keys += [(key, True) for key in sorted(dirs) if key.startswith(base)]
     keys = [(key, is_dir) for key, is_dir in keys if key != p]
+    if any((key.rsplit("/", 1)[0] or "/") not in dirs for key, _ in keys):
+        return None
     stats = await key_stats(store, keys)
     return {
         key[len(base) :]: st

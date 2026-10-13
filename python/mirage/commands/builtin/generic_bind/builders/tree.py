@@ -36,12 +36,18 @@ async def tree(
     if not ops.is_mounted(accessor):
         raise ValueError("tree: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, opts.index),
-        partial(ops.readdir, accessor),
-        partial(ops.stat, accessor),
+    readdir = partial(ops.readdir, accessor)
+    stat = partial(ops.stat, accessor)
+    return await tree_generic(
+        resolved,
+        list(texts),
+        opts,
+        readdir,
+        stat,
+        unbounded=tree_walk(
+            bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+        ),
     )
-    return await tree_generic(resolved, list(texts), opts, readdir, stat)
 
 
 BUILDER = GenericCommand("tree", tree)

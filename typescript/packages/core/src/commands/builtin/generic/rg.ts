@@ -873,7 +873,8 @@ function usage(message: string, exitCode = 2): CommandFnResult {
  * Run ripgrep-style search over backend paths or stdin. Interprets the flags
  * itself (Python `rg` parity), so backend wrappers only wire paths, texts,
  * the bag, and backend I/O. An empty `paths` searches stdin as an implicit
- * `-`.
+ * `-`. `unbounded` is the walk to take when no `--max-depth` bounds it (one
+ * the mount answers whole), else `readdir` and `stat`.
  */
 export async function rgGeneric(
   paths: PathSpec[],
@@ -882,6 +883,7 @@ export async function rgGeneric(
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
+  unbounded?: [Readdir, Stat],
 ): Promise<CommandFnResult> {
   // Every `-` operand reads stdin through one cursor, as grep's do. With no
   // operand typed, the implicit one below is stdin's sole reader, so a search
@@ -889,6 +891,7 @@ export async function rgGeneric(
   stream = stdinStream(stream, opts.stdin, paths.length === 0)
   const fl = new FlagView(opts.flags, specOf('rg'))
   const f = parseFlags(fl)
+  if (unbounded !== undefined && f.maxDepth === null) [readdir, stat] = unbounded
   const types = new FileTypes(f.typeChanges, f.typeSelections)
   if (f.typeList) return [formatRecords(typeListing(types.definitions)), new IOResult()]
   const notes: string[] = []

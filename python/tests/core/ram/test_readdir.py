@@ -16,7 +16,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.ram.readdir import readdir
+from mirage.core.ram.readdir import readdir, tree
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -199,3 +199,16 @@ async def test_readdir_orphan_below_a_missing_dir_is_not_found(index):
                 ),
                 index,
             )
+
+
+@pytest.mark.asyncio
+async def test_tree_answers_each_key_below_the_directory(accessor):
+    found = await tree(accessor, PathSpec.from_str_path("/sub"))
+    assert found is not None
+    assert sorted(found) == ["c.txt", "d.txt", "deep", "deep/e.txt"]
+
+
+@pytest.mark.asyncio
+async def test_tree_declines_a_file_whose_folder_is_missing(accessor):
+    accessor.store.files["/missing/a.txt"] = b"x"
+    assert await tree(accessor, PathSpec.from_str_path("/")) is None

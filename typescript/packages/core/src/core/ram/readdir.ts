@@ -85,7 +85,9 @@ export async function readdir(
 
 /**
  * Every key under a directory, each as `stat` answers it; null when `path` is
- * no directory, so the walk's readdir reports it. Mirrors Python's `tree`.
+ * no directory, or when a key's parent is none (a file restored without its
+ * folder), so the walk's readdir and stat report what is there. Mirrors
+ * Python's `tree`.
  */
 export function tree(
   accessor: RAMAccessor,
@@ -96,9 +98,14 @@ export function tree(
   const p = norm(path.mountPath)
   if (!store.dirs.has(p)) return Promise.resolve(null)
   const base = rstripSlash(p) + '/'
+  const keys = [...store.files.keys(), ...store.dirs].filter(
+    (key) => key.startsWith(base) && key !== p,
+  )
+  if (keys.some((key) => !store.dirs.has(key.slice(0, key.lastIndexOf('/')) || '/'))) {
+    return Promise.resolve(null)
+  }
   const found = new Map<string, FileStat>()
-  for (const key of [...store.files.keys(), ...store.dirs]) {
-    if (!key.startsWith(base) || key === p) continue
+  for (const key of keys) {
     const entry = keyStat(store, key)
     if (entry !== null) found.set(key.slice(base.length), entry)
   }

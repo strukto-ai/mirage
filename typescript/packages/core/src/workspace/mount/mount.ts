@@ -743,7 +743,7 @@ export class MountEntry {
       case 'line_count':
         return [(scope, _args, kw) => vfs.lineCount(scope, kw.index)]
       case 'follow':
-        return [(scope, _args, kw) => vfs.follow(scope, kw.index)]
+        return [(scope, args, kw) => vfs.follow(scope, args[0] as number, kw.index)]
       case 'read_tree':
         return [(scope, _args, kw) => vfs.readTree(scope, kw.index)]
       case 'search':

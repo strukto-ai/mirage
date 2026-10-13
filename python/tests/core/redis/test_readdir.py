@@ -217,3 +217,9 @@ async def test_tree_answers_each_entry_as_stat_does(accessor):
 @pytest.mark.asyncio
 async def test_tree_of_no_directory_is_none(accessor):
     assert await tree(accessor, PathSpec.from_str_path("/a.txt")) is None
+
+
+@pytest.mark.asyncio
+async def test_tree_declines_a_file_whose_folder_is_missing(accessor):
+    await accessor.store.set_file("/missing/a.txt", b"x")
+    assert await tree(accessor, PathSpec.from_str_path("/")) is None

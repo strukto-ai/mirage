@@ -69,7 +69,7 @@ describe('mongodb document streams', () => {
   it('refuses a collection outside databases before querying it', async () => {
     const secret = docs('secret')
     await expect(drain(readStream(accessor, secret))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(follow(accessor, secret)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(follow(accessor, secret, 5)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(lastLines(accessor, secret, 5)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(lineCount(accessor, secret)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(queried).toEqual([])
@@ -128,9 +128,54 @@ describe('mongodb read stand-ins', () => {
   it('counts and follows a collection', async () => {
     const [accessor] = accessorOver([], 7)
     expect(await lineCount(accessor, docs('app'))).toBe(7)
-    const added = await follow(accessor, docs('app'))
+    const added = await follow(accessor, docs('app'), 0)
     expect(added).not.toBeNull()
     if (added !== null) expect(await drain(added)).toBe('{"_id": 7, "name": "gus"}\n')
+  })
+
+  it('follows from the last documents, printing each once', async () => {
+    const [accessor] = accessorOver(
+      [
+        { _id: 7, name: 'gus' },
+        { _id: 6, name: 'fay' },
+      ],
+      7,
+    )
+    const added = await follow(accessor, docs('app'), 2)
+    expect(added).not.toBeNull()
+    if (added !== null) {
+      expect(await drain(added)).toBe('{"_id": 6, "name": "fay"}\n{"_id": 7, "name": "gus"}\n')
+    }
+  })
+
+  it('ends a wait for the next insert when closed', async () => {
+    let wake = (): void => undefined
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
+      iterInserts: <T>(): AsyncIterableIterator<T> => ({
+        next: () =>
+          new Promise((resolve) => {
+            wake = () => {
+              resolve({ value: undefined, done: true })
+            }
+          }),
+        return: () => {
+          wake()
+          return Promise.resolve({ value: undefined, done: true })
+        },
+        [Symbol.asyncIterator]() {
+          return this
+        },
+      }),
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const added = await follow(accessor, docs('app'), 0)
+    if (added === null) throw new Error('expected a follow')
+    const pulling = added.next()
+    await Promise.resolve()
+    await added.return?.()
+    expect((await pulling).done).toBe(true)
   })
 
   it('follows from the operation time it was asked at', async () => {
@@ -150,7 +195,7 @@ describe('mongodb read stand-ins', () => {
       },
     })
     const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
-    const added = await follow(accessor, docs('app'))
+    const added = await follow(accessor, docs('app'), 0)
     expect(calls).toEqual(['ping'])
     expect(added).not.toBeNull()
     if (added !== null) expect(await drain(added)).toBe('{"_id": 1}\n')
@@ -168,6 +213,6 @@ describe('mongodb read stand-ins', () => {
     })
     expect(await lastLines(accessor, schema, 2)).toBeNull()
     expect(await lineCount(accessor, schema)).toBeNull()
-    expect(await follow(accessor, docs('app', 'views', 'recent'))).toBeNull()
+    expect(await follow(accessor, docs('app', 'views', 'recent'), 5)).toBeNull()
   })
 })

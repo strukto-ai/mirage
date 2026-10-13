@@ -58,15 +58,18 @@ by entry, so each entry meets the checks its own `readdir` and `stat` meet.
 
 | Command | Asks `read_tree` for |
 | --- | --- |
-| `find` | each start point that is a directory |
+| `find` | each start point that is a directory, unless `-maxdepth` bounds the walk |
 | `du` | each operand that is a directory |
 | `ls -R` | each directory operand; `ls` without `-R` reads one directory |
-| `tree` | each operand |
-| `grep -r`, `-R` or `-d recurse`, `rg` | each directory the search walks |
+| `tree` | each operand, unless `-L` bounds the walk |
+| `grep -r`, `-R` or `-d recurse` | each directory the search walks |
+| `rg` | each directory the search walks, unless `--max-depth` bounds it |
 | `cp -r` | each source directory |
 
-Each command asks once per directory it starts a walk at. A mount without
-`read_tree`, or a call that answers `None`, walks as before. `du` caps a walk
+Each command asks once per directory it starts a walk at. A walk bounded to
+a few levels reads those levels with `readdir`, since the whole tree can cost
+far more. A mount without `read_tree`, or a call that answers `None`, walks as
+before. `du` caps a walk
 at the mount's `max_du_entries`, since each directory costs a request; the
 entries of a `read_tree` answer cost none and do not count toward the cap.
 

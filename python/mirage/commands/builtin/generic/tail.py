@@ -483,8 +483,8 @@ async def _follow(
     io: IOResult,
     unread: frozenset[str] = frozenset(),
     only_stdin: bool = False,
-    read_last: Callable[..., Any] | None = None,
-    follow: Callable[[PathSpec], Awaitable[AsyncIterator[bytes] | None]]
+    follow_lines: int | None = None,
+    follow: Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes] | None]]
     | None = None,
 ) -> AsyncIterator[bytes]:
     """Print each operand's tail, then keep printing what it gains.
@@ -524,10 +524,11 @@ async def _follow(
     reading it whole every interval and measuring that: one read per
     poll, rather than a follow that never prints.
 
-    One file followed by descriptor is asked of the mount's ``follow``
-    first: a mount that is told about new lines (a change stream) hands
-    them over as they land, so nothing is polled, and its first print
-    can take the last lines alone since no position is kept.
+    One file followed by descriptor, under a count of lines from the
+    end, is asked of the mount's ``follow`` first: a mount that is told
+    about new lines (a change stream) hands over the last lines and then
+    each new one as it lands, so nothing is polled and the two meet at
+    one point.
 
     State is per operand, not per path: ``tail -f f f`` prints what
     ``f`` gains twice, under a header each time, as GNU does.
@@ -553,11 +554,11 @@ async def _follow(
         unread (frozenset[str]): operands that opened but do not read (a
             directory): each prints its header, and none is followed.
         only_stdin (bool): every operand is standard input.
-        read_last (Callable[..., Any] | None): ``read`` answered by the
-            mount's ``last_lines``, for a first print that keeps no
-            position; None reads whole.
-        follow (Callable[[PathSpec], Awaitable[AsyncIterator[bytes] |
-            None]] | None): the mount's ``follow``; None, or an answer
+        follow_lines (int | None): the count of last lines ``follow`` is
+            asked for; None when the count is not lines from the end, and
+            the file is polled.
+        follow (Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes]
+            | None]] | None): the mount's ``follow``; None, or an answer
             of None, polls.
     """
     positions: dict[int, int] = {}
@@ -582,25 +583,28 @@ async def _follow(
             try:
                 if (
                     follow is not None
+                    and follow_lines is not None
                     and len(paths) == 1
                     and not pending
                     and not flags.follow_name
                     and not is_stdin(p)
                 ):
-                    added = await follow(p)
-                first = (
-                    read if added is None or read_last is None else read_last
+                    added = await follow(p, follow_lines)
+                # A follow's stream holds the first print too.
+                chunks = (
+                    []
+                    if added is not None
+                    else [
+                        chunk
+                        async for chunk in tail(
+                            _counted(read(p), box),
+                            n=counts.lines,
+                            c=counts.byte_count,
+                            from_line=counts.from_line,
+                            from_byte=counts.from_byte,
+                        )
+                    ]
                 )
-                chunks = [
-                    chunk
-                    async for chunk in tail(
-                        _counted(first(p), box),
-                        n=counts.lines,
-                        c=counts.byte_count,
-                        from_line=counts.from_line,
-                        from_byte=counts.from_byte,
-                    )
-                ]
             except FS_ERRORS as exc:
                 if added is not None:
                     await close_quietly(added)
@@ -778,7 +782,7 @@ async def tail_generic(
     read_range: ReadRange | None = None,
     last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
     | None = None,
-    follow: Callable[[PathSpec], Awaitable[AsyncIterator[bytes] | None]]
+    follow: Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes] | None]]
     | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tail over resolved operands, GNU semantics; mirrors tailGeneric.
@@ -805,9 +809,9 @@ async def tail_generic(
             | None): the mount's ``last_lines`` called as
             ``last_lines(path, n)``; None, or an answer of None, reads
             the file.
-        follow (Callable[[PathSpec], Awaitable[AsyncIterator[bytes] |
-            None]] | None): the mount's ``follow`` called as
-            ``follow(path)``; None, or an answer of None, polls.
+        follow (Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes]
+            | None]] | None): the mount's ``follow`` called as
+            ``follow(path, n)``; None, or an answer of None, polls.
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)
@@ -821,13 +825,14 @@ async def tail_generic(
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     counts = parsed.counts
     n = counts.lines if counts.lines is not None else 10
-    read_last = (
-        _read_last(stream, last_lines, n)
-        if last_lines is not None
-        and counts.byte_count is None
+    from_end = (
+        counts.byte_count is None
         and counts.from_line is None
         and counts.from_byte is None
-        and n > 0
+    )
+    read_last = (
+        _read_last(stream, last_lines, n)
+        if last_lines is not None and from_end and n > 0
         else None
     )
     if (
@@ -882,7 +887,7 @@ async def tail_generic(
                 io=io,
                 unread=unread,
                 only_stdin=all(is_stdin(p) for p in paths),
-                read_last=read_last,
+                follow_lines=n if from_end else None,
                 follow=follow,
             ), io
         if not opened:

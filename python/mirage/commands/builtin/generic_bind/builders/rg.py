@@ -38,11 +38,8 @@ async def rg(
     read_bytes, read_stream = await search_reads(
         ops, "rg", accessor, paths, texts, opts
     )
-    readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, opts.index),
-        bound_op(ops.readdir, accessor, opts.index),
-        bound_op(ops.stat, accessor, opts.index),
-    )
+    readdir = bound_op(ops.readdir, accessor, opts.index)
+    stat = bound_op(ops.stat, accessor, opts.index)
     return await rg_generic(
         paths,
         texts,
@@ -52,6 +49,9 @@ async def rg(
         read_bytes=read_bytes,
         read_stream=read_stream,
         stdin=opts.stdin,
+        unbounded=tree_walk(
+            bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+        ),
     )
 
 

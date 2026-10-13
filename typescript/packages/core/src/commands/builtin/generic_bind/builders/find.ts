@@ -59,8 +59,10 @@ export function findWalk<A extends Accessor>(
     texts,
     opts,
     (root, options) => {
+      // A walk -maxdepth bounds reads its own levels, not the whole tree.
+      const whole = readTree !== undefined && (options.maxDepth ?? null) === null
       const [readdir, stat] = treeWalk<string[], FileStat>(
-        readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
+        whole ? (p) => readTree(accessor, p, idx) : undefined,
         (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
         (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
       )

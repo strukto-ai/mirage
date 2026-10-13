@@ -1173,6 +1173,11 @@ async def rg_generic(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     stdin: ByteSource | None = None,
+    unbounded: tuple[
+        Callable[..., Awaitable[list[str]]],
+        Callable[..., Awaitable[FileStat]],
+    ]
+    | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run ripgrep-style fallback search over backend paths or stdin.
 
@@ -1199,6 +1204,9 @@ async def rg_generic(
             stream reader.
         stdin (ByteSource | None): the invocation's input, which a ``-``
             operand reads, as does a line with no operand at all.
+        unbounded (tuple[Callable, Callable] | None): the walk to take
+            when no ``--max-depth`` bounds it (one the mount answers
+            whole), else ``readdir`` and ``stat``.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
@@ -1213,6 +1221,8 @@ async def rg_generic(
     )
     fl = FlagView(opts.flags, spec=SPECS["rg"])
     f = parse_flags(fl)
+    if unbounded is not None and f.max_depth is None:
+        readdir, stat = unbounded
     types = FileTypes(f.type_changes, f.type_selections)
     if f.type_list:
         return format_records(type_listing(types.definitions)), IOResult()

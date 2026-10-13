@@ -397,8 +397,23 @@ async def tree_generic(
     opts: CommandOpts,
     readdir: ReaddirFn,
     stat: Stat,
+    unbounded: tuple[ReaddirFn, Stat] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Run tree over resolved operands.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        texts (list[str]): the raw words.
+        opts (CommandOpts): the parsed flags.
+        readdir (ReaddirFn): the walk's readdir.
+        stat (Stat): the walk's stat.
+        unbounded (tuple[ReaddirFn, Stat] | None): the walk to take when
+            no ``-L`` bounds it (one the mount answers whole), else
+            ``readdir`` and ``stat``.
+    """
     parsed = parse_flags(opts.flags)
+    if unbounded is not None and parsed.max_depth is None:
+        readdir, stat = unbounded
     return await tree(
         paths,
         readdir=readdir,

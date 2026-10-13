@@ -35,7 +35,7 @@ const tail: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     (p) => ops.stat(accessor, p, idx),
     readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
     boundUncached(lastLines && ((p: PathSpec, n: number) => lastLines(accessor, p, n, idx))),
-    follow && ((p: PathSpec) => follow(accessor, p, idx)),
+    follow && ((p: PathSpec, n: number) => follow(accessor, p, n, idx)),
   )
 }
 

@@ -895,6 +895,11 @@ async def find_walk_generic(
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
+    unbounded: tuple[
+        Callable[..., Awaitable[list[str]]],
+        Callable[..., Awaitable[FileStat]],
+    ]
+    | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run find by walking readdir/stat; the no-native-op twin.
 
@@ -909,6 +914,9 @@ async def find_walk_generic(
             facts (stat_path, links) from the dispatcher.
         readdir (Callable): Bound readdir called as ``readdir(p, index)``.
         stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
+        unbounded (tuple[Callable, Callable] | None): the walk to take
+            when no ``-maxdepth`` bounds it (one the mount answers whole),
+            else ``readdir`` and ``stat``.
     """
     parsed = parse_flags(opts.flags)
     flags = FlagView(opts.flags, spec=SPECS["find"])
@@ -931,6 +939,8 @@ async def find_walk_generic(
         mindepth=parsed.mindepth,
         empty=parsed.empty,
     )
+    if unbounded is not None and args.maxdepth is None:
+        readdir, stat = unbounded
     matched_runs: list[list[PathSpec]] = []
     io = IOResult(matched_runs=matched_runs)
 

@@ -387,13 +387,14 @@ class ReadTreeOp(Protocol):
 
 
 class FollowOp(Protocol):
-    """The lines added to ``path`` from now on; None when the file is to
-    be polled."""
+    """The last ``n`` lines of ``path``, then the lines added to it; None
+    when the file is to be polled."""
 
     def __call__(
         self,
         accessor: Any,
         path: PathSpec,
+        n: int,
         /,
         index: IndexCacheStore = ...,
     ) -> Awaitable[AsyncIterator[bytes] | None]: ...
