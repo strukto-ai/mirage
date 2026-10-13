@@ -1226,9 +1226,17 @@ export class Dispatcher {
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
         // another.
-        const keys = [...new Set([p.virtual, ...(dst !== null ? [dst.virtual] : [])])]
-          .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
-          .sort(compareCodePoints)
+        // A copy into or out of a live pipe holds neither name: it waits on the
+        // pipe, whose other end may need the very names it would hold (`cp f
+        // >(cat > f)`), and the pipe orders its own bytes.
+        const meetsPipe =
+          dst !== null &&
+          [scope, keyed(dst) as PathSpec].some((path) => mount.livePipe(path, this.access) !== null)
+        const keys = meetsPipe
+          ? []
+          : [...new Set([p.virtual, ...(dst !== null ? [dst.virtual] : [])])]
+              .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
+              .sort(compareCodePoints)
         let mine: OpRecord[] = []
         const own = (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> =>
           commandRecords((records) => {

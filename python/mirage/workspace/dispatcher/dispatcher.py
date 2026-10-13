@@ -1417,6 +1417,12 @@ class Dispatcher:
         names = {call.path.virtual}
         if isinstance(kwargs.get("dst"), PathSpec):
             names.add(kwargs["dst"].virtual)
+            if any(mount.live_pipe(name) is not None for name in names):
+                # A copy into or out of a live pipe holds neither name: it
+                # waits on the pipe, whose other end may need the very names
+                # it would hold (`cp f >(cat > f)`), and the pipe orders its
+                # own bytes.
+                names = set()
         prefix = mount.prefix.rstrip("/")
         keys = {f"{id(mount.vfs)}:{mount_key(name, prefix)}" for name in names}
         async with AsyncExitStack() as held:

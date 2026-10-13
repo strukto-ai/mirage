@@ -29,9 +29,10 @@ export function readStream(
   accessor: RAMAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   const pipe = activePipe(accessor, norm(path.mountPath))
-  if (pipe !== null) return pipe.stream(path)
+  if (pipe !== null) return pipe.stream(path, signal)
   return deviceStream(accessor, path)
 }
 

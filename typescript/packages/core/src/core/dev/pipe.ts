@@ -16,6 +16,7 @@ import { BytePipe } from '../../io/pipe.ts'
 import type { PipeStream } from '../../io/types.ts'
 import { ebadf } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
+import { abortable } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 
 /**
@@ -28,12 +29,15 @@ import { concat } from '../../utils/bytes.ts'
  * weakly); no reader closes it, so a function can read one substitution
  * twice. Readers take turns, one chunk each, so concurrent readers split the
  * stream between them and a ranged read leaves the rest of its chunk to the
- * next reader. Mirrors Python's DevicePipe.
+ * next reader. A reader whose signal fires while it waits leaves the chunk it
+ * waited for to the next reader rather than ending the stream for every
+ * reader. Mirrors Python's DevicePipe.
  */
 export class DevicePipe {
   readonly pipe = new BytePipe()
   readonly readers = new Set<WeakRef<PipeStream>>()
   private source: AsyncIterator<Uint8Array> | undefined
+  private pull: Promise<IteratorResult<Uint8Array>> | undefined
   private pending: Uint8Array = new Uint8Array()
   private turn: Promise<unknown> = Promise.resolve()
 
@@ -57,18 +61,19 @@ export class DevicePipe {
     return concat(chunks)
   }
 
-  async *stream(path: PathSpec): AsyncGenerator<Uint8Array> {
+  /** `signal` is the reader's own: once it fires, the reader takes nothing more. */
+  async *stream(path: PathSpec, signal?: AbortSignal): AsyncGenerator<Uint8Array> {
     if (!this.readable) throw ebadf(path)
     for (;;) {
-      const chunk = await this.take(null)
+      const chunk = await this.take(null, signal)
       if (chunk.byteLength === 0) return
       yield chunk
     }
   }
 
   /** One reader's turn: the next bytes of the stream, at most `size`, empty at its end. */
-  private take(size: number | null): Promise<Uint8Array> {
-    const taken = this.turn.then(() => this.next(size))
+  private take(size: number | null, signal?: AbortSignal): Promise<Uint8Array> {
+    const taken = this.turn.then(() => this.next(size, signal))
     this.turn = taken.then(
       () => undefined,
       () => undefined,
@@ -76,10 +81,18 @@ export class DevicePipe {
     return taken
   }
 
-  private async next(size: number | null): Promise<Uint8Array> {
+  private async next(size: number | null, signal?: AbortSignal): Promise<Uint8Array> {
+    signal?.throwIfAborted()
     if (this.pending.byteLength === 0) {
       this.source ??= this.pipe.stream()[Symbol.asyncIterator]()
-      const step = await this.source.next()
+      // A pull outlives a reader that gives up while it waits: what it
+      // brings is left for the next reader, as Python's shielded pull is.
+      const pull = (this.pull ??= this.source.next())
+      const step = await abortable(pull, signal).catch((error: unknown) => {
+        if (signal?.aborted !== true) this.pull = undefined
+        throw error
+      })
+      this.pull = undefined
       if (step.done === true) return new Uint8Array()
       this.pending = step.value
     }

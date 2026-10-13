@@ -81,6 +81,19 @@ it('abandoned reader keeps the read end open', async () => {
   expect(DEC.decode(await endpoint.read(PATH))).toBe('second')
 })
 
+it('cancelled reader leaves its chunk to the next reader', async () => {
+  const endpoint = new DevicePipe(true)
+  const abort = new AbortController()
+  const waiting = endpoint.stream(PATH, abort.signal).next()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  abort.abort()
+  await expect(waiting).rejects.toThrow()
+  await endpoint.pipe.write(ENC.encode('data'))
+  endpoint.pipe.end()
+  expect(endpoint.pipe.closedReader).toBe(false)
+  expect(DEC.decode(await endpoint.read(PATH))).toBe('data')
+})
+
 it.each([
   ['f() { cat "$1" & cat "$1"; wait; }; f <(sleep 0.2; printf data)', 'data'],
   ['f() { head -c 1 "$1"; echo; cat "$1"; }; f <(printf a; sleep 0.2; printf rest)', 'a\nrest'],
