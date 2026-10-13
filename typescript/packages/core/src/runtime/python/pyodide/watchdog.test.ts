@@ -59,9 +59,46 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
     }
   })
 
-  it('refuses a cap that is not a size', () => {
-    expect(() => new PyodideRuntime({ config: { maxMemory: 'lots' } })).toThrow(
-      /max_memory must be a size/,
+  it('fails a run that passed the cap between two reads', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        runtimes: [new PyodideRuntime({ config: { maxMemory: '128M' } }), 'workspace'],
+      },
     )
+    try {
+      const fast = await ws.shell('python3 -c "x = bytearray(512 * 1024 * 1024)"')
+      expect(fast.exitCode).toBe(1)
+      expect(DEC.decode(fast.stderr)).toContain('MemoryError: the run passed max_memory (128M)')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('caps a run outside a workspace too', async () => {
+    const rt = new PyodideRuntime({ config: { maxMemory: 64 * 1024 * 1024 } })
+    try {
+      const run = (code: string) => rt.run({ code, args: [], env: {}, stdin: null })
+      const big = await run('x = bytearray(200 * 1024 * 1024)')
+      expect(big.exitCode).toBe(1)
+      expect(DEC.decode(big.stderr ?? new Uint8Array())).toContain(
+        `MemoryError: the run passed max_memory (${String(64 * 1024 * 1024)})`,
+      )
+      const small = await run('print(1 + 1)')
+      expect([small.exitCode, DEC.decode(small.stdout)]).toEqual([0, '2\n'])
+      await expect(rt.eval('bytearray(200 * 1024 * 1024)')).rejects.toThrow(/MemoryError/)
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it('refuses a cap that is not a size', () => {
+    for (const bad of ['lots', '1.5G', '-5M', -1, 1.5]) {
+      expect(() => new PyodideRuntime({ config: { maxMemory: bad } }), String(bad)).toThrow(
+        /max_memory must be a size/,
+      )
+    }
   })
 })

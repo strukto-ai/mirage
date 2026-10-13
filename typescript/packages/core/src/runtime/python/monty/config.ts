@@ -17,9 +17,10 @@
  *
  * Args:
  *   maxMemory: the heap one run may use, spelled as sandlock spells its
- *     own (`10M`, `1G`); a run that needs more raises `MemoryError`.
+ *     own (`10M`, `1G`) or a count of bytes; a run that needs more raises
+ *     `MemoryError`.
  *     Absent or null for no cap.
  */
 export interface MontyConfig {
-  maxMemory?: string | null
+  maxMemory?: string | number | null
 }

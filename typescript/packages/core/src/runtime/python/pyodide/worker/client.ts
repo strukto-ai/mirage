@@ -175,7 +175,7 @@ export class PyodideWorkerClient {
       limit !== null && cap !== null && this.port.memory !== undefined
         ? watchMemory(this.port.memory, limit, () => {
             this.port.terminate()
-            this.fail(new PyodideMemoryError(cap))
+            this.fail(new PyodideMemoryError(String(cap)))
           })
         : null
     const cells = new Int32Array(this.interruptBuffer)

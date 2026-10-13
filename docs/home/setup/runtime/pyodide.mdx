@@ -94,7 +94,7 @@ fails. Put its pure-Python wheel on a mount and list it in `sys_path`.
 
 ## Memory
 
-`max_memory` caps the memory the worker may grow to:
+`max_memory` caps the memory one run may grow to:
 
 ```yaml
 runtimes:
@@ -103,10 +103,10 @@ runtimes:
       max_memory: 256M
 ```
 
-The worker starts at about 50M and its memory never shrinks. A run that
-passes the cap stops with `MemoryError`, and the next run starts a fresh
-worker. The cap holds on Node only: a browser cannot read a worker's
-memory. There is no cap by default.
+A run starts at about 50M. One that passes the cap fails with
+`MemoryError`, and the next run starts fresh. On Node the run is stopped
+as soon as it passes the cap; in a browser, which cannot read a worker's
+memory, it fails when it ends. There is no cap by default.
 
 ## What is wired
 

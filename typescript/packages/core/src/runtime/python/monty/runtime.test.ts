@@ -364,6 +364,7 @@ describe('MontyRuntime', () => {
       /max_memory must be a size/,
     )
     expect(() => new MontyRuntime({ config: { maxMemory: ' 10M ' } })).not.toThrow()
+    expect(() => new MontyRuntime({ config: { maxMemory: 1048576 } })).not.toThrow()
   })
 
   it('eval keeps state per session id', async () => {

@@ -241,6 +241,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private interrupter: PyodideInterrupter | null = null
   private interrupterTried = false
   private worker: Promise<PyodideWorkerClient | PyodideUnavailableError> | null = null
+  private readonly maxMemory: number | null
   private readonly syncFailures: string[] = []
   private syncSkipped = 0
 
@@ -254,7 +255,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const { maxConcurrency = 1 } = config
     if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)
       throw new Error('pyodide config: maxConcurrency must be a positive safe integer')
-    memoryLimit(config.maxMemory)
+    this.maxMemory = memoryLimit(config.maxMemory)
     this.concurrent = asyncContextIsolatesTasks && maxConcurrency > 1
     this.limiter = new ConcurrencyLimiter(asyncContextIsolatesTasks ? maxConcurrency : 1)
     this.reach = config.initModule === undefined ? 'workspace' : 'process'
@@ -283,7 +284,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.cwd }
     if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
-      return this.withFreshRuntime((runtime) => runtime.runOne(args, context))
+      return this.withFreshRuntime(async (runtime) =>
+        this.capped(runtime, await runtime.runOne(args, context)),
+      )
     }
     const scope =
       context?.scope ??
@@ -294,7 +297,11 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       ])
     return this.schedule(() =>
       this.withPermit(() =>
-        scope.run(() => this.withFreshRuntime((runtime) => runtime.runOne(args, context))),
+        scope.run(() =>
+          this.withFreshRuntime(async (runtime) =>
+            this.capped(runtime, await runtime.runOne(args, context)),
+          ),
+        ),
       ),
     )
   }
@@ -315,7 +322,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
       if (opts.session !== undefined)
         throw new EvalError('nested persistent evaluation is unsupported')
-      return this.withFreshRuntime((runtime) => runtime.evalOne(code, opts, context))
+      return this.withFreshRuntime(async (runtime) =>
+        this.cappedEval(runtime, await runtime.evalOne(code, opts, context)),
+      )
     }
     const scope =
       context?.scope ??
@@ -327,16 +336,35 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     return this.schedule(() => {
       if (opts.session === undefined)
         return this.withPermit(() =>
-          scope.run(() => this.withFreshRuntime((runtime) => runtime.evalOne(code, opts, context))),
+          scope.run(() =>
+            this.withFreshRuntime(async (runtime) =>
+              this.cappedEval(runtime, await runtime.evalOne(code, opts, context)),
+            ),
+          ),
         )
-      let runtime = this.sessions.get(opts.session)
+      const id = opts.session
+      let runtime = this.sessions.get(id)
       if (runtime === undefined) {
         runtime = this.createRuntime()
-        this.sessions.set(opts.session, runtime)
+        this.sessions.set(id, runtime)
       }
       const session = runtime
-      const task = (): Promise<EvalResult> =>
-        this.withPermit(() => scope.run(() => session.evalOne(code, opts, context)))
+      const task = async (): Promise<EvalResult> => {
+        const result = await this.withPermit(() =>
+          scope.run(() => session.evalOne(code, opts, context)),
+        )
+        const passed = this.passedCap(session)
+        if (passed === null) return result
+        // The console's interpreter keeps its heap, so the session starts over.
+        this.sessions.delete(id)
+        await session.close()
+        return {
+          ...result,
+          value: null,
+          stderr: new TextEncoder().encode(`${passed}\n`),
+          exitCode: 1,
+        }
+      }
       return this.concurrent ? session.enqueue(task) : task()
     })
   }
@@ -359,6 +387,34 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     } finally {
       release()
     }
+  }
+
+  /**
+   * The MemoryError for an interpreter whose heap is past `maxMemory`, null
+   * while it is within it. The heap never shrinks, so its size when a run
+   * ends is the most the run used, however fast it was. A run in the worker
+   * is checked there, and on Node the worker is also watched while it runs
+   * (`watchMemory`).
+   */
+  private passedCap(runtime: PyodideRuntime): string | null {
+    const heap = (runtime.pyodide?._module as { HEAP8?: Int8Array } | undefined)?.HEAP8
+    if (this.maxMemory === null || heap === undefined || heap.length <= this.maxMemory) return null
+    const cap = (this.config as PyodideConfig).maxMemory ?? this.maxMemory
+    return new PyodideMemoryError(String(cap)).message
+  }
+
+  /** A run's result, or a MemoryError when the run passed `maxMemory`. */
+  private capped(runtime: PyodideRuntime, result: RunResult): RunResult {
+    const passed = this.passedCap(runtime)
+    if (passed === null) return result
+    return { stdout: result.stdout, stderr: new TextEncoder().encode(`${passed}\n`), exitCode: 1 }
+  }
+
+  /** A one-shot evaluation's result; one that passed `maxMemory` rejects. */
+  private cappedEval(runtime: PyodideRuntime, result: EvalResult): EvalResult {
+    const passed = this.passedCap(runtime)
+    if (passed !== null) throw new EvalError(passed)
+    return result
   }
 
   private createRuntime(): PyodideRuntime {

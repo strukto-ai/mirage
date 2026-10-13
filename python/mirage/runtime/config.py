@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from dataclasses import dataclass, fields
 from typing import Any, TypeVar
 
@@ -20,25 +21,31 @@ from mirage.cache.file.utils import parse_limit
 T = TypeVar("T", bound="RuntimeConfig")
 
 
-def memory_limit(value: str | None) -> int | None:
+def memory_limit(value: str | int | None) -> int | None:
     """A runtime's ``max_memory`` in bytes, None for no cap.
 
-    Spelled as sandlock spells its own (``10M``, ``512M``, ``1G``).
+    Spelled as sandlock spells its own (``10M``, ``512M``, ``1G``), or a
+    count of bytes.
 
     Args:
-        value (str | None): the setting as configured.
+        value (str | int | None): the setting as configured.
 
     Raises:
         ValueError: the setting is not a size.
     """
     if value is None:
         return None
-    try:
-        return parse_limit(value)
-    except ValueError as exc:
+    if isinstance(value, bool) or not (
+        (isinstance(value, int) and value >= 0)
+        or (
+            isinstance(value, str)
+            and re.fullmatch(r"\d+([KMG]B?)?", value.strip(), re.IGNORECASE)
+        )
+    ):
         raise ValueError(
             f"max_memory must be a size like 10M or 1G, got {value!r}"
-        ) from exc
+        )
+    return parse_limit(value)
 
 
 @dataclass(frozen=True, slots=True)

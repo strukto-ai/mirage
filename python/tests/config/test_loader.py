@@ -348,6 +348,28 @@ route_policy: {script: route.py, runtime: monty}
     )
 
 
+def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
+    cfg = load_config(
+        {
+            "mounts": {"/data": {"vfs": "ram"}},
+            "runtimes": [
+                {"name": "monty", "config": {"max_memory": 1048576}},
+                {"name": "workspace", "config": {}},
+            ],
+        }
+    )
+    monty = cfg.to_workspace_kwargs()["runtimes"][0]
+    assert monty.config.max_memory == 1048576
+    cfg = load_config(
+        {
+            "mounts": {"/data": {"vfs": "ram"}},
+            "runtimes": [{"name": "monty", "config": {"max_memory": "lots"}}],
+        }
+    )
+    with pytest.raises(ValueError, match="max_memory must be a size"):
+        cfg.to_workspace_kwargs()
+
+
 @pytest.mark.asyncio
 async def test_js_script_path_stamps_the_language(tmp_path):
     (tmp_path / "pager.js").write_text("null")

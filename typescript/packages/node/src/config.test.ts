@@ -320,6 +320,21 @@ describe('configToWorkspaceArgs', () => {
     expect([...entry.captures]).toEqual(['grep', 'cat'])
   })
 
+  it('takes max_memory as a size or a count of bytes', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { vfs: 'ram' } },
+      runtimes: [{ name: 'monty', config: { max_memory: 1048576 } }],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const monty = args.options.runtimes?.[0] as { config: { maxMemory?: unknown } }
+    expect(monty.config.maxMemory).toBe(1048576)
+    const bad = loadWorkspaceConfig({
+      mounts: { '/': { vfs: 'ram' } },
+      runtimes: [{ name: 'monty', config: { max_memory: 'lots' } }],
+    })
+    await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
+  })
+
   it('refuses a runtime entry script', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },

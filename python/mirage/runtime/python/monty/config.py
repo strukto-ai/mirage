@@ -22,12 +22,12 @@ class MontyConfig(RuntimeConfig):
     """Config for the monty runtime.
 
     Args:
-        max_memory (str | None): the heap one run may use, spelled as
+        max_memory (str | int | None): the heap one run may use, spelled as
             sandlock spells its own (``10M``, ``1G``); a run that needs
             more raises ``MemoryError``. None for no cap.
     """
 
-    max_memory: str | None = None
+    max_memory: str | int | None = None
 
     def __post_init__(self) -> None:
         memory_limit(self.max_memory)

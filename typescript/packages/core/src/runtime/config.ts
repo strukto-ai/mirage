@@ -17,7 +17,8 @@ import { parseLimit } from '../cache/file/utils.ts'
 /**
  * A runtime's `maxMemory` in bytes, null for no cap.
  *
- * Spelled as sandlock spells its own (`10M`, `512M`, `1G`).
+ * Spelled as sandlock spells its own (`10M`, `512M`, `1G`), or a count of
+ * bytes. Mirrors the Python `memory_limit`.
  *
  * Args:
  *   value: the setting as configured.
@@ -25,11 +26,14 @@ import { parseLimit } from '../cache/file/utils.ts'
  * Throws:
  *   Error: the setting is not a size.
  */
-export function memoryLimit(value: string | null | undefined): number | null {
+export function memoryLimit(value: string | number | null | undefined): number | null {
   if (value === undefined || value === null) return null
-  if (!/^\d+([KMG]B?)?$/i.test(value.trim())) {
-    throw new Error(`max_memory must be a size like 10M or 1G, got '${value}'`)
-  }
+  const size =
+    typeof value === 'number'
+      ? Number.isSafeInteger(value) && value >= 0
+      : /^\d+([KMG]B?)?$/i.test(value.trim())
+  if (!size)
+    throw new Error(`max_memory must be a size like 10M or 1G, got ${JSON.stringify(value)}`)
   return parseLimit(value)
 }
 

@@ -40,12 +40,13 @@ export interface PyodideConfig {
   // pinned CDN in the browser. Override for self-hosted assets.
   home?: string
   /**
-   * The memory the worker may grow to, spelled as sandlock spells its own
-   * (`128M`, `1G`); a run that passes it stops with a MemoryError and the
-   * next run starts a fresh worker. The worker starts at about 50M.
-   * Enforced on Node only: a browser cannot read a worker's memory.
+   * The memory one run may grow to, spelled as sandlock spells its own
+   * (`128M`, `1G`) or a count of bytes; a run that passes it fails with a
+   * MemoryError and the next run starts fresh. A run starts at about 50M.
+   * On Node the run is stopped as soon as it passes; in a browser, which
+   * cannot read a worker's memory, it fails when it ends.
    */
-  maxMemory?: string | null
+  maxMemory?: string | number | null
 }
 
 export const KEYS: readonly (keyof PyodideConfig)[] = [

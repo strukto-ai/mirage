@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.config import HomeConfig, RuntimeConfig, memory_limit
 
 
 def test_coerce_none_gives_defaults():
@@ -44,3 +44,24 @@ def test_coerce_unknown_key_fails_loud():
 def test_base_config_has_no_fields():
     with pytest.raises(TypeError):
         RuntimeConfig.coerce({"home": "/anything"})
+
+
+@pytest.mark.parametrize(
+    ("value", "size"),
+    [
+        (None, None),
+        ("10M", 10 << 20),
+        (" 1g ", 1 << 30),
+        ("512KB", 512 << 10),
+        ("4096", 4096),
+        (1048576, 1048576),
+    ],
+)
+def test_memory_limit_reads_a_size_or_a_count_of_bytes(value, size):
+    assert memory_limit(value) == size
+
+
+@pytest.mark.parametrize("value", ["lots", "1.5G", "-5M", "+5M", -1, True])
+def test_memory_limit_refuses_anything_else(value):
+    with pytest.raises(ValueError, match="max_memory must be a size"):
+        memory_limit(value)

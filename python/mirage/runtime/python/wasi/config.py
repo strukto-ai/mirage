@@ -24,14 +24,14 @@ class WasiConfig(HomeConfig):
     Args:
         home (str | None): the CPython WASI build directory. None falls
             back to MIRAGE_WASI_HOME.
-        max_memory (str | None): the linear memory one run may grow to,
+        max_memory (str | int | None): the linear memory one run may grow to,
             spelled as sandlock spells its own (``128M``, ``1G``); a run
             that needs more raises ``MemoryError``, and one below the
             interpreter's own start (about 40M) cannot start. None for
             no cap.
     """
 
-    max_memory: str | None = None
+    max_memory: str | int | None = None
 
     def __post_init__(self) -> None:
         memory_limit(self.max_memory)
