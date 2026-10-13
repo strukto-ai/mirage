@@ -95,6 +95,7 @@ def test_preview1_numbering_is_the_wasi_libc_table():
         FsCondition.EBUSY: 10,
         FsCondition.EROFS: 69,
         FsCondition.EFBIG: 22,
+        FsCondition.EPIPE: 64,
         FsCondition.NO_XATTR: 58,
         FsCondition.STALE_WRITE: 72,
     }

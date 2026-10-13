@@ -60,7 +60,6 @@ import {
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
-import { walkTree } from '../../shell/parse/names.ts'
 import type { ExpandedWords } from './types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import {
@@ -86,6 +85,8 @@ import {
   handleIf,
   handleSelect,
   handleWhile,
+  isUnwinding,
+  trailed,
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
@@ -623,9 +624,7 @@ async function runRedirected(
     if (
       redirects.some((r) => {
         const target = r.targetNode as TSNodeLike | null
-        return (
-          target !== null && [...walkTree(target)].some((n) => n.type === NT.PROCESS_SUBSTITUTION)
-        )
+        return target !== null && namesProcessSub(target)
       })
     ) {
       // A substitution lives as long as the command naming it, so it cannot
@@ -859,6 +858,18 @@ export interface ExecuteNodeDeps {
 }
 
 /**
+ * Whether a redirect target names a process substitution of its own: alone
+ * or as part of the word, but not one inside a command substitution, which
+ * runs as a line of its own and is done with its pipes before the target is
+ * spelled (`exec >"$(cat <(echo f))"`). Mirrors Python's _names_process_sub.
+ */
+function namesProcessSub(word: TSNodeLike): boolean {
+  if (word.type === NT.PROCESS_SUBSTITUTION) return true
+  if (word.type === NT.COMMAND_SUBSTITUTION) return false
+  return word.children.some((child) => namesProcessSub(child))
+}
+
+/**
  * Whether a redirected statement's command is a bare `exec`, which installs
  * its redirects on the shell for every later statement; `exec cmd` is a
  * command.
@@ -968,7 +979,11 @@ export async function executeNode(
       context.frame.diagnostics = outer
     }
   } catch (err) {
-    await processSubs.close(true)
+    // `exit`, `return` or `break` leaving the node ends it as its last
+    // command did: the writer's end closes and output consumers finish what
+    // it wrote, rather than being cut off as a failure is.
+    if (isUnwinding(err)) await trailed(err, ...(await processSubs.settle()))
+    else await processSubs.close(true)
     throw err
   } finally {
     context.frame.processSub = previous

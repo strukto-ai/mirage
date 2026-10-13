@@ -37,6 +37,7 @@ export const CODE_ARMS: Record<string, FsCondition> = {
   EBUSY: 'EBUSY',
   EROFS: 'EROFS',
   EFBIG: 'EFBIG',
+  EPIPE: 'EPIPE',
   ENODATA: 'NO_XATTR',
   ENOATTR: 'NO_XATTR',
   STALE_WRITE: 'STALE_WRITE',
@@ -61,6 +62,7 @@ export const OPERAND_CONDITIONS: ReadonlySet<FsCondition> = new Set<FsCondition>
   'ENOTSUP',
   'EXDEV',
   'EFBIG',
+  'EPIPE',
   'STALE_WRITE',
 ])
 

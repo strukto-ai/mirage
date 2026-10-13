@@ -57,6 +57,7 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   EBUSY: osConstants.errno.EBUSY,
   EROFS,
   EFBIG: osConstants.errno.EFBIG,
+  EPIPE: osConstants.errno.EPIPE,
   // "Attribute not set": ENOATTR on macOS, which node:os does not name,
   // and ENODATA on linux. Mirrors python's errors/posix.py.
   NO_XATTR: process.platform === 'darwin' ? 93 : osConstants.errno.ENODATA,

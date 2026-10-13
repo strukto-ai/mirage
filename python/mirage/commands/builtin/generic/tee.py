@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from mirage.commands.builtin.utils.paths import (
     absent_dest_error,
@@ -12,6 +13,8 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.fs import eisdir, enotdir, fs_error, fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.errors.types import FsCondition
+from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
@@ -19,24 +22,45 @@ from mirage.types import PathSpec, StatFn
 logger = logging.getLogger(__name__)
 
 
+class PipeErrors(Enum):
+    """How tee answers a write into a pipe whose reader has gone: SIGPIPE,
+    which ends tee, without -p and --output-error; nothing under a -nopipe
+    mode; a report like any write error's under warn or exit.
+    """
+
+    SIGNAL = auto()
+    IGNORE = auto()
+    REPORT = auto()
+
+
 @dataclass(frozen=True, slots=True)
 class TeeFlags:
     append: bool = False
     stop_on_error: bool = False
+    pipe_errors: PipeErrors = PipeErrors.SIGNAL
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> TeeFlags:
     # --output-error values are validated declaratively: the spec's
     # choices= makes the parser report any other value and the executor
-    # refuse with GNU's ARGMATCH shape before tee runs. Only the exit/
-    # warn axis is observable here: the -nopipe half distinguishes a pipe
-    # sink from a file sink, and every operand tee writes is a file.
-    # A bare --output-error means warn (GNU 9.7).
+    # refuse with GNU's ARGMATCH shape before tee runs. -p and a bare
+    # --output-error are warn-nopipe, and the last of them typed wins, as
+    # GNU's one option does. The -nopipe half tells a pipe operand (a
+    # process substitution) from a file.
     fl = FlagView(flags, spec=SPECS["tee"])
-    mode = fl.as_str("output_error")
+    mode: str | None = None
+    for _, value in fl.occurrences("p", "output_error"):
+        mode = value if isinstance(value, str) else "warn-nopipe"
     return TeeFlags(
         append=fl.as_bool("append"),
         stop_on_error=mode in ("exit", "exit-nopipe"),
+        pipe_errors=(
+            PipeErrors.SIGNAL
+            if mode is None
+            else PipeErrors.IGNORE
+            if mode.endswith("-nopipe")
+            else PipeErrors.REPORT
+        ),
     )
 
 
@@ -233,6 +257,17 @@ async def write_output(
             await write_one(
                 path, raw, parsed, read_stream, write_bytes, append_bytes
             )
+        except PipeClosed:
+            # The operand is a pipe whose reader has gone: SIGPIPE ends
+            # tee unless -p or --output-error said otherwise.
+            if parsed.pipe_errors is PipeErrors.SIGNAL:
+                raise
+            if parsed.pipe_errors is PipeErrors.REPORT:
+                errors.append(
+                    error_line(path, fs_error(path, FsCondition.EPIPE))
+                )
+                if parsed.stop_on_error:
+                    break
         except Exception as exc:
             errors.append(error_line(path, exc))
             if parsed.stop_on_error:

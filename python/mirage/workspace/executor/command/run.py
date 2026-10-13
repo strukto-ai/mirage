@@ -23,6 +23,7 @@ from mirage.context.session_context import session_access
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
+from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
@@ -349,9 +350,11 @@ async def run_on_mount(
         return None, IOResult(
             exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
         )
-    except CommandTimeoutError:
+    except (CommandTimeoutError, PipeClosed):
         # A limit timeout is answered by the workspace-level handler
-        # (exit 124), not here.
+        # (exit 124), and a write into a pipe whose reader has gone is
+        # SIGPIPE, which the executor answers for the writer: neither is
+        # this command's error to word.
         raise
     except Exception as exc:
         # Every other thrown command error (a backend RuntimeError, a

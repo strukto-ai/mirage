@@ -15,28 +15,32 @@
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
-import { parseFlags, writeOutput } from './tee.ts'
+import { PipeErrors, parseFlags, writeOutput } from './tee.ts'
 
 const DEC = new TextDecoder()
 
 describe('parseFlags', () => {
-  // Only the exit/warn axis is observable: the -nopipe half tells a pipe
-  // sink from a file sink, and every operand tee writes is a file. A bare
-  // --output-error means warn (GNU 9.7).
+  // -p and a bare --output-error are warn-nopipe. The -nopipe half leaves a
+  // pipe whose reader has gone unreported, and with neither option a write
+  // into one is SIGPIPE.
   it.each([
-    ['warn-nopipe', false],
-    ['exit', true],
-    [true, false],
-  ] as const)('reads --output-error=%j', (mode, stop) => {
-    expect(parseFlags({ output_error: mode })).toEqual({ append: false, stopOnError: stop })
+    [{}, false, PipeErrors.SIGNAL],
+    [{ p: true }, false, PipeErrors.IGNORE],
+    [{ output_error: true }, false, PipeErrors.IGNORE],
+    [{ output_error: 'warn' }, false, PipeErrors.REPORT],
+    [{ output_error: 'warn-nopipe' }, false, PipeErrors.IGNORE],
+    [{ output_error: 'exit' }, true, PipeErrors.REPORT],
+    [{ output_error: 'exit-nopipe' }, true, PipeErrors.IGNORE],
+  ] as const)('reads %j', (flags, stop, pipeErrors) => {
+    expect(parseFlags(flags)).toEqual({ append: false, stopOnError: stop, pipeErrors })
   })
 })
 
 describe('writeOutput', () => {
   const ENC = new TextEncoder()
   const paths = (...names: string[]): PathSpec[] => names.map((n) => PathSpec.fromStrPath(n))
-  const PLAIN = { append: false, stopOnError: false }
-  const APPEND = { append: true, stopOnError: false }
+  const PLAIN = { append: false, stopOnError: false, pipeErrors: PipeErrors.SIGNAL }
+  const APPEND = { append: true, stopOnError: false, pipeErrors: PipeErrors.SIGNAL }
   const noStream = (): AsyncIterable<Uint8Array> => {
     throw enoent('/unused')
   }
@@ -94,7 +98,7 @@ describe('writeOutput', () => {
     const [, io] = await writeOutput(
       paths('/p', '/bad', '/q'),
       ENC.encode('x'),
-      { append: false, stopOnError: true },
+      { append: false, stopOnError: true, pipeErrors: PipeErrors.REPORT },
       noStream,
       s.write,
     )
@@ -114,7 +118,7 @@ describe('writeOutput', () => {
     const [out, io] = await writeOutput(
       paths('/good', '/denied', '/dir'),
       ENC.encode('x'),
-      { append: false, stopOnError: true },
+      { append: false, stopOnError: true, pipeErrors: PipeErrors.REPORT },
       noStream,
       s.write,
       undefined,
@@ -135,7 +139,7 @@ describe('writeOutput', () => {
     const [out, io] = await writeOutput(
       paths('/good', '/locked'),
       ENC.encode('x'),
-      { append: false, stopOnError: true },
+      { append: false, stopOnError: true, pipeErrors: PipeErrors.REPORT },
       noStream,
       s.write,
       undefined,
@@ -168,7 +172,7 @@ describe('writeOutput', () => {
       const [out, io] = await writeOutput(
         paths(...outputs),
         ENC.encode('x'),
-        { append, stopOnError: true },
+        { append, stopOnError: true, pipeErrors: PipeErrors.REPORT },
         noStream,
         s.write,
         undefined,

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { PipeClosed } from '../../../io/errors.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -26,23 +27,45 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
+/**
+ * How tee answers a write into a pipe whose reader has gone: SIGPIPE, which
+ * ends tee, without -p and --output-error; nothing under a -nopipe mode; a
+ * report like any write error's under warn or exit. Mirrors Python's
+ * PipeErrors.
+ */
+export enum PipeErrors {
+  SIGNAL = 'signal',
+  IGNORE = 'ignore',
+  REPORT = 'report',
+}
+
 export interface TeeFlags {
   append: boolean
   stopOnError: boolean
+  pipeErrors: PipeErrors
 }
 
 export function parseFlags(bag: Record<string, FlagValue>): TeeFlags {
   // --output-error values are validated declaratively: the spec's
   // choices= makes the parser report any other value and the executor
-  // refuse with GNU's ARGMATCH shape before tee runs. Only the exit/warn
-  // axis is observable here: the -nopipe half distinguishes a pipe sink
-  // from a file sink, and every operand tee writes is a file. A bare
-  // --output-error means warn (GNU 9.7).
+  // refuse with GNU's ARGMATCH shape before tee runs. -p and a bare
+  // --output-error are warn-nopipe, and the last of them typed wins, as
+  // GNU's one option does. The -nopipe half tells a pipe operand (a
+  // process substitution) from a file.
   const fl = new FlagView(bag, specOf('tee'))
-  const mode = fl.asStr('output_error')
+  let mode: string | null = null
+  for (const [, value] of fl.occurrences('p', 'output_error')) {
+    mode = typeof value === 'string' ? value : 'warn-nopipe'
+  }
   return {
     append: fl.asBool('append'),
     stopOnError: mode === 'exit' || mode === 'exit-nopipe',
+    pipeErrors:
+      mode === null
+        ? PipeErrors.SIGNAL
+        : mode.endsWith('-nopipe')
+          ? PipeErrors.IGNORE
+          : PipeErrors.REPORT,
   }
 }
 
@@ -216,7 +239,13 @@ export async function writeOutput(
     try {
       await writeOne(path, raw, parsed, stream, write, append)
     } catch (err) {
-      errors.push(errorLine(path, err))
+      if (err instanceof PipeClosed) {
+        // The operand is a pipe whose reader has gone: SIGPIPE ends tee
+        // unless -p or --output-error said otherwise.
+        if (parsed.pipeErrors === PipeErrors.SIGNAL) throw err
+        if (parsed.pipeErrors === PipeErrors.IGNORE) continue
+        errors.push(errorLine(path, fsError(path, 'EPIPE')))
+      } else errors.push(errorLine(path, err))
       if (parsed.stopOnError) break
     }
   }

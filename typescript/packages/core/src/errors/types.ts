@@ -51,6 +51,7 @@ export type FsCondition =
   | 'EBUSY'
   | 'EROFS'
   | 'EFBIG'
+  | 'EPIPE'
   | 'NO_XATTR'
   | 'STALE_WRITE'
 
@@ -71,6 +72,7 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
   'EBUSY',
   'EROFS',
   'EFBIG',
+  'EPIPE',
   'NO_XATTR',
   'STALE_WRITE',
 ]

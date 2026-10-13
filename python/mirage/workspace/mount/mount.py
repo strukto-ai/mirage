@@ -72,6 +72,7 @@ from mirage.core.generic.rewrite import (
 from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
@@ -133,7 +134,7 @@ async def _command_output(
     try:
         async for chunk in source:
             yield chunk
-    except CommandTimeoutError:
+    except (CommandTimeoutError, PipeClosed):
         raise
     except Exception as exc:
         logger.debug("%s output failed", command, exc_info=True)

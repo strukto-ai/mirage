@@ -71,7 +71,6 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
-from mirage.shell.parse.names import walk_tree
 from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
@@ -93,6 +92,7 @@ from mirage.workspace.executor.builtins.shared import (
     result,
 )
 from mirage.workspace.executor.control import (
+    UNWINDING,
     execute_body,
     handle_case,
     handle_cfor,
@@ -100,6 +100,7 @@ from mirage.workspace.executor.control import (
     handle_if,
     handle_select,
     handle_while,
+    trailed,
 )
 from mirage.workspace.executor.jobs import drained
 from mirage.workspace.executor.pipes import (
@@ -765,10 +766,8 @@ async def _run_redirected(
     )
     if _is_bare_exec(command):
         if any(
-            node.type == NT.PROCESS_SUBSTITUTION
+            r.target_node is not None and _names_process_sub(r.target_node)
             for r in redirects
-            if r.target_node is not None
-            for node in walk_tree(r.target_node)
         ):
             # A substitution lives as long as the command naming it, so it
             # cannot back a descriptor the shell keeps after `exec` returns,
@@ -1086,11 +1085,33 @@ async def execute_node(
             finally:
                 context.frame.diagnostics = outer
         return process_subs.own(stdout, io, exec_node), io, exec_node
+    except UNWINDING as sig:
+        # `exit`, `return` or `break` leaving the node ends it as its last
+        # command did: the writer's end closes and output consumers finish
+        # what it wrote, rather than being cut off as a failure is.
+        await trailed(sig, *await process_subs.settle())
+        raise
     except BaseException:
         await process_subs.close(True)
         raise
     finally:
         context.frame.process_sub = previous
+
+
+def _names_process_sub(word: TSNodeLike) -> bool:
+    """Whether a redirect target names a process substitution of its own:
+    alone or as part of the word, but not one inside a command
+    substitution, which runs as a line of its own and is done with its
+    pipes before the target is spelled (`exec >"$(cat <(echo f))"`).
+
+    Args:
+        word (TSNodeLike): the redirect's target word.
+    """
+    if word.type == NT.PROCESS_SUBSTITUTION:
+        return True
+    if word.type == NT.COMMAND_SUBSTITUTION:
+        return False
+    return any(_names_process_sub(child) for child in word.children)
 
 
 async def _execute_node(

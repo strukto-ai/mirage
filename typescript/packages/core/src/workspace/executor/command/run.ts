@@ -32,6 +32,7 @@ import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
+import { PipeClosed } from '../../../io/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -299,8 +300,14 @@ export async function runOnMount(
       ]
     }
     // A limit timeout is not a filesystem failure: let it reach the
-    // workspace-level handler that answers with exit 124.
-    if (err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError'))
+    // workspace-level handler that answers with exit 124. A write into a
+    // pipe whose reader has gone is SIGPIPE, which the executor answers for
+    // the writer.
+    if (
+      err instanceof CommandTimeoutError ||
+      err instanceof PipeClosed ||
+      (err instanceof Error && err.name === 'AbortError')
+    )
       throw err
     return [
       null,

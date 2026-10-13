@@ -42,6 +42,7 @@ CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (NotImplementedError, FsCondition.ENOTSUP),
     (BadDescriptorError, FsCondition.EBADF),
     (FileTooLargeError, FsCondition.EFBIG),
+    (BrokenPipeError, FsCondition.EPIPE),
     (StaleWriteError, FsCondition.STALE_WRITE),
     (NotADirectoryError, FsCondition.ENOTDIR),
     (IsADirectoryError, FsCondition.EISDIR),
@@ -78,6 +79,7 @@ ERRNO_ARMS: dict[int, FsCondition] = {
     errno.EBUSY: FsCondition.EBUSY,
     errno.EROFS: FsCondition.EROFS,
     errno.EFBIG: FsCondition.EFBIG,
+    errno.EPIPE: FsCondition.EPIPE,
     POSIX[FsCondition.NO_XATTR].errno: FsCondition.NO_XATTR,
 }
 
@@ -100,6 +102,7 @@ OPERAND_CONDITIONS: frozenset[FsCondition] = frozenset(
         FsCondition.ENOTSUP,
         FsCondition.EXDEV,
         FsCondition.EFBIG,
+        FsCondition.EPIPE,
         FsCondition.STALE_WRITE,
     }
 )

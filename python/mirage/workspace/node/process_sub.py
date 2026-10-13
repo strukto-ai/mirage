@@ -129,6 +129,15 @@ class ProcessSubScope:
             for child in self.held:
                 child.dev.release_input(child.path, child.allocation)
 
+    async def settle(self) -> tuple[bytes, bytes]:
+        """End the substitutions as a finished command does, for a node
+        that shell control flow (``exit``, ``return``, ``break``) leaves:
+        writers' ends close and output consumers finish what was written.
+        Returns what they wrote to the capture, stdout then stderr.
+        """
+        await self.close()
+        return self.capture.take()
+
     def own(
         self, stdout: ByteSource | None, io: IOResult, node: ExecutionNode
     ) -> ByteSource | None:

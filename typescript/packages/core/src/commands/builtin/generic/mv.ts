@@ -16,6 +16,7 @@ import { rekey, underPath } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
+  FileType,
   PathSpec,
   type MoveStrategy,
   type NativeMove,
@@ -482,6 +483,22 @@ export async function mvGeneric(
         continue
       }
     }
+    // A move across mounts removes the target before it copies, and a pipe
+    // cannot be removed: GNU stops there and the source stays (`mv f
+    // >(cat)`), where copying into it would drain the source into the pipe
+    // and then delete it.
+    if (
+      isPrimitiveMove(strategy) &&
+      targetExists &&
+      !targetIsDir &&
+      !sourceLink &&
+      (await isFifo(stat, target))
+    ) {
+      errors.push(
+        `mv: inter-device move failed: '${src.rawPath}' to '${target.rawPath}'; unable to remove target: ${posixPhrase('EPERM')}`,
+      )
+      continue
+    }
     const backupStrategy =
       copies !== undefined
         ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
@@ -570,4 +587,15 @@ export async function mvGeneric(
       exitCode: errors.length > accepted.length ? 1 : 0,
     }),
   ]
+}
+
+/** Whether a move's existing target is a pipe (a process substitution's
+ * descriptor). Mirrors Python's _is_fifo. */
+async function isFifo(stat: StatFn, target: PathSpec): Promise<boolean> {
+  try {
+    return (await stat(target)).type === FileType.FIFO
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return false
+  }
 }

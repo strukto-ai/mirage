@@ -57,6 +57,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
+    FileType,
     MoveStrategy,
     NativeMove,
     PathSpec,
@@ -158,6 +159,22 @@ async def _entry_gone(
     except FS_ERRORS:
         return True
     return not children
+
+
+async def _is_fifo(stat: StatFn, target: PathSpec) -> bool:
+    """Whether a move's existing target is a pipe (a process
+    substitution's descriptor).
+
+    Args:
+        stat (StatFn): Stats a path; raises when missing.
+        target (PathSpec): the move's target.
+    """
+    try:
+        info = await stat(target)
+    except FS_ERRORS as exc:
+        _logger.debug("mv: target %s gave no stat: %s", target.virtual, exc)
+        return False
+    return info.type == FileType.FIFO
 
 
 async def _remove_entries(
@@ -579,6 +596,23 @@ async def mv_generic(
                     f"'{target.raw_path}': {fs_strerror(exc)}"
                 )
                 continue
+        if (
+            isinstance(strategy, PrimitiveMove)
+            and target_exists
+            and not target_is_dir
+            and not source_link
+            and await _is_fifo(stat, target)
+        ):
+            # A move across mounts removes the target before it copies,
+            # and a pipe cannot be removed: GNU stops there and the source
+            # stays (`mv f >(cat)`), where copying into it would drain the
+            # source into the pipe and then delete it.
+            errors.append(
+                f"mv: inter-device move failed: '{src.raw_path}' to "
+                f"'{target.raw_path}'; unable to remove target: "
+                f"{posix_phrase(FsCondition.EPERM)}"
+            )
+            continue
         backup_strategy = (
             NativeMove(rename=partial(rename_link, copies))
             if copies is not None

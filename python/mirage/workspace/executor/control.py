@@ -190,6 +190,29 @@ async def carried(
     return sig
 
 
+async def trailed(sig: Exception, stdout: bytes, stderr: bytes) -> None:
+    """Put what an unwinding construct's process substitutions wrote as
+    they finished behind the output the signal already carries.
+
+    Args:
+        sig (Exception): one of ``UNWINDING``.
+        stdout (bytes): output to follow the signal's own.
+        stderr (bytes): diagnostics to follow the signal's own.
+    """
+    if not stdout and not stderr:
+        return
+    if isinstance(sig, LoopSignal):
+        sig.stdout = _chain_streams([sig.stdout, stdout])
+        if stderr:
+            sig.io.stderr = (await materialize(sig.io.stderr) or b"") + stderr
+    elif isinstance(sig, ExitSignal):
+        sig.stdout = (sig.stdout or b"") + stdout
+        sig.stderr += stderr
+    elif isinstance(sig, ReturnSignal):
+        sig.stdout = _chain_streams([sig.stdout, stdout])
+        sig.stderr += stderr
+
+
 async def returning(
     execute_fn: Callable[..., Any] | None,
     session: SessionState,

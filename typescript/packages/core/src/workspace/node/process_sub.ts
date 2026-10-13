@@ -144,6 +144,17 @@ export class ProcessSubScope {
     }
   }
 
+  /**
+   * End the substitutions as a finished command does, for a node that shell
+   * control flow (`exit`, `return`, `break`) leaves: writers' ends close and
+   * output consumers finish what was written. Returns what they wrote to the
+   * capture, stdout then stderr. Mirrors Python's settle.
+   */
+  async settle(): Promise<[Uint8Array, Uint8Array]> {
+    await this.close()
+    return this.capture.take()
+  }
+
   own(stdout: ByteSource | null, io: IOResult, node: ExecutionNode): ByteSource | null {
     return this.held.length === 0 ? stdout : this.output(stdout, io, node)
   }

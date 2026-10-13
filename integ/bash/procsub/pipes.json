@@ -303,6 +303,156 @@
       "note": "Mirage refuses exec onto a process substitution inside a longer word as it does alone (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
     },
     {
+      "id": "procsub_exit_finishes_output_consumer_in_cmdsub",
+      "seq": 1346098,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "x=$( { printf hi; exit 0; } > >(cat) ); echo \"[$x]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[hi]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_return_finishes_output_consumer",
+      "seq": 1346099,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { { printf hi; return 3; } > >(cat); }; f; st=$?; wait; echo; echo st=$st",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nst=3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_break_finishes_output_consumer",
+      "seq": 1346100,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "for i in 1; do { printf hi; break; } > >(cat); done; wait; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_mv_into_output_refused_keeps_source",
+      "seq": 1346101,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf valuable > {mount}/procsub-mv-src; mv {mount}/procsub-mv-src >(cat >/dev/null); echo st=$?; cat {mount}/procsub-mv-src; rm {mount}/procsub-mv-src",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nvaluable",
+        "stderr": "mv: inter-device move failed: '{mount}/procsub-mv-src' to '/dev/fd/63'; unable to remove target: Operation not permitted\n"
+      }
+    },
+    {
+      "id": "procsub_exec_onto_cmdsub_target_writes_file",
+      "seq": 1346102,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec >\"$(cat <(printf {mount}/procsub-exec-eo))\"; printf hello); cat {mount}/procsub-exec-eo; rm {mount}/procsub-exec-eo",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_tee_p_ignores_closed_output",
+      "seq": 1346103,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee -p >(head -c 1 >/dev/null) {mount}/procsub-tee-out >/dev/null; echo st=$?; wc -c < {mount}/procsub-tee-out; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=0\n200000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_tee_output_error_bare_ignores_closed_output",
+      "seq": 1346104,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee --output-error >(head -c 1 >/dev/null) {mount}/procsub-tee-out >/dev/null; echo st=$?; wc -c < {mount}/procsub-tee-out; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=0\n200000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_tee_output_error_warn_reports_closed_output",
+      "seq": 1346105,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee --output-error=warn >(head -c 1 >/dev/null) {mount}/procsub-tee-out >/dev/null; echo st=$?; wc -c < {mount}/procsub-tee-out; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\n200000\n",
+        "stderr": "tee: /dev/fd/63: Broken pipe\n"
+      }
+    },
+    {
+      "id": "procsub_tee_closed_output_is_sigpipe",
+      "seq": 1346106,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee >(head -c 1 >/dev/null) >/dev/null; echo st=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=141\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_tee_output_error_exit_stops_at_closed_output",
+      "seq": 1346107,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee --output-error=exit >(head -c 1 >/dev/null) >/dev/null; echo st=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\n",
+        "stderr": "tee: /dev/fd/63: Broken pipe\n"
+      }
+    },
+    {
       "id": "procsub_output_exec_in_subshell",
       "seq": 1346044,
       "targets": [

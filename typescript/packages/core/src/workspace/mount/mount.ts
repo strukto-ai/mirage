@@ -105,6 +105,7 @@ import {
 } from '../../types.ts'
 import { ebusy, enotsup } from '../../errors/fs.ts'
 import { formatFsError } from '../../errors/render.ts'
+import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -1319,7 +1320,11 @@ async function* commandOutput(
   try {
     yield* source
   } catch (err) {
-    if (err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError'))
+    if (
+      err instanceof CommandTimeoutError ||
+      err instanceof PipeClosed ||
+      (err instanceof Error && err.name === 'AbortError')
+    )
       throw err
     const existing = await materialize(io.stderr)
     const message = formatFsError(command, err, paths)

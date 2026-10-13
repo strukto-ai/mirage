@@ -37,6 +37,7 @@ export const POSIX: Record<FsCondition, PosixErrno> = {
   EBUSY: { errno: 16, phrase: 'Device or resource busy' },
   EROFS: { errno: 30, phrase: 'Read-only file system' },
   EFBIG: { errno: 27, phrase: 'File too large' },
+  EPIPE: { errno: 32, phrase: 'Broken pipe' },
   NO_XATTR: { errno: 61, phrase: 'No data available' },
   STALE_WRITE: { errno: 116, phrase: 'changed since it was read; read it again before writing' },
 }

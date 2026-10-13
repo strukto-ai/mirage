@@ -3,6 +3,7 @@ import errno
 import pytest
 
 from mirage.commands.builtin.generic.tee import (
+    PipeErrors,
     TeeFlags,
     parse_flags,
     tee_generic,
@@ -45,14 +46,24 @@ async def _empty(_p):
 
 
 @pytest.mark.parametrize(
-    "mode,stop",
-    [("warn-nopipe", False), ("exit", True), (True, False)],
+    ("flags", "stop", "pipe_errors"),
+    [
+        ({}, False, PipeErrors.SIGNAL),
+        ({"p": True}, False, PipeErrors.IGNORE),
+        ({"output_error": True}, False, PipeErrors.IGNORE),
+        ({"output_error": "warn"}, False, PipeErrors.REPORT),
+        ({"output_error": "warn-nopipe"}, False, PipeErrors.IGNORE),
+        ({"output_error": "exit"}, True, PipeErrors.REPORT),
+        ({"output_error": "exit-nopipe"}, True, PipeErrors.IGNORE),
+    ],
 )
-def test_parse_flags_reads_the_exit_warn_axis(mode, stop):
-    # Only the exit/warn axis is observable: the -nopipe half tells a pipe
-    # sink from a file sink, and every operand tee writes is a file. A
-    # bare --output-error means warn (GNU 9.7).
-    assert parse_flags({"output_error": mode}) == TeeFlags(stop_on_error=stop)
+def test_parse_flags_reads_both_axes(flags, stop, pipe_errors):
+    # -p and a bare --output-error are warn-nopipe. The -nopipe half
+    # leaves a pipe whose reader has gone unreported, and with neither
+    # option a write into one is SIGPIPE.
+    assert parse_flags(flags) == TeeFlags(
+        stop_on_error=stop, pipe_errors=pipe_errors
+    )
 
 
 @pytest.mark.asyncio

@@ -177,6 +177,27 @@ export async function carried(
 }
 
 /**
+ * Put what an unwinding construct's process substitutions wrote as they
+ * finished behind the output the signal already carries. Mirrors Python's
+ * trailed.
+ */
+export async function trailed(
+  sig: Unwinding,
+  stdout: Uint8Array,
+  stderr: Uint8Array,
+): Promise<void> {
+  if (stdout.byteLength === 0 && stderr.byteLength === 0) return
+  if (sig instanceof LoopSignal) {
+    sig.stdout = chainNonNull([sig.stdout, stdout])
+    if (stderr.byteLength > 0) sig.io.stderr = concat([await materialize(sig.io.stderr), stderr])
+    return
+  }
+  sig.stderr = concat([sig.stderr, stderr])
+  if (sig instanceof ReturnSignal) sig.stdout = chainNonNull([sig.stdout, stdout])
+  else sig.stdout = concat([sig.stdout ?? new Uint8Array(), stdout])
+}
+
+/**
  * What a function or a sourced file gives back as it returns: its output and
  * status, with what its RETURN action wrote after the output. A `return` in
  * a function's action returns from the function with its status. A sourced
