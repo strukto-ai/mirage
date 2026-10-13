@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from itertools import groupby
 from operator import itemgetter
 from typing import Any
@@ -22,9 +22,9 @@ from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import SharedInput, share
+from mirage.io.async_line_iterator import PipeInput, SharedInput, share
 from mirage.io.errors import PipeClosed
-from mirage.io.stream import materialize
+from mirage.io.stream import close_quietly, materialize
 from mirage.io.types import ByteSource, PipeStream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -296,12 +296,20 @@ async def _install_descriptor(
                     file.source,
                 )
             else:
+                reading: ByteSource | PipeInput = data
+                if isinstance(data, PipeStream):
+                    # The descriptor outlives this read: each read of it
+                    # opens the pipe afresh, in its reader's own context.
+                    await close_quietly(data)
+                    reading = PipeInput(
+                        scope, lambda: _open_pipe(dispatch, scope)
+                    )
                 _bind(
                     session,
                     fd,
                     OPEN_FOR_READING + scope.virtual,
                     False,
-                    SharedInput(data),
+                    SharedInput(reading),
                 )
         else:
             await create_file(
@@ -314,6 +322,26 @@ async def _install_descriptor(
                 )
     except FS_ERRORS as exc:
         return _error_line(scope.raw_path, exc)
+    return None
+
+
+async def _open_pipe(
+    dispatch: DispatchFn, scope: PathSpec
+) -> AsyncIterator[bytes] | None:
+    """A fresh read of the live pipe an ``exec`` keeps, None once the
+    substitution's command has released it.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        scope (PathSpec): the pipe.
+    """
+    try:
+        data, _ = await dispatch("read", scope, stream=True)
+    except FileNotFoundError:
+        return None
+    if isinstance(data, PipeStream):
+        return data
+    await close_quietly(data)
     return None
 
 

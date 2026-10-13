@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SharedInput, share } from '../../../../io/async_line_iterator.ts'
+import { PipeInput, SharedInput, share } from '../../../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
+import { closeQuietly } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
@@ -388,7 +389,16 @@ async function installDescriptor(
         file.opened = true
         file.source = new FileInput(file, await materialize(data))
         bind(session, fd, OPEN_FOR_READ_WRITE + scope.virtual, false, file.source)
-      } else bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(data))
+      } else {
+        // The descriptor outlives this read: each read of it opens the pipe
+        // afresh, in its reader's own context.
+        let reading: ByteSource | PipeInput = data
+        if (data instanceof PipeStream) {
+          await data.close()
+          reading = new PipeInput(scope, () => openPipe(dispatch, scope))
+        }
+        bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(reading))
+      }
     } else {
       await createFile(dispatch, session, scope, new Uint8Array(), redirect.append)
       const file = new FileDescription(scope, redirect.append)
@@ -400,6 +410,26 @@ async function installDescriptor(
     if (!isFsError(error)) throw error
     return errorLine(scope.rawPath, error)
   }
+  return null
+}
+
+/**
+ * A fresh read of the live pipe an `exec` keeps, null once the
+ * substitution's command has released it. Mirrors Python's _open_pipe.
+ */
+async function openPipe(
+  dispatch: DispatchFn,
+  scope: PathSpec,
+): Promise<AsyncIterable<Uint8Array> | null> {
+  let opened: ByteSource | null
+  try {
+    opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
+  } catch (error) {
+    if (isMissingPath(error)) return null
+    throw error
+  }
+  if (opened instanceof PipeStream) return opened
+  if (opened !== null && !(opened instanceof Uint8Array)) await closeQuietly(opened)
   return null
 }
 

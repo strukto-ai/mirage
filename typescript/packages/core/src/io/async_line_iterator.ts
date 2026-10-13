@@ -21,6 +21,37 @@ import type { PathSpec } from '../types.ts'
 const NEWLINE = 0x0a
 const BYTE_VIEW = new TextDecoder('latin1')
 
+/**
+ * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). Each read
+ * opens a stream of its own, in the reading command's own context, and
+ * closes it after one chunk: a read that gives up (`timeout`) takes nothing
+ * with it, and the next read, through this descriptor or another, gets what
+ * it left. Once the substitution's command has released the pipe, a read
+ * finds its end. Mirrors Python's PipeInput.
+ */
+export class PipeInput implements AsyncIterableIterator<Uint8Array> {
+  /** `open` opens a stream of the pipe, null once the pipe is gone. */
+  constructor(
+    readonly path: PathSpec,
+    private readonly open: () => Promise<AsyncIterable<Uint8Array> | null>,
+  ) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+
+  async next(): Promise<IteratorResult<Uint8Array>> {
+    const stream = await this.open()
+    if (stream === null) return { done: true, value: undefined }
+    const iterator = stream[Symbol.asyncIterator]()
+    try {
+      return await iterator.next()
+    } finally {
+      await iterator.return?.()
+    }
+  }
+}
+
 export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
@@ -41,6 +72,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     const s = this.input as AsyncIterable<Uint8Array>
     if (this.input instanceof Uint8Array) {
       this.source = chunks(this.input)
+    } else if (this.input instanceof PipeInput) {
+      this.source = this.input
     } else if (typeof s[Symbol.asyncIterator] === 'function') {
       this.source = chunks(s)
     } else {
@@ -176,7 +209,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         return line
       }
     } catch (error) {
-      await this.close()
+      await this.failed(error)
       throw error
     }
     const [line, found] = await this.readDelimited(eol, signal)
@@ -196,20 +229,33 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * load_rest.
    */
   async loadRest(): Promise<void> {
-    const parts: Uint8Array[] = [this.buf]
     try {
       while (!this.exhausted) {
         const pending = this.check()
         if (pending !== undefined) await pending
         const result = await this.pull()
         if (result.done === true) this.exhausted = true
-        else parts.push(result.value)
+        else this.buf = concat2(this.buf, result.value)
       }
     } catch (error) {
-      await this.close()
+      await this.failed(error)
       throw error
     }
-    this.buf = join(parts)
+  }
+
+  /**
+   * A failed read closes the source for good, but a reader's own abort on a
+   * pipe an `exec` keeps leaves it open for the next reader, with `taken`,
+   * what the read had taken from the buffer, put back. Mirrors Python's
+   * _keeps_open.
+   */
+  private async failed(error: unknown, taken: readonly Uint8Array[] = []): Promise<void> {
+    const aborted = error instanceof DOMException && error.name === 'AbortError'
+    if (this.input instanceof PipeInput && aborted) {
+      if (taken.length > 0) this.buf = join([...taken, this.buf])
+      return
+    }
+    await this.close()
   }
 
   private check(signal?: AbortSignal): Promise<void> | undefined {
@@ -265,7 +311,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         else this.buf = copyOf(result.value)
       }
     } catch (error) {
-      await this.close()
+      await this.failed(error, parts)
       throw error
     }
   }
@@ -301,7 +347,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       }
       return result.value
     } catch (error) {
-      await this.close()
+      await this.failed(error)
       throw error
     }
   }
@@ -323,8 +369,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     delim: number | null,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+    let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
     try {
-      let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
       let taken = 0
       while (taken < count) {
         const pending = this.check(signal)
@@ -349,7 +395,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       }
       return [copyOf(out), true]
     } catch (error) {
-      await this.close()
+      await this.failed(error, [out])
       throw error
     }
   }
@@ -381,7 +427,7 @@ export class SharedInput implements AsyncIterableIterator<Uint8Array> {
    * a `PipeStream` takes that stream's. */
   constructor(source: ByteSource | AsyncLineIterator, pipe: PathSpec | null = null) {
     this.lines = source instanceof AsyncLineIterator ? source : new AsyncLineIterator(source)
-    this.pipe = source instanceof PipeStream ? source.path : pipe
+    this.pipe = source instanceof PipeStream || source instanceof PipeInput ? source.path : pipe
   }
 
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {

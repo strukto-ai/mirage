@@ -15,7 +15,11 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.dev.device import active_pipe
-from mirage.core.ram.dest import check_dest_parents, lookup_error
+from mirage.core.ram.dest import (
+    check_dest_parents,
+    check_write_target,
+    lookup_error,
+)
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
@@ -49,6 +53,10 @@ async def copy(
         return
     if source is not None:
         data = await source.read(src_spec)
+        # The copy held no names while it waited on the pipe, so another
+        # job may have moved or replaced the destination meanwhile: check
+        # it again, as a write would, before storing.
+        check_dest_parents(store, dst_spec, d)
     elif s in store.files:
         data = store.files[s]
     else:
@@ -56,6 +64,7 @@ async def copy(
     if target is not None:
         await target.write(data, dst_spec)
         return
+    check_write_target(store, dst_spec, d)
     store.files[d] = data
     store.modified[d] = now_iso()
     await invalidate_after_write(dst_spec)

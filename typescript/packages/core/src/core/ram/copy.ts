@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { activePipe } from '../dev/device.ts'
-import { checkDestParents, lookupError } from './dest.ts'
+import { checkDestParents, checkWriteTarget, lookupError } from './dest.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 
 /**
@@ -36,12 +36,20 @@ export async function copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec):
     for await (const chunk of source.stream(src)) await target.write(chunk, dst)
     return
   }
-  const data = source !== null ? await source.read(src) : accessor.store.files.get(s)
+  let data: Uint8Array | undefined
+  if (source !== null) {
+    data = await source.read(src)
+    // The copy held no names while it waited on the pipe, so another job may
+    // have moved or replaced the destination meanwhile: check it again, as a
+    // write would, before storing.
+    checkDestParents(accessor, dst, d)
+  } else data = accessor.store.files.get(s)
   if (data === undefined) throw lookupError(accessor, src, s)
   if (target !== null) {
     await target.write(data, dst)
     return
   }
+  checkWriteTarget(accessor, dst, d)
   accessor.store.files.set(d, data)
   accessor.store.modified.set(d, nowIso())
   await invalidateAfterWrite(dst)

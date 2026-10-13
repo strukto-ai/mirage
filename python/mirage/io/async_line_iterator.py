@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.yield_budget import YieldBudget
@@ -41,9 +44,52 @@ def char_width(data: bytes) -> int:
     return min(width, len(data))
 
 
+class PipeInput:
+    """The read end an ``exec`` keeps on a live pipe (``exec 3<"$1"``).
+
+    Each read opens a stream of its own, in the reading command's own
+    context, and closes it after one chunk: a read that gives up
+    (``timeout``) takes nothing with it, and the next read, through this
+    descriptor or another, gets what it left. Once the substitution's
+    command has released the pipe, a read finds its end.
+
+    Args:
+        path (PathSpec): the pipe.
+        open (Callable[[], Awaitable[AsyncIterator[bytes] | None]]): opens
+            a stream of it, None once the pipe is gone.
+    """
+
+    def __init__(
+        self,
+        path: PathSpec,
+        open: Callable[[], Awaitable[AsyncIterator[bytes] | None]],
+    ) -> None:
+        self.path = path
+        self._open = open
+
+    def __aiter__(self) -> "PipeInput":
+        return self
+
+    async def __anext__(self) -> bytes:
+        stream = await self._open()
+        if stream is None:
+            raise StopAsyncIteration
+        try:
+            return await anext(stream)
+        finally:
+            closer = getattr(stream, "aclose", None)
+            if closer is not None:
+                await closer()
+
+    async def aclose(self) -> None:
+        """Nothing stays open between reads."""
+
+
 class AsyncLineIterator:
     def __init__(self, source: ByteSource) -> None:
-        self._source = chunks(source)
+        self._source: AsyncGenerator[bytes, None] | PipeInput = (
+            source if isinstance(source, PipeInput) else chunks(source)
+        )
         self._budget = YieldBudget()
         self._buf = b""
         self._loaded = 0
@@ -203,11 +249,26 @@ class AsyncLineIterator:
                     self._view = None
                 except StopAsyncIteration:
                     self._exhausted = True
-        except BaseException:
+        except BaseException as exc:
+            if self._keeps_open(exc):
+                self._buf = b"".join(parts) + self._buf
+                raise
             await self._source.aclose()
             self._buf = b""
             self._exhausted = True
             raise
+
+    def _keeps_open(self, exc: BaseException) -> bool:
+        """Whether a read that ended with ``exc`` leaves the source open,
+        what it had taken put back: a reader's own cancellation on a pipe
+        an ``exec`` keeps, which the next reader goes on reading.
+
+        Args:
+            exc (BaseException): what ended the read.
+        """
+        return isinstance(self._source, PipeInput) and isinstance(
+            exc, asyncio.CancelledError
+        )
 
     async def read_chunk(self) -> bytes | None:
         """Hand over what is buffered, else the source's next chunk.
@@ -227,8 +288,9 @@ class AsyncLineIterator:
         except StopAsyncIteration:
             self._exhausted = True
             return None
-        except BaseException:
-            await self.discard()
+        except BaseException as exc:
+            if not self._keeps_open(exc):
+                await self.discard()
             raise
 
     async def discard(self) -> None:
@@ -242,15 +304,15 @@ class AsyncLineIterator:
         """Read what the source has left into the buffer, for a descriptor
         that outlives its source (a pipe whose substitution's command has
         ended): reads go on from memory, and the source's stream ends."""
-        parts = [self._buf]
         while not self._exhausted:
             try:
                 await self._budget.run()
-                parts.append(await self._next_chunk())
+                chunk = await self._next_chunk()
             except StopAsyncIteration:
                 self._exhausted = True
-        self._buf = b"".join(parts)
-        self._view = None
+            else:
+                self._buf += chunk
+                self._view = None
 
     async def read_chars(
         self, count: int, delim: bytes | None
@@ -280,8 +342,8 @@ class AsyncLineIterator:
             ended on its own terms (the count reached, or the delimiter
             seen) rather than at EOF.
         """
+        out = bytearray()
         try:
-            out = bytearray()
             taken = 0
             need = max(len(delim) if delim is not None else 1, 4)
             while taken < count:
@@ -306,7 +368,10 @@ class AsyncLineIterator:
                 self._buf = self._buf[width:]
                 taken += 1
             return bytes(out), True
-        except BaseException:
+        except BaseException as exc:
+            if self._keeps_open(exc):
+                self._buf = bytes(out) + self._buf
+                raise
             await self._source.aclose()
             self._buf = b""
             self._exhausted = True
@@ -347,7 +412,11 @@ class SharedInput:
             if isinstance(source, AsyncLineIterator)
             else AsyncLineIterator(source)
         )
-        self.pipe = source.path if isinstance(source, PipeStream) else pipe
+        self.pipe = (
+            source.path
+            if isinstance(source, (PipeStream, PipeInput))
+            else pipe
+        )
 
     def __aiter__(self) -> "SharedInput":
         return self

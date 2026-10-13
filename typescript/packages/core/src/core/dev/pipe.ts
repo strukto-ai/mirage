@@ -16,7 +16,7 @@ import { BytePipe } from '../../io/pipe.ts'
 import type { PipeStream } from '../../io/types.ts'
 import { ebadf } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
-import { abortable } from '../../utils/abort.ts'
+import { abortable, makeAbortError } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 
 /**
@@ -82,7 +82,7 @@ export class DevicePipe {
   }
 
   private async next(size: number | null, signal?: AbortSignal): Promise<Uint8Array> {
-    signal?.throwIfAborted()
+    if (signal?.aborted === true) throw makeAbortError(signal)
     if (this.pending.byteLength === 0) {
       this.source ??= this.pipe.stream()[Symbol.asyncIterator]()
       // A pull outlives a reader that gives up while it waits: what it

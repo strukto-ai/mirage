@@ -923,6 +923,67 @@
         "stdout": "cp=0\ndata\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_exec_input_timed_out_reader_leaves_data_for_a_new_reader",
+      "seq": 1346117,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { exec 3<\"$1\"; timeout 0.1 head -c 1 <&3; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello); echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=124\nhello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_timed_out_reader_leaves_data_for_the_descriptor",
+      "seq": 1346118,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { exec 3<\"$1\"; timeout 0.1 head -c 1 <&3; echo \"st=$?\"; cat <&3; }; f <(sleep 1; printf hello); echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=124\nhello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_held_while_a_background_job_reads",
+      "seq": 1346119,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { exec 3<\"$1\"; cat <&3 & sleep 0.1; }; f <(sleep 1; printf hello); wait; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_copy_out_of_input_refuses_a_replaced_target",
+      "seq": 1346120,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf old > /dev/procsub-dst; cp <(sleep 1; printf data) /dev/procsub-dst & sleep 0.3; mv /dev/procsub-dst /dev/procsub-old; mkdir /dev/procsub-dst; wait; echo \"cp done\"; cat /dev/procsub-old; echo; ls -d /dev/procsub-dst; rm -r /dev/procsub-dst /dev/procsub-old",
+      "expect": {
+        "exit": 0,
+        "stdout": "cp done\nold\n/dev/procsub-dst\n",
+        "stderr": "cp: cannot create regular file '/dev/procsub-dst': Is a directory\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"cp done\\ndata\\n/dev/procsub-dst\\n\": GNU cp writes into the file it opened, which mv moved to procsub-old. Mirage copies by name, so a destination replaced while the copy waits on its pipe is checked again and refused rather than receiving bytes a directory would hide."
     }
   ]
 }
