@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { RoutePolicy } from '../../runtime/routing/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
+import { ScriptPolicy } from '../script.ts'
 import type { RouteContext } from '../types.ts'
 import { PlacementPolicy } from './placement.ts'
 
@@ -21,12 +23,23 @@ function line(text: string): RouteContext {
   return { line: text, commands: [], sessionId: '' }
 }
 
+function placement(route: RoutePolicy): PlacementPolicy {
+  return new PlacementPolicy(route, new ScriptPolicy({ scriptsOf: () => ({}) }))
+}
+
+const ROUTE_HEAVY = [
+  'import json',
+  'import os',
+  '',
+  'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+  'if "heavy" in ctx["line"]:',
+  '    print(json.dumps({"kind": "route", "runtime": "beta"}))',
+  '',
+].join('\n')
+
 describe('PlacementPolicy', () => {
   it('places the line on a runtime name and says nothing on null', async () => {
-    const policy = new PlacementPolicy(
-      (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
-      () => [],
-    )
+    const policy = placement((ctx) => (ctx.line.includes('heavy') ? 'beta' : null))
     expect(await policy.preExecute(line('python3 heavy'))).toEqual({
       kind: 'route',
       runtime: 'beta',
@@ -45,9 +58,36 @@ describe('PlacementPolicy', () => {
     // Refusing a line is a policy's answer, not the router's; a route
     // policy that answers anything else is misconfigured, not a refusal.
     await expect(
-      new PlacementPolicy((() => verdict) as unknown as RoutePolicy, () => []).preExecute(
-        line('echo hi'),
-      ),
+      placement((() => verdict) as unknown as RoutePolicy).preExecute(line('echo hi')),
     ).rejects.toThrow(/a runtime name or None/)
+  })
+
+  it('runs a program that prints its route or nothing', async () => {
+    const policy = placement({ script: new ScriptSource(ROUTE_HEAVY, 'python'), runtime: 'monty' })
+    expect(await policy.preExecute(line('python3 heavy'))).toEqual({
+      kind: 'route',
+      runtime: 'beta',
+    })
+    expect(await policy.preExecute(line('echo hi'))).toBeNull()
+  })
+
+  it.each([
+    ['1 / 0', /route_policy exited 1/],
+    ["print('beta')", /route_policy must print a JSON answer/],
+  ])("treats a failing program as the deployment's mistake: %s", async (source, refusal) => {
+    const policy = placement({ script: new ScriptSource(source, 'python'), runtime: 'monty' })
+    await expect(policy.preExecute(line('echo hi'))).rejects.toThrow(refusal)
+  })
+
+  it('leaves a path to the workspace yaml', () => {
+    expect(() => placement('route.py' as unknown as RoutePolicy)).toThrow(
+      /a path is the workspace yaml's/,
+    )
+    expect(() => placement({ script: 'route.py', runtime: 'monty' })).toThrow(
+      /routePolicy names a policy by path/,
+    )
+    expect(() =>
+      placement({ script: new ScriptSource('pass', 'python') } as unknown as RoutePolicy),
+    ).toThrow(/runtime/)
   })
 })

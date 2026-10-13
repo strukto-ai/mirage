@@ -77,6 +77,11 @@ PROGRAM_RUNTIMES = frozenset({"monty", "wasi"})
 # ``sys.path``.
 PROGRAM_FLAGS: dict[str, dict[str, bool]] = {"wasi": {"P": True}}
 
+# The memory a policy program gets when its runtime's config names none:
+# monty's own example cap, and enough for CPython on wasm, which starts
+# at about 40M. ``max_memory: null`` in the config lifts it.
+PROGRAM_MEMORY: dict[str, str] = {"monty": "10M", "wasi": "128M"}
+
 # The environment variable a policy program reads its context from, as
 # JSON; the same text arrives on stdin.
 CTX_ENV = "MIRAGE_POLICY_CTX"

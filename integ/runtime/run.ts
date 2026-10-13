@@ -154,7 +154,7 @@ interface World {
   command_limits?: unknown
   register_runtimes?: Record<string, string>
   runtimes?: (string | Record<string, unknown>)[]
-  route_policy?: string
+  route_policy?: { script: string; runtime: string }
   policies?: PolicySpec[]
   profiles?: Record<string, unknown>
   profile?: string
@@ -586,7 +586,6 @@ function buildEntry(entry: string | Record<string, unknown>): RuntimeEntry {
     // loader applies.
     options.config = camelizeKeys(expand(entry.config) as Record<string, unknown>)
   }
-  if (entry.script !== undefined) options.script = new ScriptSource(entry.script as string)
   return buildRuntime(entry.name as string, options)
 }
 
@@ -616,7 +615,12 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   }
   if (world.session_id !== undefined) options.sessionId = world.session_id
   if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry)
-  if (world.route_policy !== undefined) options.routePolicy = new ScriptSource(world.route_policy)
+  if (world.route_policy !== undefined) {
+    options.routePolicy = {
+      script: new ScriptSource(world.route_policy.script, 'python'),
+      runtime: world.route_policy.runtime,
+    }
+  }
   if (world.policies !== undefined) options.policies = world.policies.map(buildPolicy)
   if (world.profiles !== undefined) {
     options.profiles = Object.fromEntries(

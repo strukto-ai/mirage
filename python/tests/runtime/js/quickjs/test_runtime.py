@@ -20,7 +20,6 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.io.types import materialize
-from mirage.runtime.errors import EvalError
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.types import RunArgs
@@ -273,40 +272,13 @@ async def test_quickjs_session_narrowing_reaches_the_guest():
     await ws.close()
 
 
-@live
-@pytest.mark.asyncio
-async def test_eval_returns_the_completion_value():
-    rt = QuickJsRuntime()
-    result = await rt.eval(
-        "ctx.command === 'node' ? {deny: 'no'} : null",
-        inputs={"ctx": {"command": "node"}},
-    )
-    assert result.value == {"deny": "no"}
-    result = await rt.eval("console.log('side'); 1 + 41")
-    assert result.value == 42
-    assert result.stdout == b"side\n"
-
-
-@live
-@pytest.mark.asyncio
-async def test_eval_failures_raise_eval_error():
-    rt = QuickJsRuntime()
-    with pytest.raises(EvalError) as syn:
-        await rt.eval("def broken(")
-    assert syn.value.syntax
-    with pytest.raises(EvalError):
-        await rt.eval("throw new Error('boom')")
-    with pytest.raises(EvalError, match="one-shot"):
-        await rt.eval("1", session="s1")
-
-
 def test_reach_is_vfs():
     assert QuickJsRuntime.reach == "workspace"
 
 
 @live
 @pytest.mark.asyncio
-async def test_cwd_inherits_context_and_eval_is_isolated():
+async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
     runtime = QuickJsRuntime()
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -325,13 +297,6 @@ async def test_cwd_inherits_context_and_eval_is_isolated():
             RunArgs(code=args.code, cwd=PathSpec.from_str_path("/data/sub"))
         )
         assert explicit.stdout == b"/data/sub\n"
-        assert (
-            await runtime.eval(
-                "os.chdir('sub'); std.open('item', 'r').readAsString()"
-            )
-        ).value == "child\n"
-        assert (await runtime.eval("os.getcwd()[0]")).value == "/data"
-        assert (await runtime.eval("os", inputs={"os": 42})).value == 42
         bad = await runtime.run(
             RunArgs(
                 code="console.log('must not run')",
@@ -341,6 +306,6 @@ async def test_cwd_inherits_context_and_eval_is_isolated():
         assert bad.exit_code == 1
         assert bad.stdout == b""
         assert b"cannot change directory" in bad.stderr
-        assert (await runtime.eval("os.getcwd()[0]")).value == "/data"
+        assert (await runtime.run(args)).stdout == b"/data\n"
     finally:
         await ws.close()

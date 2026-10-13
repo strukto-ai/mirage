@@ -35,6 +35,7 @@ from mirage.policy.profile import (
     CommandsBlock,
     PathsBlock,
     ProfileMount,
+    ProfilePolicy,
     SessionProfile,
     VarsBlock,
 )
@@ -332,44 +333,40 @@ async def test_vfs_built_via_registry_has_correct_type():
 
 @pytest.mark.asyncio
 async def test_script_paths_resolve_against_config_dir(tmp_path):
-    (tmp_path / "policy.py").write_text("'local'")
-    (tmp_path / "entry.py").write_text(
-        "ctx['commands'][0]['command'] == 'python3'"
-    )
+    (tmp_path / "route.py").write_text("print('{}')")
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     vfs: ram
-route_policy: policy.py
-runtimes:
-  - name: local
-    script: entry.py
-  - workspace
+route_policy: {script: route.py, runtime: monty}
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
-    assert kwargs["route_policy"] == ScriptSource("'local'")
-    entry = kwargs["runtimes"][0]
-    assert entry.script == ScriptSource(
-        "ctx['commands'][0]['command'] == 'python3'"
+    assert kwargs["route_policy"] == ProfilePolicy(
+        script=ScriptSource("print('{}')"), runtime="monty"
     )
 
 
 @pytest.mark.asyncio
 async def test_js_script_path_stamps_the_language(tmp_path):
-    (tmp_path / "policy.js").write_text("null")
+    (tmp_path / "pager.js").write_text("null")
+    (tmp_path / "pager.mjs").write_text("null")
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     vfs: ram
-route_policy: policy.js
+clis:
+  pager: {script: pager.js, runtime: quickjs}
+  modpager: {script: pager.mjs, runtime: quickjs}
 """)
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
-    assert kwargs["route_policy"] == ScriptSource("null", language="js")
-    assert kwargs["route_policy"].language == "js"
+    pager, _ = kwargs["clis"]["pager"]
+    assert pager.script == ScriptSource("null", language="js")
+    modpager, _ = kwargs["clis"]["modpager"]
+    assert modpager.script == ScriptSource("null", language="js", module=True)
 
 
 def test_permissions_document_maps_to_workspace_kwargs(tmp_path):

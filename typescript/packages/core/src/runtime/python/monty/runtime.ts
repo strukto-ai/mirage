@@ -15,10 +15,11 @@
 import { PythonRuntime } from '../base.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
-import type { RuntimeOptions } from '../../config.ts'
+import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
+import type { MontyConfig } from './config.ts'
 import { MontyExecution } from './execution.ts'
 
 /**
@@ -57,10 +58,14 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   // "No module named" that would imply a search happened.
   override readonly runsModules = false
   readonly [EVALUATOR] = true as const
-  private readonly execution = new MontyExecution()
+  declare config: MontyConfig
+  private readonly maxMemory: number | null
+  private readonly execution: MontyExecution
 
-  constructor(options: RuntimeOptions = {}) {
-    super(options)
+  constructor(options: RuntimeOptions<MontyConfig> = {}) {
+    super(options, ['maxMemory'] satisfies (keyof MontyConfig)[])
+    this.maxMemory = memoryLimit(this.config.maxMemory)
+    this.execution = new MontyExecution(this.maxMemory)
   }
 
   /**
@@ -80,7 +85,8 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
 
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     const notice = unhonoredNotice((args.flags ?? {}) as InitFlags, this.name)
-    const execution = (context?.processes?.depth ?? 0) > 0 ? new MontyExecution() : this.execution
+    const execution =
+      (context?.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : this.execution
     const result = await execution
       .run(
         args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
@@ -105,7 +111,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     const nested = (context?.processes?.depth ?? 0) > 0
     if (nested && opts.session !== undefined)
       return Promise.reject(new Error('nested persistent evaluation is unsupported'))
-    const execution = nested ? new MontyExecution() : this.execution
+    const execution = nested ? new MontyExecution(this.maxMemory) : this.execution
     return execution
       .eval(
         code,

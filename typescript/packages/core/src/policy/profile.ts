@@ -16,7 +16,13 @@ import { parseProcessPermissions, type ProcessPermissions } from '../process/con
 import type { Limit } from '../types.ts'
 import { parseCommandLimits } from './builtin/output_cap.ts'
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS } from './constants.ts'
-import type { CommandRule, AdmissionRules, ProfileScripts, ScriptMethod } from './types.ts'
+import type {
+  CommandRule,
+  AdmissionRules,
+  ProfileScript,
+  ProfileScripts,
+  ScriptMethod,
+} from './types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
@@ -587,44 +593,76 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
     const programs = obj[key]
     if (programs === undefined) continue
     if (!Array.isArray(programs)) throw new Error(`${where}.${key} must be a list of programs`)
-    out[snakeToCamel(key) as ScriptMethod] = programs.map((raw, i): ProfilePolicySpec => {
-      const at = `${where}.${key}[${String(i)}]`
-      const program = asObject(raw, at)
-      rejectUnknownKeys(program, PROGRAM_FIELDS, at)
-      const script = program.script
-      if (script === undefined || script === null) {
-        throw new Error(`${at}.script names the policy's program, and is required`)
-      }
-      if (!(script instanceof ScriptSource) && typeof script !== 'string') {
-        throw new Error(`${at}.script must be a script path or source`)
-      }
-      const runtime = program.runtime
-      if (runtime === undefined || runtime === null) {
-        throw new Error(`${at}.runtime names the runtime the program runs on, and is required`)
-      }
-      if (typeof runtime === 'string') return { script, runtime }
-      const named = asObject(runtime, `${at}.runtime`)
-      const settings = named.config
-      if (
-        Object.keys(named).some((field) => field !== 'name' && field !== 'config') ||
-        typeof named.name !== 'string' ||
-        (settings !== undefined &&
-          (typeof settings !== 'object' || settings === null || Array.isArray(settings)))
-      ) {
-        throw new Error(
-          `${at}.runtime: a policy runtime is a name or {name, config}, got ` +
-            JSON.stringify(runtime),
-        )
-      }
-      if (settings === undefined) return { script, runtime: { name: named.name } }
-      const config = settings as Record<string, unknown>
-      return {
-        script,
-        runtime: { name: named.name, config: code ? config : normalizeFields(config) },
-      }
-    })
+    out[snakeToCamel(key) as ScriptMethod] = programs.map((raw, i) =>
+      parseProgram(raw, `${where}.${key}[${String(i)}]`, code),
+    )
   }
   return out
+}
+
+/**
+ * Validate one policy program, `{script, runtime}`: a profile's, or the
+ * workspace's `route_policy`. `code` reads a runtime's settings as the
+ * interface spells them, as `parseProfilePolicy` does.
+ */
+export function parseProgram(raw: unknown, at: string, code = false): ProfilePolicySpec {
+  const program = asObject(raw, at)
+  rejectUnknownKeys(program, PROGRAM_FIELDS, at)
+  const script = program.script
+  if (script === undefined || script === null) {
+    throw new Error(`${at}.script names the policy's program, and is required`)
+  }
+  if (!(script instanceof ScriptSource) && typeof script !== 'string') {
+    throw new Error(`${at}.script must be a script path or source`)
+  }
+  const runtime = program.runtime
+  if (runtime === undefined || runtime === null) {
+    throw new Error(`${at}.runtime names the runtime the program runs on, and is required`)
+  }
+  if (typeof runtime === 'string') return { script, runtime }
+  const named = asObject(runtime, `${at}.runtime`)
+  const settings = named.config
+  if (
+    Object.keys(named).some((field) => field !== 'name' && field !== 'config') ||
+    typeof named.name !== 'string' ||
+    (settings !== undefined &&
+      (typeof settings !== 'object' || settings === null || Array.isArray(settings)))
+  ) {
+    throw new Error(
+      `${at}.runtime: a policy runtime is a name or {name, config}, got ` + JSON.stringify(runtime),
+    )
+  }
+  if (settings === undefined) return { script, runtime: { name: named.name } }
+  const config = settings as Record<string, unknown>
+  return {
+    script,
+    runtime: { name: named.name, config: code ? config : normalizeFields(config) },
+  }
+}
+
+/**
+ * A policy program as it runs: its source, its runtime's name and that
+ * runtime's settings. `profile` is the profile it speaks for, empty for
+ * the workspace's `routePolicy`. Mirrors the Python `compile_program`.
+ *
+ * @throws Error - the script is still a path, which only the config
+ * loader loads.
+ */
+export function compileProgram(program: ProfilePolicySpec, profile: string): ProfileScript {
+  if (typeof program.script === 'string') {
+    throw new Error(
+      `names a policy by path ('${program.script}'); only the config loader loads one, ` +
+        `pass ScriptSource in code`,
+    )
+  }
+  const runtime =
+    typeof program.runtime === 'string' ? { name: program.runtime, config: {} } : program.runtime
+  return {
+    profile,
+    script: program.script,
+    runtime: runtime.name,
+    config: { ...runtime.config },
+  }
 }
 
 /** Validate one profile (a `profiles.<name>` block, or an inline document). */

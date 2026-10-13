@@ -16,7 +16,7 @@ import asyncio
 import os
 import shutil
 from collections.abc import Sequence
-from typing import Any, Callable
+from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
@@ -27,7 +27,7 @@ from mirage.runtime.sandbox.sandlock.constants import (
     SANDLOCK_CLI_HINT,
     SYSTEM_READABLE,
 )
-from mirage.runtime.types import ProcessExecution, RunResult, ScriptSource
+from mirage.runtime.types import ProcessExecution, RunResult
 from mirage.types import PathSpec
 
 
@@ -47,9 +47,8 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         self,
         captures: Sequence[str] | None = None,
         config: RuntimeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         # Each running child with the loop it runs on, which alone may
         # wait for it.
         self._children: dict[

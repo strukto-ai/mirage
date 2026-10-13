@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  decideLine,
-  evaluateScript,
-  RouteError,
-  type RouteDecision,
-} from '../../runtime/routing/index.ts'
+import { RouteError, type RouteDecision } from '../../runtime/routing/index.ts'
 import type {
   Ask,
   Claimant,
@@ -30,7 +25,7 @@ import type {
 import { opQuestion } from '../../policy/decisions.ts'
 import { agreed, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
+import { bindCommands, catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
@@ -42,8 +37,8 @@ import { makeAbortError } from '../../utils/abort.ts'
 /**
  * The policy ladder for one typed line: runtime argument, the placement
  * stage (`preExecute`: the configured route policy as a built-in, then
- * the coded policies), entry scripts. Mirrors the Python `Router` in
- * `workspace/routing.py`.
+ * the coded policies), then each command's first capturer. Mirrors the
+ * Python `Router` in `workspace/routing.py`.
  *
  * `decide` returns null when nothing decides (no runtime argument,
  * nothing to consult) so dispatch falls to the static bindings, the
@@ -51,10 +46,8 @@ import { makeAbortError } from '../../utils/abort.ts'
  * its Ask when the host refuses the line or has not answered yet; a
  * nested eval inherits the typed line's decision and never re-routes. The
  * runtime argument is the caller's own placement, so a Route is not asked
- * for and the runtime's own `script:` is not consulted (the caller forces
- * it), but a coded policy's Deny or Ask still holds the line. A runtime a
- * policy names must take the line itself (`validated`). Admission comes
- * first: a line `held` reports refused or waiting on a question is left
+ * for, but a coded policy's Deny or Ask still holds the line. Admission
+ * comes first: a line `held` reports refused or waiting on a question is left
  * on the static bindings, unplaced, for the gate to answer. `judged` is
  * the line pass's reading of the line (`lineJudgments`), which gives
  * `preExecute` its commands; awaited only when there is a placement to
@@ -86,8 +79,7 @@ export class Router {
     const placing = await policies.wantsFor('preExecute', session.sessionId)
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
     if (placed !== null && !placing) return placed
-    const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
-    if (placed === null && !placing && !hasScripts) return null
+    if (placed === null && !placing) return null
     if (held !== undefined && (await held())) return placed
     const ctx = this.context(command, session, await judged())
     const [said, route] = await policies.preExecute(ctx, placed !== null)
@@ -98,8 +90,8 @@ export class Router {
     if (action?.kind === 'abandoned') throw makeAbortError()
     if (action !== null) return action
     if (placed !== null) return placed
-    if (route !== null) return this.validated(route.runtime, ctx)
-    return this.scripted(ctx)
+    if (route !== null) return this.routed(route.runtime)
+    return this.unplaced()
   }
 
   /**
@@ -114,9 +106,8 @@ export class Router {
     judged: () => Promise<readonly [Walked, Judged[]][]>,
   ): Promise<[readonly (Deny | Ask | Route)[], RouteDecision<Runtime> | Deny | Pending | null]> {
     const policies = this.registry.policies
-    const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     const placing = await policies.wantsFor('preExecute', session.sessionId)
-    if (!hasScripts && !placing) return [[], null]
+    if (!placing) return [[], null]
     const ctx = this.context(command, session, await judged())
     const answers = await policies.answers('preExecute', ctx)
     let winner = settled(answers)
@@ -126,41 +117,43 @@ export class Router {
       winner = agreed(answers.filter((a): a is Route => a.kind === 'route'))
     }
     if (winner?.kind === 'deny') return [answers, winner]
-    if (winner?.kind === 'route') {
-      const checked = await this.validated(winner.runtime, ctx)
-      return 'kind' in checked ? [[...answers, checked], checked] : [answers, checked]
-    }
-    return [answers, await this.scripted(ctx)]
+    if (winner?.kind === 'route') return [answers, this.routed(winner.runtime)]
+    return [answers, this.unplaced()]
   }
 
   /**
-   * The decision placing a line on the runtime `name`, once the runtime
-   * agrees: its own `script:`, when it has one, must take the line, or
-   * the placement and the runtime conflict and the line is refused, as two
-   * policies placing it apart refuse it. Mirrors Python's
-   * `Router._validated`.
+   * The decision a policy's route places a line on. `workspace` keeps the
+   * line in Mirage: no line executor (a `*` capture) takes it, and each
+   * command stays on its first other capturer. Any other name places it as
+   * the runtime argument does. Mirrors Python's `Router._routed`.
    */
-  private async validated(name: string, ctx: RouteContext): Promise<RouteDecision<Runtime> | Deny> {
-    const placed = this.placed(name)
+  private routed(name: string): RouteDecision<Runtime> {
+    if (name !== 'workspace') return this.placed(name)
     const entries = this.runtimes.entries
-    const entry = entries.find((e) => e.name === name)
-    if (entry?.script === undefined) return placed
-    const willing = await evaluateScript(entry.script, ctx, entry, entries)
-    if (willing) return placed
-    return {
-      kind: 'deny',
-      reason: `runtime ${name} declines this line`,
-      policy: `runtimes.${name}`,
+    const kept = entries.filter((entry) => !entry.captures.includes('*'))
+    // Null prototype: captures are arbitrary command names.
+    const bindings = Object.create(null) as Record<string, Runtime | null>
+    for (const entry of entries) {
+      for (const command of entry.captures) bindings[command] = null
     }
+    Object.assign(bindings, bindCommands(kept))
+    return { bindings, fallback: catchAll(entries) }
   }
 
   /**
-   * The entry scripts' decision, for a line no policy placed: each
-   * runtime's `script:` says whether it takes the line. Mirrors Python's
-   * `Router._scripted`.
+   * The decision for a line no policy placed: each command on its first
+   * capturer, kept for the line's nested evals. Mirrors Python's
+   * `Router._unplaced`.
    */
-  private scripted(ctx: RouteContext): Promise<RouteDecision<Runtime>> {
-    return decideLine(this.runtimes.entries, ctx)
+  private unplaced(): RouteDecision<Runtime> {
+    const entries = this.runtimes.entries
+    return {
+      bindings: Object.assign(
+        Object.create(null) as Record<string, Runtime | null>,
+        bindCommands(entries),
+      ),
+      fallback: catchAll(entries),
+    }
   }
 
   /**

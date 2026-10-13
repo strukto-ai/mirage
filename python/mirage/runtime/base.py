@@ -19,12 +19,7 @@ from typing import Any, Callable, ClassVar
 from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
-from mirage.runtime.mixin import (
-    EvaluatorMixin,
-    LineExecutorMixin,
-    ProcessExecutorMixin,
-)
-from mirage.runtime.routing.types import RouteScript
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import (
     ExecutionRequest,
     FilesystemOperation,
@@ -48,11 +43,10 @@ class Runtime(ABC):
     across runs, teardown in close).
 
     The base holds only what every tier shares: the registry name, the
-    captured command names, the coerced config, and the per-line
-    admission script. What a runtime can DO is declared by its tier
-    and mixins, detected by type and never by probing: LanguageRuntime
-    interprets one command's code (run), LineExecutorMixin takes whole
-    lines (run_line), EvaluatorMixin evaluates expressions (eval).
+    captured command names and the coerced config. What a runtime can
+    DO is declared by its tier and mixins, detected by type and never by
+    probing: LanguageRuntime interprets one command's code (run),
+    LineExecutorMixin takes whole lines (run_line).
     """
 
     name: str
@@ -69,11 +63,6 @@ class Runtime(ABC):
     # wider runtime voids it.
     reach: RuntimeReach = "process"
     filesystem: ClassVar[tuple[FilesystemOperation, ...]] = ()
-    # Per-line admission script for the routing ladder, answering "do
-    # I want this line": a callable taking a RouteContext, or a
-    # config-borne ScriptSource. None = always willing. Policy, not
-    # capability: it can only refuse lines the captures already allow.
-    script: RouteScript | None = None
     # Each runtime's config class; coerce() makes unknown fields fail
     # loud, so runtimes need no per-field rejection code.
     config_cls: ClassVar[type[RuntimeConfig]] = RuntimeConfig
@@ -86,7 +75,6 @@ class Runtime(ABC):
         self,
         captures: Sequence[str] | None = None,
         config: RuntimeConfig | dict[str, Any] | None = None,
-        script: RouteScript | None = None,
     ) -> None:
         """Every runtime is constructed the same way.
 
@@ -101,20 +89,16 @@ class Runtime(ABC):
                 own config class (config_cls), so a field the runtime
                 does not have fails loud; the dict form is a yaml
                 entry's ``config`` block.
-            script (RouteScript | None): per-line
-                admission script for the routing ladder.
         """
         if captures is not None:
             self.captures = tuple(captures)
         self.config = self.config_cls.coerce(config)
-        self.script = script
 
     @property
     def capabilities(self) -> RuntimeCapabilities:
         return RuntimeCapabilities(
             process=isinstance(self, ProcessExecutorMixin),
             shell=isinstance(self, LineExecutorMixin),
-            evaluate=isinstance(self, EvaluatorMixin),
             reach=self.reach,
             filesystem=self.filesystem,
         )

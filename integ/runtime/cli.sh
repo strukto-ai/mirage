@@ -4,8 +4,8 @@
 # process, here built from a generated workspace yaml (`mirage
 # workspace create`) and executed with `mirage shell`. This is the
 # yaml -> daemon -> CLI construction path: entry captures, config
-# blocks, per-entry scripts (policy), the global route, workspace,
-# mount and profile command_limits, and the per-line --runtime argument.
+# blocks, the route program, workspace, mount and profile
+# command_limits, and the per-line --runtime argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
 # read_op, profile, facade — the last calls ws.vfs directly) or a runner-local
@@ -165,22 +165,14 @@ cli_expressible() {
 }
 
 # Emit the workspace yaml (as JSON) for a case world, extracting any
-# inline script sources into .py files under $2.
+# inline script sources into files under $2.
 write_world_yaml() {
   local world_json="$1" work="$2"
-  local n i src policy
-  n=$(jq '(.runtimes // []) | length' <<<"$world_json")
-  for i in $(seq 0 $((n - 1))); do
-    src=$(jq -r ".runtimes[$i] | if type == \"object\" then .script // empty else empty end" <<<"$world_json")
-    if [ -n "$src" ]; then
-      printf '%s' "$src" > "$work/script_$i.py"
-      world_json=$(jq --arg p "$work/script_$i.py" ".runtimes[$i].script = \$p" <<<"$world_json")
-    fi
-  done
-  policy=$(jq -r '.route_policy // empty' <<<"$world_json")
+  local src policy
+  policy=$(jq -r '.route_policy.script // empty' <<<"$world_json")
   if [ -n "$policy" ]; then
     printf '%s' "$policy" > "$work/policy.py"
-    world_json=$(jq --arg p "$work/policy.py" '.route_policy = $p' <<<"$world_json")
+    world_json=$(jq --arg p "$work/policy.py" '.route_policy.script = $p' <<<"$world_json")
   fi
   # A script CLI's program becomes a file the yaml `clis:` block points
   # at, the same build-context shape a deployment writes by hand; the

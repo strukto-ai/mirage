@@ -13,27 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.types import EvalResult, RunArgs, RunResult
+from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.types import RunResult
 
 
 class PlainRuntime(Runtime):
     name = "plain"
 
-    async def run(self, args: RunArgs) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+class LineRuntime(Runtime, LineExecutorMixin):
+    name = "line"
+
+    async def run_line(self, line, stdin, env, cwd) -> RunResult:
+        return RunResult(stdout=line.encode(), stderr=None, exit_code=0)
 
 
-class EvalingRuntime(Runtime, EvaluatorMixin):
-    name = "evaling"
-
-    async def run(self, args: RunArgs) -> RunResult:
-        return RunResult(stdout=b"", stderr=None, exit_code=0)
-
-    async def eval(self, code, *, inputs=None, session=None) -> EvalResult:
-        return EvalResult(value=code)
-
-
-def test_evaluator_mixin_is_a_type_level_capability():
-    assert not isinstance(PlainRuntime(), EvaluatorMixin)
-    assert isinstance(EvalingRuntime(), EvaluatorMixin)
+def test_line_executor_mixin_is_a_type_level_capability():
+    assert not isinstance(PlainRuntime(), LineExecutorMixin)
+    assert isinstance(LineRuntime(), LineExecutorMixin)

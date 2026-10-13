@@ -92,6 +92,22 @@ the package from the Pyodide CDN; Node keeps it beside the installed
 A package from PyPI cannot be installed at run time: `micropip.install`
 fails. Put its pure-Python wheel on a mount and list it in `sys_path`.
 
+## Memory
+
+`max_memory` caps the memory the worker may grow to:
+
+```yaml
+runtimes:
+  - name: pyodide
+    config:
+      max_memory: 256M
+```
+
+The worker starts at about 50M and its memory never shrinks. A run that
+passes the cap stops with `MemoryError`, and the next run starts a fresh
+worker. The cap holds on Node only: a browser cannot read a worker's
+memory. There is no cap by default.
+
 ## What is wired
 
 Anything built on these calls, such as `os.path`, `pathlib`, `glob`,

@@ -15,20 +15,20 @@
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
-from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.config import RuntimeConfig, memory_limit
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
+from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.types import (
     FilesystemOperation,
     RunArgs,
     RunResult,
     RuntimeReach,
-    ScriptSource,
 )
 from mirage.runtime.wasm import WasmExecution, WasmFsConfig, WasmView
 from mirage.runtime.wasm.loader import wasmtime
@@ -104,21 +104,20 @@ class WasiRuntime(PythonRuntime):
         "glob",
     )
 
-    config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
-    config: HomeConfig
+    config_cls: ClassVar[type[RuntimeConfig]] = WasiConfig
+    config: WasiConfig
 
     def __init__(
         self,
         captures: Sequence[str] | None = None,
-        config: HomeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
+        config: WasiConfig | dict[str, Any] | None = None,
     ) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the wasi runtime requires the 'wasi' extra. Install with: "
                 "pip install mirage-ai[wasi], or select another runtime"
             )
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         root = self.config.home or os.environ.get(WASI_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
@@ -131,7 +130,11 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}"
             )
-        self._execution = WasmExecution(self._root / "python.wasm", "python3")
+        self._execution = WasmExecution(
+            self._root / "python.wasm",
+            "python3",
+            memory_limit(self.config.max_memory),
+        )
 
     async def _execute_code(
         self, args: RunArgs, context: RuntimeContext | None

@@ -29,13 +29,6 @@ MAX_URANDOM_BYTES = 1_048_576
 # reaches; the command limits bound a run instead.
 LIMITS = {"max_suspensions": 2**31 - 1}
 
-# Monty reports an unfinished suite as a syntax error like any other, so
-# a console can only tell "keep typing" from "this is broken" by the
-# traceback text. Coupled to monty's wording on purpose, and the reason
-# it is named here rather than inline: a version bump that rephrases
-# either line turns every continuation into an error at the prompt.
-INCOMPLETE_MARKERS = ("unexpected EOF", "Expected an indented block")
-
 # What a refused readlink may mean "no link here". EINVAL is the backend
 # saying the path is not one, and the other three are CPython's own
 # `_ignore_error` list, which is what `Path.is_symlink` swallows around

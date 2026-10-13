@@ -18,7 +18,7 @@ import os
 import shutil
 import sys
 from collections.abc import Sequence
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from mirage.errors.fs import fs_strerror
 from mirage.runtime.config import RuntimeConfig
@@ -32,7 +32,6 @@ from mirage.runtime.types import (
     RunArgs,
     RunResult,
     RuntimeReach,
-    ScriptSource,
 )
 from mirage.shell.bytes import encode_text
 
@@ -101,9 +100,8 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         self,
         captures: Sequence[str] | None = None,
         config: LocalConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         chosen = self.config.home or os.environ.get(LOCAL_HOME_ENV)
         if chosen:
             resolved = shutil.which(chosen)

@@ -118,6 +118,3 @@ In TypeScript, any `std` or `os` function not listed as supported throws
 - QuickJS cannot reach host files or the network, but only `command_limits`
   bound its CPU and memory. Run untrusted or heavy code in a
   [sandbox](/home/setup/runtime/sandbox).
-- QuickJS can evaluate expressions, so it can run a
-  [route policy](/home/policy/route-policy): `route_policy: ./policy.js` runs per
-  line with `ctx` as a global, and the last expression names the runtime.

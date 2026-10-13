@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from mirage.runtime.binding import WorkspaceBinding
-from mirage.runtime.errors import EvalError
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV
 from mirage.runtime.resolver import PrefixResolver
@@ -237,55 +236,5 @@ async def test_invocations_start_with_fresh_interpreter_state(runtime, fails):
         second = await engine.run(RunArgs(code=probe))
         assert second.exit_code == 0, second.stderr
         assert second.stdout == b"fresh\nfresh\n"
-    finally:
-        await engine.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "runtime",
-    [
-        "monty",
-        pytest.param("quickjs", marks=quickjs_live),
-    ],
-)
-async def test_one_shot_evaluations_and_runs_are_isolated(runtime):
-    engine = build_runtime(runtime)
-    javascript = runtime == "quickjs"
-    seed = INVOCATION_STATE_JS if javascript else INVOCATION_STATE_PY
-    probe = INVOCATION_PROBE_JS if javascript else INVOCATION_PROBE_PY
-    try:
-        await engine.eval(seed)
-        with pytest.raises(EvalError):
-            await engine.eval("mirage_marker")
-        result = await engine.run(RunArgs(code=probe))
-        assert result.exit_code == 0, result.stderr
-        assert result.stdout == b"fresh\nfresh\n"
-        result = await engine.run(RunArgs(code=seed))
-        assert result.exit_code == 0, result.stderr
-        with pytest.raises(EvalError):
-            await engine.eval("mirage_marker")
-    finally:
-        await engine.close()
-
-
-@pytest.mark.asyncio
-async def test_only_named_evaluator_sessions_keep_interpreter_state():
-    engine = build_runtime("monty")
-    try:
-        await engine.eval("mirage_marker = 40", session="first")
-        await engine.eval("mirage_marker = 10", session="second")
-        result = await engine.run(RunArgs(code="mirage_marker = 99"))
-        assert result.exit_code == 0, result.stderr
-        await engine.eval("mirage_marker = 88")
-        assert (
-            await engine.eval("print(mirage_marker + 2)", session="first")
-        ).stdout == b"42\n"
-        assert (
-            await engine.eval("print(mirage_marker + 2)", session="second")
-        ).stdout == b"12\n"
-        result = await engine.run(RunArgs(code=INVOCATION_PROBE_PY))
-        assert result.exit_code == 0, result.stderr
-        assert result.stdout == b"fresh\nfresh\n"
     finally:
         await engine.close()

@@ -33,7 +33,7 @@ from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.config import IOConfig
-from mirage.policy.profile import SessionProfile
+from mirage.policy.profile import ProfilePolicy, SessionProfile
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
@@ -426,12 +426,8 @@ class MountBlock(BaseModel):
 def _is_script_path(value: str) -> bool:
     """True for the docker-style single-line script path form.
 
-    ``.py`` runs on a python evaluator (monty), ``.js``/``.mjs`` on a
-    JS one (quickjs); the script's language must match the world's
-    policy engine.
-
     Args:
-        value (str): a yaml ``script``/``route_policy`` value.
+        value (str): a yaml ``script`` value.
     """
     return "\n" not in value and value.strip().endswith((".py", ".js", ".mjs"))
 
@@ -440,12 +436,12 @@ def _load_script_source(value: str) -> ScriptSource:
     """Embed the referenced script file as source.
 
     Config carries a reference, the wire carries content (the docker
-    build-context model): the value must be a path to a ``.py`` file,
-    read at load time. In code, scripts are callables; config is the
-    only entry point for script source.
+    build-context model): the value must be a path to a ``.py``,
+    ``.js`` or ``.mjs`` file, read at load time. In code, a program is
+    passed as ``ScriptSource``.
 
     Args:
-        value (str): the yaml ``script``/``route_policy`` value.
+        value (str): the yaml ``script`` value.
 
     Raises:
         ValueError: the value is not a script path.
@@ -463,6 +459,20 @@ def _load_script_source(value: str) -> ScriptSource:
     )
 
 
+def _load_program(program: ProfilePolicy) -> ProfilePolicy:
+    """Embed a path-form policy program as source.
+
+    Args:
+        program (ProfilePolicy): the program as validated; returned as
+            is when it already carries source.
+    """
+    if not isinstance(program.script, str):
+        return program
+    return program.model_copy(
+        update={"script": _load_script_source(program.script)}
+    )
+
+
 def _load_profile_policy(profile: SessionProfile) -> SessionProfile:
     """Embed a profile's path-form policy programs as source.
 
@@ -473,14 +483,7 @@ def _load_profile_policy(profile: SessionProfile) -> SessionProfile:
     if profile.policy is None:
         return profile
     loaded = {
-        method: [
-            program.model_copy(
-                update={"script": _load_script_source(program.script)}
-            )
-            if isinstance(program.script, str)
-            else program
-            for program in programs
-        ]
+        method: [_load_program(program) for program in programs]
         for method, programs in profile.policy.items()
     }
     return profile.model_copy(update={"policy": loaded})
@@ -489,27 +492,22 @@ def _load_profile_policy(profile: SessionProfile) -> SessionProfile:
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     """Resolve relative script paths against the config file's dir.
 
-    A path-form ``script``/``route_policy`` in a config file means "next to
-    the file" (the docker build-context model), never "wherever the
-    server happens to run". Mutates the parsed mapping in place;
+    A path-form ``script`` in a config file means "next to the file"
+    (the docker build-context model), never "wherever the server
+    happens to run". Mutates the parsed mapping in place;
     in-memory dict configs are untouched by the loader.
 
     Args:
         raw (dict[str, Any]): the parsed config mapping.
         base (Path): directory containing the config file.
     """
-    policy = raw.get("route_policy")
-    if (
-        isinstance(policy, str)
-        and _is_script_path(policy)
-        and not Path(policy.strip()).is_absolute()
-    ):
-        raw["route_policy"] = str(base / policy.strip())
+    route = raw.get("route_policy")
+    if isinstance(route, dict):
+        _absolutize_script_key(route, base)
     runtimes = raw.get("runtimes")
     if isinstance(runtimes, list):
         for i, entry in enumerate(runtimes):
             if isinstance(entry, dict):
-                _absolutize_script_key(entry, base)
                 _absolutize_code_ref(entry, "name", base)
             elif isinstance(entry, str):
                 runtimes[i] = _rebase_code_ref(entry, base)
@@ -543,8 +541,8 @@ def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
     """Rebase one mapping's relative ``script`` path onto ``base``.
 
     Args:
-        entry (dict[str, Any]): a ``runtimes``, ``clis`` or profile
-            ``policy`` mapping entry, mutated in place.
+        entry (dict[str, Any]): a ``clis`` entry, a profile ``policy``
+            program or the ``route_policy`` block, mutated in place.
         base (Path): directory containing the config file.
     """
     script = entry.get("script")
@@ -608,8 +606,8 @@ def _runtime_class(ref: str) -> type[Runtime]:
     The runtime twin of the ``vfs:`` and ``cli:`` reference forms:
     a deployment ships a runtime as a file and names it from yaml with no
     host program calling ``register_runtime``. The class is constructed
-    with the uniform ``(captures, config, script)`` options like a
-    builtin, so the entry's other keys reach it unchanged.
+    with the uniform ``(captures, config)`` options like a builtin, so
+    the entry's other keys reach it unchanged.
 
     Args:
         ref (str): ``./box.py:EchoBox`` or ``pkg.mod:EchoBox``.
@@ -632,12 +630,12 @@ def _build_runtime_entries(
     Args:
         entries (list[str | dict[str, Any]]): names, or maps carrying a
             name plus the uniform runtime options (``captures``,
-            ``config``, ``script``). A name is a registered runtime or a
+            ``config``). A name is a registered runtime or a
             ``source:Class`` reference to a ``Runtime`` subclass.
 
     Raises:
-        ValueError: a map entry without a name, a non-path script, or a
-            reference that is not a ``Runtime`` subclass.
+        ValueError: a map entry without a name, or a reference that is
+            not a ``Runtime`` subclass.
     """
     out: list[Runtime | str] = []
     for entry in entries:
@@ -648,13 +646,6 @@ def _build_runtime_entries(
         name = options.pop("name", None)
         if not isinstance(name, str) or not name:
             raise ValueError("runtime entry needs a non-empty 'name'")
-        script = options.pop("script", None)
-        if script is not None and not isinstance(script, str):
-            raise ValueError(
-                "a runtime entry script must be a .py path string"
-            )
-        if script is not None:
-            options["script"] = _load_script_source(script)
         if ":" in name:
             out.append(_runtime_class(name)(**options))
             continue
@@ -698,13 +689,14 @@ class WorkspaceConfig(BaseModel):
     # with a name plus the uniform runtime options ({name: wasi,
     # config: {home: /opt/...}}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
-    # Global route-policy script: a .py path whose content is embedded
-    # at load. Its last expression names the runtime for the line, or
-    # None to fall to entry scripts.
-    route_policy: str | None = None
+    # The route policy, a program the way a profile's policy names one:
+    # {script: route.py, runtime: monty}. The script is embedded at load;
+    # it prints {"kind": "route", "runtime": ...} to place a line, or
+    # nothing to leave each command on its first capturer.
+    route_policy: ProfilePolicy | None = None
     # The permission documents: one profile per name. A profile is the whole
     # document a session runs under, so there is no workspace-wide
-    # block; the policy script is the line-level counterpart.
+    # block; route_policy is the one program every session shares.
     profiles: dict[str, SessionProfile] | None = None
     # The profile a session gets when it names none; `default` when unset
     # and a profile of that name exists.
@@ -831,7 +823,7 @@ class WorkspaceConfig(BaseModel):
         if self.runtimes is not None:
             kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
         if self.route_policy is not None:
-            kwargs["route_policy"] = _load_script_source(self.route_policy)
+            kwargs["route_policy"] = _load_program(self.route_policy)
         if self.profiles is not None:
             kwargs["profiles"] = {
                 name: _load_profile_policy(profile)

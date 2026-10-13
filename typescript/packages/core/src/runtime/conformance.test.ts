@@ -180,25 +180,25 @@ describe('interpreter state belongs to an invocation', () => {
         }
       }, 120_000)
     }
+  }
 
+  for (const Runtime of [MontyRuntime, PyodideRuntime]) {
     it(`${Runtime.name} isolates one-shot evaluations and runs`, async () => {
       const engine = new Runtime()
       try {
-        await engine.eval(seed)
+        await engine.eval(INVOCATION_STATE_PY)
         await expect(engine.eval('mirage_marker')).rejects.toBeInstanceOf(EvalError)
-        const result = await engine.run(runArgs(probe))
+        const result = await engine.run(runArgs(INVOCATION_PROBE_PY))
         expect(result.exitCode, String(result.stderr)).toBe(0)
         expect(new TextDecoder().decode(result.stdout)).toBe('fresh\nfresh\n')
-        const seeded = await engine.run(runArgs(seed))
+        const seeded = await engine.run(runArgs(INVOCATION_STATE_PY))
         expect(seeded.exitCode, String(seeded.stderr)).toBe(0)
         await expect(engine.eval('mirage_marker')).rejects.toBeInstanceOf(EvalError)
       } finally {
         await engine.close()
       }
     }, 120_000)
-  }
 
-  for (const Runtime of [MontyRuntime, PyodideRuntime]) {
     it(`${Runtime.name} keeps interpreter state only in its named evaluator session`, async () => {
       const engine = new Runtime()
       try {

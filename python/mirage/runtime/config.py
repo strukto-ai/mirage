@@ -15,19 +15,42 @@
 from dataclasses import dataclass, fields
 from typing import Any, TypeVar
 
+from mirage.cache.file.utils import parse_limit
+
 T = TypeVar("T", bound="RuntimeConfig")
+
+
+def memory_limit(value: str | None) -> int | None:
+    """A runtime's ``max_memory`` in bytes, None for no cap.
+
+    Spelled as sandlock spells its own (``10M``, ``512M``, ``1G``).
+
+    Args:
+        value (str | None): the setting as configured.
+
+    Raises:
+        ValueError: the setting is not a size.
+    """
+    if value is None:
+        return None
+    try:
+        return parse_limit(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"max_memory must be a size like 10M or 1G, got {value!r}"
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     """How a runtime's engine is set up: its implementation knobs.
 
-    Every runtime is constructed the same way (captures, config,
-    script); what differs between runtimes lives here. Each runtime
-    class names its own config subclass (config_cls), so an option the
-    runtime does not have is simply not a field there and fails loud
-    at construction. In yaml this is the runtime entry's ``config``
-    block, mirroring a mount's.
+    Every runtime is constructed the same way (captures, config); what
+    differs between runtimes lives here. Each runtime class names its
+    own config subclass (config_cls), so an option the runtime does not
+    have is simply not a field there and fails loud at construction. In
+    yaml this is the runtime entry's ``config`` block, mirroring a
+    mount's.
     """
 
     @classmethod

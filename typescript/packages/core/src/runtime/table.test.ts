@@ -146,7 +146,7 @@ describe('buildRuntime option validation', () => {
     expect(() => {
       checkRuntimeOptions('./box.mjs:EchoBox', { captuers: ['nvidia-smi'] })
     }).toThrow(
-      /unknown \.\/box\.mjs:EchoBox runtime option 'captuers' \(expected: 'captures', 'config', 'script'\)/,
+      /unknown \.\/box\.mjs:EchoBox runtime option 'captuers' \(expected: 'captures', 'config'\)/,
     )
     expect(() => {
       checkRuntimeOptions('./box.mjs:EchoBox', { captures: ['nvidia-smi'], config: {} })

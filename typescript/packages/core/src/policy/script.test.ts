@@ -478,6 +478,47 @@ describe('ScriptPolicy', () => {
     ])
   })
 
+  it("gives a program its runtime's memory cap unless it names one", async () => {
+    const settings: Record<string, unknown>[] = []
+    built.factory = (_runtime, config) => {
+      settings.push({ ...config })
+      return new FakeProgram()
+    }
+    const policy = track(
+      new ScriptPolicy(
+        scripts({
+          preCommand: [
+            entry('monty'),
+            entry('pyodide', 'b', { home: '/a' }),
+            entry('pyodide', 'c', { home: '/a', maxMemory: '1G' }),
+            entry('monty', 'd', { maxMemory: null }),
+          ],
+        }),
+      ),
+    )
+    await policy.preCommand(ctx())
+    expect(settings).toEqual([
+      { maxMemory: '10M' },
+      { maxMemory: '128M', home: '/a' },
+      { maxMemory: '1G', home: '/a' },
+      { maxMemory: null },
+    ])
+  })
+
+  it('runs one program and throws what went wrong', async () => {
+    const program = entry('monty', 'SOURCE 0', { slot: 0 })
+    const routing = policyWith(
+      'preExecute',
+      new FakeProgram(answer({ kind: 'route', runtime: 'x' })),
+    )
+    expect(await routing.run(program, 'preExecute', line())).toEqual({
+      kind: 'route',
+      runtime: 'x',
+    })
+    const failing = policyWith('preExecute', new FakeProgram('', 3))
+    await expect(failing.run(program, 'preExecute', line())).rejects.toThrow(/^exited 3$/)
+  })
+
   it('builds a runtime once per name and settings, and closes it', async () => {
     const engines: FakeProgram[] = []
     built.factory = () => {

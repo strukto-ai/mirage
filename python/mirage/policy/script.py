@@ -30,6 +30,7 @@ from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
     PROGRAM_FLAGS,
+    PROGRAM_MEMORY,
     PROGRAM_RUNTIMES,
 )
 from mirage.policy.mixin import SessionScopedMixin
@@ -51,8 +52,8 @@ from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.script import script_engine
-from mirage.runtime.types import CodeExecution, DispatchFn, EvalValue
-from mirage.types import PathSpec
+from mirage.runtime.types import CodeExecution, DispatchFn
+from mirage.types import JsonValue, PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ _POLICY_READ: ContextVar[bool] = ContextVar(
 )
 
 
-def _plain(value: Any) -> EvalValue:
+def _plain(value: Any) -> JsonValue:
     """A value as a program reads it: JSON-shaped data, bytes as text,
     a path as its virtual spelling, a model or record as its fields
     (the live handles left out).
@@ -105,7 +106,7 @@ def _plain(value: Any) -> EvalValue:
 
 def script_context(
     ctx: CommandContext | RouteContext | VfsContext | SessionContext,
-) -> dict[str, EvalValue]:
+) -> dict[str, JsonValue]:
     """A policy context as a program reads it: every field a coded
     policy reads, under the same name, as plain data.
 
@@ -199,16 +200,20 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     for a module it imports. Every failure fails closed: a program that
     exits non-zero, runs past the timeout, prints something else, or
     names a runtime that cannot be built refuses the action with a
-    reason naming the profile, and is logged.
+    reason naming the profile, and is logged. The workspace's
+    ``route_policy`` program runs here too (``run``), outside any
+    profile.
 
     The runtime is the policy's own, built from the name and settings
-    the profile gives, shared across sessions and never the agent's. It
-    is wired to the workspace's files the way an agent's runtime is, so
-    a program reads what an operand holds as the session reads it: a
-    hidden path is absent and a write is refused. A read from a program
-    clears the dispatcher like any other, except this policy's own
-    ``pre_vfs``: the policy is the one asking, and judging its own read
-    would re-enter the run waiting on it. Runs are serialized.
+    the profile gives, shared across sessions and never the agent's,
+    and capped at ``PROGRAM_MEMORY`` unless the settings name a
+    ``max_memory``. It is wired to the workspace's files the way an
+    agent's runtime is, so a program reads what an operand holds as the
+    session reads it: a hidden path is absent and a write is refused. A
+    read from a program clears the dispatcher like any other, except this
+    policy's own ``pre_vfs``: the policy is the one asking, and judging
+    its own read would re-enter the run waiting on it. Runs are
+    serialized.
 
     Args:
         sessions (SessionScriptsQuery): the session manager, answering
@@ -273,6 +278,35 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         """
         return bool(self._sessions.scripts_of(session_id).get(method))
 
+    async def run(
+        self,
+        entry: ProfileScript,
+        method: str,
+        ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+    ) -> Deny | Ask | Route | None:
+        """One program's answer at one method, outside any profile: the
+        workspace's ``route_policy``.
+
+        Args:
+            entry (ProfileScript): the program.
+            method (str): the method it answers at.
+            ctx (CommandContext | RouteContext | VfsContext |
+                SessionContext): its context.
+
+        Raises:
+            ValueError: the program failed: it exited non-zero, ran past
+                the timeout, printed something else, or names a runtime
+                that cannot be built. The message says what, as a clause
+                for the caller to prefix with whose program it is.
+        """
+        payload = json.dumps(script_context(ctx))
+        try:
+            return await self._run(
+                entry, method, payload, await self._cwd(ctx)
+            )
+        except ValueError as exc:
+            raise ValueError(_clause(exc)) from exc
+
     async def close(self) -> None:
         """Close every runtime a program ran on."""
         engines = list(self._engines.values())
@@ -300,7 +334,10 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         cwd = await self._cwd(ctx)
         answers: list[Deny | Ask | Route] = []
         for entry in programs:
-            answer = await self._run(entry, method, payload, cwd)
+            try:
+                answer = await self._run(entry, method, payload, cwd)
+            except ValueError as exc:
+                answer = self._failed(entry, _clause(exc))
             if answer is not None:
                 answers.append(answer)
             if isinstance(answer, Deny):
@@ -334,13 +371,16 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         payload: str,
         cwd: str,
     ) -> Deny | Ask | Route | None:
-        """One program at one method, failing closed.
+        """One program at one method.
 
         Args:
             entry (ProfileScript): the program.
             method (str): the method it answers at.
             payload (str): the context as JSON.
             cwd (str): the directory it starts in.
+
+        Raises:
+            ValueError: the program failed, as a clause about "script".
         """
         try:
             async with self._lock:
@@ -359,22 +399,20 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                     ),
                     timeout=SCRIPT_EVAL_TIMEOUT_SECONDS,
                 )
-        except asyncio.TimeoutError:
-            return self._failed(
-                entry, f"timed out after {SCRIPT_EVAL_TIMEOUT_SECONDS:g}s"
-            )
-        except ValueError as exc:
-            # script_engine's refusal: the runtime cannot be built here.
-            return self._failed(entry, _clause(exc))
+        except asyncio.TimeoutError as exc:
+            raise ValueError(
+                f"script timed out after {SCRIPT_EVAL_TIMEOUT_SECONDS:g}s"
+            ) from exc
         if result.exit_code != 0:
             stderr = (result.stderr or b"").decode(errors="replace")
-            return self._failed(
-                entry, f"exited {result.exit_code}", stderr[-2000:]
+            logger.error(
+                "policy program on %s exited %d\n%s",
+                entry.runtime,
+                result.exit_code,
+                stderr[-2000:],
             )
-        try:
-            return script_action(result.stdout, method)
-        except ValueError as exc:
-            return self._failed(entry, _clause(exc))
+            raise ValueError(f"script exited {result.exit_code}")
+        return script_action(result.stdout, method)
 
     def _engine(self, entry: ProfileScript) -> LanguageRuntime:
         """The policy's own runtime for one program, built on first use
@@ -393,10 +431,11 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                 f"script names runtime {entry.runtime!r}; a policy program "
                 f"runs on {' or '.join(sorted(PROGRAM_RUNTIMES))}"
             )
-        key = (entry.runtime, json.dumps(dict(entry.config), sort_keys=True))
+        config = {"max_memory": PROGRAM_MEMORY[entry.runtime], **entry.config}
+        key = (entry.runtime, json.dumps(config, sort_keys=True))
         engine = self._engines.get(key)
         if engine is None:
-            engine = script_engine(entry.script, entry.runtime, entry.config)
+            engine = script_engine(entry.script, entry.runtime, config)
             if self._dispatch is not None and self._resolver is not None:
                 engine.bind(WorkspaceBinding(self._reading, self._resolver))
             self._engines[key] = engine
@@ -429,20 +468,16 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         finally:
             _POLICY_READ.reset(token)
 
-    def _failed(
-        self, entry: ProfileScript, detail: str, stderr: str = ""
-    ) -> Deny:
-        """The fail-closed refusal: one wording, logged with what the
-        program wrote to stderr.
+    def _failed(self, entry: ProfileScript, detail: str) -> Deny:
+        """The fail-closed refusal: one wording, logged.
 
         Args:
             entry (ProfileScript): the program that failed.
             detail (str): what went wrong, as the clause after
                 "policy".
-            stderr (str): the tail of the program's stderr, if any.
         """
         reason = f"profile {entry.profile!r} policy {detail}"
-        logger.error("%s%s", reason, f"\n{stderr}" if stderr else "")
+        logger.error("%s", reason)
         return Deny(reason)
 
 

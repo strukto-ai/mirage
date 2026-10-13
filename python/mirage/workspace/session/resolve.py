@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
-from typing import Any
 
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import (
@@ -26,6 +25,7 @@ from mirage.policy.profile import (
     ProfileSetup,
     SessionProfile,
     VarsBlock,
+    compile_program,
 )
 from mirage.policy.types import (
     AdmissionRules,
@@ -499,25 +499,10 @@ def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
     for method, programs in (effective.policy or {}).items():
         entries: list[ProfileScript] = []
         for program in programs:
-            if isinstance(program.script, str):
-                raise PolicyError(
-                    f"profile {name!r} names a policy by path "
-                    f"({program.script!r}); only the config loader loads "
-                    f"one, pass ScriptSource in code"
-                )
-            named: dict[str, Any] = (
-                {"name": program.runtime}
-                if isinstance(program.runtime, str)
-                else program.runtime
-            )
-            entries.append(
-                ProfileScript(
-                    profile=name,
-                    script=program.script,
-                    runtime=named["name"],
-                    config=dict(named.get("config") or {}),
-                )
-            )
+            try:
+                entries.append(compile_program(program, name))
+            except ValueError as exc:
+                raise PolicyError(f"profile {name!r} {exc}") from exc
         if entries:
             compiled[method] = tuple(entries)
     return compiled

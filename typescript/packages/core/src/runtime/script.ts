@@ -1,12 +1,7 @@
-import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
-import { Runtime } from './base.ts'
+import type { Runtime } from './base.ts'
 import { LanguageRuntime } from './language.ts'
-import type { Evaluator } from './mixin.ts'
 import type { ScriptSource } from './types.ts'
 import { buildRuntime } from './table.ts'
-import type { EvalValue } from './types.ts'
-
-export const CTX_GLOBAL = 'ctx'
 
 /**
  * Build the runtime a config program runs on: the one the config named,
@@ -45,42 +40,4 @@ export function scriptEngine(
     )
   }
   return built
-}
-
-/**
- * Evaluate a config-borne script and return its last expression.
- *
- * The one place the config-script calling convention is written down:
- * the payload arrives as a single global named `ctx`, and the script's
- * last expression is its answer. Both evaluated config scripts speak it
- * (`routePolicy` and a runtime's entry script), and spelling it out per
- * caller is a convention two callers can drift apart on. A profile's
- * policy programs are run, not evaluated (`scriptEngine`).
- *
- * Deliberately throws rather than wording its failures. Each caller
- * refuses in its own voice and its own error type (the runtime router's
- * RouteError is not the permissions layer's PolicyError), so a shared wording here
- * would put one layer's words on the other layer's failure.
- *
- * @throws CommandTimeoutError - the script outran `timeoutSeconds`.
- * @throws EvalError - the script did not parse, or threw.
- */
-export async function evalWithCtx(
-  source: string,
-  ctx: Record<string, EvalValue>,
-  evaluator: Evaluator,
-  timeoutSeconds: number,
-  label: string,
-): Promise<EvalValue> {
-  const release = evaluator instanceof Runtime ? evaluator.admit() : undefined
-  try {
-    const result = await runWithTimeout(
-      evaluator.eval(source, { inputs: { [CTX_GLOBAL]: ctx } }),
-      timeoutSeconds,
-      label,
-    )
-    return result.value
-  } finally {
-    release?.()
-  }
 }

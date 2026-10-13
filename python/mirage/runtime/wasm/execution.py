@@ -68,12 +68,20 @@ class WasmExecution:
     Args:
         wasm_path (Path): the `.wasm` module to run.
         trap_prefix (str): command name prefixing a wasm-trap stderr line.
+        max_memory (int | None): the linear memory one run may grow to,
+            in bytes; None for no cap.
     """
 
-    def __init__(self, wasm_path: Path, trap_prefix: str) -> None:
+    def __init__(
+        self,
+        wasm_path: Path,
+        trap_prefix: str,
+        max_memory: int | None = None,
+    ) -> None:
         self._wasm = Path(wasm_path)
         self._cache = self._wasm.with_suffix(".cwasm")
         self._trap_prefix = trap_prefix
+        self._max_memory = max_memory
         self._compile_lock = threading.Lock()
         self._serialized: bytes | None = None
 
@@ -183,6 +191,8 @@ class WasmExecution:
         linker.define_wasi()
         store = wasmtime.Store(engine)
         store.set_epoch_deadline(1)
+        if self._max_memory is not None:
+            store.set_limits(memory_size=self._max_memory)
         if canceled.is_set():
             return b"", None, 130
         wasi_fs = WasiFs(fs, stdin or b"")
@@ -191,7 +201,16 @@ class WasmExecution:
         wasi.argv = argv
         wasi.env = list(env)
         store.set_wasi(wasi)
-        instance = linker.instantiate(store, module)
+        try:
+            instance = linker.instantiate(store, module)
+        except wasmtime.WasmtimeError as exc:
+            if self._max_memory is None:
+                raise
+            msg = (
+                f"{self._trap_prefix}: cannot start within max_memory "
+                f"({self._max_memory} bytes): {exc}\n"
+            )
+            return b"", msg.encode(), 1
         start = instance.exports(store)["_start"]
         if not isinstance(start, wasmtime.Func):
             raise RuntimeError("WASI module exports a non-function _start")

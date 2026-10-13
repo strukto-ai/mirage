@@ -14,10 +14,26 @@
 
 
 def parse_limit(limit: str | int) -> int:
+    """A size in bytes: an int, digits, or digits with a binary suffix,
+    ``KB``/``MB``/``GB`` or sandlock's ``K``/``M``/``G``.
+
+    Args:
+        limit (str | int): the size as configured.
+
+    Raises:
+        ValueError: the text is not a size.
+    """
     if isinstance(limit, int):
         return limit
     s = limit.strip().upper()
-    for suffix, mult in [("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)]:
+    for suffix, mult in [
+        ("GB", 1 << 30),
+        ("MB", 1 << 20),
+        ("KB", 1 << 10),
+        ("G", 1 << 30),
+        ("M", 1 << 20),
+        ("K", 1 << 10),
+    ]:
         if s.endswith(suffix):
             return int(s[: -len(suffix)]) * mult
     return int(s)

@@ -32,7 +32,7 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.runtime.workspace import WorkspaceRuntime
 
 
@@ -181,19 +181,18 @@ async def test_runtime_arg_vfs_fails_loud(runtime_arg_ws):
 
 @pytest_asyncio.fixture
 async def routed_ws():
-    alpha, beta = AlphaRuntime(), BetaRuntime()
-    alpha.script = lambda ctx: "big" not in ctx.line
     workspace = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[alpha, beta, "workspace"],
+        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        route_policy=lambda ctx: "beta" if "big" in ctx.line else None,
     )
     yield workspace
     await workspace.close()
 
 
 @pytest.mark.asyncio
-async def test_scripts_route_between_capturers(routed_ws):
+async def test_a_route_moves_a_line_between_capturers(routed_ws):
     io = await routed_ws.shell("python3 -c 'small'")
     assert await materialize(io.stdout) == b"ran-alpha\n"
     io = await routed_ws.shell("python3 -c 'big job'")
@@ -201,45 +200,9 @@ async def test_scripts_route_between_capturers(routed_ws):
 
 
 @pytest.mark.asyncio
-async def test_runtime_arg_beats_scripts(routed_ws):
+async def test_runtime_arg_beats_the_route(routed_ws):
     io = await routed_ws.shell("python3 -c 'big job'", runtime="alpha")
     assert await materialize(io.stdout) == b"ran-alpha\n"
-
-
-@pytest.mark.asyncio
-async def test_all_capturers_refuse_is_admission_failure():
-    alpha = AlphaRuntime()
-    alpha.script = lambda ctx: False
-    ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[alpha, "workspace"]
-    )
-    try:
-        io = await ws.shell("python3 -c 'x'")
-        assert io.exit_code == 126
-        err = await materialize(io.stderr)
-        assert err == b"python3: no runtime accepted this line\n"
-        io = await ws.shell("echo workspace-still-open")
-        assert await materialize(io.stdout) == b"workspace-still-open\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_vfs_entry_script_locks_down_lines():
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.EXEC,
-        runtimes=[
-            WorkspaceRuntime(script=lambda ctx: "/secret" not in ctx.line)
-        ],
-    )
-    try:
-        io = await ws.shell("echo ok > /notes.txt && cat /notes.txt")
-        assert await materialize(io.stdout) == b"ok\n"
-        io = await ws.shell("cat /secret/creds")
-        assert io.exit_code == 126
-    finally:
-        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -287,30 +250,12 @@ async def test_empty_captures_serve_nothing():
 
 
 @pytest.mark.asyncio
-async def test_script_finds_its_stage_among_the_commands():
-    alpha = AlphaRuntime()
-    alpha.script = lambda ctx: any(
-        c.command == "python3" for c in ctx.commands
-    )
-    ws = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[alpha, "workspace"]
-    )
-    try:
-        io = await ws.shell("echo lead | python3 -c 'x'")
-        assert io.exit_code == 0
-        assert await materialize(io.stdout) == b"ran-alpha\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_vfs_explicit_captures_restrict_under_routing():
-    alpha = AlphaRuntime()
-    alpha.script = lambda ctx: True
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[alpha, WorkspaceRuntime(captures=("echo",))],
+        runtimes=[AlphaRuntime(), WorkspaceRuntime(captures=("echo",))],
+        route_policy=lambda ctx: None,
     )
     try:
         io = await ws.shell("echo routed-ok")
@@ -511,40 +456,6 @@ async def test_two_placements_that_disagree_refuse_the_line():
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_that_declines_its_placement_refuses_the_line():
-    heavy_only = BetaRuntime(script=lambda ctx: "heavy" in ctx.line)
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.EXEC,
-        runtimes=[AlphaRuntime(), heavy_only, "workspace"],
-        route_policy=lambda ctx: "beta",
-    )
-    try:
-        io = await ws.shell("python3 -c 'heavy'")
-        assert await materialize(io.stdout) == b"ran-beta\n"
-        io = await ws.shell("python3 -c 'light'")
-        assert (io.exit_code, io.stderr) == (
-            126,
-            b"python3: Permission denied\n",
-        )
-        assert io.refusal is not None
-        assert (io.refusal.reason, io.refusal.policy) == (
-            "runtime beta declines this line",
-            "runtimes.beta",
-        )
-        # The caller's own argument forces its runtime.
-        io = await ws.shell("python3 -c 'light'", runtime="beta")
-        assert await materialize(io.stdout) == b"ran-beta\n"
-        said = await ws.explain("python3 -c 'light'")
-        assert said.answers[-1] == Deny(
-            "runtime beta declines this line", policy="runtimes.beta"
-        )
-        assert said.exit_code == 126
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_admission_comes_before_placement():
     seen: list[str] = []
 
@@ -611,12 +522,11 @@ async def test_explain_names_the_policy_that_placed_the_line():
 
 @pytest.mark.asyncio
 async def test_nested_eval_inherits_routing():
-    alpha, beta = AlphaRuntime(), BetaRuntime()
-    alpha.script = lambda ctx: "big" not in ctx.line
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[alpha, beta, "workspace"],
+        runtimes=[AlphaRuntime(), BetaRuntime(), "workspace"],
+        route_policy=lambda ctx: "beta" if "big" in ctx.line else None,
     )
     try:
         # The typed line routes to beta; the inner eval must not
@@ -646,54 +556,15 @@ async def test_add_runtime_appends_and_rebinds():
         await ws.close()
 
 
-def test_config_inline_script_is_rejected():
-    with pytest.raises(ValueError, match=r"reference a \.py/\.js file"):
-        _build_runtime_entries(
-            [
-                {
-                    "name": "local",
-                    "script": "ctx['commands'][0]['command'] == 'python3'",
-                }
-            ]
-        )
-
-
-def test_config_script_path_form_embeds_content(tmp_path):
-    script = tmp_path / "policy.py"
-    script.write_text("ctx['commands'][0]['command'] == 'python3'")
-    entries = _build_runtime_entries(
-        [
-            {"name": "local", "script": str(script)},
-            {"name": "workspace", "script": str(script)},
-        ]
-    )
-    assert entries[0].script == ScriptSource(
-        "ctx['commands'][0]['command'] == 'python3'"
-    )
-    assert isinstance(entries[1], WorkspaceRuntime)
-    assert entries[1].script == ScriptSource(
-        "ctx['commands'][0]['command'] == 'python3'"
-    )
-
-
-def test_code_string_script_is_rejected():
-    fallback = WorkspaceRuntime()
-    fallback.script = "ctx['commands'][0]['command'] == 'python3'"
-    with pytest.raises(TypeError, match="reference a .py file"):
-        Workspace({"/ram": RAMVFS()}, runtimes=[fallback])
+def test_a_runtime_entry_takes_no_script():
+    with pytest.raises(TypeError, match="script"):
+        _build_runtime_entries([{"name": "local", "script": "guard.py"}])
 
 
 @pytest.mark.asyncio
 async def test_code_string_route_is_rejected():
-    with pytest.raises(TypeError, match="reference a .py file"):
-        Workspace({"/ram": RAMVFS()}, route_policy="'local'")
-
-
-def test_config_script_path_form_missing_file_fails_loud(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        _build_runtime_entries(
-            [{"name": "local", "script": str(tmp_path / "nope.py")}]
-        )
+    with pytest.raises(TypeError, match="a path is the workspace yaml's"):
+        Workspace({"/ram": RAMVFS()}, route_policy="route.py")
 
 
 class LineBox(Runtime, LineExecutorMixin):
@@ -743,12 +614,16 @@ async def test_star_captures_any_line_and_stdin_arrives():
 
 
 @pytest.mark.asyncio
-async def test_refused_line_runtime_falls_to_the_workspace():
+async def test_a_route_to_the_workspace_keeps_a_line_in_mirage():
     box = LineBox()
     box.captures = ("*",)
-    box.script = lambda ctx: "keep-out" not in ctx.line
     ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
+        {"/ram": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[box, "workspace"],
+        route_policy=lambda ctx: (
+            "workspace" if "keep-out" in ctx.line else None
+        ),
     )
     taken = await ws.shell("echo captured")
     kept = await ws.shell("echo keep-out")
@@ -762,9 +637,11 @@ async def test_refused_line_runtime_falls_to_the_workspace():
 async def test_runtime_argument_places_the_whole_line():
     box = LineBox()
     box.captures = ("*",)
-    box.script = lambda ctx: False
     ws = Workspace(
-        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
+        {"/ram": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[box, "workspace"],
+        route_policy=lambda ctx: "workspace",
     )
     refused = await ws.shell("echo hi")
     forced = await ws.shell("echo hi", runtime="sandbox")

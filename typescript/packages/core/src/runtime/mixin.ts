@@ -21,33 +21,24 @@ import type {
 } from './types.ts'
 
 /**
- * The nominal evaluator brand (python's EvaluatorMixin inheritance).
- * Detection is by this marker, never by probing for an `eval` method,
- * so a runtime with an unrelated `eval` cannot accidentally become
- * the policy engine. `Symbol.for` keeps the brand stable even when
- * two copies of the package are loaded.
+ * The nominal evaluator brand. Detection is by this marker, never by
+ * probing for an `eval` method, so a runtime with an unrelated `eval`
+ * cannot become the console's engine. `Symbol.for` keeps the brand
+ * stable even when two copies of the package are loaded.
  */
 export const EVALUATOR: unique symbol = Symbol.for('mirage.evaluator')
 
 /**
- * The evaluator capability: named inputs in, a value out (Python's
- * EvaluatorMixin). A Runtime that also implements this can evaluate
- * expressions, which is what the routing policy engine and the repl
- * consume; process-only runtimes never implement it and are never
- * asked to evaluate. The contract promises the shape, not value
- * fidelity: inputs and the returned value stay within EvalValue so
- * any transport can carry them, and errors surface as the
+ * The evaluator capability: named inputs in, a value out. A Runtime that
+ * also implements this can evaluate expressions, which is what the
+ * Python console (`Workspace.executePythonRepl`) consumes; TypeScript
+ * only, as Python has no console of its own. The contract promises the
+ * shape, not value fidelity: inputs and the returned value stay within
+ * EvalValue so any transport can carry them, and errors surface as the
  * evaluator's own diagnostics wrapped in EvalError.
  */
 export interface Evaluator {
   readonly [EVALUATOR]: true
-
-  /**
-   * The language `eval` speaks is `Runtime.language`, the same
-   * attribute `run` answers for: the policy engine matches it against a
-   * config script's extension so a .js policy lands on a JS evaluator.
-   * A separate name here would let one runtime claim two languages.
-   */
 
   /**
    * Evaluate one program and return its last expression. `inputs`

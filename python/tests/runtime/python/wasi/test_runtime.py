@@ -20,6 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.runtime.python import WasiRuntime
+from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV, _stdlib_mount
 from mirage.runtime.types import RunArgs
 from mirage.types import PathSpec
@@ -263,6 +264,32 @@ async def test_wasi_session_narrowing_reaches_the_guest():
 
 def test_reach_is_vfs():
     assert WasiRuntime.reach == "workspace"
+
+
+def test_max_memory_must_be_a_size():
+    with pytest.raises(ValueError, match="max_memory must be a size"):
+        WasiConfig(max_memory="lots")
+
+
+@live
+@pytest.mark.asyncio
+async def test_max_memory_caps_a_run():
+    rt = WasiRuntime(config={"max_memory": "64M"})
+    big = await rt.run(RunArgs(code="x = bytearray(100 * 1024 * 1024)"))
+    assert big.exit_code == 1
+    assert big.stderr is not None and b"MemoryError" in big.stderr
+    small = await rt.run(RunArgs(code="print(1)"))
+    assert (small.exit_code, small.stdout) == (0, b"1\n")
+
+
+@live
+@pytest.mark.asyncio
+async def test_max_memory_below_the_interpreters_start_says_so():
+    rt = WasiRuntime(config={"max_memory": "8M"})
+    result = await rt.run(RunArgs(code="print(1)"))
+    assert result.exit_code == 1
+    assert result.stderr is not None
+    assert b"cannot start within max_memory" in result.stderr
 
 
 @live

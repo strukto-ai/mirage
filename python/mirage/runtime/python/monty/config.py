@@ -12,9 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.errors import EvalError
+from dataclasses import dataclass
+
+from mirage.runtime.config import RuntimeConfig, memory_limit
 
 
-def test_eval_error_carries_the_syntax_bit():
-    assert EvalError("boom").syntax is False
-    assert EvalError("boom", syntax=True).syntax is True
+@dataclass(frozen=True, slots=True)
+class MontyConfig(RuntimeConfig):
+    """Config for the monty runtime.
+
+    Args:
+        max_memory (str | None): the heap one run may use, spelled as
+            sandlock spells its own (``10M``, ``1G``); a run that needs
+            more raises ``MemoryError``. None for no cap.
+    """
+
+    max_memory: str | None = None
+
+    def __post_init__(self) -> None:
+        memory_limit(self.max_memory)

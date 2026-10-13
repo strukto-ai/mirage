@@ -27,6 +27,10 @@ export function tokenOrNull(fingerprint?: string | null): string | null {
   return fingerprint
 }
 
+/**
+ * A size in bytes: a number, digits, or digits with a binary suffix,
+ * `KB`/`MB`/`GB` or sandlock's `K`/`M`/`G`.
+ */
 export function parseLimit(limit: string | number): number {
   if (typeof limit === 'number') return limit
   const s = limit.trim().toUpperCase()
@@ -34,6 +38,9 @@ export function parseLimit(limit: string | number): number {
     ['GB', 1 << 30],
     ['MB', 1 << 20],
     ['KB', 1 << 10],
+    ['G', 1 << 30],
+    ['M', 1 << 20],
+    ['K', 1 << 10],
   ]
   for (const [suffix, mult] of suffixes) {
     if (s.endsWith(suffix)) return parseInt(s.slice(0, -suffix.length), 10) * mult

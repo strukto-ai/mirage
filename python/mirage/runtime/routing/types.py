@@ -12,41 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
+from mirage.policy.profile import ProfilePolicy
 from mirage.policy.types import RouteContext
-from mirage.runtime.types import RuntimeIdentity, ScriptSource
+from mirage.runtime.types import RuntimeIdentity
 
-# A per-runtime willingness script, answering "do I want this line?".
-# In code: a callable (sync or async) on the RouteContext returning a
-# truthy verdict. From config: a .py file reference, loaded as
-# ScriptSource (its last expression is the verdict). Mirrors the TS
-# RouteScript.
-#
-#     def wants(ctx: RouteContext) -> bool:
-#         return "/secret" not in ctx.line
-#
-#     WorkspaceRuntime(script=wants)
-#
-#     # workspace yaml: guard.py next to the config file
-#     runtimes:
-#       - name: vfs
-#         script: guard.py
-RouteScript = Callable[[RouteContext], bool | Awaitable[bool]] | ScriptSource
-
-# What the route policy answers: a runtime name places the line, None
-# leaves each command to its first capturer. Refusing a line is a
+# What a route policy callable answers: a runtime name places the line,
+# None leaves each command to its first capturer. Refusing a line is a
 # policy's (a pre_execute Deny), not the router's. Mirrors the TS
 # RouteVerdict.
 RouteVerdict = str | None
 
 # The route policy, answering "who takes this line?". In code: a
 # callable (sync or async) on the RouteContext returning a
-# RouteVerdict. From config: a .py file reference, loaded as
-# ScriptSource (its last expression is the verdict). Mirrors the TS
-# RoutePolicy.
+# RouteVerdict. Or a program, ``{script, runtime}``, run as a profile's
+# policy programs run: it reads the context as JSON and prints its
+# answer. Mirrors the TS RoutePolicy.
 #
 #     def policy(ctx: RouteContext) -> str | None:
 #         names = [c.command for c in ctx.commands]
@@ -54,11 +38,12 @@ RouteVerdict = str | None
 #
 #     Workspace(..., route_policy=policy)
 #
-#     # workspace yaml: policy.py next to the config file
-#     route_policy: policy.py
+#     # workspace yaml: route.py next to the config file
+#     route_policy: {script: route.py, runtime: monty}
 RoutePolicy = (
     Callable[[RouteContext], RouteVerdict | Awaitable[RouteVerdict]]
-    | ScriptSource
+    | ProfilePolicy
+    | Mapping[str, Any]
 )
 
 

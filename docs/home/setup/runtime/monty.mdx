@@ -59,6 +59,19 @@ it yourself:
   </Tab>
 </Tabs>
 
+## Memory
+
+`max_memory` caps the heap one run may use, spelled as sandlock spells it:
+
+```yaml
+runtimes:
+  - name: monty
+    config:
+      max_memory: 64M
+```
+
+A run that needs more raises `MemoryError`. There is no cap by default.
+
 ## What is wired
 
 Monty implements part of Python; see [Python subset](#python-subset). For

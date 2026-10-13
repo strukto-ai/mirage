@@ -12,60 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.table import NAMED, build_runtime
-from mirage.runtime.types import EvalValue, ScriptSource
-
-CTX_GLOBAL = "ctx"
-
-
-async def eval_with_ctx(
-    source: str,
-    ctx: dict[str, EvalValue],
-    evaluator: EvaluatorMixin,
-    timeout: float,
-) -> EvalValue:
-    """Evaluate a config-borne script and return its last expression.
-
-    The one place the config-script calling convention is written down:
-    the payload arrives as a single global named ``ctx``, and the
-    script's last expression is its answer. Both evaluated config
-    scripts speak it (``route_policy`` and a runtime's entry script),
-    and spelling it out per caller is a convention two callers can drift
-    apart on. A profile's policy programs are run, not evaluated
-    (``script_engine``).
-
-    Deliberately raises rather than words its failures. Each caller
-    refuses in its own voice and its own error type (the runtime
-    router's RouteError is a ValueError, the permissions layer's
-    PolicyError is not), so a shared wording here would put one
-    layer's words on the other layer's failure.
-
-    Args:
-        source (str): the script program.
-        ctx (dict[str, EvalValue]): what the script sees as ``ctx``.
-        evaluator (EvaluatorMixin): the engine to run it on.
-        timeout (float): seconds to allow before giving up.
-
-    Raises:
-        asyncio.TimeoutError: the script outran ``timeout``.
-        EvalError: the script did not parse, or raised.
-    """
-    release = evaluator.admit() if isinstance(evaluator, Runtime) else None
-    try:
-        result = await asyncio.wait_for(
-            evaluator.eval(source, inputs={CTX_GLOBAL: ctx}), timeout=timeout
-        )
-    finally:
-        if release is not None:
-            release()
-    return result.value
+from mirage.runtime.types import ScriptSource
 
 
 def script_engine(

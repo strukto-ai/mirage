@@ -21,7 +21,7 @@ A workspace can be described entirely in YAML and loaded with one call — `load
 | `clis` | map | — | Installed CLIs, keyed by head word. |
 | `runtimes` | list | — | The workspace's ordered runtime world. |
 | `profiles` / `profile` | map / string | — | Permission documents, and the default one. |
-| `route_policy` | path | — | A `.py` or `.js` whose last expression names the runtime for a line, or `None`; see [Route policy](/home/policy/route-policy). |
+| `route_policy` | block | — | A program, `{script, runtime}`, that prints the runtime for a line; see [Route policy](/home/policy/route-policy). |
 | `cache` / `index` / `store` / `console` | block | — | Where bytes, listings, workspace state and job output live. See [cache stores](/home/cache#stores) for the `cache` and `index` keys. |
 | `env` / `secrets` | map | — | The environment plane and the source table. |
 | `default_session_id` / `default_agent_id` / `workspace_id` | string | — | Identity. |

@@ -16,37 +16,23 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mirage.runtime.routing.decide import (
-        decide_line,
-        evaluate_policy,
-        evaluate_script,
-        evaluator_of,
-        runtime_for_language,
-    )
+    from mirage.runtime.routing.decide import runtime_for_language
     from mirage.runtime.routing.errors import RouteError
     from mirage.runtime.routing.facts import command_nodes
     from mirage.runtime.routing.types import (
         RouteDecision,
         RoutePolicy,
-        RouteScript,
         RouteVerdict,
     )
     from mirage.runtime.types import ScriptSource
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.runtime.routing.decide": (
-        "decide_line",
-        "evaluate_policy",
-        "evaluate_script",
-        "evaluator_of",
-        "runtime_for_language",
-    ),
+    "mirage.runtime.routing.decide": ("runtime_for_language",),
     "mirage.runtime.routing.errors": ("RouteError",),
     "mirage.runtime.routing.facts": ("command_nodes",),
     "mirage.runtime.routing.types": (
         "RouteDecision",
         "RoutePolicy",
-        "RouteScript",
         "RouteVerdict",
     ),
     "mirage.runtime.types": ("ScriptSource",),
@@ -59,14 +45,9 @@ __all__ = [
     "ScriptSource",
     "RouteDecision",
     "RoutePolicy",
-    "RouteScript",
     "RouteError",
     "RouteVerdict",
     "command_nodes",
-    "decide_line",
-    "evaluate_policy",
-    "evaluate_script",
-    "evaluator_of",
     "runtime_for_language",
 ]
 

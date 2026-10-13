@@ -4,10 +4,7 @@
       "id": "lockdown_script",
       "world": {
         "runtimes": [
-          {
-            "name": "workspace",
-            "script": "'secret' not in ctx['line']"
-          },
+          "workspace",
           {
             "name": "monty",
             "captures": []
@@ -17,6 +14,10 @@
           "/ram": {
             "vfs": "ram"
           }
+        },
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'secret' in ctx['line']:\n    print(json.dumps({\"kind\": \"deny\", \"reason\": \"sealed\"}))\n",
+          "runtime": "monty"
         }
       },
       "steps": [
@@ -31,7 +32,7 @@
           "command": "cat /ram/secret.txt",
           "expect": {
             "exit": 126,
-            "stderr_contains": "no runtime accepted this line"
+            "stderr_contains": "Permission denied"
           }
         }
       ]

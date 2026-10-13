@@ -15,30 +15,27 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
-from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.config import RuntimeConfig, memory_limit
 from mirage.runtime.files import RuntimeFiles
-from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
+from mirage.runtime.python.monty.config import MontyConfig
 from mirage.runtime.python.monty.constants import MISSING_EXTRA_HINT
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
 from mirage.runtime.types import (
-    EvalResult,
-    EvalValue,
     FilesystemOperation,
     RunArgs,
     RunResult,
     RuntimeReach,
-    ScriptSource,
 )
 
 
-class MontyRuntime(PythonRuntime, EvaluatorMixin):
+class MontyRuntime(PythonRuntime):
     """Run Python code on the Monty sandboxed interpreter.
 
     Code executes in Monty's Rust interpreter, inside a pooled worker
@@ -74,16 +71,19 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     # "No module named" that would imply a search happened.
     runs_modules: ClassVar[bool] = False
 
+    config_cls: ClassVar[type[RuntimeConfig]] = MontyConfig
+    config: MontyConfig
+
     def __init__(
         self,
         captures: Sequence[str] | None = None,
-        config: RuntimeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
+        config: MontyConfig | dict[str, Any] | None = None,
     ) -> None:
         if pydantic_monty is None:
             raise ImportError(MISSING_EXTRA_HINT)
-        super().__init__(captures, config, script)
-        self._execution = MontyExecution()
+        super().__init__(captures, config)
+        self._max_memory = memory_limit(self.config.max_memory)
+        self._execution = MontyExecution(self._max_memory)
 
     async def _execute_code(
         self, args: RunArgs, context: RuntimeContext | None
@@ -114,7 +114,9 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
             and context.processes is not None
             and context.processes.depth > 0
         )
-        execution = MontyExecution() if nested else self._execution
+        execution = (
+            MontyExecution(self._max_memory) if nested else self._execution
+        )
         try:
             result = await execution.run(args, self._fs(args.env, context))
         finally:
@@ -123,35 +125,6 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         if not notice:
             return result
         return replace(result, stderr=notice + (result.stderr or b""))
-
-    async def eval(
-        self,
-        code: str,
-        *,
-        inputs: dict[str, EvalValue] | None = None,
-        session: str | None = None,
-    ) -> EvalResult:
-        context = self._capture_context()
-        fs = self._fs({}, context)
-        nested = (
-            context is not None
-            and context.processes is not None
-            and context.processes.depth > 0
-        )
-        if nested and session is not None:
-            raise ValueError("nested persistent evaluation is unsupported")
-        execution = MontyExecution() if nested else self._execution
-        try:
-            return await execution.eval(
-                code,
-                fs,
-                inputs=inputs,
-                session=session,
-                cwd=context.cwd if context is not None else None,
-            )
-        finally:
-            if execution is not self._execution:
-                await execution.close()
 
     async def close(self) -> None:
         await self._execution.close()

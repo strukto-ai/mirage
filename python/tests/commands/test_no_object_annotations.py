@@ -20,10 +20,7 @@ SOURCE = Path(__file__).resolve().parents[2] / "mirage"
 # Every place `object` is still the honest annotation, each because the
 # signature is not ours to choose. The first four are Python protocol
 # methods, whose parameters the language types as object so that a
-# membership or attribute test on an unrelated value stays legal. The
-# fifth is the guard whose entire job is to catch a value the annotations
-# already claim cannot arrive (a plain string where a RoutePolicy belongs),
-# so narrowing it would make its own call sites type errors.
+# membership or attribute test on an unrelated value stays legal.
 ALLOWED = {
     # Overrides an external base class that declares `dict[str, object]`;
     # narrowing it here would break Liskov and mypy says so.
@@ -32,7 +29,6 @@ ALLOWED = {
     ("commands/cli/builtin/git/objects.py", "__contains__"),
     ("vfs/dev/store.py", "__contains__"),
     ("vfs/dev/store.py", "pop"),
-    ("workspace/workspace/guard.py", "reject_config_script"),
     # Override asyncssh.SFTPServer, which types the file handle it hands
     # back as `object`; `opened` is the one place it is narrowed.
     ("server/ssh/sftp.py", "opened"),

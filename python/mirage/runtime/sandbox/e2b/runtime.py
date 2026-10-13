@@ -25,7 +25,7 @@ from mirage.runtime.sandbox.constants import (
 )
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
-from mirage.runtime.types import RunResult, SandboxPipe, ScriptSource
+from mirage.runtime.types import RunResult, SandboxPipe
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +116,8 @@ class E2BRuntime(RemoteSandbox):
         self,
         captures: Sequence[str] | None = None,
         config: E2BConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         self._serve_mounts(self.config.mount_type)
 
     def _api_params(self) -> dict[str, Any]:

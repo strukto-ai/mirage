@@ -36,14 +36,9 @@ class LanguageRuntime(Runtime):
     splits the line, and a captured stage's code lands here as run().
     Never the whole line; that is LineExecutorMixin's entry point.
 
-    The language it interprets is declared once, for both entry points: run()
-    for a script CLI (runtime_for_language) and eval() for a
-    config-borne policy script (evaluator_of). One attribute, because
-    two would let a runtime claim python at one entry point and js at the
-    other, and the disagreement would only surface as an unexplained
-    127 or a policy evaluated on the wrong engine. Concrete runtimes
-    inherit it from their language tier (PythonRuntime, JsRuntime)
-    rather than declaring it per class.
+    The language it interprets is declared once, on its language tier
+    (PythonRuntime, JsRuntime), and a script CLI finds its interpreter
+    by it (runtime_for_language).
 
     A host adapter receives data, namespace and gated session views through
     WorkspaceBinding and its per-execution RuntimeContext. Guests receive

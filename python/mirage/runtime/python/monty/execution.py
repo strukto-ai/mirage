@@ -19,26 +19,31 @@ import os
 import signal
 from typing import Any
 
-from mirage.runtime.errors import EvalError
 from mirage.runtime.python.execution import main_filename
-from mirage.runtime.python.monty.constants import (
-    DEFAULT_PROG,
-    INCOMPLETE_MARKERS,
-    LIMITS,
-)
+from mirage.runtime.python.monty.constants import DEFAULT_PROG, LIMITS
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
-from mirage.runtime.types import EvalResult, EvalValue, RunArgs, RunResult
-from mirage.types import PathSpec
+from mirage.runtime.types import RunArgs, RunResult
 
 logger = logging.getLogger(__name__)
 
 
 class MontyExecution:
+    """Runs on one runtime's pooled monty workers.
+
+    Args:
+        max_memory (int | None): the heap one run may use, in bytes;
+            None for no cap.
+    """
+
     name = "monty"
 
-    def __init__(self) -> None:
-        self._eval_sessions: dict[str, Any] = {}
+    def __init__(self, max_memory: int | None = None) -> None:
+        self._limits: dict[str, int] = (
+            LIMITS
+            if max_memory is None
+            else {**LIMITS, "max_memory": max_memory}
+        )
         self._pool: Any = None
         self._pool_task: asyncio.Task[Any] | None = None
 
@@ -92,9 +97,11 @@ class MontyExecution:
         # A script is Monty's own script_name, which it keeps the last
         # part of for `__file__`, under the directory a feed starts in.
         checkout = (
-            pool.checkout(limits=LIMITS)
+            pool.checkout(limits=self._limits)
             if args.script_path is None
-            else pool.checkout(script_name=main_filename(args), limits=LIMITS)
+            else pool.checkout(
+                script_name=main_filename(args), limits=self._limits
+            )
         )
         try:
             async with checkout as session:
@@ -139,106 +146,7 @@ class MontyExecution:
         stdout, stderr = _split_streams(collector)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=0)
 
-    async def eval(
-        self,
-        code: str,
-        fs: MontyFs,
-        *,
-        inputs: dict[str, EvalValue] | None = None,
-        session: str | None = None,
-        cwd: PathSpec | None = None,
-    ) -> EvalResult:
-        """Evaluate code; the last expression is the value.
-
-        One-shot mode checks a worker out for the feed and hands it
-        straight back; a session id keeps its own worker (heap and
-        namespace) alive per id, which is the console. Inputs bind as
-        globals via monty's native mechanism, and the code sees
-        workspace files through the same fs agent code uses. The
-        value crosses the worker boundary as a converted Monty value:
-        dicts, lists, strings, numbers, bools and None arrive as their
-        Python equivalents, which is every shape a policy verdict
-        takes.
-
-        Args:
-            code (str): the python source.
-            inputs (dict[str, EvalValue] | None): named globals.
-            session (str | None): console session id, None for
-                one-shot.
-            cwd (PathSpec | None): initial virtual working directory;
-                existing console sessions retain their own directory.
-
-        Raises:
-            EvalError: the code failed to parse or raised; the
-                message is monty's own traceback.
-        """
-        collector = pydantic_monty.CollectStreams()
-        pool = await self._ensure_pool()
-        repl = (
-            self._eval_sessions.get(session) if session is not None else None
-        )
-        # A checked-out session owns a worker for its lifetime, so the
-        # one-shot arm hands its worker back as soon as the feed ends
-        # while a console session keeps its own until close().
-        one_shot = repl is None and session is None
-        initial_cwd = cwd.virtual if repl is None and cwd is not None else None
-        if repl is None:
-            repl = await pool.checkout(limits=LIMITS).__aenter__()
-            if session is not None:
-                self._eval_sessions[session] = repl
-        worker_pid = repl.worker_pid
-        try:
-            value = await repl.feed_run(
-                code,
-                inputs=dict(inputs or {}),
-                print_callback=collector,
-                cwd=initial_cwd,
-                os=fs,
-            )
-        except asyncio.CancelledError:
-            # Same reclaim as run(): cancelling the await leaves the
-            # worker running. A console session loses its heap with the
-            # worker, so drop it and let the next eval check out a
-            # fresh one rather than address a dead process.
-            _kill_worker(worker_pid)
-            if session is not None:
-                self._eval_sessions.pop(session, None)
-            # The checkout was entered by hand, so dropping the session
-            # is not enough: without this the pool keeps a lease that
-            # close() can no longer reach, and repeated cancellations
-            # exhaust its capacity.
-            await _release(repl)
-            raise
-        except pydantic_monty.MontySyntaxError as exc:
-            trace = exc.display(format="traceback")
-            # Console continuation, not a broken program: the source
-            # merely stopped early (an open block or unclosed suite).
-            incomplete = any(m in trace for m in INCOMPLETE_MARKERS)
-            if session is not None:
-                if incomplete:
-                    return EvalResult(status="incomplete")
-                return EvalResult(stderr=(trace + "\n").encode(), exit_code=1)
-            raise EvalError(trace, syntax=True)
-        except pydantic_monty.MontyRuntimeError as exc:
-            trace = exc.display(format="traceback")
-            if session is not None:
-                stdout, stderr = _split_streams(collector)
-                return EvalResult(
-                    stdout=stdout,
-                    stderr=(stderr or b"") + (trace + "\n").encode(),
-                    exit_code=1,
-                )
-            raise EvalError(trace)
-        finally:
-            if one_shot:
-                await repl.__aexit__(None, None, None)
-        stdout, stderr = _split_streams(collector)
-        return EvalResult(value=value, stdout=stdout, stderr=stderr)
-
     async def close(self) -> None:
-        for repl in self._eval_sessions.values():
-            await _release(repl)
-        self._eval_sessions.clear()
         # A pool still being opened must be awaited before teardown, or
         # its workers outlive the runtime that asked for them.
         if self._pool is None and self._pool_task is not None:
@@ -247,20 +155,6 @@ class MontyExecution:
         if self._pool is not None:
             await self._pool.__aexit__(None, None, None)
             self._pool = None
-
-
-async def _release(repl: Any) -> None:
-    """Hand a checked-out session back, even a poisoned one.
-
-    Args:
-        repl (Any): the checked-out monty session.
-    """
-    try:
-        await repl.__aexit__(None, None, None)
-    except Exception as exc:
-        # The worker is already gone in the cancel path; the lease
-        # still has to be returned, so note it and move on.
-        logger.debug("monty session release failed: %s", exc)
 
 
 def _kill_worker(pid: int | None) -> None:

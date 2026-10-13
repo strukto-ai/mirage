@@ -16,15 +16,13 @@ import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
 import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import { isEvaluator, isLineExecutor, isProcessExecutor } from './mixin.ts'
-import type { RouteScript } from './routing/types.ts'
-import {
-  ScriptSource,
-  type ExecutionRequest,
-  type FilesystemOperation,
-  type RuntimeCapabilities,
-  type RunResult,
-  type RuntimeReach,
+import { isLineExecutor, isProcessExecutor } from './mixin.ts'
+import type {
+  ExecutionRequest,
+  FilesystemOperation,
+  RuntimeCapabilities,
+  RunResult,
+  RuntimeReach,
 } from './types.ts'
 
 /**
@@ -38,16 +36,15 @@ import {
  * runs, teardown in close).
  *
  * The base holds only what every tier shares: the registry name, the
- * captured command names, the coerced config, and the per-line
- * admission script. What a runtime can DO is declared by its tier and
- * mixins, detected by type and never by probing: LanguageRuntime
- * interprets one command's code (run), LineExecutor takes whole lines
- * (runLine), Evaluator evaluates expressions (eval).
+ * captured command names and the coerced config. What a runtime can DO
+ * is declared by its tier and mixins, detected by type and never by
+ * probing: LanguageRuntime interprets one command's code (run),
+ * LineExecutor takes whole lines (runLine).
  *
- * Every runtime is constructed the same way (captures, config,
- * script); each subclass hands the base its class-default captures and
- * its config key list, so a config field the runtime does not have
- * fails loud (config_cls in Python).
+ * Every runtime is constructed the same way (captures, config); each
+ * subclass hands the base its class-default captures and its config key
+ * list, so a config field the runtime does not have fails loud
+ * (config_cls in Python).
  */
 export abstract class Runtime {
   abstract readonly name: string
@@ -69,7 +66,6 @@ export abstract class Runtime {
   readonly filesystem: readonly FilesystemOperation[] = []
   /** The runtime's coerced implementation knobs. */
   config: RuntimeConfig
-  script?: RouteScript
   protected binding: WorkspaceBinding | null = null
   private readonly activity = new Activity()
   private retired = false
@@ -79,14 +75,9 @@ export abstract class Runtime {
     defaultCaptures: readonly string[] = [],
     configKeys: readonly string[] = [],
   ) {
-    if (typeof options.script === 'string') throw scriptStringError()
     this.captures =
       options.captures !== undefined ? options.captures.slice() : defaultCaptures.slice()
-
     this.config = coerceRuntimeConfig(options.config, configKeys)
-    if (typeof options.script === 'function' || options.script instanceof ScriptSource) {
-      this.script = options.script
-    }
   }
 
   get capabilities(): RuntimeCapabilities {
@@ -94,7 +85,6 @@ export abstract class Runtime {
       languages: [],
       shell: isLineExecutor(this),
       process: isProcessExecutor(this),
-      evaluate: isEvaluator(this),
       reach: this.reach,
       filesystem: [...this.filesystem],
     }
@@ -168,11 +158,3 @@ export abstract class Runtime {
 
 /** A workspace runtimes-list entry: an instance or a name shorthand. */
 export type RuntimeEntry = Runtime | string
-
-/** The code API takes functions; script source belongs to config. */
-export function scriptStringError(kind = 'a script'): Error {
-  return new Error(
-    `${kind} in code must be a function taking the RouteContext; config ` +
-      `scripts reference a .py file (script:/route_policy: in the workspace yaml)`,
-  )
-}

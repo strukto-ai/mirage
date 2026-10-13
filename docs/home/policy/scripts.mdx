@@ -7,13 +7,12 @@ icon: code
 A policy can be a program instead of a class. A profile names a list of
 programs for each method it answers at, and the runtime each one runs on.
 A program reads the same `ctx` a [coded policy](/home/policy/policies)
-reads, as JSON, and prints its answer. Three places take a script:
+reads, as JSON, and prints its answer. Two places take a program:
 
 | Where | Asked | Answers |
 | --- | --- | --- |
 | a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_session`, for the sessions under that profile | deny or ask; a route at `pre_execute` |
-| `route_policy:` | at `pre_execute`, for every session | a runtime name, or `None` |
-| a runtime's `script:` | for a line no policy placed: does this runtime take it? | true or false |
+| [`route_policy:`](/home/policy/route-policy) | at `pre_execute`, for every session | a route, or a deny or ask |
 
 ## A profile's policy
 
@@ -149,8 +148,7 @@ it:
 | `pre_session` | `verb`, `key`, `value` |
 
 Every `ctx` also has `session_id`, `cwd`, `env`, `profile` and `mounts`,
-the mount roots the session can see. A runtime's `script:` also gets
-`runtime`: its `name` and `captures`.
+the mount roots the session can see.
 
 ## Files and the session
 
@@ -172,8 +170,8 @@ as `profile 'reviewer' policy exited 1`, and the program's stderr goes to
 the log. Silence on failure would let through exactly what the policy is
 there to judge.
 
-`route_policy:` and runtime scripts are deployment settings, so the same
-mistakes fail the line with a routing error instead.
+`route_policy:` is a deployment setting, so the same mistakes fail the
+line with a routing error instead.
 
 ## Runtimes
 
@@ -186,6 +184,10 @@ mistakes fail the line with a routing error instead.
 Each runtime is the policy's own, built from the name and settings the
 profile gives and never shared with the agent. `wasi` needs a CPython WASI
 build: its folder as `config: {home: ...}`, or in `MIRAGE_WASI_HOME`.
+
+A program gets 10M of memory on monty and 128M on `wasi` and `pyodide`,
+unless its runtime's config names `max_memory` (`null` for no cap). A
+program that needs more fails like any other.
 
 Monty runs a program in about a millisecond. `wasi` starts CPython on every
 run, 100 to 300 ms, so it suits the methods asked less often; `pre_vfs`,

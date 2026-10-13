@@ -122,11 +122,10 @@ export interface WorkspaceOptions {
    */
   runtimes?: RuntimeEntry[]
   /**
-   * The global route policy: a function taking the RouteContext (or a
-   * config-borne ScriptSource) naming the runtime for a line, or null
-   * to fall to the entries' own scripts. Ladder: the runtime argument
-   * > route policy > scripts by list order > admission failure
-   * (exit 126).
+   * The global route policy: a function taking the RouteContext naming
+   * the runtime for a line, or null to leave each command on its first
+   * capturer; or a program, `{script, runtime}`, that prints the same
+   * answer. Ladder: the runtime argument > route policy > first capturer.
    */
   routePolicy?: RoutePolicy
   /**

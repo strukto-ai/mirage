@@ -589,9 +589,8 @@ def _build_entry(entry: Any) -> Any:
     """One world runtimes entry: a name string or the uniform mapping.
 
     Args:
-        entry (Any): ``"monty"`` or ``{"name", "captures", "config",
-            "script"}``; a ``script`` is embedded source, the same
-            contract as a yaml entry.
+        entry (Any): ``"monty"`` or ``{"name", "captures", "config"}``,
+            the same contract as a yaml entry.
     """
     if isinstance(entry, str):
         return entry
@@ -600,8 +599,6 @@ def _build_entry(entry: Any) -> Any:
         options["captures"] = tuple(entry["captures"])
     if "config" in entry:
         options["config"] = _expand(entry["config"])
-    if "script" in entry:
-        options["script"] = ScriptSource(entry["script"])
     return build_runtime(entry["name"], **options)
 
 
@@ -609,7 +606,7 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
     """Install the world's script CLIs, the yaml ``clis:`` shape inline.
 
     Each entry embeds its program instead of naming a file, the same
-    way a runtime entry embeds a policy script here; cli.sh writes them
+    way the route policy embeds its program here; cli.sh writes them
     back out to files to drive the yaml path.
 
     Args:
@@ -651,7 +648,11 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     if "runtimes" in world:
         kwargs["runtimes"] = [_build_entry(e) for e in world["runtimes"]]
     if "route_policy" in world:
-        kwargs["route_policy"] = ScriptSource(world["route_policy"])
+        route = world["route_policy"]
+        kwargs["route_policy"] = {
+            "script": ScriptSource(route["script"]),
+            "runtime": route["runtime"],
+        }
     if "policies" in world:
         kwargs["policies"] = [_build_policy(s) for s in world["policies"]]
     if "command_limits" in world:

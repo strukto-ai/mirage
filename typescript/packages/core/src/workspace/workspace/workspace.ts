@@ -46,7 +46,6 @@ import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { buildFileCache } from './cache.ts'
-import { rejectConfigScript } from './guard.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
 import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
 import { makeStagingDir, removeDir } from '../snapshot/fs.ts'
@@ -364,7 +363,6 @@ export class Workspace {
       () => this.sandboxVisibleMounts(),
       (directory) => this.namespace.linkNamesUnder(directory),
     )
-    rejectConfigScript('routePolicy', options.routePolicy)
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
     // session runs under, so there is no workspace-wide block above it.
@@ -397,8 +395,9 @@ export class Workspace {
     // the manager by the id the entry point puts in the context), the
     // profile's policy (ScriptPolicy, calling its method per command through
     // the same manager), then Policy instances, then anything added later
-    // through ws.policies.add(). The runtime policy (policy option) is
-    // the line-level counterpart until it is absorbed as a method.
+    // through ws.policies.add(). The route policy (routePolicy option)
+    // answers preExecute ahead of them all, through the same program
+    // runner as the profile's policy.
     this.registry.policies.add(new PermissionsPolicy(this.sessionManager))
     this.scriptPolicy = new ScriptPolicy(
       this.sessionManager,
@@ -572,9 +571,7 @@ export class Workspace {
     this.closers.push(() => this.runtimeWorld.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     if (options.routePolicy !== undefined) {
-      this.registry.policies.place(
-        new PlacementPolicy(options.routePolicy, () => this.runtimeWorld.entries),
-      )
+      this.registry.policies.place(new PlacementPolicy(options.routePolicy, this.scriptPolicy))
     }
   }
 

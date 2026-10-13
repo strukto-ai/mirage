@@ -29,13 +29,8 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.routing import (
-    RouteDecision,
-    RouteError,
-    decide_line,
-    evaluate_script,
-)
-from mirage.runtime.table import catch_all, runtime_bindings_for
+from mirage.runtime.routing import RouteDecision, RouteError
+from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import NamespaceView, SessionView
@@ -51,14 +46,11 @@ class Router:
 
     The order is: an inherited decision, then the ``execute()`` runtime
     argument, then the placement stage (``pre_execute``: the configured
-    route policy as a built-in, then the coded policies), then the
-    entry scripts. A runtime a policy names is then validated against
-    the runtime itself: its own ``script:`` must take the line, or the
-    two conflict and the line is refused; the caller's argument forces
-    its runtime. It reads the runtime entries and the registry's
-    static bindings but owns no mutable workspace state, so the
-    volatile parts (the current agent, the line's admission) arrive per
-    call and a new step is added here rather than in the workspace.
+    route policy as a built-in, then the coded policies), then each
+    command's first capturer. It reads the runtime entries and the
+    registry's static bindings but owns no mutable workspace state, so
+    the volatile parts (the current agent, the line's admission) arrive
+    per call and a new step is added here rather than in the workspace.
 
     Args:
         registry (MountRegistry): carries the resolved static bindings.
@@ -92,13 +84,11 @@ class Router:
         its Ask when the host refuses the line or has not answered yet.
         A nested eval passes its typed line's decision as ``inherited``
         and keeps it: nested lines never re-route. The runtime argument
-        is the caller's own placement, so a Route is not asked for and
-        the runtime's own ``script:`` is not consulted (the caller
-        forces it), but a coded policy's Deny or Ask still holds the
-        line. A runtime a policy names must take the line itself
-        (``_validated``). Admission comes first: a
-        line ``held`` reports refused or waiting on a question is left
-        on the static bindings, unplaced, for the gate to answer.
+        is the caller's own placement, so a Route is not asked for, but
+        a coded policy's Deny or Ask still holds the line. Admission
+        comes first: a line ``held`` reports refused or waiting on a
+        question is left on the static bindings, unplaced, for the gate
+        to answer.
 
         Args:
             command (str): the raw command line.
@@ -134,11 +124,7 @@ class Router:
         placed = None if runtime is None else self._placed(entries, runtime)
         if placed is not None and not placing:
             return placed
-        if (
-            placed is None
-            and not placing
-            and not any(e.script is not None for e in entries)
-        ):
+        if placed is None and not placing:
             return None
         if held is not None and await held():
             return placed
@@ -160,8 +146,8 @@ class Router:
         if placed is not None:
             return placed
         if route is not None:
-            return await self._validated(entries, route.runtime, ctx)
-        return await self._scripted(entries, ctx)
+            return self._routed(entries, route.runtime)
+        return self._unplaced(entries)
 
     async def placement(
         self,
@@ -189,7 +175,7 @@ class Router:
         entries = self._runtimes.entries
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
-        if not placing and not any(e.script is not None for e in entries):
+        if not placing:
             return (), None
         ctx = self.context(command, session, await judged())
         answers = await policies.answers("pre_execute", ctx)
@@ -202,66 +188,42 @@ class Router:
         if isinstance(winner, Deny):
             return answers, winner
         if isinstance(winner, Route):
-            checked = await self._validated(entries, winner.runtime, ctx)
-            if isinstance(checked, Deny):
-                return (*answers, checked), checked
-            return answers, checked
-        return answers, await self._scripted(entries, ctx)
+            return answers, self._routed(entries, winner.runtime)
+        return answers, self._unplaced(entries)
 
-    async def _scripted(
-        self, entries: list[Runtime], ctx: RouteContext
+    def _routed(
+        self, entries: list[Runtime], name: str
     ) -> RouteDecision[Runtime]:
-        """The entry scripts' decision, for a line no policy placed: each
-        runtime's ``script:`` says whether it takes the line.
+        """The decision a policy's route places a line on. ``workspace``
+        keeps the line in Mirage: no line executor (a ``*`` capture)
+        takes it, and each command stays on its first other capturer.
+        Any other name places it as the runtime argument does.
 
         Args:
             entries (list[Runtime]): the workspace's ordered runtimes.
-            ctx (RouteContext): the placement stage's payload.
+            name (str): the runtime the route names.
 
         Raises:
-            RouteError: a script that fails or answers a verdict shape.
+            RouteError: no entry has the name.
         """
-        try:
-            return await decide_line(entries, ctx)
-        except RouteError:
-            raise
-        except (ValueError, ImportError) as exc:
-            raise RouteError(str(exc)) from exc
+        if name != WorkspaceRuntime.name:
+            return self._placed(entries, name)
+        kept = [e for e in entries if "*" not in e.captures]
+        bindings: dict[str, Runtime | None] = {
+            command: None for entry in entries for command in entry.captures
+        }
+        bindings.update(bind_commands(kept))
+        return RouteDecision(bindings=bindings, fallback=catch_all(entries))
 
-    async def _validated(
-        self,
-        entries: list[Runtime],
-        name: str,
-        ctx: RouteContext,
-    ) -> RouteDecision[Runtime] | Deny:
-        """The decision placing a line on the runtime ``name``, once the
-        runtime agrees: its own ``script:``, when it has one, must take
-        the line, or the placement and the runtime conflict and the line
-        is refused, as two policies placing it apart refuse it.
+    def _unplaced(self, entries: list[Runtime]) -> RouteDecision[Runtime]:
+        """The decision for a line no policy placed: each command on its
+        first capturer, kept for the line's nested evals.
 
         Args:
             entries (list[Runtime]): the workspace's ordered runtimes.
-            name (str): the runtime entry the line is placed on.
-            ctx (RouteContext): the placement stage's payload.
-
-        Raises:
-            RouteError: no entry has the name, or its script fails or
-                answers a verdict shape.
         """
-        placed = self._placed(entries, name)
-        entry = next((e for e in entries if e.name == name), None)
-        if entry is None or entry.script is None:
-            return placed
-        try:
-            willing = await evaluate_script(entry.script, ctx, entry, entries)
-        except RouteError:
-            raise
-        except (ValueError, ImportError) as exc:
-            raise RouteError(str(exc)) from exc
-        if willing:
-            return placed
-        return Deny(
-            f"runtime {name} declines this line", policy=f"runtimes.{name}"
+        return RouteDecision(
+            bindings=dict(bind_commands(entries)), fallback=catch_all(entries)
         )
 
     def runtime_for(

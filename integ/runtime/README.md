@@ -37,7 +37,7 @@ differs.
 | [`monty/`](monty/)                     | runtime | Monty's invocation, argv, streams, policy and Python surface                                      |
 | [`wasi/`](wasi/)                       | runtime | CPython on WASI: import paths                                                                     |
 | [`pyodide/`](pyodide/)                 | runtime | Pyodide's mounts, streams, environment, tracebacks and flags                                      |
-| [`quickjs/`](quickjs/)                 | runtime | QuickJS invocation, printing, argv and policy scripts                                             |
+| [`quickjs/`](quickjs/)                 | runtime | QuickJS invocation, printing, argv and async jobs                                                 |
 | [`local/`](local/)                     | runtime | the host's own interpreter                                                                        |
 | [`workspace/`](workspace/)             | runtime | the in-mirage runtime: captures, lockdown, listings                                               |
 | [`host/`](host/)                       | runtime | the SDK's in-process entry point: `with ws:` and `patchNodeFs`                                    |

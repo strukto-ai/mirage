@@ -14,7 +14,7 @@
 
 import asyncio
 from collections.abc import Sequence
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -26,7 +26,6 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeReach,
     SandboxPipe,
-    ScriptSource,
 )
 
 
@@ -48,7 +47,7 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
     point. Subclasses adapt one provider by implementing connect() and
     exec_line(), and open_pipe() for a ``mount_type``; routing,
     captures, and per-line scripts are inherited. Constructed like
-    every runtime (captures, config, script); config is how to reach
+    every runtime (captures, config); config is how to reach
     the sandbox, coerced through the provider's own config class.
     """
 
@@ -65,9 +64,8 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
         self,
         captures: Sequence[str] | None = None,
         config: SandboxConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         # Connect-once latch: the first captured line connects; later
         # lines just execute. A failed connect leaves it unset so the
         # next line retries.

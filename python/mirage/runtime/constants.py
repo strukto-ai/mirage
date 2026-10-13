@@ -37,7 +37,7 @@ ABSENT_PATH: Final = (FileNotFoundError, NotADirectoryError)
 # is a second name for one inode, and nothing above a mount holds that.
 HARD_LINK_REFUSAL: Final = FsCondition.EPERM
 
-# How long one policy script (a profile's ``policy:``, a ``route_policy``
-# or a runtime's ``script:``) may run before the line it judges is
-# refused or the route it decides fails. One bound for every stage.
+# How long one policy program (a profile's ``policy:`` or the
+# ``route_policy``) may run before the action it judges is refused or
+# the route it decides fails. One bound for every stage.
 SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0

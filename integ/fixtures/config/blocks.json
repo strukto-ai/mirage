@@ -17,7 +17,10 @@
         "runtimes": [
           "node"
         ],
-        "route_policy": "policy.py",
+        "route_policy": {
+          "script": "route.py",
+          "runtime": "monty"
+        },
         "profiles": {
           "default": {
             "cwd": "/d",

@@ -27,6 +27,7 @@ from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
     HideReason,
+    ProfileScript,
     ProfileScripts,
     ScriptMethod,
 )
@@ -590,6 +591,37 @@ class ProfilePolicy(BaseModel):
         if not isinstance(v.get("config", {}), dict):
             raise ValueError("a policy runtime's config is a mapping")
         return v
+
+
+def compile_program(program: ProfilePolicy, profile: str) -> ProfileScript:
+    """A policy program as it runs: its source, its runtime's name and
+    that runtime's settings.
+
+    Args:
+        program (ProfilePolicy): the program as the document states it.
+        profile (str): the profile it speaks for, empty for the
+            workspace's ``route_policy``.
+
+    Raises:
+        ValueError: the script is still a path, which only the config
+            loader loads.
+    """
+    if isinstance(program.script, str):
+        raise ValueError(
+            f"names a policy by path ({program.script!r}); only the "
+            f"config loader loads one, pass ScriptSource in code"
+        )
+    named: dict[str, Any] = (
+        {"name": program.runtime}
+        if isinstance(program.runtime, str)
+        else program.runtime
+    )
+    return ProfileScript(
+        profile=profile,
+        script=program.script,
+        runtime=named["name"],
+        config=dict(named.get("config") or {}),
+    )
 
 
 class SessionProfile(BaseModel):

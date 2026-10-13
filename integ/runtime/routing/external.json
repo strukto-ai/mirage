@@ -28,41 +28,6 @@
       ]
     },
     {
-      "id": "external_script_pipeline_stage",
-      "world": {
-        "register_runtimes": {
-          "processbox": "processbox"
-        },
-        "runtimes": [
-          {
-            "name": "processbox",
-            "script": "any(c['command'] == 'native-tool' for c in ctx['commands'])"
-          },
-          {
-            "name": "monty",
-            "captures": []
-          },
-          "workspace"
-        ]
-      },
-      "steps": [
-        {
-          "command": "echo ok | native-tool",
-          "expect": {
-            "exit": 0,
-            "stdout": "[\"native-tool\"]\n"
-          }
-        },
-        {
-          "command": "echo ok | denied-tool",
-          "expect": {
-            "exit": 126,
-            "stderr": "denied-tool: no runtime accepted this line\n"
-          }
-        }
-      ]
-    },
-    {
       "id": "external_capture_path_policy",
       "world": {
         "register_runtimes": {

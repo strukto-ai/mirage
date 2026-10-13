@@ -107,6 +107,16 @@ export const PROGRAM_FLAGS: ReadonlyMap<string, Readonly<Record<string, boolean>
 ])
 
 /**
+ * The memory a policy program gets when its runtime's config names none:
+ * monty's own example cap, and enough for Python on wasm, whose worker
+ * starts at about 50M. `maxMemory: null` in the config lifts it.
+ */
+export const PROGRAM_MEMORY: ReadonlyMap<string, string> = new Map([
+  ['monty', '10M'],
+  ['pyodide', '128M'],
+])
+
+/**
  * The environment variable a policy program reads its context from, as
  * JSON; the same text arrives on stdin.
  */

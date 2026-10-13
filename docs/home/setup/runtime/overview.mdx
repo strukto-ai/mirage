@@ -36,8 +36,8 @@ runtimes:
   - workspace
 ```
 
-An entry is a name, or a mapping with `name`, `captures`, `config` and
-`script`. The name is a runtime Mirage ships, one you registered in code, or
+An entry is a name, or a mapping with `name`, `captures` and `config`. The
+name is a runtime Mirage ships, one you registered in code, or
 a `./file.py:Class` (Python) or `./file.mjs:Class` (TypeScript) reference to
 your own runtime. Config keys are snake_case in YAML for both SDKs, and a
 runtime rejects a key it does not know.

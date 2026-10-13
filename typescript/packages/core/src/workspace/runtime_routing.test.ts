@@ -16,15 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { Runtime } from '../runtime/base.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { WorkspaceRuntime } from '../runtime/workspace.ts'
-import {
-  EVALUATOR,
-  isLineExecutor,
-  LINE_EXECUTOR,
-  type Evaluator,
-  type LineExecutor,
-} from '../runtime/mixin.ts'
-import type { EvalResult } from '../runtime/types.ts'
-import { evaluatorOf, runtimeForLanguage } from '../runtime/routing/index.ts'
+import { isLineExecutor, LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
+import { runtimeForLanguage } from '../runtime/routing/index.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { RunArgs, RunResult } from '../runtime/types.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
@@ -42,51 +35,6 @@ import type { RouteContext } from '../policy/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-
-class HangingEvaluator extends LanguageRuntime implements Evaluator {
-  readonly [EVALUATOR] = true as const
-  readonly language = 'python'
-  readonly name = 'hang-eval'
-
-  constructor() {
-    super({ captures: ['python3'] })
-  }
-
-  run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
-  }
-
-  eval(): Promise<EvalResult> {
-    return new Promise(() => undefined)
-  }
-}
-
-class NamedEvaluator extends LanguageRuntime implements Evaluator {
-  readonly [EVALUATOR] = true as const
-  readonly language: 'python' | 'js'
-
-  constructor(
-    readonly name: string,
-    language: 'python' | 'js',
-  ) {
-    super({ captures: [] })
-    this.language = language
-  }
-
-  run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
-  }
-
-  eval(): Promise<EvalResult> {
-    return Promise.resolve({
-      value: null,
-      stdout: new Uint8Array(),
-      stderr: null,
-      exitCode: 0,
-      status: 'complete',
-    })
-  }
-}
 
 class NamedFakeRuntime extends LanguageRuntime {
   readonly language = 'python'
@@ -164,20 +112,30 @@ describe('per-line runtime argument', () => {
 
 async function routedWorkspace(): Promise<Workspace> {
   const parser = await getTestParser()
-  const alpha = new NamedFakeRuntime('alpha')
-  alpha.script = (ctx) => !ctx.line.includes('big')
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       shellParser: parser,
-      runtimes: [alpha, new NamedFakeRuntime('beta'), 'workspace'],
+      runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
+      routePolicy: (ctx) => (ctx.line.includes('big') ? 'beta' : null),
     },
   )
 }
 
+const ROUTE_NODE = [
+  'import json',
+  'import os',
+  '',
+  'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+  'if any(c["command"] == "node" for c in ctx["commands"]):',
+  '    name = open("/route.txt").read().strip()',
+  '    print(json.dumps({"kind": "route", "runtime": name}))',
+  '',
+].join('\n')
+
 describe('routing ladder', () => {
-  it('scripts filter capturers in list order', async () => {
+  it('a route moves a line between capturers', async () => {
     const ws = await routedWorkspace()
     try {
       const small = await ws.shell('python3 -c "small"')
@@ -189,50 +147,11 @@ describe('routing ladder', () => {
     }
   })
 
-  it('runtime argument beats scripts', async () => {
+  it('runtime argument beats the route', async () => {
     const ws = await routedWorkspace()
     try {
       const io = await ws.shell('python3 -c "big job"', { runtime: 'alpha' })
       expect(DEC.decode(io.stdout)).toBe('ran-alpha\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('all capturers refusing is an admission failure, workspace stays open', async () => {
-    const parser = await getTestParser()
-    const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = () => false
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, 'workspace'] },
-    )
-    try {
-      const denied = await ws.shell('python3 -c "x"')
-      expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('python3: no runtime accepted this line\n')
-      const open = await ws.shell('echo workspace-still-open')
-      expect(DEC.decode(open.stdout)).toBe('workspace-still-open\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('a scripted workspace entry locks down refused lines', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        shellParser: parser,
-        runtimes: [new WorkspaceRuntime({ script: (ctx) => !ctx.line.includes('/secret') })],
-      },
-    )
-    try {
-      const ok = await ws.shell('echo ok > /notes.txt && cat /notes.txt')
-      expect(DEC.decode(ok.stdout)).toBe('ok\n')
-      const denied = await ws.shell('cat /secret/creds')
-      expect(denied.exitCode).toBe(126)
     } finally {
       await ws.close()
     }
@@ -259,74 +178,28 @@ describe('routing ladder', () => {
     }
   })
 
-  it('a hung policy script times out with a policy error', async () => {
+  it('a hung route program times out with a routing error', async () => {
     const parser = await getTestParser()
     const saved = SCRIPT_EVAL_TIMEOUT.seconds
-    SCRIPT_EVAL_TIMEOUT.seconds = 0.1
+    SCRIPT_EVAL_TIMEOUT.seconds = 0.5
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new HangingEvaluator(), 'workspace'],
-        routePolicy: new ScriptSource('1'),
+        runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
+        routePolicy: {
+          script: new ScriptSource('while True:\n    pass\n', 'python'),
+          runtime: 'monty',
+        },
       },
     )
     try {
-      await expect(ws.shell('echo hi')).rejects.toThrow(/policy script timed out after 0.1s/)
+      await expect(ws.shell('echo hi')).rejects.toThrow(/route_policy timed out after 0.5s/)
     } finally {
       SCRIPT_EVAL_TIMEOUT.seconds = saved
       await ws.close()
     }
-  })
-
-  it('a JS policy script selects the JS evaluator over an earlier python one', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        shellParser: parser,
-        runtimes: [new MontyRuntime(), new QuickJsRuntime(), 'workspace'],
-        // JavaScript a python evaluator could not parse: the line places
-        // only because the JS evaluator read it.
-        routePolicy: new ScriptSource(
-          "ctx.commands.some((c) => c.command === 'node') ? 'quickjs' : null",
-          'js',
-        ),
-      },
-    )
-    try {
-      const placed = await ws.shell('node -e "console.log(1)"')
-      expect(placed.exitCode).toBe(0)
-      expect(DEC.decode(placed.stdout)).toBe('1\n')
-      const ok = await ws.shell('echo fine')
-      expect(ok.exitCode).toBe(0)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('evaluatorOf prefers a language match and falls back to the first', () => {
-    const py = new NamedEvaluator('py-eval', 'python')
-    const js = new NamedEvaluator('js-eval', 'js')
-    expect(evaluatorOf([py, js], 'js')).toBe(js)
-    expect(evaluatorOf([py, js], 'python')).toBe(py)
-    expect(evaluatorOf([py, js])).toBe(py)
-    expect(evaluatorOf([py], 'js')).toBe(py)
-    expect(evaluatorOf([])).toBeNull()
-  })
-
-  it('one language attribute serves both entry points', () => {
-    // The eval entry point and the run entry point read the same Runtime.language, so
-    // an engine cannot be picked as a js interpreter and a python
-    // evaluator at once. Two attributes could disagree, and the
-    // disagreement only showed up as an unexplained 127 or a policy
-    // script evaluated on the wrong engine.
-    const js = new NamedEvaluator('js-eval', 'js')
-    expect(evaluatorOf([js], 'js')).toBe(js)
-    expect(runtimeForLanguage([js], 'js')).toBe(js)
-    expect(runtimeForLanguage([js], 'python')).toBeNull()
   })
 
   it('runtimeForLanguage is first-match with no cross-language fallback', () => {
@@ -335,7 +208,7 @@ describe('routing ladder', () => {
     expect(runtimeForLanguage([monty, quickjs], 'python')).toBe(monty)
     expect(runtimeForLanguage([monty, quickjs], 'js')).toBe(quickjs)
     // Captures do not count (the marker captures python3 but is no
-    // LanguageRuntime), and unlike evaluatorOf there is no any-language
+    // LanguageRuntime), and there is no any-language
     // fallback: a python program cannot run on a js engine.
     class CapturingMarker extends Runtime {
       readonly name = 'marker'
@@ -348,22 +221,17 @@ describe('routing ladder', () => {
     expect(runtimeForLanguage([], 'js')).toBeNull()
   })
 
-  it('a JS policy script reads mounted content through the fs bridge', async () => {
+  it('a route program reads mounted content as the session', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new QuickJsRuntime(), 'workspace'],
+        runtimes: [new MontyRuntime({ captures: [] }), new QuickJsRuntime(), 'workspace'],
         // The runtime name comes from a mounted file; a read that missed
-        // would name a runtime that does not exist and fail the line.
-        routePolicy: new ScriptSource(
-          "const f = std.open('/route.txt', 'r'); " +
-            "const name = f === null ? 'ghost' : f.readAsString().trim(); " +
-            'if (f !== null) f.close(); ' +
-            "ctx.commands.some((c) => c.command === 'node') ? name : null",
-        ),
+        // would fail the program and the line.
+        routePolicy: { script: new ScriptSource(ROUTE_NODE, 'python'), runtime: 'monty' },
       },
     )
     try {
@@ -488,60 +356,11 @@ describe('routing ladder', () => {
     }
   })
 
-  it('an entry script answering a verdict shape fails loud', async () => {
-    const parser = await getTestParser()
-    const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = new ScriptSource("{'deny': 'nope'}")
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        shellParser: parser,
-        runtimes: [alpha, new MontyRuntime(), 'workspace'],
-      },
-    )
-    try {
-      await expect(ws.shell('python3 -c "x"')).rejects.toThrow(/answer a boolean/)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('nested evals inherit the typed line decision', async () => {
     const ws = await routedWorkspace()
     try {
       const io = await ws.shell('echo big $(python3 -c "x")')
       expect(DEC.decode(io.stdout)).toBe('big ran-beta\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('a monty string script decides from parsed ctx', async () => {
-    const parser = await getTestParser()
-    const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = new ScriptSource(`
-big = False
-for c in ctx['commands']:
-    for p in c['paths']:
-        if p.startswith('/secret'):
-            big = True
-not big
-`)
-    // Config scripts run on the world's evaluator: a captures-empty
-    // monty is a pure policy engine, so alpha stays python3's only
-    // capturer and its refusal is still an admission failure.
-    const engine = new MontyRuntime({ captures: [] })
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, engine, 'workspace'] },
-    )
-    try {
-      await ws.shell("echo 'x = 1' > /fine.py")
-      const ok = await ws.shell('python3 /fine.py')
-      expect(DEC.decode(ok.stdout)).toBe('ran-alpha\n')
-      const denied = await ws.shell('python3 /secret/x.py')
-      expect(denied.exitCode).toBe(126)
     } finally {
       await ws.close()
     }
@@ -648,39 +467,6 @@ describe('the placement stage', () => {
     }
   })
 
-  it('a runtime that declines its placement refuses the line', async () => {
-    const heavyOnly = new NamedFakeRuntime('beta')
-    heavyOnly.script = (ctx) => ctx.line.includes('heavy')
-    const ws = await placed({
-      routePolicy: () => 'beta',
-      runtimes: [new NamedFakeRuntime('alpha'), heavyOnly, 'workspace'],
-    })
-    try {
-      expect(DEC.decode((await ws.shell('python3 -c "heavy"')).stdout)).toBe('ran-beta\n')
-      const refused = await ws.shell('python3 -c "light"')
-      expect([refused.exitCode, DEC.decode(refused.stderr)]).toEqual([
-        126,
-        'python3: Permission denied\n',
-      ])
-      expect([refused.refusal?.reason, refused.refusal?.policy]).toEqual([
-        'runtime beta declines this line',
-        'runtimes.beta',
-      ])
-      // The caller's own argument forces its runtime.
-      const forced = await ws.shell('python3 -c "light"', { runtime: 'beta' })
-      expect(DEC.decode(forced.stdout)).toBe('ran-beta\n')
-      const said = await ws.explain('python3 -c "light"')
-      expect(said.answers.at(-1)).toEqual({
-        kind: 'deny',
-        reason: 'runtime beta declines this line',
-        policy: 'runtimes.beta',
-      })
-      expect(said.exitCode).toBe(126)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('explain names the policy that placed the line', async () => {
     const ws = await placed({
       routePolicy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
@@ -756,14 +542,13 @@ describe('workspace runtime overrides', () => {
 
   it('explicit captures restrict under routing', async () => {
     const parser = await getTestParser()
-    const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = () => true
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [alpha, new WorkspaceRuntime({ captures: ['echo'] })],
+        runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
+        routePolicy: () => null,
       },
     )
     try {
@@ -778,23 +563,6 @@ describe('workspace runtime overrides', () => {
 })
 
 describe('script context', () => {
-  it('a script finds its stage among the commands', async () => {
-    const parser = await getTestParser()
-    const alpha = new NamedFakeRuntime('alpha')
-    alpha.script = (ctx) => ctx.commands.some((c) => c.command === 'python3')
-    const ws = new Workspace(
-      { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [alpha, 'workspace'] },
-    )
-    try {
-      const io = await ws.shell('echo lead | python3 -c "x"')
-      expect(io.exitCode).toBe(0)
-      expect(DEC.decode(io.stdout)).toBe('ran-alpha\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('empty declared captures serve nothing', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
@@ -874,14 +642,18 @@ describe('whole-line runtimes', () => {
     }
   })
 
-  it('a refused line falls to the workspace, never 126', async () => {
+  it('a route to the workspace keeps a line in Mirage', async () => {
     const parser = await getTestParser()
     const box = new LineBox()
     box.captures = ['*']
-    box.script = (ctx) => !ctx.line.includes('keep-out')
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [box, 'workspace'],
+        routePolicy: (ctx) => (ctx.line.includes('keep-out') ? 'workspace' : null),
+      },
     )
     try {
       const taken = await ws.shell('echo captured')
@@ -898,10 +670,14 @@ describe('whole-line runtimes', () => {
     const parser = await getTestParser()
     const box = new LineBox()
     box.captures = ['*']
-    box.script = () => false
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [box, 'workspace'],
+        routePolicy: () => 'workspace',
+      },
     )
     try {
       const refused = await ws.shell('echo hi')

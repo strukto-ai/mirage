@@ -15,25 +15,19 @@
 import json
 import os
 from collections.abc import Sequence
-from importlib.resources import files
 from pathlib import Path
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import HomeConfig, RuntimeConfig
-from mirage.runtime.errors import EvalError
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
-from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.types import (
-    EvalResult,
-    EvalValue,
     FilesystemOperation,
     RunArgs,
     RunResult,
     RuntimeReach,
-    ScriptSource,
 )
 from mirage.runtime.wasm import WasmExecution, WasmView
 from mirage.runtime.wasm.loader import wasmtime
@@ -51,19 +45,8 @@ _BUILD_HINT = (
     "the directory containing it"
 )
 
-# The one-shot eval harness: inputs bind as globals, the source runs
-# through indirect eval (global scope, completion value = the LAST
-# EXPRESSION), and the value or error rides a sentinel line appended to
-# stdout, the engine's only host-visible channel. Mirrors the TS
-# quickjs evaluator semantics; the JSON shapes match EvalValue.
-EVAL_SENTINEL = "__MIRAGE_EVAL__"
 
-_EVAL_SOURCE = (
-    files(__package__).joinpath("js/eval.js").read_text(encoding="utf8")
-)
-
-
-class QuickJsRuntime(JsRuntime, EvaluatorMixin):
+class QuickJsRuntime(JsRuntime):
     """Run JavaScript on a WASI quickjs-ng under wasmtime, in-process.
 
     A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
@@ -105,7 +88,6 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
         self,
         captures: Sequence[str] | None = None,
         config: HomeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
         if wasmtime is None:
             raise ImportError(
@@ -113,7 +95,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
                 "with: pip install mirage-ai[quickjs], or select another "
                 "runtime"
             )
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         root = self.config.home or os.environ.get(QUICKJS_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
@@ -185,58 +167,3 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
-
-    async def eval(
-        self,
-        code: str,
-        *,
-        inputs: dict[str, EvalValue] | None = None,
-        session: str | None = None,
-    ) -> EvalResult:
-        """Evaluate one JS program; the completion value is the value.
-
-        Inputs bind as globals and the source runs at global scope via
-        indirect eval, so the LAST EXPRESSION is the value (what the
-        policy engine consumes for JS policy scripts). Each eval is a
-        fresh engine; the wasi build has no persistent interpreter, so
-        console sessions are not supported.
-
-        Args:
-            code (str): the JS source to evaluate.
-            inputs (dict[str, EvalValue] | None): globals for the run.
-            session (str | None): unsupported; a session id fails loud.
-
-        Raises:
-            EvalError: session requested, the program failed to parse
-                or raised, or the value could not be carried back.
-        """
-        if session is not None:
-            raise EvalError(
-                "the quickjs evaluator is one-shot only: each eval is a "
-                "fresh wasi engine, so console sessions are unsupported"
-            )
-        request = json.dumps({"inputs": inputs or {}, "code": code})
-        result = await self.run(
-            RunArgs(code=_EVAL_SOURCE, args=[request, EVAL_SENTINEL])
-        )
-        stdout = (result.stdout or b"").decode(errors="replace")
-        marker = f"\n{EVAL_SENTINEL}"
-        head, sep, tail = stdout.rpartition(marker)
-        if not sep:
-            stderr_text = (result.stderr or b"").decode(errors="replace")
-            raise EvalError(
-                f"quickjs eval produced no value: "
-                f"{stderr_text.strip() or 'engine failed'}"
-            )
-        payload = json.loads(tail.strip() or "{}")
-        if "error" in payload:
-            name = str(payload["error"].get("name", "Error"))
-            message = str(payload["error"].get("message", ""))
-            raise EvalError(f"{name}: {message}", syntax=name == "SyntaxError")
-        return EvalResult(
-            value=payload.get("value"),
-            stdout=head.encode(),
-            stderr=result.stderr,
-            exit_code=0,
-            status="complete",
-        )

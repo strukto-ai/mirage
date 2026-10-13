@@ -50,4 +50,6 @@ export interface WorkerPort {
   onMessage(receive: (message: WorkerMessage) => void): void
   onError(receive: (error: unknown) => void): void
   terminate(): void
+  /** The worker's memory in bytes, its heap included; absent where nothing can read it (a browser). */
+  memory?: () => Promise<number>
 }

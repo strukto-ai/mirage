@@ -12,7 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RouteScript } from './routing/types.ts'
+import { parseLimit } from '../cache/file/utils.ts'
+
+/**
+ * A runtime's `maxMemory` in bytes, null for no cap.
+ *
+ * Spelled as sandlock spells its own (`10M`, `512M`, `1G`).
+ *
+ * Args:
+ *   value: the setting as configured.
+ *
+ * Throws:
+ *   Error: the setting is not a size.
+ */
+export function memoryLimit(value: string | null | undefined): number | null {
+  if (value === undefined || value === null) return null
+  if (!/^\s*\d+\s*([KMG]B?)?\s*$/i.test(value)) {
+    throw new Error(`max_memory must be a size like 10M or 1G, got '${value}'`)
+  }
+  return parseLimit(value)
+}
 
 /** Constructor options every runtime accepts (a yaml entry's keys). */
 export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
@@ -28,20 +47,13 @@ export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown
    * runtime does not have fails loud.
    */
   config?: C
-  /**
-   * Per-line admission script for the routing ladder, answering "do I
-   * want this line": a function taking a RouteContext, or a
-   * config-borne ScriptSource. Absent = always willing. Policy, not
-   * capability: it can only refuse lines the captures already allow.
-   */
-  script?: RouteScript
 }
 
 /**
  * How a runtime's engine is set up: its implementation knobs.
  *
- * Every runtime is constructed the same way (captures, config,
- * script); what differs between runtimes lives here. In yaml this is
+ * Every runtime is constructed the same way (captures, config); what
+ * differs between runtimes lives here. In yaml this is
  * the runtime entry's `config` block, mirroring a mount's.
  *
  * The base names no field, because no knob is shared by every tier.

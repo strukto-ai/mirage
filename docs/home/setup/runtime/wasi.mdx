@@ -51,6 +51,21 @@ Point `home`, or `MIRAGE_WASI_HOME`, at the unzipped directory.
   </Tab>
 </Tabs>
 
+## Memory
+
+`max_memory` caps the memory one run may grow to:
+
+```yaml
+runtimes:
+  - name: wasi
+    config:
+      home: /path/to/build
+      max_memory: 256M
+```
+
+A run that needs more raises `MemoryError`. CPython starts at about 40M, so
+a cap below that fails every run. There is no cap by default.
+
 ## What is wired
 
 Anything built on these calls, such as `os.path`, `pathlib`, `glob`,

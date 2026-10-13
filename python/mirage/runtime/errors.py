@@ -17,23 +17,6 @@ class UnsupportedExecutionError(ValueError):
     """The runtime does not support this execution kind or language."""
 
 
-class EvalError(Exception):
-    """An evaluation that could not produce a value.
-
-    The message carries the evaluator's own diagnostics (a traceback,
-    a transport failure, a non-serializable result).
-
-    Args:
-        message (str): the evaluator's diagnostic text.
-        syntax (bool): True when the program failed to parse, so
-            callers can distinguish "bad script" from "script raised".
-    """
-
-    def __init__(self, message: str, syntax: bool = False) -> None:
-        super().__init__(message)
-        self.syntax = syntax
-
-
 class CrossMountError(Exception):
     """A rename whose two ends do not live on the same mount.
 

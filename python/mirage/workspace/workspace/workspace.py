@@ -198,7 +198,6 @@ from mirage.workspace.workspace.execute import (
 )
 from mirage.workspace.workspace.explainer import Explainer
 from mirage.workspace.workspace.failure import placement_refused
-from mirage.workspace.workspace.guard import reject_config_script
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
 from mirage.workspace.workspace.lifecycle import (
     CloseDeps,
@@ -391,8 +390,8 @@ class Workspace:
         # profile's policy (ScriptPolicy, calling its method per command
         # through the same manager), then Policy instances, then anything added
         # later through ws.policies.add(). The route policy
-        # (route_policy=) is the line-level counterpart until it is
-        # absorbed as a method.
+        # (route_policy=) answers pre_execute ahead of them all, through
+        # the same program runner as the profile's policy.
         self._registry.policies.add(PermissionsPolicy(self._session_mgr))
         # The entry points the runtime world attaches (below), so a profile
         # script reads the mounts an agent's program would, and through
@@ -572,10 +571,9 @@ class Workspace:
         self._runtimes, self._router = wire_runtime_world(
             self._registry, self._runtime_binding, runtimes
         )
-        reject_config_script("route_policy", route_policy)
         if route_policy is not None:
             self._registry.policies.place(
-                PlacementPolicy(route_policy, lambda: self._runtimes.entries)
+                PlacementPolicy(route_policy, self._script_policy)
             )
 
         # Installed CLIs, fully separate from mounts: the YAML `clis:`

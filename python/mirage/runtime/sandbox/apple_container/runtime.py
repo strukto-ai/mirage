@@ -15,7 +15,7 @@
 import asyncio
 import json
 from collections.abc import Sequence
-from typing import Any, Callable
+from typing import Any
 
 from mirage.context import get_current_session
 from mirage.runtime.mixin import ProcessExecutorMixin
@@ -30,7 +30,7 @@ from mirage.runtime.sandbox.apple_container.constants import (
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import run_cli
 from mirage.runtime.sandbox.config import SandboxConfig
-from mirage.runtime.types import ProcessExecution, RunResult, ScriptSource
+from mirage.runtime.types import ProcessExecution, RunResult
 
 
 class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
@@ -56,7 +56,6 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
     Args:
         captures (Sequence[str] | None): commands routed to this runtime.
         config (SandboxConfig | dict[str, Any] | None): container settings.
-        script (Callable[..., Any] | ScriptSource | None): execution hook.
     """
 
     name = "apple_container"
@@ -67,9 +66,8 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
         self,
         captures: Sequence[str] | None = None,
         config: SandboxConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         self._running: set[str] = set()
         self._probe_lock = asyncio.Lock()
 

@@ -14,10 +14,8 @@
 
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
-import { EvalError } from '../../errors.ts'
 import { JsRuntime } from '../base.ts'
-import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
+import type { RunArgs, RunResult } from '../../types.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
@@ -32,11 +30,6 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_SIZE = 1024 * 1024
 
-// One-shot evals (the policy engine, console evals) are bounded by the
-// VM interrupt because a busy loop blocks the host timer (matches the
-// policy evaluation timeout in decide.ts).
-const EVAL_INTERRUPT_SECONDS = 10
-
 // quickjs-emscripten bundles its own wasm, so the HomeConfig `home`
 // key (for parity with the Python quickjs runtime, which locates
 // qjs-wasi.wasm) has nothing to locate here and is ignored.
@@ -44,13 +37,12 @@ const EVAL_INTERRUPT_SECONDS = 10
 // The asyncify variant is used so `std.open`/`os.readdir` can suspend
 // the guest while a workspace-mount read or write awaits the dispatch,
 // matching the Python runtime's live file I/O.
-export class QuickJsRuntime extends JsRuntime implements Evaluator {
+export class QuickJsRuntime extends JsRuntime {
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` suspend
   // into the workspace bridge: guest I/O has no way around the gate.
   override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
-  readonly [EVALUATOR] = true as const
   private newAsyncModule: NewAsyncModule | null = null
 
   constructor(options: RuntimeOptions = {}) {
@@ -169,104 +161,6 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
         stdout: ENC.encode(out.join('')),
         stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
         exitCode,
-      }
-    } finally {
-      ctx.dispose()
-    }
-  }
-
-  /**
-   * Evaluate one JS program; the completion value is the value.
-   *
-   * Inputs bind as globals and the source runs at global scope, so the
-   * LAST EXPRESSION is the value (what the policy engine consumes for
-   * JS policy scripts). Each eval is a fresh engine, mirroring the
-   * python wasi runtime, so console sessions are not supported.
-   */
-  async eval(
-    code: string,
-    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
-  ): Promise<EvalResult> {
-    const context = this.captureContext()
-    if (opts.session !== undefined) {
-      throw new EvalError(
-        'the quickjs evaluator is one-shot only: each eval is a fresh ' +
-          'engine, so console sessions are unsupported',
-      )
-    }
-    const newAsyncModule = await this.loadModule()
-    const QuickJS = await newAsyncModule()
-    // Module-owned context, not newRuntime(): the async module's runtime
-    // disposer unregisters callbacks before QTS_FreeRuntime, so a runtime
-    // that ever defined an asyncified host fn throws on dispose
-    // (justjake/quickjs-emscripten#261). newContext() hands the runtime
-    // to the context as an owned lifetime, which tears down in the safe
-    // order; ctx.dispose() ends both.
-    const ctx = QuickJS.newContext()
-    const runtime: QuickJSAsyncRuntime = ctx.runtime
-    runtime.setMemoryLimit(MEMORY_LIMIT)
-    runtime.setMaxStackSize(STACK_SIZE)
-    const out: string[] = []
-    const err: string[] = []
-    // Bounded like a policy evaluation must be: a looping script would
-    // otherwise block the event loop with no timer able to fire.
-    const timedOut = this.installInterrupt(runtime, undefined, EVAL_INTERRUPT_SECONDS)
-    try {
-      this.installGlobals(ctx, { code, args: [], env: {}, stdin: null, flags: {} }, out, err, {
-        code: 0,
-        called: false,
-      })
-      // Same filesystem surface as run(): an attached workspace serves
-      // std.open/os.readdir, so a JS policy script can read mounted
-      // content (the python evaluator gets this via run()'s RuntimeFiles).
-      const files = context !== undefined ? RuntimeFiles.of(context) : null
-      const closeAll = installQuickJsFs(ctx, files)
-      const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
-      if (boot.error) {
-        boot.error.dispose()
-        throw new EvalError('quickjs bootstrap failed')
-      }
-      boot.value.dispose()
-      let result = await ctx.evalCodeAsync(cwdPreamble(context?.cwd), 'mirage:cwd')
-      if (!result.error) {
-        result.value.dispose()
-        const inputsJson = JSON.stringify(opts.inputs ?? {})
-        const bind = ctx.evalCode(
-          `for (const [__k, __v] of Object.entries(JSON.parse(${JSON.stringify(inputsJson)}))) globalThis[__k] = __v`,
-          'mirage:inputs',
-        )
-        if (bind.error) {
-          bind.error.dispose()
-          throw new EvalError('quickjs eval could not bind inputs')
-        }
-        bind.value.dispose()
-        result = await ctx.evalCodeAsync(code, 'eval.js', { type: 'global' })
-      }
-      if (result.error) {
-        const message = this.formatError(ctx, result.error)
-        result.error.dispose()
-        await closeAll()
-        if (timedOut.value) {
-          throw new EvalError(`quickjs eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
-        }
-        throw new EvalError(message, { syntax: message.startsWith('SyntaxError') })
-      }
-      const dumped: unknown = ctx.dump(result.value)
-      result.value.dispose()
-      const drained = await this.drainJobs(runtime, ctx, err, { called: false })
-      // Files the evaluation left open still owe the mount their writes,
-      // as they do when run() ends.
-      const lost = await closeAll()
-      for (const line of lost) err.push(`${this.name}: ${line}\n`)
-      if (drained !== 0) {
-        throw new EvalError(err.join('').trim() || 'quickjs eval failed while draining jobs')
-      }
-      return {
-        value: (dumped === undefined ? null : dumped) as EvalValue,
-        stdout: ENC.encode(out.join('')),
-        stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
-        exitCode: 0,
-        status: 'complete',
       }
     } finally {
       ctx.dispose()

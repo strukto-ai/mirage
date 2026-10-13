@@ -34,6 +34,7 @@ import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { classifyPaths, classifyShows, classifyVars } from '../../utils/hidden.ts'
 import { norm } from '../../utils/path.ts'
 import {
+  compileProgram,
   type CommandsBlock,
   type CompiledProfile,
   type MountCommandsBlock,
@@ -384,21 +385,12 @@ export function compileScripts(effective: SessionProfile, name: string): Profile
   const compiled: Partial<Record<ScriptMethod, readonly ProfileScript[]>> = {}
   for (const [method, programs] of Object.entries(effective.policy ?? {})) {
     const entries = programs.map((program): ProfileScript => {
-      if (typeof program.script === 'string') {
+      try {
+        return compileProgram(program, name)
+      } catch (err) {
         throw new PolicyError(
-          `profile '${name}' names a policy by path ('${program.script}'); ` +
-            `only the config loader loads one, pass ScriptSource in code`,
+          `profile '${name}' ${err instanceof Error ? err.message : String(err)}`,
         )
-      }
-      const runtime =
-        typeof program.runtime === 'string'
-          ? { name: program.runtime, config: {} }
-          : program.runtime
-      return {
-        profile: name,
-        script: program.script,
-        runtime: runtime.name,
-        config: { ...runtime.config },
       }
     })
     if (entries.length > 0) compiled[method as ScriptMethod] = entries

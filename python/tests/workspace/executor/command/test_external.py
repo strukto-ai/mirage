@@ -20,7 +20,6 @@ import pytest
 import yaml
 
 from mirage import EXTERNAL_COMMANDS, RAMVFS, Limit, MountMode, Workspace
-from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import _build_runtime_entries
@@ -30,8 +29,7 @@ from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.python.monty import MontyRuntime
-from mirage.runtime.types import ProcessExecution, RunResult, ScriptSource
+from mirage.runtime.types import ProcessExecution, RunResult
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
 from mirage.workspace.session import SessionState
@@ -157,50 +155,6 @@ async def test_external_fallback_globs_every_unquoted_word():
             ".*.txt",
             ".none*",
         )
-
-
-@pytest.mark.asyncio
-async def test_runtime_refusal_cannot_fall_through_to_external_capture():
-    named = ProcessProbe(captures=("native-tool",), script=lambda ctx: False)
-    fallback = ProcessProbe()
-    fallback.name = "fallback"
-    async with workspace({"/": RAMVFS()}, runtimes=[named, fallback]) as ws:
-        assert (await ws.shell("native-tool")).exit_code == 126
-        assert not named.requests and not fallback.requests
-        assert (await ws.shell("another-tool")).exit_code == 0
-        assert len(fallback.requests) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "captures",
-    [("native-tool",), (EXTERNAL_COMMANDS,)],
-    ids=["named", "fallback"],
-)
-async def test_refused_external_capture_does_not_expand_globs(
-    monkeypatch, captures
-):
-    probe = ProcessProbe(captures=captures, script=lambda ctx: False)
-    async with workspace({"/": RAMVFS()}, runtimes=[probe]) as ws:
-        assert await (await ws.shell("echo mirage")).stdout_str() == "mirage\n"
-        await ws.shell("shopt -s failglob")
-        resolved = argv_module.resolve_globs
-        globbed = False
-
-        async def track_globs(*args, **kwargs):
-            nonlocal globbed
-            globbed = True
-            return await resolved(*args, **kwargs)
-
-        monkeypatch.setattr(argv_module, "resolve_globs", track_globs)
-        result = await ws.shell("native-tool /api/*")
-        assert result.exit_code == 126
-        assert (
-            await result.stderr_str()
-            == "native-tool: no runtime accepted this line\n"
-        )
-        assert not globbed
-        assert not probe.requests
 
 
 @pytest.mark.asyncio
@@ -423,101 +377,6 @@ async def test_boundary_expansion_preserves_command_tokens(
             assert probe.requests[0].argv == tokens
         else:
             assert shlex.split(probe.lines[0]) == list(tokens)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
-@pytest.mark.parametrize("source", [False, True])
-async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
-    script = (
-        ScriptSource(
-            "[w['text'] for w in ctx['commands'][-1]['words']] == "
-            "['trello', 'board', 'list', '/allowed']"
-        )
-        if source
-        else lambda ctx: (
-            [w.text for w in ctx.commands[-1].words]
-            == ["trello", "board", "list", "/allowed"]
-        )
-    )
-    probe = kind(captures=("trello board list",), script=script)
-    async with workspace(
-        {"/": RAMVFS()}, runtimes=[probe, MontyRuntime(captures=())]
-    ) as ws:
-        ws.mount("/").register_commands([board_list])
-        allowed = await ws.shell("echo ok | trello board list /allowed")
-        assert allowed.exit_code == 0
-        if isinstance(probe, ProcessProbe):
-            assert probe.requests[0].argv == (
-                "trello",
-                "board",
-                "list",
-                "/allowed",
-            )
-            probe.requests.clear()
-        else:
-            assert shlex.split(probe.lines[0]) == [
-                "trello",
-                "board",
-                "list",
-                "/allowed",
-            ]
-            probe.lines.clear()
-        denied = await ws.shell("echo ok | trello board list /denied")
-        assert denied.exit_code == 126
-        assert not (
-            probe.requests if isinstance(probe, ProcessProbe) else probe.lines
-        )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "head",
-    [
-        "echo ok",
-        "cat /input",
-        "custom-stage",
-        "trello board list",
-        "custom-cli",
-        "python3",
-    ],
-)
-async def test_external_script_sees_every_stage(head):
-    seen = []
-    probe = ProcessProbe(
-        script=lambda ctx: (
-            seen.append(ctx)
-            or any(c.command == "native-tool" for c in ctx.commands)
-        )
-    )
-    named = ProcessProbe(captures=("python3",))
-    named.name = "named"
-    async with workspace({"/": RAMVFS()}, runtimes=[probe, named]) as ws:
-        ws.mount("/").register_commands([board_list])
-        ws.register_cli(
-            "custom-cli",
-            CLI(
-                spec=CommandSpec(name="custom-cli"),
-                handlers={
-                    "": CLIHandler(fn=lambda inv: (b"ok\n", IOResult()))
-                },
-            ),
-        )
-        await ws.shell("echo ok > /input")
-        await ws.shell("custom-stage() { echo ok; }")
-        seen.clear()
-        result = await ws.shell(head + " | native-tool")
-        assert result.exit_code == 0
-        assert len(probe.requests) == 1
-        assert seen[0].line == head + " | native-tool"
-        assert [c.command for c in seen[0].commands] == [
-            head.split()[0],
-            "native-tool",
-        ]
-        probe.requests.clear()
-        denied = await ws.shell(head + " | denied-tool")
-        assert denied.exit_code == 126
-        assert not probe.requests
 
 
 @pytest.mark.asyncio
@@ -785,9 +644,8 @@ async def test_interpreter_program_operands_are_not_paths(kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
-@pytest.mark.parametrize("willing", [True, False])
-async def test_native_captures_preserve_shell_builtins(kind, willing):
-    probe = kind(captures=tuple(SHELL_NAMES), script=lambda ctx: willing)
+async def test_native_captures_preserve_shell_builtins(kind):
+    probe = kind(captures=tuple(SHELL_NAMES))
     async with workspace(
         {"/work": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe]
     ) as ws:
@@ -822,27 +680,24 @@ async def test_native_captures_preserve_shell_builtins(kind, willing):
         )
         for name in ("python", "python3", "node", "js"):
             result = await ws.shell(name + " --version")
-            assert result.exit_code == (0 if willing else 126)
+            assert result.exit_code == 0
         delegated = (
             probe.requests if isinstance(probe, ProcessProbe) else probe.lines
         )
-        assert len(delegated) == (4 if willing else 0)
+        assert len(delegated) == 4
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "name,args", [("ps", "-eo pid,cmd"), ("kill", "-0 456")]
 )
-@pytest.mark.parametrize("willing", [True, False])
-async def test_explicit_process_command_captures_reach_the_runtime(
-    name, args, willing
-):
-    probe = ProcessProbe(captures=(name,), script=lambda ctx: willing)
+async def test_explicit_process_command_captures_reach_the_runtime(name, args):
+    probe = ProcessProbe(captures=(name,))
     async with workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe]
     ) as ws:
         result = await ws.shell(f"{name} {args}")
-        assert result.exit_code == (0 if willing else 126)
-        assert [r.argv for r in probe.requests] == (
-            [tuple([name] + args.split())] if willing else []
-        )
+        assert result.exit_code == 0
+        assert [r.argv for r in probe.requests] == [
+            tuple([name] + args.split())
+        ]

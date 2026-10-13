@@ -40,3 +40,17 @@ export function noWorker(cause?: unknown): PyodideUnavailableError {
     cause,
   })
 }
+
+/**
+ * A run stopped because the worker passed its `maxMemory`. The worker is
+ * gone with the run, so the next run starts a fresh one.
+ *
+ * Args:
+ *   limit: the setting as configured, which the message names.
+ */
+export class PyodideMemoryError extends Error {
+  constructor(limit: string) {
+    super(`MemoryError: the run passed max_memory (${limit})`)
+    this.name = 'PyodideMemoryError'
+  }
+}

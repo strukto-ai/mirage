@@ -40,73 +40,6 @@
       ]
     },
     {
-      "id": "entry_script_fallthrough",
-      "world": {
-        "runtimes": [
-          {
-            "name": "monty",
-            "script": "'use-local' not in ctx['line']"
-          },
-          "local",
-          "workspace"
-        ],
-        "mounts": {
-          "/ram": {
-            "vfs": "ram"
-          }
-        }
-      },
-      "steps": [
-        {
-          "command": "python3 -c \"print(argv[0])\"",
-          "expect": {
-            "exit": 0,
-            "stdout": "-c\n"
-          }
-        },
-        {
-          "command": "python3 -c \"import sys; print('routed-to-local')\" && echo use-local",
-          "expect": {
-            "exit": 0,
-            "stdout": "routed-to-local\nuse-local\n"
-          }
-        }
-      ]
-    },
-    {
-      "id": "entry_script_refused",
-      "world": {
-        "runtimes": [
-          {
-            "name": "monty",
-            "script": "False"
-          },
-          "workspace"
-        ],
-        "mounts": {
-          "/ram": {
-            "vfs": "ram"
-          }
-        }
-      },
-      "steps": [
-        {
-          "command": "python3 -c \"x\"",
-          "expect": {
-            "exit": 126,
-            "stderr": "python3: no runtime accepted this line\n"
-          }
-        },
-        {
-          "command": "echo vfs-open",
-          "expect": {
-            "exit": 0,
-            "stdout": "vfs-open\n"
-          }
-        }
-      ]
-    },
-    {
       "id": "global_policy",
       "world": {
         "runtimes": [
@@ -119,7 +52,10 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "'local' if 'go-local' in ctx['line'] else None"
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'go-local' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "runtime": "monty"
+        }
       },
       "steps": [
         {
@@ -213,10 +149,7 @@
       "id": "ctx_command_pipeline",
       "world": {
         "runtimes": [
-          {
-            "name": "monty",
-            "script": "any(c['command'] == 'python3' for c in ctx['commands'])"
-          },
+          "monty",
           "workspace"
         ],
         "mounts": {
@@ -226,6 +159,10 @@
               "pipe.py": "print('came-through-pipe')"
             }
           }
+        },
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif any(c['command'] == 'python3' for c in ctx['commands']):\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"monty\"}))\n",
+          "runtime": "monty"
         }
       },
       "steps": [
@@ -316,7 +253,10 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "'nope'"
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"nope\"}))\n",
+          "runtime": "monty"
+        }
       },
       "steps": [
         {
@@ -358,30 +298,33 @@
       "id": "nested_eval_inherits_routing",
       "world": {
         "runtimes": [
-          {
-            "name": "monty",
-            "script": "'magic' in ctx['line']"
-          }
+          "monty",
+          "local",
+          "workspace"
         ],
         "mounts": {
           "/ram": {
             "vfs": "ram"
           }
+        },
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'magic' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "runtime": "monty"
         }
       },
       "steps": [
         {
-          "command": "echo $(python3 -c \"print(42)\") magic",
+          "command": "echo $(python3 -c \"import sys; print(sys.platform == 'monty')\") magic",
           "expect": {
             "exit": 0,
-            "stdout": "42 magic\n"
+            "stdout": "False magic\n"
           }
         },
         {
-          "command": "echo $(python3 -c \"print(42)\")",
+          "command": "echo $(python3 -c \"import sys; print(sys.platform == 'monty')\")",
           "expect": {
             "exit": 0,
-            "stdout": "\n"
+            "stdout": "True\n"
           }
         }
       ]
@@ -462,7 +405,10 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "'monty'"
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"monty\"}))\n",
+          "runtime": "monty"
+        }
       },
       "steps": [
         {
@@ -486,38 +432,16 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "{'runtme': 'monty'}"
-      },
-      "steps": [
-        {
-          "command": "python3 -c \"print(1)\"",
-          "expect": {
-            "throws_contains": "route policy must answer"
-          }
-        }
-      ]
-    },
-    {
-      "id": "entry_script_verdict_shape",
-      "world": {
-        "runtimes": [
-          {
-            "name": "monty",
-            "script": "{'deny': 'nope'}"
-          },
-          "workspace"
-        ],
-        "mounts": {
-          "/ram": {
-            "vfs": "ram"
-          }
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"runtme\": \"monty\"}))\n",
+          "runtime": "monty"
         }
       },
       "steps": [
         {
           "command": "python3 -c \"print(1)\"",
           "expect": {
-            "throws_contains": "entry scripts answer a boolean"
+            "throws_contains": "route_policy must print a JSON answer"
           }
         }
       ]
@@ -575,7 +499,10 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "'local'",
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "runtime": "monty"
+        },
         "policies": [
           {
             "name": "place_line",
@@ -615,7 +542,10 @@
             "vfs": "ram"
           }
         },
-        "route_policy": "'local'",
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "runtime": "monty"
+        },
         "policies": [
           {
             "name": "place_line",
@@ -696,45 +626,54 @@
       ]
     },
     {
-      "id": "a_runtime_that_declines_its_placement_refuses_the_line",
-      "note": "A runtime a policy places the line on is asked too: its own script declining the line conflicts with the placement and refuses it. The caller's runtime argument forces its runtime.",
+      "id": "a_route_program_reads_the_workspace",
+      "note": "A route program reads the mounts as the session does.",
       "world": {
         "runtimes": [
-          {
-            "name": "local",
-            "script": "'heavy' in ctx['line']"
-          },
           "monty",
+          "local",
           "workspace"
         ],
         "mounts": {
           "/ram": {
-            "vfs": "ram"
+            "vfs": "ram",
+            "files": {
+              "route.txt": "local\n"
+            }
           }
         },
-        "route_policy": "'local'"
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif any(c['command'] == 'python3' for c in ctx['commands']):\n    name = open('/ram/route.txt').read().strip()\n    print(json.dumps({\"kind\": \"route\", \"runtime\": name}))\n",
+          "runtime": "monty"
+        }
       },
       "steps": [
         {
-          "command": "python3 -c \"import sys; print('heavy')\"",
+          "command": "python3 -c \"import sys; print(sys.platform == 'monty')\"",
           "expect": {
             "exit": 0,
-            "stdout": "heavy\n"
+            "stdout": "False\n"
           }
-        },
+        }
+      ]
+    },
+    {
+      "id": "a_route_program_that_fails_is_a_routing_error",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "route_policy": {
+          "script": "1 / 0\n",
+          "runtime": "monty"
+        }
+      },
+      "steps": [
         {
           "command": "python3 -c \"print(1)\"",
           "expect": {
-            "exit": 126,
-            "stderr": "python3: Permission denied\n"
-          }
-        },
-        {
-          "command": "python3 -c \"import sys; print(1)\"",
-          "runtime": "local",
-          "expect": {
-            "exit": 0,
-            "stdout": "1\n"
+            "throws_contains": "route_policy exited 1"
           }
         }
       ]

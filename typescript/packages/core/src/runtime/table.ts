@@ -65,7 +65,7 @@ const PYTHON_ONLY_HINTS: Record<string, string> = {
 // knows the uniform options. Python gets this check for free
 // (`**options` raises TypeError on an unknown kwarg); a TS object
 // literal would silently swallow a typo key without it.
-const ENTRY_KEYS: readonly string[] = ['captures', 'config', 'script']
+const ENTRY_KEYS: readonly string[] = ['captures', 'config']
 
 // The names core ships, frozen before any package or host registers its
 // own, so `registerRuntime` can refuse to shadow one the way the VFS

@@ -14,57 +14,7 @@
 
 from abc import ABC, abstractmethod
 
-from mirage.runtime.types import (
-    EvalResult,
-    EvalValue,
-    ProcessExecution,
-    RunResult,
-)
-
-
-class EvaluatorMixin(ABC):
-    """The evaluator capability: named inputs in, a value out.
-
-    A true mixin: no state, no constructor, one method. A Runtime
-    that also inherits this can evaluate expressions, which is what
-    the routing policy engine and the repl consume; process-only
-    runtimes never inherit it and are never asked to evaluate. The
-    contract promises the shape, not value fidelity: inputs and the
-    returned value stay within EvalValue so any transport can carry
-    them, and errors surface as the evaluator's own diagnostics
-    wrapped in EvalError.
-
-    The language ``eval`` speaks is ``Runtime.language``, the same
-    attribute ``run`` answers for: the policy engine matches it against
-    a config script's extension so a .js policy lands on a JS
-    evaluator. A separate name here would let one runtime claim two
-    languages.
-    """
-
-    @abstractmethod
-    async def eval(
-        self,
-        code: str,
-        *,
-        inputs: dict[str, EvalValue] | None = None,
-        session: str | None = None,
-    ) -> EvalResult:
-        """Evaluate one program and return its last expression.
-
-        Args:
-            code (str): the source to evaluate.
-            inputs (dict[str, EvalValue] | None): named values the
-                program sees as globals, bound in the evaluator's own
-                idiom.
-            session (str | None): a session id for stateful console
-                semantics (interpreter state persists per id, isolated
-                from other sessions and runs); None evaluates with
-                fresh interpreter state for this call only.
-
-        Raises:
-            EvalError: the program failed to parse, raised, or its
-                value could not be carried back.
-        """
+from mirage.runtime.types import ProcessExecution, RunResult
 
 
 class LineExecutorMixin(ABC):

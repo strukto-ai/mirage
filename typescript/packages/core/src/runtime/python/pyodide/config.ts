@@ -39,6 +39,13 @@ export interface PyodideConfig {
   // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
   // pinned CDN in the browser. Override for self-hosted assets.
   home?: string
+  /**
+   * The memory the worker may grow to, spelled as sandlock spells its own
+   * (`128M`, `1G`); a run that passes it stops with a MemoryError and the
+   * next run starts a fresh worker. The worker starts at about 50M.
+   * Enforced on Node only: a browser cannot read a worker's memory.
+   */
+  maxMemory?: string | null
 }
 
 export const KEYS: readonly (keyof PyodideConfig)[] = [
@@ -52,4 +59,5 @@ export const KEYS: readonly (keyof PyodideConfig)[] = [
   'packages',
   'packageBaseUrl',
   'lockFileUrl',
+  'maxMemory',
 ]

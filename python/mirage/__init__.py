@@ -71,11 +71,7 @@ if TYPE_CHECKING:
     from mirage.runtime.constants import EXTERNAL_COMMANDS
     from mirage.runtime.errors import UnsupportedExecutionError
     from mirage.runtime.language import LanguageRuntime
-    from mirage.runtime.mixin import (
-        EvaluatorMixin,
-        LineExecutorMixin,
-        ProcessExecutorMixin,
-    )
+    from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
     from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
     from mirage.runtime.table import (
         build_runtime,
@@ -227,11 +223,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.runtime.binding": ("RuntimeContext", "WorkspaceBinding"),
     "mirage.runtime.errors": ("UnsupportedExecutionError",),
     "mirage.runtime.language": ("LanguageRuntime",),
-    "mirage.runtime.mixin": (
-        "EvaluatorMixin",
-        "LineExecutorMixin",
-        "ProcessExecutorMixin",
-    ),
+    "mirage.runtime.mixin": ("LineExecutorMixin", "ProcessExecutorMixin"),
     "mirage.runtime.sandbox": ("RemoteSandbox", "SandboxConfig"),
     "mirage.runtime.table": (
         "build_runtime",
@@ -301,7 +293,6 @@ __all__ = [
     "Decision",
     "Decisions",
     "DriftPolicy",
-    "EvaluatorMixin",
     "Explanation",
     "CommandExplanation",
     "ShellExplanation",

@@ -25,14 +25,14 @@ import { PythonRuntime } from '../base.ts'
 import { EvalError } from '../../errors.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeReach } from '../../types.ts'
-import type { RuntimeOptions } from '../../config.ts'
+import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import {
   createPyodideInterrupter,
   type ArmedInterrupt,
   type PyodideInterrupter,
 } from './interrupt.ts'
-import { noWorker, PyodideUnavailableError } from './errors.ts'
+import { noWorker, PyodideMemoryError, PyodideUnavailableError } from './errors.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { createJournal, type MutationJournal } from './fs/journal.ts'
@@ -254,6 +254,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const { maxConcurrency = 1 } = config
     if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)
       throw new Error('pyodide config: maxConcurrency must be a positive safe integer')
+    memoryLimit(config.maxMemory)
     this.concurrent = asyncContextIsolatesTasks && maxConcurrency > 1
     this.limiter = new ConcurrencyLimiter(asyncContextIsolatesTasks ? maxConcurrency : 1)
     this.reach = config.initModule === undefined ? 'workspace' : 'process'
@@ -408,17 +409,19 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const worker = await this.ensureWorker(context)
     if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && context !== undefined) {
-      return (await worker.execute(
-        {
-          kind: 'execute',
-          method: 'eval',
-          config: this.config as PyodideConfig,
-          prefixes: context.resolver.prefixes(),
-          code,
-          cwd: context.cwd.virtual,
-          ...opts,
-        },
-        context,
+      return (await this.onWorker(() =>
+        worker.execute(
+          {
+            kind: 'execute',
+            method: 'eval',
+            config: this.config as PyodideConfig,
+            prefixes: context.resolver.prefixes(),
+            code,
+            cwd: context.cwd.virtual,
+            ...opts,
+          },
+          context,
+        ),
       )) as EvalResult
     }
     // A console that ran before this runtime was bound keeps its names in
@@ -583,6 +586,19 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     this.syncMounts(this.pyodide)
     await this.wireInterruptIfNeeded(this.pyodide)
     return this.pyodide
+  }
+
+  /**
+   * One request on the worker. A run that passes `maxMemory` takes the
+   * worker with it (`watchMemory`), so the next run starts a fresh one.
+   */
+  private async onWorker<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work()
+    } catch (error) {
+      if (error instanceof PyodideMemoryError) this.worker = null
+      throw error
+    }
   }
 
   private async ensureWorker(
@@ -826,17 +842,28 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && context !== undefined) {
       const { cwd, signal, ...rest } = args
-      return (await worker.execute(
-        {
-          kind: 'execute',
-          method: 'run',
-          config: this.config as PyodideConfig,
-          prefixes: context.resolver.prefixes(),
-          args: { ...rest, ...(cwd !== undefined ? { cwd: cwd.virtual } : {}) },
-        },
-        context,
-        signal,
-      )) as RunResult
+      try {
+        return (await this.onWorker(() =>
+          worker.execute(
+            {
+              kind: 'execute',
+              method: 'run',
+              config: this.config as PyodideConfig,
+              prefixes: context.resolver.prefixes(),
+              args: { ...rest, ...(cwd !== undefined ? { cwd: cwd.virtual } : {}) },
+            },
+            context,
+            signal,
+          ),
+        )) as RunResult
+      } catch (error) {
+        if (!(error instanceof PyodideMemoryError)) throw error
+        return {
+          stdout: new Uint8Array(),
+          stderr: new TextEncoder().encode(`${error.message}\n`),
+          exitCode: 1,
+        }
+      }
     }
     if (context !== undefined && this.sync === undefined) throw noWorker()
     const pyodide = await this.ensureLoaded()

@@ -44,9 +44,9 @@ export const ABSENT_PATH: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOE
 export const HARD_LINK_REFUSAL: FsCondition = 'EPERM'
 
 /**
- * How long one policy script (a profile's `policy:`, a `routePolicy` or a
- * runtime's `script:`) may run before the line it judges is refused or
- * the route it decides fails. One bound for every stage; a holder object
- * so tests can tighten it.
+ * How long one policy program (a profile's `policy:` or the `routePolicy`)
+ * may run before the action it judges is refused or the route it decides
+ * fails. One bound for every stage; a holder object so tests can tighten
+ * it.
  */
 export const SCRIPT_EVAL_TIMEOUT = { seconds: 10 }

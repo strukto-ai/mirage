@@ -32,27 +32,9 @@ class RuntimeIdentity(Protocol):
     def captures(self) -> Sequence[str]: ...
 
 
-# The value contract of eval: never richer than JSON plus bytes, so any
-# evaluator (in-process or remote over a serialized transport) can carry
-# it, in either direction (inputs in, verdict out).
-EvalValue: TypeAlias = (
-    None
-    | bool
-    | int
-    | float
-    | str
-    | bytes
-    | list["EvalValue"]
-    | dict[str, "EvalValue"]
-)
-
-# "incomplete" is console semantics: the source needs a continuation
-# line (session mode only). "exit" is an explicit exit() call.
-EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
-
-# The languages a runtime can interpret, one name for both entry points (run
-# and eval). A Literal, not str, so a typo is a type error instead of a
-# selector that silently matches nothing and reports "no runtime".
+# The languages a runtime can interpret. A Literal, not str, so a typo is
+# a type error instead of a selector that silently matches nothing and
+# reports "no runtime".
 Language: TypeAlias = Literal["python", "js"]
 
 # Which entry points code executed by a runtime has to the outside world. The
@@ -225,13 +207,11 @@ class VFSEntry:
 
 @dataclass(frozen=True, slots=True)
 class ScriptSource:
-    """Script source arriving from a workspace config, not from code.
+    """A program's source: a policy program or a script CLI.
 
-    The programmatic API takes callables; a yaml ``script:``/``policy:``
-    value references a ``.py`` or ``.js``/``.mjs`` file whose content is
-    embedded here at load. The source sees ctx as a dict and its LAST
-    EXPRESSION is the verdict. It runs on the world's evaluator
-    (evaluator_of), preferring one whose language matches.
+    A yaml ``script:`` value references a ``.py`` or ``.js``/``.mjs``
+    file whose content is embedded here at load; code passes the text.
+    It runs as a program on the runtime its config names, never edited.
 
     Args:
         source (str): the script program.
@@ -242,9 +222,7 @@ class ScriptSource:
             a js engine must run it in module mode or ``import`` and
             top-level ``await`` fail. Stamped from the extension at
             load beside ``language``, since the path is gone once the
-            source is embedded. Inert for policy scripts: a module has
-            no completion value, and their contract is the last
-            expression.
+            source is embedded.
     """
 
     source: str
@@ -377,37 +355,5 @@ class RuntimeCapabilities:
     languages: tuple[Language, ...] = ()
     shell: bool = False
     process: bool = False
-    evaluate: bool = False
     reach: RuntimeReach = "process"
     filesystem: tuple[FilesystemOperation, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class EvalResult:
-    """Outcome of one evaluation.
-
-    One-shot mode raises EvalError on any failure, so a returned
-    result is always a success. Session (console) mode is a
-    transcript: a failing snippet comes back as a result too (its
-    traceback on stderr, a nonzero exit_code), because a console
-    reports errors and keeps going.
-
-    Args:
-        value (EvalValue): the program's last expression. In-process
-            evaluators return it directly; remote ones return what the
-            transport could carry. Session (console) mode may report
-            None when the evaluator only streams output.
-        stdout (bytes): output the program printed while running.
-        stderr (bytes | None): captured standard error, None when
-            empty.
-        exit_code (int): 0 outside session mode; a console snippet's
-            exit (1 on error, exit(N)'s N).
-        status (EvalStatus): console verdict; always "complete"
-            outside session mode.
-    """
-
-    value: EvalValue = None
-    stdout: bytes = b""
-    stderr: bytes | None = None
-    exit_code: int = 0
-    status: EvalStatus = "complete"

@@ -16,8 +16,17 @@ import pytest
 
 from mirage.policy import Deny, Route
 from mirage.policy.builtin.placement import PlacementPolicy
+from mirage.policy.script import ScriptPolicy
 from mirage.policy.types import RouteContext
 from mirage.runtime.routing import RouteError
+from mirage.runtime.types import ScriptSource
+
+
+class NoPrograms:
+    """A sessions query whose profiles name no program."""
+
+    def scripts_of(self, session_id: str) -> dict:
+        return {}
 
 
 def _line(line: str) -> RouteContext:
@@ -32,9 +41,13 @@ def _heavy_on_beta(ctx: RouteContext) -> str | None:
     return "beta" if "heavy" in ctx.line else None
 
 
+def _placement(route) -> PlacementPolicy:
+    return PlacementPolicy(route, ScriptPolicy(NoPrograms()))
+
+
 @pytest.mark.asyncio
 async def test_a_runtime_name_places_the_line_and_none_says_nothing():
-    policy = PlacementPolicy(_heavy_on_beta, list)
+    policy = _placement(_heavy_on_beta)
     assert await policy.pre_execute(_line("python3 heavy")) == Route("beta")
     assert await policy.pre_execute(_line("echo hi")) is None
 
@@ -50,6 +63,50 @@ async def test_anything_but_a_name_or_none_is_the_deployments_mistake(
     # Refusing a line is a policy's answer, not the router's; a route
     # policy that answers anything else is misconfigured, not a refusal.
     with pytest.raises(RouteError, match="a runtime name or None"):
-        await PlacementPolicy(lambda ctx: verdict, list).pre_execute(
-            _line("echo hi")
-        )
+        await _placement(lambda ctx: verdict).pre_execute(_line("echo hi"))
+
+
+ROUTE_HEAVY = """
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if "heavy" in ctx["line"]:
+    print(json.dumps({"kind": "route", "runtime": "beta"}))
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_program_prints_its_route_or_nothing():
+    policy = _placement(
+        {"script": ScriptSource(ROUTE_HEAVY), "runtime": "monty"}
+    )
+    assert await policy.pre_execute(_line("python3 heavy")) == Route("beta")
+    assert await policy.pre_execute(_line("echo hi")) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "refusal"),
+    [
+        ("1 / 0", "route_policy exited 1"),
+        ("print('beta')", "route_policy must print a JSON answer"),
+    ],
+)
+async def test_a_program_that_fails_is_the_deployments_mistake(
+    source, refusal
+):
+    policy = _placement({"script": ScriptSource(source), "runtime": "monty"})
+    with pytest.raises(RouteError, match=refusal):
+        await policy.pre_execute(_line("echo hi"))
+
+
+def test_a_path_is_the_yamls_to_load():
+    with pytest.raises(TypeError, match="a path is the workspace yaml's"):
+        _placement("route.py")
+    with pytest.raises(
+        ValueError, match="route_policy names a policy by path"
+    ):
+        _placement({"script": "route.py", "runtime": "monty"})
+    with pytest.raises(ValueError):
+        _placement({"script": ScriptSource("pass")})

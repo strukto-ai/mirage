@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
-from mirage.runtime.types import RuntimeReach, ScriptSource
+from mirage.runtime.types import RuntimeReach
 
 
 class WorkspaceRuntime(Runtime):
@@ -36,7 +36,7 @@ class WorkspaceRuntime(Runtime):
     path the line takes anyway, so there is no interpreter entry point (run)
     and no delegate entry point (run_line) to implement.
 
-    Constructed like every runtime (captures, config, script), with
+    Constructed like every runtime (captures, config), with
     two workspace readings: captures None (the default) keeps the catch-all
     behavior, an empty sequence serves nothing (full lockdown); and
     the config has no fields today, the slot exists for uniformity.
@@ -52,9 +52,8 @@ class WorkspaceRuntime(Runtime):
         self,
         captures: Sequence[str] | None = None,
         config: RuntimeConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
         # Declaring captures (even empty) turns the catch-all off; the
         # dispatcher reads this bit, not the tuple's length.
         self.restricted = captures is not None
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)

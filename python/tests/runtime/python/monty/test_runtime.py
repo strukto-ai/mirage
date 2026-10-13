@@ -17,8 +17,6 @@ import asyncio
 import pydantic_monty
 import pytest
 
-from mirage.runtime.errors import EvalError
-from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.types import RunArgs
 from mirage.types import MountMode, PathSpec
@@ -230,29 +228,6 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_eval_returns_last_expression_with_inputs():
-    runtime = MontyRuntime()
-    result = await runtime.eval(
-        "print('hey'); ctx['a'] + 1", inputs={"ctx": {"a": 41}}
-    )
-    assert result.value == 42
-    assert result.stdout == b"hey\n"
-    assert result.status == "complete"
-
-
-@pytest.mark.asyncio
-async def test_eval_sessions_keep_state_per_id():
-    runtime = MontyRuntime()
-    await runtime.eval("x = 5", session="a")
-    doubled = await runtime.eval("x * 2", session="a")
-    assert doubled.value == 10
-    other = await runtime.eval("x", session="b")
-    assert other.exit_code == 1
-    assert other.stderr is not None and b"NameError" in other.stderr
-    await runtime.close()
-
-
-@pytest.mark.asyncio
 async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
     runtime = MontyRuntime()
     ws = Workspace(
@@ -273,69 +248,14 @@ async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
         await ws.close()
 
 
-@pytest.mark.asyncio
-async def test_eval_cwd_is_seeded_once_per_session():
-    runtime = MontyRuntime()
-    ws = Workspace(
-        {"/data": RAMVFS()},
-        mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
-    )
-    try:
-        assert (
-            await ws.shell(
-                "mkdir /data/sub; echo child > /data/sub/item; cd /data"
-            )
-        ).exit_code == 0
-        assert (await runtime.eval("import os; os.getcwd()")).value == "/data"
-        first = await runtime.eval(
-            "import os; os.chdir('sub'); os.getcwd()", session="a"
-        )
-        assert first.value == "/data/sub"
-        assert (await ws.shell("cd /")).exit_code == 0
-        again = await runtime.eval("open('item').read()", session="a")
-        assert again.value == "child\n"
-        assert (
-            await runtime.eval("import os; os.getcwd()", session="b")
-        ).value == "/"
-        assert (await runtime.eval("import os; os.getcwd()")).value == "/"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_eval_session_open_block_reports_incomplete():
-    runtime = MontyRuntime()
-    result = await runtime.eval("def f():", session="a")
-    assert result.status == "incomplete"
-    assert result.value is None
-
-
-@pytest.mark.asyncio
-async def test_eval_errors_carry_monty_diagnostics():
-    runtime = MontyRuntime()
-    with pytest.raises(EvalError) as syntax_err:
-        await runtime.eval("def broken(")
-    assert syntax_err.value.syntax is True
-    with pytest.raises(EvalError) as runtime_err:
-        await runtime.eval("1 / 0")
-    assert runtime_err.value.syntax is False
-    assert "ZeroDivisionError" in str(runtime_err.value)
-
-
-def test_monty_is_an_evaluator():
-    assert isinstance(MontyRuntime(), EvaluatorMixin)
-
-
 def test_upstream_entry_points_this_runtime_binds_to():
-    """Guard the pydantic-monty API surface run() and eval() use.
+    """Guard the pydantic-monty API surface run() uses.
 
     monty's API moves fast: 0.0.19 replaced the whole execution model
     (`Monty` became a worker pool, `MontyRepl` disappeared, `run_async`
-    moved onto a checked-out session). eval() is also what the policy
-    layer evaluates config-borne scripts on, so a bump that shifts any
-    of these breaks python3 lines and script-source policies together.
-    Fail here, at the seam, rather than in every caller.
+    moved onto a checked-out session). A bump that shifts any of these
+    breaks python3 lines and policy programs together. Fail here, at
+    the seam, rather than in every caller.
     """
     pool = pydantic_monty.AsyncMonty()
     assert hasattr(pool, "__aenter__") and hasattr(pool, "__aexit__")
@@ -345,62 +265,26 @@ def test_upstream_entry_points_this_runtime_binds_to():
     assert hasattr(pydantic_monty.MontyCrashedError, "timed_out")
 
 
-@pytest.mark.asyncio
-async def test_eval_cancellation_reclaims_the_worker():
-    rt = MontyRuntime()
-    await rt.eval("x = 1", session="live")
-    task = asyncio.ensure_future(
-        rt.eval("n = 0\nwhile True:\n    n = n + 1", session="live")
-    )
-    await asyncio.sleep(0.3)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    # The killed worker took the session's heap with it, so the id is
-    # dropped and the next eval gets a fresh worker rather than a dead one.
-    assert "live" not in rt._execution._eval_sessions
-    again = await rt.eval("6 * 7", session="live")
-    assert again.value == 42
-    await rt.close()
-
-
-@pytest.mark.asyncio
-async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
-    """A cancelled console session must hand its lease back.
-
-    Dropping it from the session map alone leaves the pool holding a
-    checkout that close() can no longer reach. Asserted on the release
-    itself: one leaked lease would not exhaust a CPU-sized pool, so a
-    later eval succeeding proves nothing.
-    """
-    import mirage.runtime.python.monty.execution as monty_mod
-
-    released: list[object] = []
-    original = monty_mod._release
-
-    async def spy(repl):
-        released.append(repl)
-        await original(repl)
-
-    monkeypatch.setattr(monty_mod, "_release", spy)
-    runtime = MontyRuntime()
-    task = asyncio.create_task(
-        runtime.eval("i = 0\nwhile True:\n    i += 1", session="s1")
-    )
-    await asyncio.sleep(0.4)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert "s1" not in runtime._execution._eval_sessions
-    assert len(released) == 1, "the cancelled checkout was never released"
-    # And the runtime stays usable afterwards.
-    result = await runtime.eval("1 + 1", session="s1")
-    assert result.value == 2
-    await runtime.close()
-
-
 def test_reach_is_vfs():
     assert MontyRuntime.reach == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_max_memory_caps_a_run_and_leaves_a_small_one_alone():
+    runtime = MontyRuntime(config={"max_memory": "1M"})
+    try:
+        big = await runtime.run(RunArgs(code="x = [0] * 10_000_000"))
+        assert big.exit_code == 1
+        assert big.stderr is not None and b"MemoryError" in big.stderr
+        small = await runtime.run(RunArgs(code="print(sum(range(10)))"))
+        assert (small.exit_code, small.stdout) == (0, b"45\n")
+    finally:
+        await runtime.close()
+
+
+def test_max_memory_must_be_a_size():
+    with pytest.raises(ValueError, match="max_memory must be a size"):
+        MontyRuntime(config={"max_memory": "lots"})
 
 
 def test_monty_refuses_a_path_no_mount_serves():

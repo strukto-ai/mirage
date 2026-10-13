@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import run_cli
 from mirage.runtime.sandbox.docker.config import DockerConfig
 from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
-from mirage.runtime.types import RunResult, SandboxPipe, ScriptSource
+from mirage.runtime.types import RunResult, SandboxPipe
 
 
 class DockerRuntime(RemoteSandbox):
@@ -45,9 +45,8 @@ class DockerRuntime(RemoteSandbox):
         self,
         captures: Sequence[str] | None = None,
         config: DockerConfig | dict[str, Any] | None = None,
-        script: Callable[..., Any] | ScriptSource | None = None,
     ) -> None:
-        super().__init__(captures, config, script)
+        super().__init__(captures, config)
         self._serve_mounts(self.config.mount_type)
 
     async def _docker(

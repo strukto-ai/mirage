@@ -259,7 +259,6 @@ export interface RuntimeCapabilities {
   readonly languages: readonly RuntimeLanguage[]
   readonly shell: boolean
   readonly process: boolean
-  readonly evaluate: boolean
   readonly reach: RuntimeReach
   readonly filesystem: readonly FilesystemOperation[]
 }
@@ -312,26 +311,22 @@ export interface EvalResult {
 }
 
 /**
- * Script source arriving from a workspace config, not from code.
+ * A program's source: a policy program or a script CLI.
  *
- * The programmatic API takes functions; a yaml `script:`/`policy:`
- * value references a `.py` file whose content is embedded here at
- * load. The source sees ctx as a dict and its LAST EXPRESSION is the
- * verdict. It runs on the policy engine (monty today; a sandbox
- * runtime is a candidate entry point later).
+ * A yaml `script:` value references a `.py` or `.js`/`.mjs` file whose
+ * content is embedded here at load; code passes the text. It runs as a
+ * program on the runtime its config names, never edited.
  */
 export class ScriptSource {
   /**
    * `language` names the script's language ("python" or "js"), stamped
    * from the file extension at config load; the programmatic default
-   * is "python". The policy engine prefers a matching evaluator.
+   * is "python".
    *
    * `module` says the source is an ES module (a `.mjs` file), so a js
    * engine must run it in module mode or `import` and top-level
    * `await` fail. It is stamped from the extension at load beside
    * `language`, since the path is gone once the source is embedded.
-   * Inert for policy scripts: a module has no completion value, and
-   * their contract is the last expression.
    */
   constructor(
     readonly source: string,

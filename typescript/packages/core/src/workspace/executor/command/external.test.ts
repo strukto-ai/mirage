@@ -11,9 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CLIHandler } from '../../../commands/cli/types.ts'
-
-import { CLI } from '../../../commands/cli/types.ts'
 import { command } from '../../../commands/config.ts'
 import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -23,9 +20,7 @@ import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
-import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
-import type { RouteContext } from '../../../policy/types.ts'
-import { ScriptSource, type ProcessExecution, type RunResult } from '../../../runtime/types.ts'
+import type { ProcessExecution, RunResult } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
@@ -159,46 +154,6 @@ describe('external program capture', () => {
       const result = await ws.shell("native-tool .*.txt x=* '.*.txt' .none*")
       expect(result.exitCode).toBe(0)
       expect(probe.requests[0]?.argv).toEqual(['native-tool', '.a.txt', 'x=1', '.*.txt', '.none*'])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('never uses the external fallback for a refused named capture', async () => {
-    const probe = new ProcessProbe({ captures: ['native-tool'], script: () => false })
-    const fallback = new ProcessProbe()
-    fallback.name = 'fallback'
-    const ws = await workspace(probe, [fallback])
-    try {
-      expect((await ws.shell('native-tool')).exitCode).toBe(126)
-      expect(probe.requests).toHaveLength(0)
-      expect(fallback.requests).toHaveLength(0)
-      expect((await ws.shell('another-tool')).exitCode).toBe(0)
-      expect(fallback.requests).toHaveLength(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it.each([
-    { kind: 'named', captures: ['native-tool'] },
-    { kind: 'fallback', captures: [EXTERNAL_COMMANDS] },
-  ])('does not expand globs for a refused $kind capture', async ({ captures }) => {
-    const probe = new ProcessProbe({ captures, script: () => false })
-    const ws = await workspace(probe)
-    try {
-      expect(DEC.decode((await ws.shell('echo mirage')).stdout)).toBe('mirage\n')
-      await ws.shell('shopt -s failglob')
-      const resolved = vi.spyOn(globs, 'resolveGlobs')
-      try {
-        const result = await ws.shell('native-tool /api/*')
-        expect(result.exitCode).toBe(126)
-        expect(DEC.decode(result.stderr)).toBe('native-tool: no runtime accepted this line\n')
-        expect(resolved).not.toHaveBeenCalled()
-        expect(probe.requests).toHaveLength(0)
-      } finally {
-        resolved.mockRestore()
-      }
     } finally {
       await ws.close()
     }
@@ -399,75 +354,6 @@ describe('external command routing regressions', () => {
       }
     })
   })
-
-  describe.each(['process', 'shell'] as const)('scripted multiword %s capture', (kind) => {
-    it.each([false, true])('resolves its full command with source=%s', async (source) => {
-      const script = source
-        ? new ScriptSource(
-            "[w['text'] for w in ctx['commands'][-1]['words']] == " +
-              "['trello', 'board', 'list', '/allowed']",
-          )
-        : (ctx: RouteContext) =>
-            (ctx.commands.at(-1)?.words ?? []).map((w) => w.text).join(' ') ===
-            'trello board list /allowed'
-      const options = { captures: ['trello board list'], script }
-      const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
-      const ws = await workspace(probe, [new MontyRuntime({ captures: [] })])
-      registerBoardList(ws)
-      try {
-        expect((await ws.shell('echo ok | trello board list /allowed')).exitCode).toBe(0)
-        const tokens = ['trello', 'board', 'list', '/allowed']
-        if (probe instanceof ProcessProbe) {
-          expect(probe.requests[0]?.argv).toEqual(tokens)
-          probe.requests.length = 0
-        } else {
-          expect(probe.lines[0]).toBe(shellJoin(tokens))
-          probe.lines.length = 0
-        }
-        expect((await ws.shell('echo ok | trello board list /denied')).exitCode).toBe(126)
-        expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
-      } finally {
-        await ws.close()
-      }
-    })
-  })
-
-  it.each(['echo ok', 'cat /input', 'custom-stage', 'trello board list', 'custom-cli', 'python3'])(
-    'resolves the external script stage after %s',
-    async (head) => {
-      const seen: string[] = []
-      const probe = new ProcessProbe({
-        script: (ctx) => {
-          seen.push(ctx.commands.map((c) => c.command).join(' '))
-          return ctx.commands.some((c) => c.command === 'native-tool')
-        },
-      })
-      const named = new ProcessProbe({ captures: ['python3'] })
-      named.name = 'named'
-      const ws = await workspace(probe, [named])
-      registerBoardList(ws)
-      try {
-        ws.registerCli(
-          'custom-cli',
-          new CLI({
-            spec: new CommandSpec({ name: 'custom-cli' }),
-            handlers: { '': new CLIHandler({ fn: () => [ENC.encode('ok\n'), new IOResult()] }) },
-          }),
-        )
-        await ws.shell('echo ok > /input')
-        await ws.shell('custom-stage() { echo ok; }')
-        seen.length = 0
-        expect((await ws.shell(head + ' | native-tool')).exitCode).toBe(0)
-        expect(probe.requests).toHaveLength(1)
-        expect(seen).toEqual([`${head.split(' ')[0] ?? ''} native-tool`])
-        probe.requests.length = 0
-        expect((await ws.shell(head + ' | denied-tool')).exitCode).toBe(126)
-        expect(probe.requests).toHaveLength(0)
-      } finally {
-        await ws.close()
-      }
-    },
-  )
 })
 
 describe.each(['process', 'shell'] as const)('external %s path admission', (kind) => {
@@ -695,8 +581,8 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
 })
 
 describe.each(['process', 'shell'] as const)('native %s builtin precedence', (kind) => {
-  it.each([true, false])('keeps builtins in Mirage when willingness is %s', async (willing) => {
-    const options = { captures: [...SHELL_NAMES], script: () => willing }
+  it('keeps builtins in Mirage', async () => {
+    const options = { captures: [...SHELL_NAMES] }
     const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
     const ws = await workspace(probe)
     try {
@@ -719,11 +605,9 @@ describe.each(['process', 'shell'] as const)('native %s builtin precedence', (ki
       )
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
       for (const name of ['python', 'python3', 'node', 'js']) {
-        expect((await ws.shell(name + ' --version')).exitCode).toBe(willing ? 0 : 126)
+        expect((await ws.shell(name + ' --version')).exitCode).toBe(0)
       }
-      expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(
-        willing ? 4 : 0,
-      )
+      expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(4)
     } finally {
       await ws.close()
     }
@@ -734,15 +618,13 @@ it.each([
   ['ps', '-eo pid,cmd'],
   ['kill', '-0 456'],
 ])('explicit %s capture reaches the runtime', async (name, args) => {
-  for (const willing of [true, false]) {
-    const probe = new ProcessProbe({ captures: [name], script: () => willing })
-    const ws = await workspace(probe)
-    try {
-      const result = await ws.shell(`${name} ${args}`)
-      expect(result.exitCode).toBe(willing ? 0 : 126)
-      expect(probe.requests.map((r) => r.argv)).toEqual(willing ? [[name, ...args.split(' ')]] : [])
-    } finally {
-      await ws.close()
-    }
+  const probe = new ProcessProbe({ captures: [name] })
+  const ws = await workspace(probe)
+  try {
+    const result = await ws.shell(`${name} ${args}`)
+    expect(result.exitCode).toBe(0)
+    expect(probe.requests.map((r) => r.argv)).toEqual([[name, ...args.split(' ')]])
+  } finally {
+    await ws.close()
   }
 })

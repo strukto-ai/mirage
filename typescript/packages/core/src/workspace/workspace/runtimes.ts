@@ -14,7 +14,6 @@
 
 import { type RouteDecision } from '../../runtime/routing/index.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
-import { rejectConfigScript } from './guard.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { isLineExecutor, type LineExecutor } from '../../runtime/mixin.ts'
 import {
@@ -63,9 +62,6 @@ export class Runtimes {
     if (!entries.some((entry) => entry.name === 'workspace')) {
       entries.push(new WorkspaceRuntime())
     }
-    for (const entry of entries) {
-      rejectConfigScript(`runtime '${entry.name}' script`, entry.script)
-    }
     const bindings = bindCommands(entries)
     for (const entry of entries) entry.bind(this.binding)
     this.install(entries, bindings)
@@ -81,7 +77,6 @@ export class Runtimes {
    */
   add(runtime: RuntimeEntry): Runtime {
     const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
-    rejectConfigScript(`runtime '${entry.name}' script`, entry.script)
     const candidate = [...this.entries, entry]
     const bindings = bindCommands(candidate)
     entry.bind(this.binding)

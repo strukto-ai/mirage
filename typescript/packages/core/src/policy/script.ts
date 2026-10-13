@@ -19,8 +19,8 @@ import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { LanguageRuntime } from '../runtime/language.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
-import type { BridgeDispatchFn, EvalValue, RunResult } from '../runtime/types.ts'
-import { PathSpec } from '../types.ts'
+import type { BridgeDispatchFn, RunResult } from '../runtime/types.ts'
+import { PathSpec, type JsonValue } from '../types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Policy } from './base.ts'
 import {
@@ -29,6 +29,7 @@ import {
   DEFAULT_DENY_REASON,
   METHODS,
   PROGRAM_FLAGS,
+  PROGRAM_MEMORY,
   PROGRAM_RUNTIMES,
 } from './constants.ts'
 import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
@@ -61,7 +62,7 @@ const LIVE = new Set(['session', 'ns', 'vfs'])
  * as its virtual spelling, a record as its fields under the Python
  * names (the live handles left out). Mirrors the Python `_plain`.
  */
-function plain(value: unknown): EvalValue {
+function plain(value: unknown): JsonValue {
   if (value === null || value === undefined) return null
   if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
     return value
@@ -105,8 +106,8 @@ function plain(value: unknown): EvalValue {
  */
 export function scriptContext(
   ctx: CommandContext | RouteContext | VfsContext | SessionContext,
-): Record<string, EvalValue> {
-  const data = plain(ctx) as Record<string, EvalValue>
+): Record<string, JsonValue> {
+  const data = plain(ctx) as Record<string, JsonValue>
   const session = ctx.session
   if (session !== undefined) {
     data.cwd = session.cwd()
@@ -198,10 +199,12 @@ export interface ScriptWiring {
  * writes stands in for a module it imports. Every failure fails closed: a
  * program that exits non-zero, runs past the timeout, prints something
  * else, or names a runtime that cannot be built refuses the action with a
- * reason naming the profile, and is logged.
+ * reason naming the profile, and is logged. The workspace's `routePolicy`
+ * program runs here too (`run`), outside any profile.
  *
  * The runtime is the policy's own, built from the name and settings the
- * profile gives, shared across sessions and never the agent's. It is
+ * profile gives, shared across sessions and never the agent's, and capped
+ * at `PROGRAM_MEMORY` unless the settings name a `maxMemory`. It is
  * wired to the workspace's files the way an agent's runtime is
  * (`ScriptWiring`), so a program reads what an operand holds as the
  * session reads it. A read from a program clears the dispatcher like any
@@ -253,6 +256,28 @@ export class ScriptPolicy implements Policy, SessionScoped {
     return Promise.resolve((programs?.length ?? 0) > 0)
   }
 
+  /**
+   * One program's answer at one method, outside any profile: the
+   * workspace's `routePolicy`.
+   *
+   * @throws Error - the program failed: it exited non-zero, ran past the
+   * timeout, printed something else, or names a runtime that cannot be
+   * built. The message says what, as a clause for the caller to prefix
+   * with whose program it is.
+   */
+  async run(
+    entry: ProfileScript,
+    method: ScriptMethod,
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+  ): Promise<Deny | Ask | Route | null> {
+    const payload = JSON.stringify(scriptContext(ctx))
+    try {
+      return await this.answer(entry, method, payload, await this.cwd(ctx))
+    } catch (err) {
+      throw new Error(clause(err))
+    }
+  }
+
   /** Close every runtime a program ran on. */
   async close(): Promise<void> {
     const engines = [...this.engines.values()]
@@ -274,7 +299,12 @@ export class ScriptPolicy implements Policy, SessionScoped {
     const cwd = await this.cwd(ctx)
     const answers: (Deny | Ask | Route)[] = []
     for (const entry of programs) {
-      const answer = await this.run(entry, method, payload, cwd)
+      let answer: Deny | Ask | Route | null
+      try {
+        answer = await this.answer(entry, method, payload, cwd)
+      } catch (err) {
+        answer = failed(entry, clause(err))
+      }
       if (answer !== null) answers.push(answer)
       if (answer?.kind === 'deny') break
     }
@@ -294,8 +324,8 @@ export class ScriptPolicy implements Policy, SessionScoped {
     return cwd
   }
 
-  /** One program at one method, failing closed. */
-  private async run(
+  /** One program at one method; throws a clause about "script" when it fails. */
+  private async answer(
     entry: ProfileScript,
     method: ScriptMethod,
     payload: string,
@@ -324,7 +354,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
               timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
             }),
             SCRIPT_EVAL_TIMEOUT.seconds,
-            `profile '${entry.profile}' policy`,
+            'policy program',
           )
         } catch (err) {
           cancel.abort()
@@ -333,20 +363,18 @@ export class ScriptPolicy implements Policy, SessionScoped {
       })
     } catch (err) {
       if (err instanceof CommandTimeoutError) {
-        return failed(entry, `timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
+        throw new Error(`script timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
       }
-      // scriptEngine's refusal: the runtime cannot be built here.
-      return failed(entry, clause(err))
+      throw err
     }
     if (result.exitCode !== 0) {
       const stderr = DECODER.decode(result.stderr ?? new Uint8Array())
-      return failed(entry, `exited ${String(result.exitCode)}`, stderr.slice(-2000))
+      console.error(
+        `policy program on ${entry.runtime} exited ${String(result.exitCode)}\n${stderr.slice(-2000)}`,
+      )
+      throw new Error(`script exited ${String(result.exitCode)}`)
     }
-    try {
-      return scriptAction(result.stdout, method)
-    } catch (err) {
-      return failed(entry, clause(err))
-    }
+    return scriptAction(result.stdout, method)
   }
 
   /**
@@ -362,11 +390,12 @@ export class ScriptPolicy implements Policy, SessionScoped {
           [...PROGRAM_RUNTIMES].sort(compareCodePoints).join(' or '),
       )
     }
-    const settings = Object.entries(entry.config).sort(([a], [b]) => compareCodePoints(a, b))
+    const config = { maxMemory: PROGRAM_MEMORY.get(entry.runtime), ...entry.config }
+    const settings = Object.entries(config).sort(([a], [b]) => compareCodePoints(a, b))
     const key = JSON.stringify([entry.runtime, settings])
     let engine = this.engines.get(key)
     if (engine === undefined) {
-      engine = scriptEngine(entry.script, entry.runtime, entry.config)
+      engine = scriptEngine(entry.script, entry.runtime, config)
       // Keep policy-origin attribution on the binding's dispatch.
       if (this.wiring !== null) {
         engine.bind(new WorkspaceBinding(this.wiring.bridge(this.issuer), this.wiring.resolver))
@@ -384,10 +413,10 @@ export class ScriptPolicy implements Policy, SessionScoped {
   }
 }
 
-/** The fail-closed refusal: one wording however the program broke, logged with its stderr. */
-function failed(entry: ProfileScript, detail: string, stderr = ''): Deny {
+/** The fail-closed refusal: one wording however the program broke, logged. */
+function failed(entry: ProfileScript, detail: string): Deny {
   const reason = `profile '${entry.profile}' policy ${detail}`
-  console.error(stderr === '' ? reason : `${reason}\n${stderr}`)
+  console.error(reason)
   return { kind: 'deny', reason }
 }
 

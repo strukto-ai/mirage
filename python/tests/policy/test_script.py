@@ -8,6 +8,7 @@ from mirage.policy.constants import (
     CTX_ENV,
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
+    PROGRAM_MEMORY,
 )
 from mirage.policy.policies import Policies
 from mirage.policy.script import (
@@ -217,6 +218,13 @@ def _session_ctx(key: str = "AWS_KEY") -> SessionContext:
     return SessionContext(verb="set", key=key, value="v", session_id="s")
 
 
+def _key(entry: ProfileScript) -> tuple[str, str]:
+    """The engine a program runs on, as the policy keys it: its runtime
+    and its settings with the default memory cap."""
+    config = {"max_memory": PROGRAM_MEMORY.get(entry.runtime), **entry.config}
+    return entry.runtime, json.dumps(config, sort_keys=True)
+
+
 def _policy(
     method: str = "pre_command",
     *engines: FakeProgram,
@@ -225,8 +233,7 @@ def _policy(
     programs = entries if entries is not None else (_entry(),) * len(engines)
     policy = ScriptPolicy(Programs({method: programs}))
     for entry, engine in zip(programs, engines, strict=False):
-        key = (entry.runtime, json.dumps(dict(entry.config), sort_keys=True))
-        policy._engines.setdefault(key, engine)
+        policy._engines.setdefault(_key(entry), engine)
     return policy
 
 
@@ -374,10 +381,8 @@ def _programs(method: str, *printed: bytes) -> ScriptPolicy:
         _entry("monty", config={"n": str(i)}) for i in range(len(printed))
     )
     policy = ScriptPolicy(Programs({method: entries}))
-    for i, out in enumerate(printed):
-        policy._engines[("monty", json.dumps({"n": str(i)}))] = FakeProgram(
-            out
-        )
+    for entry, out in zip(entries, printed, strict=True):
+        policy._engines[_key(entry)] = FakeProgram(out)
     return policy
 
 
@@ -503,6 +508,44 @@ async def test_a_runtime_it_cannot_build_fails_closed(monkeypatch):
 
 def _fresh_engine(script, runtime, config):
     return FakeProgram()
+
+
+@pytest.mark.asyncio
+async def test_a_program_gets_its_runtimes_memory_cap_unless_it_names_one(
+    monkeypatch,
+):
+    settings: list[dict] = []
+
+    def recording(script, runtime, config):
+        settings.append(dict(config))
+        return FakeProgram()
+
+    monkeypatch.setattr("mirage.policy.script.script_engine", recording)
+    entries = (
+        _entry("monty"),
+        _entry("wasi", config={"home": "/a"}),
+        _entry("wasi", config={"home": "/a", "max_memory": "1G"}),
+        _entry("monty", config={"max_memory": None}),
+    )
+    policy = ScriptPolicy(Programs({"pre_command": entries}))
+    await policy.pre_command(_ctx())
+    assert settings == [
+        {"max_memory": "10M"},
+        {"max_memory": "128M", "home": "/a"},
+        {"max_memory": "1G", "home": "/a"},
+        {"max_memory": None},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_answers_one_program_and_raises_what_went_wrong():
+    policy = _policy(
+        "pre_execute", FakeProgram(_answer(kind="route", runtime="x"))
+    )
+    assert await policy.run(_entry(), "pre_execute", _line()) == Route("x")
+    failing = _policy("pre_execute", FakeProgram(b"", 3, b"Traceback"))
+    with pytest.raises(ValueError, match="^exited 3$"):
+        await failing.run(_entry(), "pre_execute", _line())
 
 
 @pytest.mark.asyncio

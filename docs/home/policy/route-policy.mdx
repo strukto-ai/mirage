@@ -1,6 +1,6 @@
 ---
 title: Route Policy
-description: Script which runtime serves each command line; route-policy scripts run on the workspace's evaluator runtime.
+description: A program, or a function in code, that picks which runtime serves each command line.
 icon: route
 ---
 
@@ -12,21 +12,23 @@ exec round-trip):
 ```yaml
 mode: exec
 runtimes:
-  - monty # captures python3 by default: sandboxed, stdlib-only
+  - monty
   - name: docker
-    captures: ["python3"] # your container, has pandas installed
+    captures: ["python3"]
     config:
       container: my-box
   - workspace
-route_policy: ./policy.py
+route_policy: {script: ./route.py, runtime: monty}
 ```
 
-```python policy.py
-# Jobs under /jobs need the container's packages; anything else
-# stays on the fast in-process sandbox. The LAST EXPRESSION is
-# the answer.
+```python route.py
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 paths = [p for c in ctx["commands"] for p in c["paths"]]
-"docker" if any(p.startswith("/jobs/") for p in paths) else "monty"
+if any(p.startswith("/jobs/") for p in paths):
+    print(json.dumps({"kind": "route", "runtime": "docker"}))
 ```
 
 `python3 /jobs/train.py` runs in the container; `cat data.csv | python3
@@ -34,22 +36,24 @@ paths = [p for c in ctx["commands"] for p in c["paths"]]
 
 ## Input and answers
 
-The script reads one global, `ctx`: the line, each of its commands with
-its words and resolved paths, and the session, the same context a
-[policy program](/home/policy/scripts#ctx) gets at `pre_execute`. Its last
-expression is the answer:
+The route policy is a [policy program](/home/policy/scripts) that every
+session shares. It reads the same `ctx` a program gets at `pre_execute`:
+the line, each of its commands with its words and resolved paths, and
+the session. It prints its answer:
 
-| Answer | Effect |
+| Prints | Effect |
 | --- | --- |
-| `"docker"` | that runtime serves every command it captures |
-| `None` | the first capturer in `runtimes` order serves each command |
-| anything else | the line fails with a routing error |
+| `{"kind": "route", "runtime": "docker"}` | that runtime serves every command it captures |
+| `{"kind": "route", "runtime": "workspace"}` | the line runs in Mirage: no whole-line runtime (a `*` capture) takes it |
+| nothing | the first capturer in `runtimes` order serves each command |
+| `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
 
-Refusing a line is not the route policy's: a policy's `pre_execute`
-denies it ([Admit, then route](#admit-then-route)).
+A program that exits non-zero, runs past 10 seconds, or prints anything
+else fails the line with a routing error. It runs on its own runtime,
+as [a profile's programs do](/home/policy/scripts#runtimes).
 
-In code, `route_policy=` takes a plain function, sync or async, returning
-the same:
+In code, `route_policy=` takes the same block with a `ScriptSource`, or
+a plain function, sync or async, returning a runtime name or `None`:
 
 ```python
 from mirage.policy import RouteContext
@@ -60,13 +64,6 @@ def policy(ctx: RouteContext) -> str | None:
 
 ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 ```
-
-A runtime entry's own `script:` answers a yes or no: will it serve this
-line? It gets the same `ctx` plus `runtime`, its `name` and `captures`,
-so it can find the commands it would run. With no placement, the first
-willing capturer wins. A runtime a policy places the line on must also say
-yes, or the line is refused with `runtimes.<name>` as the refusal's
-policy. The caller's `runtime=` argument skips the scripts.
 
 ## Admit, then route
 
@@ -88,21 +85,4 @@ A line the rules refuse is never placed. A Deny beats any Route, and two
 policies naming different runtimes refuse the line. Nested lines (`$( )`,
 `eval`, `source`, `xargs`) keep the outer line's placement.
 `ws.explain(line)` shows each placement answer and each command's
-runtime.
-
-## What runs the scripts
-
-A script runs on an **evaluator runtime** from the `runtimes` list: a
-`.py` script on the first Python evaluator (monty by default, or
-pyodide), a `.js` one on the first JavaScript evaluator (quickjs).
-With no evaluator the first decision fails. A script that runs past 10
-seconds fails the line.
-
-## Bring your own
-
-Inherit `EvaluatorMixin` (Python) or implement `Evaluator` with the
-`EVALUATOR` brand (TypeScript) on your runtime, and it can evaluate
-scripts: `eval(code, inputs=...)` returns the last expression's value.
-The docker examples do it by piping a harness to `python3 -`:
-[python](https://github.com/strukto-ai/mirage/blob/main/examples/python/runtimes/docker/docker_eval.py),
-[typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/runtimes/docker/docker_eval.ts).
+runtime. The caller's `runtime=` argument places the line itself.

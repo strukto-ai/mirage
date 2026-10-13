@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { Runtime } from '../../runtime/base.ts'
 import { EVALUATOR, LINE_EXECUTOR, type Evaluator, type LineExecutor } from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
-import { evalWithCtx } from '../../runtime/script.ts'
 import type { EvalResult, RunArgs, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -190,7 +189,7 @@ describe('removeRuntime', () => {
     alpha.release = gate.promise
     const ws = await workspace(alpha)
     try {
-      const evaluating = evalWithCtx('x', {}, alpha, 5, 'test')
+      const evaluating = ws.executePythonRepl('x')
       await alpha.entered.promise
       let removed = false
       const removing = ws.removeRuntime('alpha').then(() => {
@@ -199,7 +198,7 @@ describe('removeRuntime', () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
       expect([removed, alpha.closed]).toEqual([false, 0])
       gate.open()
-      expect(await evaluating).toBe('alpha')
+      expect((await evaluating).value).toBe('alpha')
       await removing
       expect(alpha.closed).toBe(1)
     } finally {

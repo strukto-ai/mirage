@@ -76,10 +76,19 @@ function toEvalValue(value: unknown): EvalValue {
 
 export class MontyExecution {
   private readonly name = 'monty'
+  private readonly limits: typeof LIMITS & { maxMemory?: number }
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
   private readonly evalSessions = new Map<string, MontySessionLike>()
+
+  /**
+   * Args:
+   *   maxMemory: the heap one run may use, in bytes; null for no cap.
+   */
+  constructor(maxMemory: number | null = null) {
+    this.limits = maxMemory === null ? LIMITS : { ...LIMITS, maxMemory }
+  }
 
   async run(args: RunArgs, files: RuntimeFiles | null): Promise<RunResult> {
     const pool = await this.ensurePool()
@@ -87,8 +96,8 @@ export class MontyExecution {
     // for `__file__`, under the directory a feed starts in.
     const session = await pool.checkout(
       args.scriptPath !== undefined
-        ? { scriptName: mainFilename(args), limits: LIMITS }
-        : { limits: LIMITS },
+        ? { scriptName: mainFilename(args), limits: this.limits }
+        : { limits: this.limits },
     )
     // Monty executes on its own worker process, so the event loop stays
     // live to observe the limit deadline and the kill signal; a trip
@@ -172,12 +181,12 @@ export class MontyExecution {
     if (opts.session !== undefined) {
       let existing = this.evalSessions.get(opts.session)
       if (existing === undefined) {
-        existing = await pool.checkout({ limits: LIMITS })
+        existing = await pool.checkout({ limits: this.limits })
         this.evalSessions.set(opts.session, existing)
       }
       session = existing
     } else {
-      session = await pool.checkout({ limits: LIMITS })
+      session = await pool.checkout({ limits: this.limits })
     }
     const out: string[] = []
     const err: string[] = []

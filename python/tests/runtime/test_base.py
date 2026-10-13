@@ -19,7 +19,7 @@ import pytest
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import EvaluatorMixin, LineExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin
 
 
 class MarkerRuntime(Runtime):
@@ -28,15 +28,14 @@ class MarkerRuntime(Runtime):
 
 
 def test_base_carries_no_capability_entry_points():
-    # The base holds identity and config only; run, run_line, eval and
-    # attach belong to the tiers and mixins, detected by isinstance.
+    # The base holds identity and config only; run, run_line and attach
+    # belong to the tiers and mixins, detected by isinstance.
     rt = MarkerRuntime()
     assert not hasattr(rt, "run")
     assert not hasattr(rt, "run_line")
     assert not hasattr(rt, "attach")
     assert not isinstance(rt, LanguageRuntime)
     assert not isinstance(rt, LineExecutorMixin)
-    assert not isinstance(rt, EvaluatorMixin)
 
 
 def test_close_defaults_to_noop():
@@ -47,20 +46,11 @@ def test_uniform_constructor_defaults():
     rt = MarkerRuntime()
     assert rt.captures == ("echo-run",)
     assert rt.config == RuntimeConfig()
-    assert rt.script is None
 
 
 def test_captures_override():
     rt = MarkerRuntime(captures=["only-this"])
     assert rt.captures == ("only-this",)
-
-
-def test_script_stored():
-    def wants(ctx):
-        return True
-
-    rt = MarkerRuntime(script=wants)
-    assert rt.script is wants
 
 
 def test_unknown_config_key_fails_loud():

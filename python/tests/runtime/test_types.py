@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.types import EvalResult, RunArgs
+from mirage.runtime.types import RunArgs
 
 
 def test_run_args_defaults():
@@ -21,12 +21,3 @@ def test_run_args_defaults():
     assert args.env == {}
     assert args.stdin is None
     assert args.flags == {}
-
-
-def test_eval_result_defaults():
-    result = EvalResult()
-    assert result.value is None
-    assert result.stdout == b""
-    assert result.stderr is None
-    assert result.exit_code == 0
-    assert result.status == "complete"

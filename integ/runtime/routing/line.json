@@ -8,8 +8,7 @@
             "name": "echobox",
             "captures": [
               "*"
-            ],
-            "script": "'keep-out' not in ctx['line']"
+            ]
           },
           {
             "name": "monty",
@@ -21,6 +20,10 @@
           "/ram": {
             "vfs": "ram"
           }
+        },
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'keep-out' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"workspace\"}))\n",
+          "runtime": "monty"
         }
       },
       "steps": [
@@ -275,8 +278,7 @@
             "name": "echobox",
             "captures": [
               "*"
-            ],
-            "script": "'cd ' not in ctx['line']"
+            ]
           },
           {
             "name": "monty",
@@ -302,6 +304,10 @@
               ]
             }
           }
+        },
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'cd ' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"workspace\"}))\n",
+          "runtime": "monty"
         }
       },
       "steps": [

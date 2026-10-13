@@ -28,7 +28,6 @@ from mirage.runtime.table import (
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.workspace.guard import reject_config_script
 
 
 class Runtimes:
@@ -95,10 +94,6 @@ class Runtimes:
                 )
         if not any(entry.name == WorkspaceRuntime.name for entry in entries):
             entries.append(WorkspaceRuntime())
-        for entry in entries:
-            reject_config_script(
-                f"runtime {entry.name!r} script", entry.script
-            )
         bindings = bind_commands(entries)
         for entry in entries:
             entry.bind(self._binding)
@@ -121,7 +116,6 @@ class Runtimes:
             ValueError: unknown name or duplicate entry.
         """
         entry = build_runtime(runtime) if isinstance(runtime, str) else runtime
-        reject_config_script(f"runtime {entry.name!r} script", entry.script)
         candidate = [*self._entries, entry]
         bindings = bind_commands(candidate)
         entry.bind(self._binding)

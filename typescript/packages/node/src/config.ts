@@ -47,7 +47,12 @@ import {
 } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
-import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import {
+  parseProgram,
+  parseSessionProfile,
+  type ProfilePolicySpec,
+  type SessionProfile,
+} from '@struktoai/mirage-core/policy/profile'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
@@ -84,10 +89,9 @@ function isScriptPath(value: string): boolean {
 }
 
 // Config carries a reference, the wire carries content (the docker
-// build-context model): the value must be a path to a .py/.js file,
-// read at load time. In code, scripts are functions; config is the
-// only entry point for script source. The extension stamps the script's
-// language so the policy engine can pick a matching evaluator.
+// build-context model): the value must be a path to a .py/.js/.mjs file,
+// read at load time. In code, a program is passed as a ScriptSource. The
+// extension stamps the script's language.
 function loadScriptSource(value: string): ScriptSource {
   if (!isScriptPath(value)) {
     throw new Error(
@@ -107,8 +111,8 @@ type RuntimeClass = new (options?: RuntimeOptions<never>) => Runtime
  * The runtime twin of the `vfs:` and `cli:` reference forms: a
  * deployment ships a runtime as a file and names it from yaml with no
  * host program calling `registerRuntime`. The class is constructed with
- * the uniform `(captures, config, script)` options like a builtin, so
- * the entry's other keys reach it unchanged. Mirrors `_runtime_class` in
+ * the uniform `(captures, config)` options like a builtin, so the entry's
+ * other keys reach it unchanged. Mirrors `_runtime_class` in
  * `mirage/config.py`.
  */
 async function loadRuntimeClass(ref: string): Promise<RuntimeClass> {
@@ -133,26 +137,21 @@ async function buildRuntimeEntries(entries: unknown[]): Promise<RuntimeEntry[]> 
       continue
     }
     if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
-    const { name, script, ...options } = entry
+    const { name, ...options } = entry
     if (typeof name !== 'string' || name === '') {
       throw new Error("runtime entry needs a non-empty 'name'")
     }
-    if (script !== undefined && typeof script !== 'string') {
-      throw new Error('a runtime entry script must be a .py path string')
-    }
-    const withScript: Record<string, unknown> =
-      script !== undefined ? { ...options, script: loadScriptSource(script) } : options
     if (name.includes(':')) {
       // The key check `buildRuntime` runs for a name: the base
       // constructor ignores a key it does not read, so without it a typo
       // would leave the runtime on its defaults where Python's
       // `**options` refuses the entry.
       const cls = await loadRuntimeClass(name)
-      checkRuntimeOptions(name, withScript)
-      out.push(new cls(withScript as RuntimeOptions<never>))
+      checkRuntimeOptions(name, options)
+      out.push(new cls(options as RuntimeOptions<never>))
       continue
     }
-    out.push(buildRuntime(name, withScript))
+    out.push(buildRuntime(name, options))
   }
   return out
 }
@@ -474,6 +473,9 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (raw.profiles !== undefined && raw.profiles !== null) {
     parseProfiles(raw.profiles)
   }
+  if (raw.route_policy !== undefined && raw.route_policy !== null) {
+    parseProgram(raw.route_policy, 'route_policy')
+  }
   if (raw.profile !== undefined && raw.profile !== null) {
     if (typeof raw.profile !== 'string') throw new Error('profile must be a string')
     const known = isPlainObject(raw.profiles) ? Object.keys(raw.profiles) : []
@@ -613,6 +615,13 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
   return out
 }
 
+/** A path-form policy program with its script loaded; one carrying source is left alone. */
+function loadProgram(program: ProfilePolicySpec): ProfilePolicySpec {
+  return typeof program.script === 'string'
+    ? { ...program, script: loadScriptSource(program.script) }
+    : program
+}
+
 /**
  * Load each profile's path-form policy programs into ScriptSources.
  *
@@ -635,11 +644,7 @@ function loadProfileScripts(
             policy: Object.fromEntries(
               Object.entries(policy).map(([method, programs]) => [
                 method,
-                programs.map((program) =>
-                  typeof program.script === 'string'
-                    ? { ...program, script: loadScriptSource(program.script) }
-                    : program,
-                ),
+                programs.map(loadProgram),
               ]),
             ),
           }
@@ -803,7 +808,8 @@ export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
-  routePolicy?: string | null
+  /** The route policy program, `{script, runtime}`; validated by parseProgram. */
+  routePolicy?: unknown
   /** The profiles (`profiles:`); every entry validated by parseProfiles. */
   profiles?: unknown
   /** Which profile shapes a session created without one. */
@@ -898,7 +904,7 @@ export function loadWorkspaceConfig(
  * Resolve relative script paths and code refs against the config file's
  * directory.
  *
- * A path-form `script`/`route_policy`, a `cli: ./tool.mjs:TREE`, a
+ * A path-form `script`, a `cli: ./tool.mjs:TREE`, a
  * `vfs: ./wiki.mjs:WikiVFS` and a runtime entry's
  * `name: ./box.mjs:EchoBox` in a config file all mean "next to the file"
  * (the docker build-context model), never "wherever the server happens
@@ -909,14 +915,10 @@ export function loadWorkspaceConfig(
  * `mirage/config.py`.
  */
 export function absolutizeScripts(raw: Record<string, unknown>, base: string): void {
-  const policy = raw.route_policy
-  if (typeof policy === 'string' && isScriptPath(policy) && !isAbsolute(policy.trim())) {
-    raw.route_policy = join(base, policy.trim())
-  }
+  if (isPlainObject(raw.route_policy)) absolutizeScriptKey(raw.route_policy, base)
   if (Array.isArray(raw.runtimes)) {
     raw.runtimes.forEach((entry: unknown, i: number) => {
       if (isPlainObject(entry)) {
-        absolutizeScriptKey(entry, base)
         absolutizeCodeRef(entry, 'name', base)
       } else if (typeof entry === 'string') {
         ;(raw.runtimes as unknown[])[i] = rebaseCodeRef(entry, base)
@@ -950,7 +952,7 @@ export function absolutizeScripts(raw: Record<string, unknown>, base: string): v
   }
 }
 
-/** Rebase one runtimes/clis/policy entry's relative `script` path onto `base`. */
+/** Rebase one clis entry's, policy program's or route_policy's relative `script` path onto `base`. */
 function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void {
   const script = entry.script
   if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
@@ -1191,7 +1193,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(consoleFactory !== undefined ? { consoleFactory } : {}),
       ...(runtimeEntries !== undefined ? { runtimes: runtimeEntries } : {}),
       ...(cfg.routePolicy !== undefined && cfg.routePolicy !== null
-        ? { routePolicy: loadScriptSource(cfg.routePolicy) }
+        ? { routePolicy: loadProgram(parseProgram(cfg.routePolicy, 'route_policy')) }
         : {}),
       ...(cfg.profiles !== undefined && cfg.profiles !== null
         ? { profiles: loadProfileScripts(parseProfiles(cfg.profiles)) }

@@ -58,7 +58,7 @@ UNMIRRORED_DIRS = {
 # would count 816 today. What the ratchet buys is narrower than it looks:
 # a module whose name appears nowhere in the suite cannot be added
 # silently.
-MIRROR_BASELINE = 99
+MIRROR_BASELINE = 98
 
 
 def _test_dirs() -> list[pathlib.Path]:

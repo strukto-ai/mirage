@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { noWorker, PyodideUnavailableError } from '../errors.ts'
+import { noWorker, PyodideMemoryError, PyodideUnavailableError } from '../errors.ts'
+import { watchMemory } from '../watchdog.ts'
+import { memoryLimit } from '../../../config.ts'
 import { EvalError } from '../../../errors.ts'
 import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
@@ -47,6 +49,12 @@ async function createPort(): Promise<WorkerPort | null> {
         ? ['--experimental-transform-types', '--disable-warning=ExperimentalWarning']
         : [],
     })
+    // Node 22.16 and later read a worker's heap, wasm memory included,
+    // even while its guest is busy; older ones run without the watch.
+    const stats = worker as unknown as {
+      getHeapStatistics?: () => Promise<{ external_memory: number }>
+    }
+    const heap = stats.getHeapStatistics?.bind(worker)
     return {
       post: (m) => {
         worker.postMessage(m)
@@ -63,6 +71,7 @@ async function createPort(): Promise<WorkerPort | null> {
       terminate: () => {
         void worker.terminate()
       },
+      ...(heap !== undefined ? { memory: async () => (await heap()).external_memory } : {}),
     }
   }
   if (typeof Worker === 'undefined') return null
@@ -160,6 +169,15 @@ export class PyodideWorkerClient {
     const processes = new GuestProcessTable(
       request.method === 'run' ? context : { ...context, processes: null },
     )
+    const cap = request.config.maxMemory ?? null
+    const limit = memoryLimit(cap)
+    const unwatch =
+      limit !== null && cap !== null && this.port.memory !== undefined
+        ? watchMemory(this.port.memory, limit, () => {
+            this.port.terminate()
+            this.fail(new PyodideMemoryError(cap))
+          })
+        : null
     const cells = new Int32Array(this.interruptBuffer)
     Atomics.store(cells, 3, 0)
     const abort = (): void => {
@@ -198,6 +216,7 @@ export class PyodideWorkerClient {
         throw new Error(message.message)
       }
     } finally {
+      unwatch?.()
       signal?.removeEventListener('abort', abort)
       // An interrupted guest can finish while a backend mutation is still pending.
       // Keep the runtime queue closed until every response has finished.
