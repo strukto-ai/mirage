@@ -23,7 +23,7 @@ Mirage's shell combines commands from [Core Tools](/home/core/tools) and [Data &
 | Loops | `for`, arithmetic `for`, `while`, `until`, and `select`; `break` and `continue` |
 | Branching and functions | `case`, `name() { ...; }`, `function`, and `return` |
 | Groups | `{ ...; }` shares the session; `( ... )` runs in an isolated session copy |
-| Process substitution | `<(command)` supplies command output as an input path |
+| Process substitution | `<(command)` and `>(command)` as live `/dev/fd/N` pipes, streamed both ways |
 | Background work | `command &`, `jobs`, `wait`, `fg`, `kill`, `disown`, and `ps` |
 | Timing | `time`, `time -p`, and `TIMEFORMAT`; CPU times are reported as zero |
 | Comments | `#` outside quotes |
@@ -66,7 +66,8 @@ Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, 
 ## Limits
 
 - Positive `read -t` values are accepted but do not enforce a timeout.
-- `bg`, `complete`, `compgen`, `ulimit`, `coproc`, output process substitution `>(command)`, and `exec -a/-l` are not implemented.
+- `bg`, `complete`, `compgen`, `ulimit`, `coproc`, and `exec -a/-l` are not implemented.
+- A process substitution lives as long as the command naming it, which waits for its output consumers; `exec` onto one (`exec 3> >(command)`) fails with exit status `2`. Its `/dev/fd/N` paths are Mirage pipes, not host descriptors.
 - There is no interactive terminal or OS process job control. The supported job commands manage Mirage jobs. Use the CLI's `--background` and `mirage job` for work that should outlive a request.
 - `set` and `shopt` recognize more option names than they implement; accepting or displaying an option does not mean every Bash behavior is available.
 - Enable `extglob` before the call that uses its syntax, or use `eval` after enabling it. A whole `shell()` call is parsed before it runs.
