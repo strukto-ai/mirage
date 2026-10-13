@@ -90,6 +90,7 @@
   },
   "workspace/abort": {
    "typescript_only": {
+    "callerSignal": "TypeScript hands the current call's AbortSignal to a read or copy of a live pipe, so a reader that gives up (timeout) withdraws its claim on the pipe; Python cancels the awaiting task, which the pipe's shielded pull answers directly.",
     "lineSignal": "TypeScript must pass a line's AbortSignal into fetch to interrupt an outstanding response body read; Python task cancellation interrupts the awaited HTTP read directly."
    }
   },

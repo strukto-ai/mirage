@@ -17,7 +17,7 @@ import { retainPrograms } from '../../shell/parse/program.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
-import type { ByteSource } from '../../io/types.ts'
+import type { ByteSource, ClosedPipe } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
@@ -97,15 +97,31 @@ export async function drained(
   } catch (err) {
     if (err instanceof PipeClosed) {
       // SIGPIPE ends the writer where it was, but what it had already said on
-      // stderr stands (`cat /missing big > >(head -c 1)`).
+      // stderr stands (`cat /missing big > >(head -c 1)`). A writer that
+      // answers its stdout's closed reader itself (`tee -p`) says what it
+      // says and keeps going.
       await sendStderr(sink, io)
-      throw err
-    }
-    await failedRead(io, err, execNode)
+      if (io.closedStdout === null) throw err
+      await answerClosed(sink, io.closedStdout, io, execNode)
+    } else await failedRead(io, err, execNode)
   }
   if (io.output !== null) execNode.exitCode = io.exitCode
   await sendStderr(sink, io)
   return [null, io, execNode]
+}
+
+/** Deliver a writer's own answer to its stdout's closed reader. Mirrors Python's _answer_closed. */
+async function answerClosed(
+  sink: JobConsole,
+  closed: ClosedPipe,
+  io: IOResult,
+  execNode: ExecutionNode,
+): Promise<void> {
+  if (closed.stderr.byteLength > 0) await sink.emit(Channel.STDERR, closed.stderr)
+  if (closed.exitCode !== null) {
+    io.exitCode = closed.exitCode
+    execNode.exitCode = closed.exitCode
+  }
 }
 
 /** Write a statement's stderr to its sink, emptying it in the result. Mirrors Python's _send_stderr. */

@@ -56,10 +56,11 @@ export class DeviceInput extends Uint8Array {}
 export class PipeStream implements AsyncIterable<Uint8Array> {
   private iterator: AsyncIterator<Uint8Array> | undefined
 
-  /** `path` is the descriptor it was opened at. */
+  /** `path` is the descriptor it was opened at, `end` the pipe itself. */
   constructor(
     private readonly stream: AsyncIterable<Uint8Array>,
     readonly path: PathSpec,
+    readonly end: PipeEnd,
   ) {}
 
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
@@ -146,6 +147,26 @@ export interface CountedRun {
   readonly label: string | null
 }
 
+/**
+ * The live pipe a `PipeStream` reads (a process substitution's endpoint),
+ * for a descriptor that reads it on after the stream. Mirrors Python's
+ * PipeEnd.
+ */
+export interface PipeEnd {
+  stream(path: PathSpec, signal?: AbortSignal): AsyncIterable<Uint8Array>
+}
+
+/**
+ * How a writer answers its stdout's reader going away when it does so
+ * itself rather than dying of SIGPIPE (`tee -p`, `--output-error`): what it
+ * says about it, and the status it ends with, null to keep its own.
+ * Mirrors Python's ClosedPipe.
+ */
+export interface ClosedPipe {
+  readonly stderr: Uint8Array
+  readonly exitCode: number | null
+}
+
 export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
@@ -155,6 +176,7 @@ export interface IOResultInit {
   sizedRuns?: SizedRun[] | null
   countedRuns?: CountedRun[] | null
   refusal?: Refusal | null
+  closedStdout?: ClosedPipe | null
 }
 
 export class IOResult {
@@ -186,6 +208,10 @@ export class IOResult {
   // voice, this carries the reason. merge keeps the rightmost record,
   // as it does the producer.
   refusal: Refusal | null
+  // How the command answers its stdout's reader going away when it does so
+  // itself (`tee -p`); null leaves the writer to SIGPIPE. merge keeps the
+  // right-hand one, whose stdout the result carries.
+  closedStdout: ClosedPipe | null
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
@@ -197,6 +223,7 @@ export class IOResult {
     this._exitCode = init.exitCode ?? 0
     this.producer = init.producer ?? null
     this.refusal = init.refusal ?? null
+    this.closedStdout = init.closedStdout ?? null
     this.streamSource = null
   }
 
@@ -255,6 +282,7 @@ export class IOResult {
       stderr: mergedStderr,
       producer: other.producer,
       refusal: other.refusal ?? this.refusal,
+      closedStdout: other.closedStdout,
     })
     result.output = other.output
     result.outputFinalized = other.outputFinalized

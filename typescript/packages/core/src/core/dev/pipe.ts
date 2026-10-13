@@ -43,17 +43,21 @@ export class DevicePipe {
 
   constructor(readonly readable: boolean) {}
 
-  async write(data: Uint8Array, path: PathSpec): Promise<void> {
+  async write(data: Uint8Array, path: PathSpec, signal?: AbortSignal): Promise<void> {
     if (this.readable) throw ebadf(path)
-    await this.pipe.write(data)
+    await this.pipe.write(data, signal)
   }
 
-  async read(path: PathSpec, size: number | null = null): Promise<Uint8Array> {
+  async read(
+    path: PathSpec,
+    size: number | null = null,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
     if (!this.readable) throw ebadf(path)
     const chunks: Uint8Array[] = []
     let remaining = size
     while (remaining === null || remaining > 0) {
-      const chunk = await this.take(remaining)
+      const chunk = await this.take(remaining, signal)
       if (chunk.byteLength === 0) break
       chunks.push(chunk)
       if (remaining !== null) remaining -= chunk.byteLength

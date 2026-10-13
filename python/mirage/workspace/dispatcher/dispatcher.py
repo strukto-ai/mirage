@@ -1386,7 +1386,9 @@ class Dispatcher:
             stream = mount.read_stream(call.path.virtual)
         pipe = mount.live_pipe(call.path.virtual)
         if pipe is not None:
-            live = PipeStream(await _opened(stream, call.report), call.path)
+            live = PipeStream(
+                await _opened(stream, call.report), call.path, pipe
+            )
             pipe.readers.add(live)
             return live
         if filler is not None:

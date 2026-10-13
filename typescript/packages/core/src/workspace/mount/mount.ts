@@ -20,8 +20,6 @@ import { norm } from '../../utils/path.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
-  getCurrentEvaluation,
-  getCurrentSession,
   effectiveMountMode,
   requirePathsWritable,
   runWithMountGate,
@@ -83,7 +81,7 @@ import { type WriteContext } from '../../cache/types.ts'
 import { captureCommandScope } from '../../cache/index/scope.ts'
 import type { CacheManager } from '../../cache/manager.ts'
 import { joinOrAbort, mergeSignals } from '../../utils/abort.ts'
-import { lineSignal } from '../abort.ts'
+import { callerSignal } from '../abort.ts'
 import {
   captureRecordingContext,
   runWithMountContext,
@@ -723,7 +721,7 @@ export class MountEntry {
       case 'rename':
         return [(scope, args) => vfs.rename(scope, dstArg(args[0]))]
       case 'copy':
-        return [(scope, args) => vfs.copy(scope, dstArg(args[0]))]
+        return [(scope, args) => vfs.copy(scope, dstArg(args[0]), callerSignal())]
       case 'dir_copy':
         return [(scope, args) => vfs.dirCopy(scope, dstArg(args[0]))]
       case 'rm_r':
@@ -851,11 +849,7 @@ export class MountEntry {
       (fn) => runWithWriteContext(this.prefix, this.writeContext(), async () => await fn()),
       (fn) => runWithRevisions(revisions, async () => await fn()),
     ])
-    const session = getCurrentSession()
-    const signal = mergeSignals(
-      getCurrentEvaluation()?.frame.abortSignal,
-      session === null ? undefined : lineSignal(session),
-    )
+    const signal = callerSignal()
     const stream = withMountContext(
       withPullTimeout(
         vfs.readStream(scope, this.index, signal),

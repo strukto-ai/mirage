@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PipeInput, SharedInput, share } from '../../../../io/async_line_iterator.ts'
+import { callerSignal } from '../../../abort.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
-import { closeQuietly } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../../../shell/constants.ts'
@@ -390,12 +390,12 @@ async function installDescriptor(
         file.source = new FileInput(file, await materialize(data))
         bind(session, fd, OPEN_FOR_READ_WRITE + scope.virtual, false, file.source)
       } else {
-        // The descriptor outlives this read: each read of it opens the pipe
-        // afresh, in its reader's own context.
+        // The descriptor outlives this read: it keeps the pipe the read
+        // opened, which each later read takes afresh under its own signal.
         let reading: ByteSource | PipeInput = data
         if (data instanceof PipeStream) {
           await data.close()
-          reading = new PipeInput(scope, () => openPipe(dispatch, scope))
+          reading = new PipeInput(data.path, data.end, callerSignal)
         }
         bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(reading))
       }
@@ -410,26 +410,6 @@ async function installDescriptor(
     if (!isFsError(error)) throw error
     return errorLine(scope.rawPath, error)
   }
-  return null
-}
-
-/**
- * A fresh read of the live pipe an `exec` keeps, null once the
- * substitution's command has released it. Mirrors Python's _open_pipe.
- */
-async function openPipe(
-  dispatch: DispatchFn,
-  scope: PathSpec,
-): Promise<AsyncIterable<Uint8Array> | null> {
-  let opened: ByteSource | null
-  try {
-    opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-  } catch (error) {
-    if (isMissingPath(error)) return null
-    throw error
-  }
-  if (opened instanceof PipeStream) return opened
-  if (opened !== null && !(opened instanceof Uint8Array)) await closeQuietly(opened)
   return null
 }
 
@@ -497,6 +477,14 @@ export async function divertStatement(
         if (later !== Channel.STDERR) continue
         if (keptLater) rest.push([later, more, true])
         else await routed(dispatch, session, later, more, rest)
+      }
+      const closed = io.closedStdout
+      if (channel === Channel.STDOUT && closed !== null) {
+        // The writer answers its stdout's closed reader itself (`tee -p`).
+        if (closed.stderr.byteLength > 0)
+          await routed(dispatch, session, Channel.STDERR, closed.stderr, rest)
+        if (closed.exitCode !== null) io.exitCode = closed.exitCode
+        break
       }
       if (!writerForks(statement, session, io.producer?.command ?? null)) throw new ExitSignal(141)
       io.exitCode = 141

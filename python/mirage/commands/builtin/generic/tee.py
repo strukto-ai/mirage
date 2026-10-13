@@ -12,10 +12,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.fs import eisdir, enotdir, fs_error, fs_strerror
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.errors import PipeClosed
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, ClosedPipe, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
 
@@ -295,10 +296,32 @@ async def tee_generic(
     raw = await read_stdin_async(stdin)
     if raw is None:
         raw = encode_text(" ".join(texts)) if texts else b""
-    if not paths:
-        return raw, IOResult()
-    return await write_output(
-        paths, raw, parsed, read_stream, write_bytes, append_bytes, stat
+    stdout: ByteSource | None = raw
+    io = IOResult()
+    if paths:
+        stdout, io = await write_output(
+            paths, raw, parsed, read_stream, write_bytes, append_bytes, stat
+        )
+    io.closed_stdout = _closed_stdout(parsed)
+    return stdout, io
+
+
+def _closed_stdout(parsed: TeeFlags) -> ClosedPipe | None:
+    """How tee answers its stdout's reader going away, as GNU's does:
+    SIGPIPE without -p and --output-error, nothing under a -nopipe mode,
+    ``'standard output': Broken pipe`` and status 1 under warn and exit.
+
+    Args:
+        parsed (TeeFlags): tee's flags.
+    """
+    if parsed.pipe_errors is PipeErrors.SIGNAL:
+        return None
+    if parsed.pipe_errors is PipeErrors.IGNORE:
+        return ClosedPipe()
+    phrase = posix_phrase(FsCondition.EPIPE)
+    return ClosedPipe(
+        stderr=encode_text(f"tee: 'standard output': {phrase}\n"),
+        exit_code=1,
     )
 
 

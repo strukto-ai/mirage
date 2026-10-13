@@ -15,25 +15,27 @@
 import { abortable } from '../utils/abort.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
-import { type ByteSource, DeviceInput, PipeStream } from './types.ts'
+import { type ByteSource, DeviceInput, type PipeEnd, PipeStream } from './types.ts'
 import type { PathSpec } from '../types.ts'
 
 const NEWLINE = 0x0a
 const BYTE_VIEW = new TextDecoder('latin1')
 
 /**
- * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). Each read
- * opens a stream of its own, in the reading command's own context, and
- * closes it after one chunk: a read that gives up (`timeout`) takes nothing
- * with it, and the next read, through this descriptor or another, gets what
- * it left. Once the substitution's command has released the pipe, a read
- * finds its end. Mirrors Python's PipeInput.
+ * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). It holds the
+ * pipe it opened, not the name it was opened by, so a link removed since
+ * changes nothing. Each read takes a stream of its own, under its reading
+ * command's own signal, and closes it after one chunk: a read that gives up
+ * (`timeout`) takes nothing with it, and the next read, through this
+ * descriptor or another, gets what it left. Once the substitution's command
+ * has ended the pipe, a read finds its end. Mirrors Python's PipeInput.
  */
 export class PipeInput implements AsyncIterableIterator<Uint8Array> {
-  /** `open` opens a stream of the pipe, null once the pipe is gone. */
+  /** `path` is the pipe's own (`/dev/fd/N`); `signal` gives each read its reader's. */
   constructor(
     readonly path: PathSpec,
-    private readonly open: () => Promise<AsyncIterable<Uint8Array> | null>,
+    private readonly end: PipeEnd,
+    private readonly signal: () => AbortSignal | undefined,
   ) {}
 
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
@@ -41,9 +43,7 @@ export class PipeInput implements AsyncIterableIterator<Uint8Array> {
   }
 
   async next(): Promise<IteratorResult<Uint8Array>> {
-    const stream = await this.open()
-    if (stream === null) return { done: true, value: undefined }
-    const iterator = stream[Symbol.asyncIterator]()
+    const iterator = this.end.stream(this.path, this.signal())[Symbol.asyncIterator]()
     try {
       return await iterator.next()
     } finally {

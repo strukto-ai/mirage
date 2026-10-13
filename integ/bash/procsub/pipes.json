@@ -984,6 +984,111 @@
         "stderr": "cp: cannot create regular file '/dev/procsub-dst': Is a directory\n"
       },
       "note": "Divergence: GNU bash 5.2.37 prints \"cp done\\ndata\\n/dev/procsub-dst\\n\": GNU cp writes into the file it opened, which mv moved to procsub-old. Mirage copies by name, so a destination replaced while the copy waits on its pipe is checked again and refused rather than receiving bytes a directory would hide."
+    },
+    {
+      "id": "procsub_exec_input_through_a_removed_link_keeps_the_pipe",
+      "seq": 1346121,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ln -s \"$1\" {mount}/procsub-in; exec 3<{mount}/procsub-in; rm {mount}/procsub-in; cat <&3; }; f <(printf hello); echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_through_a_removed_link_held_after_command",
+      "seq": 1346122,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(f() { ln -s \"$1\" {mount}/procsub-in; exec 3<{mount}/procsub-in; rm {mount}/procsub-in; }; f <(printf hello); cat <&3; echo)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_timed_out_copy_leaves_data_and_stores_nothing",
+      "seq": 1346123,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { timeout 0.1 cp \"$1\" /dev/procsub-out; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello); echo; [ -s /dev/procsub-out ] && echo wrote || echo empty; rm -f /dev/procsub-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=124\nhello\nempty\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_tee_p_ignores_closed_stdout",
+      "seq": 1346124,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee -p {mount}/procsub-tee-out > >(head -c 1 >/dev/null); echo \"st=$?\"; wc -c < {mount}/procsub-tee-out; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=0\n200000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_tee_output_error_warn_reports_closed_stdout",
+      "seq": 1346125,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee --output-error=warn {mount}/procsub-tee-out > >(head -c 1 >/dev/null); echo \"st=$?\"; wc -c < {mount}/procsub-tee-out; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\n200000\n",
+        "stderr": "tee: 'standard output': Broken pipe\n"
+      }
+    },
+    {
+      "id": "procsub_tee_output_error_exit_reports_closed_stdout",
+      "seq": 1346126,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee --output-error=exit {mount}/procsub-tee-out > >(head -c 1 >/dev/null); echo \"st=$?\"; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\n",
+        "stderr": "tee: 'standard output': Broken pipe\n"
+      }
+    },
+    {
+      "id": "procsub_tee_closed_stdout_is_sigpipe",
+      "seq": 1346127,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 200000 /dev/zero | tee {mount}/procsub-tee-out > >(head -c 1 >/dev/null); echo \"st=$?\"; rm {mount}/procsub-tee-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=141\n",
+        "stderr": ""
+      }
     }
   ]
 }

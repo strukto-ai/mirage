@@ -142,8 +142,8 @@ export class RAMVFS extends BaseVFS {
     return ramRename(this.accessor, src, dst)
   }
 
-  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return ramCopy(this.accessor, src, dst)
+  override copy(src: PathSpec, dst: PathSpec, signal?: AbortSignal): Promise<void> {
+    return ramCopy(this.accessor, src, dst, signal)
   }
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {

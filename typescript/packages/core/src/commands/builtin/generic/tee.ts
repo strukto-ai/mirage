@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { type ClosedPipe, IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 import { type FsError } from '../../../errors/types.ts'
 import { absentDestError, entryKind } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -81,8 +82,27 @@ export async function teeGeneric(
   const parsed = parseFlags(opts.flags)
   const stdinData = await readStdinAsync(opts.stdin)
   const raw: Uint8Array = stdinData ?? encodeText(texts.join(' '))
-  if (paths.length === 0) return [raw, new IOResult()]
-  return writeOutput(paths, raw, parsed, stream, write, append, stat)
+  const [stdout, io] =
+    paths.length === 0
+      ? [raw, new IOResult()]
+      : await writeOutput(paths, raw, parsed, stream, write, append, stat)
+  io.closedStdout = closedStdout(parsed)
+  return [stdout, io]
+}
+
+/**
+ * How tee answers its stdout's reader going away, as GNU's does: SIGPIPE
+ * without -p and --output-error, nothing under a -nopipe mode, `'standard
+ * output': Broken pipe` and status 1 under warn and exit. Mirrors Python's
+ * _closed_stdout.
+ */
+function closedStdout(parsed: TeeFlags): ClosedPipe | null {
+  if (parsed.pipeErrors === PipeErrors.SIGNAL) return null
+  if (parsed.pipeErrors === PipeErrors.IGNORE) return { stderr: new Uint8Array(), exitCode: null }
+  return {
+    stderr: encodeText(`tee: 'standard output': ${posixPhrase('EPIPE')}\n`),
+    exitCode: 1,
+  }
 }
 
 /**

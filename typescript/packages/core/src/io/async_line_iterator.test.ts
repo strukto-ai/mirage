@@ -270,7 +270,8 @@ describe('SharedInput', () => {
 
   it('names the live pipe it reads, and a dup keeps the name', () => {
     const pipe = PathSpec.fromStrPath('/dev/fd/63')
-    const shared = new SharedInput(new PipeStream(fromChunks([encode('x')]), pipe))
+    const end = { stream: () => fromChunks([]) }
+    const shared = new SharedInput(new PipeStream(fromChunks([encode('x')]), pipe, end))
     expect(shared.pipe).toBe(pipe)
     expect(shared.dup().pipe).toBe(pipe)
     expect(new SharedInput(encode('x')).pipe).toBeNull()

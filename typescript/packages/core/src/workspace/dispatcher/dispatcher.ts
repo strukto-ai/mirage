@@ -1042,7 +1042,7 @@ export class Dispatcher {
     )
     const pipe = mount.livePipe(scope, this.access)
     if (pipe !== null) {
-      const live = new PipeStream(await opened(source, call.report), call.path)
+      const live = new PipeStream(await opened(source, call.report), call.path, pipe)
       pipe.readers.add(new WeakRef(live))
       return live
     }

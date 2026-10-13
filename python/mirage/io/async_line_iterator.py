@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 
 from mirage.io.cooperative import chunks
-from mirage.io.types import ByteSource, DeviceInput, PipeStream
+from mirage.io.types import ByteSource, DeviceInput, PipeEnd, PipeStream
 from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
 
@@ -47,33 +47,27 @@ def char_width(data: bytes) -> int:
 class PipeInput:
     """The read end an ``exec`` keeps on a live pipe (``exec 3<"$1"``).
 
-    Each read opens a stream of its own, in the reading command's own
-    context, and closes it after one chunk: a read that gives up
-    (``timeout``) takes nothing with it, and the next read, through this
-    descriptor or another, gets what it left. Once the substitution's
-    command has released the pipe, a read finds its end.
+    It holds the pipe it opened, not the name it was opened by, so a link
+    removed since changes nothing. Each read takes a stream of its own,
+    in the reading command's own task, and closes it after one chunk: a
+    read that gives up (``timeout``) takes nothing with it, and the next
+    read, through this descriptor or another, gets what it left. Once the
+    substitution's command has ended the pipe, a read finds its end.
 
     Args:
-        path (PathSpec): the pipe.
-        open (Callable[[], Awaitable[AsyncIterator[bytes] | None]]): opens
-            a stream of it, None once the pipe is gone.
+        path (PathSpec): the pipe's own path (``/dev/fd/N``).
+        end (PipeEnd): the pipe.
     """
 
-    def __init__(
-        self,
-        path: PathSpec,
-        open: Callable[[], Awaitable[AsyncIterator[bytes] | None]],
-    ) -> None:
+    def __init__(self, path: PathSpec, end: PipeEnd) -> None:
         self.path = path
-        self._open = open
+        self._end = end
 
     def __aiter__(self) -> "PipeInput":
         return self
 
     async def __anext__(self) -> bytes:
-        stream = await self._open()
-        if stream is None:
-            raise StopAsyncIteration
+        stream = self._end.stream(self.path)
         try:
             return await anext(stream)
         finally:

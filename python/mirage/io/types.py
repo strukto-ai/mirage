@@ -14,7 +14,7 @@
 
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol
 
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec, Producer, Refusal
@@ -39,6 +39,28 @@ class DeviceInput(bytes):
     """
 
 
+class PipeEnd(Protocol):
+    """The live pipe a ``PipeStream`` reads (a process substitution's
+    endpoint), for a descriptor that reads it on after the stream."""
+
+    def stream(self, path: PathSpec) -> AsyncIterator[bytes]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ClosedPipe:
+    """How a writer answers its stdout's reader going away when it does so
+    itself rather than dying of SIGPIPE (``tee -p``, ``--output-error``).
+
+    Args:
+        stderr (bytes): what it says about it.
+        exit_code (int | None): the status it ends with, None to keep its
+            own.
+    """
+
+    stderr: bytes = b""
+    exit_code: int | None = None
+
+
 class PipeStream(AsyncIterator[bytes]):
     """A streamed read of a live pipe (a process substitution's ``/dev/fd/N``).
 
@@ -50,11 +72,15 @@ class PipeStream(AsyncIterator[bytes]):
     Args:
         stream (AsyncIterator[bytes]): the pipe's opened read.
         path (PathSpec): the descriptor it was opened at.
+        end (PipeEnd): the pipe itself.
     """
 
-    def __init__(self, stream: AsyncIterator[bytes], path: PathSpec) -> None:
+    def __init__(
+        self, stream: AsyncIterator[bytes], path: PathSpec, end: PipeEnd
+    ) -> None:
         self._stream = stream
         self.path = path
+        self.end = end
 
     async def __anext__(self) -> bytes:
         return await anext(self._stream)
@@ -227,6 +253,10 @@ class IOResult:
             ordinary run. stderr stays in bash's voice, this carries
             the reason. merge keeps the rightmost record, as it does
             the producer.
+        closed_stdout (ClosedPipe | None): how the command answers its
+            stdout's reader going away when it does so itself (``tee
+            -p``); None leaves the writer to SIGPIPE. merge keeps the
+            right-hand one, whose stdout the result carries.
     """
 
     def __init__(
@@ -239,8 +269,10 @@ class IOResult:
         matched_runs: list[list[PathSpec]] | None = None,
         sized_runs: list[SizedRun] | None = None,
         counted_runs: list[CountedRun] | None = None,
+        closed_stdout: ClosedPipe | None = None,
     ) -> None:
         self.stdout = stdout
+        self.closed_stdout = closed_stdout
         self.matched_runs = matched_runs
         self.sized_runs = sized_runs
         self.counted_runs = counted_runs
@@ -297,6 +329,7 @@ class IOResult:
             refusal=(
                 other.refusal if other.refusal is not None else self.refusal
             ),
+            closed_stdout=other.closed_stdout,
         )
         result.output = other.output
         result.output_finalized = other.output_finalized

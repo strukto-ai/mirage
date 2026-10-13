@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeAbortError } from '../utils/abort.ts'
+import { makeAbortError, mergeSignals } from '../utils/abort.ts'
+import { getCurrentEvaluation, getCurrentSession } from '../context/session_context.ts'
 import type { StatusWriter } from './types.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
@@ -69,6 +70,20 @@ export function lineStatusWriter(session: SessionState): StatusWriter | null {
 export function lineSignal(session: SessionState): AbortSignal | undefined {
   const frames = lineAbortContext.liveStores().filter((frame) => frame.sessions.includes(session))
   return frames.length === 1 ? frames[0]?.signal : undefined
+}
+
+/**
+ * The signal the current call answers to: its evaluation frame's and its
+ * line's. A read of a live pipe, or a copy out of or into one, waits on it,
+ * so its own reader's signal is what withdraws it; Python cancels the
+ * awaiting task instead.
+ */
+export function callerSignal(): AbortSignal | undefined {
+  const session = getCurrentSession()
+  return mergeSignals(
+    getCurrentEvaluation()?.frame.abortSignal,
+    session === null ? undefined : lineSignal(session),
+  )
 }
 
 /**

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from itertools import groupby
 from operator import itemgetter
 from typing import Any
@@ -298,12 +298,10 @@ async def _install_descriptor(
             else:
                 reading: ByteSource | PipeInput = data
                 if isinstance(data, PipeStream):
-                    # The descriptor outlives this read: each read of it
-                    # opens the pipe afresh, in its reader's own context.
+                    # The descriptor outlives this read: it keeps the pipe
+                    # the read opened, which each later read takes afresh.
                     await close_quietly(data)
-                    reading = PipeInput(
-                        scope, lambda: _open_pipe(dispatch, scope)
-                    )
+                    reading = PipeInput(data.path, data.end)
                 _bind(
                     session,
                     fd,
@@ -322,26 +320,6 @@ async def _install_descriptor(
                 )
     except FS_ERRORS as exc:
         return _error_line(scope.raw_path, exc)
-    return None
-
-
-async def _open_pipe(
-    dispatch: DispatchFn, scope: PathSpec
-) -> AsyncIterator[bytes] | None:
-    """A fresh read of the live pipe an ``exec`` keeps, None once the
-    substitution's command has released it.
-
-    Args:
-        dispatch (DispatchFn): op dispatcher.
-        scope (PathSpec): the pipe.
-    """
-    try:
-        data, _ = await dispatch("read", scope, stream=True)
-    except FileNotFoundError:
-        return None
-    if isinstance(data, PipeStream):
-        return data
-    await close_quietly(data)
     return None
 
 
@@ -664,6 +642,17 @@ async def divert_statement(
                     rest.append((later, more, True))
                 else:
                     await _routed(dispatch, session, later, more, rest)
+            closed = io.closed_stdout
+            if channel == Channel.STDOUT and closed is not None:
+                # The writer answers its stdout's closed reader itself
+                # (`tee -p`).
+                if closed.stderr:
+                    await _routed(
+                        dispatch, session, Channel.STDERR, closed.stderr, rest
+                    )
+                if closed.exit_code is not None:
+                    io.exit_code = closed.exit_code
+                break
             producer = None if io.producer is None else io.producer.command
             if not writer_forks(statement, session, producer):
                 raise ExitSignal(141) from None

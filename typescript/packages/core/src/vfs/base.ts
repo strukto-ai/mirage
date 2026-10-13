@@ -462,7 +462,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Copy a file within this VFS without moving its bytes through mirage. */
   @vfsCall({ effect: Effect.COPY, target: Target.FILE })
-  copy(_src: PathSpec, dst: PathSpec): Promise<void> {
+  copy(_src: PathSpec, dst: PathSpec, _signal?: AbortSignal): Promise<void> {
     return Promise.reject(enotsup(this.name, 'copy', dst))
   }
 

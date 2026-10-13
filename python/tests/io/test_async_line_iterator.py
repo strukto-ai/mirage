@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.core.dev.pipe import DevicePipe
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
     SharedInput,
@@ -265,7 +266,7 @@ async def test_load_rest_ends_the_source_and_reads_on_from_memory():
 @pytest.mark.asyncio
 async def test_a_descriptor_on_a_live_pipe_names_it_and_a_dup_keeps_it():
     pipe = PathSpec.from_str_path("/dev/fd/63")
-    shared = SharedInput(PipeStream(_chunks([b"x"]), pipe))
+    shared = SharedInput(PipeStream(_chunks([b"x"]), pipe, DevicePipe(True)))
     assert shared.pipe is pipe and shared.dup().pipe is pipe
     assert SharedInput(b"x").pipe is None
 

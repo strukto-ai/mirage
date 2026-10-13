@@ -534,13 +534,21 @@ async def handle_subshell(
                 merged_io = await land(written, sink, all_stdout, merged_io)
             except PipeClosed:
                 # What the statement wrote meets a pipe whose reader has
-                # gone: a child it forked (a program) dies of it alone,
-                # with 141, and the subshell goes on; the subshell's own
-                # write (a builtin's) ends it below.
+                # gone: a writer that answers that itself (`tee -p`) says
+                # what it says, a child it forked (a program) dies of it
+                # alone, with 141, and the subshell goes on; the
+                # subshell's own write (a builtin's) ends it below.
                 producer = None if io.producer is None else io.producer.command
-                if not writer_forks(child, session, producer):
+                closed = io.closed_stdout
+                if closed is not None:
+                    if closed.stderr and sink is not None:
+                        await sink.emit(Channel.STDERR, closed.stderr)
+                    if closed.exit_code is not None:
+                        io.exit_code = closed.exit_code
+                elif not writer_forks(child, session, producer):
                     raise
-                io.exit_code = 141
+                else:
+                    io.exit_code = 141
                 record_status(session, io.exit_code)
             merged_io = await merged_io.merge(io)
             merged_io = await land(
