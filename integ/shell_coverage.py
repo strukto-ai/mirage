@@ -79,6 +79,8 @@ def main() -> int:
         os.environ,
         PYTHONPATH=str(ROOT / "python"),
         COVERAGE_FILE=str(py / ".coverage"),
+        PYTHONFAULTHANDLER="1",
+        PYTHONUNBUFFERED="1",
     )
     # Explicit erase also prevents a developer's parallel/append settings from
     # pulling old unit-test data into this integration-only run.
