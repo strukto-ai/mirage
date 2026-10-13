@@ -349,6 +349,23 @@ describe('MontyRuntime', () => {
     expect(text(result.stderr)).toContain('FileNotFoundError')
   }, 30_000)
 
+  it('max_memory caps a run and leaves a small one alone', async () => {
+    const rt = new MontyRuntime({ config: { maxMemory: '1M' } })
+    runtimes.push(rt)
+    const big = await run(rt, 'x = [0] * 10_000_000')
+    expect(big.exitCode).toBe(1)
+    expect(text(big.stderr)).toContain('MemoryError')
+    const small = await run(rt, 'print(sum(range(10)))')
+    expect([small.exitCode, text(small.stdout)]).toEqual([0, '45\n'])
+  }, 30_000)
+
+  it('max_memory must be a size', () => {
+    expect(() => new MontyRuntime({ config: { maxMemory: 'lots' } })).toThrow(
+      /max_memory must be a size/,
+    )
+    expect(() => new MontyRuntime({ config: { maxMemory: ' 10M ' } })).not.toThrow()
+  })
+
   it('eval keeps state per session id', async () => {
     const rt = make()
     await rt.eval('x = 40', { session: 's1' })

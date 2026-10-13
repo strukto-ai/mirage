@@ -27,7 +27,7 @@ import { parseLimit } from '../cache/file/utils.ts'
  */
 export function memoryLimit(value: string | null | undefined): number | null {
   if (value === undefined || value === null) return null
-  if (!/^\s*\d+\s*([KMG]B?)?\s*$/i.test(value)) {
+  if (!/^\d+([KMG]B?)?$/i.test(value.trim())) {
     throw new Error(`max_memory must be a size like 10M or 1G, got '${value}'`)
   }
   return parseLimit(value)
