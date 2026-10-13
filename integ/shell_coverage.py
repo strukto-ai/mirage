@@ -109,11 +109,9 @@ def main() -> int:
         [
             (
                 [
-                    *coverage,
-                    "run",
-                    "--branch",
-                    "--source="
-                    + ",".join(
+                    sys.executable,
+                    "integ/coverage_run.py",
+                    ",".join(
                         "mirage." + source.replace("/", ".")
                         for source in sources
                     ),
