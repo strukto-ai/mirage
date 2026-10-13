@@ -29,31 +29,6 @@ import type { QuickJSAsyncContext, QuickJSAsyncRuntime, QuickJSHandle } from 'qu
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-type RuntimePointer = Parameters<QuickJSAsyncContext['getMemory']>[0]
-type ValuePointer = Parameters<ReturnType<QuickJSAsyncContext['getMemory']>['heapValueHandle']>[0]
-
-/**
- * What an async job drain needs of the engine. quickjs-emscripten runs
- * pending jobs through the bare QTS_ExecutePendingJob export (its cwrap
- * skips the asyncify wrapper for an all-number signature, its
- * `_MaybeAsync` twin included), so an asyncified host function called
- * from a job cannot suspend: a guest file call after an `await` failed and
- * its job was dropped. The emscripten module's own `cwrap`, asked for an
- * async call, waits out a suspension.
- */
-interface JobRunner {
-  rt: { value: RuntimePointer }
-  module: {
-    cwrap: (
-      name: string,
-      returns: 'number',
-      args: 'number'[],
-      opts: { async: true },
-    ) => (rt: RuntimePointer, max: number, lastContext: number) => Promise<ValuePointer>
-  }
-  ffi: { QTS_FreeValuePointerRuntime: (rt: RuntimePointer, value: ValuePointer) => void }
-}
-
 const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_SIZE = 1024 * 1024
 
@@ -377,7 +352,13 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
    * Run the jobs the program queued (promise reactions, async functions
    * past an `await`) until none are left, letting each suspend into the
    * file bridge as top-level code does. Mirrors the library's own
-   * executePendingJobs over the call that can suspend.
+   * executePendingJobs over the call that can suspend: quickjs-emscripten
+   * runs jobs through the bare QTS_ExecutePendingJob export (its cwrap
+   * skips the asyncify wrapper for an all-number signature, its
+   * `_MaybeAsync` twin included), so an asyncified host function called
+   * from a job could not suspend, and a guest file call after an `await`
+   * failed and dropped its job. The emscripten module's own `cwrap`, asked
+   * for an async call, waits out a suspension.
    */
   private async drainJobs(
     runtime: QuickJSAsyncRuntime,
@@ -385,7 +366,22 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     err: string[],
     exit: { called: boolean },
   ): Promise<number> {
-    const engine = runtime as unknown as JobRunner
+    type RuntimePointer = Parameters<QuickJSAsyncContext['getMemory']>[0]
+    type ValuePointer = Parameters<
+      ReturnType<QuickJSAsyncContext['getMemory']>['heapValueHandle']
+    >[0]
+    const engine = runtime as unknown as {
+      rt: { value: RuntimePointer }
+      module: {
+        cwrap: (
+          name: string,
+          returns: 'number',
+          args: 'number'[],
+          opts: { async: true },
+        ) => (rt: RuntimePointer, max: number, lastContext: number) => Promise<ValuePointer>
+      }
+      ffi: { QTS_FreeValuePointerRuntime: (rt: RuntimePointer, value: ValuePointer) => void }
+    }
     const memory = ctx.getMemory(engine.rt.value)
     const executePendingJob = engine.module.cwrap(
       'QTS_ExecutePendingJob',
