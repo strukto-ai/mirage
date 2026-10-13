@@ -18,19 +18,29 @@ inputs:
   start-services:
     description: Start the shared backend services used by the batteries.
     default: "true"
+  python-version:
+    description: >-
+      The interpreter the venv is built on. Another version keeps its wheels
+      under a uv cache entry of its own, so it never races the shared one.
+    default: "3.12"
+  uv-sync-args:
+    description: The extras the venv installs, as `uv sync` arguments.
+    default: "--all-extras"
 runs:
   using: composite
   steps:
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
-        python-version: "3.12"
+        python-version: ${{ inputs.python-version }}
     - name: Install uv
       uses: ./.github/actions/setup-uv
+      with:
+        cache-suffix: ${{ inputs.python-version != '3.12' && format('py{0}', inputs.python-version) || '' }}
     - name: Install Python dependencies
       working-directory: python
       shell: bash
-      run: uv sync --all-extras
+      run: uv sync --python ${{ inputs.python-version }} ${{ inputs.uv-sync-args }}
     - name: Set up Node and pnpm
       uses: ./.github/actions/setup-node-pnpm
       with:

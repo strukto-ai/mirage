@@ -3,6 +3,8 @@
 Run after building core/node: python integ/shell_coverage.py [--measure].
 Unit-test data is never loaded. Both hosts must finish the strict battery before
 fresh statement and branch reports are compared with shell_coverage.json.
+The two hosts' batteries run at once, each into its own log, printed whole
+once both have finished.
 """
 
 import argparse
@@ -20,6 +22,37 @@ def run(
     argv: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None
 ) -> None:
     subprocess.run(argv, cwd=cwd, env=env, check=True)
+
+
+def run_together(
+    legs: list[tuple[list[str], Path, Path, dict[str, str] | None]],
+) -> None:
+    """Run every leg at once and print each log whole once all have ended.
+
+    Args:
+        legs (list[tuple[list[str], Path, Path, dict[str, str] | None]]):
+            each leg's argv, working directory, log file and environment.
+    """
+    running = []
+    for argv, cwd, log, env in legs:
+        with log.open("wb") as out:
+            running.append(
+                (
+                    argv,
+                    log,
+                    subprocess.Popen(
+                        argv, cwd=cwd, env=env, stdout=out, stderr=out
+                    ),
+                )
+            )
+    codes = [(argv, log, process.wait()) for argv, log, process in running]
+    for _, log, code in codes:
+        print(f"=== {log.name}: exit {code} ===", flush=True)
+        sys.stdout.buffer.write(log.read_bytes())
+        sys.stdout.flush()
+    for argv, _, code in codes:
+        if code:
+            raise subprocess.CalledProcessError(code, argv)
 
 
 def main() -> int:
@@ -51,21 +84,6 @@ def main() -> int:
     # pulling old unit-test data into this integration-only run.
     coverage = [sys.executable, "-m", "coverage"]
     run([*coverage, "erase"], env=env)
-    run(
-        [
-            *coverage,
-            "run",
-            "--branch",
-            "--source="
-            + ",".join(
-                "mirage." + source.replace("/", ".") for source in sources
-            ),
-            "integ/runners/python/main.py",
-            *battery,
-        ],
-        env=env,
-    )
-    run([*coverage, "json", "-o", str(py / "coverage.json")], env=env)
     include = [
         item
         for source in sources
@@ -76,30 +94,54 @@ def main() -> int:
             f"**/{source}.js",
         )
     ]
-    run(
+    run_together(
         [
-            "node",
-            "node_modules/c8/bin/c8.js",
-            "--all",
-            "--allowExternal",
-            "--clean",
-            "--src",
-            "../typescript/packages/core/dist",
-            "--src",
-            "../typescript/packages/node/dist",
-            *include,
-            "--reporter=json",
-            "--reporter=json-summary",
-            "--reports-dir=" + str(ts),
-            "--temp-directory=" + str(ts / "raw"),
-            "node",
-            "--import",
-            "tsx",
-            "runners/typescript/main.ts",
-            *battery,
-        ],
-        cwd=ROOT / "integ",
+            (
+                [
+                    *coverage,
+                    "run",
+                    "--branch",
+                    "--source="
+                    + ",".join(
+                        "mirage." + source.replace("/", ".")
+                        for source in sources
+                    ),
+                    "integ/runners/python/main.py",
+                    *battery,
+                ],
+                ROOT,
+                REPORTS / "python.log",
+                env,
+            ),
+            (
+                [
+                    "node",
+                    "node_modules/c8/bin/c8.js",
+                    "--all",
+                    "--allowExternal",
+                    "--clean",
+                    "--src",
+                    "../typescript/packages/core/dist",
+                    "--src",
+                    "../typescript/packages/node/dist",
+                    *include,
+                    "--reporter=json",
+                    "--reporter=json-summary",
+                    "--reports-dir=" + str(ts),
+                    "--temp-directory=" + str(ts / "raw"),
+                    "node",
+                    "--import",
+                    "tsx",
+                    "runners/typescript/main.ts",
+                    *battery,
+                ],
+                ROOT / "integ",
+                REPORTS / "typescript.log",
+                None,
+            ),
+        ]
     )
+    run([*coverage, "json", "-o", str(py / "coverage.json")], env=env)
     totals = json.loads((py / "coverage.json").read_text())["totals"]
     summary = json.loads((ts / "coverage-summary.json").read_text())["total"]
     counts = {

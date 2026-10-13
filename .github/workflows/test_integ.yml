@@ -2394,10 +2394,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      # Python 3.14, where coverage measures branches through sys.monitoring,
+      # which stops reporting a line or branch once it has been seen. 3.12
+      # only has settrace, which calls back on every line the battery runs:
+      # there the Python half took 25 minutes and the shell code ran about 14
+      # times slower than without coverage. 1password has no 3.14 wheel and
+      # the battery never loads it (`all` would bring it back).
       - uses: ./.github/actions/integ-battery-setup
         with:
           start-services: "false"
           typescript-build-artifact: integ-typescript-dist
+          python-version: "3.14"
+          uv-sync-args: --all-extras --no-extra all --no-extra 1password
       - name: Enforce integration-only shell coverage floors
         run: ./python/.venv/bin/python integ/shell_coverage.py
       - name: Upload coverage reports
