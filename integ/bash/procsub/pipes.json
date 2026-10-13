@@ -1146,7 +1146,7 @@
       "command": "f() { ls -l /dev/fd | awk 'NR > 1 { print $1, $5, $NF }'; du -a /dev/fd; find /dev -type p; find /dev -size -1; }; f <(true)",
       "expect": {
         "exit": 0,
-        "stdout": "prw------- 0 63\n0\t/dev/fd/63\n0\t/dev/fd\n/dev/fd/63\n/dev/fd/63\n",
+        "stdout": "prw------- 0 63\n0\t/dev/fd/63\n0\t/dev/fd\n/dev/fd/63\n/dev/fd/63\n/dev/null\n/dev/zero\n",
         "stderr": ""
       },
       "note": "Divergence: GNU bash 5.2.37 on Linux prints \"0\\t/dev/fd\" and then every zero-size node under /dev. There /dev/fd is a symlink to procfs's /proc/self/fd, whose entries are links to pipe:[N], so ls -l shows the link alone, du does not follow it and find meets no FIFO. Mirage's /dev/fd is a directory holding the substitutions' FIFOs, which list, count and match as FIFOs."
