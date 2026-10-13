@@ -16,6 +16,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { GitHubAccessor } from '../../accessor/github.ts'
 import type { GitHubTransport } from './client.ts'
 import { tree } from './stat.ts'
+import type * as Tree from './tree.ts'
 import type { TreeEntry } from './tree_entry.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { materialize } from '../../io/types.ts'
@@ -24,7 +25,7 @@ import type { FlagValue } from '../../commands/spec/types.ts'
 import { BUILDER } from '../../commands/builtin/generic_bind/builders/du.ts'
 
 vi.mock('./tree.ts', async (importActual) => ({
-  ...(await importActual<typeof import('./tree.ts')>()),
+  ...(await importActual<typeof Tree>()),
   ensureTree: vi.fn().mockResolvedValue(undefined),
 }))
 
