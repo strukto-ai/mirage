@@ -4,7 +4,7 @@ What only Pyodide has. TypeScript host only.
 
 | File           | Pins                                                                                                                                                                                                           |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mounts.json`  | no mount preload; the cwd falls back without a root mount                                                                                                                                                      |
+| `mounts.json`  | no mount preload; the cwd falls back without a root mount; a mount over the stdlib at `/lib` refuses the run; one beside it runs                                                                               |
 | `streams.json` | a JSON tool closes its output; output after memory growth (also read by `pyodide_streams.test.ts`)                                                                                                             |
 | `env.json`     | each command's environment stays its own; each call starts with a clean interpreter                                                                                                                            |
 | `errors.json`  | user tracebacks; `sys.exit` sets the status                                                                                                                                                                    |

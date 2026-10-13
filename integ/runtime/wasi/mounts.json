@@ -1,0 +1,78 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_WASI_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "a_mount_over_the_stdlib_refuses_the_run",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/lib": {
+            "vfs": "ram",
+            "files": {
+              "note.txt": "x\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'print(1)'",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "mirage: the wasi runtime cannot run with a mount at '/lib', which hides the interpreter's standard library at /lib\n"
+          }
+        },
+        {
+          "command": "cat /lib/note.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "x\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_mount_beside_the_stdlib_runs",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/lib/app": {
+            "vfs": "ram",
+            "files": {
+              "note.txt": "beside\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import json; print(json.dumps(open('/lib/app/note.txt').read()))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"beside\\n\"\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}
