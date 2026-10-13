@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-FlushKind = Literal["write", "append", "pwrite", "truncate"]
+FlushKind = Literal["append", "pwrite", "truncate"]
 
 FileFetch = Callable[[int, int | None], bytes]
 

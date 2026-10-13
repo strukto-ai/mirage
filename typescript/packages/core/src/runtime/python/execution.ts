@@ -15,6 +15,9 @@
 import type { RunArgs } from '../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
+// argv[0] for the two entry points that do not read it off the command line.
+export const PAYLOAD_ARGV0 = '-c'
+export const STDIN_ARGV0 = '-'
 const STDIN_FILENAME = '<stdin>'
 
 /**
@@ -31,7 +34,7 @@ const STDIN_FILENAME = '<stdin>'
 export function mainFilename(args: RunArgs): string | null {
   const script = args.scriptPath
   if (script === undefined) {
-    return args.prog === '' || args.prog === '-' ? STDIN_FILENAME : null
+    return args.prog === '' || args.prog === STDIN_ARGV0 ? STDIN_FILENAME : null
   }
   const typed = script.rawPath !== '' ? script.rawPath : script.virtual
   if (typed.startsWith('/')) return typed
@@ -51,13 +54,17 @@ export function mainFilename(args: RunArgs): string | null {
  */
 export function prepareSource(args: RunArgs): string {
   const filename = mainFilename(args)
-  if (args.scriptCli !== true && filename === null && (args.prog ?? '-c') === '-c') {
+  if (
+    args.scriptCli !== true &&
+    filename === null &&
+    (args.prog ?? PAYLOAD_ARGV0) === PAYLOAD_ARGV0
+  ) {
     return args.code
   }
   // JSON string literals are also Python string literals; encode twice so
   // Python's JSON decoder, not its source parser, handles source escapes.
   const source = `__import__('json').loads(${JSON.stringify(JSON.stringify(args.code))})`
-  const prog = JSON.stringify(args.prog ?? '-c')
+  const prog = JSON.stringify(args.prog ?? PAYLOAD_ARGV0)
   const name = JSON.stringify(
     filename ?? (args.prog !== undefined && args.prog !== '' ? args.prog : '<string>'),
   )

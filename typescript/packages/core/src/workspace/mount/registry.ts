@@ -118,6 +118,12 @@ export class MountRegistry {
   // Catch-all when its captures are empty; explicit captures make
   // unclaimed commands an admission failure (126).
   workspaceRuntime: WorkspaceRuntime | null = null
+  // Workspace-level command -> runtime bindings (first listed capturer
+  // wins), written by Runtimes beside runtimeEntries.
+  runtimeBindings: Readonly<Record<string, Runtime | undefined>> = Object.create(null) as Record<
+    string,
+    Runtime
+  >
   // The ordered runtime world, set by Runtimes at construction (the
   // live array, so add() keeps it fresh). The CLI script arm selects
   // an interpreter from it (a runtime: pin or the script's language),

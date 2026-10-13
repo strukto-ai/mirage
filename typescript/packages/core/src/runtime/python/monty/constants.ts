@@ -27,10 +27,6 @@ export const MAX_URANDOM_BYTES = 1_048_576
 // reaches; the command limits bound a run instead.
 export const LIMITS = { maxSuspensions: 2 ** 31 - 1 }
 
-// One-shot eval is bounded like quickjs's: nothing above the runtime
-// can stop a hung guest, so the runtime owns its own interrupt.
-export const EVAL_INTERRUPT_SECONDS = 10
-
 // A console tells "keep typing" from "this is broken" by matching
 // monty's own traceback wording, so a version that rephrases either
 // line turns every continuation into an error at the prompt.

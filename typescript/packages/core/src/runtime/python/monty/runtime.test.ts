@@ -677,8 +677,8 @@ describe('Workspace with the monty runtime', () => {
 })
 
 describe('monty unavailable', () => {
-  it('handlePython maps MontyUnavailableError to exit 127', async () => {
-    const { handlePython } = await import('../../../commands/builtin/general/python.ts')
+  it('runCode maps MontyUnavailableError to exit 127', async () => {
+    const { runCode } = await import('../../../commands/builtin/general/interpreter.ts')
     const { MontyUnavailableError } = await import('./index.ts')
     class UnavailableMonty extends MontyRuntime {
       override run(): Promise<never> {
@@ -689,14 +689,16 @@ describe('monty unavailable', () => {
       }
     }
     const runtime = new UnavailableMonty()
-    const dispatch = (() => Promise.reject(new Error('unused'))) as never
-    const [, io] = await handlePython(
-      dispatch,
-      null,
-      [],
-      { stdin: null, env: {}, code: 'print(1)' },
-      { runtime },
-    )
+    const source = {
+      code: 'print(1)',
+      args: [],
+      stdin: null,
+      scriptPath: null,
+      mode: 'payload' as const,
+    }
+    const out = await runCode('python3', source, runtime, {}, { stdin: null, flags: {}, cwd: '/' })
+    if (out === null) throw new Error('no output')
+    const [, io] = out
     expect(io.exitCode).toBe(127)
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toContain('@pydantic/monty')
   })

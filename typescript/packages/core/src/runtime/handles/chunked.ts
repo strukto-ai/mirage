@@ -25,10 +25,6 @@ import { READ_CHUNK } from './constants.ts'
  * fetch comes back short, not at the size the open saw: a rendering need
  * not be as long as the stored bytes a stat measured, so that size answers
  * only until the end has been seen. Mirrors Python's `ChunkedHandle`.
- *
- * A guest that reads synchronously (quickjs) asks `lacks` or `lacksLine`
- * first and awaits `fill` until it answers false; `read` and `readLine` then answer from the
- * kept bytes without a fetch.
  */
 export class ChunkedHandle {
   readonly path: string
@@ -64,33 +60,9 @@ export class ChunkedHandle {
     return size < 0 && !this.keptToEnd()
   }
 
-  /** Whether the line at the position needs a fetch first. */
-  lacksLine(): boolean {
-    if (this.lacks(1)) return true
-    return !this.atEnd(this.pos) && this.newlineAt() < 0 && !this.keptToEnd()
-  }
-
   /** Fetch what a read of `size` bytes at the position lacks; any other size, one more chunk. */
   async fill(size: number): Promise<void> {
     await this.load(this.pos, Math.max(size, 0))
-  }
-
-  /** Read from the position, advancing it; the kept bytes must answer it (`lacks`). */
-  read(size: number | null): Uint8Array {
-    const budget = size === null || size < 0 ? this.start + this.kept.length - this.pos : size
-    const chunk = this.slice(this.pos, budget)
-    this.pos += chunk.length
-    return chunk
-  }
-
-  /** The line at the position without its newline, or null at the end. */
-  readLine(): Uint8Array | null {
-    if (this.atEnd(this.pos) || !this.covers(this.pos, 1)) return null
-    const newline = this.newlineAt()
-    const stop = newline < 0 ? this.start + this.kept.length : newline
-    const line = this.slice(this.pos, stop - this.pos)
-    this.pos = newline < 0 ? stop : stop + 1
-    return line
   }
 
   /** The kept bytes from `offset`, at most `size` of them; empty when none are kept there. */
@@ -125,11 +97,6 @@ export class ChunkedHandle {
     return (
       this.start <= offset && offset < keptEnd && (offset + size <= keptEnd || keptEnd === this.end)
     )
-  }
-
-  private newlineAt(): number {
-    const index = this.kept.indexOf(0x0a, this.pos - this.start)
-    return index < 0 ? -1 : this.start + index
   }
 
   private slice(offset: number, size: number): Uint8Array {

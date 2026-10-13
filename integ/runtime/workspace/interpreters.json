@@ -59,6 +59,24 @@
           }
         }
       ]
+    },
+    {
+      "id": "no_language_runtime_answers_before_reading_the_script",
+      "world": {
+        "runtimes": [
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 /missing.py; echo \"exit=$?\"; node /missing.js; echo \"exit=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "exit=127\nexit=127\n",
+            "stderr": "python3: command not found\nnode: command not found\n"
+          }
+        }
+      ]
     }
   ]
 }

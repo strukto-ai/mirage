@@ -18,7 +18,7 @@ import { access, stat } from 'node:fs/promises'
 import { delimiter, isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
@@ -147,9 +147,7 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
 
   constructor(options: RuntimeOptions = {}) {
     super(options, LOCAL_CONFIG_KEYS)
-    const home = (this.config as LocalConfig).home
-    const chosen = home !== undefined && home !== '' ? home : process.env[LOCAL_HOME_ENV]
-    this.python = onHostPath(chosen !== undefined && chosen !== '' ? chosen : 'python3')
+    this.python = onHostPath(resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV) ?? 'python3')
   }
 
   override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {

@@ -22,7 +22,6 @@ import pytest
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
-from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import (
     FT_DIR,
     FT_REG,
@@ -194,7 +193,7 @@ def test_mount_prefix_routes_to_bridge_even_when_host_file_exists(tmp_path):
     bridge = FakeVFS(
         files={"/data/f.txt": b"bridge-side"}, prefixes=["/data/"]
     )
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    fs = WasmView(str(tmp_path), bridge)
     assert fs.read("/data/f.txt") == b"bridge-side"
 
 
@@ -202,24 +201,24 @@ def test_host_serves_paths_outside_mounts(tmp_path):
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "os.py").write_text("stdlib")
     bridge = FakeVFS(prefixes=["/data/"])
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    fs = WasmView(str(tmp_path), bridge)
     assert fs.read("/lib/os.py") == b"stdlib"
     assert bridge.calls == []
 
 
 def test_missing_host_path_falls_through_to_bridge(tmp_path):
     bridge = FakeVFS(files={"/new.txt": b"ram-root"})
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    fs = WasmView(str(tmp_path), bridge)
     assert fs.read("/new.txt") == b"ram-root"
-    fs.write("/created.txt", b"x")
-    assert bridge.files["/created.txt"] == b"x"
+    fs.create("/created.txt")
+    assert bridge.files["/created.txt"] == b""
 
 
 def test_host_paths_are_read_only(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), FakeVFS())
+    fs = WasmView(str(tmp_path), FakeVFS())
     with pytest.raises(PermissionError, match="read-only"):
-        fs.write("/python.wasm", b"clobber")
+        fs.create("/python.wasm")
     with pytest.raises(PermissionError, match="read-only"):
         fs.unlink("/python.wasm")
     assert (tmp_path / "python.wasm").read_bytes() == b"\0asm"
@@ -304,7 +303,7 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     (tmp_path / "lib").mkdir()
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     bridge = FakeVFS(files={"/root.txt": b""}, prefixes=["/data/", "/logs/"])
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    fs = WasmView(str(tmp_path), bridge)
     # Mount entries arrive through the core readdir (the dispatcher merges
     # them) and resolve as directories through the dispatcher's stat, which
     # answers for a structure-only path.
@@ -332,7 +331,7 @@ def test_a_root_mount_does_not_shadow_the_build_directory(tmp_path):
         files={"/lib/os.py": b"mount-side", "/mine.txt": b"root-side"},
         prefixes=["/"],
     )
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    fs = WasmView(str(tmp_path), bridge)
     assert fs.read("/lib/os.py") == b"stdlib"
     assert fs.read("/mine.txt") == b"root-side"
     # An empty name would be the root prefix mistaken for a directory.
@@ -342,7 +341,7 @@ def test_a_root_mount_does_not_shadow_the_build_directory(tmp_path):
 def test_rename_within_bridge_and_across_routes(tmp_path):
     (tmp_path / "host.txt").write_text("x")
     bridge = FakeVFS(files={"/data/a.txt": b"move-me"}, prefixes=["/data/"])
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    fs = WasmView(str(tmp_path), bridge)
     fs.rename("/data/a.txt", "/data/b.txt")
     assert bridge.files == {"/data/b.txt": b"move-me"}
     with pytest.raises(OSError) as exc:
@@ -447,7 +446,7 @@ def test_readlink_on_a_build_path_is_einval_not_read_only(tmp_path):
     # holds no links, so the refusal is readlink's own.
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "os.py").write_text("stdlib")
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), FakeVFS())
+    fs = WasmView(str(tmp_path), FakeVFS())
     with pytest.raises(OSError) as caught:
         fs.readlink("/lib/os.py")
     assert caught.value.errno == host_errno.EINVAL
@@ -482,7 +481,7 @@ def test_a_mutation_of_a_build_file_stays_refused(tmp_path):
     # the build tree routes to the bridge, exactly as a new file does.
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "os.py").write_text("stdlib")
-    fs = WasmView(WasmFsConfig(host_root=str(tmp_path)), FakeVFS())
+    fs = WasmView(str(tmp_path), FakeVFS())
     with pytest.raises(PermissionError):
         fs.symlink("/lib/os.py", "elsewhere.py")
     with pytest.raises(PermissionError):

@@ -39,18 +39,9 @@ export async function runExternal(
   routing?: RouteDecision<Runtime>,
   signal?: AbortSignal,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
-  const key =
-    routing === undefined
-      ? registry.runtimeEntries.some((entry) => entry.captures.includes(argv.name))
-        ? argv.name
-        : EXTERNAL_COMMANDS
-      : Object.hasOwn(routing.bindings, argv.name)
-        ? argv.name
-        : EXTERNAL_COMMANDS
-  const runtime =
-    routing === undefined
-      ? registry.runtimeEntries.find((entry) => entry.captures.includes(key))
-      : routing.bindings[key]
+  const bindings = routing === undefined ? registry.runtimeBindings : routing.bindings
+  const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
+  const runtime = bindings[key]
   const command = shellJoin(argv.tokens)
   if (runtime == null) {
     const stderr = encodeText(`${argv.name}: no runtime accepted this line\n`)

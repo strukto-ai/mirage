@@ -23,10 +23,11 @@ import {
   type MontyPoolLike,
   type MontySessionLike,
 } from './loader.ts'
-import { DEFAULT_PROG, EVAL_INTERRUPT_SECONDS, INCOMPLETE_MARKERS, LIMITS } from './constants.ts'
+import { DEFAULT_PROG, INCOMPLETE_MARKERS, LIMITS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import type { RuntimeFiles } from '../../files.ts'
+import { SCRIPT_EVAL_TIMEOUT } from '../../constants.ts'
 
 const INTERRUPTED = Symbol('interrupted')
 
@@ -207,7 +208,7 @@ export class MontyExecution {
     const workerPid = session.workerPid
     const interruption =
       opts.session === undefined
-        ? this.installInterruption(undefined, EVAL_INTERRUPT_SECONDS)
+        ? this.installInterruption(undefined, SCRIPT_EVAL_TIMEOUT.seconds)
         : null
     try {
       const fed = session.feedRun(code, options)
@@ -216,7 +217,7 @@ export class MontyExecution {
       if (winner === INTERRUPTED) {
         fed.catch(() => undefined)
         killWorker(workerPid)
-        throw new EvalError(`monty eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
+        throw new EvalError(`monty eval timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
       }
       const value = toEvalValue(winner)
       return {

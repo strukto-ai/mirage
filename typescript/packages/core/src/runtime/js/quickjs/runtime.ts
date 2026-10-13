@@ -39,8 +39,8 @@ const STACK_SIZE = 1024 * 1024
 // matching the Python runtime's live file I/O.
 export class QuickJsRuntime extends JsRuntime {
   readonly name = 'quickjs'
-  // The engine is a WASI guest whose `std.open`/`os.readdir` suspend
-  // into the workspace bridge: guest I/O has no way around the gate.
+  // The engine's `std.open`/`os.readdir` suspend (asyncify) into the
+  // workspace bridge: guest I/O has no way around the gate.
   override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   private newAsyncModule: NewAsyncModule | null = null
@@ -95,7 +95,7 @@ export class QuickJsRuntime extends JsRuntime {
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const files = context !== undefined ? RuntimeFiles.of(context) : null
+      const files = RuntimeFiles.of(context)
       const closeAll = installQuickJsFs(ctx, files)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')

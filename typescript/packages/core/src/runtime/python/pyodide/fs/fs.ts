@@ -16,7 +16,6 @@ import { epochToIso } from '../../../../utils/dates.ts'
 import type { SetAttrFields } from '../../../../types.ts'
 import {
   BLKSIZE,
-  BLOCK_UNIT,
   DIR_MODE,
   FILE_MODE,
   GROW_FLOOR,
@@ -30,7 +29,10 @@ import {
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
+import { entryName } from '../../../../utils/remnants.ts'
+import { S_IFCHR, S_IFMT } from '../../../../utils/stat_view.ts'
 import { isUnclassified } from '../../../files.ts'
+import { posixStat } from '../../../stat.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { MirageMutation, MutationJournal } from './journal.ts'
 import { NodeTable } from './nodes.ts'
@@ -49,8 +51,6 @@ import type {
 } from './types.ts'
 
 const ENC = new TextEncoder()
-const S_IFMT = 0o170000
-const S_IFCHR = 0o020000
 
 // Emscripten's MEMFS makes these three at startup and its own stderr capture
 // reopens /dev/stderr when a run ends (`API.restore_stderr`). Mounting mirage's
@@ -112,24 +112,6 @@ export function changedAttrs(node: FSNode, attr: SetAttr): SetAttrFields | null 
 }
 
 /**
- * An Emscripten filesystem backed by a mirage mount.
- *
- * This is the pyodide runtime's interception layer. Mounting it at a mount
- * prefix puts mirage below the guest's syscall boundary, where every
- * spelling of an operation (`open`, `os.open`, `pathlib`, `shutil`'s
- * fd-relative walk) arrives as the same callback. Nothing is patched
- * inside the interpreter.
- *
- * Callbacks are synchronous: uncached lookups and reads wait for the host
- * through SyncVFS, which needs the worker. Writes enter the journal and
- * flush before a lazy backend read or after the run, preserving guest
- * order.
- *
- * The node table lives in `NodeTable` and the flush decision in
- * `planFlush`; what is left here is one method per Emscripten callback,
- * plus the errno translation only this layer performs.
- */
-/**
  * A name a repeat listing found, classified by its own stat as the
  * first listing's file adapter classifies it, or left as the listing's row
  * when that stat fails, the way the file adapter degrades one.
@@ -151,6 +133,24 @@ function takeOwner(node: FSNode, stat: VFSStat | VFSEntry): void {
   if (typeof stat.gid === 'number') node.gid = stat.gid
 }
 
+/**
+ * An Emscripten filesystem backed by a mirage mount.
+ *
+ * This is the pyodide runtime's interception layer. Mounting it at a mount
+ * prefix puts mirage below the guest's syscall boundary, where every
+ * spelling of an operation (`open`, `os.open`, `pathlib`, `shutil`'s
+ * fd-relative walk) arrives as the same callback. Nothing is patched
+ * inside the interpreter.
+ *
+ * Callbacks are synchronous: uncached lookups and reads wait for the host
+ * through SyncVFS, which needs the worker. Writes enter the journal and
+ * flush before a lazy backend read or after the run, preserving guest
+ * order.
+ *
+ * The node table lives in `NodeTable`; what is left here is one method
+ * per Emscripten callback, plus the errno translation only this layer
+ * performs.
+ */
 export class PyodideFs {
   readonly type: FSType
   private readonly host: FSHost
@@ -226,20 +226,29 @@ export class PyodideFs {
       : this.host.isDir(node.mode)
         ? BLKSIZE
         : (node.usedBytes ?? 0)
+    // The stat every runtime shares, so one path reports one inode
+    // whoever asks; a sandbox owns nothing, so an owner the node lacks
+    // is 0. The times stay the node's, which carry unflushed writes.
+    const posix = posixStat(
+      { size, isDir: this.host.isDir(node.mode), mode: node.mode },
+      this.nodes.pathOf(node),
+      '/',
+      { uid: node.uid ?? 0, gid: node.gid ?? 0 },
+    )
     return {
-      dev: 1,
-      ino: node.id,
+      dev: posix.dev,
+      ino: posix.ino,
       mode: node.mode,
-      nlink: this.host.isDir(node.mode) ? 2 : 1,
-      uid: node.uid ?? 0,
-      gid: node.gid ?? 0,
+      nlink: posix.nlink,
+      uid: posix.uid,
+      gid: posix.gid,
       rdev: node.rdev,
       size,
       atime: new Date(node.atime),
       mtime: new Date(node.mtime),
       ctime: new Date(node.ctime),
-      blksize: BLKSIZE,
-      blocks: Math.ceil(size / BLOCK_UNIT),
+      blksize: posix.blksize,
+      blocks: posix.blocks,
     }
   }
 
@@ -415,7 +424,7 @@ export class PyodideFs {
       const dir = this.nodes.pathOf(node) + '/'
       const again = node.listed === true
       for (const entry of sync.readdir(dir, !again)) {
-        const name = entry.path.replace(/\/$/, '').split('/').pop() ?? ''
+        const name = entryName(entry.path)
         if (this.nodes.childOf(node, name) !== undefined) continue
         this.placeEntry(node, name, again ? ownRow(sync, dir + name, entry) : entry)
       }

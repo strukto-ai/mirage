@@ -45,6 +45,7 @@ import { classify } from '../../../errors/index.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
+import { SCRIPT_EVAL_TIMEOUT } from '../../constants.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
@@ -181,13 +182,6 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
     },
   )
 }
-
-/** The pyodide runtime's implementation knobs (its `config` block). */
-
-// One-shot eval is bounded like quickjs's: nothing above the runtime
-// can stop a hung guest on this thread, so the runtime owns its own
-// interrupt. Console (repl) sessions stay unbounded, matching python.
-const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'pyodide'
@@ -466,7 +460,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string },
     context?: RuntimeContext,
   ): Promise<EvalResult> {
-    this.files = context !== undefined ? RuntimeFiles.of(context) : null
+    this.files = RuntimeFiles.of(context)
     const worker = await this.ensureWorker(context)
     if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && context !== undefined) {
@@ -503,7 +497,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
     const pyodide = await this.ensureLoaded()
     await this.loadImports(pyodide, code)
-    const armed = this.interrupter !== null ? this.interrupter.arm(EVAL_INTERRUPT_SECONDS) : null
+    const armed =
+      this.interrupter !== null ? this.interrupter.arm(SCRIPT_EVAL_TIMEOUT.seconds) : null
     try {
       const arr = this.guestModule(pyodide).evaluate(
         code,
@@ -511,7 +506,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         this.guestCwd(context?.cwd),
       )
       if (armed?.disarm() === 'deadline') {
-        throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
+        throw new EvalError(`pyodide eval timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
       }
       const flushFailures = this.drainMutations()
       const [valueJson, out, errBytes, ok, syntax] = arr
@@ -531,9 +526,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       const deadline = armed?.disarm() === 'deadline'
       for (const failure of this.drainMutations()) console.warn(failure)
       if (deadline) {
-        throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`, {
-          cause: err,
-        })
+        throw new EvalError(
+          `pyodide eval timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`,
+          {
+            cause: err,
+          },
+        )
       }
       throw err
     } finally {
@@ -887,7 +885,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    this.files = context !== undefined ? RuntimeFiles.of(context) : null
+    this.files = RuntimeFiles.of(context)
     const hiding = stdlibMount(this.files?.prefixes() ?? [])
     if (hiding !== null) {
       return {

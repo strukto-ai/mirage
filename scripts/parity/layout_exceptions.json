@@ -38,7 +38,7 @@
   },
   "runtime/js/quickjs": {
    "typescript_only": {
-    "errors": "The preview1 errno table and QuickJsUnavailableError for the Emscripten callbacks: the same guest-visible numbers Python's runtime/wasm/errors.py keeps for every WASI guest, which Python QuickJS uses.",
+    "errors": "QuickJsUnavailableError, raised when the optional quickjs-emscripten package is missing. Python QuickJS runs a qjs build on disk and raises FileNotFoundError when it is missing, so it has no error module.",
     "fs": "The QuickJS Emscripten host callbacks over RuntimeFiles. Python QuickJS is a WASI guest whose file callbacks are the shared runtime/wasm/fs.py host, which is already excused.",
     "list": "Encodes directory entries as QuickJS Emscripten handles. Python QuickJS gets preview1 dirents from the shared runtime/wasm/list.py.",
     "loader": "Imports the optional quickjs-emscripten npm package. Python QuickJS locates qjs-wasi.wasm on disk and runs it on the shared runtime/wasm host, whose runtime/wasm/loader.py imports wasmtime.",

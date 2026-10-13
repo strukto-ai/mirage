@@ -40,9 +40,8 @@ function handle(
   return { file, fetched }
 }
 
-async function filled(file: ChunkedHandle, size: number | 'line'): Promise<void> {
-  while (size === 'line' ? file.lacksLine() : file.lacks(size))
-    await file.fill(size === 'line' ? 0 : size)
+async function filled(file: ChunkedHandle, size: number): Promise<void> {
+  while (file.lacks(size)) await file.fill(size)
 }
 
 describe('ChunkedHandle', () => {
@@ -66,42 +65,30 @@ describe('ChunkedHandle', () => {
     ] as const) {
       const { file } = handle(data, size)
       await filled(file, -1)
-      expect(DEC.decode(file.read(null))).toBe(data)
+      expect(DEC.decode(file.peek(0, 100))).toBe(data)
+      file.pos = data.length
       expect([file.size, file.eof]).toEqual([data.length, true])
     }
   })
 
   it('keeps the size when a read past the end finds nothing', async () => {
-    // Nothing at 100 does not put the end there: a seek to the end, and a
-    // write after it, stay at 3.
+    // Nothing at 100 does not put the end there: the size, and a write
+    // after it, stay at 3.
     const { file } = handle('abc')
     file.pos = 100
     await filled(file, 4)
-    expect([file.read(4).length, file.size]).toEqual([0, 3])
+    expect([file.peek(100, 4).length, file.size]).toEqual([0, 3])
   })
 
-  it('fills a line that runs across two chunks', async () => {
-    // A synchronous guest reads only what the kept bytes hold, so a line
-    // crossing a chunk edge must be held whole before it is read.
-    const { file } = handle('ab\ncdefgh\nij')
-    const lines: string[] = []
-    for (;;) {
-      await filled(file, 'line')
-      const line = file.readLine()
-      if (line === null) break
-      lines.push(DEC.decode(line))
-    }
-    expect(lines).toEqual(['ab', 'cdefgh', 'ij'])
-  })
-
-  it('reads a byte budget, and refetches after a drop', async () => {
+  it('fills a byte budget, and refetches after a drop', async () => {
     const { file, fetched } = handle()
     await filled(file, 3)
-    expect(DEC.decode(file.read(3))).toBe('012')
+    expect(DEC.decode(file.peek(0, 3))).toBe('012')
+    file.pos = 3
     file.drop()
     expect(file.lacks(1)).toBe(true)
     await filled(file, 1)
-    expect(DEC.decode(file.read(1))).toBe('3')
+    expect(DEC.decode(file.peek(3, 1))).toBe('3')
     expect(fetched).toEqual([
       [0, 4],
       [3, 4],

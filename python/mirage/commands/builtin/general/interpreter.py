@@ -18,9 +18,9 @@ from typing import Any, Literal, TypeAlias
 from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.io.types import ByteSource, CommandOutput, IOResult
-from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.python.execution import PAYLOAD_ARGV0, STDIN_ARGV0
 from mirage.runtime.types import (
     CodeExecution,
     DispatchFn,
@@ -47,17 +47,29 @@ def run_output(result: RunResult) -> CommandOutput:
     )
 
 
+def not_bound(label: str, unavailable: str | None) -> CommandOutput:
+    """The answer of an interpreter command no runtime runs.
+
+    GNU wording (bash prints ``bash: python3: command not found``; the
+    shell prefix is dropped workspace-wide), exit 127 whatever the
+    operands say, unless the default world recorded why the entry failed
+    to build. A bound entry without the interpreter entry point (not a
+    ``LanguageRuntime``) is refused the same way: there is nothing to
+    run code on. Mirrors TS ``notBound``.
+
+    Args:
+        label (str): the command name used in the message.
+        unavailable (str | None): the dispatcher-recorded reason this
+            command has no runtime (a default entry's build error),
+            None when nothing captures it at all.
+    """
+    hint = unavailable or "command not found"
+    return None, IOResult(exit_code=127, stderr=f"{label}: {hint}\n".encode())
+
+
 async def runtime_version(
-    label: str,
-    runtime: Runtime | None,
-    env: dict[str, str] | None,
-    unavailable: str | None,
+    runtime: LanguageRuntime, env: dict[str, str] | None
 ) -> CommandOutput:
-    if not isinstance(runtime, LanguageRuntime):
-        hint = unavailable or "command not found"
-        return None, IOResult(
-            exit_code=127, stderr=f"{label}: {hint}\n".encode()
-        )
     return run_output(await runtime.version(env or {}))
 
 
@@ -116,7 +128,10 @@ class Argv0Rules:
 
 # CPython's own four answers, pinned on 3.12.13/3.13.7.
 CPYTHON_ARGV0 = Argv0Rules(
-    payload="-c", stdin_operand="-", bare_stdin="", names_file=True
+    payload=PAYLOAD_ARGV0,
+    stdin_operand=STDIN_ARGV0,
+    bare_stdin="",
+    names_file=True,
 )
 
 
@@ -329,19 +344,10 @@ async def run_code(
     prepared: Source,
     env: dict[str, str] | None,
     flags: dict[str, Any],
-    runtime: Runtime | None,
-    unavailable: str | None,
+    runtime: LanguageRuntime,
     cwd: PathSpec | None = None,
 ) -> CommandOutput:
     """Run a prepared source on the bound runtime, shared by all.
-
-    An unbound command (no workspace runtime entry captures it) is
-    refused: an explicit runtimes list is policy, and a builtin that
-    spun up its own interpreter would bypass captures and admission
-    scripts (TS parity). The refusal names the recorded reason when
-    the default world dropped the entry (the registry keys build
-    failures by captured command), so no command code ever names a
-    runtime class or probes one.
 
     Args:
         label (str): the command name used in error messages.
@@ -349,23 +355,10 @@ async def run_code(
         env (dict[str, str] | None): the session environment.
         flags (dict[str, Any]): interpreter-level switches for the
             runtime (each runtime reads its own).
-        runtime (Runtime | None): the workspace-bound runtime for this
-            command; None when no entry captures it.
+        runtime (LanguageRuntime): the workspace-bound runtime for this
+            command.
         cwd (PathSpec | None): virtual working directory for the guest.
-        unavailable (str | None): the dispatcher-recorded reason this
-            command has no runtime (a default entry's build error),
-            None when nothing captures it at all.
     """
-    if not isinstance(runtime, LanguageRuntime):
-        # GNU wording (bash prints `bash: python3: command not found`;
-        # the shell prefix is dropped workspace-wide), unless the
-        # default world recorded why the entry failed to build. A bound
-        # entry without the interpreter entry point (not a LanguageRuntime) is
-        # refused the same way: there is nothing to run code on.
-        hint = unavailable or "command not found"
-        return None, IOResult(
-            exit_code=127, stderr=f"{label}: {hint}\n".encode()
-        )
     if (
         prepared.mode == "module"
         and isinstance(runtime, PythonRuntime)

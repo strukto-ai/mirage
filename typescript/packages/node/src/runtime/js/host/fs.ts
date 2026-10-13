@@ -27,6 +27,7 @@ import { posixStat } from '@struktoai/mirage-core/runtime/stat'
 import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
+import { entryName } from '@struktoai/mirage-core/utils/remnants'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   DESCRIPTOR_CALLS,
@@ -103,11 +104,6 @@ function refusedIterator(err: Error): AsyncIterableIterator<never> {
       return this
     },
   }
-}
-
-function leaf(entry: string): string {
-  const trimmed = entry.endsWith('/') ? entry.slice(0, -1) : entry
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1)
 }
 
 /** A time argument (seconds, a numeric string, a Date) as the ISO stamp
@@ -407,7 +403,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   private direntOf(directory: string, row: VFSEntry): unknown {
     const kind = row.isLink === true ? S_IFLNK : row.isDir ? S_IFDIR : (row.mode ?? 0) & S_IFMT
     return {
-      name: leaf(row.path),
+      name: entryName(row.path),
       parentPath: directory,
       path: directory,
       isFile: () => kind === S_IFREG,
@@ -545,7 +541,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     const out: unknown[] = []
     const walk = async (directory: string, prefix: string): Promise<void> => {
       for (const row of await this.files.readdir(directory, typed || recursive)) {
-        const name = leaf(row.path)
+        const name = entryName(row.path)
         out.push(typed ? this.direntOf(directory, row) : prefix + name)
         if (recursive && row.isDir && row.isLink !== true) {
           await walk(posix.join(directory, name), `${prefix}${name}/`)
@@ -644,7 +640,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         return
       }
       for (const row of rows) {
-        const name = leaf(row.path)
+        const name = entryName(row.path)
         const isChildDir = row.isDir && row.isLink !== true
         await this.plan(posix.join(path, name), isChildDir, out, top, posix.join(where, name))
       }

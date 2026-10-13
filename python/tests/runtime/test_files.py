@@ -570,14 +570,12 @@ def test_flush_sends_each_step_in_order():
             FlushStep("truncate", length=2),
             FlushStep("pwrite", data=b"z", offset=4),
             FlushStep("append", data=b"!"),
-            FlushStep("write", data=b"w"),
         ],
     )
     assert vfs.calls == [
         ("truncate", "/data/f", {"length": 2}),
         ("pwrite", "/data/f", {"data": b"z", "offset": 4}),
         ("append", "/data/f", {"data": b"!"}),
-        ("write", "/data/f", {"data": b"w"}),
     ]
 
 

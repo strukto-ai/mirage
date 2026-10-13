@@ -239,6 +239,38 @@
           }
         }
       ]
+    },
+    {
+      "id": "every_runtime_reports_one_inode_for_a_path",
+      "runtimes": [
+        "pyodide",
+        "wasi",
+        "quickjs",
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nprint(os.stat('/data/seed.txt').st_ino)",
+            "js": "console.log(os.stat('/data/seed.txt')[0].ino)",
+            "node": "const fsp = require('node:fs').promises\nconsole.log((await fsp.stat('/data/seed.txt')).ino)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "201849602136611\n"
+          }
+        }
+      ]
     }
   ]
 }

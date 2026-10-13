@@ -17,6 +17,7 @@ import pytest
 from mirage.commands.builtin.general.interpreter import (
     Argv0Rules,
     Source,
+    not_bound,
     resolve_source,
     run_code,
     run_output,
@@ -119,29 +120,23 @@ async def test_run_source_uses_bound_runtime_and_flags():
     runtime = EchoRuntime()
     prepared = Source(code="hi")
     stdout, io = await run_code(
-        "js", prepared, {"K": "V"}, {"module": True}, runtime, None
+        "js", prepared, {"K": "V"}, {"module": True}, runtime
     )
     assert io.exit_code == 0
     assert runtime.seen[0].flags == {"module": True}
     assert runtime.seen[0].env == {"K": "V"}
 
 
-@pytest.mark.asyncio
-async def test_run_source_unbound_reports_recorded_hint():
+def test_not_bound_reports_recorded_hint():
     """A default entry's build error surfaces as the 127 hint."""
-    prepared = Source(code="hi")
-    stdout, io = await run_code(
-        "python3", prepared, None, {}, None, "needs the broken extra"
-    )
+    stdout, io = not_bound("python3", "needs the broken extra")
     assert io.exit_code == 127
     assert io.stderr == b"python3: needs the broken extra\n"
 
 
-@pytest.mark.asyncio
-async def test_run_source_unbound_refuses_without_hint():
+def test_not_bound_refuses_without_hint():
     """No captured runtime means refusal, not a hidden interpreter."""
-    prepared = Source(code="hi")
-    stdout, io = await run_code("python3", prepared, None, {}, None, None)
+    stdout, io = not_bound("python3", None)
     assert io.exit_code == 127
     assert io.stderr == b"python3: command not found\n"
 
@@ -222,7 +217,6 @@ async def test_run_source_passes_virtual_cwd():
         {},
         {},
         runtime,
-        None,
         cwd=spec("/data"),
     )
     assert runtime.seen[0].cwd == spec("/data")

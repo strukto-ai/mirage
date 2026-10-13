@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.errors.fs import fs_strerror
-from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.config import RuntimeConfig, resolve_home
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
@@ -102,7 +102,7 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         config: LocalConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(captures, config)
-        chosen = self.config.home or os.environ.get(LOCAL_HOME_ENV)
+        chosen = resolve_home(self.config, LOCAL_HOME_ENV)
         if chosen:
             resolved = shutil.which(chosen)
             if resolved is None:

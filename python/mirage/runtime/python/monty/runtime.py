@@ -47,8 +47,8 @@ class MontyRuntime(PythonRuntime):
     is the script name) and piped input as the `stdin` global (bytes,
     None when nothing was piped). Monty implements a Python subset;
     host-only features (`sys.stdin`, `sys.argv`, third-party imports)
-    are unavailable; supported stdlib modules are listed in
-    docs/python/runtime/python.mdx. The parser refuses
+    are unavailable; supported stdlib modules are listed under "Python
+    subset" in docs/home/setup/runtime/monty.mdx. The parser refuses
     class inheritance, method decorators and `yield` — use the `wasi`
     or `local` runtime for a program that needs those.
     """
@@ -132,6 +132,4 @@ class MontyRuntime(PythonRuntime):
     def _fs(
         self, env: dict[str, str], context: RuntimeContext | None
     ) -> MontyFs:
-        return MontyFs(
-            RuntimeFiles.of(context) if context is not None else None, env
-        )
+        return MontyFs(RuntimeFiles.of(context), env)

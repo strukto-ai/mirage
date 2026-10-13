@@ -31,9 +31,9 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 // WASI preview1 errnos this shim answers with directly. The numbering
-// lives beside this shim (errors.ts, the same numbers python's
-// wasm/errors.py keeps): guests compare against these, so host errno
-// numbering must not leak.
+// lives in errors/wasi.ts, the same numbers python's wasm/errors.py
+// keeps: guests compare against these, so host errno numbering must not
+// leak.
 const ENOENT = WASI.ENOENT
 
 /**

@@ -21,10 +21,10 @@ from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.wasm.build import BuildDir
-from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
 from mirage.runtime.wasm.stat import filetype_of
 from mirage.utils.path import owner_prefix
+from mirage.utils.remnants import entry_name
 
 
 class WasmView:
@@ -43,8 +43,10 @@ class WasmView:
     even with no build directory to route to.
 
     Args:
-        config (WasmFsConfig | dict | None): the knobs, chiefly which
-            build directory to serve. None means no build directory.
+        host_root (str | None): the interpreter build directory, served
+            read-only for every path no mount claims. None means the
+            guest sees mounts and nothing else, which is the quickjs
+            case, since qjs carries no files of its own.
         files (RuntimeFiles | None): the shared mount op vocabulary. None
             means no workspace is attached and only the build is
             visible.
@@ -52,12 +54,12 @@ class WasmView:
 
     def __init__(
         self,
-        config: WasmFsConfig | dict[str, Any] | None = None,
+        host_root: str | None = None,
         files: RuntimeFiles | None = None,
     ) -> None:
-        self.config = WasmFsConfig.coerce(config)
-        root = self.config.host_root
-        self._build = BuildDir(Path(root)) if root is not None else None
+        self._build = (
+            BuildDir(Path(host_root)) if host_root is not None else None
+        )
         self._files = files
 
     async def abort(self) -> None:
@@ -267,10 +269,6 @@ class WasmView:
             path, offset=offset, size=size, raw=raw
         )
 
-    def write(self, path: str, data: bytes) -> None:
-        self._deny_build(path)
-        self._core_call("write", path, data=data)
-
     def create(self, path: str) -> None:
         self._deny_build(path)
         self._core_call("create", path)
@@ -428,7 +426,7 @@ class WasmView:
     def _readdir_files(self, path: str) -> list[tuple[str, int]]:
         entries: dict[str, int] = {}
         for entry in self._require_files().readdir(path):
-            base = entry.path.rstrip("/").rsplit("/", 1)[-1]
+            base = entry_name(entry.path)
             if base:
                 entries[base] = filetype_of(entry)
         return sorted(entries.items())

@@ -18,9 +18,10 @@ import { isoTimestamp } from './dates.ts'
 // The one spelling of "a directory looks like drwxr-xr-x and a file
 // like -rw-r--r--" for every stat translator (FUSE attrs, guest
 // st_mode); mirrors mirage/utils/stat_view.py.
-const S_IFDIR = 0o040000
-const S_IFCHR = 0o020000
-const S_IFREG = 0o100000
+export const S_IFMT = 0o170000
+export const S_IFDIR = 0o040000
+export const S_IFCHR = 0o020000
+export const S_IFREG = 0o100000
 const S_IFLNK = 0o120000
 export const CHAR_MODE = S_IFCHR | 0o666
 export const DIR_MODE = S_IFDIR | 0o755

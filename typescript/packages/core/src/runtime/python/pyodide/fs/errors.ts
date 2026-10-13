@@ -15,16 +15,6 @@
 import type { FsCondition } from '../../../../errors/index.ts'
 import type { ErrnoCodes, FSHost } from './types.ts'
 
-/**
- * The conditions this filesystem can report, named rather than
- * numbered. Now the shared vocabulary (errors/types.ts) instead of a
- * private five-name union, so the layer that decides a call failed
- * names the same condition every other boundary does; the adapter
- * below still turns the name into whatever number the running
- * interpreter uses.
- */
-export type FsErrorCode = FsCondition
-
 // Condition -> the name the interpreter's own errno table knows it by.
 // Identity except for mirage's own conditions: the interpreter calls
 // "attribute not set" ENODATA and a lost conditional write ESTALE.
@@ -51,17 +41,6 @@ const CONDITION_KEY: Record<FsCondition, keyof ErrnoCodes> = {
 }
 
 /**
- * Build an error naming a POSIX condition, for failures the host sees.
- *
- * Args:
- *   code: name of the condition.
- *   message: what failed, for a human reading the stack.
- */
-export function fsError(code: FsErrorCode, message: string): Error {
-  return Object.assign(new Error(message), { code })
-}
-
-/**
  * Build the error a guest syscall should fail with.
  *
  * Both halves come from the running interpreter: the constructor so the
@@ -75,6 +54,6 @@ export function fsError(code: FsErrorCode, message: string): Error {
  *   codes: that interpreter's errno table (`pyodide.ERRNO_CODES`).
  *   code: name of the condition to report.
  */
-export function errnoError(host: FSHost, codes: ErrnoCodes, code: FsErrorCode): Error {
+export function errnoError(host: FSHost, codes: ErrnoCodes, code: FsCondition): Error {
   return new host.ErrnoError(codes[CONDITION_KEY[code]] ?? codes.EIO)
 }

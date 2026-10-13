@@ -30,8 +30,6 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.errors import FsCondition
 from mirage.errors.fs import ebusy, eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
-from mirage.runtime.constants import ABSENT_PATH
-from mirage.runtime.files import stat_row
 from mirage.runtime.python.host.constants import (
     DESCRIPTOR_CALLS,
     REFUSED_CALLS,
@@ -55,7 +53,6 @@ from mirage.runtime.types import VFSStat
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.remnants import entry_name
-from mirage.utils.stat_view import LINK_MODE
 from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
@@ -390,46 +387,14 @@ class HostFs:
             )
         )
 
-    def _link_target(self, virtual: str) -> str | None:
-        """The stored target when `virtual` is a link, else None.
-
-        Args:
-            virtual (str): the path to probe.
-        """
-        try:
-            return self._adapter.readlink(virtual)
-        except OSError as exc:
-            # EINVAL is the entry point's "there, but not a link". A missing
-            # path raises ENOENT instead, exactly as readlink(2) does,
-            # and that is the answer lstat owes its caller, so it is not
-            # swallowed here.
-            if exc.errno == errno.EINVAL:
-                return None
-            raise
-
-    def _exists(self, virtual: str) -> bool:
-        """Whether ``virtual`` is there. Only an absence answers no: a
-        refused or failed stat propagates rather than read as missing.
-
-        Args:
-            virtual (str): the mounted path.
-        """
-        try:
-            self._adapter.stat(virtual)
-            return True
-        except ABSENT_PATH:
-            return False
-
     def _isdir(self, virtual: str) -> bool:
         """Whether ``virtual`` is a directory, absence reading as no.
 
         Args:
             virtual (str): the mounted path.
         """
-        try:
-            return self._adapter.stat(virtual).is_dir
-        except ABSENT_PATH:
-            return False
+        row = self._adapter.stat_or_none(virtual)
+        return row is not None and row.is_dir
 
     def listdir(self, path: Any = None) -> list[str] | list[bytes]:
         """The names in a directory, as the host spells them off a mount.
@@ -561,14 +526,8 @@ class HostFs:
     ) -> _real_os.stat_result:
         """Stat without following, so a link reports as itself.
 
-        The node table is asked first because a link is namespace state
-        that no backend can see: a stat alone would silently answer for
-        the target, and a broken link would read as absent. The readlink
-        probe is what asks, so the entry point's visibility gate decides
-        whether the link is there at all; the row behind it is then read
-        straight off the table, because it carries what a ``chown -h``
-        wrote and rebuilding the answer from the target string alone
-        reported the process defaults instead.
+        The row is the node table's own, so it carries what a ``chown -h``
+        wrote, and the dispatcher gates the read as it gates ``readlink``.
 
         Args:
             path (Any): the path to stat.
@@ -579,24 +538,9 @@ class HostFs:
             return cast(
                 _real_os.stat_result, self._host.lstat(path, dir_fd=dir_fd)
             )
-        target = self._link_target(virtual)
-        if target is None:
-            return self._stat_of(virtual, self._adapter.stat(virtual))
-        links = self._files.links
-        row = None if links is None else links.link_stat_at(virtual)
-        if row is None:
-            # A facade built without a link table: the target string is
-            # the only fact there is.
-            return self._stat_of(
-                virtual,
-                VFSStat(
-                    size=len(target.encode()),
-                    is_dir=False,
-                    mode=LINK_MODE,
-                    is_link=True,
-                ),
-            )
-        return self._stat_of(virtual, stat_row(row))
+        return self._stat_of(
+            virtual, self._adapter.stat(virtual, nofollow=True)
+        )
 
     def access(
         self,
@@ -876,7 +820,7 @@ class HostFs:
             probe
             and probe != "/"
             and probe != root
-            and not self._exists(probe)
+            and self._adapter.stat_or_none(probe) is None
         ):
             missing.append(probe)
             probe = posixpath.dirname(probe)
@@ -1022,7 +966,7 @@ class HostFs:
             return
         if dest is not None:
             parent = posixpath.dirname(dest.rstrip("/"))
-            if parent and not self._exists(parent):
+            if parent and self._adapter.stat_or_none(parent) is None:
                 self.makedirs(parent, exist_ok=True)
         self._move(old, new, None, None, replace=False)
         if source is not None:

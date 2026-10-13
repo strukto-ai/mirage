@@ -574,13 +574,11 @@ describe('RuntimeFiles flush', () => {
       { kind: 'truncate', length: 2 },
       { kind: 'pwrite', data: enc.encode('z'), offset: 4 },
       { kind: 'append', data: enc.encode('!') },
-      { kind: 'write', data: enc.encode('w') },
     ])
     expect(dispatch.mock.calls).toEqual([
       ['truncate', '/a/x', undefined, undefined, { length: 2 }],
       ['pwrite', '/a/x', enc.encode('z'), undefined, { offset: 4 }],
       ['append', '/a/x', enc.encode('!')],
-      ['write', '/a/x', enc.encode('w')],
     ])
   })
 })

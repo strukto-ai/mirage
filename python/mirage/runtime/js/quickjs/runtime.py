@@ -13,13 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
-from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.config import HomeConfig, RuntimeConfig, resolve_home
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
@@ -96,7 +95,7 @@ class QuickJsRuntime(JsRuntime):
                 "runtime"
             )
         super().__init__(captures, config)
-        root = self.config.home or os.environ.get(QUICKJS_HOME_ENV)
+        root = resolve_home(self.config, QUICKJS_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
         self._wasm = Path(root) / _WASM_NAME
@@ -157,9 +156,7 @@ class QuickJsRuntime(JsRuntime):
                 source = f"std.evalScript({json.dumps(source)});"
             source = cwd_preamble(cwd) + source
         argv += ["-e", source, "--", *named, *args.args]
-        fs = WasmView(
-            files=RuntimeFiles.of(context) if context is not None else None
-        )
+        fs = WasmView(files=RuntimeFiles.of(context))
         stdout, stderr, exit_code = await self._execution.run(
             argv=argv,
             stdin=args.stdin,

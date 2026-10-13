@@ -14,6 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import (
+    not_bound,
     resolve_source,
     run_code,
     runtime_version,
@@ -22,6 +23,7 @@ from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import CommandOutput
+from mirage.runtime.language import LanguageRuntime
 from mirage.types import PathSpec
 
 
@@ -32,11 +34,11 @@ async def _js(
     opts: CommandOpts,
 ) -> CommandOutput:
     label = opts.command or "js"
+    if not isinstance(opts.runtime, LanguageRuntime):
+        return not_bound(label, opts.runtime_unavailable)
     fl = FlagView(opts.flags, spec=SPECS["js"])
     if fl.as_bool("version"):
-        return await runtime_version(
-            label, opts.runtime, opts.env, opts.runtime_unavailable
-        )
+        return await runtime_version(opts.runtime, opts.env)
     error, prepared = await resolve_source(
         label,
         paths,
@@ -61,7 +63,6 @@ async def _js(
         opts.env,
         {"module": as_module},
         opts.runtime,
-        opts.runtime_unavailable,
         cwd=opts.cwd,
     )
 

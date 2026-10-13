@@ -40,8 +40,8 @@ import { MontyExecution } from './execution.ts'
  * CPython's `stat_result` fields; only its sequence half (`st[6]`,
  * `len(st)`) is the python host's alone. Monty implements a Python
  * subset; host-only features (`sys.stdin`, `sys.argv`, third-party
- * imports) are unavailable; supported stdlib modules are listed in
- * docs/typescript/runtime/python.mdx. The parser
+ * imports) are unavailable; supported stdlib modules are listed under
+ * "Python subset" in docs/home/setup/runtime/monty.mdx. The parser
  * refuses class inheritance, method decorators and `yield` — use the
  * pyodide runtime for a program that needs those.
  */
@@ -128,6 +128,6 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   }
 
   private perRunVfs(context?: RuntimeContext): RuntimeFiles | null {
-    return context === undefined ? null : RuntimeFiles.of(context)
+    return RuntimeFiles.of(context)
   }
 }

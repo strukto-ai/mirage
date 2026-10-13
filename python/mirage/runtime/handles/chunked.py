@@ -38,7 +38,6 @@ class ChunkedHandle:
             ranged read, ``(offset, size)`` to the bytes there. None for an
             async owner (the mount core), which asks ``missing``, fetches
             itself and hands the bytes to ``keep``.
-        pos (int): the read position.
         generation (int): bumped by ``drop``, so an async owner can tell
             the file changed while its fetch was out.
     """
@@ -46,7 +45,6 @@ class ChunkedHandle:
     path: str
     size: int
     fetch: Callable[[int, int], bytes] | None = None
-    pos: int = 0
     generation: int = 0
     _start: int = 0
     _kept: bytes = b""
@@ -121,34 +119,6 @@ class ChunkedHandle:
         if size <= 0 or low < 0:
             return b""
         return self._kept[low : low + size]
-
-    def read(self, size: int) -> bytes:
-        """Read from the position, advancing it by what was read.
-
-        Args:
-            size (int): byte budget.
-        """
-        chunk = self.pread(self.pos, size)
-        self.pos += len(chunk)
-        return chunk
-
-    def seek(self, offset: int, whence: int) -> int | None:
-        """Move the position, POSIX whence numbering.
-
-        Args:
-            offset (int): displacement from the whence base.
-            whence (int): 0 from the start, 1 from the position, 2
-                from the end.
-
-        Returns:
-            int | None: the new position, or None when the whence is
-            unknown or the target would be negative.
-        """
-        base = {0: 0, 1: self.pos, 2: self.size}.get(whence)
-        if base is None or base + offset < 0:
-            return None
-        self.pos = base + offset
-        return self.pos
 
     def drop(self) -> None:
         """Forget the kept chunk: the next read fetches the file anew."""

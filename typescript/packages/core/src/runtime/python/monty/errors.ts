@@ -58,11 +58,6 @@ export function cpythonError(condition: FsCondition): CPythonError {
   return { exception: EXCEPTIONS[condition] ?? 'OSError', ...POSIX[condition] }
 }
 
-// The naming lives in the shared classifier; this module renders the
-// condition in CPython's message shape. GuestCode survives as the name
-// this encoder's callers know the vocabulary by.
-export type GuestCode = FsCondition
-
 /** The traceback monty renders for one of its own errors. */
 export function displayError(err: unknown): string {
   const e = err as MontyDisplayableError
@@ -79,7 +74,7 @@ export function displayError(err: unknown): string {
  *   path: the path the operation names.
  *   target: rename's destination, when there is one.
  */
-export function guestError(code: GuestCode, path: string, target?: string): Error {
+export function guestError(code: FsCondition, path: string, target?: string): Error {
   const row = cpythonError(code)
   const where = target === undefined ? `'${path}'` : `'${path}' -> '${target}'`
   const guest = Object.assign(new Error(`[Errno ${String(row.errno)}] ${row.phrase}: ${where}`), {

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.wasm.build import BuildDir
-from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.execution import WasmExecution, epoch_engine
 from mirage.runtime.wasm.fs import WasiFs, install_wasi_fs
 from mirage.runtime.wasm.view import WasmView
@@ -22,7 +21,6 @@ __all__ = [
     "BuildDir",
     "WasiFs",
     "WasmExecution",
-    "WasmFsConfig",
     "WasmView",
     "epoch_engine",
     "install_wasi_fs",

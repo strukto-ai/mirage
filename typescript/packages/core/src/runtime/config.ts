@@ -83,6 +83,18 @@ export interface HomeConfig extends RuntimeConfig {
 export const HOME_CONFIG_KEYS: readonly string[] = ['home']
 
 /**
+ * Where a runtime's engine is: the config's `home`, else `envVar`'s value,
+ * else undefined for the runtime's built-in default. Mirrors Python's
+ * `resolve_home`.
+ */
+export function resolveHome(config: HomeConfig, envVar: string): string | undefined {
+  if (config.home !== undefined && config.home !== '') return config.home
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+  const value = proc?.env?.[envVar]
+  return value !== undefined && value !== '' ? value : undefined
+}
+
+/**
  * A constructor's config option as the runtime's own config, mirroring
  * Python's RuntimeConfig.coerce: keys outside the runtime's list fail
  * loud (Python gets this from the dataclass raising TypeError; a TS

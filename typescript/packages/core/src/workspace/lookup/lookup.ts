@@ -67,7 +67,7 @@ export function runtimeRefused(
 
 /** The runtime that captures a name by name, not through the fallback. */
 function runtimeFor(name: string, registry: MountRegistry): Runtime | undefined {
-  return registry.runtimeEntries.find((entry) => entry.captures.includes(name))
+  return registry.runtimeBindings[name]
 }
 
 /**
@@ -136,7 +136,7 @@ function* layers(
   const fallback =
     routing !== undefined && Object.hasOwn(routing.bindings, EXTERNAL_COMMANDS)
       ? routing.bindings[EXTERNAL_COMMANDS]
-      : registry.runtimeEntries.find((entry) => entry.captures.includes(EXTERNAL_COMMANDS))
+      : registry.runtimeBindings[EXTERNAL_COMMANDS]
   const fallbackNative =
     fallback !== null &&
     fallback !== undefined &&
@@ -324,8 +324,8 @@ export function programs(session: SessionState, registry: MountRegistry): string
     ...EXEC_WRAPPERS.keys(),
     ...registry.clis.names(),
   ])
-  for (const entry of registry.runtimeEntries) {
-    for (const capture of entry.captures) if (capture !== EXTERNAL_COMMANDS) names.add(capture)
+  for (const capture of Object.keys(registry.runtimeBindings)) {
+    if (capture !== EXTERNAL_COMMANDS) names.add(capture)
   }
   for (const mount of registry.allMounts()) {
     for (const cmd of mount.allCommands()) names.add(cmd.name.split(' ')[0] ?? cmd.name)

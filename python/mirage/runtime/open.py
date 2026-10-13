@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-import os
 from typing import Protocol
 
 from mirage.errors import FsCondition, classify
+from mirage.errors.fs import eexist, eisdir, enoent
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.types import VFSEntry, VFSStat
 
@@ -82,12 +81,12 @@ def apply_open(
     else:
         listed = surface.listing_or_none(path) is not None
     if mode.exclusive and (row is not None or listed):
-        raise _refused(errno.EEXIST, FileExistsError, path)
+        raise eexist(path)
     if listed:
-        raise _refused(errno.EISDIR, IsADirectoryError, path)
+        raise eisdir(path)
     if row is None:
         if not mode.create:
-            raise _refused(errno.ENOENT, FileNotFoundError, path)
+            raise enoent(path)
         surface.create(path)
         return None
     if mode.truncate:
@@ -102,14 +101,3 @@ def apply_open(
             surface.create(path)
         return None
     return row
-
-
-def _refused(code: int, kind: type[OSError], path: str) -> OSError:
-    """An open's refusal, numbered and worded the way the host's own is.
-
-    Args:
-        code (int): the errno.
-        kind (type[OSError]): the builtin the errno maps to.
-        path (str): the path the open named.
-    """
-    return kind(code, os.strerror(code), path)

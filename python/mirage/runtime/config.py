@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
 import re
 from dataclasses import dataclass, fields
 from typing import Any, TypeVar
@@ -91,3 +92,14 @@ class HomeConfig(RuntimeConfig):
     """
 
     home: str | None = None
+
+
+def resolve_home(config: HomeConfig, env_var: str) -> str | None:
+    """Where a runtime's engine is: the config's ``home``, else
+    ``env_var``'s value, else None for the runtime's built-in default.
+
+    Args:
+        config (HomeConfig): the runtime's config.
+        env_var (str): the environment variable the runtime reads.
+    """
+    return config.home or os.environ.get(env_var) or None

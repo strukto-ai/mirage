@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export type FlushKind = 'write' | 'append' | 'pwrite' | 'truncate'
+export type FlushKind = 'append' | 'pwrite' | 'truncate'
 
 /** One op a closing handle owes the mount. Mirrors Python's `FlushStep`. */
 export interface FlushStep {

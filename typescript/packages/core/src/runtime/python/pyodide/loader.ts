@@ -15,6 +15,7 @@
 import type { ErrnoCodes, FSHost, FSType } from './fs/types.ts'
 import { PyodideUnavailableError } from './errors.ts'
 import { sealNetwork, type NetworkHost } from './network.ts'
+import { resolveHome } from '../../config.ts'
 
 const noopIo = (): void => undefined
 
@@ -22,12 +23,6 @@ const PYODIDE_CDN_VERSION = '314.0.5'
 const PYODIDE_CDN_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_CDN_VERSION}/full/`
 
 const PYODIDE_HOME_ENV = 'MIRAGE_PYODIDE_HOME'
-
-function envHome(): string | null {
-  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-  const value = proc?.env?.[PYODIDE_HOME_ENV]
-  return typeof value === 'string' && value !== '' ? value : null
-}
 
 interface PyodideFS extends FSHost {
   analyzePath: (path: string) => { exists: boolean }
@@ -110,8 +105,7 @@ export async function loadPyodideRuntime(
     )
   }
   const indexURL =
-    options.home ??
-    envHome() ??
+    resolveHome(options, PYODIDE_HOME_ENV) ??
     (await resolveNodeIndexURL()) ??
     (isNode() ? null : PYODIDE_CDN_URL)
   // A null-prototype jsglobals empties the guest's `js` module: `import

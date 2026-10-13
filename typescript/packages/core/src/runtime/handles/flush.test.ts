@@ -91,9 +91,6 @@ describe('applyFlush', () => {
       { kind: 'append', data: enc.encode('Z') },
     ])
     expect([...out]).toEqual([...enc.encode('hel'), 0, 0, 0, ...enc.encode('Z')])
-    expect(applyFlush(enc.encode('hello'), [{ kind: 'write', data: enc.encode('new') }])).toEqual(
-      enc.encode('new'),
-    )
     // A Node Buffer's slice is a view, so editing it would change every name
     // that shares those bytes; the bytes handed in stay as they were.
     const shared = Buffer.from('hello')

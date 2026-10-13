@@ -225,11 +225,25 @@ async def test_version_without_a_runtime_uses_the_invoked_name(name):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["python", "node"])
-async def test_missing_script_uses_the_invoked_name(ws, name):
-    io = await ws.shell(f"{name} /missing-script")
+async def test_missing_script_uses_the_invoked_name(ws):
+    io = await ws.shell("python /missing-script")
     assert io.exit_code == 1
-    assert await io.stderr_str() == f"{name}: /missing-script: No such file\n"
+    assert await io.stderr_str() == "python: /missing-script: No such file\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["python3 /missing.py", "node /missing.js"])
+async def test_an_unbound_interpreter_answers_127_before_its_script(line):
+    # bash answers a missing command before it looks at any operand, so
+    # neither a missing script nor a mode without x changes the answer.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ, runtimes=[])
+    try:
+        io = await ws.shell(line)
+        name = line.split()[0]
+        assert io.exit_code == 127
+        assert await io.stderr_str() == f"{name}: command not found\n"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

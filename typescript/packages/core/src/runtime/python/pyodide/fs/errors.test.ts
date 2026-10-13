@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { errnoError, fsError } from './errors.ts'
+import { errnoError } from './errors.ts'
 import type { ErrnoCodes, FSHost } from './types.ts'
 
 class FakeErrnoError extends Error {
@@ -31,14 +31,6 @@ class FakeErrnoError extends Error {
 const CODES: ErrnoCodes = { ENOENT: 44, EPERM: 63, EINVAL: 28, EIO: 29, EXDEV: 75 }
 
 const HOST = { ErrnoError: FakeErrnoError } as unknown as FSHost
-
-describe('fsError', () => {
-  it('names the condition rather than numbering it', () => {
-    const err = fsError('EIO', 'mount went away')
-    expect((err as { code?: string }).code).toBe('EIO')
-    expect(err.message).toBe('mount went away')
-  })
-})
 
 describe('errnoError', () => {
   it('answers in the numbering the interpreter reports', () => {

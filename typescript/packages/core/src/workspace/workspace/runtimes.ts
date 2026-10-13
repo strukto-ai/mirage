@@ -119,6 +119,7 @@ export class Runtimes {
     this.entries = entries
     this.bindings = bindings
     this.registry.runtimeEntries = entries
+    this.registry.runtimeBindings = bindings
     this.registry.workspaceRuntime =
       entries.find((entry): entry is WorkspaceRuntime => entry instanceof WorkspaceRuntime) ?? null
   }

@@ -36,6 +36,7 @@ import type { BridgeDispatchFn } from './types.ts'
 import type { RuntimeContext } from './binding.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
+import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
 
 /** Whether a failure is the mount saying the path is not there. */
@@ -79,19 +80,6 @@ function statRow(st: FileStat): VFSStat {
     ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
     ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
   }
-}
-
-/**
- * An entry's final path segment.
- *
- * What a link mark is compared on, because backends disagree on entry
- * shape (bare names, trailing-slash names, full paths) and the name is
- * the part they agree on. The same normalization `mergeReaddir`
- * dedupes on.
- */
-function baseName(entry: string): string {
-  const trimmed = rstripSlash(entry)
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1)
 }
 
 /**
@@ -157,8 +145,14 @@ export class RuntimeFiles {
     this.resolver = resolver
   }
 
-  /** The file adapter every engine builds from its execution context. */
-  static of(context: RuntimeContext): RuntimeFiles {
+  /**
+   * The file adapter every engine builds from its execution context; none
+   * outside a workspace.
+   */
+  static of(context: RuntimeContext): RuntimeFiles
+  static of(context: RuntimeContext | undefined): RuntimeFiles | null
+  static of(context: RuntimeContext | undefined): RuntimeFiles | null {
+    if (context === undefined) return null
     const links = context.ns.links
     return new RuntimeFiles(
       context.dispatch,
@@ -442,7 +436,7 @@ export class RuntimeFiles {
       }
       // Backends that mark directories with a trailing slash skip the
       // stat; unmarked entries (e.g. RAM) need one to learn dir-ness.
-      const mark = links.has(baseName(raw)) ? { isLink: true } : {}
+      const mark = links.has(entryName(raw)) ? { isLink: true } : {}
       return { path: raw, size: 0, isDir: raw.endsWith('/'), ...mark }
     })
     if (!classify) return rows
@@ -629,21 +623,11 @@ export class RuntimeFiles {
     return true
   }
 
-  /**
-   * Send a closing handle's buffer as a delta when it can be one.
-   *
-   * Args:
-   *   path: guest-absolute virtual path.
-   *   baseLen: length the file had when the handle opened.
-   *   lowWrite: lowest offset this handle wrote at.
-   *   buf: the handle's whole buffer.
-   */
   /** Send what a closing handle owes the mount, in order (its `flushPlan()`). */
   async flush(path: string, steps: readonly FlushStep[]): Promise<void> {
     for (const step of steps) {
       const data = step.data ?? new Uint8Array()
-      if (step.kind === 'write') await this.write(path, data)
-      else if (step.kind === 'append') await this.append(path, data)
+      if (step.kind === 'append') await this.append(path, data)
       else if (step.kind === 'pwrite') await this.pwrite(path, step.offset ?? 0, data)
       else await this.truncate(path, step.length ?? 0)
     }

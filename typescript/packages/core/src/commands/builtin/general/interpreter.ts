@@ -18,12 +18,15 @@ import type { LanguageRuntime } from '../../../runtime/language.ts'
 import { QuickJsUnavailableError } from '../../../runtime/js/quickjs/errors.ts'
 import { MontyUnavailableError } from '../../../runtime/python/monty/errors.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
-import type { DispatchFn, RunResult } from '../../../runtime/types.ts'
+import { PythonRuntime } from '../../../runtime/python/base.ts'
+import { PAYLOAD_ARGV0, STDIN_ARGV0 } from '../../../runtime/python/execution.ts'
+import type { RunResult } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { ExecutionNode } from '../../../workspace/types.ts'
 import { isMissingPath } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { resolveScript } from '../utils/paths.ts'
 
 /**
  * Convert one interpreter outcome into a command's output pair.
@@ -85,9 +88,6 @@ export async function runtimeVersion(
 // stdin with no operand at all. Pinned on CPython 3.12.13.
 export type SourceMode = 'payload' | 'module' | 'file' | 'stdin'
 
-// argv[0] for the two modes that do not read it off the command line.
-export const PAYLOAD_ARGV0 = '-c'
-export const STDIN_ARGV0 = '-'
 export const STDIN_OPERAND = '-'
 
 /**
@@ -147,54 +147,62 @@ export function moduleSource(name: string, label: string): string {
   ].join('\n')
 }
 
-type Result = [ByteSource | null, IOResult, ExecutionNode]
+/**
+ * What an interpreter calls itself in the entry points with no file name.
+ *
+ * File mode is universal (the operand as typed), so only these three
+ * differ, and they differ per interpreter rather than per language:
+ * CPython puts '-c' in argv[0] for a payload, while qjs leaves scriptArgs
+ * alone for `-e` and fills it only when it runs a file. An interpreter
+ * that names none of them leaves them undefined, and its runtime sees the
+ * unnamed program. `namesFile` false is qjs, whose scriptArgs start at
+ * the first argument even when it runs a file. Mirrors Python's
+ * `Argv0Rules`.
+ */
+export interface Argv0Rules {
+  payload?: string
+  stdinOperand?: string
+  bareStdin?: string
+  namesFile?: boolean
+}
+
+/** CPython's own four answers, pinned on 3.12.13/3.13.7. */
+export const CPYTHON_ARGV0: Argv0Rules = {
+  payload: PAYLOAD_ARGV0,
+  stdinOperand: STDIN_ARGV0,
+  bareStdin: '',
+  namesFile: true,
+}
+
+/**
+ * An interpreter command's inputs, resolved from the command line.
+ * `argv0` '' is meaningful (CPython's answer for stdin with no operand);
+ * undefined means this interpreter names no program here. Mirrors
+ * Python's `Source`.
+ */
+export interface Source {
+  code: string
+  args: string[]
+  stdin: Uint8Array | null
+  scriptPath: PathSpec | null
+  mode: SourceMode
+  argv0?: string
+}
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder('utf-8', { fatal: false })
 
-interface InterpreterDeps {
-  runtime: LanguageRuntime
+function failed(label: string, message: string, exitCode: number): CommandFnResult {
+  return [null, new IOResult({ exitCode, stderr: ENC.encode(`${label}: ${message}\n`) })]
 }
 
-interface InterpreterOpts {
-  command?: string
-  stdin: ByteSource | null
-  env: Record<string, string>
-  cwd?: PathSpec
-  code: string | null
-  // argv[0], derived from which entry point the source came through; '' is
-  // CPython's own answer for a program piped in with no operand, so a
-  // runtime must not treat it as absent.
-  prog?: string
-  // Runtime-specific run flags (Python's InitFlags, js's `module`).
-  flags?: Record<string, unknown>
-  // Applied to a script read from a file (CPython's -x).
-  transformSource?: (code: string) => string
-  // A refusal decided once the runtime is bound (Python's -m guard):
-  // the diagnostic text, or null to proceed.
-  refuse?: (runtime: LanguageRuntime) => string | null
-  signal?: AbortSignal
-  timeoutSeconds?: number
+/**
+ * The answer of an interpreter command no runtime runs: bash's
+ * `command not found`, exit 127, whatever the operands say.
+ */
+export function notBound(label: string): CommandFnResult {
+  return failed(label, 'command not found', 127)
 }
-
-// The language-specific half of an interpreter handler: everything else
-// (reading the script, materializing stdin, running, mapping errors) is
-// identical between python3 and js, mirroring Python's single run_code.
-export interface InterpreterSpec {
-  // Command name used in every diagnostic.
-  label: string
-  // Payload flag shown when no script operand was given (-c, -e).
-  payloadFlag: string
-  // Whether a thrown error means the runtime itself is missing (exit 127).
-  isUnavailable: (err: unknown) => boolean
-}
-
-export type InterpreterHandler = (
-  dispatch: DispatchFn,
-  pathScope: PathSpec | null,
-  args: string[],
-  opts: InterpreterOpts,
-  deps: InterpreterDeps,
-) => Promise<Result>
 
 function readAllBytes(data: unknown): Promise<Uint8Array> {
   if (data instanceof Uint8Array) return Promise.resolve(data)
@@ -212,84 +220,160 @@ function toPathSpec(p: PathSpec): PathSpec {
   })
 }
 
-// An interpreter diagnostic. The stderr rides the IOResult only: the node
-// carries the command string and the code, matching what the shell prints.
-function errorResult(cmdStr: string, message: string, exitCode: number): Result {
-  return [
-    null,
-    new IOResult({ exitCode, stderr: ENC.encode(message) }),
-    new ExecutionNode({ command: cmdStr, exitCode }),
-  ]
+/**
+ * Resolve what an interpreter command should run, shared by all.
+ *
+ * A payload flag wins (-c/-e), else the first operand is the script
+ * (read through the workspace dispatch), else piped stdin is the source.
+ * Words after the script pass through verbatim as argv. The x check
+ * follows the source's entry point: a file operand asks the per-path
+ * entry point about the script's own path, so a session whose only x
+ * grant is one show subtree runs scripts there and nowhere else; inline
+ * code, -m and stdin keep the whole-session rule, since no path holds
+ * them. Outside a workspace no entry point is wired and `execAllowed`
+ * answers for files too. Mirrors Python's `resolve_source`.
+ *
+ * Args:
+ *   label: the command name used in error messages.
+ *   paths: positional path operands.
+ *   texts: positional text operands.
+ *   payload: the -c/-e flag value, if given.
+ *   opts: the command's options (stdin, dispatch, cwd, the x checks).
+ *   module: the -m module name, if given.
+ *   argv0Rules: what this interpreter calls itself where no file names it.
+ *   skipLine: drop the script file's first line (CPython's -x).
+ *
+ * Returns:
+ *   an early error output, or the prepared source.
+ */
+export async function resolveSource(
+  label: string,
+  paths: PathSpec[],
+  texts: string[],
+  payload: string | null,
+  opts: CommandOpts,
+  module: string | null = null,
+  argv0Rules: Argv0Rules = {},
+  skipLine = false,
+): Promise<CommandFnResult | Source> {
+  let code = payload
+  let scriptPath: PathSpec | null = null
+  let mode: SourceMode = 'payload'
+  let argv0 = argv0Rules.payload
+  let args: string[]
+  if (module !== null) {
+    // runpy's alter_sys overwrites argv[0] with the module's own file,
+    // which no caller can know here; the module name stands in for the
+    // runtimes that never reach runpy.
+    code = moduleSource(module, label)
+    args = [...paths.map((p) => p.virtual), ...texts]
+    mode = 'module'
+    argv0 = module
+  } else if (code !== null) {
+    args = [...paths.map((p) => p.virtual), ...texts]
+  } else if (paths.length > 0) {
+    scriptPath = paths[0] ?? null
+    args = [...paths.slice(1).map((p) => p.virtual), ...texts]
+    mode = 'file'
+    argv0 = argv0Rules.namesFile === true ? (paths[0]?.rawPath ?? '') : undefined
+  } else if (texts[0] === STDIN_OPERAND) {
+    // The explicit stdin spelling. It is an operand, not a flag, so the
+    // words after it are the program's argv exactly as a script's would
+    // be.
+    args = texts.slice(1)
+    mode = 'stdin'
+    argv0 = argv0Rules.stdinOperand
+  } else if (texts.length > 0) {
+    scriptPath = resolveScript(texts[0] ?? '', opts.cwd)
+    args = texts.slice(1)
+    mode = 'file'
+    // As typed, which is what CPython puts in argv[0]; the resolved
+    // spelling is scriptPath's job.
+    argv0 = argv0Rules.namesFile === true ? (texts[0] ?? '') : undefined
+  } else {
+    args = []
+    mode = 'stdin'
+    argv0 = argv0Rules.bareStdin
+  }
+
+  if (mode === 'file' && scriptPath !== null) {
+    const allowed = opts.execPathAllowed?.(scriptPath.virtual) ?? opts.execAllowed !== false
+    if (!allowed) {
+      const display = scriptPath.rawPath !== '' ? scriptPath.rawPath : scriptPath.virtual
+      return failed(label, `${display}: not in EXEC mode`, 126)
+    }
+  } else if (opts.execAllowed === false) {
+    return failed(label, "root mount '/' is not in EXEC mode", 126)
+  }
+
+  if (code === null && scriptPath !== null) {
+    if (opts.dispatch === undefined) return failed(label, 'no dispatch available to read script', 1)
+    let data: unknown
+    try {
+      data = (await opts.dispatch('read', toPathSpec(scriptPath)))[0]
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      return failed(label, `${scriptPath.virtual}: No such file`, 1)
+    }
+    code = DEC.decode(await readAllBytes(data))
+    if (skipLine) code = skipFirstLine(code)
+  }
+
+  let stdin = opts.stdin !== null ? await materialize(opts.stdin) : null
+  if (code === null) {
+    if (stdin === null || stdin.length === 0) return failed(label, 'no input', 1)
+    code = DEC.decode(stdin)
+    stdin = null
+  }
+  return { code, args, stdin, scriptPath, mode, ...(argv0 !== undefined ? { argv0 } : {}) }
 }
 
 /**
- * Build an interpreter command handler.
+ * Run a prepared source on the bound runtime, shared by all. Mirrors
+ * Python's `run_code`.
  *
- * @param spec - the label, payload flag and unavailable-error test that
- *   distinguish one interpreter from another.
+ * Args:
+ *   label: the command name used in error messages.
+ *   prepared: the resolved source and argv.
+ *   runtime: the runtime bound to this command.
+ *   switches: interpreter-level switches (Python's InitFlags, js's
+ *     `module`), handed to the runtime as its run flags.
+ *   opts: the command's options (env, cwd, signal, limit).
  */
-export function makeInterpreterHandler(spec: InterpreterSpec): InterpreterHandler {
-  return async function handle(
-    dispatch: DispatchFn,
-    pathScope: PathSpec | null,
-    args: string[],
-    opts: InterpreterOpts,
-    deps: InterpreterDeps,
-  ): Promise<Result> {
-    const label = opts.command ?? spec.label
-    let code = opts.code
-    // The file the program is read from, which the runtime names it after.
-    const scriptPath = code === null ? pathScope : null
-    const cmdStr =
-      pathScope !== null ? `${label} ${pathScope.virtual}` : `${label} ${spec.payloadFlag}`
-
-    if (code === null) {
-      if (pathScope === null) return errorResult(cmdStr, `${label}: no input\n`, 1)
-      let data: unknown
-      try {
-        data = (await dispatch('read', toPathSpec(pathScope)))[0]
-      } catch (err) {
-        if (!isMissingPath(err)) throw err
-        return errorResult(cmdStr, `${label}: ${pathScope.virtual}: No such file\n`, 1)
-      }
-      const bytes = await readAllBytes(data)
-      code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-      if (opts.transformSource !== undefined) code = opts.transformSource(code)
-    }
-
-    let stdinBytes: Uint8Array | null = null
-    if (opts.stdin !== null) {
-      stdinBytes = await materialize(opts.stdin)
-    }
-
-    try {
-      const refusal = opts.refuse?.(deps.runtime) ?? null
-      if (refusal !== null) return errorResult(cmdStr, refusal, 1)
-      const result = await deps.runtime.execute({
-        kind: 'code',
-        language: deps.runtime.language,
-        code,
-        args,
-        env: opts.env,
-        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
-        ...(scriptPath !== null ? { scriptPath } : {}),
-        stdin: stdinBytes,
-        ...(opts.prog !== undefined ? { prog: opts.prog } : {}),
-        ...(opts.flags !== undefined ? { flags: opts.flags } : {}),
-        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-        ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
-      })
-      const [stdout, io] = runOutput(result)
-      return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode })]
-    } catch (err) {
-      // An in-VM limit interrupt is a timeout, not an interpreter
-      // failure: let it reach the workspace's 124 handler.
-      if (err instanceof CommandTimeoutError) throw err
-      if (spec.isUnavailable(err)) {
-        return errorResult(cmdStr, `${label}: ${(err as Error).message}\n`, 127)
-      }
-      const msg = err instanceof Error ? err.message : String(err)
-      return errorResult(cmdStr, `${label}: ${msg}\n`, 1)
-    }
+export async function runCode(
+  label: string,
+  prepared: Source,
+  runtime: LanguageRuntime,
+  switches: Record<string, unknown>,
+  opts: CommandOpts,
+): Promise<CommandFnResult> {
+  if (prepared.mode === 'module' && runtime instanceof PythonRuntime && !runtime.runsModules) {
+    // Exit 1, CPython's code for a `-m` that could not run, but not its
+    // "No module named" wording: nothing was searched for, so naming the
+    // runtime is the honest report.
+    return failed(label, `-m is not supported by the '${runtime.name}' runtime`, 1)
+  }
+  try {
+    const result = await runtime.execute({
+      kind: 'code',
+      language: runtime.language,
+      code: prepared.code,
+      args: prepared.args,
+      env: opts.env ?? {},
+      cwd: PathSpec.fromStrPath(opts.cwd),
+      ...(prepared.scriptPath !== null ? { scriptPath: prepared.scriptPath } : {}),
+      stdin: prepared.stdin,
+      ...(prepared.argv0 !== undefined ? { prog: prepared.argv0 } : {}),
+      flags: switches,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
+    })
+    return runOutput(result)
+  } catch (err) {
+    // An in-VM limit interrupt is a timeout, not an interpreter
+    // failure: let it reach the workspace's 124 handler.
+    if (err instanceof CommandTimeoutError) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    return failed(label, message, runtimeUnavailable(err) ? 127 : 1)
   }
 }

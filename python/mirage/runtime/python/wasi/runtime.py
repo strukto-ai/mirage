@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
 from mirage.runtime.binding import RuntimeContext
-from mirage.runtime.config import RuntimeConfig, memory_limit
+from mirage.runtime.config import RuntimeConfig, memory_limit, resolve_home
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
@@ -30,7 +29,7 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeReach,
 )
-from mirage.runtime.wasm import WasmExecution, WasmFsConfig, WasmView
+from mirage.runtime.wasm import WasmExecution, WasmView
 from mirage.runtime.wasm.loader import wasmtime
 
 WASI_HOME_ENV = "MIRAGE_WASI_HOME"
@@ -118,7 +117,7 @@ class WasiRuntime(PythonRuntime):
                 "pip install mirage-ai[wasi], or select another runtime"
             )
         super().__init__(captures, config)
-        root = self.config.home or os.environ.get(WASI_HOME_ENV)
+        root = resolve_home(self.config, WASI_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
         self._root = Path(root)
@@ -145,7 +144,7 @@ class WasiRuntime(PythonRuntime):
         self, args: RunArgs, context: RuntimeContext | None = None
     ) -> RunResult:
         context = context or self._capture_context()
-        files = RuntimeFiles.of(context) if context is not None else None
+        files = RuntimeFiles.of(context)
         hiding = _stdlib_mount(files.prefixes()) if files is not None else None
         if hiding is not None:
             return RunResult(
@@ -160,7 +159,7 @@ class WasiRuntime(PythonRuntime):
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
-        fs = WasmView(WasmFsConfig(host_root=str(self._root)), files)
+        fs = WasmView(str(self._root), files)
         # The guest sees the mounts, so the script's own directory heads
         # sys.path, as it does on CPython.
         source = prepare_source(args, search_path=True)

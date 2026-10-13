@@ -89,4 +89,3 @@ def test_apply_flush_lands_ranges_gaps_and_cuts_as_a_mount_does():
         FlushStep("append", data=b"Z"),
     ]
     assert apply_flush(b"hello", steps) == b"hel\x00\x00\x00Z"
-    assert apply_flush(b"hello", [FlushStep("write", data=b"new")]) == b"new"

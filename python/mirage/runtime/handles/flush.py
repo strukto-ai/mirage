@@ -72,9 +72,7 @@ def apply_flush(data: bytes, steps: Sequence[FlushStep]) -> bytes:
     """
     out = bytearray(data)
     for step in steps:
-        if step.kind == "write":
-            out = bytearray(step.data)
-        elif step.kind == "append":
+        if step.kind == "append":
             out += step.data
         elif step.kind == "pwrite":
             if step.offset > len(out):

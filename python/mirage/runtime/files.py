@@ -29,6 +29,7 @@ from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import CycleError, norm, resolve_path
+from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
     DIR_MODE,
     atime_ns,
@@ -57,7 +58,7 @@ def _listed(raw: str, links: set[str]) -> VFSEntry:
         raw (str): the entry as the listing spelled it.
         links (set[str]): the link names the namespace owes the directory.
     """
-    linked = raw.rstrip("/").rsplit("/", 1)[-1] in links
+    linked = entry_name(raw) in links
     return VFSEntry(path=raw, size=0, is_dir=raw.endswith("/"), is_link=linked)
 
 
@@ -151,12 +152,15 @@ class RuntimeFiles:
         self._limiter = ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
 
     @classmethod
-    def of(cls, context: RuntimeContext) -> "RuntimeFiles":
+    def of(cls, context: RuntimeContext | None) -> "RuntimeFiles | None":
         """The file adapter every engine builds from its execution context.
 
         Args:
-            context (RuntimeContext): the execution's captured entry points.
+            context (RuntimeContext | None): the execution's captured entry
+                points; None outside a workspace, which has no adapter.
         """
+        if context is None:
+            return None
         links = context.ns.links
         return cls(
             context.dispatch,
@@ -705,9 +709,7 @@ class RuntimeFiles:
             steps (list[FlushStep]): the handle's ``flush_plan()``.
         """
         for step in steps:
-            if step.kind == "write":
-                self.write(path, step.data)
-            elif step.kind == "append":
+            if step.kind == "append":
                 self.append(path, step.data)
             elif step.kind == "pwrite":
                 self.pwrite(path, step.offset, step.data)
