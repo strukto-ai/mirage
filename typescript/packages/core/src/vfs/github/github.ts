@@ -41,7 +41,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { read as githubRead } from '../../core/github/read.ts'
-import { stat as githubStat } from '../../core/github/stat.ts'
+import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import {
   beforeFullScan as githubBeforeFullScan,
   filesContaining as githubFilesContaining,
@@ -143,6 +143,13 @@ export class GitHubVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return githubStat(this.accessor, path, index)
+  }
+
+  override readTree(
+    path: PathSpec,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return githubTree(this.accessor, path, index)
   }
 
   override filesContaining(

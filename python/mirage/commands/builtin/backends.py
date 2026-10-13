@@ -32,7 +32,6 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.gdocs.gdocs.GDocsVFS": "mirage.commands.builtin.gdocs",
     "mirage.vfs.gsheets.gsheets.GSheetsVFS": "mirage.commands.builtin.gsheets",
     "mirage.vfs.gslides.gslides.GSlidesVFS": "mirage.commands.builtin.gslides",
-    "mirage.vfs.github.github.GitHubVFS": "mirage.commands.builtin.github",
     "mirage.vfs.gridfs.gridfs.GridFSVFS": "mirage.commands.builtin.gridfs",
     "mirage.vfs.history.history.HistoryViewVFS": "mirage.commands.builtin.history",
     "mirage.vfs.lancedb.lancedb.LanceDBVFS": "mirage.commands.builtin.lancedb",

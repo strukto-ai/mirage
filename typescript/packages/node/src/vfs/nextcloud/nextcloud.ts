@@ -14,7 +14,7 @@ import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'
 import { read } from '../../core/nextcloud/read.ts'
-import { stat } from '../../core/nextcloud/stat.ts'
+import { stat, tree } from '../../core/nextcloud/stat.ts'
 import { readStream } from '../../core/nextcloud/stream.ts'
 import { exists } from '../../core/nextcloud/exists.ts'
 import { write } from '../../core/nextcloud/write.ts'
@@ -68,6 +68,13 @@ export class NextcloudVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return stat(this.accessor, path, index)
+  }
+
+  override readTree(
+    path: PathSpec,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return tree(this.accessor, path, index)
   }
 
   override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {

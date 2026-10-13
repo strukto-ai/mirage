@@ -17,8 +17,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.github.du import du
+from mirage.commands.builtin.generic_bind.builders.du import du
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.core.github.stat import tree
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
@@ -34,12 +35,8 @@ TREE = {
 }
 
 
-async def _resolve(_accessor, paths, _index):
-    return paths
-
-
-async def _tree_stat(_accessor, path, _index):
-    entry = TREE.get(path.vfs_path)
+async def _tree_stat(_accessor, path, _index=None):
+    entry = TREE.get(path.vfs_path.strip("/"))
     is_file = entry is not None and entry.type == "blob"
     return FileStat(
         name=path.virtual,
@@ -48,31 +45,8 @@ async def _tree_stat(_accessor, path, _index):
     )
 
 
-def _patch(monkeypatch, readdir, stat) -> CommandIO:
-    monkeypatch.setitem(du.__wrapped__.__globals__, "stat", stat)
-    monkeypatch.setitem(du.__wrapped__.__globals__, "ensure_tree", AsyncMock())
-    monkeypatch.setitem(du.__wrapped__.__globals__, "resolve_glob", _resolve)
-    return CommandIO(
-        readdir=readdir,
-        stat=stat,
-        read_bytes=AsyncMock(),
-        read_stream=AsyncMock(),
-        is_mounted=lambda _: True,
-    )
-
-
-async def _run(accessor, operand, flags, table: CommandIO):
-    stream, io = await du.__wrapped__(
-        accessor,
-        [PathSpec.from_str_path(operand)],
-        [],
-        CommandOpts(flags=flags, io=table),
-    )
-    return (
-        (await materialize(stream)).decode(),
-        io.exit_code,
-        await io.stderr_str(),
-    )
+async def _unlisted(_accessor, path, _index=None):
+    raise AssertionError(f"listed {path.virtual}")
 
 
 @pytest.mark.asyncio
@@ -90,7 +64,28 @@ async def _run(accessor, operand, flags, table: CommandIO):
         ("/readme.txt", {"a": True}, "7\t/readme.txt\n"),
     ],
 )
-async def test_du_sums_the_live_tree(monkeypatch, operand, flags, expected):
-    table = _patch(monkeypatch, AsyncMock(), _tree_stat)
+async def test_du_sums_the_tree_it_reads_once(
+    monkeypatch, operand, flags, expected
+):
+    monkeypatch.setitem(tree.__globals__, "ensure_tree", AsyncMock())
+    table = CommandIO(
+        readdir=_unlisted,
+        read_bytes=AsyncMock(),
+        read_stream=AsyncMock(),
+        stat=_tree_stat,
+        read_tree=tree,
+        is_mounted=lambda _: True,
+    )
     accessor = SimpleNamespace(truncated=False, tree=TREE)
-    assert await _run(accessor, operand, flags, table) == (expected, 0, "")
+    stream, io = await du(
+        table,
+        accessor,
+        [PathSpec.from_str_path(operand)],
+        [],
+        CommandOpts(flags=flags),
+    )
+    assert (
+        (await materialize(stream)).decode(),
+        io.exit_code,
+        await io.stderr_str(),
+    ) == (expected, 0, "")

@@ -44,13 +44,13 @@ const TREE = [
   { path: 'empty', type: 'tree', sha: 'b' },
 ]
 
-function offline(): void {
+function offline(tree: object[] = TREE): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: string | URL | Request) => {
       const url = input instanceof Request ? input.url : String(input)
       const body = url.includes('/git/trees/')
-        ? { tree: TREE, truncated: false }
+        ? { tree, truncated: false }
         : { default_branch: 'main' }
       return Promise.resolve(
         new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }),
@@ -102,6 +102,38 @@ describe('GitHubVFS', () => {
       }
     })
   }
+
+  // Mirrors test_find_judges_a_directory_by_what_the_session_sees: a walk
+  // asks readTree, which the dispatcher declines under a hide, so -empty sees
+  // the directory as the session does.
+  it('judges a directory for find by what the session sees', async () => {
+    offline([
+      { path: 'docs', type: 'tree', sha: 'd' },
+      { path: 'docs/guide.md', type: 'blob', sha: 'g', size: 3 },
+      { path: 'top.txt', type: 'blob', sha: 't', size: 2 },
+    ])
+    const vfs = await GitHubVFS.create({
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      baseUrl: 'http://127.0.0.1:1',
+    })
+    const ws = new Workspace(
+      { '/gh': vfs },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      const seen = await ws.shell('find /gh; find /gh -type d -empty')
+      expect(DEC.decode(seen.stdout)).toBe('/gh\n/gh/docs\n/gh/docs/guide.md\n/gh/top.txt\n')
+      const session = ws.createSession('veiled')
+      session.visibility = { ...session.visibility, paths: { paths: ['/gh/docs/guide.md'] } }
+      const veiled = await ws.shell('find /gh; find /gh -type d -empty', { sessionId: 'veiled' })
+      expect(DEC.decode(veiled.stdout)).toBe('/gh\n/gh/docs\n/gh/top.txt\n/gh/docs\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 const LIMIT = 384 * 1024

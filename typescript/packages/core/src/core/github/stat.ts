@@ -21,7 +21,9 @@ import { FileStat, FileType } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { GitHubApiError } from './client.ts'
-import { fetchHead } from './tree.ts'
+import { ensureTree, fetchHead } from './tree.ts'
+import { indexEntryFromTree } from './tree_entry.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { locate, lookupRetrying, pointLookup } from './lookup.ts'
 
 // Render one tree row as a FileStat, the same from either route.
@@ -37,6 +39,31 @@ function statOf(entry: IndexEntry): FileStat {
     fingerprint: entry.id,
     extra: { sha: entry.id },
   })
+}
+
+/**
+ * Every entry under a directory of the repository, each as `stat` renders it,
+ * from the git tree the mount fetches once. Null when GitHub truncated that
+ * tree, which then names only some paths, or when `path` is no directory in
+ * it, so the walk's readdir and stat report what is there. Mirrors `tree` in
+ * `mirage/core/github/stat.py`.
+ */
+export async function tree(
+  accessor: GitHubAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<Map<string, FileStat> | null> {
+  await ensureTree(accessor, index, mountPrefixOf(path.virtual, path.vfsPath))
+  if (accessor.truncated) return null
+  const base = path.mountPath.replace(/^\/+|\/+$/g, '')
+  if (base !== '' && accessor.tree[base]?.type !== 'tree') return null
+  const lead = base === '' ? '' : `${base}/`
+  const found = new Map<string, FileStat>()
+  for (const [key, entry] of Object.entries(accessor.tree)) {
+    if (key === base || !key.startsWith(lead)) continue
+    found.set(key.slice(lead.length), statOf(indexEntryFromTree(entry)))
+  }
+  return found
 }
 
 export async function stat(

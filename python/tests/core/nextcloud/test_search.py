@@ -4,30 +4,14 @@ import httpx
 import pytest
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.core.generic.find_eval import (
-    And,
-    Name,
-    Not,
-    Or,
-    Path,
-    TrueNode,
-    Type,
-)
-from mirage.core.nextcloud.search import (
-    Bounds,
-    FilesSearchQuery,
-    search_files,
-    supports_query,
-)
+from mirage.core.nextcloud.search import search_files
 from mirage.core.nextcloud.search.constants import SEARCH_PAGE_SIZE
-from mirage.core.nextcloud.search.query import glob_to_like, request_body
+from mirage.core.nextcloud.search.query import request_body
 from mirage.core.nextcloud.search.target import relative_path, search_target
 from mirage.types import FindType, PathSpec
-from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.nextcloud import NextcloudConfig
 
 _DAV_NAMESPACE = "DAV:"
-_OWNCLOUD_NAMESPACE = "http://owncloud.org/ns"
 _SEARCHDAV_NAMESPACE = "https://github.com/icewind1991/SearchDAV/ns"
 
 
@@ -47,10 +31,6 @@ def _multistatus(paths: list[tuple[str, bool]]) -> bytes:
             response, _qname(_DAV_NAMESPACE, "propstat")
         )
         prop = ElementTree.SubElement(propstat, _qname(_DAV_NAMESPACE, "prop"))
-        displayname = ElementTree.SubElement(
-            prop, _qname(_DAV_NAMESPACE, "displayname")
-        )
-        displayname.text = href_value.rstrip("/").rsplit("/", 1)[-1]
         resource_type = ElementTree.SubElement(
             prop, _qname(_DAV_NAMESPACE, "resourcetype")
         )
@@ -58,14 +38,11 @@ def _multistatus(paths: list[tuple[str, bool]]) -> bytes:
             ElementTree.SubElement(
                 resource_type, _qname(_DAV_NAMESPACE, "collection")
             )
-        content_length = ElementTree.SubElement(
-            prop, _qname(_DAV_NAMESPACE, "getcontentlength")
-        )
-        content_length.text = "42"
-        size = ElementTree.SubElement(
-            prop, _qname(_OWNCLOUD_NAMESPACE, "size")
-        )
-        size.text = "42"
+        if not is_dir:
+            content_length = ElementTree.SubElement(
+                prop, _qname(_DAV_NAMESPACE, "getcontentlength")
+            )
+            content_length.text = "42"
         modified = ElementTree.SubElement(
             prop, _qname(_DAV_NAMESPACE, "getlastmodified")
         )
@@ -116,7 +93,6 @@ def test_scope_preserves_spaces_unicode_and_xml_escapes_ampersand():
         request_body(
             target,
             PathSpec.from_str_path("/My Documents/税 & VAT"),
-            FilesSearchQuery(tree=Name("Invoices")),
             0,
         )
     )
@@ -131,127 +107,38 @@ def test_scope_preserves_spaces_unicode_and_xml_escapes_ampersand():
     )
 
 
-def test_glob_to_like_broadens_sql_wildcard_and_backslash_literals():
-    assert glob_to_like("a_b%\\c?*") == "a_b%%c_%"
-
-
-@pytest.mark.parametrize(
-    "tree",
-    [
-        Or([Name("*.pdf"), Path("*/deep/*")]),
-        Not(And([Name("*.pdf"), Path("*/deep/*")])),
-    ],
-)
-def test_query_rejects_partially_representable_boolean_tree(tree):
-    assert not supports_query(FilesSearchQuery(tree=tree))
-
-
-def test_query_accepts_fully_representable_boolean_tree():
-    tree = Or([Name("*.pdf"), Not(Type("d"))])
-    assert supports_query(FilesSearchQuery(tree=tree))
-
-
-@pytest.mark.parametrize(
-    "tree",
-    [
-        Not(Or([Name("notes.txt"), Name("rows.csv")])),
-        Not(And([Name("notes.txt"), Type("d")])),
-        Not(Not(Name("notes.txt"))),
-        Not(Type("f")),
-    ],
-)
-def test_query_rejects_negated_compound(tree):
-    assert not supports_query(FilesSearchQuery(tree=tree))
-
-
-@pytest.mark.parametrize(
-    "tree",
-    [
-        Not(Name("*.txt")),
-        Not(Name("a?.txt")),
-        Not(Name("notes.txt", icase=True)),
-        Not(Or([Name("*.txt")])),
-        Not(And([Name("*.txt")])),
-    ],
-)
-def test_query_rejects_negated_inexact_name(tree):
-    assert not supports_query(FilesSearchQuery(tree=tree))
-
-
-@pytest.mark.parametrize(
-    "tree",
-    [
-        Not(Name("notes.txt")),
-        Not(Type("d")),
-        Not(Or([Name("notes.txt")])),
-    ],
-)
-def test_query_accepts_negated_comparison(tree):
-    assert supports_query(FilesSearchQuery(tree=tree))
-
-
-@pytest.mark.parametrize("pattern", ["[ab].txt", "a\\b"])
-def test_query_rejects_unrepresentable_name_pattern(pattern):
-    assert not supports_query(FilesSearchQuery(tree=Name(pattern)))
-
-
-@pytest.mark.parametrize(
-    "size,keeps_directories",
-    [
-        (Bounds(lower=10), True),
-        (Bounds(upper=100), False),
-        (Bounds(lower=DIR_SIZE + 1), False),
-        (Bounds(lower=DIR_SIZE, upper=DIR_SIZE), True),
-    ],
-)
-def test_size_query_keeps_directories_when_dir_size_fits(
-    size, keeps_directories
-):
-    target = search_target("https://cloud.example/remote.php/dav/files/alice/")
-    assert target is not None
-    body = ElementTree.fromstring(
-        request_body(
-            target,
-            PathSpec.from_str_path("/Accounting"),
-            FilesSearchQuery(tree=TrueNode(), size=size),
-            0,
-        )
-    )
-    where = body.find(".//" + _qname(_DAV_NAMESPACE, "where"))
-    assert where is not None
-    kept = where.find("./" + _qname(_DAV_NAMESPACE, "or")) is not None
-    assert kept == keeps_directories
-
-
 @pytest.mark.asyncio
-async def test_search_files_builds_query_and_paginates(make_acc, httpx_mock):
+async def test_search_files_lists_every_entry_a_page_at_a_time(
+    make_acc, httpx_mock
+):
     first_paths = [
-        (f"/remote.php/dav/files/user/Accounting/item-{index}.pdf", True)
+        (f"/remote.php/dav/files/user/Accounting/item-{index}.pdf", False)
         for index in range(SEARCH_PAGE_SIZE)
     ]
-    second_paths = [("/files/user/Accounting/final%20invoice.pdf", True)]
+    second_paths = [("/files/user/Accounting/final%20invoices/", True)]
     httpx_mock.add_response(
         method="SEARCH", status_code=207, content=_multistatus(first_paths)
     )
     httpx_mock.add_response(
         method="SEARCH", status_code=207, content=_multistatus(second_paths)
     )
-    accessor = make_acc({})
-    query = FilesSearchQuery(
-        tree=And([Name("*.pdf"), Type("d")]),
-        size=Bounds(lower=10, upper=100),
-        modified=Bounds(lower=1000.75, upper=2000.25),
-    )
 
     entries = await search_files(
-        accessor, PathSpec.from_str_path("/Accounting"), query
+        make_acc({}), PathSpec.from_str_path("/Accounting")
     )
 
     assert entries is not None
     assert len(entries) == SEARCH_PAGE_SIZE + 1
-    assert entries[-1].key == "/Accounting/final invoice.pdf"
-    assert entries[-1].kind == FindType.DIRECTORY
-    assert entries[-1].size == 42
+    assert (entries[0].kind, entries[0].size, entries[0].modified) == (
+        FindType.FILE,
+        42,
+        "2026-07-11T12:00:00+00:00",
+    )
+    assert (entries[-1].key, entries[-1].kind, entries[-1].size) == (
+        "/Accounting/final invoices",
+        FindType.DIRECTORY,
+        None,
+    )
     requests = httpx_mock.get_requests()
     assert len(requests) == 2
     assert requests[0].method == "SEARCH"
@@ -269,34 +156,26 @@ async def test_search_files_builds_query_and_paginates(make_acc, httpx_mock):
         )
         == "/files/user/Accounting"
     )
-    assert (
-        first_body.findtext(
-            ".//" + _qname(_SEARCHDAV_NAMESPACE, "firstresult")
-        )
-        == "0"
-    )
-    assert second_body.findtext(
-        ".//" + _qname(_SEARCHDAV_NAMESPACE, "firstresult")
+    assert [
+        body.findtext(".//" + _qname(_SEARCHDAV_NAMESPACE, "firstresult"))
+        for body in (first_body, second_body)
+    ] == ["0", str(SEARCH_PAGE_SIZE)]
+    assert first_body.findtext(
+        ".//" + _qname(_DAV_NAMESPACE, "nresults")
     ) == str(SEARCH_PAGE_SIZE)
-    assert (
-        first_body.find(".//" + _qname(_DAV_NAMESPACE, "is-collection"))
-        is not None
-    )
-    literals = [
-        element.text
-        for element in first_body.findall(
-            ".//" + _qname(_DAV_NAMESPACE, "literal")
-        )
+    where = first_body.find(".//" + _qname(_DAV_NAMESPACE, "where"))
+    assert where is not None
+    assert [element.tag.split("}")[1] for element in where.iter()] == [
+        "where",
+        "or",
+        "is-collection",
+        "not",
+        "is-collection",
     ]
-    assert "%.pdf" in literals
-    assert "10" in literals
-    assert "100" in literals
-    assert "1000" in literals
-    assert "2001" in literals
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [404, 405, 501])
+@pytest.mark.parametrize("status_code", [404, 405, 500, 501])
 async def test_search_files_returns_none_when_search_is_unavailable(
     make_acc, httpx_mock, status_code
 ):
@@ -304,7 +183,6 @@ async def test_search_files_returns_none_when_search_is_unavailable(
     result = await search_files(
         make_acc({}),
         PathSpec.from_str_path("/Documents"),
-        FilesSearchQuery(tree=Name("Invoices")),
     )
     assert result is None
 
@@ -324,7 +202,6 @@ async def test_search_files_stops_when_pagination_makes_no_progress(
     result = await search_files(
         make_acc({}),
         PathSpec.from_str_path("/Documents"),
-        FilesSearchQuery(tree=Name("item-*")),
     )
 
     assert result is None
@@ -353,7 +230,6 @@ async def test_search_files_rebases_configured_subroot(httpx_mock):
     entries = await search_files(
         accessor,
         PathSpec.from_str_path("/Reports"),
-        FilesSearchQuery(tree=Name("*.pdf")),
     )
 
     assert entries is not None
@@ -372,7 +248,7 @@ async def test_search_files_rebases_configured_subroot(httpx_mock):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [401, 500])
+@pytest.mark.parametrize("status_code", [401, 503])
 async def test_search_files_propagates_http_error(
     make_acc, httpx_mock, status_code
 ):
@@ -381,7 +257,6 @@ async def test_search_files_propagates_http_error(
         await search_files(
             make_acc({}),
             PathSpec.from_str_path("/Documents"),
-            FilesSearchQuery(tree=Name("Invoices")),
         )
     assert exc_info.value.response.status_code == status_code
 
@@ -397,7 +272,6 @@ async def test_search_files_rejects_malformed_multistatus(
         await search_files(
             make_acc({}),
             PathSpec.from_str_path("/Documents"),
-            FilesSearchQuery(tree=Name("Invoices")),
         )
 
 
@@ -412,5 +286,4 @@ async def test_search_files_rejects_out_of_scope_href(make_acc, httpx_mock):
         await search_files(
             make_acc({}),
             PathSpec.from_str_path("/Documents"),
-            FilesSearchQuery(tree=Name("Invoices")),
         )

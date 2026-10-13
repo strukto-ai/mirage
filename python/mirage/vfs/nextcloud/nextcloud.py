@@ -16,6 +16,7 @@ from mirage.core.nextcloud.rename import rename as _rename
 from mirage.core.nextcloud.rm import rm_r as _rm_r
 from mirage.core.nextcloud.rmdir import rmdir as _rmdir
 from mirage.core.nextcloud.stat import stat as _stat
+from mirage.core.nextcloud.stat import tree as _tree
 from mirage.core.nextcloud.stream import read_stream as _read_stream
 from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
@@ -66,6 +67,11 @@ class NextcloudVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def read_tree(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, index)
 
     def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

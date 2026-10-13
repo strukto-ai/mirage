@@ -19,7 +19,7 @@ import { RedisIndexCacheStore } from '../../cache/index/redis.ts'
 import { PathSpec } from '../../types.ts'
 import { populateIndex } from './tree.ts'
 import { read } from './read.ts'
-import { stat } from './stat.ts'
+import { stat, tree } from './stat.ts'
 import type { GitHubTreeItem } from './client.ts'
 import { FakeGitHub, servedAccessor } from './_test_util.ts'
 
@@ -224,5 +224,56 @@ describe('the root stat names the head commit', () => {
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toMatch(/^head of [^/]+\/[^ ]+ not answered: /)
     warn.mockRestore()
+  })
+})
+
+function under(virtual: string): PathSpec {
+  return new PathSpec({
+    vfsPath: virtual.slice('/gh'.length),
+    virtual,
+    directory: virtual,
+  })
+}
+
+describe('tree', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Mirrors test_tree_answers_each_entry_as_stat_does.
+  it('answers each entry as stat does', async () => {
+    const gh = new FakeGitHub({ 'docs/a.txt': 'alpha', 'docs/sub/b.txt': 'bb', 'top.txt': 't' })
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = servedAccessor()
+    const index = new RAMIndexCacheStore()
+    const found = await tree(accessor, under('/gh/docs'), index)
+    if (found === null) throw new Error('expected a tree')
+    expect([...found.keys()].sort()).toEqual(['a.txt', 'sub', 'sub/b.txt'])
+    for (const [rel, entry] of found) {
+      expect(entry).toEqual(await stat(accessor, under(`/gh/docs/${rel}`), index))
+    }
+    expect([...((await tree(accessor, ROOT, index)) ?? new Map()).keys()].sort()).toEqual([
+      'docs',
+      'docs/a.txt',
+      'docs/sub',
+      'docs/sub/b.txt',
+      'top.txt',
+    ])
+    expect(gh.count('recursive')).toBe(1)
+  })
+
+  // Mirrors test_tree_leaves_a_file_and_a_truncated_tree_to_the_walk.
+  it('leaves a file and a truncated tree to the walk', async () => {
+    const files = { 'docs/a.txt': 'alpha', 'top.txt': 't' }
+    const gh = new FakeGitHub(files)
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = servedAccessor()
+    const index = new RAMIndexCacheStore()
+    expect(await tree(accessor, under('/gh/top.txt'), index)).toBeNull()
+    expect(await tree(accessor, under('/gh/nope'), index)).toBeNull()
+    const cut = new FakeGitHub(files)
+    cut.truncatedRecursive = true
+    vi.stubGlobal('fetch', cut.fetch)
+    expect(await tree(servedAccessor(), ROOT, new RAMIndexCacheStore())).toBeNull()
   })
 })

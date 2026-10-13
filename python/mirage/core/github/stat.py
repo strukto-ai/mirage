@@ -21,10 +21,11 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.lookup import locate, lookup_retrying, point_lookup
 from mirage.core.github.repo import ensure_ref
-from mirage.core.github.tree import fetch_head
+from mirage.core.github.tree import ensure_tree, fetch_head, index_entry
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
+from mirage.utils.key_prefix import mount_prefix_of
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +84,39 @@ async def stat(
     if found.entry is None:
         raise enoent(path_spec.virtual)
     return stat_of(found.entry)
+
+
+async def tree(
+    accessor: GitHubAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, FileStat] | None:
+    """Every entry under a directory of the repository, each as ``stat``
+    renders it, from the git tree the mount fetches once. None when
+    GitHub truncated that tree, which then names only some paths, or
+    when ``path`` is no directory in it, so the walk's readdir and stat
+    report what is there.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        path (PathSpec): the directory.
+        index (IndexCacheStore): the mount's index, which the tree's
+            refetch reseeds.
+    """
+    await ensure_tree(
+        accessor, index, mount_prefix_of(path.virtual, path.vfs_path)
+    )
+    if accessor.truncated:
+        return None
+    base = path.mount_path.strip("/")
+    if base and getattr(accessor.tree.get(base), "type", None) != "tree":
+        return None
+    lead = base + "/" if base else ""
+    return {
+        key[len(lead) :]: stat_of(index_entry(entry, key.rsplit("/", 1)[-1]))
+        for key, entry in accessor.tree.items()
+        if key.startswith(lead) and key != base
+    }
 
 
 async def _root_version(

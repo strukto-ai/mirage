@@ -81,9 +81,13 @@ entries of a `read_tree` answer cost none and do not count toward the cap.
 | GridFS | one `fs.files` query under the prefix |
 | Hugging Face buckets | one recursive listing |
 | Dropbox | one recursive `list_folder` |
+| Nextcloud | one file search under the path, a page of a thousand entries per request |
+| GitHub | the repository tree the mount fetches once |
 | Redis | one key scan, with every stat in one pipeline |
 | RAM | the store in memory |
 
-A walk on any other mount reads one directory at a time. GitHub and the
-Hugging Face Hub already answer every `readdir` from the repository tree they
-fetch once.
+A walk on any other mount reads one directory at a time. The Hugging Face Hub
+already answers every `readdir` from the repository tree it fetches once.
+Nextcloud's file search needs a Nextcloud server; on another WebDAV server the
+walk lists each folder. GitHub answers `None` when GitHub truncated the tree of
+a large repository.

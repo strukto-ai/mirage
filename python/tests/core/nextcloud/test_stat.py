@@ -3,8 +3,9 @@ import pytest
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.nextcloud.read import read
 from mirage.core.nextcloud.readdir import readdir
-from mirage.core.nextcloud.stat import stat
-from mirage.types import FileType, PathSpec
+from mirage.core.nextcloud.search import SearchEntry
+from mirage.core.nextcloud.stat import stat, tree
+from mirage.types import ContentType, FileStat, FileType, FindType, PathSpec
 
 
 @pytest.mark.asyncio
@@ -126,3 +127,54 @@ async def test_stat_size_matches_read_for_every_file(make_acc):
             assert info.size == len(body), trimmed
             files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]
+
+
+def _rows(*entries: SearchEntry):
+    async def search_files(_accessor, _path):
+        return list(entries)
+
+    return search_files
+
+
+@pytest.mark.asyncio
+async def test_tree_renders_each_row_as_a_listed_stat(make_acc, monkeypatch):
+    when = "2026-07-11T12:00:00+00:00"
+    monkeypatch.setitem(
+        tree.__globals__,
+        "search_files",
+        _rows(
+            SearchEntry("/docs/a.txt", FindType.FILE, 3, when),
+            SearchEntry("/docs/sub", FindType.DIRECTORY, None, when),
+            SearchEntry("/docs/sub/b.txt", FindType.FILE, 0, None),
+            SearchEntry("/other.txt", FindType.FILE, 1, when),
+        ),
+    )
+    found = await tree(make_acc({}), PathSpec.from_str_path("/docs"))
+    assert found == {
+        "a.txt": FileStat(
+            name="a.txt",
+            size=3,
+            modified=when,
+            type=FileType.FILE,
+            content=ContentType.TEXT,
+        ),
+        "sub": FileStat(name="sub", type=FileType.DIRECTORY, modified=when),
+        "sub/b.txt": FileStat(
+            name="b.txt", size=0, type=FileType.FILE, content=ContentType.TEXT
+        ),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rows",
+    [None, [SearchEntry("/docs/a.txt", FindType.FILE, None, None)]],
+)
+async def test_tree_leaves_no_search_or_a_sizeless_file_to_the_walk(
+    make_acc, monkeypatch, rows
+):
+    async def search_files(_accessor, _path):
+        return rows
+
+    monkeypatch.setitem(tree.__globals__, "search_files", search_files)
+    assert await tree(make_acc({}), PathSpec.from_str_path("/docs")) is None

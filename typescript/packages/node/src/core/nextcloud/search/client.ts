@@ -6,10 +6,10 @@ import {
   SEARCH_PAGE_SIZE,
   UNAVAILABLE_STATUS_CODES,
 } from './constants.ts'
-import { requestBody, supportsQuery } from './query.ts'
+import { requestBody } from './query.ts'
 import { parsePage } from './response.ts'
 import { searchTarget } from './target.ts'
-import type { FilesSearchQuery, SearchEntry } from './types.ts'
+import type { SearchEntry } from './types.ts'
 
 function authorization(accessor: NextcloudAccessor): string | null {
   const username = accessor.config.username
@@ -17,12 +17,16 @@ function authorization(accessor: NextcloudAccessor): string | null {
   return `Basic ${Buffer.from(`${username}:${accessor.config.password ?? ''}`).toString('base64')}`
 }
 
+/**
+ * Every file and folder under a directory, from Nextcloud's file search, a page
+ * of a thousand per request. Null from a server without the search (plain
+ * WebDAV), and for a `path` it cannot find or that is a file. Mirrors Python's
+ * `search_files`.
+ */
 export async function searchFiles(
   accessor: NextcloudAccessor,
   path: PathSpec,
-  query: FilesSearchQuery,
 ): Promise<SearchEntry[] | null> {
-  if (!supportsQuery(query)) return null
   const target = searchTarget(accessor.config.url)
   if (target === null) return null
   const headers: Record<string, string> = { ...SEARCH_HEADERS }
@@ -34,7 +38,7 @@ export async function searchFiles(
     const response = await fetch(target.endpoint, {
       method: SEARCH_METHOD,
       headers,
-      body: requestBody(target, path, query, offset),
+      body: requestBody(target, path, offset),
       signal: AbortSignal.timeout((accessor.config.timeout ?? 30) * 1000),
     })
     if (UNAVAILABLE_STATUS_CODES.has(response.status)) return null

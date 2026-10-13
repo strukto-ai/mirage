@@ -1,25 +1,18 @@
-import type { PredNode } from '@struktoai/mirage-core/core/generic/find_eval'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { searchFiles, supportsQuery, type Bounds } from './search/index.ts'
+import { searchFiles } from './search/index.ts'
 import { SEARCH_PAGE_SIZE } from './search/constants.ts'
-import { globToLike, requestBody } from './search/query.ts'
+import { requestBody } from './search/query.ts'
 import { relativePath, searchTarget } from './search/target.ts'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-
-const NAME_TXT: PredNode = { op: 'name', pattern: '*.txt', icase: false }
-const NAME_NOTES: PredNode = { op: 'name', pattern: 'notes.txt', icase: false }
-const NAME_ROWS: PredNode = { op: 'name', pattern: 'rows.csv', icase: false }
-const DIRECTORY: PredNode = { op: 'type', kind: 'd' }
 
 function multistatus(paths: { href: string; directory?: boolean }[]): string {
   const responses = paths
     .map(({ href, directory }) => {
-      const name = rstripSlash(href).split('/').pop() ?? ''
-      const resourceType = directory === true ? '<d:collection/>' : ''
-      return `<d:response><d:href>${href}</d:href><d:propstat><d:prop><d:displayname>${name}</d:displayname><d:resourcetype>${resourceType}</d:resourcetype><d:getcontentlength>42</d:getcontentlength><oc:size>42</oc:size><d:getlastmodified>Sat, 11 Jul 2026 12:00:00 GMT</d:getlastmodified></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
+      const folder = directory === true
+      const resourceType = folder ? '<d:collection/>' : ''
+      const length = folder ? '' : '<d:getcontentlength>42</d:getcontentlength>'
+      return `<d:response><d:href>${href}</d:href><d:propstat><d:prop><d:resourcetype>${resourceType}</d:resourcetype>${length}<d:getlastmodified>Sat, 11 Jul 2026 12:00:00 GMT</d:getlastmodified></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
     })
     .join('')
   return `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">${responses}</d:multistatus>`
@@ -43,7 +36,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('Nextcloud Files Search query', () => {
+describe('Nextcloud Files Search request', () => {
   it('preserves a webroot and configured subroot', () => {
     expect(
       searchTarget('https://cloud.example/nextcloud/remote.php/dav/files/alice/team%20docs/'),
@@ -63,95 +56,20 @@ describe('Nextcloud Files Search query', () => {
     ).toBe('/report.pdf')
   })
 
-  it('escapes scopes and compiles only fully representable predicates', () => {
+  it('escapes the scope and asks for every entry under it', () => {
     const target = requiredTarget('https://cloud.example/remote.php/dav/files/alice/team%20docs/')
-    const body = requestBody(
-      target,
-      PathSpec.fromStrPath('/My Documents/税 & VAT'),
-      { tree: { op: 'name', pattern: 'Invoices', icase: false } },
-      0,
-    )
+    const body = requestBody(target, PathSpec.fromStrPath('/My Documents/税 & VAT'), 0)
     expect(body).toContain('/files/alice/team docs/My Documents/税 &amp; VAT')
-    expect(
-      supportsQuery({
-        tree: {
-          op: 'or',
-          kids: [
-            { op: 'name', pattern: '*.pdf', icase: false },
-            { op: 'path', pattern: '*/deep/*' },
-          ],
-        },
-      }),
-    ).toBe(false)
-    expect(
-      supportsQuery({
-        tree: {
-          op: 'or',
-          kids: [
-            { op: 'name', pattern: '*.pdf', icase: false },
-            { op: 'not', kid: { op: 'type', kind: 'd' } },
-          ],
-        },
-      }),
-    ).toBe(true)
-  })
-
-  it.each<[string, PredNode]>([
-    ['not of an or', { op: 'not', kid: { op: 'or', kids: [NAME_NOTES, NAME_ROWS] } }],
-    ['not of an and', { op: 'not', kid: { op: 'and', kids: [NAME_NOTES, DIRECTORY] } }],
-    ['not of a not', { op: 'not', kid: { op: 'not', kid: NAME_NOTES } }],
-    ['not of -type f', { op: 'not', kid: { op: 'type', kind: 'f' } }],
-  ])('refuses to push down a negated compound: %s', (_label, tree) => {
-    expect(supportsQuery({ tree })).toBe(false)
-  })
-
-  it.each<[string, PredNode]>([
-    ['not of a star glob', { op: 'not', kid: NAME_TXT }],
-    ['not of a question glob', { op: 'not', kid: { op: 'name', pattern: 'a?.txt', icase: false } }],
-    ['not of an -iname', { op: 'not', kid: { op: 'name', pattern: 'notes.txt', icase: true } }],
-    ['not of a one-armed group', { op: 'not', kid: { op: 'or', kids: [NAME_TXT] } }],
-  ])('refuses to push down a negated inexact name: %s', (_label, tree) => {
-    expect(supportsQuery({ tree })).toBe(false)
-  })
-
-  it.each<[string, PredNode]>([
-    ['not of an exact name', { op: 'not', kid: NAME_NOTES }],
-    ['not of -type d', { op: 'not', kid: DIRECTORY }],
-    ['not of a one-armed group', { op: 'not', kid: { op: 'or', kids: [NAME_NOTES] } }],
-  ])('pushes down a negated comparison: %s', (_label, tree) => {
-    expect(supportsQuery({ tree })).toBe(true)
-  })
-
-  it.each<[string, string]>([
-    ['a character class', '[ab].txt'],
-    ['a backslash escape', 'a\\b'],
-  ])('refuses to push down %s', (_label, pattern) => {
-    expect(supportsQuery({ tree: { op: 'name', pattern, icase: false } })).toBe(false)
-  })
-
-  it.each<[string, Bounds, boolean]>([
-    ['a lower bound below DIR_SIZE', { lower: 10, upper: null }, true],
-    ['an upper bound below DIR_SIZE', { lower: null, upper: 100 }, false],
-    ['a lower bound above DIR_SIZE', { lower: DIR_SIZE + 1, upper: null }, false],
-    ['exactly DIR_SIZE', { lower: DIR_SIZE, upper: DIR_SIZE }, true],
-  ])('keeps directories in a size query only when DIR_SIZE fits: %s', (_label, size, keeps) => {
-    const target = requiredTarget('https://cloud.example/remote.php/dav/files/alice/')
-    const body = requestBody(
-      target,
-      PathSpec.fromStrPath('/Accounting'),
-      { tree: { op: 'true' }, size },
-      0,
+    expect(body).toContain(
+      '<d:where><d:or><d:is-collection/><d:not><d:is-collection/></d:not></d:or></d:where>',
     )
-    expect(body.includes('<d:or>')).toBe(keeps)
-  })
-
-  it('broadens SQL wildcard and backslash literals safely', () => {
-    expect(globToLike('a_b%\\c?*')).toBe('a_b%%c_%')
+    expect(body).toContain(`<d:nresults>${String(SEARCH_PAGE_SIZE)}</d:nresults>`)
   })
 })
 
 describe('Nextcloud Files Search transport', () => {
-  it('authenticates, paginates, and parses metadata', async () => {
+  // Mirrors test_search_files_lists_every_entry_a_page_at_a_time.
+  it('lists every entry a page at a time', async () => {
     const first = Array.from({ length: SEARCH_PAGE_SIZE }, (_, index) => ({
       href: `/remote.php/dav/files/user/Accounting/item-${String(index)}.pdf`,
     }))
@@ -160,29 +78,20 @@ describe('Nextcloud Files Search transport', () => {
       .mockResolvedValueOnce(new Response(multistatus(first), { status: 207 }))
       .mockResolvedValueOnce(
         new Response(
-          multistatus([{ href: '/files/user/Accounting/final%20invoice.pdf', directory: true }]),
+          multistatus([{ href: '/files/user/Accounting/final%20invoices/', directory: true }]),
           { status: 207 },
         ),
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const entries = await searchFiles(accessor(), PathSpec.fromStrPath('/Accounting'), {
-      tree: {
-        op: 'and',
-        kids: [
-          { op: 'name', pattern: '*.pdf', icase: false },
-          { op: 'type', kind: 'd' },
-        ],
-      },
-      size: { lower: 10, upper: 100 },
-      modified: { lower: 1000.75, upper: 2000.25 },
-    })
+    const entries = await searchFiles(accessor(), PathSpec.fromStrPath('/Accounting'))
 
     expect(entries).toHaveLength(SEARCH_PAGE_SIZE + 1)
+    expect(entries?.[0]).toMatchObject({ kind: 'f', size: 42, modified: '2026-07-11T12:00:00Z' })
     expect(entries?.at(-1)).toMatchObject({
-      key: '/Accounting/final invoice.pdf',
+      key: '/Accounting/final invoices',
       kind: 'd',
-      size: 42,
+      size: null,
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const firstInit = fetchMock.mock.calls[0]?.[1]
@@ -198,13 +107,9 @@ describe('Nextcloud Files Search transport', () => {
     expect(secondBody).toContain(`<sd:firstresult>${String(SEARCH_PAGE_SIZE)}</sd:firstresult>`)
   })
 
-  it.each([404, 405, 501])('falls back when SEARCH returns HTTP %s', async (status) => {
+  it.each([404, 405, 500, 501])('falls back when SEARCH returns HTTP %s', async (status) => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status })))
-    await expect(
-      searchFiles(accessor(), PathSpec.fromStrPath('/Documents'), {
-        tree: { op: 'name', pattern: 'Invoices', icase: false },
-      }),
-    ).resolves.toBeNull()
+    await expect(searchFiles(accessor(), PathSpec.fromStrPath('/Documents'))).resolves.toBeNull()
   })
 
   it('accepts an empty multistatus page', async () => {
@@ -214,11 +119,7 @@ describe('Nextcloud Files Search transport', () => {
         .fn<typeof fetch>()
         .mockResolvedValue(new Response('<d:multistatus xmlns:d="DAV:"/>', { status: 207 })),
     )
-    await expect(
-      searchFiles(accessor(), PathSpec.fromStrPath('/Documents'), {
-        tree: { op: 'name', pattern: 'Documents', icase: false },
-      }),
-    ).resolves.toEqual([])
+    await expect(searchFiles(accessor(), PathSpec.fromStrPath('/Documents'))).resolves.toEqual([])
   })
 
   it('rejects malformed and out-of-scope responses', async () => {
@@ -229,12 +130,11 @@ describe('Nextcloud Files Search transport', () => {
         new Response(multistatus([{ href: '/files/other/Documents/Invoices' }]), { status: 207 }),
       )
     vi.stubGlobal('fetch', fetchMock)
-    const query = { tree: { op: 'name', pattern: 'Invoices', icase: false } as const }
-    await expect(
-      searchFiles(accessor(), PathSpec.fromStrPath('/Documents'), query),
-    ).rejects.toThrow('invalid Nextcloud Files Search XML')
-    await expect(
-      searchFiles(accessor(), PathSpec.fromStrPath('/Documents'), query),
-    ).rejects.toThrow('out-of-scope href')
+    await expect(searchFiles(accessor(), PathSpec.fromStrPath('/Documents'))).rejects.toThrow(
+      'invalid Nextcloud Files Search XML',
+    )
+    await expect(searchFiles(accessor(), PathSpec.fromStrPath('/Documents'))).rejects.toThrow(
+      'out-of-scope href',
+    )
   })
 })

@@ -23,6 +23,7 @@ from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.search import before_full_scan as _before_full_scan
 from mirage.core.github.search import files_containing as _files_containing
 from mirage.core.github.stat import stat as _stat
+from mirage.core.github.stat import tree as _tree
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.core.github.watch import build_delta_hook
 from mirage.types import FileStat, ListingVersion, PathSpec, VFSName
@@ -167,6 +168,11 @@ class GitHubVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def read_tree(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, index)
 
     async def files_containing(
         self,

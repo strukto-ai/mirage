@@ -25,7 +25,13 @@ from mirage.core.github.repo import ensure_default_branch
 from mirage.core.github.stat import stat
 from mirage.core.github.tree import ensure_tree
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import MountMode, PathSpec, VFSName
+from mirage.types import (
+    HiddenPaths,
+    MountMode,
+    PathSpec,
+    VFSName,
+    Visibility,
+)
 from mirage.vfs.github.github import GitHubVFS
 from mirage.workspace import Workspace
 from tests.fixtures.driver_ops import ops
@@ -327,3 +333,35 @@ async def test_removing_a_tree_entry_is_refused_not_missing(
         assert (result.exit_code, await result.stderr_str()) == (0, "")
         result = await ws.shell("ls /gh")
         assert await result.stdout_str() == "empty\ntop.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_judges_a_directory_by_what_the_session_sees() -> None:
+    # A walk asks read_tree, which the dispatcher declines under a hide,
+    # so -empty sees the directory as the session does.
+    tree = {
+        "docs": TreeEntry(path="docs", type="tree", sha="d", size=None),
+        "docs/guide.md": TreeEntry(
+            path="docs/guide.md", type="blob", sha="g", size=3
+        ),
+        "top.txt": TreeEntry(path="top.txt", type="blob", sha="t", size=2),
+    }
+    with _offline(tree):
+        ws = Workspace({"/gh": _make_vfs()}, mode=MountMode.READ)
+        try:
+            result = await ws.shell("find /gh; find /gh -type d -empty")
+            assert await result.stdout_str() == (
+                "/gh\n/gh/docs\n/gh/docs/guide.md\n/gh/top.txt\n"
+            )
+            session = ws.create_session("veiled")
+            session.visibility = Visibility(
+                paths=HiddenPaths(paths=("/gh/docs/guide.md",))
+            )
+            result = await ws.shell(
+                "find /gh; find /gh -type d -empty", session_id="veiled"
+            )
+            assert await result.stdout_str() == (
+                "/gh\n/gh/docs\n/gh/top.txt\n/gh/docs\n"
+            )
+        finally:
+            await ws.close()

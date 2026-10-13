@@ -5,10 +5,8 @@ from xml.etree import ElementTree
 
 from mirage.core.nextcloud.search.constants import (
     CONTENT_LENGTH,
-    DISPLAY_NAME,
     LAST_MODIFIED,
     RESOURCE_TYPE,
-    SIZE,
 )
 from mirage.core.nextcloud.search.target import relative_path
 from mirage.core.nextcloud.search.types import (
@@ -59,7 +57,12 @@ def has_collection(properties: list[XmlElement]) -> bool:
     return False
 
 
-def modified_timestamp(value: str | None) -> float | None:
+def modified_text(value: str | None) -> str | None:
+    """A getlastmodified value as the ISO time a listing records.
+
+    Args:
+        value (str | None): the property's text.
+    """
     if value is None:
         return None
     try:
@@ -73,13 +76,11 @@ def modified_timestamp(value: str | None) -> float | None:
             ) from exc
     if modified.tzinfo is None:
         modified = modified.replace(tzinfo=timezone.utc)
-    return modified.timestamp()
+    return modified.isoformat()
 
 
-def entry_size(properties: list[XmlElement]) -> int | None:
-    value = find_text(properties, SIZE)
-    if value is None:
-        value = find_text(properties, CONTENT_LENGTH)
+def content_length(properties: list[XmlElement]) -> int | None:
+    value = find_text(properties, CONTENT_LENGTH)
     if value is None:
         return None
     try:
@@ -95,19 +96,12 @@ def parse_response(response: XmlElement, target: SearchTarget) -> SearchEntry:
     if href is None:
         raise ValueError("Nextcloud Files Search result is missing href")
     properties = successful_properties(response)
-    key = relative_path(href, target)
-    name = (
-        find_text(properties, DISPLAY_NAME)
-        or key.rstrip("/").rsplit("/", 1)[-1]
-    )
+    folder = has_collection(properties)
     return SearchEntry(
-        key=key,
-        name=name,
-        kind=(
-            FindType.DIRECTORY if has_collection(properties) else FindType.FILE
-        ),
-        size=entry_size(properties),
-        modified=modified_timestamp(find_text(properties, LAST_MODIFIED)),
+        key=relative_path(href, target),
+        kind=FindType.DIRECTORY if folder else FindType.FILE,
+        size=None if folder else content_length(properties),
+        modified=modified_text(find_text(properties, LAST_MODIFIED)),
     )
 
 

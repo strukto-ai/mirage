@@ -1,5 +1,5 @@
 import type { Metadata } from 'opendal'
-import { ResourceType } from '@struktoai/mirage-core/cache/index/config'
+import { IndexEntry, ResourceType } from '@struktoai/mirage-core/cache/index/config'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -8,7 +8,64 @@ import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { mountPrefixOf, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
+import { searchFiles } from './search/index.ts'
 import { isNotFound } from './util.ts'
+
+/** A listed row as `stat` renders it, the same from the index and from a search. */
+export function statOf(entry: IndexEntry): FileStat {
+  if (entry.resourceType === ResourceType.FOLDER) {
+    return new FileStat({
+      name: entry.name,
+      type: FileType.DIRECTORY,
+      modified: entry.remoteTime || null,
+    })
+  }
+  return new FileStat({
+    name: entry.name,
+    size: entry.size ?? null,
+    modified: entry.remoteTime || null,
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.name),
+  })
+}
+
+/**
+ * Every file and folder under a directory, each as `stat` answers it after a
+ * listing, from Nextcloud's file search: a page of a thousand per request,
+ * where a walk sends one per folder. Null from a server without the search,
+ * for a path it cannot find or that is a file, and when a file comes back
+ * without its length, which only a stat of it fills. Mirrors `tree` in
+ * `mirage/core/nextcloud/stat.py`.
+ */
+export async function tree(
+  accessor: NextcloudAccessor,
+  path: PathSpec,
+  _index?: IndexCacheStore,
+): Promise<Map<string, FileStat> | null> {
+  const found = await searchFiles(accessor, path)
+  if (found === null) return null
+  const base = stripSlash(rawPathOf(path))
+  const lead = base === '' ? '/' : `/${base}/`
+  const rows = new Map<string, FileStat>()
+  for (const entry of found) {
+    if (!entry.key.startsWith(lead)) continue
+    const folder = entry.kind === 'd'
+    if (!folder && entry.size === null) return null
+    rows.set(
+      entry.key.slice(lead.length),
+      statOf(
+        new IndexEntry({
+          id: entry.key,
+          name: entry.key.slice(entry.key.lastIndexOf('/') + 1),
+          resourceType: folder ? ResourceType.FOLDER : ResourceType.FILE,
+          size: entry.size,
+          remoteTime: entry.modified ?? '',
+        }),
+      ),
+    )
+  }
+  return rows
+}
 
 export async function stat(
   accessor: NextcloudAccessor,
@@ -23,21 +80,7 @@ export async function stat(
   if (index !== undefined) {
     const lookup = await index.get(virtualKey)
     if (lookup.entry !== undefined && lookup.entry !== null) {
-      const entry = lookup.entry
-      if (entry.resourceType === ResourceType.FOLDER) {
-        return new FileStat({
-          name: entry.name,
-          type: FileType.DIRECTORY,
-          modified: entry.remoteTime || null,
-        })
-      }
-      return new FileStat({
-        name: entry.name,
-        size: entry.size ?? null,
-        modified: entry.remoteTime || null,
-        type: FileType.FILE,
-        content: contentTypeForPath(entry.name),
-      })
+      return statOf(lookup.entry)
     }
     const parent = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
     const listing = await index.listDir(parent)

@@ -26,6 +26,7 @@ from mirage.core.github.config import GitHubConfig
 from mirage.core.github.read import read
 from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
+from mirage.core.github.stat import tree as subtree
 from mirage.core.github.tree import index_rows
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import ContentType, FileType, PathSpec
@@ -336,3 +337,47 @@ async def test_a_root_stat_with_no_index_asks_nothing():
         found = await stat(vfs.accessor, ROOT)
         assert found.fingerprint is None
         assert hub.counts() == (0, 0, 0)
+
+
+def _under(virtual: str) -> PathSpec:
+    return PathSpec(
+        virtual=virtual, directory=virtual, vfs_path=virtual[len("/gh") :]
+    )
+
+
+@pytest.mark.asyncio
+async def test_tree_answers_each_entry_as_stat_does():
+    files = {"docs/a.txt": b"alpha", "docs/sub/b.txt": b"bb", "top.txt": b"t"}
+    with serve(FakeGitHub(files=files)) as hub:
+        vfs = _vfs(hub)
+        index = RAMIndexCacheStore()
+        found = await subtree(vfs.accessor, _under("/gh/docs"), index)
+        assert found is not None
+        assert sorted(found) == ["a.txt", "sub", "sub/b.txt"]
+        for rel, entry in found.items():
+            assert entry == await stat(
+                vfs.accessor, _under(f"/gh/docs/{rel}"), index
+            )
+        assert sorted(await subtree(vfs.accessor, ROOT, index) or {}) == [
+            "docs",
+            "docs/a.txt",
+            "docs/sub",
+            "docs/sub/b.txt",
+            "top.txt",
+        ]
+        assert hub.count("recursive") == 1
+
+
+@pytest.mark.asyncio
+async def test_tree_leaves_a_file_and_a_truncated_tree_to_the_walk():
+    files = {"docs/a.txt": b"alpha", "top.txt": b"t"}
+    with serve(FakeGitHub(files=files)) as hub:
+        vfs = _vfs(hub)
+        index = RAMIndexCacheStore()
+        assert (
+            await subtree(vfs.accessor, _under("/gh/top.txt"), index) is None
+        )
+        assert await subtree(vfs.accessor, _under("/gh/nope"), index) is None
+    with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
+        vfs = _vfs(hub)
+        assert await subtree(vfs.accessor, ROOT, RAMIndexCacheStore()) is None

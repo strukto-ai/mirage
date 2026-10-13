@@ -19,7 +19,6 @@ import { DifyVFS } from '../../vfs/dify/dify.ts'
 import { DiscordVFSBase } from '../../vfs/discord/discord.ts'
 import { GCalVFS } from '../../vfs/gcal/gcal.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
-import { GitHubVFS } from '../../vfs/github/github.ts'
 import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
 import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
@@ -36,7 +35,6 @@ import { DIFY_COMMANDS } from './dify/index.ts'
 import { DISCORD_COMMANDS } from './discord/index.ts'
 import { GCAL_COMMANDS } from './gcal/index.ts'
 import { GDOCS_COMMANDS } from './gdocs/index.ts'
-import { GITHUB_COMMANDS } from './github/index.ts'
 import { GSHEETS_COMMANDS } from './gsheets/index.ts'
 import { GSLIDES_COMMANDS } from './gslides/index.ts'
 import { HISTORY_COMMANDS } from './history/index.ts'
@@ -47,7 +45,7 @@ import { QDRANT_COMMANDS } from './qdrant/index.ts'
 import { S3_COMMANDS } from './s3/index.ts'
 import { TRELLO_COMMANDS } from './trello/index.ts'
 
-// A VFS class, whatever its constructor's visibility (GitHubVFS builds
+// A VFS class, whatever its constructor's visibility (one may build
 // through a factory).
 interface VFSClass {
   readonly prototype: BaseVFS
@@ -125,7 +123,6 @@ registerBackendCommands(DifyVFS, () => DIFY_COMMANDS)
 registerBackendCommands(DiscordVFSBase, () => DISCORD_COMMANDS)
 registerBackendCommands(GCalVFS, () => GCAL_COMMANDS)
 registerBackendCommands(GDocsVFS, () => GDOCS_COMMANDS)
-registerBackendCommands(GitHubVFS, () => GITHUB_COMMANDS)
 registerBackendCommands(GSheetsVFS, () => GSHEETS_COMMANDS)
 registerBackendCommands(GSlidesVFS, () => GSLIDES_COMMANDS)
 registerBackendCommands(HistoryViewVFS, () => HISTORY_COMMANDS)

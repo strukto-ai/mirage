@@ -1,29 +1,14 @@
-import math
 from xml.etree import ElementTree
 
 import mirage.core.nextcloud.search.constants as constants
-from mirage.core.generic.find_eval import (
-    And,
-    Name,
-    Not,
-    Or,
-    PredNode,
-    TrueNode,
-    Type,
-)
 from mirage.core.nextcloud.search.target import scope_path
 from mirage.core.nextcloud.search.types import (
-    BooleanOperation,
-    Comparison,
-    CompiledPredicate,
-    FilesSearchQuery,
     Property,
     SearchTarget,
     XmlElement,
 )
 from mirage.core.nextcloud.search.xml import dav, searchdav
-from mirage.types import FindType, PathSpec
-from mirage.utils.stat_view import DIR_SIZE
+from mirage.types import PathSpec
 
 
 def property_element(parent: XmlElement, field: Property) -> XmlElement:
@@ -32,199 +17,14 @@ def property_element(parent: XmlElement, field: Property) -> XmlElement:
     return prop
 
 
-def comparison(
-    operation: Comparison, field: Property, value: str | int
-) -> XmlElement:
-    element = ElementTree.Element(dav(operation))
-    property_element(element, field)
-    literal = ElementTree.SubElement(element, dav("literal"))
-    literal.text = str(value)
-    return element
-
-
-def is_collection() -> XmlElement:
-    return ElementTree.Element(dav("is-collection"))
-
-
-def negate(condition: XmlElement) -> XmlElement:
-    element = ElementTree.Element(dav("not"))
-    element.append(condition)
-    return element
-
-
-def not_collection() -> XmlElement:
-    return negate(is_collection())
-
-
-def combine(
-    operation: BooleanOperation, elements: list[XmlElement]
-) -> XmlElement:
-    if len(elements) == 1:
-        return elements[0]
-    combined = ElementTree.Element(dav(operation))
-    combined.extend(elements)
-    return combined
-
-
-def glob_to_like(pattern: str) -> str:
-    translated: list[str] = []
-    for char in pattern:
-        if char == "*":
-            translated.append("%")
-        elif char == "?":
-            translated.append("_")
-        elif char == "\\":
-            translated.append("%")
-        else:
-            translated.append(char)
-    return "".join(translated)
-
-
-def name_operation(name: Name) -> Comparison:
-    has_wildcard = "*" in name.pattern or "?" in name.pattern
-    return Comparison.LIKE if has_wildcard or name.icase else Comparison.EQUAL
-
-
-def name_condition(name: Name) -> XmlElement:
-    operation = name_operation(name)
-    value = (
-        glob_to_like(name.pattern)
-        if operation == Comparison.LIKE
-        else name.pattern
-    )
-    return comparison(operation, constants.DISPLAY_NAME, value)
-
-
-def compile_predicate(node: PredNode) -> CompiledPredicate | None:
-    if isinstance(node, TrueNode):
-        return CompiledPredicate(None)
-    if isinstance(node, Name):
-        # A class has no LIKE spelling, and a backslash escapes the next
-        # character out of the glob (`-name 'a\b'` matches `ab`), so the
-        # literal the server would compare is not the name being matched.
-        if "[" in node.pattern or "\\" in node.pattern:
-            return None
-        # LIKE is a deliberate superset (case-insensitive, and a literal
-        # `%`/`_` in the pattern stays a wildcard) that the client-side
-        # keep() re-filters. Negation has nothing to re-filter with:
-        # NOT(superset) withholds rows the true predicate keeps and no
-        # client pass can add them back, so only the exact comparison is
-        # safe to negate.
-        exact = name_operation(node) == Comparison.EQUAL
-        return CompiledPredicate(name_condition(node), negatable=exact)
-    if isinstance(node, Type):
-        if node.kind == FindType.DIRECTORY:
-            return CompiledPredicate(is_collection(), negatable=True)
-        if node.kind == FindType.FILE:
-            return CompiledPredicate(not_collection())
-        return None
-    if isinstance(node, Not):
-        compiled = compile_predicate(node.kid)
-        if compiled is None or compiled.condition is None:
-            return None
-        # Nextcloud inverts a `<d:not>` by swapping the comparison inside it
-        # for its opposite, so the only thing it can negate is a single
-        # comparison; anything else raises server-side and comes back as a
-        # 500. Refusing here is what falls the whole find back to the scan
-        # walk, which has no such limit.
-        if not compiled.negatable:
-            return None
-        return CompiledPredicate(negate(compiled.condition))
-    if isinstance(node, (And, Or)):
-        conditions: list[XmlElement] = []
-        negatable = False
-        for kid in node.kids:
-            compiled = compile_predicate(kid)
-            if compiled is None:
-                return None
-            if compiled.condition is None:
-                if isinstance(node, Or):
-                    return None
-                continue
-            conditions.append(compiled.condition)
-            negatable = compiled.negatable
-        if not conditions:
-            return CompiledPredicate(None) if isinstance(node, And) else None
-        operation = (
-            BooleanOperation.AND
-            if isinstance(node, And)
-            else BooleanOperation.OR
-        )
-        # `combine` returns a lone condition unwrapped, so a one-armed group
-        # is still exactly whatever that arm was, negatable included. With two
-        # or more arms the result is a `<d:and>`/`<d:or>`, which is not.
-        return CompiledPredicate(
-            combine(operation, conditions),
-            negatable=len(conditions) == 1 and negatable,
-        )
-    return None
-
-
-def size_condition(query: FilesSearchQuery) -> XmlElement | None:
-    bounds: list[XmlElement] = []
-    if query.size.lower is not None and query.size.upper == query.size.lower:
-        bounds.append(
-            comparison(Comparison.EQUAL, constants.SIZE, query.size.lower)
-        )
-    else:
-        if query.size.lower is not None:
-            bounds.append(
-                comparison(
-                    Comparison.GREATER_THAN_OR_EQUAL,
-                    constants.SIZE,
-                    query.size.lower,
-                )
-            )
-        if query.size.upper is not None:
-            bounds.append(
-                comparison(
-                    Comparison.LESS_THAN_OR_EQUAL,
-                    constants.SIZE,
-                    query.size.upper,
-                )
-            )
-    if not bounds:
-        return None
-    file_bounds = combine(BooleanOperation.AND, [not_collection(), *bounds])
-    includes_dir_size = (
-        query.size.lower is None or query.size.lower <= DIR_SIZE
-    ) and (query.size.upper is None or query.size.upper >= DIR_SIZE)
-    if includes_dir_size:
-        return combine(BooleanOperation.OR, [is_collection(), file_bounds])
-    return file_bounds
-
-
-def where_condition(query: FilesSearchQuery) -> XmlElement | None:
-    compiled = compile_predicate(query.tree)
-    if compiled is None:
-        return None
-    conditions: list[XmlElement] = []
-    if compiled.condition is not None:
-        conditions.append(compiled.condition)
-    size = size_condition(query)
-    if size is not None:
-        conditions.append(size)
-    if query.modified.lower is not None:
-        conditions.append(
-            comparison(
-                Comparison.GREATER_THAN_OR_EQUAL,
-                constants.LAST_MODIFIED,
-                math.floor(query.modified.lower),
-            )
-        )
-    if query.modified.upper is not None:
-        conditions.append(
-            comparison(
-                Comparison.LESS_THAN_OR_EQUAL,
-                constants.LAST_MODIFIED,
-                math.ceil(query.modified.upper),
-            )
-        )
-    return combine(BooleanOperation.AND, conditions) if conditions else None
-
-
-def supports_query(query: FilesSearchQuery) -> bool:
-    return where_condition(query) is not None
+def every_entry() -> XmlElement:
+    """A condition every file and folder meets, since Nextcloud's search
+    refuses a request with none."""
+    either = ElementTree.Element(dav("or"))
+    ElementTree.SubElement(either, dav("is-collection"))
+    negated = ElementTree.SubElement(either, dav("not"))
+    ElementTree.SubElement(negated, dav("is-collection"))
+    return either
 
 
 def order(parent: XmlElement, field: Property) -> None:
@@ -233,12 +33,15 @@ def order(parent: XmlElement, field: Property) -> None:
     ElementTree.SubElement(element, dav("ascending"))
 
 
-def request_body(
-    target: SearchTarget, path: PathSpec, query: FilesSearchQuery, offset: int
-) -> bytes:
-    condition = where_condition(query)
-    if condition is None:
-        raise ValueError("Nextcloud Files Search requires a supported query")
+def request_body(target: SearchTarget, path: PathSpec, offset: int) -> bytes:
+    """One page of every file and folder under ``path``.
+
+    Args:
+        target (SearchTarget): the server's search endpoint and the
+            mount's scope in it.
+        path (PathSpec): the directory.
+        offset (int): how many entries earlier pages held.
+    """
     root = ElementTree.Element(dav("searchrequest"))
     basic = ElementTree.SubElement(root, dav("basicsearch"))
     select = ElementTree.SubElement(basic, dav("select"))
@@ -252,7 +55,7 @@ def request_body(
     depth = ElementTree.SubElement(scope, dav("depth"))
     depth.text = constants.SEARCH_DEPTH
     where = ElementTree.SubElement(basic, dav("where"))
-    where.append(condition)
+    where.append(every_entry())
     orderby = ElementTree.SubElement(basic, dav("orderby"))
     for field in constants.ORDER_PROPERTIES:
         order(orderby, field)

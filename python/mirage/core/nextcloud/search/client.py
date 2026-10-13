@@ -10,10 +10,10 @@ from mirage.core.nextcloud.search.constants import (
     SEARCH_PAGE_SIZE,
     UNAVAILABLE_STATUS_CODES,
 )
-from mirage.core.nextcloud.search.query import request_body, supports_query
+from mirage.core.nextcloud.search.query import request_body
 from mirage.core.nextcloud.search.response import parse_page
 from mirage.core.nextcloud.search.target import search_target
-from mirage.core.nextcloud.search.types import FilesSearchQuery, SearchEntry
+from mirage.core.nextcloud.search.types import SearchEntry
 from mirage.types import PathSpec
 from mirage.vfs.secrets import reveal_secret
 
@@ -31,10 +31,16 @@ def auth(accessor: NextcloudAccessor) -> httpx.BasicAuth | None:
 async def search_files(
     accessor: NextcloudAccessor,
     path: PathSpec,
-    query: FilesSearchQuery,
 ) -> list[SearchEntry] | None:
-    if not supports_query(query):
-        return None
+    """Every file and folder under a directory, from Nextcloud's file
+    search, a page of a thousand per request. None from a server without
+    the search (plain WebDAV), and for a ``path`` it cannot find or that is
+    a file.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the directory.
+    """
     target = search_target(accessor.config.url)
     if target is None:
         logger.debug(
@@ -55,7 +61,7 @@ async def search_files(
             response = await client.request(
                 SEARCH_METHOD,
                 target.endpoint,
-                content=request_body(target, path, query, offset),
+                content=request_body(target, path, offset),
             )
             if response.status_code in UNAVAILABLE_STATUS_CODES:
                 logger.debug(
