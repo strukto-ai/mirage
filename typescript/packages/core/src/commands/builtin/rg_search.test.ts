@@ -281,6 +281,9 @@ it.each([1, 7, 16384, 65536])(
       expect([actual, fast]).toEqual([expected, slow])
     }
   },
+  // Twelve whole scans of a 144 KB haystack: well under a second alone, but a
+  // shared CI runner can take it past the 5 s default.
+  30_000,
 )
 
 it.each([
