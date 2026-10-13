@@ -107,12 +107,10 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no python.wasm under {self._root}; {_BUILD_HINT}"
             )
-        stdlibs = sorted((self._root / "lib").glob("python3.*"))
-        if not stdlibs:
+        if not any((self._root / "lib").glob("python3.*")):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}"
             )
-        self._pythonhome = f"/lib/{stdlibs[-1].name}"
         self._execution = WasmExecution(self._root / "python.wasm", "python3")
 
     async def _execute_code(
@@ -144,10 +142,12 @@ class WasiRuntime(PythonRuntime):
         stdout, stderr, exit_code = await self._execution.run(
             argv=["python", *init_argv(args.flags), "-c", source, *args.args],
             stdin=args.stdin,
+            # The build directory is the prefix, so the stdlib is found
+            # under /lib on its own and a session's PYTHONPATH only adds
+            # to sys.path, as on CPython.
             env=[
                 *args.env.items(),
-                ("PYTHONHOME", self._pythonhome),
-                ("PYTHONPATH", self._pythonhome),
+                ("PYTHONHOME", "/"),
                 ("PYTHONDONTWRITEBYTECODE", "1"),
             ],
             fs=fs,

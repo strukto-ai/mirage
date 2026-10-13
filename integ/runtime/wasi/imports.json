@@ -52,6 +52,44 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_session_pythonpath_adds_to_sys_path",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "lib/mymod.py": "X = 42\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "PYTHONPATH=/ram/lib python3 -c 'import mymod, json; print(mymod.X)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "export PYTHONPATH=/ram/lib; python3 -c 'import sys; print(\"/ram/lib\" in sys.path)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "True\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }
