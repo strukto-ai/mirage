@@ -66,6 +66,14 @@
             ]
           },
           {
+            "group": "Core",
+            "pages": [
+              "home/core/shell",
+              "home/core/tools",
+              "home/core/data-network"
+            ]
+          },
+          {
             "group": "Access",
             "pages": [
               "home/access/overview",
@@ -98,7 +106,6 @@
             "pages": [
               "home/architecture",
               "home/workspace",
-              "home/bash",
               "home/vfs-matrix",
               "home/cache",
               "home/yaml",

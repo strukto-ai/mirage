@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: Four layers, one filesystem. How Mirage turns mounted services into one bash-driven environment.
+description: Four layers, one filesystem. How Mirage turns mounted services into one shell environment.
 icon: cube
 ---
 
@@ -13,11 +13,11 @@ Mirage stacks four thin layers between an agent and the services it touches.
 
 ## 1. AI Agent and Application
 
-The agent (or any application embedding Mirage) issues bash commands, VFS calls, or syscalls. One vocabulary, every backend.
+The agent (or any application embedding Mirage) issues shell commands, VFS calls, or syscalls. One vocabulary, every backend.
 
-## 2. Mirage Bash and VFS
+## 2. Mirage Shell and VFS
 
-The action surface. **Mirage Bash** parses commands with tree-sitter and runs them against the **Mirage VFS**, a unified filesystem API over every mount. A **FUSE Adapter** exposes the same tree to host tools when you want it. A **Command Registry** and **VFS Registry** describe what verbs and mounts are available.
+The action surface. The [Mirage shell](/home/core/shell) parses commands with tree-sitter and runs them against the **Mirage VFS**, a unified filesystem API over every mount. A **FUSE Adapter** exposes the same tree to host tools when you want it. A **Command Registry** and **VFS Registry** describe what verbs and mounts are available.
 
 ## 3. Dispatcher & Cache
 

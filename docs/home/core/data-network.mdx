@@ -1,0 +1,65 @@
+---
+title: Data & Network
+description: Process JSON, encode data, work with archives, and make HTTP requests.
+icon: network-wired
+---
+
+These commands extend [Core Tools](/home/core/tools) with structured data, compression, checksums, HTTP, and language runtimes.
+
+Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for the full reference; unlisted options are not necessarily supported.
+
+## JSON and calculations
+
+| Command | Purpose | Common flags |
+| --- | --- | --- |
+| `jq` | Query and transform a stream of JSON values | `-c`, `-r`, `-j`, `-n`, `-R`, `-s`, `-e`, `-S`, `-a`, `-f FILE`, `--arg`, `--argjson`, `--rawfile`, `--slurpfile`, `--args`, `--jsonargs`, `--stream`, `--seq`, `--raw-output0`, `--tab`, `--indent` |
+| `bc` | Evaluate numeric expressions | `-l`, `-q` |
+| `expr` | Evaluate integer and string expressions | Operators are operands; no command-specific flags |
+
+`jq` runs once per JSON value, whether input is JSONL, concatenated documents, or piped output. Use `-s` to collect the stream into an array, and `--arg` / `--argjson` to pass values safely.
+
+**Limits:** `jq -C`, `-L`, `--stream-errors`, and `--build-configuration` are unsupported. Input-consuming programs follow the common `input` / `inputs` patterns; partial drains or multiple conditional reads can differ from jq. Halts inside error handling can also differ.
+
+## Encoding and checksums
+
+| Command | Purpose | Common flags |
+| --- | --- | --- |
+| `base64` | Encode or decode Base64 | `-d`, `-D`, `-w WIDTH`, `-i` |
+| `iconv` | Convert character encodings | `-f FROM`, `-t TO`, `-c`, `-o FILE`, `-l` |
+| `xxd` | Create or reverse a hex dump | `-r`, `-p`, `-l LENGTH`, `-c COLS`, `-s OFFSET`, `-g BYTES`, `-u` |
+| `od` | Dump bytes in a chosen format | `-A RADIX`, `-j BYTES`, `-N BYTES`, `-t TYPE`, `-c` |
+| `md5` | Print an MD5 digest | No command-specific flags |
+| `md5sum`, `sha1sum`, `sha256sum`, `sha384sum`, `sha512sum` | Generate or verify checksums | `-c`, `-b`, `-t`, `--tag`, `-z`, `--status`, `--quiet`, `--strict`, `--ignore-missing` |
+
+## Archives and compression
+
+| Command | Purpose | Common flags |
+| --- | --- | --- |
+| `tar` | Create, extract, or list archives | `-c`, `-x`, `-t`, `-f FILE`, `-C DIR`, `-z`, `-j`, `-J`, `-v`, `-h`, `-O`, `--strip-components`, `--exclude`, `--one-file-system` |
+| `zip` | Create ZIP archives | `-r`, `-j`, `-q`, `-X`, `-y`, `-x PATTERN` |
+| `unzip` | Extract, inspect, or test ZIP archives | `-d DIR`, `-o`, `-n`, `-l`, `-p`, `-t`, `-v`, `-q`, `-x PATTERN`, `-Z` |
+| `gzip` | Compress or decompress gzip data | `-d`, `-k`, `-f`, `-c`, `-q`, `-S SUFFIX`, `-1` through `-9` |
+| `gunzip` | Decompress or test gzip data | `-k`, `-f`, `-c`, `-t`, `-q`, `-S SUFFIX` |
+| `zcat` | Read compressed content to stdout | `-f`, `-q`, `-S SUFFIX` |
+| `zgrep` | Search compressed content | `-E`, `-F`, `-P`, `-i`, `-n`, `-v`, `-c`, `-l`, `-o`, `-e`, `-f` |
+
+`zegrep` and `zfgrep` invoke `zgrep` with `-E` and `-F` respectively.
+
+**Limits:** Archive creation does not traverse descendant mounts, and a mount root cannot be a source for `tar -c` or `zip`. Extracting or writing an archive requires a writable destination.
+
+## HTTP
+
+| Command | Purpose | Supported flags |
+| --- | --- | --- |
+| `curl` | Send an HTTP request | `-X`, `-H`, `-A`, `-u`, `-d`, `--data-binary`, `--data-raw`, `--data-urlencode`, `--json`, `-F`, `-o`, `-D`, `-L`, `-f`, `-s`, `-S`, `-v`, `-i`, `-I`, `-w`, `-m`, `-k`, `-4`, `-6` |
+| `wget` | Download a URL or check its response | `-O FILE`, `-q`, `-T SECONDS` / `--timeout`, `--spider` |
+
+`curl` writes the body to stdout unless `-o` selects a virtual file. `wget` saves to a virtual file; use `-O -` for stdout. Both respect destination mount permissions.
+
+**Limits:** These are HTTP tools, with no full curl or Wget option set. Recursive Wget downloads (`-r`, `--mirror`) are unsupported. `curl -4/-6` are accepted, but the host transport chooses the address family. `wget -T` uses one request deadline rather than separate DNS, connect, and read timers; zero disables it.
+
+`curl -w` supports `http_code`, `response_code`, `url_effective`, `num_redirects`, `size_download`, `content_type`, `method`, `exitcode`, and `time_total`. Other variables produce a diagnostic.
+
+## Language runtimes
+
+For `python`, `python3`, `js`, and `node`, see [Runtimes](/home/setup/runtime/overview) for available engines, configuration, and execution limits.

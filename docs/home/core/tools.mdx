@@ -1,0 +1,109 @@
+---
+title: Core Tools
+description: Inspect, edit, search, and transform files with familiar command-line tools.
+icon: wrench
+---
+
+Mirage provides familiar Unix-style commands over virtual paths, with availability determined by the mount's capabilities and your session's permissions.
+
+Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for the full command reference. Compatibility varies by command, so a familiar name does not imply every option from the original program.
+
+## Files and directories
+
+| Command | Purpose | Common flags |
+| --- | --- | --- |
+| `ls` | List entries | `-l`, `-a`, `-A`, `-h`, `-R`, `-d`, `-t`, `-S`, `-r`, `-F`, `-L`, `--sort` |
+| `stat` | Show metadata | `-c FORMAT`, `-f`, `-L` |
+| `tree` | Show a directory tree | `-a`, `-d`, `-L DEPTH`, `-I PATTERN`, `-P PATTERN`, `-x` |
+| `du` | Count file and directory bytes | `-h`, `-s`, `-a`, `-d DEPTH`, `-c`, `-L`, `-S`, `-x` |
+| `df` | Show mount capacity, when available | `-h`, `-H`, `-k`, `-i`, `-a`, `-T`, `-P`, `-B SIZE` |
+| `mount` | List configured mounts | `-l`, `-t TYPES` |
+| `file` | Identify content type | `-b`, `-i`, `-L`, `-h` |
+| `mkdir` | Create directories | `-p`, `-v`, `-m MODE` |
+| `touch` | Create files or update timestamps | `-a`, `-m`, `-c`, `-d DATE`, `-r FILE`, `-t TIME`, `-h` |
+| `cp` | Copy files or directories, including across mounts | `-r`, `-R`, `-a`, `-L`, `-P`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `-x` |
+| `mv` | Move or rename entries | `-f`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `--no-copy`, `--exchange` |
+| `rm` | Remove entries | `-r`, `-R`, `-f`, `-v`, `-d`, `-i`, `-I`, `--one-file-system` |
+| `rmdir` | Remove empty directories | `-p`, `-v`, `--ignore-fail-on-non-empty` |
+| `unlink` | Remove one entry | No command-specific flags |
+| `truncate` | Resize a file | `-s SIZE`, `-c` |
+| `mktemp` | Create a temporary file or directory | `-d`, `-p DIR`, `--tmpdir`, `--suffix`, `-u`, `-q` |
+| `ln` | Create a symbolic link or copy a file's bytes | `-s`, `-r`, `-f`, `-n`, `-t DIR`, `-T`, `-b` |
+| `readlink` | Read a link or resolve its target | `-f`, `-e`, `-m`, `-n`, `-z` |
+| `realpath` | Resolve a path | `-e`, `-m`, `-L`, `-P`, `-s`, `--relative-to`, `--relative-base`, `-z` |
+| `basename` | Remove a directory prefix or suffix | `-a`, `-s SUFFIX`, `-z` |
+| `dirname` | Print the parent path | `-z` |
+| `chmod` | Set permission metadata | `-R`, `-c`, `-f`, `-v` |
+| `chown`, `chgrp` | Set owner or group metadata | `-R`, `-c`, `-f`, `-v`, `-h`, `--dereference` |
+| `getfattr` | Read extended attributes | `-n NAME`, `-d`, `-m PATTERN`, `-e ENCODING`, `--only-values`, `-R` |
+| `setfattr` | Set or remove an extended attribute | `-n NAME`, `-v VALUE`, `-x NAME`, `-h` |
+
+## Search and compare
+
+| Command | Purpose | Common flags |
+| --- | --- | --- |
+| `find` | Select paths and run actions | `-name`, `-iname`, `-path`, `-type`, `-size`, `-mtime`, `-newer`, `-newermt`, `-empty`, `-mindepth`, `-maxdepth`, `-print0`, `-printf`, `-delete`, `-exec`, `-prune`, `-ls`, `-L`, `-xdev` |
+| `grep` | Search lines | `-E`, `-F`, `-G`, `-P`, `-i`, `-v`, `-n`, `-r`, `-R`, `-l`, `-c`, `-o`, `-q`, `-e`, `-f`, `-A`, `-B`, `-C`, `--include`, `--exclude` |
+| `rg` | Search recursively with path filters | `-i`, `-S`, `-F`, `-n`, `-l`, `-c`, `-g`, `-t`, `-T`, `--hidden`, `--files`, `--json`, `-U`, `-P`, `-z`, `--pre` |
+| `search` | Search through a backend's search capability | `--method`, `--top-k`, `--threshold` |
+| `diff` | Compare text files or directory trees | `-u`, `-U N`, `-q`, `-r`, `-N`, `-i`, `-w`, `-b`, `-x`, `-X` |
+| `cmp` | Compare bytes | `-s`, `-l`, `-b`, `-n N`, `-i SKIP` |
+| `patch` | Apply a patch | `-p N`, `-R`, `-i FILE`, `-N` |
+| `look` | Find lines with a prefix | `-f` |
+
+`egrep` and `fgrep` invoke `grep` with `-E` and `-F` respectively. Compressed-file search is covered under [Data & Network](/home/core/data-network#archives-and-compression).
+
+## Text processing
+
+| Command | Purpose | Common flags |
+| --- | --- | --- |
+| `cat` | Read and concatenate files | `-n`, `-b`, `-s`, `-v`, `-E`, `-T`, `-A` |
+| `head` | Read the beginning | `-n N`, `-c N`, `-q`, `-v`, `-z` |
+| `tail` | Read the end or follow changes | `-n N`, `-c N`, `-q`, `-v`, `-f`, `-F`, `--retry`, `-s SECONDS` |
+| `wc` | Count lines, words, bytes, or characters | `-l`, `-w`, `-c`, `-m`, `-L`, `--total` |
+| `sort` | Order lines | `-n`, `-r`, `-u`, `-k KEY`, `-t CHAR`, `-h`, `-V`, `-s`, `-f`, `-c`, `-m`, `-o FILE`, `-z` |
+| `uniq` | Filter adjacent repeated lines | `-c`, `-d`, `-u`, `-i`, `-f N`, `-s N`, `-w N`, `-z` |
+| `cut` | Select fields, bytes, or characters | `-f LIST`, `-d CHAR`, `-b LIST`, `-c LIST`, `--complement`, `--output-delimiter`, `-s`, `-z` |
+| `tr` | Translate, delete, or squeeze characters | `-d`, `-s`, `-c`, `-C`, `-t` |
+| `sed` | Edit a text stream | `-e SCRIPT`, `-f FILE`, `-n`, `-E`, `-r`, `-i`, `-s`, `-l WIDTH` |
+| `awk` | Process records and fields | `-F SEPARATOR`, `-v NAME=VALUE`, `-f FILE` |
+| `tee` | Copy stdin to stdout and files | `-a`, `-i`, `-p`, `--output-error` |
+| `paste` | Combine lines into columns | `-d DELIMITERS`, `-s`, `-z` |
+| `join` | Join sorted files on a field | `-1 FIELD`, `-2 FIELD`, `-t CHAR`, `-a`, `-v`, `-e`, `-o`, `-i`, `--header`, `-z` |
+| `comm` | Compare sorted lines | `-1`, `-2`, `-3`, `--check-order`, `--total`, `-z` |
+| `split` | Split input into files | `-l N`, `-b SIZE`, `-n CHUNKS`, `-d`, `-x`, `-a N`, `--additional-suffix` |
+| `csplit` | Split at line numbers or patterns | `-f PREFIX`, `-n DIGITS`, `-b FORMAT`, `-k`, `-s`, `-z` |
+| `nl` | Number lines | `-b STYLE`, `-n FORMAT`, `-s STRING`, `-w WIDTH`, `-v START`, `-i STEP` |
+| `tac` | Reverse record order | `-b`, `-r`, `-s SEPARATOR` |
+| `rev` | Reverse characters in each line | No command-specific flags |
+| `column` | Arrange text into columns | `-t`, `-s SEPARATORS`, `-o SEPARATOR` |
+| `fold` | Wrap long lines | `-w WIDTH`, `-s`, `-b`, `-c` |
+| `fmt` | Reflow paragraphs | `-w WIDTH`, `-g GOAL`, `-c`, `-p PREFIX`, `-s`, `-t`, `-u` |
+| `expand`, `unexpand` | Convert tabs and spaces | `-t TABS`; `expand -i`; `unexpand -a`, `--first-only` |
+| `strings` | Extract printable strings | `-n LENGTH` |
+| `seq` | Generate a number sequence | `-s SEPARATOR`, `-w`, `-f FORMAT` |
+| `shuf` | Shuffle or sample lines | `-n N`, `-e`, `-r`, `-i RANGE`, `-o FILE`, `-z` |
+| `tsort` | Sort dependency pairs | No command-specific flags |
+| `numfmt` | Convert numeric units | `--from`, `--to`, `--suffix`, `--grouping` |
+
+## Running commands and inspecting the environment
+
+| Command | Purpose | Common options |
+| --- | --- | --- |
+| `xargs` | Build commands from input | `-0`, `-d CHAR`, `-I STRING`, `-n N`, `-L N`, `-s BYTES`, `-P N`, `-r`, `-a FILE`, `-t`, `--process-slot-var` |
+| `timeout` | Limit a command's running time | `-s SIGNAL`, `-k DURATION`, `-p`, `-f`, `-v` |
+| `sleep` | Wait for a duration | Numbers with `s`, `m`, `h`, or `d` suffixes |
+| `env`, `printenv` | Run with environment changes or print exported variables | `env -i`, `-u NAME`, `NAME=VALUE`; `printenv NAME` |
+| `date` | Format a date or time | `-d DATE`, `-u`, `-I`, `-R`, `--rfc-3339`, `+FORMAT` |
+| `uname`, `hostname` | Report system or host information | `uname -a/-s/-r/-m`; `hostname -s/-f/-d/-i` |
+| `id`, `whoami` | Report identity | `id -u/-g/-G/-n/-r/-z`; `whoami` |
+| `getconf` | Query configuration values | `-a`, `-v SPECIFICATION` |
+
+## Limits
+
+- File operations depend on the backend; a read-only mount cannot accept writes. Permission and owner metadata may live in Mirage's overlay rather than the remote service.
+- Mount roots are protected from removal, renaming, and use as copy sources. `mount` lists configured mounts; it does not attach new backends.
+- `ln -s` creates a virtual symlink. Without `-s`, a regular file is copied; there is no shared hard-link inode.
+- `find` supports `-a`, `-o`, `!`, parentheses, and both `-exec ... \;` and `-exec ... {} +`. Tests must precede actions in each AND chain, and OR branches must use the same action. `-newer` and `-newermt` must be in a top-level AND chain. `-execdir` and `-ok` are unsupported.
+- `rg` cannot sort by creation time. `ls --color` and `grep --color` are accepted without colored output.
+- `xargs -p` and `-o` fail because there is no terminal. `timeout` models signals as task actions; its commands cannot trap OS signals.

@@ -49,9 +49,9 @@
 
   <!-- ===================== LAYER 2: WORKSPACE ===================== -->
   <rect x="20" y="376" width="1160" height="200" rx="8" fill="#1A1A1D" stroke="#FFFFFF" stroke-width="1" stroke-dasharray="6 4"/>
-  <text x="44" y="414" font-size="22" font-weight="500" fill="#FFFFFF" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif">Mirage Bash and VFS</text>
+  <text x="44" y="414" font-size="22" font-weight="500" fill="#FFFFFF" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif">Mirage Shell and VFS</text>
   <text x="44" y="444" font-size="18" fill="#A1A1AA">
-    <tspan x="44" dy="0">Mirage Bash &amp;</tspan>
+    <tspan x="44" dy="0">Mirage Shell &amp;</tspan>
     <tspan x="44" dy="24">registered commands;</tspan>
     <tspan x="44" dy="24">Mirage VFS &amp;</tspan>
     <tspan x="44" dy="24">registered VFS ops</tspan>
@@ -59,7 +59,7 @@
 
   <!-- Mirage Shell -->
   <rect x="376" y="409" width="188" height="52" rx="4" fill="#0E0E10" stroke="#FFFFFF" stroke-width="1.2"/>
-  <text x="470" y="441" text-anchor="middle" font-size="19" font-weight="500" fill="#FFFFFF" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif">Mirage Bash</text>
+  <text x="470" y="441" text-anchor="middle" font-size="19" font-weight="500" fill="#FFFFFF" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif">Mirage Shell</text>
 
   <!-- Mirage VFS -->
   <rect x="596" y="409" width="168" height="52" rx="4" fill="#0E0E10" stroke="#FFFFFF" stroke-width="1.2"/>

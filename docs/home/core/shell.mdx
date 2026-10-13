@@ -1,0 +1,73 @@
+---
+title: Shell
+description: Run Bash-style commands, pipelines, and scripts across your mounted data.
+icon: square-terminal
+---
+
+Mirage's shell combines commands from [Core Tools](/home/core/tools) and [Data & Network](/home/core/data-network) with variables, control flow, and persistent sessions.
+
+## Syntax
+
+| Feature | Supported |
+| --- | --- |
+| Command lists | `;`, newlines, `&&`, `\|\|`, and `!` |
+| Pipelines | `\|` and `\|&`; `$?` and `${PIPESTATUS[@]}` report exit statuses |
+| Redirection | `>`, `>>`, `<`, `<>`, `>\|`, `2>`, `2>&1`, `&>`, `&>>`; descriptor duplication and closing |
+| Inline input | Here-documents `<<EOF`, tab-stripping `<<-EOF`, and here-strings `<<<` |
+| Quoting | Single quotes, double quotes, backslash escapes, and `$'...'` |
+| Expansion | Variables, `${name:-default}`, substring and pattern operations, `$(command)`, backticks, and `$((expression))` |
+| Paths | Tilde expansion, brace expansion, `*`, `?`, and bracket patterns |
+| Extended patterns | `extglob`, `globstar`, `dotglob`, `nullglob`, and `failglob` through `shopt` |
+| Variables | Scalars, indexed arrays, associative arrays (`declare -A`), positional arguments, `$RANDOM`, and `${FUNCNAME[@]}` |
+| Conditions | `if` / `elif` / `else`, `test`, `[ ... ]`, and `[[ ... ]]` |
+| Loops | `for`, arithmetic `for`, `while`, `until`, and `select`; `break` and `continue` |
+| Branching and functions | `case`, `name() { ...; }`, `function`, and `return` |
+| Groups | `{ ...; }` shares the session; `( ... )` runs in an isolated session copy |
+| Process substitution | `<(command)` supplies command output as an input path |
+| Background work | `command &`, `jobs`, `wait`, `fg`, `kill`, `disown`, and `ps` |
+| Timing | `time`, `time -p`, and `TIMEFORMAT`; CPU times are reported as zero |
+| Comments | `#` outside quotes |
+
+## Shell commands
+
+These are common options, not an exhaustive flag reference.
+
+| Commands | Purpose and common options |
+| --- | --- |
+| `cd`, `pwd` | Change or print the working directory; `-L`, `-P` |
+| `export`, `unset` | Export variables or functions (`export -f`); remove variables or functions (`unset -v`, `-f`) |
+| `declare`, `typeset`, `local`, `readonly` | Set variable scope and attributes; arrays `-a` / `-A`, integers `-i`, readonly `-r`, export `-x` |
+| `set` | Set positional arguments and options such as `-e`, `-u`, `-x`, `-f`, `-C`, and `-o pipefail` |
+| `shopt` | Set, unset, print, or query options with `-s`, `-u`, `-p`, `-q`; `-o` selects `set` options |
+| `alias`, `unalias` | Define or remove aliases; enable expansion with `shopt -s expand_aliases` |
+| `read` | Read into variables; `-r`, `-a ARRAY`, `-d CHAR`, `-n N`, `-N N`, `-t SECONDS`, `-u FD` |
+| `mapfile`, `readarray` | Read into an array; `-t`, `-d CHAR`, `-n N`, `-s N`, `-O INDEX`, `-u FD`, `-C CALLBACK`, `-c N` |
+| `echo`, `printf` | Print text or formatted values; `echo -n/-e/-E`, `printf -v NAME` |
+| `source`, `.`, `eval` | Run a file or command string in the current session |
+| `bash`, `sh` | Run a script, `-c COMMAND`, or stdin with `-s` in a fresh shell environment |
+| `exec` | Replace the current shell command flow, or keep descriptor redirections; `-c` clears the command's environment |
+| `getopts`, `shift`, `let` | Parse script options, shift positional arguments, or evaluate integer expressions |
+| `trap` | Run actions on `EXIT`, `ERR`, and `RETURN` |
+| `umask` | Read or set the creation mask; `-S` prints symbolic form |
+| `command`, `type`, `which` | Run or locate a command; `command -v/-V`, `type -t/-a/-p/-P` |
+| `true`, `false`, `:` | Return success or failure; `:` is a no-op |
+| `exit` | End the current shell with an optional exit status |
+| `history` | Read or manage command history; `-c`, `-d`, `-s`, `-p`, `-a`, `-r`, `-w`, `-n` |
+| `man` | Show command help, including registered CLI subcommands: `man ls`, `man linear issue create` |
+
+## Sessions and permissions
+
+`ws.shell(...)` keeps the session's working directory, variables, and functions between calls. Supplying `cwd` or `env` uses an isolated copy for that call. Calls on one session run in order; use separate sessions for concurrent command streams. Python accepts a cancellation event through `cancel`; TypeScript accepts an abort `signal`.
+
+### Per-session mount modes
+
+Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use a [policy profile](/home/policy/overview) to hide paths or restrict commands.
+
+## Limits
+
+- `bg`, `complete`, `compgen`, `ulimit`, `coproc`, output process substitution `>(command)`, and `exec -a/-l` are not implemented.
+- There is no interactive terminal or OS process job control. The supported job commands manage Mirage jobs. Use the CLI's `--background` and `mirage job` for work that should outlive a request.
+- `set` and `shopt` recognize more option names than they implement; accepting or displaying an option does not mean every Bash behavior is available.
+- Enable `extglob` before the call that uses its syntax, or use `eval` after enabling it. A whole `shell()` call is parsed before it runs.
+- Command substitutions and background jobs do not inherit stdin. Writes through an already open output descriptor append rather than track a write offset.
+- Syntax errors return exit status `2`. Compatibility is a supported subset of Bash, not a full Bash installation.
