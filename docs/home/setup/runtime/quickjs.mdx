@@ -112,6 +112,9 @@ In TypeScript, any `std` or `os` function not listed as supported throws
   `.js` and `-e` run as classic scripts, and `-m` forces module mode.
 - `console.log` and `print` add a newline; `std.out.puts` and `std.err.puts`
   write raw.
+- An error in async code fails the run. In TypeScript this holds for a
+  module and for the promise a script ends with, as in `main()`; a promise
+  the script drops before then is not reported.
 - QuickJS cannot reach host files or the network, but only `command_limits`
   bound its CPU and memory. Run untrusted or heavy code in a
   [sandbox](/home/setup/runtime/sandbox).

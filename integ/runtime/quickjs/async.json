@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "jobs_reach_the_mount_and_their_errors_fail_the_run",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "after.js": "async function main() {\n  await 0\n  const f = std.open('/ram/out.txt', 'w')\n  f.puts('written')\n  f.close()\n  console.log(os.readdir('/ram')[0].filter((n) => n[0] !== '.').sort().join(','))\n}\nmain()\n",
+              "then.js": "Promise.resolve().then(() => console.log(std.open('/ram/out.txt', 'r').readAsString()))\n",
+              "late.mjs": "await null\nJSON.parse('{bad')\n",
+              "reject.js": "async function main() {\n  await null\n  throw new Error('late')\n}\nmain()\n",
+              "exit.mjs": "await null\nstd.exit(3)\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node /ram/after.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "after.js,exit.mjs,late.mjs,out.txt,reject.js,then.js\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /ram/then.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "written\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /ram/late.mjs && echo SUCCESS",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "SyntaxError"
+          }
+        },
+        {
+          "command": "node /ram/reject.js && echo SUCCESS",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Possibly unhandled promise rejection: Error: late"
+          }
+        },
+        {
+          "command": "node /ram/exit.mjs; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=3\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

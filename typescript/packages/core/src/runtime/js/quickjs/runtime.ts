@@ -29,6 +29,31 @@ import type { QuickJSAsyncContext, QuickJSAsyncRuntime, QuickJSHandle } from 'qu
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
+type RuntimePointer = Parameters<QuickJSAsyncContext['getMemory']>[0]
+type ValuePointer = Parameters<ReturnType<QuickJSAsyncContext['getMemory']>['heapValueHandle']>[0]
+
+/**
+ * What an async job drain needs of the engine. quickjs-emscripten runs
+ * pending jobs through the bare QTS_ExecutePendingJob export (its cwrap
+ * skips the asyncify wrapper for an all-number signature, its
+ * `_MaybeAsync` twin included), so an asyncified host function called
+ * from a job cannot suspend: a guest file call after an `await` failed and
+ * its job was dropped. The emscripten module's own `cwrap`, asked for an
+ * async call, waits out a suspension.
+ */
+interface JobRunner {
+  rt: { value: RuntimePointer }
+  module: {
+    cwrap: (
+      name: string,
+      returns: 'number',
+      args: 'number'[],
+      opts: { async: true },
+    ) => (rt: RuntimePointer, max: number, lastContext: number) => Promise<ValuePointer>
+  }
+  ffi: { QTS_FreeValuePointerRuntime: (rt: RuntimePointer, value: ValuePointer) => void }
+}
+
 const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_SIZE = 1024 * 1024
 
@@ -139,9 +164,26 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
         }
         result.error.dispose()
       } else {
+        exitCode = await this.drainJobs(runtime, ctx, err, exit)
+        // A module's evaluation is a promise, so a throw after a top-level
+        // await rejects it rather than failing the eval; a script's last
+        // value is the promise of the async call it ends with (`main()`).
+        // The library has no rejection tracker, so a promise a script
+        // drops before its end goes unreported.
+        const state = ctx.getPromiseState(result.value)
+        if (state.type === 'rejected') {
+          if (!exit.called) {
+            const label =
+              args.flags?.module === true ? '' : 'Possibly unhandled promise rejection: '
+            err.push(label + this.formatError(ctx, state.error) + '\n')
+            exitCode = 1
+          }
+          state.error.dispose()
+        } else if (state.type === 'fulfilled' && state.value !== result.value) {
+          state.value.dispose()
+        }
+        if (exit.called) exitCode = exit.code
         result.value.dispose()
-        const drained = this.drainJobs(runtime, ctx, err)
-        if (drained !== null) exitCode = exit.called ? exit.code : drained
       }
       // Files the guest left open still owe the mount their writes, however
       // the program ended.
@@ -236,12 +278,12 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       }
       const dumped: unknown = ctx.dump(result.value)
       result.value.dispose()
-      const drained = this.drainJobs(runtime, ctx, err)
+      const drained = await this.drainJobs(runtime, ctx, err, { called: false })
       // Files the evaluation left open still owe the mount their writes,
       // as they do when run() ends.
       const lost = await closeAll()
       for (const line of lost) err.push(`${this.name}: ${line}\n`)
-      if (drained !== null && drained !== 0) {
+      if (drained !== 0) {
         throw new EvalError(err.join('').trim() || 'quickjs eval failed while draining jobs')
       }
       return {
@@ -331,19 +373,44 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     setGlobal('__mirage_env', env)
   }
 
-  private drainJobs(
+  /**
+   * Run the jobs the program queued (promise reactions, async functions
+   * past an `await`) until none are left, letting each suspend into the
+   * file bridge as top-level code does. Mirrors the library's own
+   * executePendingJobs over the call that can suspend.
+   */
+  private async drainJobs(
     runtime: QuickJSAsyncRuntime,
     ctx: QuickJSAsyncContext,
     err: string[],
-  ): number | null {
+    exit: { called: boolean },
+  ): Promise<number> {
+    const engine = runtime as unknown as JobRunner
+    const memory = ctx.getMemory(engine.rt.value)
+    const executePendingJob = engine.module.cwrap(
+      'QTS_ExecutePendingJob',
+      'number',
+      ['number', 'number', 'number'],
+      { async: true },
+    )
     for (;;) {
-      const jobs = runtime.executePendingJobs()
-      if (jobs.error) {
-        err.push(this.formatError(ctx, jobs.error) + '\n')
-        jobs.error.dispose()
+      const lastContext = memory.newMutablePointerArray(1)
+      const done = await executePendingJob(engine.rt.value, -1, lastContext.value.ptr)
+      const ran = lastContext.value.typedArray[0]
+      lastContext.dispose()
+      if (ran === 0) {
+        engine.ffi.QTS_FreeValuePointerRuntime(engine.rt.value, done)
+        return 0
+      }
+      const jobs = memory.heapValueHandle(done)
+      if (ctx.typeof(jobs) !== 'number') {
+        if (!exit.called) err.push(this.formatError(ctx, jobs) + '\n')
+        jobs.dispose()
         return 1
       }
-      if (jobs.value <= 0) return 0
+      const count = ctx.getNumber(jobs)
+      jobs.dispose()
+      if (count <= 0) return 0
     }
   }
 
