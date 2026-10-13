@@ -47,12 +47,10 @@ def char_width(data: bytes) -> int:
 class PipeInput:
     """The read end an ``exec`` keeps on a live pipe (``exec 3<"$1"``).
 
-    It holds the pipe it opened, not the name it was opened by, so a link
-    removed since changes nothing. Each read takes a stream of its own,
-    in the reading command's own task, and closes it after one chunk: a
-    read that gives up (``timeout``) takes nothing with it, and the next
-    read, through this descriptor or another, gets what it left. Once the
-    substitution's command has ended the pipe, a read finds its end.
+    It holds the pipe, not the name it was opened by. Each read takes a
+    stream of its own in the reading command's task and closes it after
+    one chunk, so a read that gives up (``timeout``) leaves the rest to the
+    next read.
 
     Args:
         path (PathSpec): the pipe's own path (``/dev/fd/N``).
@@ -246,9 +244,9 @@ class AsyncLineIterator:
             raise
 
     async def _failed(self, exc: BaseException, taken: bytes = b"") -> None:
-        """Close the source for good after a failed read, unless it was a
-        reader's own cancellation on a pipe an ``exec`` keeps: that leaves
-        it open for the next reader, with what the read had taken put back.
+        """Close the source after a failed read, unless it was a reader's
+        own cancellation on a pipe an ``exec`` keeps, which stays open with
+        what the read had taken put back.
 
         Args:
             exc (BaseException): what ended the read.
@@ -292,8 +290,7 @@ class AsyncLineIterator:
 
     async def load_rest(self) -> None:
         """Read what the source has left into the buffer, for a descriptor
-        that outlives its source (a pipe whose substitution's command has
-        ended): reads go on from memory, and the source's stream ends."""
+        that outlives its pipe: reads go on from memory."""
         while not self._exhausted:
             try:
                 await self._budget.run()
@@ -377,9 +374,8 @@ class SharedInput:
     source, since a later command may still read it; whoever opened the
     source closes it, and a failed line discards it.
 
-    One over a live pipe (a process substitution's ``/dev/fd/N``) names
-    it in ``pipe`` while the substitution's command runs. When that
-    command ends, its scope keeps the rest of the pipe readable for a
+    One over a live pipe names it in ``pipe`` while the substitution's
+    command runs; when that ends, its scope loads the rest for a
     descriptor the shell still holds (``f() { exec 3<"$1"; }; f <(cmd)``)
     and clears the name.
 

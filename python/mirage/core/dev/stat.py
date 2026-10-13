@@ -33,8 +33,7 @@ async def stat(
 
     Neither has rendered content, so the size is None; a device's
     identity is the [major, minor] under DEVICE_NUMBERS_KEY. Both carry
-    the mode, owner and times a chmod, chown or touch stored, and a FIFO
-    that has none is rw------- as a pipe is created.
+    the stored mode, owner and times; a FIFO without a mode is rw-------.
 
     Args:
         accessor (RAMAccessor): the /dev store's accessor.

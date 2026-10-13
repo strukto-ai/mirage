@@ -68,9 +68,9 @@ async def path_kind(
     Symlinks are followed first (test -e/-f/-d act on the target), then
     ``resolve_path_stat`` answers what is there. That probe is shared with
     ``find`` and ``tree``'s start point, so ``test -d`` and a traversal
-    cannot disagree about whether a path exists. A FIFO is not a regular
-    file: ``-f`` is false for one, and ``-s`` too without reading it, a
-    FIFO storing nothing (GNU: ``[ -s <(printf x) ]`` is false).
+    cannot disagree about whether a path exists. A FIFO is no regular file
+    and stores nothing, so ``-f`` and ``-s`` are false for one (GNU: ``[ -s
+    <(printf x) ]``).
 
     Args:
         ctx (CondContext): evaluation context.

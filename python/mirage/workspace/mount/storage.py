@@ -91,9 +91,8 @@ def check_unlink(registry: MountRegistry, path: PathSpec) -> None:
     after the copy landed, so the move is refused before it starts. The
     mount owning the source counts, and so does any mount nested under it,
     which the walk would cross; a mount above the owner is never touched.
-    A live pipe (a process substitution) is no file a move can delete
-    either, and copying it first would drain it, so it is refused with
-    EPERM before anything is read, as ``rm`` refuses it.
+    A live pipe cannot be deleted either, and copying it would drain it,
+    so it is refused with EPERM, as ``rm`` refuses it.
 
     Args:
         registry (MountRegistry): Mount set the operand is addressed in.

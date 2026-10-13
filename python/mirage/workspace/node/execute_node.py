@@ -769,9 +769,8 @@ async def _run_redirected(
             r.target_node is not None and _names_process_sub(r.target_node)
             for r in redirects
         ):
-            # A substitution lives as long as the command naming it, so it
-            # cannot back a descriptor the shell keeps after `exec` returns,
-            # spelled alone or inside a longer word (`>(cat)""`).
+            # A substitution lives only as long as its command, so it
+            # cannot back a descriptor `exec` keeps (`>(cat)""` too).
             err = b"mirage: unsupported: exec onto a process substitution\n"
             return (
                 None,
@@ -803,9 +802,8 @@ async def _run_redirected(
                         given, sink, redirect_paths_for(command.id)
                     )
 
-                # The words have expanded by now, and what the head ran
-                # as decides whether bash forks: `$cmd` naming a builtin
-                # is the shell's own.
+                # What the head ran as decides whether bash forks:
+                # `$cmd` naming a builtin is the shell's own.
                 ran_forked = forks(command, context.session, (name, *args))
                 return await handle_redirect(
                     prepared,
@@ -1086,9 +1084,8 @@ async def execute_node(
                 context.frame.diagnostics = outer
         return process_subs.own(stdout, io, exec_node), io, exec_node
     except UNWINDING as sig:
-        # `exit`, `return` or `break` leaving the node ends it as its last
-        # command did: the writer's end closes and output consumers finish
-        # what it wrote, rather than being cut off as a failure is.
+        # `exit`, `return` or `break` ends the node as its last command
+        # did: output consumers finish, rather than being cut off.
         await trailed(sig, *await process_subs.settle())
         raise
     except BaseException:
@@ -1099,10 +1096,9 @@ async def execute_node(
 
 
 def _names_process_sub(word: TSNodeLike) -> bool:
-    """Whether a redirect target names a process substitution of its own:
-    alone or as part of the word, but not one inside a command
-    substitution, which runs as a line of its own and is done with its
-    pipes before the target is spelled (`exec >"$(cat <(echo f))"`).
+    """Whether a redirect target names a process substitution of its own,
+    alone or in a longer word; one inside a command substitution is done
+    with before the target is spelled (`exec >"$(cat <(echo f))"`).
 
     Args:
         word (TSNodeLike): the redirect's target word.
@@ -1330,12 +1326,10 @@ async def _execute_node(
                 )
             return ran if sink is None else await drained(sink, *ran)
         except PipeClosed:
-            # SIGPIPE: a program writing into a pipe whose reader has
-            # gone dies of it alone, and its caller goes on; a builtin
-            # or a function writes as the shell, which goes down with it.
-            # What the head expanded to decides (`$cmd` naming printf is
-            # the shell's), and a command that never expanded (an alias
-            # whose own line already settled it) leaves it to its caller.
+            # SIGPIPE ends a program alone; a builtin or a function writes
+            # as the shell, which dies. What the head expanded to decides
+            # (`$cmd` naming printf is the shell's); a command that never
+            # expanded (an alias) leaves it to its caller.
             if expanded.words is None or not forks(
                 node, session, expanded.words
             ):

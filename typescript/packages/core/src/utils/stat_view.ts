@@ -25,8 +25,7 @@ const S_IFLNK = 0o120000
 export const CHAR_MODE = S_IFCHR | 0o666
 export const DIR_MODE = S_IFDIR | 0o755
 export const FILE_MODE = S_IFREG | 0o644
-// S_IFIFO, created rw------- as a pipe is (GNU: `stat -L -c %A <(true)`
-// prints prw-------), which is what a FIFO with no recorded mode reports.
+// S_IFIFO; a pipe is created rw------- (GNU: `stat -L -c %A <(true)`).
 export const FIFO_MODE = 0o010000 | 0o600
 // A link is always lrwxrwxrwx: the bits on a symlink are not consulted
 // by any POSIX system, so this is the one mode every translator reports
@@ -161,12 +160,9 @@ export function contentSize(st: FileStat): number {
 }
 
 /**
- * Whether a listing has no size to show for one FileStat.
- *
- * A directory always shows `DIR_SIZE`, and a FIFO 0: it stores no bytes,
- * so its size stays null, and 0 is what GNU's `stat` and `ls -l` print
- * for one. Any other entry shows its rendered length, unknown when the
- * backend reports none. Mirrors python's size_unknown.
+ * Whether a listing has no size to show for one FileStat. A directory shows
+ * `DIR_SIZE` and a FIFO, which stores nothing, 0 (as GNU's `stat` and `ls -l`
+ * do); any other entry its rendered length. Mirrors python's size_unknown.
  */
 export function sizeUnknown(st: FileStat): boolean {
   return st.size === null && !isDir(st) && !isFifo(st)

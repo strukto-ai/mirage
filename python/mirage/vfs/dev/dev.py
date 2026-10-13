@@ -66,8 +66,8 @@ class DevVFS(RAMVFS):
     def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
-        # A live pipe is bound as the read opens, so a descriptor that
-        # holds it reads on after the pipe's path is released.
+        # Bound as the read opens, so a descriptor reads on after the
+        # pipe's path is released.
         pipe = active_pipe(self.accessor, norm(path.mount_path))
         if pipe is not None:
             return pipe.stream(path)

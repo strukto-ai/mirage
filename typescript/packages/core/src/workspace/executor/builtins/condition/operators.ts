@@ -41,9 +41,9 @@ function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
  * Resolve an operand to 'dir' / 'file' / 'char' / 'fifo' / null plus its
  * stat. Symlinks are followed first, then resolvePathStat answers what is
  * there. That probe is shared with find and tree's start point, so `test -d`
- * and a traversal cannot disagree about whether a path exists. A FIFO is not
- * a regular file: `-f` is false for one, and `-s` too without reading it, a
- * FIFO storing nothing (GNU: `[ -s <(printf x) ]` is false).
+ * and a traversal cannot disagree about whether a path exists. A FIFO is no
+ * regular file and stores nothing, so `-f` and `-s` are false for one (GNU:
+ * `[ -s <(printf x) ]`).
  */
 async function pathKind(
   ctx: CondContext,

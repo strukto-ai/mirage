@@ -23,12 +23,10 @@ const BYTE_VIEW = new TextDecoder('latin1')
 
 /**
  * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). It holds the
- * pipe it opened, not the name it was opened by, so a link removed since
- * changes nothing. Each read takes a stream of its own, under its reading
- * command's own signal, and closes it after one chunk: a read that gives up
- * (`timeout`) takes nothing with it, and the next read, through this
- * descriptor or another, gets what it left. Once the substitution's command
- * has ended the pipe, a read finds its end. Mirrors Python's PipeInput.
+ * pipe, not the name it was opened by. Each read takes a stream of its own
+ * under the reading command's signal and closes it after one chunk, so a read
+ * that gives up (`timeout`) leaves the rest to the next read. Mirrors
+ * Python's PipeInput.
  */
 export class PipeInput implements AsyncIterableIterator<Uint8Array> {
   /** `path` is the pipe's own (`/dev/fd/N`); `signal` gives each read its reader's. */
@@ -224,9 +222,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
 
   /**
    * Read what the source has left into the buffer, for a descriptor that
-   * outlives its source (a pipe whose substitution's command has ended):
-   * reads go on from memory, and the source's stream ends. Mirrors Python's
-   * load_rest.
+   * outlives its pipe: reads go on from memory. Mirrors Python's load_rest.
    */
   async loadRest(): Promise<void> {
     try {
@@ -244,10 +240,9 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   /**
-   * A failed read closes the source for good, but a reader's own abort on a
-   * pipe an `exec` keeps leaves it open for the next reader, with `taken`,
-   * what the read had taken from the buffer, put back. Mirrors Python's
-   * _keeps_open.
+   * Close the source after a failed read, unless it was a reader's own abort
+   * on a pipe an `exec` keeps, which stays open with `taken`, what the read
+   * had taken, put back. Mirrors Python's _failed.
    */
   private async failed(error: unknown, taken: readonly Uint8Array[] = []): Promise<void> {
     const aborted = error instanceof DOMException && error.name === 'AbortError'
@@ -415,10 +410,9 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
 export class SharedInput implements AsyncIterableIterator<Uint8Array> {
   lines: AsyncLineIterator
   /**
-   * The live pipe (a process substitution's `/dev/fd/N`) this reads while
-   * the substitution's command runs. When that command ends, its scope
-   * keeps the rest of the pipe readable for a descriptor the shell still
-   * holds (`f() { exec 3<"$1"; }; f <(cmd)`) and clears the name.
+   * The live pipe this reads while the substitution's command runs; when that
+   * ends, its scope loads the rest for a descriptor the shell still holds
+   * (`f() { exec 3<"$1"; }; f <(cmd)`) and clears the name.
    */
   pipe: PathSpec | null
 

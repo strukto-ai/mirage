@@ -164,13 +164,10 @@ class ProcessSubScope:
                 child.dev.release_input(child.path, child.allocation)
 
     def _held_inputs(self) -> dict[str, list[AsyncLineIterator]]:
-        """The input pipes of this scope that a descriptor of the shell
-        still reads after the command, opened by its path (``exec
-        3<"$1"``) or duplicated from one, with the line buffers reading
-        each: they load the rest of it, and reads go on from memory once
-        the pipe is released. Every descriptor naming one stops naming
-        it, as the path is free for the next substitution once this
-        command ends.
+        """This scope's input pipes that a shell descriptor still reads
+        after the command (``exec 3<"$1"``, or a dup), with the line
+        buffers reading each, which load the rest. The descriptors stop
+        naming them, as the paths are free once this command ends.
         """
         inputs = {c.path for c in self.held if c.endpoint.readable}
         held: dict[str, list[AsyncLineIterator]] = {}
@@ -190,9 +187,8 @@ class ProcessSubScope:
 
     async def settle(self) -> tuple[bytes, bytes]:
         """End the substitutions as a finished command does, for a node
-        that shell control flow (``exit``, ``return``, ``break``) leaves:
-        writers' ends close and output consumers finish what was written.
-        Returns what they wrote to the capture, stdout then stderr.
+        ``exit``, ``return`` or ``break`` leaves, and return what they
+        wrote to the capture, stdout then stderr.
         """
         await self.close()
         return self.capture.take()

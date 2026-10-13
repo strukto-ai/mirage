@@ -522,10 +522,8 @@ export async function handleSubshell(
       try {
         mergedIo = await land(written, sink, allStdout, mergedIo)
       } catch (err) {
-        // What the statement wrote meets a pipe whose reader has gone: a writer
-        // that answers that itself (`tee -p`) says what it says, a child it
-        // forked (a program) dies of it alone, with 141, and the subshell goes
-        // on; the subshell's own write (a builtin's) ends it below.
+        // A closed pipe ends a forked writer alone, with 141, unless it answers
+        // itself (`tee -p`); the subshell's own write ends it below.
         if (!(err instanceof PipeClosed)) throw err
         if (
           sink === null ||
@@ -544,8 +542,7 @@ export async function handleSubshell(
         mergedIo,
       )
     } catch (err) {
-      // The subshell's own write (a builtin's) into a pipe whose reader has
-      // gone: SIGPIPE ends the subshell, with 141.
+      // The subshell's own write met a closed pipe: SIGPIPE ends it.
       const sig = err instanceof PipeClosed ? new ExitSignal(141) : err
       if (!(sig instanceof ExitSignal || sig instanceof ReturnSignal)) throw err
       ;[mergedIo, lastExec] = await subshellEnded(sig, recorder, session, sink, allStdout, mergedIo)

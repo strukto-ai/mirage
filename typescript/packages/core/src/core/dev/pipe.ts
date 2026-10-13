@@ -22,16 +22,12 @@ import { concat } from '../../utils/bytes.ts'
 /**
  * One directional virtual descriptor, with bounded producer backpressure.
  *
- * The read end belongs to the scope that opened the descriptor, which
- * closes it with `pipe.closeReader()` when its command ends, unless a
- * descriptor the shell still holds reads the rest first, and closes the
- * streams readers opened on it that are still open (`readers`, held
- * weakly); no reader closes it, so a function can read one substitution
- * twice. Readers take turns, one chunk each, so concurrent readers split the
- * stream between them and a ranged read leaves the rest of its chunk to the
- * next reader. A reader whose signal fires while it waits leaves the chunk it
- * waited for to the next reader rather than ending the stream for every
- * reader. Mirrors Python's DevicePipe.
+ * The read end belongs to the scope that opened it, which closes it, and the
+ * reader streams still open (`readers`, held weakly), when its command ends;
+ * no reader closes it, so a function can read one substitution twice. Readers
+ * take turns a chunk at a time, so they split the stream, and a ranged read
+ * leaves the rest of its chunk to the next. A reader whose signal fires while
+ * it waits leaves that chunk to the next reader. Mirrors Python's DevicePipe.
  */
 export class DevicePipe {
   readonly pipe = new BytePipe()

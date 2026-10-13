@@ -26,9 +26,8 @@ import { activeDevice, activePipe } from './device.ts'
  * active synthetic name, otherwise the ordinary RAM stat (a recreated real
  * file, or a dir). Neither has rendered content, so the size is null; a
  * device's identity is the [major, minor] under DEVICE_NUMBERS_KEY. Both
- * carry the mode, owner and times a chmod, chown or touch stored, and a
- * FIFO that has none is rw------- as a pipe is created. Mirrors Python's
- * dev stat.
+ * carry the stored mode, owner and times; a FIFO without a mode is
+ * rw-------. Mirrors Python's dev stat.
  */
 export function stat(
   accessor: RAMAccessor,

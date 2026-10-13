@@ -164,12 +164,10 @@ export class ProcessSubScope {
   }
 
   /**
-   * The input pipes of this scope that a descriptor of the shell still reads
-   * after the command, opened by its path (`exec 3<"$1"`) or duplicated from
-   * one, with the line buffers reading each: they load the rest of it, and
-   * reads go on from memory once the pipe is released. Every descriptor
-   * naming one stops naming it, as the path is free for the next substitution
-   * once this command ends. Mirrors Python's _held_inputs.
+   * This scope's input pipes that a shell descriptor still reads after the
+   * command (`exec 3<"$1"`, or a dup), with the line buffers reading each,
+   * which load the rest. The descriptors stop naming them, as the paths are
+   * free once this command ends. Mirrors Python's _held_inputs.
    */
   private heldInputs(): Map<string, AsyncLineIterator[]> {
     const inputs = new Set(this.held.filter((c) => c.endpoint.readable).map((c) => c.path))
@@ -186,10 +184,9 @@ export class ProcessSubScope {
   }
 
   /**
-   * End the substitutions as a finished command does, for a node that shell
-   * control flow (`exit`, `return`, `break`) leaves: writers' ends close and
-   * output consumers finish what was written. Returns what they wrote to the
-   * capture, stdout then stderr. Mirrors Python's settle.
+   * End the substitutions as a finished command does, for a node `exit`,
+   * `return` or `break` leaves, and return what they wrote to the capture,
+   * stdout then stderr. Mirrors Python's settle.
    */
   async settle(): Promise<[Uint8Array, Uint8Array]> {
     await this.close()

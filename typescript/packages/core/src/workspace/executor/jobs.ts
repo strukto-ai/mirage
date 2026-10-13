@@ -96,10 +96,8 @@ export async function drained(
     await pump(sink, Channel.STDOUT, stdout)
   } catch (err) {
     if (err instanceof PipeClosed) {
-      // SIGPIPE ends the writer where it was, but what it had already said on
-      // stderr stands (`cat /missing big > >(head -c 1)`). A writer that
-      // answers its stdout's closed reader itself (`tee -p`) says what it
-      // says and keeps going.
+      // SIGPIPE keeps what the writer already said on stderr (`cat /missing
+      // big > >(head -c 1)`), unless it answers itself (`tee -p`).
       await sendStderr(sink, io)
       if (!(await answerClosed(io, (channel, data) => sink.emit(channel, data)))) throw err
       execNode.exitCode = io.exitCode

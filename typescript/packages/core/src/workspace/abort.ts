@@ -74,8 +74,7 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
 
 /**
  * The signal the current call answers to: its evaluation frame's and its
- * line's. A read of a live pipe, or a copy out of or into one, waits on it,
- * so its own reader's signal is what withdraws it; Python cancels the
+ * line's, which withdraw a pipe read or copy that waits; Python cancels the
  * awaiting task instead.
  */
 export function callerSignal(): AbortSignal | undefined {

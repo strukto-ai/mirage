@@ -276,9 +276,8 @@ async def _install_descriptor(
         if redirect.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
             try:
                 data, _ = await dispatch("read", scope, stream=True)
-                # A pipe streams as its producer writes, as under any
-                # redirect, so a command reading it need not wait for
-                # the producer to end; a file is read whole here.
+                # A pipe streams, as under any redirect; a file is read
+                # whole here.
                 if not isinstance(data, PipeStream):
                     data = await materialize(data) or b""
             except FileNotFoundError:
@@ -299,8 +298,7 @@ async def _install_descriptor(
             else:
                 reading: ByteSource | PipeInput = data
                 if isinstance(data, PipeStream):
-                    # The descriptor outlives this read: it keeps the pipe
-                    # the read opened, which each later read takes afresh.
+                    # The descriptor keeps the pipe; each read takes it anew.
                     await close_quietly(data)
                     reading = PipeInput(data.path, data.end)
                 _bind(
@@ -598,11 +596,9 @@ async def divert_statement(
     stderr's own binding and makes the statement's status 1, which `$?`
     shows. An unwritable stderr fails only a statement that sent its own
     stdout there (``>&2``); a lost diagnostic leaves the status the
-    command earned. A stream bound to a pipe whose reader has gone is
-    SIGPIPE for the writer: a program or subshell ends with 141 and
-    nothing more it wrote is delivered, while the shell's own write (a
-    builtin, a function, a compound command) ends the shell with 141.
-    Returns what is left for the terminal, in the order it was written.
+    command earned. A closed pipe is SIGPIPE for the writer: a program or
+    subshell ends with 141, the shell's own write ends the shell. Returns
+    what is left for the terminal, in the order it was written.
 
     Args:
         dispatch (DispatchFn | None): op dispatcher, None for a loop
@@ -634,8 +630,7 @@ async def divert_statement(
         try:
             refused = await _routed(dispatch, session, channel, data, rest)
         except PipeClosed:
-            # SIGPIPE ends the writer where it was, but what it had
-            # already said on stderr stands.
+            # SIGPIPE keeps what the writer already said on stderr.
             for later, kept_later, more in runs[index + 1 :]:
                 if later != Channel.STDERR:
                     continue

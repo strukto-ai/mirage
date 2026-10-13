@@ -1345,9 +1345,8 @@ class MountEntry:
                 push_write_context(prev_write)
 
     def live_pipe(self, path: str) -> DevicePipe | None:
-        """The live pipe a read of ``path`` takes bytes from, another task
-        still writing it: a pipe endpoint in a store with them, whose first
-        byte must not be pulled before its reader asks for it.
+        """The live pipe a read of ``path`` takes bytes from, which another
+        task is still writing.
 
         Args:
             path (str): virtual path.

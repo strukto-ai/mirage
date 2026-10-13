@@ -1361,8 +1361,7 @@ class Dispatcher:
         """Open a streamed read, its first chunk pulled before it returns.
 
         A cold read fills the cache as it is pulled. A live pipe's read is
-        neither pulled nor cached: it answers as a ``PipeStream``, which
-        its reader takes as the bytes come.
+        neither pulled nor cached: it answers as a ``PipeStream``.
 
         Args:
             call (_Call): the admitted read.
@@ -1407,10 +1406,8 @@ class Dispatcher:
         if isinstance(kwargs.get("dst"), PathSpec):
             names.add(kwargs["dst"].virtual)
             if any(mount.live_pipe(name) is not None for name in names):
-                # A copy into or out of a live pipe holds neither name: it
-                # waits on the pipe, whose other end may need the very names
-                # it would hold (`cp f >(cat > f)`), and the pipe orders its
-                # own bytes.
+                # A copy meeting a live pipe holds no name: the pipe's other
+                # end may need it (`cp f >(cat > f)`).
                 names = set()
         prefix = mount.prefix.rstrip("/")
         keys = {f"{id(mount.vfs)}:{mount_key(name, prefix)}" for name in names}

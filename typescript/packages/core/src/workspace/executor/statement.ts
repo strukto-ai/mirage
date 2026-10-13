@@ -169,15 +169,12 @@ export function carryStatus(session: SessionState): void {
 }
 
 /**
- * Whether bash forks to run a command, so what fails there fails that
- * command alone: its redirects expand in the child, and a pipe closing under
- * its writes ends only it. A subshell or a program forks; a builtin, a
- * function or another compound command is the shell's own, which expands
- * its redirects itself and discards the line on an error, and ends with a
- * pipe its own write closed. `command -v` is the builtin itself; `command X`
- * is X with functions masked. Once the command has expanded, its words
- * (`words`, its name first) decide; before then a name only an expansion
- * spells (`$cmd`) is taken for a program. Mirrors Python's forks.
+ * Whether bash forks to run a command: a subshell or a program, whose
+ * redirects expand in the child and whose closed pipe ends it alone; a
+ * builtin, a function or a compound command runs in the shell itself.
+ * `command -v` is the builtin, `command X` masks functions. The expanded
+ * `words` decide once there are any; before, a name only an expansion spells
+ * (`$cmd`) counts as a program. Mirrors Python's forks.
  */
 export function forks(
   command: TSNodeLike | null,
@@ -221,11 +218,9 @@ function spelled(word: TSNodeLike): string | null {
 
 /**
  * Whether what a statement wrote came from a child bash forks for it, so a
- * pipe closing under the write ends that writer alone: a program or a
- * subshell, redirected or negated too, or a pipeline, whose commands are each
- * a child of their own. A command is judged by what its output names as its
- * producer, what its head ran as (`$cmd`), when it names one. Mirrors
- * Python's writer_forks.
+ * closed pipe ends that writer alone: a program, a subshell or a pipeline,
+ * redirected or negated too. A command is judged by the producer its output
+ * names, what its head ran as (`$cmd`). Mirrors Python's writer_forks.
  */
 export function writerForks(
   statement: TSNodeLike | null,
@@ -243,9 +238,8 @@ export function writerForks(
 }
 
 /**
- * Deliver a writer's own answer to its stdout's reader going away (`tee -p`),
- * if it has one, rather than SIGPIPE: what it says, and the status it ends
- * with. Mirrors Python's answer_closed.
+ * Deliver a writer's own answer to its stdout's reader going away (`tee -p`)
+ * in place of SIGPIPE, if it has one. Mirrors Python's answer_closed.
  */
 export async function answerClosed(
   io: IOResult,
@@ -441,8 +435,7 @@ export async function land(
         await sink.emit(channel, data)
       } catch (err) {
         if (!(err instanceof PipeClosed)) throw err
-        // SIGPIPE ends the writer where it was, but what it had already said
-        // on stderr stands (`(cat /missing big) > >(head -c 1)`).
+        // SIGPIPE keeps what the writer already said on stderr.
         for (const [later, more] of written.slice(index + 1))
           if (later === Channel.STDERR) await sink.emit(later, more)
         throw err

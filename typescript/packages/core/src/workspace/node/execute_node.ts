@@ -627,9 +627,8 @@ async function runRedirected(
         return target !== null && namesProcessSub(target)
       })
     ) {
-      // A substitution lives as long as the command naming it, so it cannot
-      // back a descriptor the shell keeps after `exec` returns, spelled alone
-      // or inside a longer word (`>(cat)""`).
+      // A substitution lives only as long as its command, so it cannot back
+      // a descriptor `exec` keeps (`>(cat)""` too).
       const err = encodeText('mirage: unsupported: exec onto a process substitution\n')
       return [
         null,
@@ -657,8 +656,8 @@ async function runRedirected(
   try {
     if (command !== null && command.type === NT.COMMAND) {
       const underRedirects: RedirectRunner = (run, guard, name, args) => {
-        // The words have expanded by now, and what the head ran as decides
-        // whether bash forks: `$cmd` naming a builtin is the shell's own.
+        // What the head ran as decides whether bash forks: `$cmd` naming a
+        // builtin is the shell's own.
         const ranForked = forks(command, context.session, [name, ...args])
         return handleRedirect(
           (_node, _current, given, _stack, options) =>
@@ -858,10 +857,10 @@ export interface ExecuteNodeDeps {
 }
 
 /**
- * Whether a redirect target names a process substitution of its own: alone
- * or as part of the word, but not one inside a command substitution, which
- * runs as a line of its own and is done with its pipes before the target is
- * spelled (`exec >"$(cat <(echo f))"`). Mirrors Python's _names_process_sub.
+ * Whether a redirect target names a process substitution of its own, alone or
+ * in a longer word; one inside a command substitution is done with before the
+ * target is spelled (`exec >"$(cat <(echo f))"`). Mirrors Python's
+ * _names_process_sub.
  */
 function namesProcessSub(word: TSNodeLike): boolean {
   if (word.type === NT.PROCESS_SUBSTITUTION) return true
@@ -979,9 +978,8 @@ export async function executeNode(
       context.frame.diagnostics = outer
     }
   } catch (err) {
-    // `exit`, `return` or `break` leaving the node ends it as its last
-    // command did: the writer's end closes and output consumers finish what
-    // it wrote, rather than being cut off as a failure is.
+    // `exit`, `return` or `break` ends the node as its last command did:
+    // output consumers finish, rather than being cut off.
     if (isUnwinding(err)) await trailed(err, ...(await processSubs.settle()))
     else await processSubs.close(true)
     throw err
@@ -1218,12 +1216,10 @@ async function executeNodeBody(
       )
       return sink === undefined ? ran : await drained(sink, ...ran)
     } catch (err) {
-      // SIGPIPE: a program writing into a pipe whose reader has gone dies
-      // of it alone, and its caller goes on; a builtin or a function writes
-      // as the shell, which goes down with it. What the head expanded to
-      // decides (`$cmd` naming printf is the shell's), and a command that
-      // never expanded (an alias whose own line already settled it) leaves
-      // it to its caller.
+      // SIGPIPE ends a program alone; a builtin or a function writes as the
+      // shell, which dies. What the head expanded to decides (`$cmd` naming
+      // printf is the shell's); a command that never expanded (an alias)
+      // leaves it to its caller.
       if (
         !(err instanceof PipeClosed) ||
         expanded.words === null ||

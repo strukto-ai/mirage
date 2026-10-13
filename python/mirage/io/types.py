@@ -40,16 +40,16 @@ class DeviceInput(bytes):
 
 
 class PipeEnd(Protocol):
-    """The live pipe a ``PipeStream`` reads (a process substitution's
-    endpoint), for a descriptor that reads it on after the stream."""
+    """The live pipe a ``PipeStream`` reads, for a descriptor reading on
+    after it."""
 
     def stream(self, path: PathSpec) -> AsyncGenerator[bytes, None]: ...
 
 
 @dataclass(frozen=True, slots=True)
 class ClosedPipe:
-    """How a writer answers its stdout's reader going away when it does so
-    itself rather than dying of SIGPIPE (``tee -p``, ``--output-error``).
+    """How a writer answers its stdout's reader going away instead of
+    dying of SIGPIPE (``tee -p``).
 
     Args:
         stderr (bytes): what it says about it.
@@ -62,12 +62,9 @@ class ClosedPipe:
 
 
 class PipeStream(AsyncIterator[bytes]):
-    """A streamed read of a live pipe (a process substitution's ``/dev/fd/N``).
-
-    Another task is still writing it, so its reader takes the bytes as
-    they come: the dispatcher opens it without pulling a first chunk that
-    may wait on the very command about to read it, and a redirect binds it
-    as a stream rather than reading it whole first.
+    """A streamed read of a live pipe (a process substitution's ``/dev/fd/N``),
+    which another task is still writing, so its reader takes the bytes as
+    they come.
 
     Args:
         stream (AsyncIterator[bytes]): the pipe's opened read.

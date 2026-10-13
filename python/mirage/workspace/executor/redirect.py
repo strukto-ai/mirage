@@ -113,11 +113,9 @@ class _Unreadable(Enum):
 class PipeRecorder(Recorder):
     """Send FIFO writes immediately; preserve ordinary redirect recording.
 
-    While a pipe is in play (``live``), whatever reaches the terminal
-    goes out as it is written, through a copied descriptor too, so the
-    bytes keep the order the command wrote them in. A write into an output
-    pipe whose reader has gone raises ``PipeClosed``, which the redirect
-    answers as SIGPIPE.
+    While a pipe is in play (``live``), terminal output goes out as it is
+    written, through a copied descriptor too, so it keeps the command's
+    order. A write into a pipe whose reader has gone raises ``PipeClosed``.
 
     Args:
         dispatch (DispatchFn): op dispatcher the pipe writes go through.
@@ -382,8 +380,8 @@ async def handle_redirect(
         guard (RedirectGuard | None): admit each resolved target before I/O.
         name (str): command name for the output-only fast path.
         args (tuple[str, ...]): expanded command arguments.
-        forked (bool): whether bash forks to run the command (a program
-            or a subshell), so a closed output pipe ends it alone.
+        forked (bool): whether bash forks to run the command, so a
+            closed pipe ends it alone.
         links (NamespaceLinks | None): the namespace's links, so a link
             to a pipe streams as the pipe does.
     """
@@ -552,9 +550,8 @@ async def handle_redirect(
                     inputs[r.fd], outputs[r.fd] = stdin, _CLOSED
                     continue
                 data, _ = await dispatch("read", scope, stream=True)
-                # A pipe streams as its producer writes; a file is read
-                # whole here, so a read that fails partway fails the
-                # redirect rather than the command reading it.
+                # A file is read whole here, so a read failing partway
+                # fails the redirect; a pipe streams.
                 if not isinstance(data, PipeStream):
                     data = await materialize(data) or b""
             except FileNotFoundError as exc:
@@ -705,11 +702,8 @@ async def handle_redirect(
                 )
                 refused = exec_node.refused
             except PipeClosed:
-                # SIGPIPE: a program or a subshell writing into an output
-                # pipe whose reader has gone ends alone with its status (a
-                # program inside a compound already has); a builtin's
-                # write is the shell's own, in a function or a group too,
-                # and the shell dies with it, as bash's does.
+                # SIGPIPE ends a forked writer alone; a builtin's write,
+                # in a function or a group too, is the shell's, which dies.
                 if not forked:
                     raise ExitSignal(141) from None
                 io = IOResult(exit_code=141)

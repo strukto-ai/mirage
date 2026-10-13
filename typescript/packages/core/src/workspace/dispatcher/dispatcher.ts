@@ -1020,8 +1020,8 @@ export class Dispatcher {
   /**
    * Open a streamed read, its first chunk pulled before it returns. A cold
    * read fills the cache as it is pulled. A live pipe's read is neither
-   * pulled nor cached: it answers as a `PipeStream`, which its reader takes
-   * as the bytes come. Mirrors Python's Dispatcher._open_stream.
+   * pulled nor cached: it answers as a `PipeStream`. Mirrors Python's
+   * Dispatcher._open_stream.
    */
   private async openStream(
     call: Call,
@@ -1218,9 +1218,8 @@ export class Dispatcher {
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
         // another.
-        // A copy into or out of a live pipe holds neither name: it waits on the
-        // pipe, whose other end may need the very names it would hold (`cp f
-        // >(cat > f)`), and the pipe orders its own bytes.
+        // A copy meeting a live pipe holds no name: the pipe's other end may
+        // need it (`cp f >(cat > f)`).
         const meetsPipe =
           dst !== null &&
           [p.virtual, dst.virtual].some((path) => mount.livePipe(path, this.access) !== null)

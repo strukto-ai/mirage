@@ -483,10 +483,8 @@ export async function mvGeneric(
         continue
       }
     }
-    // A move across mounts removes the target before it copies, and a pipe
-    // cannot be removed: GNU stops there and the source stays (`mv f
-    // >(cat)`), where copying into it would drain the source into the pipe
-    // and then delete it.
+    // A cross-mount move removes the target first, and a pipe cannot be
+    // removed: GNU stops there, keeping the source (`mv f >(cat)`).
     if (
       isPrimitiveMove(strategy) &&
       targetExists &&

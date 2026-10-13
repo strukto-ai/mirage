@@ -29,10 +29,9 @@ import { type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 /**
- * How tee answers a write into a pipe whose reader has gone: SIGPIPE, which
- * ends tee, without -p and --output-error; nothing under a -nopipe mode; a
- * report like any write error's under warn or exit. Mirrors Python's
- * PipeErrors.
+ * How tee answers a write into a pipe whose reader has gone: SIGPIPE without
+ * -p and --output-error, nothing under a -nopipe mode, a write error's report
+ * under warn and exit. Mirrors Python's PipeErrors.
  */
 export enum PipeErrors {
   SIGNAL = 'signal',
@@ -50,9 +49,8 @@ export function parseFlags(bag: Record<string, FlagValue>): TeeFlags {
   // --output-error values are validated declaratively: the spec's
   // choices= makes the parser report any other value and the executor
   // refuse with GNU's ARGMATCH shape before tee runs. -p and a bare
-  // --output-error are warn-nopipe, and the last of them typed wins, as
-  // GNU's one option does. The -nopipe half tells a pipe operand (a
-  // process substitution) from a file.
+  // --output-error are warn-nopipe; the last one typed wins, as GNU's one
+  // option does.
   const fl = new FlagView(bag, specOf('tee'))
   let mode: string | null = null
   for (const [, value] of fl.occurrences('p', 'output_error')) {
@@ -91,10 +89,8 @@ export async function teeGeneric(
 }
 
 /**
- * How tee answers its stdout's reader going away, as GNU's does: SIGPIPE
- * without -p and --output-error, nothing under a -nopipe mode, `'standard
- * output': Broken pipe` and status 1 under warn and exit. Mirrors Python's
- * _closed_stdout.
+ * How tee answers its stdout's reader going away, as GNU's does under its
+ * `PipeErrors` mode. Mirrors Python's _closed_stdout.
  */
 function closedStdout(parsed: TeeFlags): ClosedPipe | null {
   if (parsed.pipeErrors === PipeErrors.SIGNAL) return null
@@ -260,9 +256,8 @@ export async function writeOutput(
       await writeOne(path, raw, parsed, stream, write, append)
     } catch (err) {
       if (err instanceof PipeClosed) {
-        // The operand is a pipe whose reader has gone: SIGPIPE ends tee there,
-        // with what it had already reported, unless -p or --output-error said
-        // otherwise.
+        // A pipe operand whose reader has gone: SIGPIPE ends tee with what it
+        // reported, unless -p or --output-error say otherwise.
         if (parsed.pipeErrors === PipeErrors.SIGNAL) {
           const stderr = errors.length > 0 ? encodeText(errors.join('')) : null
           return [null, new IOResult({ exitCode: 141, stderr })]

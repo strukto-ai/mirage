@@ -216,15 +216,12 @@ def forks(
     session: SessionState,
     words: Sequence[str] | None = None,
 ) -> bool:
-    """Whether bash forks to run a command, so what fails there fails that
-    command alone: its redirects expand in the child, and a pipe closing
-    under its writes ends only it. A subshell or a program forks; a
-    builtin, a function or another compound command is the shell's own,
-    which expands its redirects itself and discards the line on an error,
-    and ends with a pipe its own write closed. ``command -v`` is the
-    builtin itself; ``command X`` is X with functions masked. Once the
-    command has expanded, its words decide; before then a name only an
-    expansion spells (``$cmd``) is taken for a program.
+    """Whether bash forks to run a command: a subshell or a program, whose
+    redirects expand in the child and whose closed pipe ends it alone; a
+    builtin, a function or a compound command runs in the shell itself.
+    ``command -v`` is the builtin, ``command X`` masks functions. The
+    expanded words decide once there are any; before, a name only an
+    expansion spells (``$cmd``) counts as a program.
 
     Args:
         command (TSNodeLike | None): the command, None for none.
@@ -276,11 +273,9 @@ def writer_forks(
     statement: TSNodeLike | None, session: SessionState, io: IOResult
 ) -> bool:
     """Whether what a statement wrote came from a child bash forks for
-    it, so a pipe closing under the write ends that writer alone: a
-    program or a subshell, redirected or negated too, or a pipeline,
-    whose commands are each a child of their own. A command is judged by
-    what its output names as its producer, what its head ran as
-    (``$cmd``), when it names one.
+    it, so a closed pipe ends that writer alone: a program, a subshell or
+    a pipeline, redirected or negated too. A command is judged by the
+    producer its output names, what its head ran as (``$cmd``).
 
     Args:
         statement (TSNodeLike | None): the statement that wrote.
@@ -303,8 +298,7 @@ async def answer_closed(
     io: IOResult, emit: Callable[[Channel, bytes], Awaitable[bool | None]]
 ) -> bool:
     """Deliver a writer's own answer to its stdout's reader going away
-    (``tee -p``), if it has one, rather than SIGPIPE: what it says, and
-    the status it ends with.
+    (``tee -p``) in place of SIGPIPE, if it has one.
 
     Args:
         io (IOResult): the writer's result, whose status takes the
@@ -553,9 +547,7 @@ async def land(
             try:
                 await sink.emit(channel, data)
             except PipeClosed:
-                # SIGPIPE ends the writer where it was, but what it had
-                # already said on stderr stands (`(cat /missing big) >
-                # >(head -c 1)`).
+                # SIGPIPE keeps what the writer already said on stderr.
                 for later, more, _ in written[index + 1 :]:
                     if later == Channel.STDERR:
                         await sink.emit(later, more)

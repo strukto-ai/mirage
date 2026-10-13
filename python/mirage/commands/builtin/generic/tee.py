@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class PipeErrors(Enum):
-    """How tee answers a write into a pipe whose reader has gone: SIGPIPE,
-    which ends tee, without -p and --output-error; nothing under a -nopipe
-    mode; a report like any write error's under warn or exit.
+    """How tee answers a write into a pipe whose reader has gone: SIGPIPE
+    without -p and --output-error, nothing under a -nopipe mode, a write
+    error's report under warn and exit.
     """
 
     SIGNAL = auto()
@@ -45,9 +45,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TeeFlags:
     # --output-error values are validated declaratively: the spec's
     # choices= makes the parser report any other value and the executor
     # refuse with GNU's ARGMATCH shape before tee runs. -p and a bare
-    # --output-error are warn-nopipe, and the last of them typed wins, as
-    # GNU's one option does. The -nopipe half tells a pipe operand (a
-    # process substitution) from a file.
+    # --output-error are warn-nopipe; the last one typed wins, as GNU's one
+    # option does.
     fl = FlagView(flags, spec=SPECS["tee"])
     mode: str | None = None
     for _, value in fl.occurrences("p", "output_error"):
@@ -259,9 +258,8 @@ async def write_output(
                 path, raw, parsed, read_stream, write_bytes, append_bytes
             )
         except PipeClosed:
-            # The operand is a pipe whose reader has gone: SIGPIPE ends
-            # tee there, with what it had already reported, unless -p or
-            # --output-error said otherwise.
+            # A pipe operand whose reader has gone: SIGPIPE ends tee with
+            # what it reported, unless -p or --output-error say otherwise.
             if parsed.pipe_errors is PipeErrors.SIGNAL:
                 return None, IOResult(
                     exit_code=141, stderr=b"".join(errors) or None
@@ -307,9 +305,8 @@ async def tee_generic(
 
 
 def _closed_stdout(parsed: TeeFlags) -> ClosedPipe | None:
-    """How tee answers its stdout's reader going away, as GNU's does:
-    SIGPIPE without -p and --output-error, nothing under a -nopipe mode,
-    ``'standard output': Broken pipe`` and status 1 under warn and exit.
+    """How tee answers its stdout's reader going away, as GNU's does under
+    its ``PipeErrors`` mode.
 
     Args:
         parsed (TeeFlags): tee's flags.

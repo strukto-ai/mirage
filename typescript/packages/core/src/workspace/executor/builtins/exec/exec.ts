@@ -375,9 +375,7 @@ async function installDescriptor(
       let data: ByteSource
       try {
         const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-        // A pipe streams as its producer writes, as under any redirect, so a
-        // command reading it need not wait for the producer to end; a file is
-        // read whole here.
+        // A pipe streams, as under any redirect; a file is read whole here.
         data = opened instanceof PipeStream ? opened : await materialize(opened)
       } catch (error) {
         if (redirect.kind !== RedirectKind.READWRITE || !isMissingPath(error)) throw error
@@ -390,8 +388,7 @@ async function installDescriptor(
         file.source = new FileInput(file, await materialize(data))
         bind(session, fd, OPEN_FOR_READ_WRITE + scope.virtual, false, file.source)
       } else {
-        // The descriptor outlives this read: it keeps the pipe the read
-        // opened, which each later read takes afresh under its own signal.
+        // The descriptor keeps the pipe; each read takes it anew.
         let reading: ByteSource | PipeInput = data
         if (data instanceof PipeStream) {
           await data.close()
@@ -437,10 +434,8 @@ function stdoutToStderr(node: TSNodeLike): boolean {
  * stderr's own binding and makes the statement's status 1, which `$?`
  * shows. An unwritable stderr fails only a statement that sent its own
  * stdout there (`>&2`); a lost diagnostic leaves the status the command
- * earned. A stream bound to a pipe whose reader has gone is SIGPIPE for the
- * writer: a program or subshell ends with 141 and nothing more it wrote is
- * delivered, while the shell's own write (a builtin, a function, a compound
- * command) ends the shell with 141. `command` is the statement's recorded
+ * earned. A closed pipe is SIGPIPE for the writer: a program or subshell ends
+ * with 141, the shell's own write ends the shell. `command` is the statement's recorded
  * line; its first word names the writer in a write error. `written` is the
  * statement's output in order; what went to the terminal through a copy
  * keeps its place. Returns what is left for the terminal, in the order it
@@ -471,8 +466,7 @@ export async function divertStatement(
       refused = await routed(dispatch, session, channel, data, rest)
     } catch (err) {
       if (!(err instanceof PipeClosed)) throw err
-      // SIGPIPE ends the writer where it was, but what it had already said on
-      // stderr stands.
+      // SIGPIPE keeps what the writer already said on stderr.
       for (const [later, more, keptLater] of grouped.slice(index + 1)) {
         if (later !== Channel.STDERR) continue
         if (keptLater) rest.push([later, more, true])

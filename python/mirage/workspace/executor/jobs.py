@@ -88,8 +88,7 @@ async def pump(
     was nothing to observe before it finished. A pipe is drained before
     the next chunk is pulled, so a reader that closed stops the source
     before it fetches more. A write that fails closes the source too, as
-    TypeScript's ``for await`` does, so no half-read stream is left for
-    the collector to finalize.
+    TypeScript's ``for await`` does.
 
     Args:
         console (JobConsole): where the output goes.
@@ -140,10 +139,8 @@ async def drained(
     except OSError as exc:
         await failed_read(io, exc, exec_node)
     except PipeClosed:
-        # SIGPIPE ends the writer where it was, but what it had already
-        # said on stderr stands (`cat /missing big > >(head -c 1)`). A
-        # writer that answers its stdout's closed reader itself (`tee
-        # -p`) says what it says and keeps going.
+        # SIGPIPE keeps what the writer already said on stderr (`cat
+        # /missing big > >(head -c 1)`), unless it answers itself (`tee -p`).
         await _send_stderr(sink, io)
         if not await answer_closed(io, sink.emit):
             raise

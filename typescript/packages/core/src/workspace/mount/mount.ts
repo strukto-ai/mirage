@@ -382,9 +382,8 @@ export class MountEntry {
   }
 
   /**
-   * The VFS as the owner of `access` sees it: the device mount's own view of
-   * that session's descriptors, so a browser call reads its own `/dev/fd`
-   * whatever other session is live; every other VFS as it is.
+   * The VFS as the owner of `access` sees it: the device mount's view of that
+   * session's descriptors, which a browser call cannot find any other way.
    */
   private viewFor(access?: SessionAccess): BaseVFS {
     return this.vfs instanceof DevVFS && access !== undefined
@@ -398,11 +397,7 @@ export class MountEntry {
     return vfs === this.vfs ? this.io : commandIo(vfs)
   }
 
-  /**
-   * The live pipe a read of `path` takes bytes from, another task still
-   * writing it: a pipe endpoint in a store with them, whose first byte must
-   * not be pulled before its reader asks for it. Mirrors Python's `live_pipe`.
-   */
+  /** The live pipe a read of `path` takes bytes from, which another task is still writing. Mirrors Python's `live_pipe`. */
   livePipe(path: string, access?: SessionAccess): DevicePipe | null {
     const accessor = this.viewFor(access).accessor
     if (!(accessor instanceof RAMAccessor)) return null

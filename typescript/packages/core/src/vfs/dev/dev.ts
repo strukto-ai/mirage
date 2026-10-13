@@ -78,8 +78,8 @@ export class DevVFS extends RAMVFS {
     index?: IndexCacheStore,
     signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
-    // A live pipe is bound as the read opens, so a descriptor that holds it
-    // reads on after the pipe's path is released.
+    // Bound as the read opens, so a descriptor reads on after the pipe's path
+    // is released.
     const pipe = activePipe(this.accessor, norm(path.mountPath))
     if (pipe !== null) return pipe.stream(path, signal)
     return this.readWhole(path, index)

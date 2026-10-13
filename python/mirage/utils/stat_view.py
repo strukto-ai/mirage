@@ -23,8 +23,7 @@ from mirage.utils.dates import iso_timestamp
 CHAR_MODE = S_IFCHR | 0o666
 DIR_MODE = S_IFDIR | 0o755
 FILE_MODE = S_IFREG | 0o644
-# A pipe is created rw------- (GNU: `stat -L -c %A <(true)` prints
-# prw-------), which is what a FIFO with no recorded mode reports.
+# A pipe is created rw------- (GNU: `stat -L -c %A <(true)`).
 FIFO_MODE = S_IFIFO | 0o600
 # A link is always lrwxrwxrwx: the bits on a symlink are not consulted
 # by any POSIX system, so this is the one mode every translator reports
@@ -195,10 +194,8 @@ def content_size(st: FileStat) -> int:
 def size_unknown(st: FileStat) -> bool:
     """Whether a listing has no size to show for one FileStat.
 
-    A directory always shows ``DIR_SIZE``, and a FIFO 0: it stores no
-    bytes, so its size stays None, and 0 is what GNU's ``stat`` and
-    ``ls -l`` print for one. Any other entry shows its rendered length,
-    unknown when the backend reports none.
+    A directory shows ``DIR_SIZE`` and a FIFO, which stores nothing, 0 (as
+    GNU's ``stat`` and ``ls -l`` do); any other entry its rendered length.
 
     Args:
         st (FileStat): the stat to inspect.

@@ -74,11 +74,10 @@ import { posixPhrase } from '../../errors/posix.ts'
 
 /**
  * Send FIFO writes immediately; preserve ordinary redirect recording. While a
- * pipe is in play (`live`), whatever reaches the terminal goes out as it is
- * written, through a copied descriptor too, so the bytes keep the order the
- * command wrote them in. A write into an output pipe whose reader has gone
- * throws `PipeClosed`, which the redirect answers as SIGPIPE. Mirrors
- * Python's PipeRecorder.
+ * pipe is in play (`live`), terminal output goes out as it is written, through
+ * a copied descriptor too, so it keeps the command's order. A write into a
+ * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
+ * PipeRecorder.
  */
 class PipeRecorder extends Recorder {
   constructor(
@@ -252,8 +251,7 @@ export async function handleRedirect(
   guard?: RedirectGuard,
   name = '',
   args: readonly string[] = [],
-  // Whether bash forks to run the command (a program or a subshell), so a
-  // closed output pipe ends it alone rather than the shell.
+  // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
   // The namespace's links, so a link to a pipe streams as the pipe does.
   links: NamespaceLinks | null = null,
@@ -400,9 +398,8 @@ export async function handleRedirect(
           continue
         }
         const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-        // A pipe streams as its producer writes; a file is read whole
-        // here, so a read that fails partway fails the redirect rather
-        // than the command reading it.
+        // A file is read whole here, so a read failing partway fails the
+        // redirect; a pipe streams.
         source = opened instanceof PipeStream ? opened : await materialize(opened)
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
@@ -555,10 +552,8 @@ export async function handleRedirect(
         refused = execNode.refused
       } catch (error) {
         if (!(error instanceof PipeClosed)) throw error
-        // SIGPIPE: a program or a subshell writing into an output pipe whose
-        // reader has gone ends alone with its status (a program inside a
-        // compound already has); a builtin's write is the shell's own, in a
-        // function or a group too, and the shell dies with it, as bash's does.
+        // SIGPIPE ends a forked writer alone; a builtin's write, in a
+        // function or a group too, is the shell's, which dies.
         if (!forked) throw new ExitSignal(141)
         io = new IOResult({ exitCode: 141 })
       }

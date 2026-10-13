@@ -603,10 +603,9 @@ async def mv_generic(
             and not source_link
             and await _target_is_fifo(stat, target)
         ):
-            # A move across mounts removes the target before it copies,
-            # and a pipe cannot be removed: GNU stops there and the source
-            # stays (`mv f >(cat)`), where copying into it would drain the
-            # source into the pipe and then delete it.
+            # A cross-mount move removes the target first, and a pipe
+            # cannot be removed: GNU stops there, keeping the source (`mv
+            # f >(cat)`).
             errors.append(
                 f"mv: inter-device move failed: '{src.raw_path}' to "
                 f"'{target.raw_path}'; unable to remove target: "

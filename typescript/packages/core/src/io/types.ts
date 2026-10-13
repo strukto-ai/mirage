@@ -47,11 +47,9 @@ export class OutputState {
 export class DeviceInput extends Uint8Array {}
 
 /**
- * A streamed read of a live pipe (a process substitution's `/dev/fd/N`).
- * Another task is still writing it, so its reader takes the bytes as they
- * come: the dispatcher opens it without pulling a first chunk that may wait
- * on the very command about to read it, and a redirect binds it as a stream
- * rather than reading it whole first. Mirrors Python's PipeStream.
+ * A streamed read of a live pipe (a process substitution's `/dev/fd/N`),
+ * which another task is still writing, so its reader takes the bytes as they
+ * come. Mirrors Python's PipeStream.
  */
 export class PipeStream implements AsyncIterable<Uint8Array> {
   private iterator: AsyncIterator<Uint8Array> | undefined
@@ -147,19 +145,14 @@ export interface CountedRun {
   readonly label: string | null
 }
 
-/**
- * The live pipe a `PipeStream` reads (a process substitution's endpoint),
- * for a descriptor that reads it on after the stream. Mirrors Python's
- * PipeEnd.
- */
+/** The live pipe a `PipeStream` reads, for a descriptor reading on after it. Mirrors Python's PipeEnd. */
 export interface PipeEnd {
   stream(path: PathSpec, signal?: AbortSignal): AsyncIterable<Uint8Array>
 }
 
 /**
- * How a writer answers its stdout's reader going away when it does so
- * itself rather than dying of SIGPIPE (`tee -p`, `--output-error`): what it
- * says about it, and the status it ends with, null to keep its own.
+ * How a writer answers its stdout's reader going away instead of dying of
+ * SIGPIPE (`tee -p`): what it says, and its status, null to keep its own.
  * Mirrors Python's ClosedPipe.
  */
 export interface ClosedPipe {
