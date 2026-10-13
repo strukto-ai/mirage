@@ -80,6 +80,17 @@ describe('MirageService', () => {
     ).rejects.toThrow(/unknown monty runtime option 'confg'/)
   })
 
+  it('reads a runtime config block in snake_case, as a workspace file does', async () => {
+    const ctx = new Context()
+    const fiber = ctx.plugin(MirageService, {
+      mounts: { '/x': new RAMVFS() },
+      runtimes: [{ name: 'pyodide', config: { deny_packages: ['numpy'] } }],
+    })
+    await fiber.await()
+    await expect(ctx.mirage.ready).resolves.toBeDefined()
+    await fiber.dispose()
+  })
+
   it('rejects an unknown declarative VFS name', async () => {
     const ctx = new Context()
     const fiber = ctx.plugin(MirageService, {

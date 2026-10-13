@@ -227,11 +227,12 @@ export class PyodideFs {
         ? BLKSIZE
         : (node.usedBytes ?? 0)
     // The stat every runtime shares, so one path reports one inode
-    // whoever asks; a sandbox owns nothing, so an owner the node lacks
-    // is 0. The times stay the node's, which carry unflushed writes.
+    // whoever asks, named by the path the node was made under so a
+    // rename keeps it; a sandbox owns nothing, so an owner the node
+    // lacks is 0. The times stay the node's, which carry unflushed writes.
     const posix = posixStat(
       { size, isDir: this.host.isDir(node.mode), mode: node.mode },
-      this.nodes.pathOf(node),
+      node.inodePath ?? this.nodes.pathOf(node),
       '/',
       { uid: node.uid ?? 0, gid: node.gid ?? 0 },
     )

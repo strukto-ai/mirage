@@ -279,8 +279,15 @@ export class MontyExecution {
     }
     this.evalSessions.clear()
     // A pool still being opened must be awaited before teardown, or its
-    // workers outlive the runtime that asked for them.
-    if (this.pool === null && this.poolPromise !== null) this.pool = await this.poolPromise
+    // workers outlive the runtime that asked for them. One that fails to
+    // open has nothing to close; the command that asked already reported it.
+    if (this.pool === null && this.poolPromise !== null) {
+      try {
+        this.pool = await this.poolPromise
+      } catch (err) {
+        console.debug('monty: the pool being opened at close failed', err)
+      }
+    }
     this.poolPromise = null
     if (this.pool !== null) {
       await this.pool.close()
@@ -290,8 +297,13 @@ export class MontyExecution {
 
   private async ensurePool(): Promise<MontyPoolLike> {
     if (this.pool !== null) return this.pool
-    this.poolPromise ??= this.loadPool()
-    this.pool = await this.poolPromise
+    const opening = (this.poolPromise ??= this.loadPool())
+    try {
+      this.pool = await opening
+    } catch (err) {
+      if (this.poolPromise === opening) this.poolPromise = null
+      throw err
+    }
     return this.pool
   }
 

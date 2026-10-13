@@ -152,7 +152,11 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
             code: code ?? 1,
           })
         })
-        stream.on('error', rejectFn)
+        stream.on('error', (streamErr: Error) => {
+          signal?.removeEventListener('abort', abort)
+          stream.close()
+          rejectFn(streamErr)
+        })
         // No pipe still closes stdin, so a reader sees EOF immediately.
         if (stdin !== null) stream.write(stdin)
         stream.end()

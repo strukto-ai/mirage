@@ -213,4 +213,16 @@ describe('SSHRuntime cancellation', () => {
     await expect(running).rejects.toMatchObject({ name: 'AbortError' })
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([['KILL'], true])
   })
+
+  it('closes its channel and stops listening when the channel fails', async () => {
+    const runtime = new HungRuntime()
+    const controller = new AbortController()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('true', controller.signal)
+    await started
+    runtime.channel.emit('error', new Error('connection lost'))
+    await expect(running).rejects.toThrow('connection lost')
+    controller.abort()
+    expect([runtime.channel.signals, runtime.channel.closed]).toEqual([[], true])
+  })
 })

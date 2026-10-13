@@ -116,6 +116,11 @@ export interface FSNode {
   /** Its name went while a stream had it open (`PyodideFs.orphan`). */
   unlinked?: boolean
   /**
+   * The path it was made under, which names its inode: a rename keeps
+   * the inode, as a host descriptor keeps the path it was opened under.
+   */
+  inodePath?: string
+  /**
    * A symlink's target, verbatim as it was typed. Emscripten's own
    * MEMFS keeps it under this name and `FS.readlink` reads it, so the
    * spelling is the interpreter's, not ours.

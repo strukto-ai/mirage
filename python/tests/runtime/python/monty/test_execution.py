@@ -38,7 +38,7 @@ async def test_close_waits_for_a_pool_still_being_opened(monkeypatch):
     closed: list[bool] = []
 
     class Pool:
-        async def __aexit__(self, *_: object) -> None:
+        async def __aexit__(self, *exc) -> None:
             closed.append(True)
 
     async def open_pool() -> Pool:
@@ -51,3 +51,41 @@ async def test_close_waits_for_a_pool_still_being_opened(monkeypatch):
     opened.set_result(Pool())
     await asyncio.gather(opening, closing)
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_pool_that_failed_to_open_neither_sticks_nor_breaks_close(
+    monkeypatch,
+):
+    execution = MontyExecution()
+    attempts: list[int] = []
+
+    async def open_pool() -> None:
+        attempts.append(1)
+        raise RuntimeError("monty is not installed")
+
+    monkeypatch.setattr(execution, "_open_pool", open_pool)
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="not installed"):
+            await execution._ensure_pool()
+    await execution.close()
+    assert len(attempts) == 2
+
+
+@pytest.mark.asyncio
+async def test_close_survives_a_pool_that_fails_while_it_waits(monkeypatch):
+    execution = MontyExecution()
+    opened = asyncio.get_running_loop().create_future()
+
+    async def open_pool() -> None:
+        await opened
+        raise RuntimeError("monty is not installed")
+
+    monkeypatch.setattr(execution, "_open_pool", open_pool)
+    opening = asyncio.ensure_future(execution._ensure_pool())
+    await asyncio.sleep(0)
+    closing = asyncio.ensure_future(execution.close())
+    opened.set_result(None)
+    with pytest.raises(RuntimeError, match="not installed"):
+        await opening
+    await closing

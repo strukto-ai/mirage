@@ -98,9 +98,9 @@ class SSHRuntime(RemoteSandbox):
             # signalled and its channel closed, with no wait for the
             # remote side to finish.
             process.kill()
-            process.close()
             raise
-        process.close()
+        finally:
+            process.close()
         await process.wait_closed()
         code = result.returncode if result.returncode is not None else 1
         return result.stdout, result.stderr, code

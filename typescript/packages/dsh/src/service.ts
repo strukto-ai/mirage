@@ -18,6 +18,7 @@ import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { parseMountMode } from '@struktoai/mirage-core/types'
+import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace, buildVfs, parseSessionProfile } from '@struktoai/mirage-node'
@@ -130,10 +131,19 @@ function parseProfiles(raw: Record<string, unknown>): Record<string, SessionProf
   return out
 }
 
+// A config block is snake_case, as in a workspace file; the runtime's
+// own keys are camelCase. Only the keys: values pass through untouched.
+function camelKeys(block: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(block).map(([key, value]) => [snakeToCamel(key), value]))
+}
+
 function toRuntimeEntry(entry: string | MirageRuntimeBlock): RuntimeEntry {
   if (typeof entry === 'string') return entry
-  const { name, ...options } = entry
-  return buildRuntime(name, options)
+  const { name, config, ...options } = entry
+  return buildRuntime(
+    name,
+    config === undefined ? options : { ...options, config: camelKeys(config) },
+  )
 }
 
 // A name shorthand builds exactly as the workspace would build it; holding

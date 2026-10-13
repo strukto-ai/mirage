@@ -67,7 +67,13 @@ class MontyExecution:
             return self._pool
         if self._pool_task is None:
             self._pool_task = asyncio.ensure_future(self._open_pool())
-        self._pool = await self._pool_task
+        opening = self._pool_task
+        try:
+            self._pool = await opening
+        except BaseException:
+            if self._pool_task is opening:
+                self._pool_task = None
+            raise
         return self._pool
 
     async def _open_pool(self) -> Any:
@@ -148,9 +154,16 @@ class MontyExecution:
 
     async def close(self) -> None:
         # A pool still being opened must be awaited before teardown, or
-        # its workers outlive the runtime that asked for them.
+        # its workers outlive the runtime that asked for them. One that
+        # fails to open has nothing to close; the command that asked
+        # already reported it.
         if self._pool is None and self._pool_task is not None:
-            self._pool = await self._pool_task
+            try:
+                self._pool = await self._pool_task
+            except Exception as exc:
+                logger.debug(
+                    "monty pool being opened at close failed: %s", exc
+                )
         self._pool_task = None
         if self._pool is not None:
             await self._pool.__aexit__(None, None, None)

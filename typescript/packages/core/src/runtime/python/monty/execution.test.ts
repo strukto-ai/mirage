@@ -37,4 +37,34 @@ describe('MontyExecution.close', () => {
     await Promise.all([opening, closing])
     expect(close).toHaveBeenCalledTimes(1)
   })
+
+  it('neither keeps nor rethrows a pool that failed to open', async () => {
+    const execution = new MontyExecution()
+    const hooks = execution as unknown as PoolHooks
+    const loadPool = vi
+      .spyOn(hooks, 'loadPool')
+      .mockImplementation(() => Promise.reject(new Error('monty is not installed')))
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    await expect(hooks.ensurePool()).rejects.toThrow('not installed')
+    await expect(hooks.ensurePool()).rejects.toThrow('not installed')
+    await expect(execution.close()).resolves.toBeUndefined()
+    expect(loadPool).toHaveBeenCalledTimes(2)
+  })
+
+  it('closes cleanly when the pool it waits for fails to open', async () => {
+    const execution = new MontyExecution()
+    const hooks = execution as unknown as PoolHooks
+    let fail: (err: Error) => void = () => undefined
+    vi.spyOn(hooks, 'loadPool').mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject
+      }),
+    )
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    const opening = hooks.ensurePool()
+    const closing = execution.close()
+    fail(new Error('monty is not installed'))
+    await expect(opening).rejects.toThrow('not installed')
+    await expect(closing).resolves.toBeUndefined()
+  })
 })

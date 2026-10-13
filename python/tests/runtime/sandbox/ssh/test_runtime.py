@@ -187,7 +187,7 @@ class HungProcess:
     async def __aenter__(self) -> "HungProcess":
         return self
 
-    async def __aexit__(self, *_: object) -> None:
+    async def __aexit__(self, *exc) -> None:
         self.close()
         await self.wait_closed()
 
@@ -217,3 +217,20 @@ async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
         with pytest.raises(asyncio.CancelledError):
             await task
     assert process.calls == ["eof", "kill", "close"]
+
+
+class LostProcess(HungProcess):
+    """A remote command whose connection drops mid-wait."""
+
+    async def wait(self, check: bool = False) -> None:
+        raise ConnectionResetError("connection lost")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_line_still_closes_its_channel():
+    process = LostProcess()
+    runtime = SSHRuntime(config={"host": "box"})
+    runtime._conn = HungConn(process)
+    with pytest.raises(ConnectionResetError):
+        await runtime._ssh("true", None)
+    assert process.calls == ["eof", "close"]
