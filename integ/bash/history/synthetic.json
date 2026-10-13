@@ -6,6 +6,7 @@
       "targets": [
         "ram-history"
       ],
+      "session": "s2",
       "command": "grep -c 'synthetic entry one' /.bash_history",
       "expect": {
         "exit": 0,

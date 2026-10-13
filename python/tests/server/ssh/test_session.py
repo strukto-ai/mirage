@@ -152,8 +152,9 @@ async def test_a_profile_value_wins_over_the_login_default(tmp_path):
 @pytest.mark.asyncio
 async def test_lines_are_recorded_in_history(ssh):
     async with ssh.connect() as conn:
-        await conn.run("echo remembered")
-        result = await conn.run("cat /.bash_history")
+        result = await conn.run(
+            input="echo remembered\ncat /.bash_history\nexit\n"
+        )
     assert "echo remembered" in result.stdout
     assert "export HOME" not in result.stdout
 

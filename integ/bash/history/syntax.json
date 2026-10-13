@@ -28,6 +28,7 @@
       "id": "bash_history_keeps_the_syntax_error_line",
       "seq": 310058,
       "targets": ["ram-history"],
+      "session": "s2",
       "command": "grep -c '^if then$' /.bash_history",
       "expect": {
         "exit": 0,

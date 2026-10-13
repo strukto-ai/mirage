@@ -71,16 +71,18 @@ describe('history view + builtin', () => {
     await ws.close()
   })
 
-  it('cat /.bash_history shows all sessions in histfile format', async () => {
+  it('cat /.bash_history shows only the calling session', async () => {
     const ws = makeWs()
     ws.createSession('s2')
     await ws.shell('ls /data')
     await ws.shell('pwd', { sessionId: 's2' })
     const res = await ws.shell('cat /.bash_history')
     expect(res.exitCode).toBe(0)
+    const other = out(await ws.shell('cat /.bash_history', { sessionId: 's2' }))
     expect(out(res)).toContain('ls /data')
-    expect(out(res)).toContain('pwd')
-    expect((out(res).match(/#/g) ?? []).length).toBeGreaterThanOrEqual(2)
+    expect(out(res)).not.toContain('pwd')
+    expect(other).toContain('pwd')
+    expect(other).not.toContain('ls /data')
     await ws.close()
   })
 
@@ -133,7 +135,9 @@ describe('history view + builtin', () => {
     expect(clear.exitCode).toBe(0)
     expect(out(await ws.shell('history'))).not.toContain('ls /data')
     expect(out(await ws.shell('history', { sessionId: 's2' }))).toContain('pwd')
-    expect(out(await ws.shell('cat /.bash_history'))).toContain('ls /data')
+    const file = out(await ws.shell('cat /.bash_history'))
+    expect(file).toContain('ls /data')
+    expect(file).not.toContain('pwd')
     await ws.close()
   })
 

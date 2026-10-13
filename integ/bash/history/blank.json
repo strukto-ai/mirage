@@ -44,7 +44,7 @@
       "command": "history 3",
       "expect": {
         "exit": 0,
-        "stdout": "6  history 3\n7     \n8  # marker-comment\n",
+        "stdout": "7  grep -c 'synthetic entry one' /.bash_history\n8     \n9  # marker-comment\n",
         "stderr": ""
       }
     },
@@ -52,6 +52,7 @@
       "id": "bash_history_has_no_empty_command_line",
       "seq": 310055,
       "targets": ["ram-history"],
+      "session": "s2",
       "command": "grep -c '^ *$' /.bash_history",
       "expect": {
         "exit": 0,

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
+import { liveSessions } from '../../context/session_context.ts'
 import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { PathSpec } from '../../types.ts'
@@ -21,12 +22,25 @@ import { renderBashHistory } from './render.ts'
 export const VIEW_NAME = '.bash_history'
 export const VIEW_KEYS = ['', VIEW_NAME]
 
-/** Render the GNU histfile from the recorder's command events. */
+/** Render the GNU histfile from the recorder's command events.
+ *
+ * A session reads its own commands only, as `history` does: another
+ * session's lines are its own business. With no session bound every
+ * session's commands are shown; `ws.vfs` reads as the default session, and
+ * the host reads them all through `ws.history()`. On the fallback storage
+ * every live session must be the same one, so a concurrent session's
+ * commands never show. */
 export async function read(accessor: HistoryAccessor, path: PathSpec): Promise<Uint8Array> {
   const key = path.mountPath
   if (!VIEW_KEYS.includes(stripSlash(key))) {
     throw enoent(path)
   }
-  const events = await accessor.observer.commandEvents()
+  let events = await accessor.observer.commandEvents()
+  const live = new Set(liveSessions().map((session) => session.sessionId))
+  if (live.size > 0) {
+    events = events.filter(
+      (e) => live.size === 1 && typeof e.session === 'string' && live.has(e.session),
+    )
+  }
   return new TextEncoder().encode(renderBashHistory(events))
 }

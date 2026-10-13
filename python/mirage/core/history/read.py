@@ -14,6 +14,7 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.context.session_context import get_current_session
 from mirage.core.history.render import render_bash_history
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
@@ -29,6 +30,11 @@ async def read(
 ) -> bytes:
     """Render the GNU histfile from the recorder's command events.
 
+    A session reads its own commands only, as ``history`` does: another
+    session's lines are its own business. With no session bound every
+    session's commands are shown; ``ws.vfs`` reads as the default session,
+    and the host reads them all through ``ws.history()``.
+
     Args:
         accessor (HistoryAccessor): Accessor holding the recorder.
         path (PathSpec): Virtual path; only the view file resolves.
@@ -41,4 +47,7 @@ async def read(
     if key.strip("/") not in VIEW_KEYS:
         raise enoent(key)
     events = await accessor.observer.command_events()
+    session = get_current_session()
+    if session is not None:
+        events = [e for e in events if e.get("session") == session.session_id]
     return render_bash_history(events).encode()

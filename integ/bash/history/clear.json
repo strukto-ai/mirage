@@ -47,7 +47,7 @@
       "targets": [
         "ram-history"
       ],
-      "command": "grep -c marker-s2 /.bash_history",
+      "command": "grep -c marker-one /.bash_history",
       "expect": {
         "exit": 0,
         "stdout": "2\n",

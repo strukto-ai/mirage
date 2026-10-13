@@ -262,8 +262,8 @@ describe('command channels', () => {
 
   it('are recorded in history, the login line is not', async () => {
     const client = await connect(await startHarness())
-    await exec(client, 'echo remembered')
-    const history = (await exec(client, 'cat /.bash_history')).stdout
+    const stream = await shell(client, null)
+    const history = (await collect(stream, 'echo remembered\ncat /.bash_history\nexit\n')).stdout
     expect(history).toContain('echo remembered')
     expect(history).not.toContain('export HOME')
   })

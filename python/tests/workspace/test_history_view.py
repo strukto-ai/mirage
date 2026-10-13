@@ -79,17 +79,19 @@ def test_history_builtin_wins_over_mount_command():
     assert "ls /data" in out
 
 
-def test_cat_bash_history_all_sessions():
+def test_cat_bash_history_shows_only_my_session():
     ws = _ws()
     ws.create_session("s2")
     _exec(ws, "ls /data")
     _exec(ws, "pwd", session_id="s2")
     io = _exec(ws, "cat /.bash_history")
     assert io.exit_code == 0
-    out = _stdout(io)
-    assert "ls /data" in out
-    assert "pwd" in out
-    assert out.count("#") >= 2
+    mine = _stdout(io)
+    other = _stdout(_exec(ws, "cat /.bash_history", session_id="s2"))
+    assert "ls /data" in mine
+    assert "pwd" not in mine
+    assert "pwd" in other
+    assert "ls /data" not in other
 
 
 def test_grep_and_tail_bash_history():
@@ -150,6 +152,7 @@ def test_history_c_clears_only_my_session_file_unchanged():
     assert "ls /data" not in mine
     assert "pwd" in other
     assert "ls /data" in file_out
+    assert "pwd" not in file_out
 
 
 def test_append_to_bash_history_rejected():
