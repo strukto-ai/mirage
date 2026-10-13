@@ -51,12 +51,14 @@ Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for th
 
 | Command | Purpose | Supported flags |
 | --- | --- | --- |
-| `curl` | Send an HTTP request | `-X`, `-H`, `-A`, `-u`, `-d`, `--data-binary`, `--data-raw`, `--data-urlencode`, `--json`, `-F`, `-o`, `-D`, `-L`, `-f`, `-s`, `-S`, `-v`, `-i`, `-I`, `-w`, `-m`, `-k`, `-4`, `-6` |
+| `curl` | Send an HTTP request | `-X`, `-H`, `-A`, `-u`, `-d`, `--data-binary`, `--data-raw`, `--data-urlencode`, `--json`, `-o`, `-D`, `-L`, `-f`, `-s`, `-S`, `-v`, `-i`, `-I`, `-w`, `-m`, `-k`, `-4`, `-6` |
 | `wget` | Download a URL or check its response | `-O FILE`, `-q`, `-T SECONDS` / `--timeout`, `--spider` |
 
 `curl` writes the body to stdout unless `-o` selects a virtual file. `wget` saves to a virtual file; use `-O -` for stdout. Both respect destination mount permissions.
 
 **Limits:** These are HTTP tools, with no full curl or Wget option set. Recursive Wget downloads (`-r`, `--mirror`) are unsupported. `curl -4/-6` are accepted, but the host transport chooses the address family. `wget -T` uses one request deadline rather than separate DNS, connect, and read timers; zero disables it.
+
+`curl -F` sends one URL-encoded text field; repeated `-F` keeps only the last field, and `@FILE` is literal text. Multipart file uploads are unsupported.
 
 `curl -w` supports `http_code`, `response_code`, `url_effective`, `num_redirects`, `size_download`, `content_type`, `method`, `exitcode`, and `time_total`. Other variables produce a diagnostic.
 

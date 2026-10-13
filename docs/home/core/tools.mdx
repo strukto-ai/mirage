@@ -23,7 +23,7 @@ Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for th
 | `touch` | Create files or update timestamps | `-a`, `-m`, `-c`, `-d DATE`, `-r FILE`, `-t TIME`, `-h` |
 | `cp` | Copy files or directories, including across mounts | `-r`, `-R`, `-a`, `-L`, `-P`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `-x` |
 | `mv` | Move or rename entries | `-f`, `-n`, `-u`, `-v`, `-t DIR`, `-T`, `-b`, `--no-copy`, `--exchange` |
-| `rm` | Remove entries | `-r`, `-R`, `-f`, `-v`, `-d`, `-i`, `-I`, `--one-file-system` |
+| `rm` | Remove entries | `-r`, `-R`, `-f`, `-v`, `-d`, `--one-file-system` |
 | `rmdir` | Remove empty directories | `-p`, `-v`, `--ignore-fail-on-non-empty` |
 | `unlink` | Remove one entry | No command-specific flags |
 | `truncate` | Resize a file | `-s SIZE`, `-c` |
@@ -101,6 +101,7 @@ Tables list common supported flags; use `man COMMAND` or `COMMAND --help` for th
 
 ## Limits
 
+- `rm -i` and `-I` are accepted but ignored; deletion does not prompt for confirmation.
 - File operations depend on the backend; a read-only mount cannot accept writes. Permission and owner metadata may live in Mirage's overlay rather than the remote service.
 - Mount roots are protected from removal, renaming, and use as copy sources. `mount` lists configured mounts; it does not attach new backends.
 - `ln -s` creates a virtual symlink. Without `-s`, a regular file is copied; there is no shared hard-link inode.

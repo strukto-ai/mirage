@@ -40,7 +40,7 @@ These are common options, not an exhaustive flag reference.
 | `set` | Set positional arguments and options such as `-e`, `-u`, `-x`, `-f`, `-C`, and `-o pipefail` |
 | `shopt` | Set, unset, print, or query options with `-s`, `-u`, `-p`, `-q`; `-o` selects `set` options |
 | `alias`, `unalias` | Define or remove aliases; enable expansion with `shopt -s expand_aliases` |
-| `read` | Read into variables; `-r`, `-a ARRAY`, `-d CHAR`, `-n N`, `-N N`, `-t SECONDS`, `-u FD` |
+| `read` | Read into variables; `-r`, `-a ARRAY`, `-d CHAR`, `-n N`, `-N N`, `-u FD` |
 | `mapfile`, `readarray` | Read into an array; `-t`, `-d CHAR`, `-n N`, `-s N`, `-O INDEX`, `-u FD`, `-C CALLBACK`, `-c N` |
 | `echo`, `printf` | Print text or formatted values; `echo -n/-e/-E`, `printf -v NAME` |
 | `source`, `.`, `eval` | Run a file or command string in the current session |
@@ -65,6 +65,7 @@ Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, 
 
 ## Limits
 
+- Positive `read -t` values are accepted but do not enforce a timeout.
 - `bg`, `complete`, `compgen`, `ulimit`, `coproc`, output process substitution `>(command)`, and `exec -a/-l` are not implemented.
 - There is no interactive terminal or OS process job control. The supported job commands manage Mirage jobs. Use the CLI's `--background` and `mirage job` for work that should outlive a request.
 - `set` and `shopt` recognize more option names than they implement; accepting or displaying an option does not mean every Bash behavior is available.
