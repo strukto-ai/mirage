@@ -316,9 +316,10 @@ const noKeysOut: Policy = {
 
 </CodeGroup>
 
-`session.vfs.read` of a file holding a private key raises `EACCES`. A
-result is never cut, since a FUSE or SFTP mount reads a file in pieces; to
-bound what a line prints, use `post_execute`.
+Reading a file that holds a private key with `session.vfs.read` raises
+`EACCES`. `post_vfs` can refuse a read but not shorten it: the file comes
+back whole or not at all. To cap how much a command prints, use
+`post_execute`.
 
 ### pre_session
 
