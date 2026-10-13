@@ -391,7 +391,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Replace a file's bytes, creating it when missing. */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
-  write(path: PathSpec, _data: Uint8Array): Promise<void> {
+  write(path: PathSpec, _data: Uint8Array, _signal?: AbortSignal): Promise<void> {
     return Promise.reject(enotsup(this.name, 'write', path))
   }
 
@@ -401,7 +401,12 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * writing it back.
    */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
-  append(path: PathSpec, _data: Uint8Array, _index?: IndexCacheStore): Promise<void> {
+  append(
+    path: PathSpec,
+    _data: Uint8Array,
+    _index?: IndexCacheStore,
+    _signal?: AbortSignal,
+  ): Promise<void> {
     return Promise.reject(enotsup(this.name, 'append', path))
   }
 
@@ -417,6 +422,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _data: Uint8Array,
     _offset: number,
     _index?: IndexCacheStore,
+    _signal?: AbortSignal,
   ): Promise<void> {
     return Promise.reject(enotsup(this.name, 'pwrite', path))
   }

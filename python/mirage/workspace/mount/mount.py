@@ -61,7 +61,7 @@ from mirage.context import (
     set_walk_probe,
     strongest_mode_under,
 )
-from mirage.core.dev.device import active_pipe
+from mirage.core.dev.device import active_pipe, pipe_below
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.generic.rewrite import (
     append_by_rewrite,
@@ -1356,6 +1356,18 @@ class MountEntry:
             return None
         key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
         return active_pipe(accessor, key)
+
+    def holds_live_pipe(self, path: str) -> bool:
+        """Whether a live pipe sits at ``path`` or below it.
+
+        Args:
+            path (str): virtual path.
+        """
+        accessor = getattr(self.vfs, "accessor", None)
+        if not isinstance(accessor, RAMAccessor):
+            return False
+        key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
+        return pipe_below(accessor, key)
 
     def read_stream(self, path: str) -> AsyncIterator[bytes]:
         """The VFS's streamed read of ``path``, framed for later pulls.

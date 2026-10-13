@@ -29,3 +29,9 @@ export function activePipe(accessor: RAMAccessor, key: string): DevicePipe | nul
   const files = accessor.store.files
   return files instanceof PipeFiles ? files.pipeOf(key) : null
 }
+
+/** Whether a live pipe sits at `key` or below it in the RAM store. Mirrors Python's pipe_below. */
+export function pipeBelow(accessor: RAMAccessor, key: string): boolean {
+  const files = accessor.store.files
+  return files instanceof PipeFiles && files.holdsPipe(key)
+}

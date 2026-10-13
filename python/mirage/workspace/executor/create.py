@@ -18,9 +18,10 @@ from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import materialize
+from mirage.io.types import OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import splice_window
 from mirage.workspace.session import SessionState
 
@@ -34,7 +35,7 @@ async def create_file(
     data: bytes,
     *,
     append: bool = False,
-) -> None:
+) -> PathSpec | None:
     """Write or append, giving a newly created file the umask's mode.
 
     Every shell path that opens a file for writing goes through here, so
@@ -55,6 +56,11 @@ async def create_file(
         scope (PathSpec): the target.
         data (bytes): the bytes to write.
         append (bool): append through the dispatcher instead of replacing.
+
+    Returns:
+        PathSpec | None: the live pipe the open reached, directly or
+        through a link, which a descriptor goes on writing to whatever
+        becomes of the name it was opened by; None for anything else.
     """
     created = False
     if session.umask != DEFAULT_UMASK:
@@ -63,9 +69,13 @@ async def create_file(
         except FS_ERRORS as exc:
             logger.debug("write target %s is new: %s", scope.raw_path, exc)
             created = True
-    await dispatch("append" if append else "write", scope, data=data)
-    if not created:
-        return
+    report = OpReport()
+    await dispatch(
+        "append" if append else "write", scope, data=data, report=report
+    )
+    pipe = await _reached_pipe(dispatch, report.path)
+    if not created or pipe is not None:
+        return pipe
     try:
         await dispatch(
             "setattr",
@@ -78,6 +88,31 @@ async def create_file(
         )
     except FS_ERRORS as exc:
         logger.debug("umask mode write failed for %s: %s", scope.raw_path, exc)
+    return None
+
+
+async def _reached_pipe(
+    dispatch: DispatchFn, path: str | None
+) -> PathSpec | None:
+    """The live pipe a write ran on, None when it ran on anything else.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        path (str | None): where the write ran once links were followed.
+    """
+    if path is None or not path.startswith("/dev/fd/"):
+        return None
+    scope = PathSpec.from_str_path(path)
+    try:
+        stat, _ = await dispatch("stat", scope)
+    except FS_ERRORS as exc:
+        logger.debug("written descriptor %s is gone: %s", path, exc)
+        return None
+    return (
+        scope
+        if isinstance(stat, FileStat) and stat.type == FileType.FIFO
+        else None
+    )
 
 
 async def write_description(

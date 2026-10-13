@@ -309,13 +309,18 @@ async def _install_descriptor(
                     SharedInput(reading),
                 )
         else:
-            await create_file(
+            pipe = await create_file(
                 dispatch, session, scope, b"", append=redirect.append
             )
-            file = FileDescription(scope, append=redirect.append, opened=True)
+            target = pipe or scope
+            file = FileDescription(target, append=redirect.append, opened=True)
             for claimed in [1, 2] if fd == FD_BOTH else [fd]:
                 _bind(
-                    session, claimed, scope.virtual, redirect.append, file=file
+                    session,
+                    claimed,
+                    target.virtual,
+                    redirect.append,
+                    file=file,
                 )
     except FS_ERRORS as exc:
         return _error_line(scope.raw_path, exc)

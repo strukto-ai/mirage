@@ -153,6 +153,8 @@ def test_session_views_share_files_but_hide_each_others_descriptors():
     assert left.pipe_of(path[4:]) is endpoint
     assert path[4:] not in right
     assert right.pipe_of(path[4:]) is None
+    assert (left.holds_pipe("/fd"), left.holds_pipe("/")) == (True, True)
+    assert not right.holds_pipe("/fd")
     left["/ordinary"] = b"shared"
     assert right["/ordinary"] == b"shared"
     assert left.release_input(path, allocation)

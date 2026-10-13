@@ -33,12 +33,13 @@ export async function pwrite(
   path: PathSpec,
   data: Uint8Array,
   offset: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const timer = startOp()
   const p = norm(path.mountPath)
   const pipe = activePipe(accessor, p)
   if (pipe !== null) {
-    await pipe.write(data, path)
+    await pipe.write(data, path, signal)
     record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)
     return
   }

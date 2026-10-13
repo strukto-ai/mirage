@@ -79,10 +79,10 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
  * whose backend ignores delete conditions the delete would be refused after
  * the copy landed. The owning mount counts, and so does any mount nested
  * under the path, which the walk would cross; a mount above the owner is
- * never touched. A live pipe cannot be deleted either, and copying it would
- * drain it, so it is refused with EPERM, as `rm` refuses it; it is looked up
- * as the moving command's own session sees /dev. Mirrors Python's
- * `make_check_unlink`.
+ * never touched. A live pipe at or below the source cannot be deleted either,
+ * and copying it would drain it, so it is refused with EPERM, as `rm` refuses
+ * it; it is looked up as the moving command's own session sees /dev. Mirrors
+ * Python's `make_check_unlink`.
  */
 export function makeCheckUnlink(
   registry: MountRegistry,
@@ -90,7 +90,7 @@ export function makeCheckUnlink(
 ): (path: PathSpec) => void {
   return (path: PathSpec): void => {
     const owner = registry.tryMountFor(path.virtual)
-    if (owner?.livePipe(path.virtual, access) != null) throw fsError(path, 'EPERM')
+    if (owner?.holdsLivePipe(path.virtual, access) === true) throw fsError(path, 'EPERM')
     for (const entry of registry.allMounts()) {
       if (
         entry.write === WritePolicy.CONDITIONAL &&

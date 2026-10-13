@@ -1196,6 +1196,67 @@
         "stdout": "0\n1\n1\n0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_output_through_a_removed_link_keeps_the_pipe",
+      "seq": 1346135,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ln -s \"$1\" {mount}/procsub-out; { rm {mount}/procsub-out; printf hello; } > {mount}/procsub-out; }; f >(cat); wait; echo; [ -e {mount}/procsub-out ] || echo gone",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\ngone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_through_a_removed_link_keeps_the_pipe",
+      "seq": 1346136,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ln -s \"$1\" {mount}/procsub-out; exec 3>{mount}/procsub-out; rm {mount}/procsub-out; printf hi >&3; exec 3>&-; }; f >(cat); wait; echo; [ -e {mount}/procsub-out ] || echo gone",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\ngone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_timed_out_writer_stops_writing",
+      "seq": 1346137,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "head -c 1000000 /dev/zero > {mount}/procsub-source; f() { timeout 0.1 tee \"$1\" < {mount}/procsub-source > /dev/null; echo \"st=$?\"; sleep 1; }; f >(sleep 0.3; cat > {mount}/procsub-copy); wait; [ \"$(wc -c < {mount}/procsub-copy)\" -lt 1000000 ] && echo partial; rm {mount}/procsub-source {mount}/procsub-copy",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=124\npartial\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_mv_of_a_tree_holding_a_pipe_refused",
+      "seq": 1346138,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { mv /dev/fd {mount}/procsub-saved; echo \"st=$?\"; cat \"$1\"; }; f <(printf hello)",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\nhello",
+        "stderr": "mv: cannot move '/dev/fd' to '{mount}/procsub-saved': Operation not permitted\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 prints \"st=0\" and cat fails with \"No such file or directory\". On Linux /dev/fd is a symlink into procfs, which GNU mv (as root in a container) moves itself, so \"$1\" no longer resolves. Mirage's /dev/fd holds the live pipes, which a move would drain, so the move is refused with EPERM, as a pipe's own move is, and the pipe keeps its bytes."
     }
   ]
 }

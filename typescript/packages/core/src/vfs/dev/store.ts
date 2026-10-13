@@ -70,6 +70,11 @@ export class DevFiles extends PipeFiles {
       : null
   }
 
+  holdsPipe(key: string): boolean {
+    const under = key.replace(/\/+$/, '') + '/'
+    return [...this.visibleInputs().keys()].some((k) => k === key || k.startsWith(under))
+  }
+
   visibleInputs(): Map<string, DevicePipe> {
     const owner = this.owner()
     return new Map(

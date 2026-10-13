@@ -25,12 +25,13 @@ export async function write(
   accessor: RAMAccessor,
   path: PathSpec,
   data: Uint8Array,
+  signal?: AbortSignal,
 ): Promise<void> {
   const timer = startOp()
   const p = norm(path.mountPath)
   const pipe = activePipe(accessor, p)
   if (pipe !== null) {
-    await pipe.write(data, path)
+    await pipe.write(data, path, signal)
     record('write', path.virtual, VFSName.RAM, data.byteLength, timer)
     return
   }

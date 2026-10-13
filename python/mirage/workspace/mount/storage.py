@@ -91,8 +91,9 @@ def check_unlink(registry: MountRegistry, path: PathSpec) -> None:
     after the copy landed, so the move is refused before it starts. The
     mount owning the source counts, and so does any mount nested under it,
     which the walk would cross; a mount above the owner is never touched.
-    A live pipe cannot be deleted either, and copying it would drain it,
-    so it is refused with EPERM, as ``rm`` refuses it.
+    A live pipe at or below the source cannot be deleted either, and
+    copying it would drain it, so it is refused with EPERM, as ``rm``
+    refuses it.
 
     Args:
         registry (MountRegistry): Mount set the operand is addressed in.
@@ -100,10 +101,10 @@ def check_unlink(registry: MountRegistry, path: PathSpec) -> None:
 
     Raises:
         OperationNotSupportedError: a mount cannot condition a delete.
-        PermissionError: the source is a live pipe.
+        PermissionError: the source is or holds a live pipe.
     """
     owner = registry.try_mount_for(path.virtual)
-    if owner is not None and owner.live_pipe(path.virtual) is not None:
+    if owner is not None and owner.holds_live_pipe(path.virtual):
         raise fs_error(path, FsCondition.EPERM)
     for entry in registry.mounts():
         if (

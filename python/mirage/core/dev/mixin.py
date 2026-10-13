@@ -22,3 +22,11 @@ class PipeFiles(ABC):
 
     @abstractmethod
     def pipe_of(self, key: str) -> DevicePipe | None: ...
+
+    @abstractmethod
+    def holds_pipe(self, key: str) -> bool:
+        """Whether a pipe endpoint sits at ``key`` or anywhere below it.
+
+        Args:
+            key (str): the store key.
+        """

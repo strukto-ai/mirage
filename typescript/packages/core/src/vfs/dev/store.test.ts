@@ -169,6 +169,11 @@ it('shares ordinary files but hides descriptors between bound sessions', () => {
   expect(left.pipeOf(path.slice(4))).toBe(endpoint)
   expect(right.has(path.slice(4))).toBe(false)
   expect(right.pipeOf(path.slice(4))).toBeNull()
+  expect([left.holdsPipe('/fd'), left.holdsPipe('/'), right.holdsPipe('/fd')]).toEqual([
+    true,
+    true,
+    false,
+  ])
   left.set('/ordinary', new Uint8Array([1]))
   expect(right.get('/ordinary')).toEqual(new Uint8Array([1]))
   expect(left.releaseInput(path, allocation)).toBe(true)

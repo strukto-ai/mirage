@@ -102,16 +102,27 @@ export class RAMVFS extends BaseVFS {
     return ramDuAll(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return ramWrite(this.accessor, path, data)
+  override write(path: PathSpec, data: Uint8Array, signal?: AbortSignal): Promise<void> {
+    return ramWrite(this.accessor, path, data, signal)
   }
 
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return ramAppend(this.accessor, path, data)
+  override append(
+    path: PathSpec,
+    data: Uint8Array,
+    _index?: IndexCacheStore,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return ramAppend(this.accessor, path, data, signal)
   }
 
-  override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    return ramPwrite(this.accessor, path, data, offset)
+  override pwrite(
+    path: PathSpec,
+    data: Uint8Array,
+    offset: number,
+    _index?: IndexCacheStore,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return ramPwrite(this.accessor, path, data, offset, signal)
   }
 
   override create(path: PathSpec): Promise<void> {

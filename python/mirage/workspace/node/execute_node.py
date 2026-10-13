@@ -819,7 +819,6 @@ async def _run_redirected(
                     name=name,
                     args=args,
                     forked=ran_forked,
-                    links=namespace,
                 )
 
             token = set_redirect_paths(
@@ -848,7 +847,6 @@ async def _run_redirected(
                 sink=sink if pipe_node is None else None,
                 expand=expand,
                 forked=forked,
-                links=namespace,
             )
         if simple and command is not None and context.frame.diagnostics:
             err = diagnostic_stderr(command, context)

@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { materialize, type ByteSource } from '../../io/types.ts'
+import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
 import type { FileDescription } from '../../shell/descriptors.ts'
 import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import type { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import type { SessionState } from '../session/session.ts'
@@ -37,6 +37,10 @@ import { hasAborted, makeAbortError } from '../../utils/abort.ts'
  * renders as 644, which is 0666 under bash's default mask. A mode that
  * cannot be written is swallowed and not fatal, since the bytes are
  * already there and the write is what the caller asked for.
+ *
+ * Returns the live pipe the open reached, directly or through a link, which
+ * a descriptor goes on writing to whatever becomes of the name it was opened
+ * by; null for anything else. Mirrors Python's create_file.
  */
 export async function createFile(
   dispatch: DispatchFn,
@@ -44,7 +48,7 @@ export async function createFile(
   scope: PathSpec,
   data: Uint8Array,
   append = false,
-): Promise<void> {
+): Promise<PathSpec | null> {
   let created = false
   if (session.umask !== DEFAULT_UMASK) {
     try {
@@ -54,13 +58,31 @@ export async function createFile(
       created = true
     }
   }
-  await dispatch(append ? 'append' : 'write', scope, [data])
-  if (!created) return
+  const report = new OpReport()
+  await dispatch(append ? 'append' : 'write', scope, [data], {}, report)
+  const pipe = await reachedPipe(dispatch, report.path)
+  if (!created || pipe !== null) return pipe
   try {
     await dispatch('setattr', scope, [], { mode: 0o666 & ~session.umask })
   } catch (modeErr) {
     if (!isFsError(modeErr)) throw modeErr
   }
+  return null
+}
+
+/** The live pipe a write ran on, null when it ran on anything else. Mirrors Python's _reached_pipe. */
+async function reachedPipe(dispatch: DispatchFn, path: string | null): Promise<PathSpec | null> {
+  if (!path?.startsWith('/dev/fd/')) return null
+  const scope = PathSpec.fromStrPath(path)
+  let stat: unknown
+  try {
+    ;[stat] = await dispatch('stat', scope)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`written descriptor ${path} is gone: ${String(err)}`)
+    return null
+  }
+  return stat instanceof FileStat && stat.type === FileType.FIFO ? scope : null
 }
 
 /**

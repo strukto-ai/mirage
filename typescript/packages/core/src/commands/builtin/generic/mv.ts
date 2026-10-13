@@ -594,6 +594,7 @@ async function targetIsFifo(stat: StatFn, target: PathSpec): Promise<boolean> {
     return isFifo(await stat(target))
   } catch (err) {
     if (!isFsError(err)) throw err
+    console.debug(`mv: target ${target.virtual} gave no stat: ${String(err)}`)
     return false
   }
 }

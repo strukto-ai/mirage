@@ -57,8 +57,6 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import CycleError
-from mirage.view.types import NamespaceLinks
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
@@ -349,7 +347,6 @@ async def handle_redirect(
     name: str = "",
     args: tuple[str, ...] = (),
     forked: bool = False,
-    links: NamespaceLinks | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Apply ordered descriptor bindings for one command and restore them.
 
@@ -382,8 +379,6 @@ async def handle_redirect(
         args (tuple[str, ...]): expanded command arguments.
         forked (bool): whether bash forks to run the command, so a
             closed pipe ends it alone.
-        links (NamespaceLinks | None): the namespace's links, so a link
-            to a pipe streams as the pipe does.
     """
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
@@ -594,7 +589,7 @@ async def handle_redirect(
                 else None
             )
             try:
-                await create_file(
+                pipe = await create_file(
                     dispatch, session, scope, b"", append=r.append
                 )
             except OSError as exc:
@@ -607,9 +602,10 @@ async def handle_redirect(
                 for fd, path in read_paths.items():
                     if path == scope.virtual:
                         inputs[fd] = emptied
-            pipe = await _is_pipe(dispatch, scope, links)
-            file = FileDescription(scope, append=r.append or pipe, opened=True)
-            if pipe:
+            file = FileDescription(
+                pipe or scope, append=r.append or pipe is not None, opened=True
+            )
+            if pipe is not None:
                 pipe_files.append(file)
             if len(expanded) == len(redirects) and _output_only(name, args):
                 complete_output = file
@@ -1095,35 +1091,6 @@ async def redirect_stdin(
         else:
             sources[r.fd] = DeviceInput()
     return sources.get(FD_STDIN)
-
-
-async def _is_pipe(
-    dispatch: DispatchFn, scope: PathSpec, links: NamespaceLinks | None
-) -> bool:
-    """Whether an output target is a live pipe, whose writes stream.
-
-    Only a descriptor path, named or behind a link, is asked, so an
-    ordinary target costs no round trip; a link loop or a descriptor no
-    longer there is no pipe, and the open answers for either.
-
-    Args:
-        dispatch (DispatchFn): op dispatcher.
-        scope (PathSpec): the redirect target.
-        links (NamespaceLinks | None): the namespace's links.
-    """
-    try:
-        followed = (
-            scope.virtual if links is None else links.follow(scope.virtual)
-        )
-    except CycleError as exc:
-        logger.debug(
-            "pipe probe met a link loop at %s: %s", scope.raw_path, exc
-        )
-        return False
-    return (
-        followed.startswith("/dev/fd/")
-        and await _stat_type(dispatch, scope) == FileType.FIFO
-    )
 
 
 async def _stat_type(dispatch: DispatchFn, scope: PathSpec) -> FileType | None:

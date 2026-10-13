@@ -14,7 +14,7 @@
 
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { activePipe } from '../../core/dev/device.ts'
+import { activePipe, pipeBelow } from '../../core/dev/device.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { norm } from '../../utils/path.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
@@ -404,6 +404,13 @@ export class MountEntry {
     return activePipe(accessor, norm('/' + mountKey(path, rstripSlash(this.prefix))))
   }
 
+  /** Whether a live pipe sits at `path` or below it. Mirrors Python's `holds_live_pipe`. */
+  holdsLivePipe(path: string, access?: SessionAccess): boolean {
+    const accessor = this.viewFor(access).accessor
+    if (!(accessor instanceof RAMAccessor)) return false
+    return pipeBelow(accessor, norm('/' + mountKey(path, rstripSlash(this.prefix))))
+  }
+
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
   glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
     return resolveGlobOf({ ...this.ioFor(access), ...(access === undefined ? {} : { access }) })(
@@ -701,13 +708,13 @@ export class MountEntry {
       case 'stat':
         return [(scope, _args, kw) => vfs.stat(scope, kw.index)]
       case 'write':
-        return [(scope, args) => vfs.write(scope, writeData(args))]
+        return [(scope, args) => vfs.write(scope, writeData(args), callerSignal())]
       case 'append':
-        return [(scope, args, kw) => vfs.append(scope, writeData(args), kw.index)]
+        return [(scope, args, kw) => vfs.append(scope, writeData(args), kw.index, callerSignal())]
       case 'pwrite':
         return [
           (scope, args, kw) =>
-            vfs.pwrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
+            vfs.pwrite(scope, writeData(args), offsetArg(args[1], scope), kw.index, callerSignal()),
         ]
       case 'create':
         return [(scope) => vfs.create(scope)]

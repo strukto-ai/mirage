@@ -47,8 +47,6 @@ import { getText, literalWord } from '../../shell/helpers.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { CycleError } from '../../utils/path.ts'
-import type { NamespaceLinks } from '../../view/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -253,8 +251,6 @@ export async function handleRedirect(
   args: readonly string[] = [],
   // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
-  // The namespace's links, so a link to a pipe streams as the pipe does.
-  links: NamespaceLinks | null = null,
 ): Promise<Result> {
   const session = context.session
   const badFd = unsupportedDescriptor(redirects)
@@ -440,11 +436,13 @@ export async function handleRedirect(
         )
       }
     } else {
+      let pipe: PathSpec | null
       try {
         const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
-        if (command !== null && guard !== undefined)
-          await runWithRedirectPaths(command, targets, open)
-        else await open()
+        pipe =
+          command !== null && guard !== undefined
+            ? await runWithRedirectPaths(command, targets, open)
+            : await open()
       } catch (error) {
         if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
         return failed(redirectFailure(scope, error))
@@ -453,9 +451,8 @@ export async function handleRedirect(
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
-      const pipe = await isPipe(dispatch, scope, links)
-      const file = new FileDescription(scope, r.append || pipe)
-      if (pipe) pipeFiles.push(file)
+      const file = new FileDescription(pipe ?? scope, r.append || pipe !== null)
+      if (pipe !== null) pipeFiles.push(file)
       file.opened = true
       if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
       files.push(file)
@@ -837,28 +834,6 @@ export async function redirectStdin(
   return sources.get(FD_STDIN) ?? null
 }
 
-/**
- * Whether an output target is a live pipe, whose writes stream. Only a
- * descriptor path, named or behind a link, is asked, so an ordinary target
- * costs no round trip; a link loop or a descriptor no longer there is no pipe,
- * and the open answers for either. Mirrors Python's _is_pipe.
- */
-async function isPipe(
-  dispatch: DispatchFn,
-  scope: PathSpec,
-  links: NamespaceLinks | null,
-): Promise<boolean> {
-  let followed: string
-  try {
-    followed = links === null ? scope.virtual : links.follow(scope.virtual)
-  } catch (err) {
-    if (!(err instanceof CycleError)) throw err
-    logger.debug(`pipe probe met a link loop at ${scope.rawPath}: ${String(err)}`)
-    return false
-  }
-  return followed.startsWith('/dev/fd/') && (await statType(dispatch, scope)) === FileType.FIFO
-}
-
 /** What a redirect target is, null when nothing answers there. Mirrors Python's _stat_type. */
 async function statType(dispatch: DispatchFn, scope: PathSpec): Promise<FileType | null> {
   let stat: unknown
@@ -866,7 +841,7 @@ async function statType(dispatch: DispatchFn, scope: PathSpec): Promise<FileType
     ;[stat] = await dispatch('stat', scope)
   } catch (err) {
     if (!isFsError(err)) throw err
-    logger.debug(`redirect probe found nothing at ${scope.rawPath}: ${String(err)}`)
+    console.debug(`redirect probe found nothing at ${scope.rawPath}: ${String(err)}`)
     return null
   }
   return stat instanceof FileStat ? stat.type : null

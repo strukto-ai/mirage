@@ -675,7 +675,6 @@ async function runRedirected(
           name,
           args,
           ranForked,
-          namespace,
         )
       }
       ;[stdout, io, execNode] = await runWithRedirectPaths(
@@ -707,7 +706,6 @@ async function runRedirected(
         '',
         [],
         forked,
-        namespace,
       )
     }
     if (simple && context.frame.diagnostics.length > 0) {

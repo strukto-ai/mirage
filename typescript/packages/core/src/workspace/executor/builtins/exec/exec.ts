@@ -397,11 +397,12 @@ async function installDescriptor(
         bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(reading))
       }
     } else {
-      await createFile(dispatch, session, scope, new Uint8Array(), redirect.append)
-      const file = new FileDescription(scope, redirect.append)
+      const target =
+        (await createFile(dispatch, session, scope, new Uint8Array(), redirect.append)) ?? scope
+      const file = new FileDescription(target, redirect.append)
       file.opened = true
       for (const claimed of fd === FD_BOTH ? [1, 2] : [fd])
-        bind(session, claimed, scope.virtual, redirect.append, null, file)
+        bind(session, claimed, target.virtual, redirect.append, null, file)
     }
   } catch (error) {
     if (!isFsError(error)) throw error

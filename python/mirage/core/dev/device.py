@@ -26,3 +26,9 @@ def active_device(accessor: RAMAccessor, key: str) -> str | None:
 def active_pipe(accessor: RAMAccessor, key: str) -> DevicePipe | None:
     files = accessor.store.files
     return files.pipe_of(key) if isinstance(files, PipeFiles) else None
+
+
+def pipe_below(accessor: RAMAccessor, key: str) -> bool:
+    """Whether a live pipe sits at ``key`` or below it in the RAM store."""
+    files = accessor.store.files
+    return isinstance(files, PipeFiles) and files.holds_pipe(key)

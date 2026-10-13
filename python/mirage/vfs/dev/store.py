@@ -80,6 +80,12 @@ class DevFiles(dict[str, bytes], PipeFiles):
             else None
         )
 
+    def holds_pipe(self, key: str) -> bool:
+        under = key.rstrip("/") + "/"
+        return any(
+            k == key or k.startswith(under) for k in self._visible_inputs()
+        )
+
     def _listed_bytes(self, key: str) -> bytes:
         return b"" if key.startswith("/fd/") else self[key]
 
