@@ -42,10 +42,13 @@ class Kept:
             the mount renders the file other than it stores it; None when
             the two agree, so a reader reads ``data`` and every write
             landed on it.
-        error (OSError | None): why its bytes could not be read before
-            the name went, which every later read reports.
+        error (OSError | None): why the stored bytes could not be read
+            before the name went, which every later read of them reports.
+        rendering_error (OSError | None): why the rendering could not be
+            read, which only a handle that reads it reports.
     """
 
     data: bytes = b""
     rendering: bytes | None = None
     error: OSError | None = None
+    rendering_error: OSError | None = None

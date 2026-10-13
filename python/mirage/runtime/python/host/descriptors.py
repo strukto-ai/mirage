@@ -22,7 +22,7 @@ from typing import IO, Any, cast
 from mirage.commands.builtin.utils.paths import walk_spelling
 from mirage.errors.fs import fs_error
 from mirage.errors.types import FsCondition
-from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.files import RuntimeFiles, kept_view
 from mirage.runtime.handles import FileHandle, Kept, apply_flush
 from mirage.runtime.handles.mode import OpenMode, parse_mode
 from mirage.runtime.open import apply_open
@@ -206,15 +206,9 @@ class Descriptors:
             offset (int): where the range starts.
             size (int | None): how many bytes; None reads to the end.
         """
-        kept = desc.kept
-        if kept is not None:
-            if kept.error is not None:
-                raise kept.error
+        if desc.kept is not None:
             end = None if size is None else offset + size
-            view = (
-                kept.data if raw or kept.rendering is None else kept.rendering
-            )
-            return view[offset:end]
+            return kept_view(desc.kept, raw)[offset:end]
         return syscall(self._adapter.read)(
             desc.path, offset=offset, size=size, raw=raw
         )
@@ -394,9 +388,7 @@ class Descriptors:
         # A descriptor that cannot read needs nothing kept for it.
         kept = syscall(self._adapter.kept)(
             path,
-            stored=any(
-                desc.facts.writable and desc.facts.readable for desc in held
-            ),
+            stored=any(desc.facts.writable for desc in held),
             rendered=any(
                 desc.facts.readable and not desc.facts.writable
                 for desc in held

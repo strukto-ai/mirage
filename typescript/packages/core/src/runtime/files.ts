@@ -95,6 +95,20 @@ function baseName(entry: string): string {
 }
 
 /**
+ * The bytes a handle on a removed file reads: the stored ones for a handle
+ * that writes, the rendering for one that only reads, or the error that
+ * kept that view from being read. Mirrors Python's `kept_view`.
+ */
+export function keptView(kept: Kept, raw: boolean): Uint8Array {
+  if (!raw) {
+    if (kept.renderingError !== null) throw kept.renderingError
+    if (kept.rendering !== null) return kept.rendering
+  }
+  if (kept.error !== null) throw kept.error
+  return kept.data
+}
+
+/**
  * The mount-facing op vocabulary a sandboxed runtime encodes into.
  *
  * One instruction set (read/write/append/stat/readdir/create/truncate/
@@ -157,27 +171,44 @@ export class RuntimeFiles {
    * What the handles open on `path` keep once its name goes: the stored
    * bytes for one that writes, the rendering for one that only reads, read
    * once and shared when the two agree. A read that fails is kept as the
-   * error their later reads report, so the removal still goes ahead.
-   * Mirrors Python's RuntimeFiles.kept.
+   * error the later reads of that view report, so the removal still goes
+   * ahead. Mirrors Python's RuntimeFiles.kept.
    */
   async kept(path: string, opts: { stored: boolean; rendered: boolean }): Promise<Kept> {
-    const kept: Kept = { data: new Uint8Array(), rendering: null, error: null }
+    const kept: Kept = {
+      data: new Uint8Array(),
+      rendering: null,
+      error: null,
+      renderingError: null,
+    }
+    const failed = (err: unknown): Error => {
+      console.warn(`runtime files: keeping ${path} failed`, err)
+      return err instanceof Error ? err : new Error(String(err))
+    }
     let raw: Uint8Array | null = null
     let shown: Uint8Array | null = null
-    try {
-      if (opts.stored) raw = await this.read(path, { raw: true })
-      if (opts.rendered) shown = await this.read(path)
-    } catch (err) {
-      console.warn(`runtime files: keeping ${path} before it goes failed`, err)
-      kept.error = err instanceof Error ? err : new Error(String(err))
-      return kept
+    if (opts.stored) {
+      try {
+        raw = await this.read(path, { raw: true })
+      } catch (err) {
+        kept.error = failed(err)
+      }
+    }
+    if (opts.rendered) {
+      try {
+        shown = await this.read(path)
+      } catch (err) {
+        kept.renderingError = failed(err)
+      }
     }
     if (raw !== null) {
-      kept.data = raw
-      const seen = raw
+      const stored = raw
+      kept.data = stored
       const same =
-        shown !== null && shown.length === seen.length && shown.every((b, i) => b === seen[i])
+        shown !== null && shown.length === stored.length && shown.every((b, i) => b === stored[i])
       kept.rendering = shown === null || same ? null : shown
+    } else if (opts.stored) {
+      kept.rendering = shown
     } else if (shown !== null) {
       kept.data = shown
     }

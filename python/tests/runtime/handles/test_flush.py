@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.runtime.handles.flush import plan_flush
+from mirage.runtime.handles.flush import apply_flush, plan_flush
 from mirage.runtime.handles.types import FlushStep
 
 
@@ -77,3 +77,16 @@ def test_plan_flush(facts, steps):
         "appending": False,
     }
     assert plan_flush(**{**base, **facts}) == steps
+
+
+def test_apply_flush_lands_ranges_gaps_and_cuts_as_a_mount_does():
+    # A range past the end leaves zeros between, and a cut then a growth
+    # reads zeros where the cut bytes were.
+    steps = [
+        FlushStep("pwrite", data=b"X", offset=8),
+        FlushStep("truncate", length=3),
+        FlushStep("truncate", length=6),
+        FlushStep("append", data=b"Z"),
+    ]
+    assert apply_flush(b"hello", steps) == b"hel\x00\x00\x00Z"
+    assert apply_flush(b"hello", [FlushStep("write", data=b"new")]) == b"new"

@@ -23,6 +23,7 @@ from typing import Any, Callable, Literal
 
 from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.files import kept_view
 from mirage.runtime.handles import FileHandle, FileTable, Kept, apply_flush
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.open import apply_open
@@ -707,15 +708,9 @@ class WasiFs:
             offset (int): where the range starts.
             size (int | None): how many bytes; None reads to the end.
         """
-        kept = entry.kept
-        if kept is not None:
-            if kept.error is not None:
-                raise kept.error
+        if entry.kept is not None:
             end = None if size is None else offset + size
-            view = (
-                kept.data if raw or kept.rendering is None else kept.rendering
-            )
-            return view[offset:end]
+            return kept_view(entry.kept, raw)[offset:end]
         return self._fs.read(entry.path, offset=offset, size=size, raw=raw)
 
     def _hold(self, path: str) -> list[tuple[FdEntry, Kept]]:

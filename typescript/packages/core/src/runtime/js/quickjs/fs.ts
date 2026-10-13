@@ -23,7 +23,7 @@ import { epochToIso } from '../../../utils/dates.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { applyFlush, FileHandle, FileTable, type Kept, type OpenMode } from '../../handles/index.ts'
 import { applyOpen } from '../../open.ts'
-import type { RuntimeFiles } from '../../files.ts'
+import { keptView, type RuntimeFiles } from '../../files.ts'
 import type { VFSStat } from '../../types.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
@@ -133,7 +133,7 @@ export function installQuickJsFs(
     const open = [...places.values()].filter((p) => p.path === named && p.kept === null)
     if (open.length === 0) return []
     const kept = await bound.kept(named, {
-      stored: open.some((p) => p.readable && p.raw),
+      stored: open.some((p) => p.raw),
       rendered: open.some((p) => p.readable && !p.raw),
     })
     return open.map((place) => [place, kept])
@@ -257,9 +257,14 @@ export function installQuickJsFs(
                   size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
                 )
               }
-              if (kept.error !== null) return Promise.reject(kept.error)
-              const view = mode.writable || kept.rendering === null ? kept.data : kept.rendering
-              return Promise.resolve(view.slice(offset, size === null ? undefined : offset + size))
+              try {
+                const view = keptView(kept, mode.writable)
+                return Promise.resolve(
+                  view.slice(offset, size === null ? undefined : offset + size),
+                )
+              } catch (err) {
+                return Promise.reject(err instanceof Error ? err : new Error(String(err)))
+              }
             },
         { size: row?.size ?? 0, writable: mode.writable, append: mode.append },
       )

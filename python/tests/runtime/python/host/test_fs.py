@@ -97,6 +97,10 @@ async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
     return b"RENDERED"
 
 
+async def _refuse_tally(accessor, path: PathSpec, **kwargs) -> bytes:
+    raise PermissionError(errno.EACCES, "no rendering")
+
+
 class _NoReads(Policy):
     async def pre_vfs(self, ctx):
         return Deny("no read") if ctx.call.name == "read" else None
@@ -644,6 +648,41 @@ class TestDescriptors:
         patched.unlink("/data/b.tally")
         assert patched.read(reader, 8) == b"RENDERED"
         assert patched.read(writer, 6) == b"STORED"
+        patched.close(reader)
+        patched.close(writer)
+
+    def test_a_failed_rendering_leaves_a_writer_its_stored_bytes(self):
+        # Only the reader of the rendering reports it could not be read.
+        ws = Workspace(
+            {"/data/": render(RAMVFS(), ".tally", _refuse_tally)},
+            mode=MountMode.WRITE,
+        )
+        run(ws.vfs.write("/data/b.tally", b"STORED"))
+        patched = make_os_module(ws.vfs)
+        reader = patched.open("/data/b.tally", os.O_RDONLY)
+        writer = patched.open("/data/b.tally", os.O_RDWR)
+        patched.unlink("/data/b.tally")
+        assert patched.read(writer, 6) == b"STORED"
+        with pytest.raises(PermissionError):
+            patched.read(reader, 6)
+        patched.close(reader)
+        patched.close(writer)
+
+    def test_a_write_only_handle_leaves_a_reader_its_rendering(self):
+        # The writer lands on the stored bytes, not on the rendering the
+        # reader keeps.
+        ws = Workspace(
+            {"/data/": render(RAMVFS(), ".tally", _read_tally)},
+            mode=MountMode.WRITE,
+        )
+        run(ws.vfs.write("/data/b.tally", b"STORED"))
+        patched = make_os_module(ws.vfs)
+        reader = patched.open("/data/b.tally", os.O_RDONLY)
+        writer = patched.open("/data/b.tally", os.O_WRONLY)
+        patched.unlink("/data/b.tally")
+        patched.write(writer, b"X")
+        patched.fsync(writer)
+        assert patched.read(reader, 8) == b"RENDERED"
         patched.close(reader)
         patched.close(writer)
 

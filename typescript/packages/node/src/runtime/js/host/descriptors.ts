@@ -16,7 +16,7 @@ import { constants } from 'node:fs'
 import { devNull } from 'node:os'
 import { walkSpelling } from '@struktoai/mirage-core/commands/builtin/utils/paths'
 import { ebadf, eisdir, eloop, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
-import type { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
+import { keptView, type RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 import { FileHandle } from '@struktoai/mirage-core/runtime/handles/file_handle'
 import { applyFlush } from '@struktoai/mirage-core/runtime/handles/flush'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/mode'
@@ -231,9 +231,12 @@ export class Descriptors {
     return (offset, size) => {
       const kept = desc.kept
       if (kept !== null) {
-        if (kept.error !== null) return Promise.reject(kept.error)
-        const view = raw || kept.rendering === null ? kept.data : kept.rendering
-        return Promise.resolve(view.slice(offset, size === null ? undefined : offset + size))
+        try {
+          const view = keptView(kept, raw)
+          return Promise.resolve(view.slice(offset, size === null ? undefined : offset + size))
+        } catch (err) {
+          return Promise.reject(err instanceof Error ? err : new Error(String(err)))
+        }
       }
       return this.files.read(desc.path, size === null ? { raw } : { offset, size, raw })
     }
@@ -292,7 +295,7 @@ export class Descriptors {
     )
     if (held.length === 0) return []
     const kept = await this.files.kept(named, {
-      stored: held.some((desc) => desc.mode.readable && desc.mode.writable),
+      stored: held.some((desc) => desc.mode.writable),
       rendered: held.some((desc) => desc.mode.readable && !desc.mode.writable),
     })
     return held.map((desc) => [desc, kept])

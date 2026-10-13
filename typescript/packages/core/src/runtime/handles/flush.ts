@@ -67,27 +67,44 @@ export function planFlush(facts: {
  * handle landed between its ranges stays. Mirrors Python's `apply_flush`.
  */
 export function applyFlush(data: Uint8Array, steps: readonly FlushStep[]): Uint8Array {
-  let out = data
+  // One buffer for every step, grown by doubling: a copy of the whole file
+  // per range would cost the file's size times the ranges a handle wrote.
+  let out = data.slice()
+  let length = out.length
+  const reserve = (size: number): void => {
+    if (size <= out.length) return
+    const grown = new Uint8Array(Math.max(size, out.length * 2))
+    grown.set(out.subarray(0, length))
+    out = grown
+  }
+  // Bytes past `length` may be left from a longer past, so growth zeroes
+  // them as a file's growth reads zeros.
+  const extend = (size: number): void => {
+    reserve(size)
+    if (size > length) out.fill(0, length, size)
+  }
   for (const step of steps) {
     const bytes = step.data ?? new Uint8Array()
     if (step.kind === 'write') {
       out = bytes.slice()
+      length = out.length
     } else if (step.kind === 'append') {
-      const next = new Uint8Array(out.length + bytes.length)
-      next.set(out)
-      next.set(bytes, out.length)
-      out = next
+      extend(length + bytes.length)
+      out.set(bytes, length)
+      length += bytes.length
     } else if (step.kind === 'pwrite') {
       const offset = step.offset ?? 0
-      const next = new Uint8Array(Math.max(out.length, offset + bytes.length))
-      next.set(out)
-      next.set(bytes, offset)
-      out = next
+      const end = offset + bytes.length
+      if (end > length) {
+        extend(end)
+        length = end
+      }
+      out.set(bytes, offset)
     } else {
-      const next = new Uint8Array(step.length ?? 0)
-      next.set(out.subarray(0, next.length))
-      out = next
+      const size = step.length ?? 0
+      extend(size)
+      length = size
     }
   }
-  return out
+  return out.subarray(0, length)
 }

@@ -375,6 +375,46 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
+  it('leaves a writer its stored bytes when the rendering fails', async () => {
+    // Only the reader of the rendering reports it could not be read.
+    const vfs = render(new RAMVFS(), '.tally', () => Promise.reject(new Error('no rendering')))
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/b.tally', 'stored')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const reader = await fs.promises.open('/data/b.tally', 'r')
+    const writer = await fs.promises.open('/data/b.tally', 'r+')
+    await fs.promises.unlink('/data/b.tally')
+    const own = await writer.read(Buffer.alloc(6), 0, 6, 0)
+    expect(own.buffer.toString('utf8', 0, own.bytesRead)).toBe('stored')
+    await expect(reader.read(Buffer.alloc(6), 0, 6, 0)).rejects.toThrow()
+    await reader.close()
+    await writer.close()
+    await ws.close()
+  })
+
+  it('leaves a reader its rendering beside a write-only handle', async () => {
+    // The writer lands on the stored bytes, not on the rendering the reader
+    // keeps.
+    const vfs = render(new RAMVFS(), '.tally', () =>
+      Promise.resolve(new TextEncoder().encode('rendered')),
+    )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/b.tally', 'stored')
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const reader = await fs.promises.open('/data/b.tally', 'r')
+    const writer = await fs.promises.open('/data/b.tally', 'w')
+    await fs.promises.unlink('/data/b.tally')
+    await writer.write('X', 0)
+    await writer.sync()
+    const seen = await reader.read(Buffer.alloc(8), 0, 8, 0)
+    expect(seen.buffer.toString('utf8', 0, seen.bytesRead)).toBe('rendered')
+    await reader.close()
+    await writer.close()
+    await ws.close()
+  })
+
   it('keeps a handle through a rename onto its own name', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

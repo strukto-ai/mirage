@@ -61,6 +61,25 @@ def _listed(raw: str, links: set[str]) -> VFSEntry:
     return VFSEntry(path=raw, size=0, is_dir=raw.endswith("/"), is_link=linked)
 
 
+def kept_view(kept: Kept, raw: bool) -> bytes:
+    """The bytes a handle on a removed file reads: the stored ones for a
+    handle that writes, the rendering for one that only reads, or the
+    error that kept that view from being read.
+
+    Args:
+        kept (Kept): what the file kept once its name went.
+        raw (bool): the handle reads the stored bytes.
+    """
+    if not raw:
+        if kept.rendering_error is not None:
+            raise kept.rendering_error
+        if kept.rendering is not None:
+            return kept.rendering
+    if kept.error is not None:
+        raise kept.error
+    return kept.data
+
+
 def stat_row(fs: FileStat) -> VFSStat:
     """Translate one mirage stat row into the struct a guest surface reads.
 
@@ -150,8 +169,8 @@ class RuntimeFiles:
         """What the handles open on ``path`` keep once its name goes: the
         stored bytes for one that writes, the rendering for one that only
         reads, read once and shared when the two agree. A read that fails
-        is kept as the error their later reads report, so the removal
-        still goes ahead.
+        is kept as the error the later reads of that view report, so the
+        removal still goes ahead.
 
         Args:
             path (str): guest-absolute virtual path.
@@ -159,16 +178,24 @@ class RuntimeFiles:
             rendered (bool): a handle that only reads is open on it.
         """
         kept = Kept()
-        try:
-            raw = self.read(path, raw=True) if stored else None
-            shown = self.read(path) if rendered else None
-        except OSError as err:
-            logger.warning("keeping %s before it goes failed: %r", path, err)
-            kept.error = err
-            return kept
+        raw = shown = None
+        if stored:
+            try:
+                raw = self.read(path, raw=True)
+            except OSError as err:
+                logger.warning("keeping %s failed: %r", path, err)
+                kept.error = err
+        if rendered:
+            try:
+                shown = self.read(path)
+            except OSError as err:
+                logger.warning("keeping %s rendered failed: %r", path, err)
+                kept.rendering_error = err
         if raw is not None:
             kept.data = raw
             kept.rendering = shown if shown not in (None, raw) else None
+        elif stored:
+            kept.rendering = shown
         elif shown is not None:
             kept.data = shown
         return kept

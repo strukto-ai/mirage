@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { planFlush } from './flush.ts'
+import { applyFlush, planFlush } from './flush.ts'
 
 const enc = new TextEncoder()
 
@@ -76,5 +76,23 @@ describe('planFlush', () => {
     expect(
       planFlush({ baseLen: 3, runs: [], cut: null, size: 3, appending: false, ...facts }),
     ).toEqual(steps)
+  })
+})
+
+describe('applyFlush', () => {
+  it('lands ranges, gaps and cuts as a mount does', () => {
+    // A range past the end leaves zeros between, and a cut then a growth
+    // reads zeros where the cut bytes were.
+    const enc = new TextEncoder()
+    const out = applyFlush(enc.encode('hello'), [
+      { kind: 'pwrite', data: enc.encode('X'), offset: 8 },
+      { kind: 'truncate', length: 3 },
+      { kind: 'truncate', length: 6 },
+      { kind: 'append', data: enc.encode('Z') },
+    ])
+    expect([...out]).toEqual([...enc.encode('hel'), 0, 0, 0, ...enc.encode('Z')])
+    expect(applyFlush(enc.encode('hello'), [{ kind: 'write', data: enc.encode('new') }])).toEqual(
+      enc.encode('new'),
+    )
   })
 })

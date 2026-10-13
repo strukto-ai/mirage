@@ -31,11 +31,14 @@ export type FileFetch = (offset: number, size: number | null) => Promise<Uint8Ar
  * stored bytes with what its handles landed since; `rendering` is what a
  * handle that only reads sees when the mount renders the file other than it
  * stores it, null when the two agree (a reader then reads `data` and every
- * write landed on it); `error` is why its bytes could not be read before the
- * name went, which every later read reports. Mirrors Python's `Kept`.
+ * write landed on it); `error` is why the stored bytes could not be read
+ * before the name went, which every later read of them reports;
+ * `renderingError` is why the rendering could not be, which only a handle
+ * that reads it reports. Mirrors Python's `Kept`.
  */
 export interface Kept {
   data: Uint8Array
   rendering: Uint8Array | null
   error: Error | null
+  renderingError: Error | null
 }
