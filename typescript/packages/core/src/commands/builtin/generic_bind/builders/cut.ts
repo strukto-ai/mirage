@@ -15,6 +15,7 @@
 import { cutGeneric } from '../../generic/cut.ts'
 import {
   type GenericCommand,
+  dirAwareStat,
   dirAwareStream,
   resolveGlobOf,
   type GenericCommandFn,
@@ -23,7 +24,12 @@ import {
 const cut: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return cutGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+  return cutGeneric(
+    resolved,
+    opts,
+    dirAwareStream(ops, accessor, opts),
+    dirAwareStat(ops, accessor, opts),
+  )
 }
 
 export const BUILDER: GenericCommand = {

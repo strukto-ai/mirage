@@ -18,7 +18,6 @@ from mirage.commands.builtin.cut_ranges import (
     _OPEN_END,
     _cut_record,
     _select_positions,
-    _split_records,
     parse_ranges,
 )
 
@@ -268,17 +267,6 @@ class TestCutRecordFields:
             )
             == b"a\tc"
         )
-
-
-class TestSplitRecords:
-    def test_drops_trailing_empty(self):
-        assert _split_records(b"a\nb\n", False) == [b"a", b"b"]
-
-    def test_keeps_final_without_newline(self):
-        assert _split_records(b"a\nb", False) == [b"a", b"b"]
-
-    def test_zero_terminated(self):
-        assert _split_records(b"a\x00b\x00", True) == [b"a", b"b"]
 
 
 # The refused remainder is rendered through gnulib `quote()`, the same

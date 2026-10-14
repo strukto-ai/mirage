@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseRanges } from './cut_ranges.ts'
+import { materialize } from '../../io/types.ts'
+import { cutStream, parseRanges, type CutOptions } from './cut_ranges.ts'
 
 const TRY = "Try 'cut --help' for more information.\n"
 const OPEN_END = 2 ** 31 - 1
@@ -116,4 +117,52 @@ describe('cut quotes the remainder through gnulib', () => {
   it.each(['1-3', '1,2,3', '1-', '-3', '2'])('still accepts %s', (spec) => {
     expect(typeof parseRanges(spec, 'fields')).not.toBe('string')
   })
+})
+
+const STREAM_OPTIONS: CutOptions = {
+  ranges: [[2, 2]],
+  mode: 'fields',
+  delimiter: ',',
+  complement: false,
+  onlyDelimited: false,
+  whitespace: null,
+  noPartial: false,
+  outputDelimiter: null,
+  zeroTerminated: false,
+}
+
+it.each(['\n', '\0'])('cut emits before the tail and closes (%j)', async (separator) => {
+  let closed = false
+  async function* source() {
+    await Promise.resolve()
+    try {
+      yield new TextEncoder().encode(`left,right${separator}`)
+      throw new Error('cut fetched the tail')
+    } finally {
+      closed = true
+    }
+  }
+  const output = cutStream(source(), { ...STREAM_OPTIONS, zeroTerminated: separator === '\0' })[
+    Symbol.asyncIterator
+  ]()
+  try {
+    expect((await output.next()).value).toEqual(new TextEncoder().encode(`right${separator}`))
+  } finally {
+    await output.return?.()
+  }
+  expect(closed).toBe(true)
+})
+
+it.each([
+  ['a,b\nc,d\n', 'b\nd\n'],
+  ['a,b\nc,d', 'b\nd\n'],
+  ['a,b\0c,d\0', 'b\0d\0'],
+  ['', ''],
+])('cut records survive one-byte chunks %j', async (data, expected) => {
+  async function* source() {
+    await Promise.resolve()
+    for (const byte of new TextEncoder().encode(data)) yield Uint8Array.of(byte)
+  }
+  const output = cutStream(source(), { ...STREAM_OPTIONS, zeroTerminated: data.includes('\0') })
+  expect(new TextDecoder().decode(await materialize(output))).toBe(expected)
 })

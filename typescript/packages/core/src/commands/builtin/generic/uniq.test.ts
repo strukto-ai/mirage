@@ -14,6 +14,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CommandOpts } from '../../config.ts'
+import { ensureStream } from '../../../io/stream.ts'
+import { materialize, type ByteSource } from '../../../io/types.ts'
 import { uniqGeneric } from './uniq.ts'
 
 const DEC = new TextDecoder()
@@ -96,4 +98,58 @@ describe('uniq argument refusals carry GNU candidate blocks', () => {
     expect(stderr.split('\n')[0]).toBe("uniq: ambiguous argument '' for '--group'")
     expect(code).toBe(1)
   })
+})
+
+async function run(stdin: ByteSource, flags: CommandOpts['flags']) {
+  const result = await uniqGeneric([], { stdin, flags, cwd: '/' }, () => {
+    throw new Error('no file operand')
+  })
+  if (result === null) throw new Error('uniq returned no result')
+  return result
+}
+
+it.each<[CommandOpts['flags'], string, string]>([
+  [{}, 'a\n', 'a\n'],
+  [{ count: true }, 'a\na\nb\n', '      2 a\n'],
+  [{ repeated: true }, 'a\na\n', 'a\n'],
+  [{ unique: true }, 'a\nb\n', 'a\n'],
+  [{ D: true }, 'a\na\n', 'a\n'],
+  [{ group: 'prepend' }, 'a\n', '\n'],
+  [{ all_repeated: 'prepend' }, 'a\na\n', '\n'],
+  [{ zero_terminated: true }, 'a\0', 'a\0'],
+])('uniq emits before the tail and closes %j', async (flags, data, expected) => {
+  let closed = false
+  async function* source() {
+    await Promise.resolve()
+    try {
+      yield new TextEncoder().encode(data)
+      throw new Error('uniq fetched the tail')
+    } finally {
+      closed = true
+    }
+  }
+  const [out] = await run(source(), flags)
+  const output = ensureStream(out ?? new Uint8Array())[Symbol.asyncIterator]()
+  try {
+    const first = await output.next()
+    if (first.done === true) throw new Error('stream ended before its first output')
+    expect(DEC.decode(first.value)).toBe(expected)
+  } finally {
+    await output.return?.()
+  }
+  expect(closed).toBe(true)
+})
+
+it.each<[CommandOpts['flags'], string]>([
+  [{ ignore_case: true }, 'A\nb\nC\n'],
+  [{ ignore_case: true, count: true }, '      3 A\n      1 b\n      2 C\n'],
+  [{ ignore_case: true, all_repeated: 'separate' }, 'A\na\nA\n\nC\nc\n'],
+  [{ ignore_case: true, group: 'both' }, '\nA\na\nA\n\nb\n\nC\nc\n\n'],
+])('uniq groups survive one-byte chunks %j', async (flags, expected) => {
+  async function* source() {
+    await Promise.resolve()
+    for (const byte of new TextEncoder().encode('A\na\nA\nb\nC\nc')) yield Uint8Array.of(byte)
+  }
+  const [out] = await run(source(), flags)
+  expect(DEC.decode(await materialize(out))).toBe(expected)
 })

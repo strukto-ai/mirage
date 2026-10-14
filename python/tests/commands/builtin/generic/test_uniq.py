@@ -7,13 +7,14 @@ from mirage.commands.builtin.generic.uniq import (
     uniq_generic,
 )
 from mirage.commands.errors import UsageError
+from mirage.io.types import ByteSource
 
 
 def _unused_read_stream(_accessor, _path):
     raise AssertionError("read_stream should not be called for stdin input")
 
 
-async def _collect(stdin: bytes | None, **kwargs) -> bytes:
+async def _collect(stdin: ByteSource | None, **kwargs) -> bytes:
     source, _io = await uniq_generic(
         [],
         read_stream=_unused_read_stream,
@@ -128,3 +129,67 @@ def test_group_still_refuses_an_unmatched_word():
     assert str(exc.value).startswith(
         "uniq: invalid argument 'pp' for '--group'\n"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,data,expected",
+    [
+        ({}, b"a\n", b"a\n"),
+        ({"count": True}, b"a\na\nb\n", b"      2 a\n"),
+        ({"repeated": True}, b"a\na\n", b"a\n"),
+        ({"unique": True}, b"a\nb\n", b"a\n"),
+        ({"D": True}, b"a\na\n", b"a\n"),
+        ({"group": "prepend"}, b"a\n", b"\n"),
+        ({"all_repeated": "prepend"}, b"a\na\n", b"\n"),
+        ({"zero_terminated": True}, b"a\0", b"a\0"),
+    ],
+)
+async def test_uniq_emits_before_reading_the_tail_and_closes(
+    flags, data, expected
+):
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield data
+            raise AssertionError("uniq fetched the tail")
+        finally:
+            closed = True
+
+    output, _ = await uniq_generic(
+        [], read_stream=_unused_read_stream, stdin=source(), flags=flags
+    )
+    try:
+        assert await anext(output) == expected
+    finally:
+        await output.aclose()
+    assert closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,expected",
+    [
+        ({"ignore_case": True}, b"A\nb\nC\n"),
+        (
+            {"ignore_case": True, "count": True},
+            b"      3 A\n      1 b\n      2 C\n",
+        ),
+        (
+            {"ignore_case": True, "all_repeated": "separate"},
+            b"A\na\nA\n\nC\nc\n",
+        ),
+        (
+            {"ignore_case": True, "group": "both"},
+            b"\nA\na\nA\n\nb\n\nC\nc\n\n",
+        ),
+    ],
+)
+async def test_uniq_groups_survive_one_byte_chunks(flags, expected):
+    async def source():
+        for byte in b"A\na\nA\nb\nC\nc":
+            yield bytes([byte])
+
+    assert await _collect(source(), flags=flags) == expected

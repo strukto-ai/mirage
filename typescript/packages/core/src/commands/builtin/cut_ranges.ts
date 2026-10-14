@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize } from '../../io/types.ts'
+import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { quoteText } from '../quote.ts'
 
 const ENC = new TextEncoder()
@@ -185,19 +185,6 @@ function joinPositionGroups(
   return concat(joined, outputDelimiter ?? new Uint8Array())
 }
 
-function splitRecords(raw: Uint8Array, separator: number): Uint8Array[] {
-  const records: Uint8Array[] = []
-  let start = 0
-  for (let index = 0; index < raw.byteLength; index++) {
-    if (raw[index] === separator) {
-      records.push(raw.subarray(start, index))
-      start = index + 1
-    }
-  }
-  if (start < raw.byteLength) records.push(raw.subarray(start))
-  return records
-}
-
 function isCutWhitespace(text: string, index: number): boolean {
   const code = text.charCodeAt(index)
   return code === 32 || code === 9
@@ -297,14 +284,20 @@ export async function* cutStream(
   source: AsyncIterable<Uint8Array>,
   options: CutOptions,
 ): AsyncIterable<Uint8Array> {
-  const raw = await materialize(source)
   const separator = options.zeroTerminated ? 0 : 0x0a
-  for (const rec of splitRecords(raw, separator)) {
-    const selected = cutRecord(rec, options)
-    if (selected === null) continue
-    const out = new Uint8Array(selected.byteLength + 1)
-    out.set(selected)
-    out[selected.byteLength] = separator
-    yield out
+  const reader = new AsyncLineIterator(source)
+  try {
+    for (;;) {
+      const rec = await reader.readline(undefined, separator)
+      if (rec === null) return
+      const selected = cutRecord(rec, options)
+      if (selected === null) continue
+      const out = new Uint8Array(selected.byteLength + 1)
+      out.set(selected)
+      out[selected.byteLength] = separator
+      yield out
+    }
+  } finally {
+    await reader.discard()
   }
 }

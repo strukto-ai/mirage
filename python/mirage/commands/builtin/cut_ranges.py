@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.usage import usage_hint
-from mirage.io.types import materialize
+from mirage.io.async_line_iterator import AsyncLineIterator
 
 _OPEN_END = 2**31 - 1
 _BLANKS = re.compile(r"[ \t]+")
@@ -143,14 +143,6 @@ def _select_positions(
     return [position for position in range(1, n + 1) if position in in_set]
 
 
-def _split_records(raw: bytes, zero_terminated: bool) -> list[bytes]:
-    separator = b"\x00" if zero_terminated else b"\n"
-    records = raw.split(separator)
-    if records and records[-1] == b"":
-        records = records[:-1]
-    return records
-
-
 def _join_position_groups(
     parts: list[bytes], positions: list[int], output_delimiter: bytes | None
 ) -> bytes:
@@ -262,21 +254,24 @@ async def cut_stream(
     zero_terminated: bool,
 ) -> AsyncIterator[bytes]:
     separator = b"\x00" if zero_terminated else b"\n"
-    raw = await materialize(source)
-    for rec in _split_records(raw, zero_terminated):
-        output = _cut_record(
-            rec,
-            ranges,
-            mode,
-            delimiter,
-            complement,
-            only_delimited,
-            whitespace,
-            no_partial,
-            output_delimiter,
-        )
-        if output is not None:
-            yield output + separator
+    reader = AsyncLineIterator(source)
+    try:
+        while (rec := await reader.readline(separator)) is not None:
+            output = _cut_record(
+                rec,
+                ranges,
+                mode,
+                delimiter,
+                complement,
+                only_delimited,
+                whitespace,
+                no_partial,
+                output_delimiter,
+            )
+            if output is not None:
+                yield output + separator
+    finally:
+        await reader.discard()
 
 
 __all__ = [

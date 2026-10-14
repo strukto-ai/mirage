@@ -14,6 +14,7 @@ from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec, StatFn
@@ -142,19 +143,6 @@ def _comparison_key(line: bytes, flags: UniqFlags) -> str:
     return text
 
 
-async def _records(
-    source: AsyncIterator[bytes], separator: bytes
-) -> AsyncIterator[bytes]:
-    buffer = b""
-    async for chunk in source:
-        buffer += chunk
-        while separator in buffer:
-            record, buffer = buffer.split(separator, 1)
-            yield record
-    if buffer:
-        yield buffer
-
-
 def _format_record(
     line: bytes, count: int, flags: UniqFlags, separator: bytes
 ) -> bytes:
@@ -173,50 +161,55 @@ async def _uniq_stream(
     source: AsyncIterator[bytes], flags: UniqFlags
 ) -> AsyncIterator[bytes]:
     separator = b"\x00" if flags.zero_terminated else b"\n"
-    groups: list[list[bytes]] = []
-    current: list[bytes] = []
+    reader = AsyncLineIterator(source)
+    first: bytes | None = None
     current_key: str | None = None
-    async for line in _records(source, separator):
-        key = _comparison_key(line, flags)
-        if current and key != current_key:
-            groups.append(current)
-            current = []
-        current.append(line)
-        current_key = key
-    if current:
-        groups.append(current)
-
-    if flags.group is not None:
-        for index, group in enumerate(groups):
-            if _group_separator_before(index, flags.group):
-                yield separator
-            for line in group:
+    count = 0
+    group_index = -1
+    repeated_groups = 0
+    try:
+        while True:
+            line = await reader.readline(separator)
+            key = None if line is None else _comparison_key(line, flags)
+            if line is None or first is None or key != current_key:
+                if (
+                    first is not None
+                    and flags.all_repeated is None
+                    and (flags.count or flags.unique_only)
+                ):
+                    if not (flags.duplicates_only and count == 1) and not (
+                        flags.unique_only and count > 1
+                    ):
+                        yield _format_record(first, count, flags, separator)
+                if line is None:
+                    break
+                first, current_key, count = line, key, 0
+                group_index += 1
+            count += 1
+            if flags.group is not None:
+                if count == 1 and _group_separator_before(
+                    group_index, flags.group
+                ):
+                    yield separator
                 yield line + separator
-        if groups and flags.group in ("append", "both"):
+            elif flags.all_repeated is not None:
+                if count == 2:
+                    if flags.all_repeated == "prepend" or (
+                        flags.all_repeated == "separate"
+                        and repeated_groups > 0
+                    ):
+                        yield separator
+                    yield first + separator
+                    repeated_groups += 1
+                if count >= 2:
+                    yield line + separator
+            elif not (flags.count or flags.unique_only):
+                if count == (2 if flags.duplicates_only else 1):
+                    yield first + separator
+        if first is not None and flags.group in ("append", "both"):
             yield separator
-        return
-
-    if flags.all_repeated is not None:
-        emitted = 0
-        for group in groups:
-            if len(group) == 1:
-                continue
-            if flags.all_repeated == "prepend" or (
-                flags.all_repeated == "separate" and emitted > 0
-            ):
-                yield separator
-            for line in group:
-                yield line + separator
-            emitted += 1
-        return
-
-    for group in groups:
-        count = len(group)
-        if flags.duplicates_only and count == 1:
-            continue
-        if flags.unique_only and count > 1:
-            continue
-        yield _format_record(group[0], count, flags, separator)
+    finally:
+        await reader.discard()
 
 
 async def uniq_generic(

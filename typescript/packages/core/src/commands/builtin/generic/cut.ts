@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stdinStream } from '../utils/stream.ts'
+import { stdinStat, stdinStream } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseRanges, type CutOptions } from '../cut_ranges.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import { operandsIo, splitReadable } from '../utils/operands.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -91,6 +91,7 @@ export async function cutGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  stat: (path: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
@@ -98,10 +99,10 @@ export async function cutGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
   if (paths.length > 0) {
-    const [ok, err] = await readOperands(paths, stream, 'cut')
+    const [ok, err] = await splitReadable(paths, stdinStat(stat), 'cut')
     const io = operandsIo(err)
     if (ok.length === 0 && err !== '') return [null, io]
-    const outputs = ok.map((operand) => cutStream(singleChunk(operand.data), parsed))
+    const outputs = ok.map((operand) => cutStream(stream(operand), parsed))
     const out: ByteSource = asyncChain(outputs)
     return [out, io]
   }

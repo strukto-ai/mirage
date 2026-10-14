@@ -23,7 +23,7 @@ import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/ty
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { concat } from '../../../utils/bytes.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 
 interface UniqFlags {
@@ -139,24 +139,6 @@ function comparisonKey(line: Uint8Array, flags: UniqFlags): string {
   return flags.ignoreCase ? text.toLowerCase() : text
 }
 
-async function* records(
-  source: AsyncIterable<Uint8Array>,
-  separator: number,
-): AsyncIterable<Uint8Array> {
-  let buffer: Uint8Array = new Uint8Array()
-  for await (const chunk of source) {
-    buffer = concat([buffer, chunk])
-    let start = 0
-    for (let index = 0; index < buffer.byteLength; index += 1) {
-      if (buffer[index] !== separator) continue
-      yield buffer.slice(start, index)
-      start = index + 1
-    }
-    buffer = buffer.slice(start)
-  }
-  if (buffer.byteLength > 0) yield buffer
-}
-
 function padLeft(value: string, width: number): string {
   return value.length >= width ? value : ' '.repeat(width - value.length) + value
 }
@@ -180,62 +162,62 @@ function groupSeparatorBefore(index: number, method: NonNullable<UniqFlags['grou
   return index > 0
 }
 
-async function collectGroups(
-  source: AsyncIterable<Uint8Array>,
-  flags: UniqFlags,
-  separator: number,
-): Promise<Uint8Array[][]> {
-  const groups: Uint8Array[][] = []
-  let current: Uint8Array[] = []
-  let currentKey: string | null = null
-  for await (const line of records(source, separator)) {
-    const key = comparisonKey(line, flags)
-    if (current.length > 0 && key !== currentKey) {
-      groups.push(current)
-      current = []
-    }
-    current.push(line)
-    currentKey = key
-  }
-  if (current.length > 0) groups.push(current)
-  return groups
-}
-
 async function* uniqStream(
   source: AsyncIterable<Uint8Array>,
   flags: UniqFlags,
 ): AsyncIterable<Uint8Array> {
   const separator = flags.zeroTerminated ? 0 : 0x0a
-  const groups = await collectGroups(source, flags, separator)
-  if (flags.group !== null) {
-    for (let index = 0; index < groups.length; index += 1) {
-      const group = groups[index] ?? []
-      if (groupSeparatorBefore(index, flags.group)) yield Uint8Array.of(separator)
-      for (const line of group) yield formatRecord(line, 1, { ...flags, count: false }, separator)
+  const reader = new AsyncLineIterator(source)
+  let first: Uint8Array | null = null
+  let currentKey: string | null = null
+  let count = 0
+  let groupIndex = -1
+  let repeatedGroups = 0
+  try {
+    for (;;) {
+      const line = await reader.readline(undefined, separator)
+      const key = line === null ? null : comparisonKey(line, flags)
+      if (line === null || first === null || key !== currentKey) {
+        if (first !== null && flags.allRepeated === null && (flags.count || flags.uniqueOnly)) {
+          if (!(flags.duplicatesOnly && count === 1) && !(flags.uniqueOnly && count > 1)) {
+            yield formatRecord(first, count, flags, separator)
+          }
+        }
+        if (line === null) break
+        first = line
+        currentKey = key
+        count = 0
+        groupIndex += 1
+      }
+      count += 1
+      if (flags.group !== null) {
+        if (count === 1 && groupSeparatorBefore(groupIndex, flags.group)) {
+          yield Uint8Array.of(separator)
+        }
+        yield formatRecord(line, 1, flags, separator)
+      } else if (flags.allRepeated !== null) {
+        if (count === 2) {
+          if (
+            flags.allRepeated === 'prepend' ||
+            (flags.allRepeated === 'separate' && repeatedGroups > 0)
+          ) {
+            yield Uint8Array.of(separator)
+          }
+          yield formatRecord(first, 1, flags, separator)
+          repeatedGroups += 1
+        }
+        if (count >= 2) yield formatRecord(line, 1, flags, separator)
+      } else if (!(flags.count || flags.uniqueOnly)) {
+        if (count === (flags.duplicatesOnly ? 2 : 1)) {
+          yield formatRecord(first, count, flags, separator)
+        }
+      }
     }
-    if (groups.length > 0 && (flags.group === 'append' || flags.group === 'both')) {
+    if (first !== null && (flags.group === 'append' || flags.group === 'both')) {
       yield Uint8Array.of(separator)
     }
-    return
-  }
-  if (flags.allRepeated !== null) {
-    let emitted = 0
-    for (const group of groups) {
-      if (group.length === 1) continue
-      if (flags.allRepeated === 'prepend' || (flags.allRepeated === 'separate' && emitted > 0)) {
-        yield Uint8Array.of(separator)
-      }
-      for (const line of group) yield formatRecord(line, 1, { ...flags, count: false }, separator)
-      emitted += 1
-    }
-    return
-  }
-  for (const group of groups) {
-    const first = group[0]
-    if (first === undefined) continue
-    if (flags.duplicatesOnly && group.length === 1) continue
-    if (flags.uniqueOnly && group.length > 1) continue
-    yield formatRecord(first, group.length, flags, separator)
+  } finally {
+    await reader.discard()
   }
 }
 

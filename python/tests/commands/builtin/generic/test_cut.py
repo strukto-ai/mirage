@@ -47,3 +47,63 @@ async def _no_stream(_path):
 async def test_cut_without_stdin_reads_empty_input():
     out, io = await cut([], read_stream=_no_stream, flags={"fields": "1"})
     assert (await materialize(out), io.exit_code) == (b"", 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("separator", [b"\n", b"\0"])
+async def test_cut_emits_a_record_before_reading_the_tail_and_closes(
+    separator,
+):
+    closed = False
+
+    async def source():
+        nonlocal closed
+        try:
+            yield b"left,right" + separator
+            raise AssertionError("cut fetched the tail")
+        finally:
+            closed = True
+
+    output, _ = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=source(),
+        flags={
+            "fields": "2",
+            "delimiter": ",",
+            "zero_terminated": separator == b"\0",
+        },
+    )
+    try:
+        assert await anext(output) == b"right" + separator
+    finally:
+        await output.aclose()
+    assert closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        (b"a,b\nc,d\n", b"b\nd\n"),
+        (b"a,b\nc,d", b"b\nd\n"),
+        (b"a,b\0c,d\0", b"b\0d\0"),
+        (b"", b""),
+    ],
+)
+async def test_cut_records_survive_one_byte_chunks(data, expected):
+    async def source():
+        for byte in data:
+            yield bytes([byte])
+
+    output, _ = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=source(),
+        flags={
+            "fields": "2",
+            "delimiter": ",",
+            "zero_terminated": b"\0" in data,
+        },
+    )
+    assert await materialize(output) == expected

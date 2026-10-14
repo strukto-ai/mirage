@@ -4556,6 +4556,185 @@
           }
         }
       ]
+    },
+    {
+      "id": "stream_filters_close_on_early_consumer_exit",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n",
+                "/encoded.txt": "Zmlyc3QKbGFzdAo="
+              },
+              "chunk_size": 6,
+              "repeat": 100000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cut -f 1 /data/log.txt | head -n 1",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "uniq /data/log.txt | head -n 1",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "base64 /data/log.txt | head -c 4",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "Zmly",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "base64 -d /data/encoded.txt | head -c 3",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "fir",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 4
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/encoded.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_filters_cancel_stalled_inputs",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n",
+                "/encoded.txt": "Zmlyc3QKbGFzdAo="
+              },
+              "chunk_size": 6,
+              "stall_after": 1
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cut -f 1 /data/log.txt | cat",
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          },
+          "cancel_after_ms": 100
+        },
+        {
+          "op": "exec",
+          "command": "uniq /data/log.txt | cat",
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          },
+          "cancel_after_ms": 100
+        },
+        {
+          "op": "exec",
+          "command": "base64 /data/log.txt | cat",
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          },
+          "cancel_after_ms": 100
+        },
+        {
+          "op": "exec",
+          "command": "base64 -d /data/encoded.txt | cat",
+          "expect": {
+            "value": {
+              "aborted": true
+            }
+          },
+          "cancel_after_ms": 100
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 4,
+              "pulls": 8
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/encoded.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
     }
   ]
 }

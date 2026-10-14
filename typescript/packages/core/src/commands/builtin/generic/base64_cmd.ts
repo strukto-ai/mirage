@@ -14,17 +14,19 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
+import { encodeBase64 } from '../../../utils/base64.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
 interface Base64Flags {
   readonly decode: boolean
@@ -45,30 +47,95 @@ function parseFlags(bag: Record<string, FlagValue>): Base64Flags {
 async function* base64EncodeStream(
   source: AsyncIterable<Uint8Array>,
   wrap: number | null,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const buf = await materialize(source)
-  const encoded = encodeBase64(buf)
-  if (encoded === '') return
-  if (wrap !== null && wrap === 0) {
-    yield encodeText(encoded + '\n')
-    return
+  const width = wrap ?? 76
+  let pending: Uint8Array = new Uint8Array()
+  let column = 0
+  const stream = chunks(source, signal)
+  try {
+    for (;;) {
+      const chunk = await stream.next()
+      const data = concat([pending, chunk.value ?? new Uint8Array()])
+      const size = chunk.done === true ? data.length : Math.floor(data.length / 3) * 3
+      const encoded = encodeBase64(data.subarray(0, size))
+      pending = data.slice(size)
+      const output: string[] = []
+      let offset = 0
+      while (offset < encoded.length) {
+        const take = width ? Math.min(encoded.length - offset, width - column) : encoded.length
+        output.push(encoded.slice(offset, offset + take))
+        offset += take
+        column += take
+        if (width && column === width) {
+          output.push('\n')
+          column = 0
+        }
+      }
+      if (output.length > 0) yield encodeText(output.join(''))
+      if (chunk.done === true) break
+    }
+    if (width && column) yield encodeText('\n')
+  } finally {
+    await stream.return?.()
   }
-  const lineLen = wrap ?? 76
-  const lines: string[] = []
-  for (let i = 0; i < encoded.length; i += lineLen) {
-    lines.push(encoded.slice(i, i + lineLen))
-  }
-  yield encodeText(lines.join('\n') + '\n')
 }
 
 async function* base64DecodeStream(
   source: AsyncIterable<Uint8Array>,
   ignoreGarbage: boolean,
+  io: IOResult,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const buf = await materialize(source)
-  let text = DEC.decode(buf).replace(/\s/g, '')
-  if (ignoreGarbage) text = text.replace(/[^A-Za-z0-9+/=]/g, '')
-  yield decodeBase64(text)
+  // GNU coreutils 9.7 accepts unpadded tails and concatenated padded
+  // blocks. Decode as bytes arrive so an invalid suffix keeps its prefix.
+  let digits = 0
+  let value = 0
+  let padding = false
+  for await (const chunk of chunks(source, signal)) {
+    const output: number[] = []
+    let failed = false
+    for (const byte of chunk) {
+      const digit = ALPHABET.indexOf(String.fromCharCode(byte))
+      if (byte === 10 || (ignoreGarbage && digit < 0 && byte !== 61)) continue
+      if (padding) {
+        if (byte !== 61) {
+          failed = true
+          break
+        }
+        padding = false
+      } else if (digit >= 0) {
+        value = (value << 6) | digit
+        digits += 1
+        if (digits >= 2) output.push((value >> (2 * (4 - digits))) & 255)
+        if (digits === 4) {
+          digits = 0
+          value = 0
+        }
+      } else if (byte === 61 && (digits === 2 || digits === 3)) {
+        if (value & ((1 << (2 * (4 - digits))) - 1)) {
+          failed = true
+          break
+        }
+        padding = digits === 2
+        digits = 0
+        value = 0
+      } else {
+        failed = true
+        break
+      }
+    }
+    if (failed) {
+      io.exitCode = 1
+      io.stderr = encodeText('base64: invalid input\n')
+    }
+    if (output.length > 0) yield Uint8Array.from(output)
+    if (failed) return
+  }
+  if (padding || digits === 1 || (digits && value & ((1 << (2 * (4 - digits))) - 1))) {
+    io.exitCode = 1
+    io.stderr = encodeText('base64: invalid input\n')
+  }
 }
 
 // The operand is stat'ed before the lazy encode starts, so a missing or
@@ -88,6 +155,15 @@ export async function base64Generic(
     if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
   const parsed = parseFlags(opts.flags)
+  if (parsed.wrap !== null && parsed.wrap < 0) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: encodeText(`base64: invalid wrap size: '${String(parsed.wrap)}'\n`),
+      }),
+    ]
+  }
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
     const first = paths[0]
@@ -96,8 +172,9 @@ export async function base64Generic(
   } else {
     source = resolveSource(opts.stdin)
   }
+  const io = new IOResult()
   const out = parsed.decode
-    ? base64DecodeStream(source, parsed.ignoreGarbage)
-    : base64EncodeStream(source, parsed.wrap)
-  return [out, new IOResult()]
+    ? base64DecodeStream(source, parsed.ignoreGarbage, io, opts.signal)
+    : base64EncodeStream(source, parsed.wrap, opts.signal)
+  return [out, io]
 }
