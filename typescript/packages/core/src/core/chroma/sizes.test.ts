@@ -108,13 +108,11 @@ describe('chroma ensureDirSizes', () => {
       names.map((name) => [name, fileEntry(name, `guides/${name}`)]),
     )
 
-    for (const _name of names) {
-      await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
-    }
-
     for (const name of names) {
+      await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
       expect((await index.get(`/knowledge/guides/${name}`)).entry?.size).toBe(0)
     }
+
     expect(collection.calls).toHaveLength(1)
   })
 })
