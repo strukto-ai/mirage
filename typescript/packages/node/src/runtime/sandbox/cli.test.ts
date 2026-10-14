@@ -34,6 +34,22 @@ async function ended(pid: number): Promise<boolean> {
   return false
 }
 
+// A child that starts a sleep in a session of its own, so killing the
+// child's group leaves it running with the output pipes it inherited.
+const ESCAPE = [
+  "const { spawn } = require('node:child_process')",
+  "const c = spawn('sleep', ['30'], { detached: true, stdio: 'inherit' })",
+  "require('node:fs').writeFileSync(process.argv[1], String(c.pid))",
+  'setTimeout(() => undefined, 30000)',
+].join('\n')
+
+async function escapedPid(pidFile: string): Promise<number> {
+  while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return Number(readFileSync(pidFile, 'utf8'))
+}
+
 describe('runCli', () => {
   it('returns both streams and the status', async () => {
     const r = await runCli(
@@ -75,6 +91,38 @@ describe('runCli', () => {
     await expect(run).rejects.toMatchObject({ name: 'AbortError' })
     expect(Date.now() - started).toBeLessThan(5000)
     expect(await ended(Number(readFileSync(pidFile, 'utf8')))).toBe(true)
+  })
+
+  it('does not wait on a descendant that left the group when aborted', async () => {
+    const controller = new AbortController()
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-cli-')), 'pid')
+    const run = runCli(process.execPath, null, ['-e', ESCAPE, pidFile], null, {
+      signal: controller.signal,
+    })
+    const escaped = await escapedPid(pidFile)
+    try {
+      const started = Date.now()
+      controller.abort()
+      await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      process.kill(escaped, 'SIGKILL')
+    }
+  })
+
+  it('closeChildren does not wait on a descendant that left the group', async () => {
+    const children = new Set<ChildProcess>()
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-cli-')), 'pid')
+    const run = runCli(process.execPath, null, ['-e', ESCAPE, pidFile], null, { children })
+    const escaped = await escapedPid(pidFile)
+    try {
+      const started = Date.now()
+      await closeChildren(children)
+      expect((await run).code).not.toBe(0)
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      process.kill(escaped, 'SIGKILL')
+    }
   })
 
   it('closeChildren kills every running tree and waits for it', async () => {

@@ -83,6 +83,11 @@
     "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields."
    }
   },
+  "runtime/sandbox/cli": {
+   "python_only": {
+    "_STREAM_LIMIT": "Spawning through loop.subprocess_exec, which keeps the transport that closes the pipes, means building the stream protocol with its buffer size; Node's child streams size their own."
+   }
+  },
   "execution/context": {
    "typescript_only": {
     "captureExecutionContext": "Deferred TypeScript callbacks restore the execution async-local store explicitly; Python contextvars travel with the copied context."

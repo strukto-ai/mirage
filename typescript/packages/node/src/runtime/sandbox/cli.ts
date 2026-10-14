@@ -37,9 +37,9 @@ export interface CliOptions {
 /**
  * One process run to its end: its output and its exit status. The child
  * leads a process group of its own, and an aborted call kills the whole
- * group: a grandchild left alive holds the output pipes open, so 'close'
- * would wait until it exited on its own, and the call rejects with an
- * AbortError once the group is gone. A missing executable rejects with
+ * group and stops reading the pipes: a grandchild left alive, or one that
+ * left the group, holds the output pipes open, so 'close' would wait until
+ * it exited on its own, and the call rejects with an AbortError at once. A missing executable rejects with
  * `hint` when one is given, else with spawn's own error. EPIPE means the
  * command exited without draining its stdin (`head`-like); python's
  * communicate() suppresses the matching BrokenPipeError, so it is not an
@@ -61,7 +61,7 @@ export function runCli(
       detached: process.platform !== 'win32',
     })
     const abort = (): void => {
-      killTree(child)
+      stopTree(child)
     }
     signal?.addEventListener('abort', abort, { once: true })
     if (signal?.aborted === true) abort()
@@ -117,6 +117,17 @@ export function killTree(child: ChildProcess): void {
 }
 
 /**
+ * Kill a child's tree and stop reading its pipes, which a descendant that
+ * left the group (a session of its own) survives the kill holding; 'close'
+ * comes once the child exits. Mirrors Python's `stop_tree`.
+ */
+function stopTree(child: ChildProcess): void {
+  killTree(child)
+  child.stdout?.destroy()
+  child.stderr?.destroy()
+}
+
+/**
  * Kill every child still running, so none outlives the workspace, and wait
  * for each to close. Mirrors Python's `close_children`.
  */
@@ -128,7 +139,7 @@ export async function closeChildren(children: Set<ChildProcess>): Promise<void> 
           child.once('close', () => {
             resolve()
           })
-          killTree(child)
+          stopTree(child)
         }),
     ),
   )

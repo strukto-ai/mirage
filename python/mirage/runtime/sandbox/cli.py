@@ -20,8 +20,15 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-# Each running child with the loop it runs on, which alone may wait for it.
-Children = dict[asyncio.subprocess.Process, asyncio.AbstractEventLoop]
+# Each running child with its transport, which closes our ends of its
+# pipes, and the loop it runs on, which alone may wait for it.
+Children = dict[
+    asyncio.subprocess.Process,
+    tuple[asyncio.SubprocessTransport, asyncio.AbstractEventLoop],
+]
+
+# What a pipe's reader buffers, as asyncio.create_subprocess_exec sets it.
+_STREAM_LIMIT = 2**16
 
 
 async def run_cli(
@@ -37,9 +44,10 @@ async def run_cli(
     """One process run to its end: its output and its exit status.
 
     The child leads a process group of its own, and a cancelled call
-    kills the whole group before it re-raises: a grandchild left alive
+    kills the whole group and closes our ends of the pipes before it
+    re-raises: a grandchild left alive, or one that left the group,
     holds the output pipes open, so the wait would last until it exited
-    on its own. A line abandoned to a timeout leaves nothing running.
+    on its own. A line abandoned to a timeout returns at once.
 
     Args:
         executable (str): the program (``docker``, ``sandlock``, a host
@@ -58,8 +66,12 @@ async def run_cli(
     Raises:
         RuntimeError: the executable is missing and ``hint`` names it.
     """
+    loop = asyncio.get_running_loop()
     try:
-        process = await asyncio.create_subprocess_exec(
+        transport, protocol = await loop.subprocess_exec(
+            lambda: asyncio.subprocess.SubprocessStreamProtocol(
+                limit=_STREAM_LIMIT, loop=loop
+            ),
             executable,
             *args,
             cwd=cwd,
@@ -77,12 +89,13 @@ async def run_cli(
         if hint is None:
             raise
         raise RuntimeError(hint) from None
+    process = asyncio.subprocess.Process(transport, protocol, loop)
     if children is not None:
-        children[process] = asyncio.get_running_loop()
+        children[process] = (transport, loop)
     try:
         stdout, stderr = await process.communicate(stdin)
     except asyncio.CancelledError:
-        kill_tree(process)
+        stop_tree(process, transport)
         await process.wait()
         raise
     finally:
@@ -110,21 +123,44 @@ def kill_tree(process: asyncio.subprocess.Process) -> None:
         logger.debug("process group %d has already exited", process.pid)
 
 
+def stop_tree(
+    process: asyncio.subprocess.Process,
+    transport: asyncio.SubprocessTransport,
+) -> None:
+    """Kill a child's tree and close our ends of its pipes, which a
+    descendant that left the group (a session of its own) survives the
+    kill holding. Mirrors TypeScript's ``stopTree``.
+
+    Args:
+        process (asyncio.subprocess.Process): a child ``run_cli`` started.
+        transport (asyncio.SubprocessTransport): the child's transport.
+    """
+    kill_tree(process)
+    transport.close()
+
+
 async def close_children(children: Children) -> None:
     """Kill every child still running, so none outlives the workspace.
 
-    Only a child on the closing loop is waited for. One a sync ``with``
-    block left running belongs to the loop that block exits inside,
-    which runs nothing until the close returns; that loop reaps it once
-    the kill lands.
+    Each child's pipes are closed on our side too, so a descendant that
+    left the group cannot hold the close open. Only a child on the
+    closing loop is waited for. One a sync ``with`` block left running
+    belongs to the loop that block exits inside, which runs nothing
+    until the close returns; that loop closes its pipes and reaps it
+    once it runs again.
 
     Args:
         children (Children): a runtime's running children.
     """
     running = list(children.items())
-    for child, _ in running:
-        kill_tree(child)
     loop = asyncio.get_running_loop()
+    for child, (transport, owner) in running:
+        if owner is loop:
+            stop_tree(child, transport)
+            continue
+        kill_tree(child)
+        if not owner.is_closed():
+            owner.call_soon_threadsafe(transport.close)
     await asyncio.gather(
-        *(child.wait() for child, owner in running if owner is loop)
+        *(child.wait() for child, (_, owner) in running if owner is loop)
     )

@@ -13,11 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextlib
 import os
+import signal
+import sys
 
 import pytest
 
 from mirage.runtime.sandbox.cli import Children, close_children, run_cli
+
+# A child that starts a sleep in a session of its own, so killing the
+# child's group leaves it running with the output pipes it inherited.
+ESCAPE = (
+    "import subprocess, sys, time\n"
+    "p = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+    "open(sys.argv[1], 'w').write(str(p.pid))\n"
+    "time.sleep(30)\n"
+)
 
 
 async def _ended(pid: int) -> bool:
@@ -117,3 +129,54 @@ async def test_close_children_kills_every_running_tree(tmp_path):
         _, _, code = await task
     assert code != 0 and not children
     assert await _ended(int(pid_file.read_text()))
+
+
+async def _wait_for_pid(pid_file) -> int:
+    while not (pid_file.exists() and pid_file.read_text().strip()):
+        await asyncio.sleep(0.01)
+    return int(pid_file.read_text())
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_call_does_not_wait_on_a_descendant_that_left(
+    tmp_path,
+):
+    pid_file = tmp_path / "pid"
+    task = asyncio.create_task(
+        run_cli(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
+    )
+    escaped = await _wait_for_pid(pid_file)
+    try:
+        task.cancel()
+        async with asyncio.timeout(5):
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(escaped, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
+async def test_close_children_does_not_wait_on_a_descendant_that_left(
+    tmp_path,
+):
+    children: Children = {}
+    pid_file = tmp_path / "pid"
+    task = asyncio.create_task(
+        run_cli(
+            sys.executable,
+            None,
+            ["-c", ESCAPE, str(pid_file)],
+            None,
+            children=children,
+        )
+    )
+    escaped = await _wait_for_pid(pid_file)
+    try:
+        async with asyncio.timeout(5):
+            await close_children(children)
+            _, _, code = await task
+        assert code != 0 and not children
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(escaped, signal.SIGKILL)
