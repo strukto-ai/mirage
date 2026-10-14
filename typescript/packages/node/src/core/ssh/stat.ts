@@ -172,12 +172,11 @@ function findAttrs(fields: readonly string[]): SshAttrs | null {
   if (type === undefined || fields.length < 8 || !/^[0-7]+$/.test(mode)) return null
   if (![size, uid, gid].every((n) => /^\d+$/.test(n))) return null
   if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
-  const whole = (t: string): number => Number(t.split('.')[0])
   return {
     mode: type | Number.parseInt(mode, 8),
     size: Number(size),
-    mtime: whole(mtime),
-    atime: whole(atime),
+    mtime: Number(mtime.split('.')[0]),
+    atime: Number(atime.split('.')[0]),
     uid: Number(uid),
     gid: Number(gid),
   }
