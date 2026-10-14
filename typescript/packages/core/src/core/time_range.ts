@@ -6,7 +6,7 @@ import type { Guard } from './hierarchy/readdir.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
 import type { StatHook } from './hierarchy/stat.ts'
 import { enoent } from '../errors/fs.ts'
-import { sleep } from '../utils/abort.ts'
+import { abortable, sleep } from '../utils/abort.ts'
 import { jsonlBytes } from './render/json.ts'
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
@@ -144,8 +144,9 @@ export function dayStat<A extends Accessor>(readdir: ReaddirFn<A>, guard?: Guard
  * be closed, as `tail -f` waits on a file that stops growing. Each ask starts
  * where the last answer ended, so none is lost or printed twice. An iterator
  * rather than a generator: a generator queues `return` behind a pull waiting
- * out its interval, so an idle `tail -f` could never close it. Mirrors
- * Python's `followed_day`.
+ * out its interval, so an idle `tail -f` could never close it. Closing also
+ * ends a pull waiting on a stalled ask, whose late answer is dropped, as
+ * Python's task cancel ends it there. Mirrors Python's `followed_day`.
  */
 export function followedDay<M>(
   messages: readonly M[],
@@ -171,7 +172,7 @@ export function followedDay<M>(
         while (!over) {
           await sleep(interval * 1000, stop.signal)
           over = Date.now() / 1000 >= end
-          const added = await after(last)
+          const added = await abortable(after(last), stop.signal)
           if (added.length > 0) {
             last = added[added.length - 1] ?? last
             return { value: jsonlBytes(added), done: false }

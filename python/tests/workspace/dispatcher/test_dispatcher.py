@@ -1497,20 +1497,33 @@ async def test_a_direct_read_neither_serves_nor_keeps_the_cache():
 
 
 class _FollowedRAM(RAMVFS):
+    def __init__(self, after) -> None:
+        super().__init__()
+        self._after = after
+
     async def follow(self, path, n, interval, index=NULL_INDEX):
-        return followed_day([{"ts": "1"}], 1, 0, 0.001, _nothing_after)
+        return followed_day([{"ts": "1"}], 1, 0, 0.001, self._after)
 
 
 async def _nothing_after(last):
     return []
 
 
+async def _stalled_after(last):
+    await asyncio.Event().wait()
+    return []
+
+
+@pytest.mark.parametrize(
+    "after", [_nothing_after, _stalled_after], ids=["idle", "stalled"]
+)
 @pytest.mark.asyncio
-async def test_an_idle_follow_closes_through_the_mount():
-    # A follow past its day waits to be closed; the pull that waits on it
-    # is cancelled and the close reaches it through the mount's wrappers,
-    # or the follow holds the mount forever.
-    vfs = _FollowedRAM()
+async def test_a_waiting_follow_closes_through_the_mount(after):
+    # A follow past its day waits to be closed, idle or on an ask the
+    # backend never answers; the pull that waits on it is cancelled and the
+    # close reaches it through the mount's wrappers, or the follow holds the
+    # mount forever.
+    vfs = _FollowedRAM(after)
     vfs._store.dirs.add("/")
     vfs._store.files["/day"] = b'{"ts":"1"}\n'
     ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)

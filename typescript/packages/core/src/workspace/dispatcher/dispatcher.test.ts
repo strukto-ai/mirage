@@ -1221,13 +1221,26 @@ describe('a cold read keeps its bytes for the next reader', () => {
     expect(await ws.cache.exists('/data/f.count')).toBe(false)
   })
 
-  it('closes an idle follow through the mount', async () => {
-    // A follow past its day waits to be closed; that close has to reach it
-    // through the mount's wrappers while a pull waits, or the follow holds
-    // the mount forever.
+  it.each([
+    ['an idle', (): Promise<{ ts: string }[]> => Promise.resolve([])],
+    ['a stalled', (): Promise<{ ts: string }[]> => new Promise(() => undefined)],
+  ])('closes %s follow through the mount', async (_kind, answer) => {
+    // A follow past its day waits to be closed, idle or on an ask the
+    // backend never answers; that close has to reach it through the mount's
+    // wrappers while a pull waits, or the follow holds the mount forever.
+    // Mirrors python's test_a_waiting_follow_closes_through_the_mount.
+    let asked = (): void => undefined
+    const polled = new Promise<void>((resolve) => {
+      asked = resolve
+    })
     class FollowedRAM extends RAMVFS {
       override follow(): Promise<AsyncIterable<Uint8Array> | null> {
-        return Promise.resolve(followedDay([{ ts: '1' }], 1, 0, 0.001, () => Promise.resolve([])))
+        return Promise.resolve(
+          followedDay([{ ts: '1' }], 1, 0, 0.001, () => {
+            asked()
+            return answer()
+          }),
+        )
       }
     }
     const parser = await getTestParser()
@@ -1245,6 +1258,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
       const lines = stream[Symbol.asyncIterator]()
       expect(DEC.decode((await lines.next()).value as Uint8Array)).toBe('{"ts":"1"}\n')
       const idle = lines.next()
+      await polled
       const closed = await Promise.race([
         lines.return?.().then(() => 'closed'),
         new Promise((resolve) => {

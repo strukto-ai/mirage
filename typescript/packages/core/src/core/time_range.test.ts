@@ -140,4 +140,19 @@ describe('followedDay', () => {
     expect((await idle).done).toBe(true)
     expect(asked).toEqual([{ ts: '1' }])
   })
+
+  it('closes while an ask waits on the backend', async () => {
+    let asked = (): void => undefined
+    const stalled = new Promise<void>((resolve) => {
+      asked = resolve
+    })
+    const it = followedDay(msgs('1'), 0, Date.now() / 1000 + 60, 0.001, () => {
+      asked()
+      return new Promise<{ ts: string }[]>(() => undefined)
+    })
+    const pull = it.next()
+    await stalled
+    await it.return?.()
+    expect((await pull).done).toBe(true)
+  })
 })
