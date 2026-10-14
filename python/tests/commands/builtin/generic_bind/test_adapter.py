@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     Operation,
     dir_aware_stat,
     dir_aware_stream,
+    file_size,
     require_op,
     resolve_or_empty,
     with_command_guards,
@@ -39,6 +40,7 @@ from mirage.context import (
 )
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
+from mirage.observe.context import push_revisions, reset_revisions
 from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.policy.policies import (
     Policies,
@@ -912,3 +914,47 @@ async def test_command_guards_wrap_time_capture_covers_late_calls():
     with pytest.raises(PermissionError):
         await ops.readdir(acc, _spec("/data/secret"))
     assert ("readdir", "/data/secret") not in calls
+
+
+def _sized_ops(st: FileStat) -> CommandIO:
+    async def stat(_accessor, path, _index):
+        return st
+
+    async def unused(*_args):
+        raise AssertionError("not used")
+
+    return CommandIO(
+        readdir=unused,
+        read_bytes=unused,
+        read_stream=unused,
+        stat=stat,
+        is_mounted=lambda _a: True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "st,size",
+    [
+        (FileStat(name="f", type=FileType.FILE, size=7), 7),
+        (FileStat(name="f", type=FileType.FILE, size=7, mode=0o644), None),
+        (FileStat(name="f", type=FileType.FILE), None),
+        (FileStat(name="f", type=FileType.CHAR_DEVICE, size=0), None),
+    ],
+)
+async def test_file_size_answers_only_a_store_without_permission_bits(
+    st, size
+):
+    bound = file_size(_sized_ops(st), None, NO_NS)
+    assert await bound(PathSpec.from_str_path("/f")) == size
+
+
+@pytest.mark.asyncio
+async def test_file_size_reads_a_path_pinned_to_a_revision():
+    st = FileStat(name="f", type=FileType.FILE, size=7)
+    bound = file_size(_sized_ops(st), None, NO_NS)
+    token = push_revisions({"/f": "v1"})
+    try:
+        assert await bound(PathSpec.from_str_path("/f")) is None
+    finally:
+        reset_revisions(token)

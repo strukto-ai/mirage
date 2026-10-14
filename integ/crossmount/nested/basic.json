@@ -749,7 +749,7 @@
       "command": "od /ghost",
       "expect": {
         "exit": 1,
-        "stdout": "",
+        "stdout": "0000000\n",
         "stderr": "od: /ghost: Is a directory\n"
       }
     },

@@ -25,7 +25,7 @@ import type { PathSpec, ReadRangeFn } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
-import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
+import { isStdin, rangedStream, resolveSource, stdinStream } from '../utils/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 
@@ -289,6 +289,15 @@ export interface XxdSeek {
   readonly back: boolean
 }
 
+/** The `-l` operand: null for none, and a negative count too, which xxd reads
+ * as no limit; `0` (or no number) dumps nothing. Mirrors Python's
+ * parse_limit. */
+export function parseLimit(raw: string | undefined): number | null {
+  if (raw === undefined) return null
+  const limit = strtol(raw)
+  return limit < 0 ? null : limit
+}
+
 /** The `-s` operand. Mirrors Python's parse_seek. */
 export function parseSeek(raw: string): XxdSeek {
   const relative = raw.startsWith('+')
@@ -364,9 +373,9 @@ async function seeked(
   readRange: ReadRangeFn | null,
   sizeOf: ((p: PathSpec) => Promise<number | null>) | null,
   seek: XxdSeek,
-  limit: number,
+  limit: number | null,
 ): Promise<[AsyncIterable<Uint8Array>, number] | null> {
-  const window = limit > 0 ? limit : null
+  const window = limit
   if (path === null || isStdin(path)) {
     let source = path === null ? resolveSource(stdin) : read(path)
     if (seek.back) return null
@@ -389,9 +398,11 @@ async function seeked(
     const end = window === null ? undefined : start + window
     return [singleChunk(data.subarray(start, end)), start]
   }
-  if (readRange !== null && size !== null && (start > 0 || window !== null)) {
-    let want = Math.max(size - start, 0)
-    if (window !== null) want = Math.min(want, window)
+  if (readRange !== null && size !== null && window === null && start > 0) {
+    return [rangedStream(readRange, path, start, size), start]
+  }
+  if (readRange !== null && size !== null && window !== null) {
+    const want = Math.min(Math.max(size - start, 0), window)
     const got = want > 0 ? await readRange(path, start, want) : new Uint8Array()
     return [singleChunk(got), start]
   }
@@ -475,7 +486,7 @@ interface XxdFlags {
   readonly cols: number
   readonly group: number
   readonly seek: XxdSeek
-  readonly limit: number
+  readonly limit: number | null
 }
 
 function count(value: FlagValue | undefined, fallback: number): number {
@@ -492,7 +503,7 @@ function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
     cols: count(fl.raw('c'), 16),
     group: count(fl.raw('g'), 2),
     seek: parseSeek(fl.asStr('s') ?? ''),
-    limit: strtol(fl.asStr('args_l') ?? ''),
+    limit: parseLimit(fl.asStr('args_l')),
   }
 }
 
@@ -524,11 +535,11 @@ export async function xxdGeneric(
   let base = 0
   if (parsed.reverse) {
     source = paths[0] !== undefined ? stream(paths[0]) : resolveSource(opts.stdin)
-    if (seek.offset !== 0 || limit > 0) {
+    if (seek.offset !== 0 || (limit ?? 0) > 0) {
       source = applyLimits(
         source,
         Math.max(seek.offset, 0),
-        limit > 0 ? limit : Number.MAX_SAFE_INTEGER,
+        limit !== null && limit > 0 ? limit : Number.MAX_SAFE_INTEGER,
       )
     }
   } else {

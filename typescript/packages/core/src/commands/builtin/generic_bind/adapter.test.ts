@@ -31,7 +31,15 @@ import { formatFsError } from '../../../errors/render.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts, CommandIO } from '../../config.ts'
-import { commandIo, dirAwareStat, dirAwareStream, resolveGlobOf, withDirGuard } from './adapter.ts'
+import {
+  commandIo,
+  dirAwareStat,
+  dirAwareStream,
+  fileSize,
+  resolveGlobOf,
+  withDirGuard,
+} from './adapter.ts'
+import { runWithRevisions } from '../../../observe/context.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { makeResolveGlob } from '../../../utils/glob_walk.ts'
@@ -943,5 +951,32 @@ describe('directory EOF', () => {
       expect(await drain(ops.readStream(accessor, path))).toEqual([new Uint8Array()])
       expect(await ops.readRange?.(accessor, path, undefined, 0, null)).toEqual(new Uint8Array())
     }
+  })
+})
+
+describe('fileSize', () => {
+  const sized = (st: FileStat): CommandIO => ({ ...dirOps([]), stat: () => Promise.resolve(st) })
+
+  // Mirrors python's test_file_size_answers_only_a_store_without_permission_bits.
+  it.each([
+    [new FileStat({ name: 'f', type: FileType.FILE, size: 7 }), 7],
+    [new FileStat({ name: 'f', type: FileType.FILE, size: 7, mode: 0o644 }), null],
+    [new FileStat({ name: 'f', type: FileType.FILE }), null],
+    [new FileStat({ name: 'f', type: FileType.CHAR_DEVICE, size: 0 }), null],
+  ])('answers %j as %s', async (st, size) => {
+    expect(await fileSize(sized(st), accessor, NO_NS)(PathSpec.fromStrPath('/f'))).toBe(size)
+  })
+
+  // Mirrors python's test_file_size_reads_a_path_pinned_to_a_revision.
+  it('reads a path pinned to a revision', async () => {
+    const bound = fileSize(
+      sized(new FileStat({ name: 'f', type: FileType.FILE, size: 7 })),
+      accessor,
+      NO_NS,
+    )
+    const found = await runWithRevisions(new Map([['/f', 'v1']]), () =>
+      bound(PathSpec.fromStrPath('/f')),
+    )
+    expect(found).toBeNull()
   })
 })

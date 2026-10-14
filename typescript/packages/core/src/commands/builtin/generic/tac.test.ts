@@ -105,3 +105,38 @@ describe('tac records', () => {
     expect(await materialize(out)).toEqual(expected)
   })
 })
+
+describe('tac failures and separators', () => {
+  // Mirrors python's test_a_file_that_fails_to_read_is_reported_and_tac_goes_on.
+  it('reports a file that fails to read and goes on', async () => {
+    const bad = PathSpec.fromStrPath('/bad')
+    const good = PathSpec.fromStrPath('/good')
+    const readRange = (p: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
+      if (p.virtual === '/bad')
+        return Promise.reject(Object.assign(new Error('/bad'), { code: 'EACCES' }))
+      const data = ENC.encode('a\nb\n')
+      return Promise.resolve(data.subarray(offset, size === null ? undefined : offset + size))
+    }
+    const [out, io] = await tacGeneric(
+      [bad, good],
+      opts({}),
+      streamOf(new Uint8Array()),
+      readRange,
+      () => Promise.resolve(4),
+    )
+    expect(new TextDecoder().decode(await materialize(out))).toBe('b\na\n')
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toContain('/bad')
+  })
+
+  // Mirrors python's test_a_raw_byte_separator_splits_on_that_byte.
+  it('splits on a raw byte separator', async () => {
+    const data = Uint8Array.of(0x61, 0x80, 0x62, 0x80)
+    const [out] = await tacGeneric(
+      [],
+      opts({ separator: '\udc80' }, data),
+      streamOf(new Uint8Array()),
+    )
+    expect(await materialize(out)).toEqual(Uint8Array.of(0x62, 0x80, 0x61, 0x80))
+  })
+})

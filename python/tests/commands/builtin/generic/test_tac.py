@@ -117,3 +117,43 @@ async def test_tac_keeps_bytes_and_puts_b_before_the_record(
     )
     got = out if isinstance(out, bytes) else b"".join([c async for c in out])
     assert got == expect
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_fails_to_read_is_reported_and_tac_goes_on():
+    bad = PathSpec(
+        vfs_path="bad", virtual="/bad", directory="/", resolved=True
+    )
+    good = PathSpec(
+        vfs_path="good", virtual="/good", directory="/", resolved=True
+    )
+
+    async def read_range(path, *, offset, size):
+        if path.virtual == "/bad":
+            raise PermissionError(13, "Permission denied", "/bad")
+        return b"a\nb\n"[offset : offset + size]
+
+    async def size_of(path):
+        return 4
+
+    out, io = await tac(
+        [bad, good],
+        read_stream=_read_stream({}),
+        read_range=read_range,
+        size_of=size_of,
+    )
+    assert b"".join([c async for c in out]) == b"b\na\n"
+    assert io.exit_code == 1
+    assert b"/bad" in io.stderr
+
+
+@pytest.mark.asyncio
+async def test_a_raw_byte_separator_splits_on_that_byte():
+    out, _ = await tac(
+        [],
+        read_stream=_read_stream({}),
+        stdin=b"a\x80b\x80",
+        separator="\udc80",
+    )
+    got = out if isinstance(out, bytes) else b"".join([c async for c in out])
+    assert got == b"b\x80a\x80"

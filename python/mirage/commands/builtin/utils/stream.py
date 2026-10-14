@@ -15,9 +15,19 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
+from mirage.commands.builtin.constants import (
+    RANGE_FIRST_BLOCK,
+    RANGE_MAX_BLOCK,
+)
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.io.types import ByteSource, materialize
-from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
+from mirage.types import (
+    FileStat,
+    FileType,
+    PathSpec,
+    PolymorphicReadFn,
+    ReadRangeFn,
+)
 
 # The backend config a platform command threads through to its reader.
 # Generic rather than a union: the config and the reader that consumes
@@ -170,3 +180,27 @@ def stdin_stat(
         return await stat(path)
 
     return probe
+
+
+async def ranged_stream(
+    read_range: ReadRangeFn, path: PathSpec, start: int, end: int
+) -> AsyncIterator[bytes]:
+    """Bytes ``start`` to ``end`` of a file, one ranged read per block,
+    so a reader that stops early leaves the rest unread and no block is
+    held whole.
+
+    Args:
+        read_range (ReadRangeFn): the mount's byte window.
+        path (PathSpec): the file.
+        start (int): the first byte.
+        end (int): one past the last byte.
+    """
+    block = RANGE_FIRST_BLOCK
+    while start < end:
+        size = min(block, end - start)
+        data = bytes(await read_range(path, offset=start, size=size))
+        if not data:
+            return
+        yield data
+        start += len(data)
+        block = min(block * 2, RANGE_MAX_BLOCK)

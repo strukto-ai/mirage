@@ -49,6 +49,7 @@ from mirage.errors.fs import (
 from mirage.errors.types import DotWalkError
 from mirage.io import IOResult
 from mirage.io.stream import close_quietly, ensure_stream, materialize
+from mirage.observe.context import revision_for
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.policy.types import EntryGate
@@ -937,11 +938,15 @@ def file_size(
     the size alone (``wc -c``), as GNU takes it from ``st_size``.
 
     None reads the file instead: for a file the read cache holds, which
-    is read from there as the read it replaces would be, for anything
-    but a regular file (a device or a pipe has no size to trust), and
-    for a size the stat does not know. A directory fails with EISDIR as
-    ``dir_aware_stat`` has it. Called as ``size(path)``; mirrors
-    ``fileSize`` in adapter.ts.
+    is read from there as the read it replaces would be; for anything
+    but a regular file (a device or a pipe has no size to trust); for a
+    size the stat does not know; for a path pinned to an older revision,
+    whose size the stat does not give; and for a store that keeps
+    permission bits (a disk, SFTP), where a file the stat sees may still
+    refuse its read, and a disk's named pipe stats as a file. A store
+    without them grants the read with the stat. A directory fails with
+    EISDIR as ``dir_aware_stat`` has it. Called as ``size(path)``;
+    mirrors ``fileSize`` in adapter.ts.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
@@ -954,8 +959,12 @@ def file_size(
         manager = active_cache_manager()
         if manager is not None and await manager.is_cached(path):
             return None
+        if revision_for(path.virtual) is not None:
+            return None
         st = await _stat_refusing_dirs(ops, accessor, opts, path)
-        return st.size if st.type == FileType.FILE else None
+        if st.type != FileType.FILE or st.mode is not None:
+            return None
+        return st.size
 
     return size
 

@@ -169,3 +169,24 @@ describe('a stored digest', () => {
     expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('/f: OK\n')
   })
 })
+
+// Mirrors python's test_a_failed_stored_digest_is_reported_and_the_rest_hash.
+it('reports a failed stored digest and hashes the rest', async () => {
+  const stored = (p: PathSpec): Promise<string | null> =>
+    p.virtual === '/b'
+      ? Promise.reject(Object.assign(new Error('/b'), { code: 'ENOENT' }))
+      : Promise.resolve('f'.repeat(32))
+  const result = await checksumGeneric(
+    [spec('/a'), spec('/b'), spec('/c')],
+    opts({}),
+    makeStream({}),
+    hasher,
+    'md5sum',
+    () => Promise.resolve(null),
+    stored,
+  )
+  const [out, io] = result ?? [null, new IOResult()]
+  expect(DEC.decode(await materialize(out))).toBe(`${'f'.repeat(32)}  /a\n${'f'.repeat(32)}  /c\n`)
+  expect(io.exitCode).toBe(1)
+  expect(DEC.decode(await materialize(io.stderr))).toBe('md5sum: /b: No such file or directory\n')
+})

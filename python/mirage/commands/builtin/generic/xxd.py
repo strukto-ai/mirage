@@ -13,6 +13,7 @@ from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
+    ranged_stream,
     resolve_source,
     stdin_stream,
 )
@@ -286,6 +287,19 @@ class XxdSeek:
     back: bool = False
 
 
+def parse_limit(raw: str | None) -> int | None:
+    """The ``-l`` operand: None for none, and a negative count too, which
+    xxd reads as no limit; ``0`` (or no number) dumps nothing.
+
+    Args:
+        raw (str | None): as typed.
+    """
+    if raw is None:
+        return None
+    limit = strtol(raw)
+    return None if limit < 0 else limit
+
+
 def parse_seek(raw: str) -> XxdSeek:
     """The ``-s`` operand.
 
@@ -348,7 +362,7 @@ async def _seeked(
     read_range: ReadRangeFn | None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None,
     seek: XxdSeek,
-    limit: int,
+    limit: int | None,
 ) -> tuple[AsyncIterator[bytes], int] | None:
     """INFILE from where ``-s`` puts it and within ``-l``, and the offset
     its first byte has; None when xxd cannot seek there.
@@ -366,9 +380,9 @@ async def _seeked(
         read_range (Callable | None): the mount's byte window.
         size_of (Callable | None): a regular file's size.
         seek (XxdSeek): -s.
-        limit (int): -l, 0 for no limit.
+        limit (int | None): -l, None for no limit.
     """
-    window = limit or None
+    window = limit
     if path is None or is_stdin(path):
         source = read(path) if path is not None else resolve_source(stdin)
         if seek.back:
@@ -393,10 +407,15 @@ async def _seeked(
     if data is not None:
         end = None if window is None else start + window
         return yield_bytes(data[start:end]), start
-    if read_range is not None and size is not None and (start or window):
-        want = max(size - start, 0)
-        if window is not None:
-            want = min(want, window)
+    if (
+        read_range is not None
+        and size is not None
+        and window is None
+        and start
+    ):
+        return ranged_stream(read_range, path, start, size), start
+    if read_range is not None and size is not None and window is not None:
+        want = min(max(size - start, 0), window)
         got = (
             bytes(await read_range(path, offset=start, size=want))
             if want
@@ -448,7 +467,7 @@ async def xxd(
     cols: int = 16,
     group: int = 2,
     seek: XxdSeek | None = None,
-    limit: int = 0,
+    limit: int | None = None,
     read_range: ReadRangeFn | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -471,7 +490,7 @@ async def xxd(
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
         stdin (ByteSource | None): standard input.
         seek (XxdSeek | None): -s.
-        limit (int): -l, 0 for no limit.
+        limit (int | None): -l, None for no limit.
         read_range (Callable | None): the mount's byte window, which
             serves a dump's -s and -l without reading what they pass.
         size_of (Callable | None): a regular file's size.
@@ -632,7 +651,7 @@ class XxdFlags:
     cols: int = 16
     group: int = 2
     seek: XxdSeek = XxdSeek()
-    limit: int = 0
+    limit: int | None = None
 
 
 def _count(value: FlagValue | None, default: int) -> int:
@@ -652,7 +671,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags:
         cols=_count(fl.raw("c"), 16),
         group=_count(fl.raw("g"), 2),
         seek=parse_seek(fl.as_str("s") or ""),
-        limit=strtol(fl.as_str("args_l") or ""),
+        limit=parse_limit(fl.as_str("args_l")),
     )
 
 

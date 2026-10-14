@@ -10,7 +10,10 @@ from mirage.commands.builtin.utils.operands import (
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, read_stdin_async
 from mirage.commands.config import CommandOpts
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
@@ -35,19 +38,26 @@ async def md5(
         digest = hashlib.md5(data).hexdigest()
         return f"{digest}  -\n".encode(), IOResult()
     outputs: list[str] = []
+    err = b""
     for p in paths:
-        found = (
-            await stored(p, "md5")
-            if stored is not None and not is_stdin(p)
-            else None
-        )
+        try:
+            found = (
+                await stored(p, "md5")
+                if stored is not None and not is_stdin(p)
+                else None
+            )
+        except FS_ERRORS as exc:
+            err += encode_text(fs_error_line("md5", p, exc))
+            continue
         digest = (
             found
             if found is not None
             else hashlib.md5(await read_bytes(p)).hexdigest()
         )
         outputs.append(f"{digest}  {p.raw_path}")
-    return format_records(outputs), IOResult()
+    return format_records(outputs), IOResult(
+        exit_code=1 if err else 0, stderr=err or None
+    )
 
 
 async def md5_generic(

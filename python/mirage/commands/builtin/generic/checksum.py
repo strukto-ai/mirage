@@ -26,11 +26,13 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import usage_exit_code, usage_hint
-from mirage.errors.constants import WALK_ERRORS
+from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.render import fs_error_line
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
@@ -517,17 +519,24 @@ async def checksum(
             exit_code=exit_code, stderr=b"".join(errs) or None
         )
     if paths:
-        digests = [
-            (
-                await stored(p, algorithm)
-                if stored is not None and not is_stdin(p)
-                else None
-            )
-            for p in paths
-        ]
+        kept: list[PathSpec] = []
+        digests: list[str | None] = []
+        err = b""
+        for p in paths:
+            try:
+                digest = (
+                    await stored(p, algorithm)
+                    if stored is not None and not is_stdin(p)
+                    else None
+                )
+            except FS_ERRORS as exc:
+                err += encode_text(fs_error_line(f"{algorithm}sum", p, exc))
+                continue
+            kept.append(p)
+            digests.append(digest)
         return _hash_multi(
-            paths, digests, read_stream, factory, algorithm, binary, tag, zero
-        ), IOResult()
+            kept, digests, read_stream, factory, algorithm, binary, tag, zero
+        ), IOResult(exit_code=1 if err else 0, stderr=err or None)
     source = resolve_source(stdin)
     return _hash_stream(
         source, "-", factory, algorithm, binary, tag, zero

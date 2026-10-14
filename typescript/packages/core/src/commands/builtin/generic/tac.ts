@@ -20,9 +20,10 @@ import type { PathSpec, ReadRangeFn } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
 import { operandsIo, singleChunk } from '../utils/operands.ts'
-import { TAC_FIRST_BLOCK, TAC_MAX_BLOCK } from '../constants.ts'
+import { RANGE_FIRST_BLOCK, RANGE_MAX_BLOCK } from '../constants.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
@@ -78,12 +79,12 @@ async function* reverseRanged(
 ): AsyncIterable<Uint8Array> {
   let pos = size
   let held: Uint8Array = new Uint8Array()
-  let block = TAC_FIRST_BLOCK
+  let block = RANGE_FIRST_BLOCK
   while (pos > 0) {
     const start = Math.max(pos - block, 0)
     held = concat([await readRange(p, start, pos - start), held])
     pos = start
-    block = Math.min(block * 2, TAC_MAX_BLOCK)
+    block = Math.min(block * 2, RANGE_MAX_BLOCK)
     const at = indexOf(held, separator, 0)
     if (pos === 0 || at < 0) continue
     const cut = before ? at : at + 1
@@ -101,7 +102,7 @@ async function reverseSource(
   regex: boolean,
 ): Promise<Uint8Array> {
   const data = await materialize(source)
-  if (!regex) return concat(records(data, ENC.encode(separator), before).reverse())
+  if (!regex) return concat(records(data, encodeText(separator), before).reverse())
   const text = DEC.decode(data)
   const matcher = new RegExp(`(${separator})`, 'g')
   const parts = text.split(matcher)
@@ -133,20 +134,30 @@ function parseFlags(bag: Record<string, FlagValue>): TacFlags {
 }
 
 /** Each operand's records last first, one operand after another: a size
- * reads the file from its end, bytes are the file read whole. */
+ * reads the file from its end, bytes are the file read whole. An operand that
+ * fails to read is reported on `io` and the next one goes on, as GNU tac
+ * does. */
 async function* reversed(
   plans: readonly [PathSpec, number | Uint8Array][],
   readRange: ReadRangeFn | null,
   separator: string,
   before: boolean,
   regex: boolean,
+  io: IOResult,
 ): AsyncIterable<Uint8Array> {
   for (const [p, plan] of plans) {
-    if (typeof plan === 'number') {
-      if (readRange !== null)
-        yield* reverseRanged(readRange, p, plan, ENC.encode(separator), before)
-    } else {
-      yield await reverseSource(singleChunk(plan), separator, before, regex)
+    try {
+      if (typeof plan === 'number') {
+        if (readRange !== null)
+          yield* reverseRanged(readRange, p, plan, encodeText(separator), before)
+      } else {
+        yield await reverseSource(singleChunk(plan), separator, before, regex)
+      }
+    } catch (e) {
+      if (!isFsError(e)) throw e
+      const held = io.stderr === null ? new Uint8Array() : await materialize(io.stderr)
+      io.stderr = concat([held, encodeText(fsErrorLine('tac', p, e))])
+      io.exitCode = 1
     }
   }
 }
@@ -169,7 +180,7 @@ export async function tacGeneric(
   const { separator, before, regex } = parseFlags(opts.flags)
   if (paths.length > 0) {
     const ranged =
-      readRange !== null && sizeOf !== undefined && !regex && ENC.encode(separator).byteLength === 1
+      readRange !== null && sizeOf !== undefined && !regex && encodeText(separator).byteLength === 1
     const plans: [PathSpec, number | Uint8Array][] = []
     let err = ''
     for (const p of paths) {
@@ -183,7 +194,7 @@ export async function tacGeneric(
     }
     const io = operandsIo(err)
     if (plans.length === 0 && err !== '') return [null, io]
-    return [reversed(plans, readRange, separator, before, regex), io]
+    return [reversed(plans, readRange, separator, before, regex, io), io]
   }
   const result: ByteSource = await reverseSource(
     resolveSource(opts.stdin),

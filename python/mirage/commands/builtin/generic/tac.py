@@ -2,7 +2,10 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import TAC_FIRST_BLOCK, TAC_MAX_BLOCK
+from mirage.commands.builtin.constants import (
+    RANGE_FIRST_BLOCK,
+    RANGE_MAX_BLOCK,
+)
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     normalized_read,
@@ -18,7 +21,10 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, IOResult
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
+from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, ReadRangeFn, StatFn
 
 
@@ -80,13 +86,13 @@ async def _reverse_ranged(
     """
     pos = size
     held = b""
-    block = TAC_FIRST_BLOCK
+    block = RANGE_FIRST_BLOCK
     while pos > 0:
         start = max(pos - block, 0)
         got = await read_range(path, offset=start, size=pos - start)
         held = bytes(got) + held
         pos = start
-        block = min(block * 2, TAC_MAX_BLOCK)
+        block = min(block * 2, RANGE_MAX_BLOCK)
         at = held.find(separator)
         if pos == 0 or at < 0:
             continue
@@ -104,7 +110,9 @@ async def _reverse_source(
 ) -> bytes:
     data = b"".join([chunk async for chunk in source])
     if not regex:
-        return b"".join(reversed(_records(data, separator.encode(), before)))
+        return b"".join(
+            reversed(_records(data, encode_text(separator), before))
+        )
     text = data.decode(errors="replace")
     parts = re.split(f"({separator})", text)
     records: list[str] = []
@@ -126,26 +134,36 @@ async def _reversed(
     separator: str,
     before: bool,
     regex: bool,
+    io: IOResult,
 ) -> AsyncIterator[bytes]:
     """Each operand's records last first, one operand after another.
+
+    An operand that fails to read is reported on ``io`` and the next
+    one goes on, as GNU tac does.
 
     Args:
         plans (list[tuple[PathSpec, int | AsyncIterator[bytes]]]): each
             operand with its size, to read it from its end, or its
             stream, to read it whole.
-        read_range (Callable | None): the mount's byte window.
+        read_range (ReadRangeFn | None): the mount's byte window.
         separator (str): -s.
         before (bool): -b.
         regex (bool): -r.
+        io (IOResult): takes each failed operand's line.
     """
     for p, plan in plans:
-        if isinstance(plan, int) and read_range is not None:
-            async for chunk in _reverse_ranged(
-                read_range, p, plan, separator.encode(), before
-            ):
-                yield chunk
-        elif not isinstance(plan, int):
-            yield await _reverse_source(plan, separator, before, regex)
+        try:
+            if isinstance(plan, int) and read_range is not None:
+                async for chunk in _reverse_ranged(
+                    read_range, p, plan, encode_text(separator), before
+                ):
+                    yield chunk
+            elif not isinstance(plan, int):
+                yield await _reverse_source(plan, separator, before, regex)
+        except FS_ERRORS as exc:
+            held = await materialize(io.stderr) if io.stderr else b""
+            io.stderr = held + encode_text(fs_error_line("tac", p, exc))
+            io.exit_code = 1
 
 
 async def tac(
@@ -168,7 +186,7 @@ async def tac(
             read_range is not None
             and size_of is not None
             and not regex
-            and len(separator.encode()) == 1
+            and len(encode_text(separator)) == 1
         )
         plans: list[tuple[PathSpec, int | AsyncIterator[bytes]]] = []
         for p in paths:
@@ -178,10 +196,8 @@ async def tac(
                 else None
             )
             plans.append((p, size if size is not None else read_stream(p)))
-        return (
-            _reversed(plans, read_range, separator, before, regex),
-            IOResult(),
-        )
+        io = IOResult()
+        return _reversed(plans, read_range, separator, before, regex, io), io
 
     source = resolve_source(stdin)
     return await _reverse_source(source, separator, before, regex), IOResult()

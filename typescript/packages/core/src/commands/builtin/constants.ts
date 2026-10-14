@@ -28,11 +28,11 @@ export const MIME_SYMLINK = 'inode/symlink; charset=binary'
 // How much of a file `file` sniffs: only its first bytes are read.
 export const FILE_HEADER_BYTES = 512
 
-// tac reads a file that serves ranges from its end, a block at a time, each
-// twice the last up to the cap, so a short read takes one request and a long
-// one few.
-export const TAC_FIRST_BLOCK = 64 * 1024
-export const TAC_MAX_BLOCK = 8 * 1024 * 1024
+// A read of a file that serves ranges goes a block at a time (tac from the
+// end, xxd -s from its seek), each block twice the last up to the cap, so a
+// short read takes one request and a long one few.
+export const RANGE_FIRST_BLOCK = 64 * 1024
+export const RANGE_MAX_BLOCK = 8 * 1024 * 1024
 
 export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
   text: 'text/plain; charset=us-ascii',

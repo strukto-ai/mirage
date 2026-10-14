@@ -20,6 +20,7 @@ import {
   type SearchQuery,
 } from '../../../vfs/types.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
+import { revisionFor } from '../../../observe/context.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { declared } from '../../../vfs/call.ts'
 import { getExtension } from '../../../utils/filetype.ts'
@@ -687,10 +688,13 @@ export function dirAwareStat<A extends Accessor>(
  * A regular file's size from its stat, for a command whose answer is the size
  * alone (`wc -c`), as GNU takes it from `st_size`. Null reads the file
  * instead: for a file the read cache holds, which is read from there as the
- * read it replaces would be, for anything but a regular file (a device or a
- * pipe has no size to trust), and for a size the stat does not know. A
- * directory fails with EISDIR as `dirAwareStat` has it. Mirrors Python's
- * `file_size`.
+ * read it replaces would be; for anything but a regular file (a device or a
+ * pipe has no size to trust); for a size the stat does not know; for a path
+ * pinned to an older revision, whose size the stat does not give; and for a
+ * store that keeps permission bits (a disk, SFTP), where a file the stat sees
+ * may still refuse its read, and a disk's named pipe stats as a file. A store
+ * without them grants the read with the stat. A directory fails with EISDIR
+ * as `dirAwareStat` has it. Mirrors Python's `file_size`.
  */
 export function fileSize<A extends Accessor>(
   ops: CommandIO<A>,
@@ -700,8 +704,9 @@ export function fileSize<A extends Accessor>(
   return async (p) => {
     const manager = activeCacheManager()
     if (manager !== null && (await manager.isCached(p))) return null
+    if (revisionFor(p.virtual) !== null) return null
     const st = await statRefusingDirs(ops, accessor, opts, p)
-    return st.type === FileType.FILE ? st.size : null
+    return st.type === FileType.FILE && st.mode === null ? st.size : null
   }
 }
 

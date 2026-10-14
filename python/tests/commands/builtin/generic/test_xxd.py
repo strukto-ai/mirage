@@ -16,6 +16,7 @@ import pytest
 
 from mirage.commands.builtin.generic.xxd import (
     XxdSeek,
+    parse_limit,
     parse_seek,
     strtol,
     xxd,
@@ -77,7 +78,7 @@ def _io(read: list[str]):
     [
         (
             "2",
-            0,
+            None,
             "00000002: 6667 68                                  fgh\n",
             ["2+3"],
         ),
@@ -87,10 +88,11 @@ def _io(read: list[str]):
             "00000003: 67                                       g\n",
             ["3+1"],
         ),
-        ("10", 0, "", []),
+        ("10", None, "", []),
+        ("1", 0, "", []),
         (
             "0",
-            0,
+            None,
             "00000000: 6465 6667 68                             defgh\n",
             ["stream"],
         ),
@@ -148,3 +150,38 @@ async def test_stdin_is_read_off_and_cannot_seek_back(seek, code, out):
     )
     got = b"" if stdout is None else await materialize(stdout)
     assert (got.decode(), io.exit_code) == (out, code)
+
+
+@pytest.mark.parametrize(
+    "raw,limit", [(None, None), ("2", 2), ("0", 0), ("x", 0), ("-1", None)]
+)
+def test_parse_limit_reads_no_limit_for_a_negative_count(raw, limit):
+    assert parse_limit(raw) == limit
+
+
+@pytest.mark.asyncio
+async def test_a_seek_without_a_limit_reads_growing_blocks():
+    data = bytes(range(256)) * 1024
+    asked: list[tuple[int, int]] = []
+
+    async def stream(path):
+        raise AssertionError("streamed")
+        yield b""
+
+    async def read_range(path, *, offset, size):
+        asked.append((offset, size))
+        return data[offset : offset + size]
+
+    async def size_of(path):
+        return len(data)
+
+    stdout, _ = await xxd(
+        [F],
+        read_stream=stream,
+        seek=parse_seek("16"),
+        read_range=read_range,
+        size_of=size_of,
+    )
+    first = await anext(stdout)
+    assert first.startswith(b"00000010: 1011 1213")
+    assert asked == [(16, 64 * 1024)]

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-import { parseSeek, strtol, xxdGeneric } from './xxd.ts'
+import { parseLimit, parseSeek, strtol, xxdGeneric } from './xxd.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -73,6 +73,7 @@ describe('xxd -s', () => {
     ['2', undefined, '00000002: 6667 68                                  fgh\n', ['2+3']],
     ['-2', '1', '00000003: 67                                       g\n', ['3+1']],
     ['10', undefined, '', []],
+    ['1', '0', '', []],
     ['0', undefined, '00000000: 6465 6667 68                             defgh\n', ['stream']],
   ])('-s %s -l %s', async (seek, limit, out, reads) => {
     const read: string[] = []
@@ -125,5 +126,46 @@ describe('xxd -s', () => {
     }
     const [stdout, result] = await xxdGeneric([], opts({ s: seek }, DATA), empty)
     expect([DEC.decode(await materialize(stdout)), result.exitCode]).toEqual([out, code])
+  })
+})
+
+describe('xxd -l', () => {
+  // Mirrors python's test_parse_limit_reads_no_limit_for_a_negative_count.
+  it.each([
+    [undefined, null],
+    ['2', 2],
+    ['0', 0],
+    ['x', 0],
+    ['-1', null],
+  ])('parseLimit %j', (raw, limit) => {
+    expect(parseLimit(raw)).toBe(limit)
+  })
+
+  // Mirrors python's test_a_seek_without_a_limit_reads_growing_blocks.
+  it('reads a seek without a limit in growing blocks', async () => {
+    const data = new Uint8Array(256 * 1024).map((_, i) => i % 256)
+    const asked: [number, number | null][] = []
+    const stream = (): AsyncIterable<Uint8Array> => {
+      throw new Error('streamed')
+    }
+    const readRange = (_p: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
+      asked.push([offset, size])
+      return Promise.resolve(data.subarray(offset, size === null ? undefined : offset + size))
+    }
+    const [stdout] = await xxdGeneric(
+      [F],
+      opts({ s: '16' }),
+      stream,
+      null,
+      null,
+      null,
+      readRange,
+      () => Promise.resolve(data.byteLength),
+    )
+    const first = await (stdout as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]().next()
+    expect(DEC.decode(first.done === true ? new Uint8Array() : first.value)).toMatch(
+      /^00000010: 1011 1213/,
+    )
+    expect(asked).toEqual([[16, 64 * 1024]])
   })
 })

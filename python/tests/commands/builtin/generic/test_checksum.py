@@ -176,3 +176,25 @@ async def test_check_reads_the_bytes_and_asks_no_stored_digest():
         stored=stored,
     )
     assert (out, io.exit_code) == (b"/f: OK\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
+    async def stored(p: PathSpec, algorithm: str) -> str | None:
+        if p.virtual == "/b":
+            raise FileNotFoundError(2, "No such file or directory", "/b")
+        return "f" * 32
+
+    read_bytes, read_stream = _fs({})
+    out, io = await checksum(
+        [_spec("/a"), _spec("/b"), _spec("/c")],
+        factory=_FakeDigest,
+        algorithm="md5",
+        read_bytes=read_bytes,
+        read_stream=read_stream,
+        stored=stored,
+    )
+    got = b"".join([chunk async for chunk in out])
+    assert got == f"{'f' * 32}  /a\n{'f' * 32}  /c\n".encode()
+    assert io.exit_code == 1
+    assert io.stderr == b"md5sum: /b: No such file or directory\n"
