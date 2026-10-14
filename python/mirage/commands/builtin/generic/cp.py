@@ -1847,10 +1847,14 @@ async def cp_generic(
                         policy,
                     )
                 continue
+            # A whole-tree copy cannot honor a merge's per-entry rules (a
+            # Drive copy adds a second entry of the same name, a Box one
+            # refuses the tree), so only a fresh destination takes it.
             if (
                 strategy.dir_copy is not None
                 and not per_entry_native
                 and not into_itself
+                and not target_exists
             ):
                 tree = (
                     await _tree_lines(

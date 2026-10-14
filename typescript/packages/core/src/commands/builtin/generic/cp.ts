@@ -1406,7 +1406,10 @@ export async function cpGeneric(
         }
         continue
       }
-      if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself) {
+      // A whole-tree copy cannot honor a merge's per-entry rules (a Drive copy
+      // adds a second entry of the same name, a Box one refuses the tree), so
+      // only a fresh destination takes it.
+      if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself && !targetExists) {
         const tree = flags.verbose
           ? await treeLines(strategy, stat, src, target, srcBase, dstBase, index)
           : []
