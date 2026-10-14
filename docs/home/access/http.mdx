@@ -8,7 +8,9 @@ Use the Mirage server's HTTP API to create workspaces, run shell lines, access f
 
 ## Make a request
 
-Start a local server with the [CLI quickstart](/home/access/cli#quickstart), or connect to a server someone runs for you. The example below uses a CLI-started local server, which creates a token file when no token is configured. For another server, use its URL and the token its operator provides. See [Auth](#auth) for the local-mode exception.
+Start a local server with the [CLI quickstart](/home/access/cli#quickstart), or connect to a server someone runs for you. If you follow the quickstart, leave its `demo` workspace running until you finish these requests; deleting the last workspace stops the CLI-started server after 30 seconds.
+
+The requests below use a CLI-started local server, which creates a token file when no token is configured. For another server, use its URL and the token its operator provides. See [Auth](#auth) for the local-mode exception.
 
 ```bash
 TOKEN="$(cat "${MIRAGE_HOME:-$HOME/.mirage}/auth_token")"
@@ -38,7 +40,7 @@ When the server has a token configured, send it as `Authorization: Bearer <token
 
 Check the HTTP status and `Content-Type` before parsing an error response. Route errors generally include `detail` in JSON, but middleware errors such as authentication or an invalid `Host` can be plain text. Schema validation can return `422` with structured details. Limits vary by route.
 
-A successful HTTP response does not always mean the operation succeeded: check `exit_code` for shell results, `is_error` for tools, `status` and `error` for jobs, and the terminal record for a streamed shell line. If you receive `401`, check that the request sent a nonempty bearer token from the intended server or login; see [Configure authentication](#configure-authentication).
+A successful HTTP response does not always mean the operation succeeded: check `exit_code` for shell results, `is_error` for tools, and `status` and `error` for job details. A job can be `done` with no `error` even when its shell command fails, so also check `result.exit_code` on completed shell jobs. For a streamed shell line, check the terminal record. If you receive `401`, check that the request sent a nonempty bearer token from the intended server or login; see [Configure authentication](#configure-authentication).
 
 | Status | When |
 | --- | --- |
@@ -65,6 +67,8 @@ Answers `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}`, without a token.
 <Badge color="green">POST</Badge> `/v1/shutdown`
 
 Asks the server to stop. The daemon the CLI starts closes its workspaces and exits; a server you run yourself stops only if you gave it `on_idle_exit` (`onIdleExit` in TypeScript).
+
+<a id="run-it" />
 
 ## Run your own server
 
@@ -340,7 +344,7 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 ## Asks
 
-An ask pauses a line when a policy needs a decision. List pending asks, then allow or deny one to let the line continue or refuse it; see [Asks](/home/policy/policies#asks).
+An ask refuses the current action and records a pending decision. List pending asks, allow or deny one, then retry the refused line or VFS call in the same session; answering alone does not resume the original request. See [Asks](/home/policy/policies#asks).
 
 ### List asks
 
