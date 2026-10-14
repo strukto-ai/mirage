@@ -151,12 +151,20 @@ export function writes(session: SessionState, mounts: readonly MountEntry[]): bo
  * A file tool's call as the unit an op-level answer covers
  * (`Decisions.withinCall`): an approval for a path runs every op the call
  * makes on it, and the call's end spends it. `run` gets the session's
- * files as that call, so each op carries it and a call running at the
- * same time never claims this one's approval. Mirrors Python's `one_call`.
+ * files as that call, bound to the session by id (the default session's
+ * `vfs` is the unnamed facade), so each op carries it and a call running
+ * at the same time never claims this one's approval. The call is no
+ * line's, so its ops never read as a line's I/O, which skips the policy
+ * methods: without task isolation the caller in reach may be another
+ * task's line. Mirrors Python's `one_call`.
  */
 function oneCall<T>(session: SessionLike, run: (vfs: Files) => Promise<T>): Promise<T> {
   return session.decisions.withinCall(session.sessionId, (handed) =>
-    run(session.vfs.forCaller({ call: [session.decisions, handed, session.sessionId] })),
+    run(
+      session.vfs
+        .forSession(session.sessionId)
+        .forCaller({ call: [session.decisions, handed, session.sessionId], refusals: null }),
+    ),
   )
 }
 

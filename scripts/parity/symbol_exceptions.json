@@ -90,6 +90,7 @@
   },
   "execution/context": {
    "typescript_only": {
+    "captureExecutionContext": "Deferred TypeScript callbacks restore the execution async-local store explicitly; Python contextvars travel with the copied context."
    }
   },
   "workspace/abort": {
@@ -466,6 +467,7 @@
     "set_current_evaluation": "Python binds an evaluation with its session and returns the ContextVar token reset_current_session restores; TypeScript runWithEvaluation scopes the binding around an async callback."
    },
    "typescript_only": {
+    "CallerDispatchFn": "TypeScript's DispatchFn lives in the runtime types, which import no workspace module and so cannot name the Caller; the dispatcher and the workspace functions that hand it a caller take this type. Python's DispatchFn carries the caller through its keywords.",
     "runWithEvaluation": "TypeScript scopes the evaluation's session binding around a callback; Python set_current_evaluation returns a ContextVar token."
    }
   },

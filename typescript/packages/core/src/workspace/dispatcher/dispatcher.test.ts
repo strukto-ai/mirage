@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller } from '../../context/session_context.ts'
+import { type CallerDispatchFn, currentCaller } from '../../context/session_context.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
@@ -1355,7 +1355,7 @@ const byCommand = (
   args: readonly unknown[] = [],
   kwargs: Record<string, unknown> = {},
 ): Promise<[unknown, IOResult]> =>
-  (ws as unknown as { dispatcher: { dispatch: DispatchFn } }).dispatcher.dispatch(
+  (ws as unknown as { dispatcher: { dispatch: CallerDispatchFn } }).dispatcher.dispatch(
     op,
     spec(virtual),
     args,

@@ -119,6 +119,7 @@ import {
 } from './constants.ts'
 import {
   type Caller,
+  type CallerDispatchFn,
   effectivePathMode,
   explaining,
   getCurrentSession,
@@ -631,7 +632,7 @@ export class Dispatcher {
     return null
   }
 
-  dispatch: DispatchFn = (name, path, args, kwargs, report, caller) => {
+  dispatch: CallerDispatchFn = (name, path, args, kwargs, report, caller) => {
     if (caller !== undefined && caller !== this.caller) {
       const view = this.forCaller(caller)
       const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)

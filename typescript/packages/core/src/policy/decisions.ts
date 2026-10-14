@@ -935,6 +935,14 @@ export function getOpCall(owner: Decisions, sessionId: string): HandOff | null {
   return call?.[1] ?? null
 }
 
+// The ledger's call on the caller: added here, where Decisions lives, so
+// the caller's module imports no policy module.
+declare module '../context/session_context.ts' {
+  interface Caller {
+    readonly call: readonly [Decisions, HandOff, string] | null
+  }
+}
+
 /**
  * The call `caller` runs in under `owner`'s ledger for `sessionId`, null
  * for a bare op, for a call another ledger runs or for another session's

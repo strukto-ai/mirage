@@ -33,6 +33,16 @@ export interface RevisionsState {
   map: Map<string, string> | null
 }
 
+// Where the running line records its calls, with the mount serving them,
+// and the revision pins, on the caller: added here, where their shapes
+// live, so the caller's module imports no observe module.
+declare module '../context/session_context.ts' {
+  interface Caller {
+    readonly recording: RecordingState | null
+    readonly revisions: RevisionsState | null
+  }
+}
+
 /**
  * Collect the records the running command itself emits.
  *

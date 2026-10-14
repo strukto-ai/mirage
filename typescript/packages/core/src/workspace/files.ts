@@ -19,8 +19,12 @@ import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
-import type { DispatchFn } from '../runtime/types.ts'
-import { type Caller, currentCaller, getCurrentSession } from '../context/session_context.ts'
+import {
+  type Caller,
+  type CallerDispatchFn,
+  currentCaller,
+  getCurrentSession,
+} from '../context/session_context.ts'
 import type { NamespaceLinks, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
@@ -41,7 +45,7 @@ export interface FilesOptions {
   caller?: Partial<Caller> | null
   // The dispatcher bound to the session a bind put in place; the plain
   // dispatch serves an op that kept the caller's ambient session.
-  dispatchAs?: ((owner: SessionAccess) => DispatchFn) | null
+  dispatchAs?: ((owner: SessionAccess) => CallerDispatchFn) | null
   sessionId?: string | null
   records?: OpRecord[]
 }
@@ -114,14 +118,14 @@ async function* recorded(
  * reaching the dispatcher from widening the view it was given.
  */
 export class Files {
-  private readonly dispatchFn: DispatchFn
+  private readonly dispatchFn: CallerDispatchFn
   private readonly sink: OpSink | null
   // Injected namespace seam (workspace wires it); the mount core follows
   // `links` to recognise one file opened through a link and its target.
   readonly links: NamespaceLinks | null
   private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
-  private readonly dispatchAs: ((owner: SessionAccess) => DispatchFn) | null
+  private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
@@ -133,7 +137,7 @@ export class Files {
   readonly records: OpRecord[]
 
   constructor(
-    dispatch: DispatchFn,
+    dispatch: CallerDispatchFn,
     sink: OpSink | null = null,
     links: NamespaceLinks | null = null,
     ownerOf: OwnerOf = () => null,

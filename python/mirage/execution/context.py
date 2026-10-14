@@ -1,10 +1,10 @@
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from contextvars import ContextVar
 from typing import TypeVar
 
-from mirage.context import bind_caller, current_caller, reset_caller
 from mirage.utils.ids import uuid7
 
+_current: ContextVar[str | None] = ContextVar("execution_id", default=None)
 T = TypeVar("T")
 
 
@@ -13,14 +13,14 @@ def new_execution_id() -> str:
 
 
 def current_execution_id() -> str | None:
-    return current_caller().execution_id
+    return _current.get()
 
 
 async def run_with_execution(
     execution_id: str, run: Callable[[], Awaitable[T]]
 ) -> T:
-    token = bind_caller(replace(current_caller(), execution_id=execution_id))
+    token = _current.set(execution_id)
     try:
         return await run()
     finally:
-        reset_caller(token)
+        _current.reset(token)

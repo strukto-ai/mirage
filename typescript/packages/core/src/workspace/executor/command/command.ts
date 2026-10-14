@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, getAdmission, sessionAccess } from '../../../context/session_context.ts'
+import {
+  type CallerDispatchFn,
+  currentCaller,
+  getAdmission,
+  sessionAccess,
+} from '../../../context/session_context.ts'
 import type { EntryGate } from '../../../policy/types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { isBuiltinGrammar, registeredSpec } from '../../../commands/spec/builtins.ts'
@@ -46,7 +51,6 @@ import { ExecutionNode } from '../../types.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
 import {
   handleCrossMount,
   isCrossMount,
@@ -135,7 +139,7 @@ async function finishFind(
   executeFn: ExecuteFn | undefined,
   ns: NamespaceView | undefined,
   statPath: StatPath,
-  dispatch: DispatchFn,
+  dispatch: CallerDispatchFn,
   stdin: ByteSource | null,
   starts: readonly PathSpec[],
   signal: AbortSignal | undefined,
@@ -175,7 +179,7 @@ function spelledWords(parts: readonly (string | PathSpec)[]): string[] {
 
 export async function handleCommand(
   executeNode: ExecuteNodeFn,
-  dispatch: DispatchFn,
+  dispatch: CallerDispatchFn,
   registry: MountRegistry,
   parts: readonly (string | PathSpec)[],
   context: EvaluationContext,

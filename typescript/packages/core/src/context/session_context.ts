@@ -15,7 +15,7 @@
 import type { SessionAccess } from '../view/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
-import type { ByteSource, IOResult } from '../io/types.ts'
+import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { Redirect } from '../shell/types.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { ExecutionNode } from '../workspace/types.ts'
@@ -25,18 +25,8 @@ import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
-import type { DryRun, VfsExplanation, EntryGate, HandOff } from '../policy/types.ts'
-import type { Decisions } from '../policy/decisions.ts'
-import type { Policies } from '../policy/policies.ts'
-import type { LineAbortFrame } from '../workspace/abort.ts'
+import type { DryRun, VfsExplanation, EntryGate } from '../policy/types.ts'
 import type { OpRecord } from '../observe/record.ts'
-import type { RecordingState, RevisionsState } from '../observe/context.ts'
-import type {
-  CacheContextState,
-  OwnVersionBinding,
-  ReadFacts,
-  WriteBinding,
-} from '../cache/context.ts'
 import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -77,7 +67,11 @@ export type RedirectRunner = (
  * pulled later, a runtime's callback) keeps the record it was made with.
  * `owner` is the session manager the session belongs to, one per
  * workspace; `evaluation` the evaluation running on the session, which a
- * layer bound to another session never carries. Mirrors Python's Caller.
+ * layer bound to another session never carries. The fields whose type
+ * lives in a module that reads the caller (the ledger's call, the
+ * policies, the line's abort, the recording and the cache bindings) are
+ * added in that module, so this one imports none of them. Mirrors
+ * Python's Caller.
  */
 export interface Caller {
   readonly session: SessionState | null
@@ -95,25 +89,28 @@ export interface Caller {
     | readonly [object, readonly PathSpec[], RedirectRunner | null, readonly Redirect[]]
     | null
   readonly program: SessionState | null
-  readonly call: readonly [Decisions, HandOff, string] | null
-  readonly policies: Policies | null
   readonly stop: AbortController | null
   readonly writeHeld: boolean
-  readonly lineAbort: LineAbortFrame | null
-  readonly executionId: string | null
-  // Where the running line records its calls, with the mount serving them.
-  readonly recording: RecordingState | null
-  readonly revisions: RevisionsState | null
   // The running command's own records, and those of the command it runs in.
   readonly commandSink: readonly [OpRecord[] | null, OpRecord[]] | null
-  // The cache a backend's writes report to.
-  readonly cache: CacheContextState | null
-  readonly readFacts: ReadFacts | null
-  readonly write: WriteBinding | null
-  readonly ownVersion: OwnVersionBinding | null
   // When the running command started.
   readonly started: number | null
 }
+
+/**
+ * A dispatch that takes who makes the op: the dispatcher's own, and each
+ * workspace function that hands it a caller. The runtime's DispatchFn
+ * leaves the caller out, as no runtime passes one; Python's carries it
+ * through its keywords.
+ */
+export type CallerDispatchFn = (
+  name: string,
+  path: PathSpec,
+  args?: readonly unknown[],
+  kwargs?: Record<string, unknown>,
+  report?: OpReport,
+  caller?: Caller,
+) => Promise<[unknown, IOResult]>
 
 const UNBOUND: Caller = {
   session: null,
@@ -132,7 +129,6 @@ const UNBOUND: Caller = {
   stop: null,
   writeHeld: false,
   lineAbort: null,
-  executionId: null,
   recording: null,
   revisions: null,
   commandSink: null,

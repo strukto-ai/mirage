@@ -134,7 +134,6 @@ class Caller:
             workspace's write admission.
         line_writer (StatusWriter | None): the identity of the line
             running on this task.
-        execution_id (str | None): the running execution's id.
         recorder (Recorder | None): where the running line records its
             calls, with the mount serving them.
         command_sink (tuple | None): the running command's own records,
@@ -175,7 +174,6 @@ class Caller:
     stop: asyncio.Event | None = None
     write_held: bool = False
     line_writer: StatusWriter | None = None
-    execution_id: str | None = None
     recorder: Recorder | None = None
     command_sink: tuple[list[OpRecord] | None, list[OpRecord]] | None = None
     revisions: dict[str, str] | None = None

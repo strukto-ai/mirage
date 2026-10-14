@@ -252,6 +252,18 @@ export interface OwnVersionBinding {
   version: string | OwnRead | null
 }
 
+// The cache a backend's writes report to, and what its reads and writes
+// note, on the caller: added here, where their shapes live, so the
+// caller's module imports no cache module.
+declare module '../context/session_context.ts' {
+  interface Caller {
+    readonly cache: CacheContextState | null
+    readonly readFacts: ReadFacts | null
+    readonly write: WriteBinding | null
+    readonly ownVersion: OwnVersionBinding | null
+  }
+}
+
 /** Run `fn` with `context` bound as the write context of the mount at `prefix`. */
 export function runWithWriteContext<T>(
   prefix: string,

@@ -97,6 +97,7 @@ import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
   currentCaller,
+  type CallerDispatchFn,
   getAdmission,
   getCurrentSessionUnlessForeign,
   runExplaining,
@@ -119,6 +120,7 @@ import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine, explainedLine, holds, lineJudgments } from '../node/explain.ts'
 import { Documents } from '../documentation/documents.ts'
 import { getCurrentSessionFor, sessionAccess } from '../../context/session_context.ts'
+import { captureExecutionContext } from '../../execution/context.ts'
 import { abortable } from '../../utils/abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
@@ -654,7 +656,10 @@ export class Workspace {
     // capture keeps the dispatcher's fold across every live session.
     const dispatcher =
       sessionId === undefined ? this.dispatcher : this.dispatcher.forSession(session)
-    const scope = new ContextScope([...captureSessionContext(session, this.sessionManager)])
+    const scope = new ContextScope([
+      ...captureSessionContext(session, this.sessionManager),
+      captureExecutionContext(),
+    ])
     return captureBinding(
       this.runtimeBinding,
       {
@@ -722,7 +727,10 @@ export class Workspace {
     // terminal, so the command limits bound what it hands back wherever
     // the parent's own output goes.
     child.terminalOutput = true
-    const scope = new ContextScope([...captureSessionContext(child, this.sessionManager)])
+    const scope = new ContextScope([
+      ...captureSessionContext(child, this.sessionManager),
+      captureExecutionContext(),
+    ])
     const input = new ProcessInput(this.io.bufferBytes),
       output = new ProcessOutput(request.mergeStderr, this.io.bufferBytes),
       abort = new AbortController()
@@ -800,7 +808,7 @@ export class Workspace {
     dispatcher: Dispatcher = this.dispatcher,
     gate: EntryGate | null = null,
   ): BridgeDispatchFn {
-    const dispatch: DispatchFn = (op, path, args, kwargs, report, caller) =>
+    const dispatch: CallerDispatchFn = (op, path, args, kwargs, report, caller) =>
       dispatcher.dispatch(
         op,
         path,

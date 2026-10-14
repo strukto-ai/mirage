@@ -828,6 +828,14 @@ export class Policies {
  * call time by `withCommandGuards`; unset outside a dispatched command
  * (a generic invoked directly in a test), where the guard is inert.
  */
+// The policies a call consults, on the caller: added here, where Policies
+// lives, so the caller's module imports no policy module.
+declare module '../context/session_context.ts' {
+  interface Caller {
+    readonly policies: Policies | null
+  }
+}
+
 export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
   return runWithCaller({ ...currentCaller(), policies }, fn)
 }

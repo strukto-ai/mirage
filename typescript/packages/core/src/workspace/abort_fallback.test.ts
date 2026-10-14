@@ -14,10 +14,11 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
-import { runWithLineAbort } from './abort.ts'
+import { lineSignal, runWithLineAbort } from './abort.ts'
 import { recordStatus } from './executor/statement.ts'
 import { SessionState } from './session/session.ts'
 import { newStatusWriter } from './abort.ts'
+import { currentCaller, runWithCaller } from '../context/session_context.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -44,6 +45,17 @@ function gate(): [Promise<void>, () => void] {
 }
 
 describe('the status write on the fallback storage', () => {
+  it("a line's own layers count as one line", async () => {
+    // Each layer below the line copies its frame; counted per layer, the
+    // line would read as two and its reads lose the signal.
+    const a = new SessionState({ sessionId: 'a', cwd: '/' })
+    const abort = new AbortController()
+    const seen = await runWithLineAbort(abort.signal, [a], newStatusWriter(), () =>
+      runWithCaller({ ...currentCaller(), writeHeld: true }, () => Promise.resolve(lineSignal(a))),
+    )
+    expect(seen).toBe(abort.signal)
+  })
+
   it('an aborted line does not reach a concurrent line on another session', async () => {
     // B binds after A and aborts; while B's frame is the newest, A stamps.
     // The slot would answer A with B's signal and make A throw B's abort.

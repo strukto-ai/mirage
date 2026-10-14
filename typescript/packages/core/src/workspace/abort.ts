@@ -14,6 +14,7 @@
 
 import { makeAbortError, mergeSignals } from '../utils/abort.ts'
 import {
+  type CallerDispatchFn,
   currentCaller,
   getCurrentEvaluation,
   getCurrentSession,
@@ -21,7 +22,6 @@ import {
   runWithCaller,
 } from '../context/session_context.ts'
 import type { StatusWriter } from './types.ts'
-import type { DispatchFn } from '../runtime/types.ts'
 import type { SessionState } from './session/session.ts'
 
 /**
@@ -37,6 +37,14 @@ export interface LineAbortFrame {
   signal: AbortSignal | undefined
   sessions: readonly SessionState[]
   writer: StatusWriter
+}
+
+// The line's abort on the caller: added here, where LineAbortFrame lives,
+// so the caller's module imports no workspace module.
+declare module '../context/session_context.ts' {
+  interface Caller {
+    readonly lineAbort: LineAbortFrame | null
+  }
 }
 
 /**
@@ -120,7 +128,10 @@ export function abortedLine(session: SessionState): AbortSignal | undefined {
  * stops it there without threading the signal through each handler. An
  * op already in flight settles on its own.
  */
-export function guardDispatch(dispatch: DispatchFn, signal: AbortSignal | undefined): DispatchFn {
+export function guardDispatch(
+  dispatch: CallerDispatchFn,
+  signal: AbortSignal | undefined,
+): CallerDispatchFn {
   if (signal === undefined) return dispatch
   return (op, path, args, kwargs, report, caller) => {
     if (signal.aborted) return Promise.reject(makeAbortError(signal))
@@ -128,9 +139,16 @@ export function guardDispatch(dispatch: DispatchFn, signal: AbortSignal | undefi
   }
 }
 
-/** Every line frame live in this context, oldest first. */
+/**
+ * Every line frame live in this context, oldest first, each once: on the
+ * fallback storage the layers of one line each copy its frame.
+ */
 function lineFrames(): LineAbortFrame[] {
-  return liveCallers().flatMap((caller) => (caller.lineAbort === null ? [] : [caller.lineAbort]))
+  return [
+    ...new Set(
+      liveCallers().flatMap((caller) => (caller.lineAbort === null ? [] : [caller.lineAbort])),
+    ),
+  ]
 }
 
 /** A fresh line identity. */
