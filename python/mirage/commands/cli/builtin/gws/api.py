@@ -19,7 +19,6 @@ from enum import Enum, auto
 from typing import Any
 from urllib.parse import quote
 
-from mirage.cache.context import invalidate_after_write
 from mirage.commands.cli.builtin.gws.methods import (
     GWS_METHODS,
     SERVICE_BASES,
@@ -42,7 +41,7 @@ from mirage.core.google.client import (
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue, PathSpec
+from mirage.types import JsonValue
 
 _PARAMS_HELP = (
     'JSON object of path and query parameters, e.g. \'{"fileId":"abc"}\''
@@ -60,17 +59,6 @@ API_OPTIONS: tuple[Argument, ...] = (
     Argument("--page-all", action="store_true", help=_PAGE_ALL_HELP),
     Argument("--page-limit", help=_PAGE_LIMIT_HELP),
 )
-
-
-async def invalidate_mount_listing() -> None:
-    """Flush a mounted listing after a gws mutation, when one is cached.
-
-    gws commands mutate Drive items by id, so the precise resource path is
-    unknown; invalidating a synthetic root child flushes the cached root
-    listing so newly created items surface in the next ls. No-op when no
-    cache manager is active (the usual case for a CLI line).
-    """
-    await invalidate_after_write(PathSpec.from_str_path("/.gws-write"))
 
 
 def _parse_json_flag(value: FlagValue | None, flag: str) -> dict[str, Any]:
@@ -291,7 +279,6 @@ async def run_gws_method(
         )
         if method.placement == "relocate" and isinstance(result, dict):
             await place_in_scope(method, token_manager, result)
-        await invalidate_mount_listing()
         if result is _NO_CONTENT:
             return None, IOResult()
         out = json_lib.dumps(

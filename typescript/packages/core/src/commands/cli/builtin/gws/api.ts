@@ -14,7 +14,6 @@
 import { CommandSpec } from '../../../spec/types.ts'
 import { CLIHandler } from '../../types.ts'
 
-import { invalidateAfterWrite } from '../../../../cache/context.ts'
 import { TokenManager } from '../../../../core/google/client.ts'
 import {
   driveBase,
@@ -26,7 +25,6 @@ import {
 } from '../../../../core/google/client.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 
 import type { CLIInvocation } from '../../types.ts'
@@ -49,15 +47,6 @@ const API_OPTIONS: readonly Argument[] = [
   new Argument('--page-all', { action: 'store_true', help: PAGE_ALL_HELP }),
   new Argument('--page-limit', { help: PAGE_LIMIT_HELP }),
 ]
-
-// Flush a mounted listing after a gws mutation, when one is cached: gws
-// commands mutate Drive items by id, so the precise resource path is unknown;
-// invalidating a synthetic root child flushes the cached root listing so
-// newly created items surface in the next ls. No-op when no cache manager
-// is active (the usual case for a CLI line).
-async function invalidateMountListing(): Promise<void> {
-  await invalidateAfterWrite(PathSpec.fromStrPath('/.gws-write'))
-}
 
 function parseJsonFlag(value: unknown, flag: string): Record<string, unknown> {
   if (value === undefined || value === null || value === '') return {}
@@ -255,7 +244,6 @@ export async function runGwsMethod(
   if (method.placement === 'relocate' && result !== NO_CONTENT && result !== null) {
     await placeInScope(method, tm, result as Record<string, unknown>)
   }
-  await invalidateMountListing()
   if (result === NO_CONTENT) return [null, new IOResult()]
   return [ENC.encode(JSON.stringify(result)), new IOResult()]
 }
