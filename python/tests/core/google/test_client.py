@@ -26,6 +26,7 @@ from mirage.core.google.client import (
     forms_base,
     gmail_base,
     google_error_message,
+    google_get_stream,
     google_headers,
     sheets_base,
     slides_base,
@@ -143,3 +144,23 @@ async def test_google_headers_carry_the_bearer_token():
     with _refresh_returning("my-token"):
         headers = await google_headers(_manager())
     assert headers["Authorization"] == "Bearer my-token"
+
+
+@pytest.mark.asyncio
+async def test_a_stream_closed_early_closes_its_download():
+    closed: list[bool] = []
+
+    async def download(url, **kwargs):
+        try:
+            yield b"a"
+            yield b"b"
+        finally:
+            closed.append(True)
+
+    tm = _manager()
+    tm.get_token = AsyncMock(return_value="tok")
+    with patch("mirage.core.google.client.api_stream", download):
+        stream = google_get_stream(tm, "https://drive.test/f")
+        assert await anext(stream) == b"a"
+        await stream.aclose()
+    assert closed == [True]

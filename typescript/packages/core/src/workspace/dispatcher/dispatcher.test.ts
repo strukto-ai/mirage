@@ -31,6 +31,7 @@ import { CommandTimeoutError } from '../../errors/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
+import { followedDay } from '../../core/time_range.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
@@ -1218,6 +1219,45 @@ describe('a cold read keeps its bytes for the next reader', () => {
     await ws.cache.remove('/data/f.count')
     await ws.dispatch('read', '/data/f.count', [], { direct: true })
     expect(await ws.cache.exists('/data/f.count')).toBe(false)
+  })
+
+  it('closes an idle follow through the mount', async () => {
+    // A follow past its day waits to be closed; that close has to reach it
+    // through the mount's wrappers while a pull waits, or the follow holds
+    // the mount forever.
+    class FollowedRAM extends RAMVFS {
+      override follow(): Promise<AsyncIterable<Uint8Array> | null> {
+        return Promise.resolve(followedDay([{ ts: '1' }], 1, 0, 0.001, () => Promise.resolve([])))
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/m': new FollowedRAM() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.vfs.write('/m/day', '{"ts":"1"}\n')
+      const stream = (await ws.dispatch(
+        'follow',
+        '/m/day',
+        [1, 0.001],
+      )) as AsyncIterable<Uint8Array>
+      const lines = stream[Symbol.asyncIterator]()
+      expect(DEC.decode((await lines.next()).value as Uint8Array)).toBe('{"ts":"1"}\n')
+      const idle = lines.next()
+      const closed = await Promise.race([
+        lines.return?.().then(() => 'closed'),
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve('stuck')
+          }, 500)
+        }),
+      ])
+      expect(closed).toBe('closed')
+      expect((await idle).done).toBe(true)
+    } finally {
+      await ws.close()
+    }
   })
 
   it('asks past a stale listing on a fresh stat', async () => {

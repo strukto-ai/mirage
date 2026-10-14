@@ -942,11 +942,13 @@ def file_size(
     permission bits (a disk, SFTP), where a file the stat sees may still
     refuse its read, and a disk's named pipe stats as a file. A store
     without them grants the read with the stat. A directory fails with
-    EISDIR as ``dir_aware_stat`` has it. The size itself comes from a
-    stat that asks the backend past the mount's index (``fresh``): a
-    listing the index holds can be up to its TTL old, and a size read
-    off it would count bytes a read would not. Called as
-    ``size(path)``; mirrors ``fileSize`` in adapter.ts.
+    EISDIR as ``dir_aware_stat`` has it. A listing the index holds can
+    be up to its TTL old, so the size is checked against a stat that
+    asks the backend now (``fresh``), and a file whose size moved since
+    the listing is read: whether that read serves the listed version (a
+    GitHub blob the listing named) or the current one, it is what the
+    command counts. Called as ``size(path)``; mirrors ``fileSize`` in
+    adapter.ts.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
@@ -967,9 +969,9 @@ def file_size(
         if opts.dispatch is None:
             return st.size
         now, _ = await opts.dispatch("stat", path, fresh=True)
-        if not isinstance(now, FileStat) or now.type != FileType.FILE:
+        if not isinstance(now, FileStat) or now.size != st.size:
             return None
-        return now.size
+        return st.size
 
     return size
 

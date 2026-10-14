@@ -691,10 +691,11 @@ export function dirAwareStat<A extends Accessor>(
  * store that keeps permission bits (a disk, SFTP), where a file the stat sees
  * may still refuse its read, and a disk's named pipe stats as a file. A store
  * without them grants the read with the stat. A directory fails with EISDIR
- * as `dirAwareStat` has it. The size itself comes from a stat that asks the
- * backend past the mount's index (`fresh`): a listing the index holds can be
- * up to its TTL old, and a size read off it would count bytes a read would
- * not. Mirrors Python's `file_size`.
+ * as `dirAwareStat` has it. A listing the index holds can be up to its TTL
+ * old, so the size is checked against a stat that asks the backend now
+ * (`fresh`), and a file whose size moved since the listing is read: whether
+ * that read serves the listed version (a GitHub blob the listing named) or the
+ * current one, it is what the command counts. Mirrors Python's `file_size`.
  */
 export function fileSize<A extends Accessor>(
   ops: CommandIO<A>,
@@ -709,7 +710,7 @@ export function fileSize<A extends Accessor>(
     if (st.type !== FileType.FILE || st.mode !== null) return null
     if (opts.dispatch === undefined) return st.size
     const [now] = await opts.dispatch('stat', p, [], { fresh: true })
-    return now instanceof FileStat && now.type === FileType.FILE ? now.size : null
+    return now instanceof FileStat && now.size === st.size ? st.size : null
   }
 }
 

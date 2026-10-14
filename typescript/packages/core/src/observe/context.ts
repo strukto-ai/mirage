@@ -227,21 +227,41 @@ export function runWithMountContext<T>(fn: () => Promise<T>, mountId?: string | 
  * underlying source. A command may return a stream that defers its backend
  * read to the first chunk request, by which point the mount's own scope has
  * already exited, so without this the record lands under whatever frame
- * drains it. Mirrors python's `with_mount_context`.
+ * drains it. An iterator rather than a generator: a generator queues `return`
+ * behind a pull waiting for the next chunk, so the close of an idle follow
+ * would never reach the source whose own close ends that wait. Mirrors
+ * python's `with_mount_context`.
  */
-export async function* withMountContext(
+export function withMountContext(
   it: AsyncIterable<Uint8Array>,
   mountId?: string | null,
-): AsyncGenerator<Uint8Array> {
+): AsyncIterableIterator<Uint8Array> {
   const iter = it[Symbol.asyncIterator]()
-  try {
-    for (;;) {
-      const step = await runWithMountContext(() => iter.next(), mountId)
-      if (step.done === true) return
-      yield step.value
-    }
-  } finally {
-    await iter.return?.(undefined)
+  let ended = false
+  const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
+  return {
+    async next(): Promise<IteratorResult<Uint8Array>> {
+      if (ended) return done
+      try {
+        const step = await runWithMountContext(() => iter.next(), mountId)
+        if (step.done === true) ended = true
+        return step
+      } catch (err) {
+        ended = true
+        await iter.return?.(undefined)
+        throw err
+      }
+    },
+    async return(): Promise<IteratorResult<Uint8Array>> {
+      if (!ended) {
+        ended = true
+        await iter.return?.(undefined)
+      }
+      return done
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
   }
 }
 

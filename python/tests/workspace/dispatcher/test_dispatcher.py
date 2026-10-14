@@ -27,6 +27,7 @@ from mirage.context import (
     reset_current_session,
     set_current_session,
 )
+from mirage.core.time_range import followed_day
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
 from mirage.errors.types import (
@@ -1493,6 +1494,39 @@ async def test_a_direct_read_neither_serves_nor_keeps_the_cache():
     await ws.cache.remove("/data/f.count")
     await ws.dispatch("read", path, direct=True)
     assert not await ws.cache.exists("/data/f.count")
+
+
+class _FollowedRAM(RAMVFS):
+    async def follow(self, path, n, interval, index=NULL_INDEX):
+        return followed_day([{"ts": "1"}], 1, 0, 0.001, _nothing_after)
+
+
+async def _nothing_after(last):
+    return []
+
+
+@pytest.mark.asyncio
+async def test_an_idle_follow_closes_through_the_mount():
+    # A follow past its day waits to be closed; the pull that waits on it
+    # is cancelled and the close reaches it through the mount's wrappers,
+    # or the follow holds the mount forever.
+    vfs = _FollowedRAM()
+    vfs._store.dirs.add("/")
+    vfs._store.files["/day"] = b'{"ts":"1"}\n'
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        stream, _ = await ws.dispatch(
+            "follow", PathSpec.from_str_path("/m/day"), n=1, interval=0.001
+        )
+        assert await anext(stream) == b'{"ts":"1"}\n'
+        idle = asyncio.ensure_future(anext(stream))
+        await asyncio.sleep(0.05)
+        idle.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await idle
+        await asyncio.wait_for(stream.aclose(), 0.5)
+    finally:
+        await ws.close()
 
 
 class _ListedRAM(RAMVFS):

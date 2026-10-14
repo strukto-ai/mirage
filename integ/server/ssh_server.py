@@ -182,22 +182,30 @@ def tree_records(root: str, scope: str) -> tuple[int, bytes, bytes]:
     chroot the SFTP server applies: one NUL-ended record per entry, the
     scope first, links followed and a broken one typed ``l``. A link loop
     or a directory the SFTP server will not list exits 1 with find's
-    message, as find does.
+    message, as find does. Nothing outside ``root`` is listed or
+    described, through a link or not: such an entry exits 1 as one find
+    could not read.
 
     Args:
         root (str): Local directory served as the SFTP root.
         scope (str): The directory, as the client named it.
     """
-    base = os.path.join(os.path.realpath(root), scope.lstrip("/"))
-    if not os.path.lexists(base):
+    root = os.path.realpath(root)
+    base = os.path.join(root, scope.lstrip("/"))
+    if not _inside(root, base) or not os.path.lexists(base):
         return 1, b"", f"find: '{scope}': No such file or directory\n".encode()
     records: list[bytes] = []
     errors: list[str] = []
 
     def visit(path: str, rel: str, ancestors: frozenset[str]) -> None:
+        named = scope.rstrip("/") + (f"/{rel}" if rel else "")
+        if not _inside(root, path):
+            errors.append(f"find: '{named}': Permission denied\n")
+            return
         try:
             info = os.stat(path)
-        except OSError:
+        except OSError as exc:
+            logger.debug("ssh fake tree could not stat %s: %s", path, exc)
             info = None
         kind = _find_kind(info)
         shown = info or os.lstat(path)
@@ -214,7 +222,6 @@ def tree_records(root: str, scope: str) -> tuple[int, bytes, bytes]:
         records.append(" ".join(fields).encode() + b"\0")
         if kind != "d":
             return
-        named = scope.rstrip("/") + (f"/{rel}" if rel else "")
         real = os.path.realpath(path)
         if real in ancestors:
             errors.append(f"find: File system loop detected; '{named}'\n")
@@ -232,13 +239,17 @@ def tree_records(root: str, scope: str) -> tuple[int, bytes, bytes]:
 
 def line_total(root: str, target: str) -> tuple[int, bytes, bytes]:
     """What ``wc -l < TARGET`` answers under the chroot: a regular file's
-    newline count, or wc's or the shell's complaint.
+    newline count, or wc's or the shell's complaint. Nothing outside
+    ``root`` is read, through a link or not.
 
     Args:
         root (str): Local directory served as the SFTP root.
         target (str): The file, as the client named it.
     """
-    path = os.path.join(os.path.realpath(root), target.lstrip("/"))
+    root = os.path.realpath(root)
+    path = os.path.join(root, target.lstrip("/"))
+    if not _inside(root, path):
+        return 1, b"", f"sh: {target}: No such file or directory\n".encode()
     try:
         with open(path, "rb") as handle:
             data = handle.read()

@@ -918,16 +918,19 @@ async def test_file_size_answers_only_a_store_without_permission_bits(
 
 
 @pytest.mark.asyncio
-async def test_file_size_takes_the_size_from_a_fresh_stat():
+@pytest.mark.parametrize("now,size", [(7, 7), (9, None)])
+async def test_file_size_reads_a_file_whose_size_moved_since_its_listing(
+    now, size
+):
     asked: list[tuple[str, dict]] = []
 
     async def dispatch(name, path, **kwargs):
         asked.append((name, kwargs))
-        return FileStat(name="f", type=FileType.FILE, size=9), None
+        return FileStat(name="f", type=FileType.FILE, size=now), None
 
     listed = FileStat(name="f", type=FileType.FILE, size=7)
     bound = file_size(_sized_ops(listed), None, CommandOpts(dispatch=dispatch))
-    assert await bound(PathSpec.from_str_path("/f")) == 9
+    assert await bound(PathSpec.from_str_path("/f")) == size
     assert asked == [("stat", {"fresh": True})]
 
 

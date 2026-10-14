@@ -14,6 +14,7 @@
 
 import json
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 import aiohttp
@@ -318,10 +319,12 @@ async def google_get_stream(
         token_manager (TokenManager): OAuth2 token manager.
         url (str): API URL.
     """
-    async for chunk in api_stream(
+    source = api_stream(
         url,
         error_of=_error_of,
         headers=await google_headers(token_manager),
         session=token_manager.pool,
-    ):
-        yield chunk
+    )
+    async with aclosing(source):
+        async for chunk in source:
+            yield chunk

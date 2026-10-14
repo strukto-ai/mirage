@@ -916,13 +916,16 @@ describe('fileSize', () => {
     expect(await fileSize(sized(st), accessor, NO_NS)(PathSpec.fromStrPath('/f'))).toBe(size)
   })
 
-  // Mirrors python's test_file_size_takes_the_size_from_a_fresh_stat.
-  it('takes the size from a fresh stat', async () => {
+  // Mirrors python's test_file_size_reads_a_file_whose_size_moved_since_its_listing.
+  it.each([
+    [7, 7],
+    [9, null],
+  ])('answers a fresh size of %s as %s', async (now, size) => {
     const asked: unknown[] = []
     const dispatch: DispatchFn = (name, _path, _args, kwargs) => {
       asked.push([name, kwargs])
       return Promise.resolve([
-        new FileStat({ name: 'f', type: FileType.FILE, size: 9 }),
+        new FileStat({ name: 'f', type: FileType.FILE, size: now }),
         new IOResult(),
       ])
     }
@@ -931,7 +934,7 @@ describe('fileSize', () => {
       accessor,
       { ...NO_NS, dispatch },
     )
-    expect(await bound(PathSpec.fromStrPath('/f'))).toBe(9)
+    expect(await bound(PathSpec.fromStrPath('/f'))).toBe(size)
     expect(asked).toEqual([['stat', { fresh: true }]])
   })
 
