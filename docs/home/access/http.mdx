@@ -1,17 +1,72 @@
 ---
 title: HTTP
-description: The Mirage server's HTTP routes, how to run it, and how it checks tokens.
+description: The Mirage server's HTTP routes, request formats, and responses.
 icon: globe
 ---
 
-The Mirage server serves JSON over HTTP, every route under `/v1`, the same in Python and TypeScript. The CLI is a client of these routes.
+Use the Mirage server's HTTP API to create workspaces, run shell lines, access files, and manage sessions and jobs. Python and TypeScript servers speak the same protocol, and the CLI is a client of it. API routes are under `/v1` except for OAuth discovery. Most responses are JSON; snapshots, generated documents, and streamed shell output use other formats.
+
+## Make a request
+
+Start a local server with the [CLI quickstart](/home/access/cli#quickstart), or connect to a server someone runs for you. The example below uses a CLI-started local server, which creates a token file when no token is configured. For another server, use its URL and the token its operator provides. See [Auth](#auth) for the local-mode exception.
 
 ```bash
-curl -s http://127.0.0.1:8765/v1/workspaces \
-  -H "Authorization: Bearer $(cat ~/.mirage/auth_token)"
+TOKEN="$(cat "${MIRAGE_HOME:-$HOME/.mirage}/auth_token")"
+curl -i http://127.0.0.1:8765/v1/workspaces \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-## Run it
+The response is `200` with a JSON list of workspaces, which may be empty. To create one and run a line in its default session:
+
+```bash
+curl -i http://127.0.0.1:8765/v1/workspaces \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"id":"http-demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
+
+curl -i http://127.0.0.1:8765/v1/workspaces/http-demo/shell \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"command":"echo hello"}'
+```
+
+Creation answers `201` with a workspace whose `id` is `http-demo`. The shell call answers `200` with `exit_code: 0` and `stdout: "hello\n"`. A nonzero `exit_code` means the line failed even if the HTTP request succeeded. The [workspace](#create-a-workspace) and [shell](#run-a-shell-line) sections describe the full contracts.
+
+## Auth
+
+When the server has a token configured, send it as `Authorization: Bearer <token>` on API requests. The CLI creates or reuses a local token when it starts the server without one configured. A directly started server in default `local` mode accepts requests without a token if neither an environment token nor a token file exists. `GET /v1/health` and `GET /.well-known/oauth-protected-resource` are public. See [Configure authentication](#configure-authentication) for shared tokens, JWTs, CLI login, and account access.
+
+## Errors
+
+Check the HTTP status and `Content-Type` before parsing an error response. Route errors generally include `detail` in JSON, but middleware errors such as authentication or an invalid `Host` can be plain text. Schema validation can return `422` with structured details. Limits vary by route.
+
+A successful HTTP response does not always mean the operation succeeded: check `exit_code` for shell results, `is_error` for tools, `status` and `error` for jobs, and the terminal record for a streamed shell line. If you receive `401`, check that the request sent a nonempty bearer token from the intended server or login; see [Configure authentication](#configure-authentication).
+
+| Status | When |
+| --- | --- |
+| `400` | A malformed request or a `Host` the server does not allow. |
+| `401` | A missing or rejected token when authentication is configured. |
+| `403` | A VFS call a policy or a mount mode refuses, or an account asked to shut the server down. |
+| `404` | An unknown workspace, session, job or ask, one of another account's, or a path a VFS call does not find. |
+| `409` | A taken id, an ask already answered, or a workspace whose lines did not end for a snapshot or clone. |
+| `413` | A request or upload exceeds that route's limit. |
+| `422` | A schema validation error, unknown profile, or bad mode. |
+| `499` | The job was canceled. |
+| `500` | The job failed inside the server. |
+
+## Server
+
+### Check health
+
+<Badge color="blue">GET</Badge> `/v1/health`
+
+Answers `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}`, without a token.
+
+### Shut down
+
+<Badge color="green">POST</Badge> `/v1/shutdown`
+
+Asks the server to stop. The daemon the CLI starts closes its workspaces and exits; a server you run yourself stops only if you gave it `on_idle_exit` (`onIdleExit` in TypeScript).
+
+## Run your own server
 
 The server is a FastAPI app in Python and a Fastify app in TypeScript. Run it as your own service:
 
@@ -31,80 +86,7 @@ await buildApp().listen({ host: '127.0.0.1', port: 8765 })
 ```
 </CodeGroup>
 
-It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `127.0.0.1`, `localhost` and `::1` by default, so add the name your clients use. On your own machine the CLI starts the same server as a daemon, which exits 30 seconds after its last workspace is deleted. Options are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server) server pages.
-
-## Auth
-
-Every route but `GET /v1/health` and `GET /.well-known/oauth-protected-resource` needs `Authorization: Bearer <token>`. `MIRAGE_AUTH_MODE` decides what the server accepts:
-
-| Mode | Accepts | Configure |
-| --- | --- | --- |
-| `local` (default) | the token in `~/.mirage/auth_token`, which the CLI writes when it starts the server | nothing |
-| `token` | one fixed token | `MIRAGE_AUTH_TOKEN` |
-| `jwt` | a JWT your issuer signed | `MIRAGE_JWT_PUBKEY`, `MIRAGE_JWT_PUBKEY_FILE` or `MIRAGE_JWT_JWKS_URL`, and `MIRAGE_JWT_ALG` |
-
-In `jwt` mode the server checks the signature against that public key, or against the key set your issuer publishes at `MIRAGE_JWT_JWKS_URL`; it keeps that set and fetches it again for a key id it does not hold, so a key rotation needs no restart (a fixed key needs one). It accepts only the pinned algorithm, requires `exp` and `sub`, and checks `iss` when `MIRAGE_JWT_ISSUER` is set. A token with `aud` must name one of `MIRAGE_JWT_AUDIENCE`, a comma-separated list. A token without `aud` must carry an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that is set, and is refused when only an audience is. So one server takes both your app's session tokens and an OAuth client's access tokens, as Clerk issues them:
-
-```bash
-MIRAGE_AUTH_MODE=jwt
-MIRAGE_JWT_ALG=RS256
-MIRAGE_JWT_JWKS_URL=https://clerk.example.com/.well-known/jwks.json
-MIRAGE_JWT_ISSUER=https://clerk.example.com
-MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example.com   # session tokens from your app
-MIRAGE_JWT_AUDIENCE=client_cli                          # OAuth tokens the CLI logs in with
-MIRAGE_LOGIN_CLIENT_ID=client_cli                       # where `mirage login` signs in
-```
-
-### CLI login
-
-With `MIRAGE_LOGIN_CLIENT_ID` set, `GET /.well-known/oauth-protected-resource` tells [`mirage login`](/home/access/cli#log-in) where to sign in: the issuer (`MIRAGE_JWT_ISSUER`) and the OAuth client. The CLI reads the issuer's endpoints from its `/.well-known/oauth-authorization-server`, opens the browser on its sign-in, and swaps the code it gets back for tokens with PKCE, so no secret is kept on the user's machine. The setting needs `jwt` mode and an issuer, and `MIRAGE_JWT_AUDIENCE` must list the client. Without it the route answers `404`, and `mirage login` reports that the server needs no login.
-
-In Clerk, create an OAuth application with no client secret and PKCE on, add the redirect `http://127.0.0.1/callback` (the CLI picks a free port), allow the `offline_access` scope so the CLI gets a refresh token, and turn the consent screen off so a signed-in user goes straight back to the CLI. Its access tokens last a day and the CLI refreshes them; it asks the user to log in again after 30 days.
-
-### Accounts
-
-In `jwt` mode the token's `sub` is the caller's account, and an account reaches only the workspaces it created:
-
-- Another account's workspace answers `404` on every route, the same as a missing one, and so do its sessions, jobs and asks. `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
-- The owner is kept under the state root, so after a restart a stored workspace reopens only for its owner. A workspace stored before the server ran in `jwt` mode has no owner, and no account can create its id.
-- Snapshot keys live under `accounts/<account>/` in the snapshot store.
-- `POST /v1/shutdown` answers `403`.
-
-An [SSH key](/home/access/ssh#bind-a-key-to-an-account) belongs to an account through its `mirage-account` option.
-
-<Warning>
-  Accounts keep workspaces apart, not the host: a workspace config can still mount a host directory or run the `local` runtime. In `local` and `token` mode any accepted token can use every route and every workspace, including `POST /v1/shutdown`. In `local` mode with no token in the environment or in `~/.mirage/auth_token`, the server asks for none.
-</Warning>
-
-## Errors
-
-A failed request answers `{"detail": "<message>"}`.
-
-| Status | When |
-| --- | --- |
-| `400` | The body is not JSON or fails its schema, or the `Host` is not allowed. |
-| `401` | A missing or rejected token. |
-| `403` | A VFS call a policy or a mount mode refuses, or an account asked to shut the server down. |
-| `404` | An unknown workspace, session, job or ask, one of another account's, or a path a VFS call does not find. |
-| `409` | A taken id, an ask already answered, or a workspace whose lines did not end for a snapshot or clone. |
-| `413` | A body over 4 MiB, or an uploaded snapshot over 1 GiB. |
-| `422` | An unknown profile or a bad mode. |
-| `499` | The job was canceled. |
-| `500` | The job failed inside the server. |
-
-## Server
-
-### Check health
-
-<Badge color="blue">GET</Badge> `/v1/health`
-
-Answers `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}`, without a token.
-
-### Shut down
-
-<Badge color="green">POST</Badge> `/v1/shutdown`
-
-Asks the server to stop. The daemon the CLI starts closes its workspaces and exits; a server you run yourself stops only if you gave it `on_idle_exit` (`onIdleExit` in TypeScript).
+It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `127.0.0.1`, `localhost` and `::1` by default, so add the name your clients use. Set `MIRAGE_AUTH_MODE=token` and `MIRAGE_AUTH_TOKEN` before starting it if clients should authenticate with a fixed token. In default `local` mode, a directly started server with no token configured accepts unauthenticated requests. Options are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server) server pages.
 
 ## Workspaces
 
@@ -118,9 +100,9 @@ Asks the server to stop. The daemon the CLI starts closes its workspaces and exi
 Answers `201` and the workspace. The same id and config again answers `200` and that workspace; another config under a taken id answers `409`.
 
 ```bash
-curl -s http://127.0.0.1:8765/v1/workspaces \
+curl -i http://127.0.0.1:8765/v1/workspaces \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}}'
+  -d '{"id":"http-demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
 ```
 
 Set the queue capacity in the creation payload's `config.io` block. For
@@ -190,6 +172,8 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 <ParamField body="override" type="object">A config that re-supplies the redacted credentials.</ParamField>
 
 ## Sessions
+
+A session keeps its own working directory, environment, and history. Requests use the workspace's default session unless they specify `session_id`.
 
 ### Create a session
 
@@ -264,7 +248,7 @@ With `?stream=true`, the response uses `application/x-ndjson` and retains the sa
 Streaming input and output can overlap. When a command finishes before stdin ends, the server discards the remaining input and waits for the closing multipart boundary before sending the terminal record. A disconnected client cancels its job and the server joins cleanup; streaming output is not retained for replay by this endpoint.
 
 ```bash
-curl -s "http://127.0.0.1:8765/v1/workspaces/demo/shell?session_id=agent" \
+curl -i http://127.0.0.1:8765/v1/workspaces/http-demo/shell \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"command": "ls / | wc -l"}'
 ```
@@ -356,6 +340,8 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 ## Asks
 
+An ask pauses a line when a policy needs a decision. List pending asks, then allow or deny one to let the line continue or refuse it; see [Asks](/home/policy/policies#asks).
+
 ### List asks
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/asks`
@@ -369,3 +355,60 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 <ParamField body="answer" type="string" required>`allow` or `deny`.</ParamField>
 <ParamField body="scope" type="string" default="once">`once`, or `session` to allow every matching line in the session.</ParamField>
+
+## Configure authentication
+
+`MIRAGE_AUTH_MODE` controls which credentials the server accepts. These settings apply to its HTTP, MCP, and RPC routes; the CLI uses the same HTTP API.
+
+| Mode | Accepts | Server configuration |
+| --- | --- | --- |
+| `local` (default) | A configured token or the local token file, if either exists | `MIRAGE_AUTH_TOKEN` or `~/.mirage/auth_token` (`MIRAGE_HOME` relocates it) |
+| `token` | One fixed token shared by clients | `MIRAGE_AUTH_TOKEN` |
+| `jwt` | A JWT signed with the configured key | `MIRAGE_JWT_ALG` and a fixed key (`MIRAGE_JWT_PUBKEY` or `MIRAGE_JWT_PUBKEY_FILE`) or `MIRAGE_JWT_JWKS_URL`; do not combine a fixed key with JWKS |
+
+### Local mode
+
+When the CLI starts a local server without a configured token, it creates or reuses `$MIRAGE_HOME/auth_token` (`~/.mirage/auth_token` by default). A server started directly in `local` mode accepts requests without a token if neither that file nor `MIRAGE_AUTH_TOKEN` exists. Set a token before exposing a server to other clients.
+
+### Shared token
+
+Set `MIRAGE_AUTH_MODE=token` and `MIRAGE_AUTH_TOKEN` in the server's environment before starting it. Clients send that value in the bearer header. The CLI reads its client-side token from `MIRAGE_TOKEN` or `auth_token` in its [configuration](/home/access/cli#config); `MIRAGE_AUTH_TOKEN` configures the server, not the client.
+
+### JWT
+
+In `jwt` mode, the server verifies signatures with either a fixed key or the key set at `MIRAGE_JWT_JWKS_URL`. It caches that set and refetches it for a key id it does not hold, so a JWKS key rotation needs no server restart; replacing a fixed key does.
+
+The server accepts only the algorithm named by `MIRAGE_JWT_ALG` and requires `exp` and `sub`. It checks `iss` when `MIRAGE_JWT_ISSUER` is set. A token with `aud` must name an entry in the comma-separated `MIRAGE_JWT_AUDIENCE`. A token without `aud` needs an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that setting is present, and is refused when only an audience is configured. This lets one server accept an app's session tokens and an OAuth client's access tokens, as Clerk issues them.
+
+For example, configure the server to use an issuer's JWKS and accept both token types:
+
+```bash
+export MIRAGE_AUTH_MODE=jwt
+export MIRAGE_JWT_ALG=RS256
+export MIRAGE_JWT_JWKS_URL=https://clerk.example.com/.well-known/jwks.json
+export MIRAGE_JWT_ISSUER=https://clerk.example.com
+export MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example.com
+export MIRAGE_JWT_AUDIENCE=client_cli
+export MIRAGE_LOGIN_CLIENT_ID=client_cli
+```
+
+### CLI login
+
+With `MIRAGE_LOGIN_CLIENT_ID` set, `GET /.well-known/oauth-protected-resource` tells [`mirage login`](/home/access/cli#log-in) where to sign in: the issuer (`MIRAGE_JWT_ISSUER`) and the OAuth client. The CLI reads the issuer's endpoints from its `/.well-known/oauth-authorization-server`, opens the browser for sign-in, and exchanges the returned code for tokens with PKCE. This setting needs `jwt` mode and an issuer, and `MIRAGE_JWT_AUDIENCE` must list the client. Without it, the route answers `404` and `mirage login` reports that the server needs no login.
+
+In Clerk, create an OAuth application with no client secret and PKCE enabled. Add the redirect `http://127.0.0.1/callback` (the CLI chooses a free port), allow the `offline_access` scope for a refresh token, and turn the consent screen off so a signed-in user returns directly to the CLI. The CLI refreshes access tokens as they expire and asks the user to log in again after 30 days.
+
+### Accounts
+
+In `jwt` mode the token's `sub` identifies the caller's account. An account reaches only the workspaces it created:
+
+- Another account's workspace, session, job, or ask answers `404`, like a missing one. `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
+- The owner is kept under the state root. After a restart, a stored workspace reopens only for its owner. A workspace stored before the server used `jwt` mode has no owner, and no account can create its id.
+- Snapshot keys live under `accounts/<account>/` in the snapshot store.
+- `POST /v1/shutdown` answers `403`.
+
+An [SSH key](/home/access/ssh#bind-a-key-to-an-account) belongs to an account through its `mirage-account` option.
+
+<Warning>
+  Accounts keep workspaces apart, not the host: a workspace config can still mount a host directory or run the `local` runtime. In `local` and `token` mode any accepted token can use every route and every workspace, including `POST /v1/shutdown`.
+</Warning>

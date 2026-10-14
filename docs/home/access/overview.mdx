@@ -54,4 +54,4 @@ Each way in stops a running line as its clients do: Ctrl-C in the CLI and SSH, `
 
 ## Auth
 
-The server asks every HTTP request but `GET /v1/health` for a bearer token; in the default local mode the CLI reads it from `~/.mirage/auth_token` for you. See [Auth](/home/access/http#auth). SSH logins on the SSH port use public keys instead; through `mirage ssh-proxy` they use the CLI's token. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`.
+When authentication is configured, HTTP requests need a bearer token except for health and OAuth discovery. The CLI reads the local token file for you; a directly started server in default local mode accepts requests without a token if none is configured. See [Auth](/home/access/http#auth). SSH logins on the SSH port use public keys instead; through `mirage ssh-proxy` they use the CLI's token. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`.

@@ -4,7 +4,7 @@ description: Every mirage command, the same in the Python and TypeScript package
 icon: /images/mirage-icon-light.svg
 ---
 
-`mirage` is a client of the server's [HTTP routes](/home/access/http), with the same commands in Python and TypeScript. When its `url` is on this machine, it starts a server on first use; a remote `url` is never started.
+`mirage` is a client of the server's [HTTP routes](/home/access/http), with the same commands in Python and TypeScript. When its `url` is on this machine, creating a workspace starts the server if needed; a remote `url` is never started.
 
 ## Install
 
@@ -166,7 +166,7 @@ mirage login
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#settings) |
-| `jwt_*` | `MIRAGE_JWT_*` | see [Auth](/home/access/http#auth) |
+| `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [CLI login](/home/access/http#cli-login) |
 
 `MIRAGE_HOME` moves everything under `~/.mirage`.

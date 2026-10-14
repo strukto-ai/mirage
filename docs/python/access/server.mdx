@@ -35,7 +35,7 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 
 | Argument | Default | Meaning |
 | --- | --- | --- |
-| `auth_config` | from `MIRAGE_AUTH_MODE` | Token or JWT [auth](/home/access/http#auth). |
+| `auth_config` | from `MIRAGE_AUTH_MODE` | Token or JWT [configuration](/home/access/http#configure-authentication). |
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS`, else loopback | `Host` names the app answers. `["*"]` turns the check off, safe only behind a trusted proxy. |
 | `ssh_config` | from the `ssh_*` settings | The SSH server, opened with the app; off unless a port is set. |
 | `snapshot_store` | `None` | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |

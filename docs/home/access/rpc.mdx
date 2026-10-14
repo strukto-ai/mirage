@@ -40,7 +40,7 @@ Answers come back as calls finish, so match them by `id`.
 
 ## Auth
 
-The same bearer token as the [HTTP API](/home/access/http#auth). `mirage rpc` reads it from `MIRAGE_TOKEN` or `~/.mirage/auth_token`.
+The same [authentication](/home/access/http#auth) as the HTTP API. `mirage rpc` uses the CLI's selected token, including a saved [login](/home/access/cli#log-in) for a hosted server, `MIRAGE_TOKEN`, or the local token file. A direct client sends the bearer header when the server requires authentication.
 
 ## Methods
 

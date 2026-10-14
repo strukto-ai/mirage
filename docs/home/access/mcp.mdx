@@ -92,7 +92,7 @@ For a server elsewhere, give the client the URL and a token:
 
 ## Auth
 
-The endpoint takes the same bearer token as the [HTTP API](/home/access/http#auth). `mirage mcp` reads it from `MIRAGE_TOKEN` or `~/.mirage/auth_token`. The server does not offer OAuth sign-in, so a client must send the header.
+The endpoint uses the same [authentication](/home/access/http#auth) as the HTTP API. `mirage mcp` uses the CLI's selected token, including a saved [login](/home/access/cli#log-in) for a hosted server, `MIRAGE_TOKEN`, or the local token file. The MCP endpoint does not start an OAuth sign-in; when the server requires authentication, a direct client must send the bearer header.
 
 ## Tools
 
