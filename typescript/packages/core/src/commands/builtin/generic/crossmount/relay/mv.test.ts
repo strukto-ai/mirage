@@ -16,7 +16,7 @@ import { expect, it } from 'vitest'
 import { IOResult } from '../../../../../io/types.ts'
 import type { DispatchFn } from '../../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
-import { enoent, eacces } from '../../../../../errors/fs.ts'
+import { enoent, eacces, exdev } from '../../../../../errors/fs.ts'
 import { guardDispatch } from '../../../../../workspace/abort.ts'
 import { runMv } from './mv.ts'
 
@@ -39,6 +39,7 @@ it.each(['read', 'write'])(
         enter()
         await pending
       }
+      if (op === 'copy') throw exdev(path)
       if (op === 'stat') {
         if (['/a/one', '/a/two'].includes(path.virtual)) {
           return [new FileStat({ name: 'source', type: FileType.FILE }), new IOResult()]
@@ -80,6 +81,7 @@ it('failed destination write preserves move source', async () => {
       }
       throw enoent(path)
     }
+    if (op === 'copy') throw exdev(path)
     if (op === 'write') throw eacces(path)
     return [op === 'read' ? new TextEncoder().encode('payload') : null, new IOResult()]
   }
@@ -88,4 +90,29 @@ it('failed destination write preserves move source', async () => {
   expect(io.exitCode).toBe(1)
   expect(calls).toContainEqual(['write', '/b/one'])
   expect(calls.some(([op]) => ['unlink', 'rmdir'].includes(op))).toBe(false)
+})
+
+// Mirrors python's test_a_store_copy_moves_the_file_without_reading_it.
+it('moves a file by a store copy without reading it', async () => {
+  const calls: [string, string][] = []
+  const dispatch: DispatchFn = async (op, path) => {
+    await Promise.resolve()
+    calls.push([op, path.virtual])
+    if (op === 'stat') {
+      if (path.virtual === '/a/one') {
+        return [new FileStat({ name: 'one', type: FileType.FILE }), new IOResult()]
+      }
+      if (path.virtual === '/b') {
+        return [new FileStat({ name: 'b', type: FileType.DIRECTORY }), new IOResult()]
+      }
+      throw enoent(path)
+    }
+    return [null, new IOResult()]
+  }
+  const scopes = ['/a/one', '/b'].map((p) => PathSpec.fromStrPath(p))
+  const [, io] = await runMv(scopes, {}, dispatch)
+  expect(io.exitCode).toBe(0)
+  expect(calls).toContainEqual(['copy', '/a/one'])
+  expect(calls).toContainEqual(['unlink', '/a/one'])
+  expect(calls.some(([op]) => op === 'read' || op === 'write')).toBe(false)
 })

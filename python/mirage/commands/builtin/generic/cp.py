@@ -42,6 +42,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
+from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -1313,6 +1314,65 @@ async def _copy_entry(
         await copies.relay.write(dst, data=data)
 
 
+async def transfer_file(
+    strategy: PrimitiveCopy | PrimitiveMove,
+    src: PathSpec,
+    dst: PathSpec,
+    cmd_name: str,
+    errors: list[str],
+) -> bool:
+    """Copy one file between the strategy's mounts, reporting a failure
+    in GNU's words; False when it failed.
+
+    A store-to-store copy goes first where the strategy has one: the
+    destination's store copies from the source's without the bytes
+    passing through mirage. EXDEV from it says the stores cannot, and
+    the bytes move through a read and a write, the file materialized
+    in between.
+
+    Args:
+        strategy (PrimitiveCopy | PrimitiveMove): the transfer
+            primitives.
+        src (PathSpec): the file.
+        dst (PathSpec): where it goes.
+        cmd_name (str): ``cp`` or ``mv``, for the error lines.
+        errors (list[str]): collects the error lines.
+    """
+    if strategy.copy is not None:
+        try:
+            await strategy.copy(src, dst)
+            return True
+        except OSError as exc:
+            if classify(exc) is not FsCondition.EXDEV:
+                if not isinstance(exc, FS_ERRORS):
+                    raise
+                errors.append(
+                    f"{cmd_name}: cannot open '{src.raw_path}' "
+                    f"for reading: {fs_strerror(exc)}"
+                    if getattr(exc, "filename", None) == src.virtual
+                    else f"{cmd_name}: cannot create regular file "
+                    f"'{dst.raw_path}': {fs_strerror(exc)}"
+                )
+                return False
+    try:
+        data = await strategy.read_bytes(src)
+    except FS_ERRORS as exc:
+        errors.append(
+            f"{cmd_name}: cannot open '{src.raw_path}' "
+            f"for reading: {fs_strerror(exc)}"
+        )
+        return False
+    try:
+        await strategy.write(dst, data=data)
+    except FS_ERRORS as exc:
+        errors.append(
+            f"{cmd_name}: cannot create regular file "
+            f"'{dst.raw_path}': {fs_strerror(exc)}"
+        )
+        return False
+    return True
+
+
 async def _mirror_dirs(
     strategy: NativeCopy,
     stat: StatFn,
@@ -1632,25 +1692,10 @@ async def copy_entries(
                 continue
         if lines is not None:
             lines.append(transfer_line(entry, entry_dst, backup, cmd_name))
-        try:
-            data = await strategy.read_bytes(entry)
-        except FS_ERRORS as exc:
-            errors.append(
-                f"{cmd_name}: cannot open '{entry.raw_path}' "
-                f"for reading: {fs_strerror(exc)}"
-            )
+        if not await transfer_file(
+            strategy, entry, entry_dst, cmd_name, errors
+        ):
             copied_all = False
-            continue
-        try:
-            # write takes bytes, not a stream: file materialized here.
-            await strategy.write(entry_dst, data=data)
-        except FS_ERRORS as exc:
-            errors.append(
-                f"{cmd_name}: cannot create regular file "
-                f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
-            )
-            copied_all = False
-            continue
     return copied_all
 
 
@@ -2142,23 +2187,7 @@ async def cp_generic(
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))
         if isinstance(strategy, PrimitiveCopy):
-            try:
-                # write takes bytes, not a stream: the file is
-                # materialized here.
-                data = await strategy.read_bytes(src)
-            except FS_ERRORS as exc:
-                errors.append(
-                    f"cp: cannot open '{src.raw_path}' "
-                    f"for reading: {fs_strerror(exc)}"
-                )
-                continue
-            try:
-                await strategy.write(target, data=data)
-            except FS_ERRORS as exc:
-                errors.append(
-                    f"cp: cannot create regular file "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
-                )
+            if not await transfer_file(strategy, src, target, "cp", errors):
                 continue
         else:
             try:

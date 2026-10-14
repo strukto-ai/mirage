@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
-from mirage.errors.fs import eacces, enoent
+from mirage.errors.fs import eacces, enoent, exdev
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -40,6 +40,8 @@ async def test_cancelled_move_preserves_sources_and_stops_dispatch(blocked_op):
             if path.virtual == "/b":
                 return FileStat(name="b", type=FileType.DIRECTORY), IOResult()
             raise enoent(path)
+        if op == "copy":
+            raise exdev(path)
         if op == "read":
             return b"payload", IOResult()
         return None, IOResult()
@@ -71,6 +73,8 @@ async def test_failed_destination_write_preserves_move_source():
             if path.virtual == "/b":
                 return FileStat(name="b", type=FileType.DIRECTORY), IOResult()
             raise enoent(path)
+        if op == "copy":
+            raise exdev(path)
         if op == "read":
             return b"payload", IOResult()
         if op == "write":
@@ -82,3 +86,25 @@ async def test_failed_destination_write_preserves_move_source():
     assert io.exit_code == 1
     assert ("write", "/b/one") in calls
     assert not any(op in {"unlink", "rmdir"} for op, _ in calls)
+
+
+@pytest.mark.asyncio
+async def test_a_store_copy_moves_the_file_without_reading_it():
+    calls: list[tuple[str, str]] = []
+
+    async def dispatch(op, path, **kwargs):
+        calls.append((op, path.virtual))
+        if op == "stat":
+            if path.virtual == "/a/one":
+                return FileStat(name="one", type=FileType.FILE), IOResult()
+            if path.virtual == "/b":
+                return FileStat(name="b", type=FileType.DIRECTORY), IOResult()
+            raise enoent(path)
+        return None, IOResult()
+
+    scopes = [PathSpec.from_str_path(p) for p in ("/a/one", "/b")]
+    _, io = await run_mv(scopes, {}, dispatch)
+    assert io.exit_code == 0
+    assert ("copy", "/a/one") in calls
+    assert ("unlink", "/a/one") in calls
+    assert not any(op in {"read", "write"} for op, _ in calls)

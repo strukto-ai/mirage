@@ -16,7 +16,7 @@ import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
+import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { LinkView, MountView, NamespaceView } from '../../../../../view/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
@@ -90,7 +90,8 @@ export async function runCp(
   const mkdir = async (p: PathSpec): Promise<void> => {
     await dispatch('mkdir', p)
   }
-  const strategy = { readBytes, write, mkdir, readdir }
+  const copy = (src: PathSpec, dst: PathSpec): Promise<void> => relayCopy(dispatch, src, dst)
+  const strategy = { readBytes, write, mkdir, readdir, copy }
   return cpGeneric(
     flat,
     stat,

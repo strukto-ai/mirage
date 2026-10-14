@@ -900,6 +900,9 @@ export interface PrimitiveCopy {
   write: CopyFn<[target: PathSpec, data: Uint8Array]>
   mkdir: CopyFn<[path: PathSpec]>
   readdir: ReaddirFn
+  /** A store-to-store copy between two mounts, tried before the bytes move;
+   * EXDEV from it says the stores cannot. */
+  copy?: CopyFn
 }
 
 export type CopyStrategy = NativeCopy | PrimitiveCopy
@@ -917,6 +920,7 @@ export interface PrimitiveMove {
   rmdir: MoveFn<[path: PathSpec]>
   /** Throws when the source's mount cannot condition its delete. */
   checkUnlink?: (path: PathSpec) => void
+  copy?: CopyFn
 }
 
 export type MoveStrategy = NativeMove | PrimitiveMove

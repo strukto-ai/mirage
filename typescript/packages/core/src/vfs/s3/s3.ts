@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
 import { MD5_ETAG_STORES, SCOPE_ERROR } from '../../core/s3/constants.ts'
-import { copy as s3Copy } from '../../core/s3/copy.ts'
+import { copy as s3Copy, copyFrom as s3CopyFrom } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
 import { mkdir as s3Mkdir } from '../../core/s3/mkdir.ts'
@@ -33,6 +33,7 @@ import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import { write as s3Write } from '../../core/s3/write.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import { exdev } from '../../errors/fs.ts'
 import { tree as s3Tree } from '../../core/s3/readdir.ts'
 
 /**
@@ -80,6 +81,11 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return s3Stat(this.accessor, path, index)
+  }
+
+  override copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
+    if (!(source instanceof S3VFSBase)) return Promise.reject(exdev(dst))
+    return s3CopyFrom(this.accessor, source.accessor, src, dst)
   }
 
   override checksum(

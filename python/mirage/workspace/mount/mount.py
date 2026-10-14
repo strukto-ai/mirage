@@ -70,7 +70,7 @@ from mirage.core.generic.rewrite import (
     refuse_taken,
     truncate_by_rewrite,
 )
-from mirage.errors.fs import ebusy, enotsup
+from mirage.errors.fs import ebusy, enotsup, exdev
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.errors import PipeClosed
@@ -1341,6 +1341,47 @@ class MountEntry:
                 return None
             finally:
                 reset_revisions(revs_token)
+                reset_active_recorder(recording_token)
+                push_write_context(prev_write)
+
+    async def copy_from(
+        self, source: "MountEntry", src: str, dst: str
+    ) -> None:
+        """Copy a file from ``source``'s store into this mount's, store to
+        store.
+
+        For ``cp`` and ``mv`` between two mounts, once the dispatcher
+        has judged ``src`` as a read and ``dst`` as a create. Raises
+        EXDEV when this mount's VFS cannot copy from that one, and the
+        caller moves the bytes itself.
+
+        Args:
+            source (MountEntry): the mount ``src`` is on.
+            src (str): the source's virtual path, on ``source``.
+            dst (str): the destination's virtual path, on this mount.
+        """
+        if not self.vfs.supports("copy_from"):
+            raise exdev(src)
+        async with self.use(), source.use():
+            self.require_writable("write", PathSpec.from_str_path(dst), ())
+            recording_token = push_mount_context(self.mount_id)
+            prev_write = push_write_context(self.write_context())
+            try:
+                with host_io():
+                    await self.vfs.copy_from(
+                        source.vfs,
+                        PathSpec(
+                            virtual=src,
+                            directory=src.rsplit("/", 1)[0] or "/",
+                            vfs_path=mount_key(src, source.prefix.rstrip("/")),
+                        ),
+                        PathSpec(
+                            virtual=dst,
+                            directory=dst.rsplit("/", 1)[0] or "/",
+                            vfs_path=mount_key(dst, self.prefix.rstrip("/")),
+                        ),
+                    )
+            finally:
                 reset_active_recorder(recording_token)
                 push_write_context(prev_write)
 

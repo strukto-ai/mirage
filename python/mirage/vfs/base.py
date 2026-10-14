@@ -596,6 +596,27 @@ class BaseVFS:
         """
         raise enotsup(self.name, "copy", dst)
 
+    async def copy_from(
+        self, source: "BaseVFS", src: PathSpec, dst: PathSpec
+    ) -> None:
+        """Copy a file from another mount onto this one without moving
+        its bytes through mirage.
+
+        ``cp`` and ``mv`` between two mounts ask this before they read
+        the file and write it here, once the dispatcher has judged the
+        source as a read and the destination as a create. It is no
+        dispatcher call of its own, so nothing reaches it unjudged.
+        Raise EXDEV when this backend cannot copy from ``source`` (another
+        kind of store, other credentials, a refusal), and the bytes move
+        through the read and the write instead.
+
+        Args:
+            source (BaseVFS): the source mount's VFS.
+            src (PathSpec): the file, on ``source``.
+            dst (PathSpec): the copy, on this VFS.
+        """
+        raise enotsup(self.name, "copy_from", dst)
+
     @vfs_call(effect=Effect.COPY, target=Target.DIR, subtree=True)
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a directory tree within this VFS in one call.

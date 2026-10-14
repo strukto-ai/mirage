@@ -83,6 +83,23 @@ async def _relay_write(
     await dispatched_call(dispatch, "write", path, data=data)
 
 
+async def _relay_copy(
+    dispatch: DispatchFn, src: PathSpec, dst: PathSpec
+) -> None:
+    """Copy one file store to store, from its mount onto ``dst``'s.
+
+    The dispatcher judges the source as a read and the destination as a
+    create, and answers EXDEV when the destination's store cannot copy
+    from the source's.
+
+    Args:
+        dispatch (DispatchFn): Workspace operation dispatcher.
+        src (PathSpec): The file.
+        dst (PathSpec): Where it goes.
+    """
+    await dispatched_call(dispatch, "copy", src, dst=dst)
+
+
 async def run_operands(
     run_single: RunSingle,
     cmd_name: str,
@@ -195,6 +212,7 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
         stat=p(dispatched_call, dispatch, "stat"),
         read_bytes=p(dispatched_call, dispatch, "read"),
         write=p(_relay_write, dispatch),
+        copy=p(_relay_copy, dispatch),
         mkdir=p(dispatched_call, dispatch, "mkdir"),
         readdir=p(dispatched_call, dispatch, "readdir"),
     )
@@ -224,6 +242,7 @@ def transfer_links_of(
             write=prim["write"],
             mkdir=prim["mkdir"],
             readdir=prim["readdir"],
+            copy=prim["copy"],
         ),
         relay_stat=prim["stat"],
         visibility=visibility,

@@ -662,8 +662,10 @@ export class Dispatcher {
         )
       : this.boundary(owner)
     if (owner !== null) {
-      await this.refuseCrossMount(call, owner)
+      const across = this.copyTarget(call, owner)
+      if (across === null) await this.refuseCrossMount(call, owner)
       if (await this.declines(call)) {
+        if (across !== null) throw exdev(call.path)
         if (name === 'search' || name === 'files_containing') return [null, new IOResult()]
         throw walkDeclined(owner.vfs.name, name, call.path)
       }
@@ -681,6 +683,10 @@ export class Dispatcher {
         )
         await boundary.complete(mark, call.path, call.write, null, call.issuer)
         return [null, new IOResult()]
+      }
+      if (across !== null) {
+        await this.copyAcross(call, owner, across)
+        return [await boundary.complete(mark, call.path, call.write, null), new IOResult()]
       }
     }
     let resolved: [BaseVFS, PathSpec, MountMode]
@@ -935,6 +941,41 @@ export class Dispatcher {
    * missing one is ENOENT (ENOTDIR through a file) ahead of EXDEV. Mirrors
    * Python's Dispatcher._refuse_cross_mount.
    */
+  /**
+   * The mount a copy's destination is on, when that is another mount whose
+   * store may copy from this one's; null otherwise. Mirrors Python's
+   * Dispatcher._copy_target.
+   */
+  private copyTarget(call: Call, owner: MountEntry): MountEntry | null {
+    if (call.name !== 'copy' || call.dst === null) return null
+    const other = this.namespace.tryMountFor(call.dst.virtual)
+    if (other === null || other === owner || !other.vfs.supports('copyFrom')) return null
+    return other
+  }
+
+  /**
+   * Copy a file onto another mount, store to store.
+   *
+   * Admission judged the source as a read and the destination as a create
+   * under its own mount's mode, as for a copy within one mount. The
+   * destination's store copies from the source's where it can (one bucket to
+   * another under one set of credentials); otherwise it answers EXDEV, as a
+   * copy between two mounts always did, and the caller moves the bytes
+   * itself. The destination's name is held, and its caches settled, on its
+   * own mount. Mirrors Python's Dispatcher._copy_across.
+   */
+  private async copyAcross(call: Call, owner: MountEntry, other: MountEntry): Promise<void> {
+    const dst = call.dst
+    if (dst === null) throw exdev(call.path)
+    await owner.ensureReady()
+    await other.ensureReady()
+    const key = `${String(this.storeId(other.vfs))}:${mountKey(dst.virtual, rstripSlash(other.prefix))}`
+    await this.state.writers.withLock(key, async () => {
+      await other.copyFrom(owner, call.path.virtual, dst.virtual)
+      await this.settleWrite('copy', call.path, dst, [dst], [])
+    })
+  }
+
   private async refuseCrossMount(call: Call, owner: MountEntry): Promise<void> {
     // A function runs on one backend, so every path it is handed must be
     // on the mount that serves it.
@@ -943,6 +984,10 @@ export class Dispatcher {
     }
     const dst = call.dst
     if (dst === null || this.namespace.tryMountFor(dst.virtual) === owner) return
+    // A copy between two stores that cannot make it is the caller's cue to
+    // move the bytes, whose read and write word any missing parent
+    // themselves, so it asks the backends nothing.
+    if (call.name === 'copy') throw exdev(call.path)
     throw (
       (await this.parentRefusal(call.path, call.issuer)) ??
       (await this.parentRefusal(dst, call.issuer)) ??

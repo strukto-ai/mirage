@@ -19,7 +19,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import { refuseReveal } from '../../../generic_bind/adapter.ts'
 import { mvGeneric, parseFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
+import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
@@ -68,6 +68,7 @@ export async function runMv(
       readdir,
       unlink,
       rmdir,
+      copy: (src: PathSpec, dst: PathSpec) => relayCopy(dispatch, src, dst),
       ...(checkUnlink !== undefined ? { checkUnlink } : {}),
     },
     parseFlags(new FlagView(flagKwargs, specOf('mv'))),

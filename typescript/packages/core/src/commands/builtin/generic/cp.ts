@@ -73,6 +73,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { CycleError, parent, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
+import { classify } from '../../../errors/classify.ts'
 
 const ENC = new TextEncoder()
 
@@ -1257,30 +1258,62 @@ export async function copyEntries(
       backup = made.backup
     }
     opts.lines?.push(transferLine(entrySpec, entryDstSpec, backup, cmdName))
-    let data: Uint8Array
-    try {
-      data = await strategy.readBytes(entrySpec)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      errors.push(
-        `${cmdName}: cannot open '${entrySpec.rawPath}' for reading: ${String(fsStrerror(err))}`,
-      )
+    if (!(await transferFile(strategy, entrySpec, entryDstSpec, cmdName, errors))) {
       copiedAll = false
-      continue
-    }
-    try {
-      // write takes bytes, not a stream: file materialized here.
-      await strategy.write(entryDstSpec, data)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      errors.push(
-        `${cmdName}: cannot create regular file '${entryDstSpec.rawPath}': ${String(fsStrerror(err))}`,
-      )
-      copiedAll = false
-      continue
     }
   }
   return copiedAll
+}
+
+/**
+ * Copy one file between the strategy's mounts, reporting a failure in GNU's
+ * words; false when it failed. A store-to-store copy goes first where the
+ * strategy has one: the destination's store copies from the source's without
+ * the bytes passing through mirage. EXDEV from it says the stores cannot, and
+ * the bytes move through a read and a write, the file materialized in
+ * between. Mirrors Python's transfer_file.
+ */
+export async function transferFile(
+  strategy: PrimitiveCopy | PrimitiveMove,
+  src: PathSpec,
+  dst: PathSpec,
+  cmdName: string,
+  errors: string[],
+): Promise<boolean> {
+  if (strategy.copy !== undefined) {
+    try {
+      await strategy.copy(src, dst)
+      return true
+    } catch (err) {
+      if (classify(err) !== 'EXDEV') {
+        if (!isFsError(err)) throw err
+        errors.push(
+          (err as { virtualPath?: unknown }).virtualPath === src.virtual
+            ? `${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`
+            : `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
+        )
+        return false
+      }
+    }
+  }
+  let data: Uint8Array
+  try {
+    data = await strategy.readBytes(src)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    errors.push(`${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`)
+    return false
+  }
+  try {
+    await strategy.write(dst, data)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    errors.push(
+      `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
+    )
+    return false
+  }
+  return true
 }
 
 // Copy sources to a destination, fanning out into a directory. NativeCopy
@@ -1680,24 +1713,7 @@ export async function cpGeneric(
     if (!made.ok) continue
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
     if (isPrimitiveCopy(strategy)) {
-      let data: Uint8Array
-      try {
-        // write takes bytes, not a stream: the file is materialized here.
-        data = await strategy.readBytes(src)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        errors.push(`cp: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`)
-        continue
-      }
-      try {
-        await strategy.write(target, data)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        errors.push(
-          `cp: cannot create regular file '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
-        continue
-      }
+      if (!(await transferFile(strategy, src, target, 'cp', errors))) continue
     } else {
       try {
         await strategy.copy(src, target)

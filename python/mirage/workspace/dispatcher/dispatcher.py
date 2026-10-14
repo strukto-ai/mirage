@@ -841,8 +841,12 @@ class Dispatcher:
             return None, IOResult()
         if mount is None:
             return await self._answer_unmounted(call), IOResult()
-        await self._refuse_cross_mount(call, mount)
+        across = self._copy_target(call, mount)
+        if across is None:
+            await self._refuse_cross_mount(call, mount)
         if await self._declines(call):
+            if across is not None:
+                raise exdev(call.path)
             if call.name in ("search", "files_containing"):
                 return None, IOResult()
             raise walk_declined(str(mount.vfs.name), call.name, call.path)
@@ -871,6 +875,10 @@ class Dispatcher:
                 call.path,
                 bool(call.kwargs.get("parents")),
             )
+            await boundary.complete(mark, call.path, call.write, None)
+            return None, IOResult()
+        if across is not None:
+            await self._copy_across(call, mount, across)
             await boundary.complete(mark, call.path, call.write, None)
             return None, IOResult()
         await mount.ensure_ready()
@@ -1112,6 +1120,55 @@ class Dispatcher:
             call.name, call.path, fallback, call.report
         )
 
+    def _copy_target(
+        self, call: _Call, mount: MountEntry
+    ) -> MountEntry | None:
+        """The mount a copy's destination is on, when that is another
+        mount whose store may copy from this one's; None otherwise.
+
+        Args:
+            call (_Call): the followed op.
+            mount (MountEntry): the mount serving its path.
+        """
+        if call.name != "copy" or call.dst is None:
+            return None
+        other = self._namespace.try_mount_for(call.dst.virtual)
+        if (
+            other is None
+            or other is mount
+            or not other.vfs.supports("copy_from")
+        ):
+            return None
+        return other
+
+    async def _copy_across(
+        self, call: _Call, mount: MountEntry, other: MountEntry
+    ) -> None:
+        """Copy a file onto another mount, store to store.
+
+        Admission judged the source as a read and the destination as a
+        create under its own mount's mode, as for a copy within one
+        mount. The destination's store copies from the source's where it
+        can (one bucket to another under one set of credentials);
+        otherwise it answers EXDEV, as a copy between two mounts always
+        did, and the caller moves the bytes itself. The destination's
+        name is held, and its caches settled, on its own mount.
+
+        Args:
+            call (_Call): the admitted copy.
+            mount (MountEntry): the mount serving its source.
+            other (MountEntry): the mount serving its destination.
+        """
+        dst = call.dst
+        if dst is None:
+            raise exdev(call.path)
+        await mount.ensure_ready()
+        await other.ensure_ready()
+        key = f"{id(other.vfs)}:{mount_key(dst.virtual, other.prefix.rstrip('/'))}"
+        async with self._writers.with_lock(key):
+            await other.copy_from(mount, call.path.virtual, dst.virtual)
+            await self._settle_write(other, "copy", call.path, {"dst": dst})
+
     async def _refuse_cross_mount(
         self, call: _Call, mount: MountEntry
     ) -> None:
@@ -1134,6 +1191,11 @@ class Dispatcher:
             dst is not None
             and self._namespace.try_mount_for(dst.virtual) is not mount
         ):
+            # A copy between two stores that cannot make it is the caller's
+            # cue to move the bytes, whose read and write word any missing
+            # parent themselves, so it asks the backends nothing.
+            if call.name == "copy":
+                raise exdev(call.path)
             refusal = await self._parent_refusal(call.path)
             refusal = refusal or await self._parent_refusal(dst)
             raise refusal or exdev(call.path)

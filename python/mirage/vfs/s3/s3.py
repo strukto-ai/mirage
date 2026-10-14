@@ -23,6 +23,7 @@ from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.s3.checksum import checksum as _checksum
 from mirage.core.s3.constants import MD5_ETAG_STORES, SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
+from mirage.core.s3.copy import copy_from as _copy_from
 from mirage.core.s3.create import create as _create
 from mirage.core.s3.exists import exists as _exists
 from mirage.core.s3.mkdir import mkdir as _mkdir
@@ -38,6 +39,7 @@ from mirage.core.s3.truncate import truncate as _truncate
 from mirage.core.s3.unlink import unlink as _unlink
 from mirage.core.s3.watch import build_delta_hook
 from mirage.core.s3.write import write as _write
+from mirage.errors.fs import exdev
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.s3.config import S3Config
@@ -127,6 +129,13 @@ class S3VFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def copy_from(
+        self, source: BaseVFS, src: PathSpec, dst: PathSpec
+    ) -> None:
+        if not isinstance(source, S3VFS):
+            raise exdev(dst)
+        await _copy_from(self.accessor, source.accessor, src, dst)
 
     async def checksum(
         self,

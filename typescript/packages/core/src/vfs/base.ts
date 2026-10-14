@@ -541,6 +541,22 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Copy a directory tree within this VFS in one call. */
+  /**
+   * Copy a file from another mount onto this one without moving its bytes
+   * through mirage.
+   *
+   * `cp` and `mv` between two mounts ask this before they read the file and
+   * write it here, once the dispatcher has judged the source as a read and
+   * the destination as a create. It is no dispatcher call of its own, so
+   * nothing reaches it unjudged. `source` is the source mount's VFS and `src`
+   * the file there. Reject EXDEV when this backend cannot copy from `source`
+   * (another kind of store, other credentials, a refusal), and the bytes move
+   * through the read and the write instead.
+   */
+  copyFrom(_source: BaseVFS, _src: PathSpec, dst: PathSpec): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'copyFrom', dst))
+  }
+
   @vfsCall({ effect: Effect.COPY, target: Target.DIR, subtree: true })
   dirCopy(_src: PathSpec, dst: PathSpec): Promise<void> {
     return Promise.reject(enotsup(this.name, 'dirCopy', dst))

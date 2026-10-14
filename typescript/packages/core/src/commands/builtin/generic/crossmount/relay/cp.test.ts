@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../../../types.ts'
-import { enoent } from '../../../../../errors/fs.ts'
+import { enoent, exdev } from '../../../../../errors/fs.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
 import type { DispatchFn } from '../types.ts'
@@ -34,6 +34,7 @@ function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): Dispat
   return (op: string, path: PathSpec, args?: readonly unknown[]) => {
     const k = rstripSlash(path.virtual)
     const name = k.split('/').pop() ?? ''
+    if (op === 'copy') return Promise.reject(exdev(path))
     if (op === 'stat') {
       if (dirs.has(k)) {
         return Promise.resolve([new FileStat({ name, type: FileType.DIRECTORY }), new IOResult()])

@@ -92,8 +92,15 @@ Every other function is optional, and each stands alone:
 | `readdir`, `read`, `stat` | Required filesystem behavior. |
 | `read_stream`, `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
+| `copy_from` | Optional: copy a file from another mount of the same kind inside the store, for `cp` and `mv` between two mounts. |
 | `search`, `search_many` | Optional resource search. |
 | `files_containing`, `lines_containing`, `before_full_scan` | Optional: let grep and rg skip what your search rules out, and refuse a scan of every file. |
+
+`copy_from(source, src, dst)` receives the other mount's VFS and the file's
+path there. Raise EXDEV when the store cannot make the copy (another kind of
+store, other credentials, a refusal), and `cp` reads the file and writes it
+instead. S3 and the S3-compatible stores copy between two buckets that one
+set of credentials reaches.
 
 `pwrite` receives `(path, data, offset)` and keeps every byte outside the
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets

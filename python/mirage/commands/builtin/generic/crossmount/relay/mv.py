@@ -77,6 +77,7 @@ async def run_mv(
             unlink=p(dispatched_call, dispatch, "unlink"),
             rmdir=p(dispatched_call, dispatch, "rmdir"),
             check_unlink=check_unlink,
+            copy=primitives["copy"],
         ),
         flags=parse_flags(fl),
         backend_key=storage_key,

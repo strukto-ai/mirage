@@ -125,6 +125,7 @@ async def run_cp(
         write=primitives["write"],
         mkdir=primitives["mkdir"],
         readdir=primitives["readdir"],
+        copy=primitives["copy"],
     )
     return await generic_cp(
         flat_scopes(scopes),

@@ -181,6 +181,16 @@ export function streamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<U
   return gen
 }
 
+/**
+ * Copy one file store to store, from its mount onto `dst`'s. The dispatcher
+ * judges the source as a read and the destination as a create, and answers
+ * EXDEV when the destination's store cannot copy from the source's. Mirrors
+ * Python's `_relay_copy`.
+ */
+export async function relayCopy(dispatch: DispatchFn, src: PathSpec, dst: PathSpec): Promise<void> {
+  await dispatch('copy', src, [dst])
+}
+
 export function transferLinksOf(
   links: LinkView,
   dispatch: DispatchFn,
@@ -202,6 +212,7 @@ export function transferLinksOf(
         await dispatch('mkdir', p)
       },
       readdir: readdirOp(dispatch),
+      copy: (src: PathSpec, dst: PathSpec) => relayCopy(dispatch, src, dst),
     },
     relayStat,
   }

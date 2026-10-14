@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
-import { enoent } from '../../../../errors/fs.ts'
+import { enoent, exdev } from '../../../../errors/fs.ts'
 import { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import { handleCrossMount, isCrossMount, type RunSingle } from './index.ts'
 
@@ -71,6 +71,7 @@ describe('handleCrossMount — cp / mv', () => {
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
+      if (op === 'copy') return Promise.reject(exdev(p))
       if (op === 'stat') {
         // dst does not exist yet; src is an existing file. The mount root
         // stats as a directory, like every real mount: cp probes the
@@ -105,6 +106,7 @@ describe('handleCrossMount — cp / mv', () => {
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
+      if (op === 'copy') return Promise.reject(exdev(p))
       if (op === 'stat') {
         // The mount root stats as a directory, like every real mount: cp
         // probes the destination's parent before creating anything under it.
@@ -147,6 +149,7 @@ describe('handleCrossMount — cp / mv', () => {
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
+      if (op === 'copy') return Promise.reject(exdev(p))
       if (op === 'stat') {
         if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
         // The destination's parent is a mount root, which every mount
@@ -167,7 +170,7 @@ describe('handleCrossMount — cp / mv', () => {
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
     await handleCrossMount('mv', paths, [], {}, dispatch, runSingleNoop, null)
     const ops = dispatch.mock.calls.map((c) => c[0]).filter((o) => o !== 'stat')
-    expect(ops).toEqual(['read', 'write', 'unlink'])
+    expect(ops).toEqual(['copy', 'read', 'write', 'unlink'])
   })
 })
 

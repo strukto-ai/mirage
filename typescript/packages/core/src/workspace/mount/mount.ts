@@ -103,7 +103,7 @@ import {
   MountMode,
   PathSpec,
 } from '../../types.ts'
-import { ebusy, enotsup } from '../../errors/fs.ts'
+import { ebusy, enotsup, exdev } from '../../errors/fs.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -1342,6 +1342,38 @@ export class MountEntry {
         this.mountId,
       )
     })
+  }
+
+  /**
+   * Copy a file from `source`'s store into this mount's, store to store.
+   *
+   * For `cp` and `mv` between two mounts, once the dispatcher has judged
+   * `src` as a read and `dst` as a create. Rejects EXDEV when this mount's VFS
+   * cannot copy from that one, and the caller moves the bytes itself. Mirrors
+   * Python's `copy_from`.
+   */
+  async copyFrom(source: MountEntry, src: string, dst: string): Promise<void> {
+    if (!this.vfs.supports('copyFrom')) throw exdev(src)
+    const spec = (mount: MountEntry, path: string): PathSpec => {
+      const lastSlash = path.lastIndexOf('/')
+      return new PathSpec({
+        virtual: path,
+        directory: lastSlash > 0 ? path.slice(0, lastSlash + 1) : '/',
+        vfsPath: mountKey(path, rstripSlash(mount.prefix)),
+      })
+    }
+    await this.use(() =>
+      source.use(() =>
+        runWithMountContext(
+          () =>
+            this.runWithWriteRevisions(async () => {
+              this.requireWritable('write', PathSpec.fromStrPath(dst), [])
+              await this.vfs.copyFrom(source.vfs, spec(source, src), spec(this, dst))
+            }),
+          this.mountId,
+        ),
+      ),
+    )
   }
 }
 
