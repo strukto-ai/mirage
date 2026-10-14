@@ -15,12 +15,99 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextvars import copy_context
-from typing import ParamSpec, TypeVar
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
+from contextvars import Context, copy_context
+from typing import Any, Generic, ParamSpec, TypeVar, cast
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+class InlineAwait(Generic[T]):
+    """Await an awaitable inside the awaiting task, each step in a context.
+
+    asyncio runs a coroutine in another context, or lets another task
+    cancel it, only through a task of its own, and a task costs two turns
+    of the event loop: on a command's output that is most of what one
+    write costs. This drives the awaitable's own steps instead and hands
+    the event loop each future a step waits on, so the awaiting task waits
+    on it directly. ``cancel`` does what cancelling such a task would: it
+    cancels the future the step waits on, or throws CancelledError into
+    the next step.
+
+    Args:
+        awaitable (Awaitable[T]): what to await, once.
+        context (Context | None): where each step runs; None runs it in
+            the awaiting task's own context.
+    """
+
+    def __init__(
+        self, awaitable: Awaitable[T], context: Context | None = None
+    ) -> None:
+        self._awaitable = awaitable
+        self._context = context
+        self._waiting: Any = None
+        self._cancelling = False
+        self._finished = False
+        self._ended: asyncio.Future[None] | None = None
+
+    def cancel(self) -> None:
+        """Cancel the step in flight, or the next one to run."""
+        waiting = self._waiting
+        if isinstance(waiting, asyncio.Future) and waiting.cancel():
+            return
+        self._cancelling = True
+
+    def ended(self) -> asyncio.Future[None]:
+        """A future that resolves once the last step has run."""
+        if self._ended is None:
+            self._ended = asyncio.get_running_loop().create_future()
+            if self._finished:
+                self._ended.set_result(None)
+        return self._ended
+
+    def _step(
+        self, steps: Any, value: Any, error: BaseException | None
+    ) -> Any:
+        if error is not None:
+            call = steps.throw
+            arg: Any = error
+        else:
+            call, arg = steps.send, value
+        if self._context is None:
+            return call(arg)
+        return self._context.run(call, arg)
+
+    def __await__(self) -> Generator[Any, None, T]:
+        steps = self._awaitable.__await__()
+        value: Any = None
+        error: BaseException | None = None
+        try:
+            while True:
+                if self._cancelling and error is None:
+                    self._cancelling = False
+                    error = asyncio.CancelledError()
+                try:
+                    yielded = self._step(steps, value, error)
+                except StopIteration as stop:
+                    return cast(T, stop.value)
+                self._waiting = yielded
+                try:
+                    value, error = (yield yielded), None
+                except GeneratorExit:
+                    if self._context is None:
+                        steps.close()
+                    else:
+                        self._context.run(steps.close)
+                    raise
+                except BaseException as exc:
+                    value, error = None, exc
+                finally:
+                    self._waiting = None
+        finally:
+            self._finished = True
+            if self._ended is not None and not self._ended.done():
+                self._ended.set_result(None)
 
 
 class ContextScope:
@@ -62,15 +149,11 @@ class ContextScope:
 
         async def iterate() -> AsyncIterator[T]:
             iterator = source.__aiter__()
-
-            async def advance() -> T:
-                return await iterator.__anext__()
-
             try:
                 while True:
                     try:
-                        value = await asyncio.create_task(
-                            advance(), context=context
+                        value = await InlineAwait(
+                            iterator.__anext__(), context
                         )
                     except StopAsyncIteration:
                         return

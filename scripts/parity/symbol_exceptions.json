@@ -688,6 +688,11 @@
    "typescript_only": {
     "deadlineCheck": "A JavaScript generator cannot be cancelled from outside, so a TypeScript scan inside one pull checks the invocation's deadline itself; Python's with_timeout cancels the pull, and the scan stops at its next await."
    }
+  },
+  "utils/context_scope": {
+   "python_only": {
+    "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
+   }
   }
  }
 }

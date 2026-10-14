@@ -13,8 +13,11 @@ def test_deferred_stream_retains_producer_context_and_closes_there():
         scope = ContextScope()
         current.reset(token)
 
+        consumer = asyncio.current_task()
+
         async def source():
             assert current.get() == "producer"
+            assert asyncio.current_task() is consumer
             inner = current.set("inner")
             try:
                 yield current.get()

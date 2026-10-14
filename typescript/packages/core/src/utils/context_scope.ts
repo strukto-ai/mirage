@@ -12,13 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ContextCall } from './async_context.ts'
+import { asyncContextIsolatesTasks, snapshotContext, type ContextCall } from './async_context.ts'
 
-/** Replay captured storage frames around callbacks, including async continuations. */
+/**
+ * Replay captured storage frames around callbacks, including async
+ * continuations. Where tasks are isolated the scopes are entered once, here,
+ * and the context inside them is taken whole, as Python's ContextScope copies
+ * its context: each call then switches to it in one step instead of entering
+ * every store again, which a stream pays on every pull.
+ */
 export class ContextScope {
-  constructor(private readonly scopes: readonly ContextCall[]) {}
+  private readonly frozen: ContextCall | null
+
+  constructor(private readonly scopes: readonly ContextCall[]) {
+    let frozen: ContextCall | null = null
+    // Only where every store is an isolated task store does the snapshot
+    // hold them all; a fallback store lives outside it.
+    if (asyncContextIsolatesTasks) {
+      this.enter(() => {
+        frozen = snapshotContext()
+      })
+    }
+    this.frozen = frozen
+  }
 
   call<T>(fn: () => T): T {
+    return this.frozen === null ? this.enter(fn) : (this.frozen(fn) as T)
+  }
+
+  private enter<T>(fn: () => T): T {
     const enter = (at: number): T => {
       const scope = this.scopes[at]
       return scope === undefined ? fn() : (scope(() => enter(at + 1)) as T)

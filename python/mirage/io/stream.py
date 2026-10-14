@@ -20,6 +20,7 @@ from mirage.concurrency.limiter import settle
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize  # noqa: F401
+from mirage.utils.context_scope import InlineAwait
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class OutputStream:
     ) -> None:
         self._source = source
         self._close = close
-        self._pull: asyncio.Future[bytes] | None = None
+        self._pull: InlineAwait[bytes] | None = None
         self._closing: asyncio.Task[None] | None = None
 
     def __aiter__(self) -> "OutputStream":
@@ -107,7 +108,9 @@ class OutputStream:
     async def __anext__(self) -> bytes:
         if self._closing is not None:
             raise StopAsyncIteration
-        pull = asyncio.ensure_future(anext(self._source))
+        # In the consumer's own task, which a close from another task can
+        # still cancel: a task per pull would cost as much as the write.
+        pull = InlineAwait(anext(self._source))
         self._pull = pull
         try:
             return await pull
@@ -117,16 +120,9 @@ class OutputStream:
 
     async def _finish(self) -> None:
         pull = self._pull
-        if pull is not None and not pull.done():
+        if pull is not None:
             pull.cancel()
-            try:
-                await settle(pull)
-            except asyncio.CancelledError:
-                logger.debug("closing an active handler output pull")
-            except Exception:
-                logger.debug(
-                    "handler output pull failed during close", exc_info=True
-                )
+            await settle(pull.ended())
         close = getattr(self._source, "aclose", None)
         try:
             if close is not None:

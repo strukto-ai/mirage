@@ -36,3 +36,31 @@ it('retains the producer context during lazy reads and close', async () => {
   expect(closed).toEqual(['producer'])
   expect(current.getStore()).toBeUndefined()
 })
+
+it('replays the whole producer context, as Python copies it', async () => {
+  // A store the scopes do not name keeps the producer's value too, and the
+  // scope is entered once rather than on every call.
+  const named = createAsyncContext<string>()
+  const unnamed = createAsyncContext<string>()
+  let entered = 0
+  const scope = unnamed.run('producer', () =>
+    named.run('producer', () => {
+      const capture = named.capture()
+      return new ContextScope([
+        (fn) => {
+          entered += 1
+          return capture(fn)
+        },
+      ])
+    }),
+  ) as ContextScope
+  const seen = await unnamed.run('consumer', () =>
+    scope.run(async () => {
+      await Promise.resolve()
+      return [named.getStore(), unnamed.getStore()]
+    }),
+  )
+  await scope.run(() => Promise.resolve())
+  expect(seen).toEqual(['producer', 'producer'])
+  expect(entered).toBe(1)
+})

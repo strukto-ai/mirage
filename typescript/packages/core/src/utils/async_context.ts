@@ -191,6 +191,16 @@ const verifiedCtor: ALSCtor | null = asyncContextIsolatesTasks ? resolved : null
 const unbound: ContextCall | null = verifiedCtor?.snapshot?.() ?? null
 
 /**
+ * The whole current context as one call, as Python's `copy_context` takes
+ * it: replaying it switches the context in one step, where re-entering each
+ * store copies the context once per store. Null without task isolation,
+ * where a single slot has no context to take.
+ */
+export function snapshotContext(): ContextCall | null {
+  return verifiedCtor?.snapshot?.() ?? null
+}
+
+/**
  * Run `fn` with no store bound, as this module loaded: for work a line
  * starts that outlives it and must not carry the line's state, such as
  * a sandbox's SFTP server. Without task isolation there is nothing to

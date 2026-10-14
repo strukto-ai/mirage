@@ -18,6 +18,7 @@ import pytest
 
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import (
+    OutputStream,
     SharedStdin,
     async_chain,
     close_quietly,
@@ -219,3 +220,33 @@ async def test_ensure_stream_wraps_bytes_and_passes_a_stream_through():
     assert [c async for c in ensure_stream(b"hello")] == [b"hello"]
     source = _make_stream(b"foo", b"bar")
     assert ensure_stream(source) is source
+
+
+@pytest.mark.asyncio
+async def test_a_close_cancels_the_pull_in_flight_in_the_consumers_task():
+    # Each pull runs in the consumer's own task, so a close from another
+    # task cancels the step it waits on, as cancelling a pull task did.
+    consumer: list[asyncio.Task | None] = []
+    events: list[str] = []
+    started = asyncio.Event()
+
+    async def source():
+        consumer.append(asyncio.current_task())
+        try:
+            started.set()
+            await asyncio.Event().wait()
+            yield b"never"
+        finally:
+            events.append("source closed")
+
+    async def close():
+        events.append("handler closed")
+
+    stream = OutputStream(source(), close)
+    pulling = asyncio.ensure_future(anext(stream))
+    await started.wait()
+    await stream.aclose()
+    with pytest.raises(asyncio.CancelledError):
+        await pulling
+    assert consumer == [pulling]
+    assert events == ["source closed", "handler closed"]
